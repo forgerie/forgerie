@@ -2,13 +2,14 @@ import { usePortalTarget } from "./portalLayer";
 import type { ContextUse } from "../contextUse";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { CheckIcon, ChevronDownIcon, EyeIcon, EyeOffIcon } from "lucide-react";
+import { ChevronDownIcon, EyeIcon, EyeOffIcon } from "lucide-react";
 import type { SessionModel } from "../contracts";
-import { modelKey, modelLabel, modelMenu, thinkingLabel } from "../modelChoice";
+import { hiddenModelsLabel, modelKey, modelLabel, modelMenu, modelOptionGroups, thinkingLabel } from "../modelChoice";
 import { cycleTarget, resolveFavorites } from "../models/modelPrefs";
 import { useModelPrefs } from "../models/modelPrefsApi";
 import { usePanelPlacement } from "./usePanelPlacement";
-import "./modelMenu.css";
+import { FloatingPanel } from "./FloatingPanel";
+import { OptionList, type OptionListHandle, type OptionStatus } from "./OptionList";
 
 /**
  * What the picker shows and changes. The binding owns where the choice lives:
@@ -146,7 +147,7 @@ function ModelPanel({ id, binding, anchor, trigger, initialQuery, onClose, chang
   change: Change; setChange: (change: Change) => void;
 }) {
   const panel = useRef<HTMLDivElement>(null);
-  const search = useRef<HTMLInputElement>(null);
+  const list = useRef<OptionListHandle>(null);
   const [query, setQuery] = useState(initialQuery);
   const activeKey = binding.model ? modelKey(binding.model) : undefined;
   const models = useLoad(binding.listModels, "models");
@@ -178,17 +179,14 @@ function ModelPanel({ id, binding, anchor, trigger, initialQuery, onClose, chang
   // itself takes focus at once, so Escape works while the models load and no
   // touch keyboard opens. The active row takes over once the list is there.
   useLayoutEffect(() => {
-    if (initialQuery !== "") search.current?.focus({ preventScroll: true });
+    if (initialQuery !== "") panel.current?.querySelector<HTMLInputElement>("input[type=search]")?.focus({ preventScroll: true });
     else panel.current?.focus({ preventScroll: true });
   }, [initialQuery]);
   const rowFocused = useRef(false);
   useEffect(() => {
     if (rowFocused.current || initialQuery !== "" || models.type !== "ready") return;
     rowFocused.current = true;
-    if (document.activeElement !== panel.current) return;
-    const active = panel.current?.querySelector<HTMLButtonElement>(".model-row[aria-current='true']")
-      ?? panel.current?.querySelector<HTMLButtonElement>(".model-row");
-    active?.focus({ preventScroll: false });
+    if (document.activeElement === panel.current) list.current?.focus();
   }, [initialQuery, models.type]);
 
   async function pickModel(provider: string, modelId: string) {
@@ -208,57 +206,27 @@ function ModelPanel({ id, binding, anchor, trigger, initialQuery, onClose, chang
     catch (error) { setChange({ type: "failed", message: messageOf(error) }); }
   }
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (!changingRef.current) onClose(true); return; }
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    const rows = [...(panel.current?.querySelectorAll<HTMLButtonElement>(".model-row") ?? [])];
-    if (rows.length === 0) return;
-    event.preventDefault();
-    const index = rows.indexOf(document.activeElement as HTMLButtonElement);
-    const next = index === -1 ? (event.key === "ArrowDown" ? 0 : rows.length - 1)
-      : Math.max(0, Math.min(rows.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
-    rows[next]?.focus();
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (!changingRef.current) onClose(true); }
   }
 
+  const trimmed = query.trim();
+  const status: OptionStatus | undefined = models.type === "loading" ? { tone: "status", text: "Loading models…" }
+    : models.type === "failed" ? { tone: "alert", text: `Models unavailable: ${models.message}` }
+    : groups.length > 0 ? undefined
+    : { tone: "status", text: menu.hidden > 0 ? (trimmed ? `No shown model matches "${trimmed}".` : "Every model is hidden.")
+      : trimmed ? `No model matches "${trimmed}".` : "Pi offers no models for this session." };
+  const options = modelOptionGroups(groups, { activeKey, changing: change.type === "changing" ? change.target : undefined, blocked: busy });
   const levelChoices = levels.type === "ready" ? levels.value : [];
-  return <div ref={panel} id={id} className="model-panel" role="dialog" aria-label="Model and thinking level" tabIndex={-1} onKeyDown={onKeyDown}>
-    <input ref={search} type="search" className="model-search" placeholder="Search models" aria-label="Search models"
-      value={query} onChange={(event) => setQuery(event.target.value)} enterKeyHint="search" />
-    {change.type === "failed" && <p className="model-error" role="alert">{change.message}</p>}
-    <div className="model-list">
-      {models.type === "loading" && <p className="model-hint" role="status">Loading models…</p>}
-      {models.type === "failed" && <p className="model-hint" role="alert">Models unavailable: {models.message}</p>}
-      {models.type === "ready" && groups.length === 0 && <p className="model-hint" role="status">
-        {menu.hidden > 0 ? (query.trim() ? `No shown model matches "${query.trim()}".` : "Every model is hidden.")
-          : query.trim() ? `No model matches "${query.trim()}".` : "Pi offers no models for this session."}
-      </p>}
-      {groups.map((group) => <section key={group.key} className="model-group" aria-labelledby={`${id}-${group.key}`}>
-        <h3 className="model-group-label" id={`${id}-${group.key}`}>{group.label}</h3>
-        <ul>{group.rows.map((row) => {
-          const active = row.key === activeKey;
-          const changing = change.type === "changing" && change.target === row.key;
-          return <li key={row.key}>
-            <button type="button" className="model-row" aria-current={active || undefined} data-plain={row.plain || undefined} data-hidden={row.hidden || undefined}
-              aria-disabled={busy && !active || undefined} aria-busy={changing || undefined} onClick={() => void pickModel(row.provider, row.id)}>
-              <span className="model-row-name">{row.label}{row.variant && <span className="model-row-variant">{row.variant}</span>}</span>
-              <span className="model-row-meta">
-                {row.isDefault && <span className="model-row-default">default</span>}
-                {row.providerName && <span>{row.providerName}</span>}
-                {row.context && <span>{row.context} context</span>}
-                {row.plain && <span>no thinking</span>}
-                {row.hidden && <span>hidden</span>}
-                {changing && <span>Switching…</span>}
-              </span>
-              {active && <CheckIcon aria-hidden size={16} className="model-row-check" />}
-            </button>
-          </li>;
-        })}</ul>
-      </section>)}
-      {models.type === "ready" && (menu.hidden > 0 || showHidden) && <button type="button" className="model-hidden-toggle" aria-pressed={showHidden}
-        onClick={() => setShowHidden(!showHidden)}>
-        {showHidden ? <EyeOffIcon aria-hidden size={14} /> : <EyeIcon aria-hidden size={14} />}
-        {showHidden ? "Hide models you do not show" : `Show ${String(menu.hidden)} hidden ${menu.hidden === 1 ? "model" : "models"}`}
-      </button>}
-    </div>
+  return <FloatingPanel ref={panel} id={id} role="dialog" aria-label="Model and thinking level" tabIndex={-1} onKeyDown={onKeyDown}>
+    <OptionList ref={list} label="Models" groups={options} status={status}
+      search={{ value: query, onChange: setQuery, label: "Search models", placeholder: "Search models" }}
+      alert={change.type === "failed" ? change.message : undefined}
+      action={models.type === "ready" && (menu.hidden > 0 || showHidden) ? { label: hiddenModelsLabel(menu.hidden, showHidden), pressed: showHidden,
+        icon: showHidden ? <EyeOffIcon aria-hidden size={14} /> : <EyeIcon aria-hidden size={14} />, onPress: () => setShowHidden(!showHidden) } : undefined}
+      input={{ type: "focus", onChoose: (key) => {
+        const model = models.type === "ready" ? models.value.find((item) => modelKey(item) === key) : undefined;
+        if (model?.provider && model.id) void pickModel(model.provider, model.id);
+      } }} />
     {binding.thinking !== false && <div className="model-thinking" role="group" aria-labelledby={`${id}-thinking`}>
       <span id={`${id}-thinking`} className="model-thinking-label">Thinking</span>
       {levels.type === "loading" && <span className="model-hint" role="status">Loading…</span>}
@@ -269,5 +237,5 @@ function ModelPanel({ id, binding, anchor, trigger, initialQuery, onClose, chang
           aria-disabled={busy && item !== binding.thinkingLevel || undefined} onClick={() => void pickLevel(item)}>{thinkingLabel(item)}</button>)}
       </div>}
     </div>}
-  </div>;
+  </FloatingPanel>;
 }

@@ -1,0 +1,26 @@
+/* One choice: its name over short details, a check at the end on the choice in
+   effect. The row keeps a control-sized target at every width; the name wraps
+   rather than truncates, so two similar names never read the same. */
+.option-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name check" "details check";
+  align-items: center; align-content: center; column-gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size);
+  padding: var(--space-1) var(--space-3); border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--foreground); font: inherit; text-align: start; }
+.option-row[data-icon] { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "icon name check" "icon details check"; }
+.option-row:not([aria-disabled]):hover, .option-row:focus-visible { background: var(--hover-surface); }
+.option-row:focus-visible { outline-offset: calc(var(--hairline) * -2); }
+/* The choice in effect, or the one a text field's arrow keys point at. */
+.option-row[aria-current="true"], .option-row[data-highlighted] { background: var(--active-surface); }
+.option-row[aria-disabled] { cursor: default; opacity: 0.4; }
+.option-row-icon { grid-area: icon; display: grid; place-items: center; color: var(--muted-foreground); }
+.option-row-name { grid-area: name; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); min-inline-size: 0; overflow-wrap: anywhere; }
+.option-row[data-tone="quiet"] .option-row-name { color: var(--quiet-foreground); }
+.option-row[data-tone="faint"] .option-row-name { color: var(--faint-foreground); }
+.option-row-variant { color: var(--muted-foreground); font-size: var(--label-text); }
+.option-row-details { grid-area: details; display: flex; flex-wrap: wrap; column-gap: var(--space-3); min-inline-size: 0;
+  color: var(--muted-foreground); font-size: var(--label-text); }
+.option-row-strong { color: var(--foreground); }
+/* A path gives way at its start: rtl moves the ellipsis there, bdi keeps the text in order. */
+.option-row-path { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left;
+  font-family: var(--code-font); font-size: var(--meta-text); }
+.option-row-path > bdi { direction: ltr; }
+.option-row-check { grid-area: check; }

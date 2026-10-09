@@ -18,8 +18,8 @@ let source: ModelPrefsSource;
 let current: SessionModel;
 let moves: string[];
 const settle = () => act(async () => { for (let index = 0; index < 6; index++) await new Promise((resolve) => setTimeout(resolve, 0)); });
-const rows = () => [...document.querySelectorAll(".model-row .model-row-name")].map((node) => node.firstChild?.textContent);
-const labels = () => [...document.querySelectorAll(".model-group-label")].map((node) => node.textContent);
+const rows = () => [...document.querySelectorAll(".option-row .option-row-name")].map((node) => node.firstChild?.textContent);
+const labels = () => [...document.querySelectorAll(".option-list-heading")].map((node) => node.textContent);
 const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent?.trim() === text);
 
 function Fixture({ cycle }: { cycle: boolean }) {
@@ -61,7 +61,7 @@ describe("model menu with the app's lists", () => {
     expect(rows()).toEqual(["Gemini 3.8 Flash", "Claude Opus 5.5", "GPT-5.6 Sol"]);
     await act(async () => button("Show 1 hidden model")!.click());
     expect(rows()).toEqual(["Gemini 3.8 Flash", "Claude Opus 5.5", "Claude Haiku 3.5", "GPT-5.6 Sol"]);
-    expect(document.querySelector(".model-row[data-hidden]")?.textContent).toContain("hidden");
+    expect(document.querySelector(".option-row[data-tone=faint]")?.textContent).toContain("hidden");
     await act(async () => button("Hide models you do not show")!.click());
     expect(rows()).toHaveLength(3);
   });

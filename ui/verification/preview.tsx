@@ -212,8 +212,8 @@ const previewMentions: MentionSource = {
     return mentionFiles.filter((path) => path.toLowerCase().includes(query.toLowerCase())).slice(0, 12)
       .map((path) => ({ id: path, type: "file", label: path, description: "tracked" }));
   },
-  models: async (query) => Array.from({ length: 12 }, (_, i) => ({ id: `provider/model-${i}`, type: "model", label: `provider/model-${i}`,
-    description: `Coding model ${i}` })).filter((item) => item.id.includes(query)),
+  models: async (query) => ({ hidden: 0, groups: [{ key: "provider", label: "Provider", options: Array.from({ length: 12 }, (_, i) => ({
+    id: `provider/model-${i}`, name: `Coding model ${i}`, details: ["128k context"] })).filter((item) => item.id.includes(query)) }] }),
 };
 // The real discovery adapter, configured with local responses rather than network interception.
 const prefsMentionRoutes: Record<string, unknown> = {

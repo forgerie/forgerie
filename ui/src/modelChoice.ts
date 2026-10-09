@@ -1,6 +1,8 @@
 import type { SessionModel } from "./contracts";
 import { isShown, resolveFavorites } from "./models/modelPrefs";
 import type { ModelPrefs } from "@shared/modelPrefsContract";
+import type { OptionGroup, OptionItem } from "./ui/OptionList";
+import type { OptionDetail } from "./ui/OptionRow";
 
 export type { SessionModel };
 
@@ -75,6 +77,33 @@ export function modelMenu(models: readonly SessionModel[], query = "", options: 
   }
   return { groups, hidden };
 }
+
+/** Where a list of model choices stands: the model in use, and a change in progress that blocks the others. */
+export interface OptionState { activeKey?: string | undefined; changing?: string | undefined; blocked?: boolean | undefined }
+
+/** One menu row as a choice in an option list: the same words wherever a model is offered. */
+export function modelOption(row: ModelRow, state: OptionState = {}): OptionItem {
+  const busy = state.changing === row.key;
+  const current = row.key === state.activeKey;
+  const details: OptionDetail[] = [
+    ...(row.isDefault ? [{ text: "default", strong: true }] : []),
+    ...(row.providerName ? [row.providerName] : []),
+    ...(row.context ? [`${row.context} context`] : []),
+    ...(row.plain ? ["no thinking"] : []),
+    ...(row.hidden ? ["hidden"] : []),
+    ...(busy ? ["Switching…"] : []),
+  ];
+  return { id: row.key, name: row.label, variant: row.variant, details, current, busy,
+    tone: row.hidden ? "faint" : row.plain ? "quiet" : "plain", blocked: state.blocked === true && !current };
+}
+
+/** {@link modelMenu}'s groups as option groups. */
+export const modelOptionGroups = (groups: readonly ModelGroup[], state: OptionState = {}): OptionGroup[] =>
+  groups.map((group) => ({ key: group.key, label: group.label, options: group.rows.map((row) => modelOption(row, state)) }));
+
+/** The command that shows or hides the models off the shown list. */
+export const hiddenModelsLabel = (hidden: number, showing: boolean) =>
+  showing ? "Hide models you do not show" : `Show ${String(hidden)} hidden ${hidden === 1 ? "model" : "models"}`;
 
 /** {@link modelMenu}'s groups alone. */
 export const modelGroups = (models: readonly SessionModel[], query = "", options: MenuOptions = {}): ModelGroup[] => modelMenu(models, query, options).groups;

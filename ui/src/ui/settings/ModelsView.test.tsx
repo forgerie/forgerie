@@ -82,8 +82,8 @@ describe("Models settings", () => {
     expect(document.querySelector(".models-default")?.textContent).toContain("starts at that level instead");
     expect(byLabel("Remove Claude Opus 5.5 from favorites").disabled).toBe(true);
     await click(document.querySelector<HTMLButtonElement>(".models-default .model-trigger")!);
-    const row = [...document.querySelectorAll<HTMLButtonElement>(".model-panel .model-row")].find((node) => node.textContent?.includes("Llama 3 8B"))!;
-    expect(document.querySelector(".model-panel .model-row[aria-current='true']")?.textContent).toContain("default");
+    const row = [...document.querySelectorAll<HTMLButtonElement>(".floating-panel .option-row")].find((node) => node.textContent?.includes("Llama 3 8B"))!;
+    expect(document.querySelector(".floating-panel .option-row[aria-current='true']")?.textContent).toContain("default");
     await click(row);
     expect(saves.at(-1)).toMatchObject({ defaultModel: "local/llama3:8b", favorites: ["proxy/claude-opus-5-5:high", "proxy/*", "local/llama3:8b"] });
     expect(saves.at(-1)?.defaultThinkingLevel).toBeUndefined();

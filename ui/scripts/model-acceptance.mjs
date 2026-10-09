@@ -34,7 +34,7 @@ try {
   async function navigate(scenario, open = scenario !== "model" && scenario !== "model-error") {
     await cdp.send("Page.navigate", { url: `${origin}/verification/preview.html?scenario=${scenario}` });
     await until("!!document.querySelector('[data-composer-input]') && !!document.querySelector('.model-trigger')");
-    if (open) await until("!!document.querySelector('.model-panel .model-row') && !!document.querySelector('.model-thinking button, .model-thinking .model-hint:not([role=status])')");
+    if (open) await until("!!document.querySelector('.floating-panel .option-row') && !!document.querySelector('.model-thinking button, .model-thinking .model-hint:not([role=status])')");
   }
   async function input(text) {
     await evaluate(cdp, "document.querySelector('[data-composer-input]').focus()"); await pressCombo(cdp, "ctrl+a");
@@ -50,14 +50,14 @@ try {
     await sleep(150);
     const state = await evaluate(cdp, `(() => {
       const box = element => element?.getBoundingClientRect().toJSON();
-      const panel = document.querySelector('.model-panel');
-      const list = document.querySelector('.model-list');
+      const panel = document.querySelector('.floating-panel');
+      const list = document.querySelector('.option-list-rows');
       return { overflow: document.documentElement.scrollWidth > innerWidth, inputs: document.querySelectorAll('[data-composer-input]').length,
         trigger: box(document.querySelector('.model-trigger')), name: box(document.querySelector('.model-trigger-name')),
         actions: [...document.querySelectorAll('.composer-actions button')].map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })),
-        panel: box(panel), list: box(list), search: box(document.querySelector('.model-search')),
+        panel: box(panel), list: box(list), search: box(document.querySelector('.option-list-search')),
         levels: [...document.querySelectorAll('.model-levels button')].map(box), thinking: box(document.querySelector('.model-thinking')),
-        firstRow: box(document.querySelector('.model-row')), rows: document.querySelectorAll('.model-row').length };
+        firstRow: box(document.querySelector('.option-row')), rows: document.querySelectorAll('.option-row').length };
     })()`);
     const name = `${scenario} ${posture.name} ${scheme}`;
     const inside = (rect, label) => assert.ok(rect.left >= -0.5 && rect.right <= posture.width + 0.5 && rect.top >= -0.5 && rect.bottom <= posture.height + 0.5,
@@ -98,12 +98,12 @@ try {
   assert.match(await trigger(), /Claude Opus 5\.5.*High/);
   await input("unsent thought");
   await evaluate(cdp, "document.querySelector('.model-trigger').click()");
-  await until("!!document.querySelector('.model-panel .model-row')");
-  assert.match(await focused(), /model-row:Claude Opus 5\.5/);
+  await until("!!document.querySelector('.floating-panel .option-row')");
+  assert.match(await focused(), /option-row:Claude Opus 5\.5/);
   await pressCombo(cdp, "arrowdown");
-  assert.match(await focused(), /model-row:GPT-5\.6 Sol/);
-  await clickText(".model-row", "Claude Sonnet 5");
-  await until("!document.querySelector('.model-panel')");
+  assert.match(await focused(), /option-row:GPT-5\.6 Sol/);
+  await clickText(".option-row", "Claude Sonnet 5");
+  await until("!document.querySelector('.floating-panel')");
   assert.match(await trigger(), /Claude Sonnet 5.*High/);
   assert.match(await focused(), /model-trigger/);
   assert.equal(await draft(), "unsent thought");
@@ -115,7 +115,7 @@ try {
   await clickText(".model-levels button", "Extra high");
   await until("document.querySelector('.model-levels [aria-pressed=true]')?.textContent === 'Extra high'");
   assert.match(await trigger(), /Claude Sonnet 5.*Extra high/);
-  assert.equal(await evaluate(cdp, "!!document.querySelector('.model-panel')"), true);
+  assert.equal(await evaluate(cdp, "!!document.querySelector('.floating-panel')"), true);
   result.flows.pickLevel = true;
 
   // The open panel and the draft survive fold, unfold, and rotation.
@@ -123,38 +123,38 @@ try {
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
     await sleep(100);
     assert.equal(await draft(), "unsent thought");
-    assert.equal(await evaluate(cdp, "!!document.querySelector('.model-panel')"), true);
-    const panel = await evaluate(cdp, "document.querySelector('.model-panel').getBoundingClientRect().toJSON()");
+    assert.equal(await evaluate(cdp, "!!document.querySelector('.floating-panel')"), true);
+    const panel = await evaluate(cdp, "document.querySelector('.floating-panel').getBoundingClientRect().toJSON()");
     assert.ok(panel.top >= 0 && panel.bottom <= posture.height + 0.5, `${posture.name}: panel ${JSON.stringify(panel)}`);
     result.transitions.push(posture.name);
   }
 
   // Escape closes; a tap outside closes.
   await pressCombo(cdp, "escape");
-  await until("!document.querySelector('.model-panel')");
+  await until("!document.querySelector('.floating-panel')");
   await evaluate(cdp, "document.querySelector('.model-trigger').click()");
-  await until("!!document.querySelector('.model-panel')");
+  await until("!!document.querySelector('.floating-panel')");
   await evaluate(cdp, "document.querySelector('.transcript').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))");
-  await until("!document.querySelector('.model-panel')");
+  await until("!document.querySelector('.floating-panel')");
   result.flows.closes = true;
 
   // `/model` opens the picker with its search, and sends nothing.
   await input("/model haiku");
   await until("[...document.querySelectorAll('.composer-actions button')].some(button => button.textContent.trim() === 'Choose model')");
   await pressCombo(cdp, "enter");
-  await until("!!document.querySelector('.model-panel .model-row')");
+  await until("!!document.querySelector('.floating-panel .option-row')");
   assert.equal(await draft(), "");
-  assert.equal(await evaluate(cdp, "document.querySelector('.model-search').value"), "haiku");
-  assert.equal(await evaluate(cdp, "document.querySelectorAll('.model-row').length"), 2);
+  assert.equal(await evaluate(cdp, "document.querySelector('.option-list-search').value"), "haiku");
+  assert.equal(await evaluate(cdp, "document.querySelectorAll('.option-row').length"), 2);
   result.flows.modelCommand = true;
 
   // A refusal keeps the old choice and says why.
   await navigate("model-error");
   await evaluate(cdp, "document.querySelector('.model-trigger').click()");
-  await until("!!document.querySelector('.model-panel .model-row')");
-  await clickText(".model-row", "Claude Sonnet 5");
-  await until("!!document.querySelector('.model-error')");
-  assert.equal(await evaluate(cdp, "document.querySelector('.model-error').textContent"), "Model not found: anthropic/claude-sonnet-5");
+  await until("!!document.querySelector('.floating-panel .option-row')");
+  await clickText(".option-row", "Claude Sonnet 5");
+  await until("!!document.querySelector('.option-list-alert')");
+  assert.equal(await evaluate(cdp, "document.querySelector('.option-list-alert').textContent"), "Model not found: anthropic/claude-sonnet-5");
   assert.match(await trigger(), /Claude Opus 5\.5/);
   result.flows.refusal = true;
 

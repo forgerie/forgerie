@@ -1,7 +1,9 @@
 import { usePortalTarget } from "./portalLayer";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, FolderIcon, GitBranchPlusIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, FolderIcon, GitBranchPlusIcon } from "lucide-react";
+import { FloatingPanel } from "./FloatingPanel";
+import { OptionList, type OptionItem, type OptionListHandle, type OptionStatus } from "./OptionList";
 import type { Project, Workspace } from "../newSession";
 import type { WorktreeOptions } from "../worktrees/worktreeApi";
 import { usePanelPlacement } from "./usePanelPlacement";
@@ -26,6 +28,8 @@ type Step = { type: "projects" } | { type: "workspaces"; project: Project };
 const PANEL_CAP = 416;
 /** Room for a typical path on one line, even when the anchor is only a short chip. */
 const PANEL_MIN_REM = 28;
+/** The fresh-worktree choice's id; no workspace id has a colon prefix like this. */
+const FRESH = "fresh:worktree";
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 function useRead<T>(read: ((signal: AbortSignal) => Promise<T>) | undefined, key: string): Load<T> {
@@ -70,14 +74,6 @@ export function DestinationPicker({ binding }: { binding: DestinationBinding }) 
   </div>;
 }
 
-/**
- * A folder path on one line. When it does not fit, the start gives way, so the
- * folder names that tell rows apart stay visible. The title carries the whole path.
- */
-function DestinationPath({ path }: { path: string }) {
-  return <span className="destination-path" title={path}><bdi dir="ltr">{path}</bdi></span>;
-}
-
 /** How a destination reads: the project, then the workspace when it is not the project's own folder. */
 function workspaceLabel(project: Project, workspace: Workspace): string {
   return workspace.isMain || workspace.path === project.path ? project.name : `${project.name} · ${workspace.branch ?? workspace.label}`;
@@ -88,6 +84,7 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
   onClose: (returnFocus: boolean) => void;
 }) {
   const panel = useRef<HTMLDivElement>(null);
+  const list = useRef<OptionListHandle>(null);
   const [step, setStep] = useState<Step>({ type: "projects" });
   const cameFrom = useRef<string | undefined>(undefined);
   const [query, setQuery] = useState("");
@@ -103,9 +100,9 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
   usePanelPlacement(panel, anchor, PANEL_CAP, PANEL_MIN_REM);
   // Focus moves in at once, so Escape always reaches the panel; no touch keyboard opens.
   useLayoutEffect(() => {
-    const back = step.type === "projects" && cameFrom.current
-      ? panel.current?.querySelector<HTMLButtonElement>(`[data-project="${cameFrom.current}"]`) : undefined;
-    (back ?? panel.current)?.focus({ preventScroll: true });
+    // Back from a project's workspaces, focus returns to that project's row.
+    if (step.type === "projects" && cameFrom.current && list.current?.focus(cameFrom.current)) return;
+    panel.current?.focus({ preventScroll: true });
   }, [step]);
   useEffect(() => {
     const outside = (event: PointerEvent) => {
@@ -135,69 +132,48 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
   const choose = (cwd: string, label: string, placement: "fresh" | "existing" | undefined = placed) => { binding.onChoose(cwd, label, placement); onClose(true); };
   const freshHere = binding.placement === "fresh" && project !== undefined && (binding.cwd === project.path || binding.cwd.startsWith(`${project.path}/`));
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault(); event.stopPropagation();
-      if (step.type === "workspaces") setStep({ type: "projects" }); else onClose(true);
-      return;
-    }
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    const rows = [...(panel.current?.querySelectorAll<HTMLButtonElement>(".destination-row") ?? [])];
-    if (rows.length === 0) return;
-    event.preventDefault();
-    const index = rows.indexOf(document.activeElement as HTMLButtonElement);
-    const next = index === -1 ? (event.key === "ArrowDown" ? 0 : rows.length - 1)
-      : Math.max(0, Math.min(rows.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
-    rows[next]?.focus();
+    if (event.key !== "Escape") return;
+    event.preventDefault(); event.stopPropagation();
+    if (step.type === "workspaces") setStep({ type: "projects" }); else onClose(true);
   }
   const needle = query.trim().toLowerCase();
   const shownProjects = projects.type === "ready"
     ? projects.value.filter((item) => !needle || item.name.toLowerCase().includes(needle) || item.path.toLowerCase().includes(needle)) : [];
-  return <div ref={panel} id={id} className="model-panel destination-panel" role="dialog" tabIndex={-1} onBlur={onBlur}
-    aria-label={project ? `Workspaces of ${project.name}` : "Where the session starts"} onKeyDown={onKeyDown}>
-    {step.type === "projects" ? <>
-      <input type="search" className="model-search" placeholder="Search projects" aria-label="Search projects"
-        value={query} onChange={(event) => setQuery(event.target.value)} enterKeyHint="search" />
-      <div className="model-list">
-        {projects.type === "loading" && <p className="model-hint" role="status">Loading projects…</p>}
-        {projects.type === "failed" && <p className="model-hint" role="alert">Projects unavailable: {projects.message}</p>}
-        {projects.type === "ready" && shownProjects.length === 0 && <p className="model-hint" role="status">
-          {needle ? `No project matches "${query.trim()}".` : "Forgerie knows no projects yet. This app cannot add one yet."}
-        </p>}
-        <ul>{shownProjects.map((item) => {
-          const here = binding.cwd === item.path || binding.cwd.startsWith(`${item.path}/`);
-          return <li key={item.id}><button type="button" className="model-row destination-row" aria-current={here || undefined}
-            data-project={item.id} onClick={() => { cameFrom.current = item.id; setQuery(""); setStep({ type: "workspaces", project: item }); }}>
-            <span className="model-row-name">{item.name}</span>
-            <span className="model-row-meta"><DestinationPath path={item.path} /></span>
-            {here && <CheckIcon aria-hidden size={16} className="model-row-check" />}
-          </button></li>;
-        })}</ul>
-      </div>
-    </> : <>
-      <button type="button" className="destination-back" onClick={() => setStep({ type: "projects" })}>
-        <ChevronLeftIcon aria-hidden size={16} />{step.project.name}
-      </button>
-      <div className="model-list">
-        {git && <ul><li><button type="button" className="model-row destination-row destination-fresh" aria-current={freshHere || undefined}
-          onClick={() => choose(step.project.path, `${step.project.name} · new worktree from ${git.defaultBranch}`, "fresh")}>
-          <span className="model-row-name"><GitBranchPlusIcon aria-hidden size={16} />New worktree<span className="model-row-variant">from {git.defaultBranch}</span></span>
-          <span className="model-row-meta">Its own branch and folder. Land or discard it when the work is done.</span>
-          {freshHere && <CheckIcon aria-hidden size={16} className="model-row-check" />}
-        </button></li></ul>}
-        {workspaces.type === "loading" && <p className="model-hint" role="status">Loading workspaces…</p>}
-        {workspaces.type === "failed" && <p className="model-hint" role="alert">Workspaces unavailable: {workspaces.message}</p>}
-        <ul>{workspaces.type === "ready" && workspaces.value.map((item) => {
-          const name = item.branch ?? item.label;
-          const label = workspaceLabel(step.project, item);
-          const current = binding.cwd === item.path && binding.placement !== "fresh";
-          return <li key={item.id}><button type="button" className="model-row destination-row" aria-current={current || undefined}
-            onClick={() => choose(item.path, label)}>
-            <span className="model-row-name">{name}{item.isMain && <span className="model-row-variant">main checkout</span>}</span>
-            <span className="model-row-meta"><DestinationPath path={item.path} /></span>
-            {current && <CheckIcon aria-hidden size={16} className="model-row-check" />}
-          </button></li>;
-        })}</ul>
-      </div>
-    </>}
-  </div>;
+  const path = (text: string) => ({ text, truncate: "start" as const });
+  if (step.type === "projects") {
+    const status: OptionStatus | undefined = projects.type === "loading" ? { tone: "status", text: "Loading projects…" }
+      : projects.type === "failed" ? { tone: "alert", text: `Projects unavailable: ${projects.message}` }
+      : shownProjects.length > 0 ? undefined
+      : { tone: "status", text: needle ? `No project matches "${query.trim()}".` : "Forgerie knows no projects yet. This app cannot add one yet." };
+    const options: OptionItem[] = shownProjects.map((item) => ({ id: item.id, name: item.name, details: [path(item.path)],
+      current: binding.cwd === item.path || binding.cwd.startsWith(`${item.path}/`) }));
+    return <FloatingPanel ref={panel} id={id} role="dialog" tabIndex={-1} onBlur={onBlur} aria-label="Where the session starts" onKeyDown={onKeyDown}>
+      <OptionList ref={list} label="Projects" groups={[{ key: "projects", options }]} status={status}
+        search={{ value: query, onChange: setQuery, label: "Search projects", placeholder: "Search projects" }}
+        input={{ type: "focus", onChoose: (projectId) => {
+          const item = shownProjects.find((candidate) => candidate.id === projectId);
+          if (!item) return;
+          cameFrom.current = item.id; setQuery(""); setStep({ type: "workspaces", project: item });
+        } }} />
+    </FloatingPanel>;
+  }
+  const chosen = step.project;
+  const fresh: OptionItem[] = git ? [{ id: FRESH, name: "New worktree", variant: `from ${git.defaultBranch}`, icon: <GitBranchPlusIcon size={16} />,
+    details: ["Its own branch and folder. Land or discard it when the work is done."], current: freshHere }] : [];
+  const listed = workspaces.type === "ready" ? workspaces.value : [];
+  const folders: OptionItem[] = listed.map((item) => ({ id: item.id, name: item.branch ?? item.label, variant: item.isMain ? "main checkout" : undefined,
+    details: [path(item.path)], current: binding.cwd === item.path && binding.placement !== "fresh" }));
+  const status: OptionStatus | undefined = workspaces.type === "loading" ? { tone: "status", text: "Loading workspaces…" }
+    : workspaces.type === "failed" ? { tone: "alert", text: `Workspaces unavailable: ${workspaces.message}` } : undefined;
+  return <FloatingPanel ref={panel} id={id} role="dialog" tabIndex={-1} onBlur={onBlur} aria-label={`Workspaces of ${chosen.name}`} onKeyDown={onKeyDown}>
+    <button type="button" className="destination-back" onClick={() => setStep({ type: "projects" })}>
+      <ChevronLeftIcon aria-hidden size={16} />{chosen.name}
+    </button>
+    <OptionList ref={list} label="Workspaces" groups={[{ key: "fresh", options: fresh }, { key: "workspaces", options: folders }].filter((group) => group.options.length > 0)}
+      status={status} input={{ type: "focus", onChoose: (choice) => {
+        if (choice === FRESH && git) { choose(chosen.path, `${chosen.name} · new worktree from ${git.defaultBranch}`, "fresh"); return; }
+        const item = listed.find((candidate) => candidate.id === choice);
+        if (item) choose(item.path, workspaceLabel(chosen, item));
+      } }} />
+  </FloatingPanel>;
 }

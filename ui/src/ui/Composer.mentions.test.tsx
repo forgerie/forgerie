@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type Unstable_TriggerItem } from "@assistant-ui/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MentionSource } from "../mentionSource";
+import type { MentionSource, ModelSuggestions } from "../mentionSource";
 import type { AskBinding } from "./useAskMode";
 import { Composer } from "./Composer";
 import { useThreadMessages } from "../useThreadMessages";
@@ -14,7 +14,7 @@ const files: Unstable_TriggerItem[] = [
   { id: "src/main.ts", type: "file", label: "src/main.ts", description: "tracked" },
   { id: "src/file with spaces.ts", type: "file", label: "src/file with spaces.ts", description: "tracked" },
 ];
-const models: Unstable_TriggerItem[] = [{ id: "p/model", type: "model", label: "p/model", description: "Friendly name" }];
+const models: ModelSuggestions = { hidden: 0, groups: [{ key: "favorites", label: "Favorites", options: [{ id: "p/model", name: "Friendly name", details: ["P"] }] }] };
 function source(config: Partial<MentionSource> = {}): MentionSource {
   return { key: "session-a", files: async () => files, models: async () => models, ...config };
 }
@@ -53,7 +53,7 @@ describe("assistant-ui mention composer", () => {
     await render({ mentions: source({ files: lookup }), onNew });
     await type("read @src");
     expect(suggestions()?.getAttribute("aria-label")).toBe("Files suggestions");
-    expect(document.querySelector('.mention-status[role="status"]')?.textContent).toBe("Searching…");
+    expect(document.querySelector('.option-list-status[role="status"]')?.textContent).toBe("Searching…");
     await settle();
     expect(lookup).toHaveBeenCalledWith("src", "tracked", expect.any(AbortSignal));
     expect(options()).toHaveLength(2);
@@ -70,8 +70,10 @@ describe("assistant-ui mention composer", () => {
     const lookup = vi.fn<MentionSource["models"]>().mockResolvedValue(models);
     await render({ mentions: source({ models: lookup }) });
     await type("use #friendly"); await settle();
-    expect(lookup).toHaveBeenCalledWith("friendly", expect.any(AbortSignal));
+    expect(lookup).toHaveBeenCalledWith("friendly", { showHidden: false }, expect.any(AbortSignal));
     expect(suggestions()?.getAttribute("aria-label")).toBe("Models suggestions");
+    expect(document.querySelector('[role="listbox"] [role="group"]')?.textContent).toContain("Favorites");
+    expect(options()[0]?.textContent).toBe("Friendly nameP");
     await press("Tab");
     expect(input().value).toBe("use #p/model ");
     expect(suggestions()).toBeNull();

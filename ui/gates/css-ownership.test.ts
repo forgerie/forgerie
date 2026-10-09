@@ -12,7 +12,9 @@ import {
 } from "./source";
 
 const ownedFiles = cssFiles.filter((file) => !GLOBAL_CSS.includes(file));
-const importersOf = (sheet: string) => runtimeModules.filter((module) => cssImports(module).includes(sheet));
+// Parse each module once, not once per stylesheet: the per-sheet scan outgrew the test timeout.
+const sheetsByModule = new Map(runtimeModules.map((module) => [module, cssImports(module)]));
+const importersOf = (sheet: string) => runtimeModules.filter((module) => sheetsByModule.get(module)!.includes(sheet));
 
 describe("styles load through their owners", () => {
   test("no stylesheet uses @import", () => {
@@ -33,8 +35,7 @@ describe("styles load through their owners", () => {
       return existsSync(owner) && importers.length === 1 && importers[0] === owner
         ? [] : [`${rel(file)}: imported by ${importers.map(rel).join(", ") || "nothing"}`];
     }));
-  // It parses every module once per stylesheet: about 2.5 s alone, past 5 s when the whole suite runs in parallel.
-  }, 30_000);
+  });
 });
 
 describe("a stylesheet does not reach into another component", () => {

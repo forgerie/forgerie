@@ -39,7 +39,7 @@ try {
     await until("document.querySelector('.ns-dialog .model-trigger')?.textContent.includes('Claude Opus 5.5') && document.querySelector('.destination-value')?.textContent === 'forgerie · new-ui-mvp'");
     if (openDestination) {
       await evaluate(cdp, "document.querySelector('.destination-trigger').click()");
-      await until("!!document.querySelector('.destination-panel .destination-row')");
+      await until("!!document.querySelector('.floating-panel .option-row')");
     }
   }
   async function type(text) {
@@ -56,7 +56,7 @@ try {
         input: box(document.querySelector('.ns-dialog [data-composer-input]')), destination: box(document.querySelector('.destination-trigger')),
         value: box(document.querySelector('.destination-value')), model: box(document.querySelector('.ns-dialog .model-trigger')),
         actions: [...document.querySelectorAll('.ns-dialog .ns-context button, .ns-chips button, .ns-foot button, .ns-close, .ns-launch-actions button')].map(button => ({ label: button.getAttribute('aria-label') || button.textContent, ...box(button) })),
-        panel: box(document.querySelector('.destination-panel')), firstRow: box(document.querySelector('.destination-row')),
+        panel: box(document.querySelector('.floating-panel')), firstRow: box(document.querySelector('.option-row')),
         dialog: box(document.querySelector('.ns-window')) };
     })()`);
     const name = `${scenario} ${posture.name} ${scheme}`;
@@ -85,15 +85,15 @@ try {
 
   // Pick a workspace, a model, and a level; Send starts the session there.
   await navigate("new-session", true);
-  assert.equal(await evaluate(cdp, "document.activeElement?.classList.contains('destination-panel')"), true);
-  await click(".destination-row", "forgerie");
-  await until("document.querySelectorAll('.destination-panel .destination-row').length === 3");
-  await click(".destination-row", "main checkout");
-  await until("!document.querySelector('.destination-panel') && document.querySelector('.destination-value').textContent === 'forgerie'");
+  assert.equal(await evaluate(cdp, "document.activeElement?.classList.contains('floating-panel')"), true);
+  await click(".option-row", "forgerie");
+  await until("document.querySelectorAll('.floating-panel .option-row').length === 3");
+  await click(".option-row", "main checkout");
+  await until("!document.querySelector('.floating-panel') && document.querySelector('.destination-value').textContent === 'forgerie'");
   await evaluate(cdp, "document.querySelector('.ns-dialog .model-trigger').click()");
-  await until("!!document.querySelector('.model-panel .model-row')");
-  await click(".model-row", "Claude Sonnet 5");
-  await until("!document.querySelector('.model-panel') && document.querySelector('.ns-dialog .model-trigger').textContent.includes('Claude Sonnet 5')");
+  await until("!!document.querySelector('.floating-panel .option-row')");
+  await click(".option-row", "Claude Sonnet 5");
+  await until("!document.querySelector('.floating-panel') && document.querySelector('.ns-dialog .model-trigger').textContent.includes('Claude Sonnet 5')");
   await type("Fix the build");
   await pressCombo(cdp, "ctrl+enter");
   await until("document.querySelector('.ns-status')?.textContent === 'Starting session…'");
@@ -104,12 +104,12 @@ try {
 
   // Escape steps back from workspaces to projects, then closes.
   await navigate("new-session", true);
-  await click(".destination-row", "forgerie");
+  await click(".option-row", "forgerie");
   await until("!!document.querySelector('.destination-back')");
   await pressCombo(cdp, "escape");
-  await until("!document.querySelector('.destination-back') && !!document.querySelector('.destination-panel')");
+  await until("!document.querySelector('.destination-back') && !!document.querySelector('.floating-panel')");
   await pressCombo(cdp, "escape");
-  await until("!document.querySelector('.destination-panel')");
+  await until("!document.querySelector('.floating-panel')");
   result.flows.escape = true;
 
   // A refused start keeps the message and says why.
@@ -124,12 +124,12 @@ try {
   await navigate("new-session");
   await type("unsent first message");
   await evaluate(cdp, "document.querySelector('.destination-trigger').click()");
-  await until("!!document.querySelector('.destination-panel .destination-row')");
+  await until("!!document.querySelector('.floating-panel .option-row')");
   for (const posture of [...FOLD8_POSTURES, FOLD8_POSTURES[2]]) {
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
     await sleep(100);
     assert.equal(await draft(), "unsent first message");
-    assert.equal(await evaluate(cdp, "!!document.querySelector('.destination-panel')"), true);
+    assert.equal(await evaluate(cdp, "!!document.querySelector('.floating-panel')"), true);
     result.transitions.push(posture.name);
   }
 

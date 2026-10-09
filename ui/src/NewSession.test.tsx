@@ -149,10 +149,10 @@ describe("the new-session dialog", () => {
   it("mounts its pickers inside itself, so they are not inert behind the modal", async () => {
     await render(scriptedApi().api);
     await click(document.querySelector<HTMLButtonElement>(".model-trigger")!);
-    expect(document.querySelector(".model-panel")?.parentElement).toBe(dialog());
-    await act(async () => { document.querySelector(".model-panel")!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })); });
+    expect(document.querySelector(".floating-panel")?.parentElement).toBe(dialog());
+    await act(async () => { document.querySelector(".floating-panel")!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })); });
     await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
-    expect(document.querySelector(".destination-panel")?.parentElement).toBe(dialog());
+    expect(document.querySelector(".floating-panel")?.parentElement).toBe(dialog());
   });
 
   it("closes from Escape and Close, and keeps the draft for next time", async () => {
@@ -183,7 +183,7 @@ describe("starting a new session", () => {
     const script = scriptedApi();
     await render(script.api);
     await click(document.querySelector<HTMLButtonElement>(".model-trigger")!);
-    await click(button("Claude Haiku 4.5", document.querySelector(".model-panel")!));
+    await click(button("Claude Haiku 4.5", document.querySelector(".floating-panel")!));
     await click(document.querySelector<HTMLButtonElement>(".model-trigger")!);
     await click(button("Low", document.querySelector(".model-levels")!));
     await type("hi");
@@ -196,10 +196,10 @@ describe("starting a new session", () => {
     const onDestination = vi.fn();
     await render(script.api, { onDestination });
     await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
-    const panel = () => document.querySelector<HTMLElement>(".destination-panel")!;
+    const panel = () => document.querySelector<HTMLElement>(".floating-panel")!;
     await click(button("forgerie", panel()));
     await click(button("feat/ui", panel()));
-    expect(document.querySelector(".destination-panel")).toBeNull();
+    expect(document.querySelector(".floating-panel")).toBeNull();
     expect(document.querySelector(".destination-value")!.textContent).toBe("forgerie · feat/ui");
     expect(script.modelReads.at(-1)).toBe("/code/forgerie/.worktree/ui");
     expect(onDestination).toHaveBeenCalledWith("/code/forgerie/.worktree/ui");

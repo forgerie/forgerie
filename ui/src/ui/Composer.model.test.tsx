@@ -40,7 +40,7 @@ function deferred<T>() {
 const render = (props: Props = {}) => act(async () => root.render(<Fixture {...props} />));
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 const trigger = () => document.querySelector<HTMLButtonElement>(".model-trigger")!;
-const panel = () => document.querySelector<HTMLElement>(".model-panel");
+const panel = () => document.querySelector<HTMLElement>(".floating-panel");
 const input = () => document.querySelector<ComposerInputElement>(".composer [data-composer-input]")!;
 const buttons = (scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")];
 const button = (name: string, scope: ParentNode = document) => buttons(scope).find((node) => node.textContent?.includes(name) || node.getAttribute("aria-label") === name);
@@ -91,7 +91,7 @@ describe("model and thinking level in the input bar", () => {
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
     await click(trigger());
     expect(trigger().getAttribute("aria-expanded")).toBe("true");
-    expect([...panel()!.querySelectorAll(".model-group-label")].map((node) => node.textContent)).toEqual(["Favorites", "Anthropic", "Openai Codex"]);
+    expect([...panel()!.querySelectorAll(".option-list-heading")].map((node) => node.textContent)).toEqual(["Favorites", "Anthropic", "Openai Codex"]);
     expect(button("Claude Opus 5.5", panel()!)!.getAttribute("aria-current")).toBe("true");
     expect(document.activeElement).toBe(button("Claude Opus 5.5", panel()!));
     expect(button("GPT-5.6 Sol", panel()!)!.textContent).toContain("no thinking");
@@ -140,12 +140,12 @@ describe("model and thinking level in the input bar", () => {
   it("filters the list as you search, and Escape closes it", async () => {
     await render();
     await click(trigger());
-    const search = panel()!.querySelector<HTMLInputElement>(".model-search")!;
+    const search = panel()!.querySelector<HTMLInputElement>(".option-list-search")!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, "codex");
       search.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    expect([...panel()!.querySelectorAll(".model-row")].map((node) => node.querySelector(".model-row-name")!.textContent)).toEqual(["GPT-5.6 Sol"]);
+    expect([...panel()!.querySelectorAll(".option-row")].map((node) => node.querySelector(".option-row-name")!.textContent)).toEqual(["GPT-5.6 Sol"]);
     await press(search, "Escape");
     expect(panel()).toBeNull();
   });
@@ -159,8 +159,8 @@ describe("model and thinking level in the input bar", () => {
     await settle();
     expect(onNew).not.toHaveBeenCalled();
     expect(input().value).toBe("");
-    expect(panel()!.querySelector<HTMLInputElement>(".model-search")!.value).toBe("haiku");
-    expect([...panel()!.querySelectorAll(".model-row")]).toHaveLength(1);
+    expect(panel()!.querySelector<HTMLInputElement>(".option-list-search")!.value).toBe("haiku");
+    expect([...panel()!.querySelectorAll(".option-row")]).toHaveLength(1);
   });
 
   it("names a session without a model, and cannot change anything while offline", async () => {
@@ -231,6 +231,6 @@ describe("model and thinking level in the input bar", () => {
   it("reports a failed model read inside the panel", async () => {
     await render({ model: { listModels: async () => { throw new Error("HTTP 404"); } } });
     await click(trigger());
-    expect(panel()!.querySelector(".model-list [role=alert]")!.textContent).toBe("Models unavailable: HTTP 404");
+    expect(panel()!.querySelector(".option-list-rows [role=alert]")!.textContent).toBe("Models unavailable: HTTP 404");
   });
 });

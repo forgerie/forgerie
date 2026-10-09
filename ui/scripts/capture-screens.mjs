@@ -37,7 +37,7 @@ const SCREENS = {
   "new-session": { query: `?session=${RICH_SESSION}&new=${encodeURIComponent(FOLDER)}`, ready: "dialog[open]" },
   changes: { query: `?session=${RICH_SESSION}`, settled: SESSION_READY, press: "Review changes", ready: ".file-tree" },
   "pull-request": { query: `?session=${PR_SESSION}`, settled: SESSION_READY, press: "Pull request", ready: ".pr-body" },
-  "model-menu": { query: `?session=${RICH_SESSION}`, settled: SESSION_READY, press: "Model and thinking level", ready: ".model-panel" },
+  "model-menu": { query: `?session=${RICH_SESSION}`, settled: SESSION_READY, press: "Model and thinking level", ready: ".floating-panel" },
   settings: { query: "?settings=root", ready: ".settings-sections" },
   "settings-models": { query: "?settings=models", ready: ".models-search" },
   "settings-plugins": { query: "?settings=plugins", ready: ".agent-list" },

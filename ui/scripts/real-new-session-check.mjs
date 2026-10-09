@@ -54,10 +54,10 @@ try {
   await evaluate(cdp, "document.querySelector('.model-trigger').click()");
   await until("[...document.querySelectorAll('.model-levels button')].some(b => b.textContent === 'Low')");
   await evaluate(cdp, "[...document.querySelectorAll('.model-levels button')].find(b => b.textContent === 'Low').click()");
-  await until("document.querySelector('.model-levels [aria-pressed=true]')?.textContent === 'Low' && !document.querySelector('.model-panel [aria-busy=true]')");
+  await until("document.querySelector('.model-levels [aria-pressed=true]')?.textContent === 'Low' && !document.querySelector('.floating-panel [aria-busy=true]')");
   await sleep(100);
   await pressCombo(cdp, "escape");
-  await until("!document.querySelector('.model-panel') && document.querySelector('.model-trigger').textContent.includes('Low')");
+  await until("!document.querySelector('.floating-panel') && document.querySelector('.model-trigger').textContent.includes('Low')");
 
   const shownModel = await evaluate(cdp, "document.querySelector('.model-trigger-name').textContent");
   await evaluate(cdp, "document.querySelector('.ns-dialog [data-composer-input]').focus()");

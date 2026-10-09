@@ -70,8 +70,8 @@ try {
   step("the trigger names Pi's model and level", { trigger: await trigger(), model: before.model.id, level: before.thinkingLevel });
 
   await evaluate(cdp, "document.querySelector('.model-trigger').click()");
-  await until("!!document.querySelector('.model-panel .model-row') && document.querySelectorAll('.model-levels button').length > 1");
-  const rows = await evaluate(cdp, "document.querySelectorAll('.model-row').length");
+  await until("!!document.querySelector('.floating-panel .option-row') && document.querySelectorAll('.model-levels button').length > 1");
+  const rows = await evaluate(cdp, "document.querySelectorAll('.option-row').length");
   assert.equal(rows, models.filter((model) => model.provider && model.id).length);
   const levels = await evaluate(cdp, "[...document.querySelectorAll('.model-levels button')].map(button => button.textContent)");
   step("the panel lists every model Pi offers, and the current model's levels", { rows, levels });
@@ -81,9 +81,9 @@ try {
   await until(`document.querySelector('.model-trigger').textContent.includes(${JSON.stringify(low)})`);
   step("a level change reached Pi and the trigger follows", { level: (await status(id)).thinkingLevel, trigger: await trigger() });
 
-  await evaluate(cdp, `[...document.querySelectorAll('.model-row')].find(row => row.querySelector('.model-row-name').textContent.startsWith(${JSON.stringify((target.name ?? target.id).replace(/ \(latest\)$/, ""))}))?.click()`);
+  await evaluate(cdp, `[...document.querySelectorAll('.option-row')].find(row => row.querySelector('.option-row-name').textContent.startsWith(${JSON.stringify((target.name ?? target.id).replace(/ \(latest\)$/, ""))}))?.click()`);
   await waitUntil("model saved", async () => (await status(id)).model?.id === target.id);
-  await until("!document.querySelector('.model-panel')");
+  await until("!document.querySelector('.floating-panel')");
   step("a model change reached Pi and closed the panel", { model: (await status(id)).model.id, trigger: await trigger() });
 
   await open();

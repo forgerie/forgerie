@@ -86,9 +86,9 @@ describe("a new session's worktree", () => {
     const onDestination = vi.fn();
     await render(h, { onDestination });
     await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
-    await click(document.querySelector<HTMLButtonElement>('[data-project="p1"]')!);
+    await click(document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')!);
     expect(button("New worktreefrom main")?.getAttribute("aria-current")).toBe("true");
-    await click([...document.querySelectorAll<HTMLButtonElement>(".destination-row")].find((row) => row.textContent?.startsWith("feat/ui")));
+    await click([...document.querySelectorAll<HTMLButtonElement>(".option-row")].find((row) => row.textContent?.startsWith("feat/ui")));
     expect(label()).toBe("forgerie · feat/ui");
     expect(onDestination).toHaveBeenLastCalledWith("/code/forgerie/.worktree/ui", "existing");
     await type("Fix it here");

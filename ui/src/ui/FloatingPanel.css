@@ -1,0 +1,6 @@
+/* A window-level surface over the page. Its host sets the position and the
+   height it may take; the content scrolls inside that height. */
+/* Until a host places it, the panel sits inside the window edges, so it is usable unplaced. */
+.floating-panel { position: fixed; z-index: 100; inset-block-start: var(--space-2); inset-inline: var(--space-2); max-block-size: calc(100% - var(--space-4)); display: flex; flex-direction: column; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain;
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--popover);
+  box-shadow: 0 var(--space-2) var(--space-6) var(--line); color: var(--foreground); font-size: var(--small-text); }

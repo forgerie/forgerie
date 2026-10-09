@@ -1,0 +1,22 @@
+/* Choices in groups. The list takes the room its container gives it: the
+   search field and alert stay put, and the rows scroll inside what is left. */
+.option-list { display: flex; flex-direction: column; flex: 1 1 auto; min-block-size: 0; max-block-size: 100%; }
+.option-list-search { flex: none; min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0;
+  border-block-end: var(--hairline) solid var(--line); background: transparent; color: var(--foreground); font: inherit; outline: none; }
+.option-list-search::placeholder { color: var(--muted-foreground); }
+.option-list-alert { flex: none; margin: 0; padding: var(--space-2) var(--space-3); border-block-end: var(--hairline) solid var(--line);
+  color: var(--destructive); overflow-wrap: anywhere; }
+.option-list-rows { flex: 1 1 auto; min-block-size: var(--control-size); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1); }
+.option-list-group + .option-list-group { margin-block-start: var(--space-1); padding-block-start: var(--space-1); border-block-start: var(--hairline) solid var(--line); }
+.option-list-heading { display: block; margin: 0; padding: var(--space-2) var(--space-3) var(--space-1);
+  color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+.option-list-items { margin: 0; padding: 0; list-style: none; }
+.option-list-status { margin: 0; padding: var(--space-2) var(--space-3); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.option-list-status[role="alert"] { color: var(--destructive); }
+/* A quiet command at the foot of the list. */
+.option-list-action { display: flex; align-items: center; gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size);
+  margin-block-start: var(--space-1); padding: var(--space-1) var(--space-3); border: 0; border-block-start: var(--hairline) solid var(--line); border-radius: 0;
+  background: transparent; color: var(--muted-foreground); font-size: var(--label-text); text-align: start; }
+.option-list-action:hover, .option-list-action:focus-visible { color: var(--foreground); background: var(--hover-surface); }
+.option-list-action:focus-visible { outline-offset: calc(var(--hairline) * -2); }
+.option-list-action svg { flex: none; }

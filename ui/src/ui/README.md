@@ -47,6 +47,9 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `ErrorBoundary` (atom): replaces children that throw while drawing with a fallback, so everything around them keeps working.
 - `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, with optional captions, a marked block, trailing cells that span rows, and a small action chip per block.
 - `Consequence` (molecule): one consequence the reader must see before acting, set apart by a wash and an icon, plain or warn.
+- `FloatingPanel` (atom): the surface of a window-level panel that scrolls inside the height it gets; its host places it, and it sits inside the window edges until then.
+- `OptionRow` (atom): one choice as a button: a name, a variant, a leading mark, short details (a path gives way at its start), and a check on the choice in effect.
+- `OptionList` (molecule): choices in named groups with search, one status line and a foot command; rows take focus, or follow a text field's highlight.
 - `Shelf` (organism): a section at the foot of a list that switches between two forms from a group header, scrolls on its own, and reports the room it sits in.
 - `BadgeButton` (atom): an icon button drawn small with a control-sized hit area, a live-colour count of what waits on the reader, and a working dot.
 - `SheetDialog` (organism): a modal sheet that is a card while the window has room and meets each edge as the room runs out, with back, title, actions, close, a scrolling body, and a footer.

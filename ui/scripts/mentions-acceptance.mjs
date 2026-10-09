@@ -46,12 +46,12 @@ try {
       await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
       for (const text of ["@src", "#model"]) {
         await draft(text);
-        await until(`document.querySelectorAll('.mention-option').length > 0`);
+        await until(`document.querySelectorAll('.option-row').length > 0`);
         const state = await evaluate(cdp, `(() => {
           const box = (node) => node.getBoundingClientRect().toJSON();
-          return { popup: box(document.querySelector('.mention-popover')), input: box(document.querySelector('[aria-label="Message"]')),
+          return { popup: box(document.querySelector('.floating-panel')), input: box(document.querySelector('[aria-label="Message"]')),
             overflow: document.documentElement.scrollWidth > innerWidth, draft: document.querySelector('[aria-label="Message"]').value,
-            target: box(document.querySelector('.mention-option')), parent: document.querySelector('.mention-popover').parentElement.tagName };
+            target: box(document.querySelector('.option-row')), parent: document.querySelector('[role=listbox]').parentElement.tagName };
         })()`);
         assert.equal(state.draft, text);
         assert.equal(state.overflow, false);
@@ -61,10 +61,10 @@ try {
         assert.ok(state.input.bottom <= posture.height + 1);
         assert.ok(state.target.height >= 44);
         // Navigating to the last result must bring it into view in the short pane.
-        const count = await evaluate(cdp, `document.querySelectorAll('.mention-option').length`);
+        const count = await evaluate(cdp, `document.querySelectorAll('.option-row').length`);
         for (let i = 1; i < count; i++) await pressCombo(cdp, "arrowdown");
         const visible = await evaluate(cdp, `(() => {
-          const list = document.querySelector('.mention-popover').getBoundingClientRect();
+          const list = document.querySelector('.floating-panel').getBoundingClientRect();
           const item = document.getElementById(document.querySelector('[aria-label="Message"]').getAttribute('aria-activedescendant')).getBoundingClientRect();
           return item.y >= list.y && item.bottom <= list.bottom + 1;
         })()`);
@@ -86,7 +86,7 @@ try {
   await pressCombo(cdp, "enter");
   assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), "/name ");
   await draft("/review @src");
-  await until(`document.querySelectorAll('.mention-option').length > 0`);
+  await until(`document.querySelectorAll('.option-row').length > 0`);
   await pressCombo(cdp, "enter");
   assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), "/review @src/main.ts ");
   assert.equal(await evaluate(cdp, `document.querySelectorAll('.message').length`), 2, "Mention and slash completion must coexist without sending");
@@ -111,14 +111,14 @@ try {
     for (const posture of FOLD8_POSTURES) {
       await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
       await draft("#");
-      await until(`document.querySelectorAll('.mention-option').length === 3`);
-      const labels = await evaluate(cdp, `[...document.querySelectorAll('.mention-option .mention-description > span')].map(node => node.textContent)`);
-      assert.deepEqual(labels, ["provider/careful", "provider/fast", "provider/balanced"], "Only shown models, with favorites in Settings order");
+      await until(`document.querySelectorAll('.option-row').length === 3`);
+      const labels = await evaluate(cdp, `[...document.querySelectorAll('.option-row-name')].map(node => node.textContent)`);
+      assert.deepEqual(labels, ["Careful model", "Fast model", "Balanced model"], "Only shown models, with favorites in Settings order");
       await pressCombo(cdp, "tab");
       assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), "#provider/careful ");
       await draft("#hidden");
       await until(`document.body.textContent.includes('No matching models.')`);
-      assert.equal(await evaluate(cdp, `document.querySelectorAll('.mention-option').length`), 0);
+      assert.equal(await evaluate(cdp, `document.querySelectorAll('.option-row').length`), 0);
       await pressCombo(cdp, "escape");
       report.cases.push({ scheme, posture: posture.name, preferences: true, labels });
     }
@@ -130,12 +130,12 @@ try {
     await cdp.send("Page.navigate", { url: live.href });
     await until(`!!document.querySelector('[aria-label="Message"]') && !document.querySelector('[aria-label="Message"]').disabled`);
     await draft("@src");
-    await until(`document.querySelectorAll('.mention-option').length > 0`);
-    const file = await evaluate(cdp, `document.querySelector('.mention-option .mention-description > span').textContent`);
+    await until(`document.querySelectorAll('.option-row').length > 0`);
+    const file = await evaluate(cdp, `document.querySelector('.option-row-name').textContent`);
     await pressCombo(cdp, "escape");
     await draft("#");
-    await until(`document.querySelectorAll('.mention-option').length > 0`);
-    const model = await evaluate(cdp, `document.querySelector('.mention-option .mention-description > span').textContent`);
+    await until(`document.querySelectorAll('.option-row').length > 0`);
+    const model = await evaluate(cdp, `document.querySelector('.option-row-name').textContent`);
     await pressCombo(cdp, "enter");
     assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), `#${model} `);
     assert.ok(report.apiRequests.every((r) => r.method === "GET"), "Read-only validation must not mutate the session");

@@ -23,6 +23,9 @@
   /* Row states from thread-list-item.tsx: hover /[0.04], active /[0.06]. */
   --hover-surface: color-mix(in oklab, var(--foreground) 4%, transparent);
   --active-surface: color-mix(in oklab, var(--foreground) 6%, transparent);
+  /* Text with less to it, and text off its usual list. */
+  --quiet-foreground: color-mix(in oklab, var(--foreground) 70%, transparent);
+  --faint-foreground: color-mix(in oklab, var(--foreground) 62%, transparent);
   --body-font: "Public Sans Variable", sans-serif;
   --display-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --code-font: "JetBrains Mono Variable", monospace;
@@ -139,23 +142,13 @@
 html { overscroll-behavior: none; }
 body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--body-font); font-size: var(--text-size); -webkit-font-smoothing: antialiased; }
 button, textarea { font: inherit; }
-/* Trigger suggestions reuse the homepage popover palette, type and radii.
-   Window geometry comes from mentionPlacement; rows retain independent touch targets. */
-.mention-popover { position: fixed; z-index: 100; overflow-y: auto; overscroll-behavior: contain;
-  border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover);
-  padding: var(--space-1); box-shadow: 0 var(--space-1) var(--space-3) var(--line); font-size: var(--small-text); }
-.mention-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
-  padding-inline: var(--space-2); color: var(--muted-foreground); font-size: var(--label-text); }
+/* Trigger suggestions: a FloatingPanel placed by mentionPlacement, holding an OptionList.
+   The label lines up with the row names below it. */
+.mention-header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  padding-inline: var(--space-4) var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); }
 .mention-close { display: grid; place-items: center; flex: none; inline-size: var(--control-size); block-size: var(--control-size);
   background: transparent; border: 0; border-radius: var(--radius-control); }
 .mention-close:hover { background: var(--hover-surface); }
-.mention-option { display: flex; align-items: center; gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size);
-  padding: var(--space-2); border: 0; border-radius: var(--radius-document); background: transparent; text-align: start; }
-.mention-option[data-highlighted] { background: var(--active-surface); }
-.mention-option > svg { flex: none; color: var(--muted-foreground); }
-.mention-description { display: flex; flex-direction: column; min-inline-size: 0; overflow-wrap: anywhere; }
-.mention-description small { color: var(--muted-foreground); font-size: var(--label-text); }
-.mention-status { margin: 0; padding: var(--space-2); color: var(--muted-foreground); overflow-wrap: anywhere; }
 button { color: inherit; cursor: pointer; }
 button:disabled { cursor: default; opacity: 0.4; }
 :focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
@@ -350,26 +343,7 @@ button:disabled { cursor: default; opacity: 0.4; }
 /* In a very narrow pane the level moves to the picker, where it is always shown,
    so the model name keeps a readable width. Spacing has already yielded. */
 @container (max-width: 22rem) { .model-trigger-level { display: none; } }
-/* The panel: window level, the homepage menu surface. The list scrolls inside
-   the room the anchor measured; search and thinking stay put around it. */
-.model-panel { position: fixed; z-index: 100; display: flex; flex-direction: column; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain;
-  border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover); box-shadow: 0 var(--space-2) var(--space-6) var(--line); font-size: var(--small-text); }
-.model-search { flex: none; min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-block-end: 1px solid var(--line); background: transparent; color: var(--foreground); font: inherit; outline: none; }
-.model-search::placeholder { color: var(--muted-foreground); }
-.model-list { flex: 1 1 auto; min-block-size: var(--control-size); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1); }
-.model-group + .model-group { margin-block-start: var(--space-1); padding-block-start: var(--space-1); border-block-start: 1px solid var(--line); }
-.model-group-label { margin: 0; padding: var(--space-2) var(--space-3) var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
-.model-group ul { margin: 0; padding: 0; list-style: none; }
-.model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name check" "meta check"; align-items: center; column-gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-1) var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; text-align: start; }
-.model-row:not([aria-disabled]):hover, .model-row:focus-visible { background: var(--hover-surface); }
-.model-row:focus-visible { outline-offset: -2px; }
-.model-row[aria-current="true"] { background: var(--active-surface); }
-.model-row-name { grid-area: name; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); color: var(--foreground); overflow-wrap: anywhere; }
-.model-row[data-plain] .model-row-name { color: color-mix(in oklab, var(--foreground) 70%, transparent); }
-.model-row-variant { color: var(--muted-foreground); font-size: var(--label-text); }
-.model-row-meta { grid-area: meta; display: flex; flex-wrap: wrap; column-gap: var(--space-3); color: var(--muted-foreground); font-size: var(--label-text); }
-.model-row-meta:empty { display: none; }
-.model-row-check { grid-area: check; }
+/* The panel's list and search are an OptionList; thinking stays put under it. */
 .model-hint { margin: 0; padding: var(--space-2) var(--space-3); color: var(--muted-foreground); }
 /* Thinking: Pi's levels for this model, as one wrapping row of segments next
    to the trigger, so they stay in reach when the list scrolls. */
@@ -380,8 +354,7 @@ button:disabled { cursor: default; opacity: 0.4; }
 .model-levels button { min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); }
 .model-levels button:not([aria-disabled]):hover { background: var(--hover-surface); color: var(--foreground); }
 .model-levels button[aria-pressed="true"] { background: var(--active-surface); color: var(--foreground); font-weight: 500; }
-.model-row[aria-disabled], .model-levels button[aria-disabled] { cursor: default; opacity: 0.4; }
-.model-error { flex: none; margin: 0; padding: var(--space-2) var(--space-3); border-block-end: 1px solid var(--line); color: var(--destructive); overflow-wrap: anywhere; }
+.model-levels button[aria-disabled] { cursor: default; opacity: 0.4; }
 /* A new session's destination: one quiet line above the input bar. The value
    is a readout and truncates; the line itself never wraps away, so the choice
    stays one tap away at every size. */
@@ -393,11 +366,6 @@ button:disabled { cursor: default; opacity: 0.4; }
 .destination-trigger:not(:disabled):hover, .destination-trigger[aria-expanded="true"] { background: var(--hover-surface); }
 .destination-trigger svg { flex: none; color: var(--muted-foreground); }
 .destination-value { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.destination-panel ul { margin: 0; padding: 0; list-style: none; }
-/* One line; an overlong path loses its start (rtl box, ltr text), never wraps mid-word. */
-.destination-path { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left;
-  font-family: var(--code-font); font-size: var(--meta-text); }
-.destination-path > bdi { direction: ltr; }
 .destination-back { flex: none; display: flex; align-items: center; gap: var(--space-1); min-block-size: var(--control-size); padding-inline: var(--space-2); border: 0; border-block-end: 1px solid var(--line); background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 500; text-align: start; }
 .destination-back:hover, .destination-back:focus-visible { background: var(--hover-surface); }
 .dictation-status { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--small-text); color: var(--muted-foreground); }
@@ -1268,5 +1236,3 @@ summary.trace-line:hover { color: var(--foreground); }
 .wt-foot { flex: none; display: flex; flex-wrap: wrap-reverse; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3) var(--space-5) var(--space-4); border-block-start: 1px solid var(--line); }
 .wt-foot > button { flex: 1 0 auto; }
 @media (prefers-reduced-motion: reduce) { .wt-steps li[data-state="running"] > svg, .wt-status svg { animation: none; } }
-.destination-fresh .model-row-name { display: inline-flex; align-items: center; gap: var(--space-2); }
-.destination-fresh .model-row-name svg { flex: none; color: var(--live); }

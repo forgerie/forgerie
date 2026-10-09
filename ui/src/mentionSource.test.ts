@@ -2,7 +2,9 @@ import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { createMentionSource } from "./mentionSource";
+import { createMentionSource, type ModelSuggestions } from "./mentionSource";
+
+const ids = (found: ModelSuggestions) => found.groups.flatMap((group) => group.options.map((option) => option.id));
 
 let server: Server | undefined;
 afterEach(async () => { if (server) { server.closeAllConnections(); server.close(); await once(server, "close"); server = undefined; } });
@@ -45,25 +47,38 @@ describe("mention discovery against Forgerie HTTP contracts", () => {
       "/api/projects/other/workspaces/external/files?q=&scope=tracked": [] });
     expect(await source.files("", "tracked", new AbortController().signal)).toEqual([]);
   });
-  it("honors shown models and puts favorites first in Settings order before limiting suggestions", async () => {
+  it("groups suggestions like the model menu: favorites first in Settings order, hidden models out", async () => {
     const { source } = await service({ [prefsPath]: { ...prefs, favorites: ["p/favorite-b:high", "favorite-a"], visible: ["p/shown"] },
       [modelPath]: { models: [
         ...Array.from({ length: 15 }, (_, i) => ({ provider: "p", id: `hidden-${i}` })),
-        { provider: "p", id: "shown" }, { provider: "p", id: "favorite-a" }, { provider: "p", id: "favorite-b" },
+        { provider: "p", id: "shown", contextWindow: 200_000 }, { provider: "p", id: "favorite-a" }, { provider: "p", id: "favorite-b", reasoning: false },
       ] } });
     const signal = new AbortController().signal;
-    expect((await source.models("", signal)).map((item) => item.id)).toEqual(["p/favorite-b", "p/favorite-a", "p/shown"]);
-    expect((await source.models("hidden", signal)).map((item) => item.id)).toEqual([]);
-    expect((await source.models("FAVORITE", signal)).map((item) => item.id)).toEqual(["p/favorite-b", "p/favorite-a"]);
+    const all = await source.models("", { showHidden: false }, signal);
+    expect(all.groups.map((group) => [group.label, ...group.options.map((option) => option.id)]))
+      .toEqual([["Favorites", "p/favorite-b", "p/favorite-a"], ["P", "p/shown"]]);
+    expect(all.hidden).toBe(15);
+    expect(all.toggle).toEqual({ show: "Show 15 hidden models", hide: "Hide models you do not show" });
+    expect(all.groups[0]!.options[0]).toMatchObject({ details: ["P", "no thinking"], tone: "quiet" });
+    expect(all.groups[1]!.options[0]!.details).toEqual(["200k context"]);
+    expect(ids(await source.models("hidden", { showHidden: false }, signal))).toEqual([]);
+    expect(ids(await source.models("FAVORITE", { showHidden: false }, signal))).toEqual(["p/favorite-b", "p/favorite-a"]);
+  });
+  it("offers hidden models on request, marked as hidden", async () => {
+    const { source } = await service({ [prefsPath]: { ...prefs, visible: ["p/shown"] },
+      [modelPath]: { models: [{ provider: "p", id: "shown" }, { provider: "p", id: "off" }] } });
+    const found = await source.models("", { showHidden: true }, new AbortController().signal);
+    expect(ids(found)).toEqual(["p/shown", "p/off"]);
+    expect(found.groups[0]!.options[1]).toMatchObject({ tone: "faint", details: ["hidden"] });
   });
   it("filters names and qualified model IDs and inserts no session mutation", async () => {
     const { source, requests } = await service({ [modelPath]: { models: [
       { provider: "p", id: "fast", name: "Fast model" }, { provider: "p", id: "precise", name: "Careful" },
     ] } });
-    expect(await source.models("CAREFUL", new AbortController().signal)).toEqual([{ id: "p/precise", type: "model", label: "p/precise", description: "Careful" }]);
+    expect(ids(await source.models("CAREFUL", { showHidden: false }, new AbortController().signal))).toEqual(["p/precise"]);
     expect(requests).toHaveLength(2);
     expect(requests).toEqual(expect.arrayContaining([{ url: modelPath, method: "GET" }, { url: prefsPath, method: "GET" }]));
-    expect(await source.models("P/PRECISE", new AbortController().signal)).toEqual([{ id: "p/precise", type: "model", label: "p/precise", description: "Careful" }]);
+    expect(ids(await source.models("P/PRECISE", { showHidden: false }, new AbortController().signal))).toEqual(["p/precise"]);
   });
   it("reads Settings again on each search without recreating the source", async () => {
     const stored = { ...prefs, visible: ["p/first"] };
@@ -71,33 +86,33 @@ describe("mention discovery against Forgerie HTTP contracts", () => {
       { provider: "p", id: "first" }, { provider: "p", id: "second" },
     ] } });
     const signal = new AbortController().signal;
-    expect((await source.models("", signal)).map((item) => item.id)).toEqual(["p/first"]);
+    expect(ids(await source.models("", { showHidden: false }, signal))).toEqual(["p/first"]);
     stored.visible = ["p/second"];
-    expect((await source.models("", signal)).map((item) => item.id)).toEqual(["p/second"]);
+    expect(ids(await source.models("", { showHidden: false }, signal))).toEqual(["p/second"]);
   });
   it("applies the same preferences before a new session exists", async () => {
     const path = "/api/models?cwd=%2Frepo%2Fwork+tree";
     const { source } = await service({ [prefsPath]: { ...prefs, favorites: ["p/chosen"], visible: [] }, [path]: { models: [
       { provider: "p", id: "hidden" }, { provider: "p", id: "chosen" },
     ] } }, {}, path);
-    expect((await source.models("", new AbortController().signal)).map((item) => item.id)).toEqual(["p/chosen"]);
+    expect(ids(await source.models("", { showHidden: false }, new AbortController().signal))).toEqual(["p/chosen"]);
   });
   it("reports preference failures instead of offering hidden models", async () => {
     const { source } = await service({ [prefsPath]: { error: "Model settings unavailable" }, [modelPath]: { models: [{ provider: "p", id: "hidden" }] } },
       { [prefsPath]: 503 });
-    await expect(source.models("", new AbortController().signal)).rejects.toThrow("Model settings unavailable");
+    await expect(source.models("", { showHidden: false }, new AbortController().signal)).rejects.toThrow("Model settings unavailable");
   });
   it("rejects invalid preference data instead of ignoring the shown list", async () => {
     const { source } = await service({ [prefsPath]: { ...prefs, visible: "p/hidden" }, [modelPath]: { models: [] } });
-    await expect(source.models("", new AbortController().signal)).rejects.toThrow();
+    await expect(source.models("", { showHidden: false }, new AbortController().signal)).rejects.toThrow();
   });
-  it("limits matches and reports server failures and invalid wire data", async () => {
+  it("offers every shown model, as the model menu does, and lets the list scroll", async () => {
     const { source } = await service({ [modelPath]: { models: Array.from({ length: 30 }, (_, i) => ({ provider: "p", id: `m${i}` })) } });
-    expect(await source.models("", new AbortController().signal)).toHaveLength(12);
+    expect(ids(await source.models("", { showHidden: false }, new AbortController().signal))).toHaveLength(30);
   });
   it("keeps server refusals observable", async () => {
     const { source } = await service({ [modelPath]: { error: "Models unavailable" } }, { [modelPath]: 503 });
-    await expect(source.models("", new AbortController().signal)).rejects.toThrow("Models unavailable");
+    await expect(source.models("", { showHidden: false }, new AbortController().signal)).rejects.toThrow("Models unavailable");
   });
   it("refuses a missing workspace instead of searching unrelated files", async () => {
     const { source } = await service({ "/api/projects": projects, [workspacePath]: [], "/api/projects/other/workspaces": [] });
@@ -105,12 +120,12 @@ describe("mention discovery against Forgerie HTTP contracts", () => {
   });
   it("rejects invalid model identities", async () => {
     const { source } = await service({ [modelPath]: { models: [{ provider: "", id: "bad" }] } });
-    await expect(source.models("", new AbortController().signal)).rejects.toThrow();
+    await expect(source.models("", { showHidden: false }, new AbortController().signal)).rejects.toThrow();
   });
   it("cancels a request before it can discover or select from another session", async () => {
     const { source, requests } = await service({ [modelPath]: { models: [] } });
     const controller = new AbortController(); controller.abort();
-    await expect(source.models("", controller.signal)).rejects.toThrow();
+    await expect(source.models("", { showHidden: false }, controller.signal)).rejects.toThrow();
     expect(requests).toEqual([]);
   });
 });
