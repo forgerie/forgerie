@@ -757,6 +757,8 @@ function NewSessionPreview() {
     // Captures need the panel already open, or the launches already listed.
     const timers: ReturnType<typeof setTimeout>[] = [];
     if (scenario.startsWith("new-session-attach")) timers.push(setTimeout(() => void dropFiles(scenario), 300));
+    // The menu scenario opens the attach chip's setting once the image is in.
+    if (scenario === "new-session-attach-menu") timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>('[aria-haspopup="menu"][aria-label^="Send images"]')?.click(), 1200));
     if (scenario === "new-session-destination") timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>(".destination-trigger")?.click(), 400));
     if (scenario === "new-session-rapidfire") {
       for (const [index, text] of ["First: fix the login form", "Second: add the regression tests", "Third: update the changelog"].entries()) {

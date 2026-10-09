@@ -174,9 +174,15 @@ describe("queueing attachments while the agent works", () => {
   const saved = (path: string) => vi.fn<SaveAttachment>().mockResolvedValue({ path, mimeType: "image/png", size: 2 });
   const add = (file: File) => act(async () => runtime.thread.composer.addAttachment(file));
   const picture = () => new File(["hi"], "picture.png", { type: "image/png" });
-  const choice = () => document.querySelector('[role="group"][aria-labelledby]');
-  const option = (name: string) => [...choice()?.querySelectorAll<HTMLButtonElement>("button") ?? []].find((node) => node.textContent === name);
-  const pressed = (name: string) => option(name)?.getAttribute("aria-pressed") === "true";
+  // The setting rides on the attach chip: its second half names the mode and opens a menu.
+  const choice = () => document.querySelector<HTMLButtonElement>('[aria-haspopup="menu"][aria-label^="Send images"]');
+  const pressed = (name: string) => choice()?.getAttribute("aria-label") === `Send images: ${name}`;
+  const choose = async (name: string) => {
+    await click(choice() ?? undefined);
+    const row = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((node) => node.querySelector(".option-row-name")?.textContent === name);
+    expect(row?.textContent).toContain("queue");
+    await click(row);
+  };
   const note = () => document.querySelector(".file-tile-note")?.textContent;
   const notice = () => document.querySelector(".ask-route")?.textContent ?? "";
 
@@ -199,7 +205,7 @@ describe("queueing attachments while the agent works", () => {
     const save = saved(".forgerie/attachments/picture.png");
     await render({ onNew, attachments: createAttachmentAdapter(save) });
     await add(picture());
-    expect(choice()?.textContent).toContain("Send images");
+    expect(choice()?.textContent).toBe("Inline");
     expect(pressed("Inline")).toBe(true);
     expect(button("Queue message")?.disabled).toBe(true);
     expect(button("Steer")?.disabled).toBe(true);
@@ -227,7 +233,8 @@ describe("queueing attachments while the agent works", () => {
     await render({ attachments: createAttachmentAdapter(saved(".forgerie/attachments/picture.png")) });
     await add(picture());
     expect(button("Queue message")?.disabled).toBe(false);
-    await click(option("Inline"));
+    await choose("Inline");
+    expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(attachmentDelivery.get()).toBe("inline");
     expect(button("Queue message")?.disabled).toBe(true);
   });

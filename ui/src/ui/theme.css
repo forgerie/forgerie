@@ -534,7 +534,6 @@ button:disabled { cursor: default; opacity: 0.4; }
 .tree-actions .tree-summarize[aria-pressed="true"] { border-color: var(--line-focus); background: var(--active-surface); }
 .tree-actions .tree-continue { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
 .tree-actions .tree-stop { margin-inline-end: auto; color: var(--destructive); }
-.composer-add-attachment { flex: none; }
 /* The tiles' own look lives in FileTile and TileStrip; these only place them. */
 .composer-attachments { padding: var(--space-3) var(--space-4) 0; min-inline-size: 0; }
 /* Full width: the strip measures its container, so it cannot shrink-wrap its tiles. They line up at the end. */

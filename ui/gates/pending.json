@@ -33,7 +33,7 @@
   ".command-option in ui/CommandResultPanel.tsx, ui/SlashCommands.tsx",
   ".composer in ui/Composer.tsx, ui/NewSessionDialog.tsx",
   ".connection-status in ui/SessionFrame.tsx, ui/settings/SettingsFrame.tsx",
-  ".icon-button in NewSession.tsx, ui/ArchiveNext.tsx, ui/Attachments.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ComposerDictation.tsx, ui/CopyButton.tsx, ui/ImageViewer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/Thread.tsx, ui/WorktreeActions.tsx, ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
+  ".icon-button in NewSession.tsx, ui/ArchiveNext.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ComposerDictation.tsx, ui/CopyButton.tsx, ui/ImageViewer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/Thread.tsx, ui/WorktreeActions.tsx, ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
   ".markdown-content in ui/MarkdownText.tsx, ui/backlog/BacklogView.tsx",
   ".message in ui/Messages.tsx, ui/PullNoticeRow.tsx",
   ".notice in ui/SessionFrame.tsx, ui/settings/SettingsFrame.tsx",
@@ -315,7 +315,7 @@
  "file with more than one component": [
   "App.tsx: SettingsView, BacklogView, App",
   "DictationProvider.tsx: DictationContext, DictationProvider",
-  "ui/Attachments.tsx: Attachment, ComposerAttachments, UserMessageAttachments, AddAttachment, AttachmentDeliveryChoice, AttachmentErrors",
+  "ui/Attachments.tsx: Attachment, ComposerAttachments, UserMessageAttachments, AttachButton, AttachmentErrors",
   "ui/ChangesReview.tsx: DiffEditor, CodeEditor, ChangesOpener, ChangesReview, Review, FileTreeRow, FileBody, NoteEditor, NoteCard",
   "ui/Composer.tsx: Composer, ComposerBar, AskQuestions, AskActions, ContextBar",
   "ui/DestinationPicker.tsx: DestinationPicker, DestinationPanel",
@@ -345,7 +345,7 @@
   "ui/settings/SettingsView.tsx: AgentRow, SettingsView"
  ],
  "inline style beyond custom properties": [
-  "ui/Composer.tsx:373",
+  "ui/Composer.tsx:372",
   "ui/ImageGallery.tsx:47",
   "ui/ImageViewer.tsx:158",
   "ui/Picker.tsx:298"

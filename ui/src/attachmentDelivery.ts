@@ -7,14 +7,14 @@ export type AttachmentDelivery = "inline" | "folder";
 export const ATTACHMENT_FOLDER = ".forgerie/attachments";
 
 /**
- * The choice's words, in one place, so the switch and the queue notice use
- * the same names: "Inline" and "As files".
+ * The choice's words, in one place, so the attach chip, its menu and the
+ * queue notice use the same names: "Inline" and "As files".
  */
 export const DELIVERY_WORDS = {
-  lead: "Send images",
+  setting: "Send images",
   options: [
-    { value: "inline", label: "Inline", title: "The model sees each image in this message. An inline image cannot wait in the queue." },
-    { value: "folder", label: "As files", title: `Each image is saved to ${ATTACHMENT_FOLDER} in the workspace, and the agent gets its path. The message can wait in the queue.` },
+    { value: "inline", label: "Inline", details: ["The model sees each image", "Cannot wait in the queue"] },
+    { value: "folder", label: "As files", details: [`Saved to ${ATTACHMENT_FOLDER}`, "Can wait in the queue"] },
   ],
   queueBlocked: "Inline images cannot be queued.",
   toFiles: "Send images as files",

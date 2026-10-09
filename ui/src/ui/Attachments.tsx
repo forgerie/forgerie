@@ -1,14 +1,14 @@
 // Adapted from assistant-ui's attachment registry. See THIRD_PARTY_NOTICES.md.
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ComposerPrimitive, MessagePrimitive, useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
-import { PlusIcon } from "lucide-react";
+import { PaperclipIcon, PlusIcon } from "lucide-react";
 import { attachmentImage, attachmentImages, type ViewerImage } from "../images";
 import { useImageViewer } from "./ImageViewer";
 import { offersDeliveryChoice, oversizedImage } from "../attachments";
 import { DELIVERY_WORDS, attachmentDelivery, type AttachmentDelivery } from "../attachmentDelivery";
 import { FileTile } from "./FileTile";
 import { TileStrip } from "./TileStrip";
-import { ToggleGroup } from "./ToggleGroup";
+import { SplitButton } from "./SplitButton";
 
 /** The page's one delivery choice. Every composer reads and writes the same value. */
 export function useAttachmentDelivery(): AttachmentDelivery {
@@ -54,8 +54,8 @@ function Attachment({ browse }: { browse?: readonly ViewerImage[] }) {
     {...removable ? { onRemove: () => aui.attachment.remove(), removeDisabled: disabled } : {}} />;
 }
 
-/** The draft's files as one row of tiles. `children` is the one control for all of them, at the row's end. */
-export function ComposerAttachments({ children }: { children?: ReactNode }) {
+/** The draft's files as one row of tiles. */
+export function ComposerAttachments() {
   const count = useAuiState((s) => s.composer.attachments.length);
   // Joined, so the selector returns a value that compares equal between renders.
   const failures = useAuiState((s) => s.composer.attachments.flatMap((attachment) =>
@@ -63,7 +63,7 @@ export function ComposerAttachments({ children }: { children?: ReactNode }) {
       ? [`${attachment.name}: ${attachment.status.message ?? "Upload failed. Send again to retry, or remove this file."}`] : []).join("\n"));
   if (count === 0) return null;
   return <div className="composer-attachments">
-    <TileStrip label={count === 1 ? "1 attached file" : `${count} attached files`} end={children} alerts={failures ? failures.split("\n") : []}>
+    <TileStrip label={count === 1 ? "1 attached file" : `${count} attached files`} alerts={failures ? failures.split("\n") : []}>
       <ComposerPrimitive.Attachments>{() => <Attachment />}</ComposerPrimitive.Attachments>
     </TileStrip>
   </div>;
@@ -76,24 +76,34 @@ export function UserMessageAttachments() {
     <MessagePrimitive.Attachments>{() => <Attachment browse={browse} />}</MessagePrimitive.Attachments>
   </TileStrip></div>;
 }
-export function AddAttachment({ disabled }: { disabled: boolean }) {
-  return <ComposerPrimitive.AddAttachment className="icon-button quiet-button composer-add-attachment" disabled={disabled} multiple
-    aria-label="Add attachment" title="Add attachment"><PlusIcon aria-hidden size={16} /></ComposerPrimitive.AddAttachment>;
-}
-
 /**
- * Send images inline, or save them to the workspace like any file. It shows
- * only while the draft holds an image the choice decides. A saved image
- * travels as its path, so it can queue while the agent works.
+ * Adds files, and carries how images travel: the chip's second half shows
+ * "Inline" or "As files" while the draft holds an image that choice decides.
+ * `compact` draws the action as a plus, for the chat bar.
  */
-export function AttachmentDeliveryChoice({ disabled = false }: { disabled?: boolean }) {
-  const delivery = useAttachmentDelivery();
+export function AttachButton({ disabled, compact = false, offerSetting = true, settingDisabled = false, title }: {
+  disabled: boolean; compact?: boolean; offerSetting?: boolean; settingDisabled?: boolean; title?: string;
+}) {
+  const aui = useAui();
+  const editing = useAuiState((s) => s.composer.isEditing);
+  const accept = useAuiState((s) => s.composer.attachmentAccept);
   const offered = useAuiState((s) => offersDeliveryChoice(s.composer.attachments));
-  if (!offered) return null;
-  return <ToggleGroup label={DELIVERY_WORDS.lead} lead={DELIVERY_WORDS.lead} options={DELIVERY_WORDS.options} value={delivery} disabled={disabled}
-    onChange={(value) => attachmentDelivery.set(value)} />;
+  const delivery = useAttachmentDelivery();
+  const input = useRef<HTMLInputElement>(null);
+  const label = compact ? "Add attachment" : "Attach";
+  return <>
+    <SplitButton icon={compact ? <PlusIcon aria-hidden size={16} /> : <PaperclipIcon aria-hidden size={14} />} label={label} title={title ?? label}
+      compact={compact} disabled={disabled || !editing} onPress={() => input.current?.click()}
+      setting={offerSetting && offered ? { label: DELIVERY_WORDS.setting, value: delivery, options: DELIVERY_WORDS.options,
+        disabled: settingDisabled, onChange: (value) => attachmentDelivery.set(value) } : undefined} />
+    <input ref={input} type="file" multiple hidden tabIndex={-1} accept={accept === "*" ? undefined : accept} onChange={(event) => {
+      const files = [...event.target.files ?? []];
+      event.target.value = "";
+      // A refused file reports through the composer's add-error event; nothing is left to catch here.
+      for (const file of files) void aui.composer.addAttachment(file).catch(() => undefined);
+    }} />
+  </>;
 }
-/** A file that could not be added. One that stays in the draft says why under the tiles instead. */
 export function AttachmentErrors() {
   const [failure, setFailure] = useState<{ message: string; id?: string | undefined }>();
   useAuiEvent("composer.attachmentAddError", ({ message, attachmentId }) => setFailure({ message, id: attachmentId }));

@@ -5,10 +5,12 @@ import { mentionPlacement } from "../mentionSyntax";
  * Keep a window-level panel beside its anchor: above or below, wherever there
  * is more room, as wide as the anchor (or `minWidthRem` when the anchor is
  * narrower), and within the visual viewport (so a touch keyboard counts). The
- * panel scrolls inside the height it gets.
+ * panel scrolls inside the height it gets. A host that keeps the panel
+ * unmounted while closed passes `open`, so placement starts when it appears.
  */
-export function usePanelPlacement(panel: RefObject<HTMLElement | null>, anchor: RefObject<HTMLElement | null>, cap: number, minWidthRem = 0) {
+export function usePanelPlacement(panel: RefObject<HTMLElement | null>, anchor: RefObject<HTMLElement | null>, cap: number, minWidthRem = 0, open = true) {
   useLayoutEffect(() => {
+    if (!open) return;
     const element = panel.current;
     const target = anchor.current;
     if (!element || !target) return;
@@ -37,5 +39,5 @@ export function usePanelPlacement(panel: RefObject<HTMLElement | null>, anchor: 
       viewport?.removeEventListener("resize", position);
       viewport?.removeEventListener("scroll", position);
     };
-  }, [panel, anchor, cap, minWidthRem]);
+  }, [panel, anchor, cap, minWidthRem, open]);
 }

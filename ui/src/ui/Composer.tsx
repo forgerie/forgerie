@@ -9,7 +9,7 @@ import { useDictation } from "../DictationProvider";
 import { ComposerDictation } from "./ComposerDictation";
 import { useAskMode, type AskBinding, type AskControl } from "./useAskMode";
 import { SlashCommands, type CommandBinding } from "./SlashCommands";
-import { AddAttachment, AttachmentDeliveryChoice, AttachmentErrors, ComposerAttachments, useAttachmentDelivery } from "./Attachments";
+import { AttachButton, AttachmentErrors, ComposerAttachments, useAttachmentDelivery } from "./Attachments";
 import { MAX_ATTACHMENTS, sendsInline } from "../attachments";
 import { DELIVERY_WORDS, attachmentDelivery } from "../attachmentDelivery";
 import { isCompactCommand } from "../compaction";
@@ -216,9 +216,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
       {control && dialog && <p className="composer-hint">
         <PuzzleIcon aria-hidden size={14} />An extension also asks something. It shows after these questions.
       </p>}
-      <ComposerAttachments>
-        {!dialogInput && <AttachmentDeliveryChoice disabled={disabled || preparing || !!control?.sending} />}
-      </ComposerAttachments>
+      <ComposerAttachments />
       {notes && noteCount > 0 && <NoteTray binding={notes} disabled={sendingNotes} />}
       <AttachmentErrors />
       {tooMany && <p role="alert" className="attachment-notice">Send at most 16 attachments. Remove a file to continue.</p>}
@@ -256,7 +254,8 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
         disabled={control?.sending} />
       <div className="composer-actions">
         {context}
-        {attachments && <AddAttachment disabled={disabled || preparing || !!control?.sending || dialogInput || count >= MAX_ATTACHMENTS} />}
+        {attachments && <AttachButton compact disabled={disabled || preparing || !!control?.sending || dialogInput || count >= MAX_ATTACHMENTS}
+          offerSetting={!dialogInput} settingDisabled={disabled || preparing || !!control?.sending} />}
         {model && <ModelPicker binding={model} anchor={anchor} open={picker} onOpenChange={setPicker} />}
         <ComposerDictation disabled={disabled || preparing || !!control?.sending} />
         {preparing ? <ComposerPrimitive.Cancel className="primary icon-button" aria-label="Cancel attachment preparation" title="Cancel attachment preparation">

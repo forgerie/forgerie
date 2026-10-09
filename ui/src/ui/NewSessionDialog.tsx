@@ -1,13 +1,13 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ComposerPrimitive, unstable_useTriggerPopoverRootContext, useAuiState } from "@assistant-ui/react";
-import { AnvilIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, LoaderIcon, PaperclipIcon, XIcon, ZapIcon } from "lucide-react";
+import { AnvilIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, LoaderIcon, XIcon, ZapIcon } from "lucide-react";
 import { setupFailureText, type Launch } from "../launches";
 import type { WorktreeRecord } from "../worktrees/worktreeApi";
 import type { MentionSource } from "../mentionSource";
 import { MAX_ATTACHMENTS } from "../attachments";
 import { PortalLayerProvider } from "./portalLayer";
-import { AttachmentDeliveryChoice, AttachmentErrors, ComposerAttachments } from "./Attachments";
+import { AttachButton, AttachmentErrors, ComposerAttachments } from "./Attachments";
 import { ComposerDictation } from "./ComposerDictation";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "./ModelPicker";
@@ -142,19 +142,19 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
     </div>
     <ComposerPrimitive.AttachmentDropzone ref={body} className="ns-body" disabled={busy}>
       {carry?.card}
-      <ComposerAttachments><AttachmentDeliveryChoice disabled={busy} /></ComposerAttachments>
-      <AttachmentErrors />
       <ComposerEditor inputRef={input} label="First message" className="ns-input"
         placeholder={carry?.placeholder ?? "Describe what the agent should do first…"}
         keyShortcuts="Control+Alt+I Control+Enter Meta+Enter"
         onKeyDown={onKeyDown} onKeyUp={keyboard.onKeyUp} onBlur={keyboard.onBlur}
         onCompositionStart={keyboard.onCompositionStart} onCompositionEnd={keyboard.onCompositionEnd}
         onEdit={keyboard.onChange} onSelectionChange={remember} />
+      {/* What the message carries sits under the words, beside the chip that added it. */}
+      <ComposerAttachments />
+      <AttachmentErrors />
     </ComposerPrimitive.AttachmentDropzone>
     {tray}
     <div className="ns-chips" role="group" aria-label="What the first message carries">
-      <ComposerPrimitive.AddAttachment className="ns-chip" multiple disabled={busy} title={`Attach up to ${MAX_ATTACHMENTS} files`}>
-        <PaperclipIcon aria-hidden size={14} />Attach</ComposerPrimitive.AddAttachment>
+      <AttachButton disabled={busy} settingDisabled={busy} title={`Attach up to ${MAX_ATTACHMENTS} files`} />
       <button type="button" className="ns-chip" aria-pressed={rapidfire} disabled={busy} onClick={onRapidfire}
         title={rapidfire ? "Rapidfire: each start runs in the background and this stays open" : "Rapidfire: start several sessions without leaving"}>
         <ZapIcon aria-hidden size={14} />Rapidfire</button>

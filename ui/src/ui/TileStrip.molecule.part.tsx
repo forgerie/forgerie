@@ -1,23 +1,16 @@
-import { useState } from "react";
 import { FileTile } from "./FileTile";
 import { TileStrip } from "./TileStrip";
-import { ToggleGroup } from "./ToggleGroup";
 
 export const name = "Tile strip";
-export const note = "One row of tiles that keeps its height, with one control at its end";
+export const note = "One row of tiles that keeps its height and scrolls sideways";
 
-const names = ["image.png", "fold-1.png", "fold-2.png", "fold-3.png", "notes.txt", "build.log"];
+const names = ["image.png", "fold-1.png", "fold-2.png", "fold-3.png", "notes.txt", "build.log", "trace.json", "report.pdf"];
 
-function Switch() {
-  const [value, setValue] = useState<"inline" | "folder">("inline");
-  return <ToggleGroup label="Send images" lead="Send images" value={value} onChange={setValue}
-    options={[{ value: "inline", label: "Inline" }, { value: "folder", label: "As files" }]} />;
-}
 export default function One() {
-  return <TileStrip label="1 attached file" end={<Switch />}><FileTile name="notes.txt" onRemove={() => undefined} /></TileStrip>;
+  return <TileStrip label="1 attached file"><FileTile name="notes.txt" onRemove={() => undefined} /></TileStrip>;
 }
 export function Many() {
-  return <TileStrip label="6 attached files" end={<Switch />}>
+  return <TileStrip label="8 attached files">
     {names.map((file) => <FileTile key={file} name={file} onRemove={() => undefined} />)}
   </TileStrip>;
 }

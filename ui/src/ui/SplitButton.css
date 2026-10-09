@@ -1,0 +1,22 @@
+/* An action and its one setting as one chip: a hairline splits the halves, and each keeps a control-sized hit area. */
+.split-button { position: relative; flex: none; display: inline-flex; align-items: stretch; min-block-size: 2.25rem;
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-control); color: var(--muted-foreground); font-size: var(--small-text); }
+.split-button-main, .split-button-setting { position: relative; display: inline-flex; align-items: center; gap: var(--space-2); padding-inline: var(--space-3);
+  border: 0; background: transparent; color: inherit; font: inherit; white-space: nowrap; cursor: pointer; }
+.split-button-main::before, .split-button-setting::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
+.split-button-main { border-radius: calc(var(--radius-control) - var(--hairline)); }
+/* The setting in effect reads in the text colour: the mode is visible without opening anything. */
+.split-button-setting { gap: var(--space-1); padding-inline: var(--space-3) var(--space-2); border-inline-start: var(--hairline) solid var(--line);
+  border-start-end-radius: calc(var(--radius-control) - var(--hairline)); border-end-end-radius: calc(var(--radius-control) - var(--hairline)); color: var(--foreground); font-weight: 500; }
+.split-button-setting svg { color: var(--muted-foreground); transition: rotate 150ms; }
+.split-button-setting[aria-expanded="true"] svg { rotate: 180deg; }
+.split-button[data-split] .split-button-main { border-start-end-radius: 0; border-end-end-radius: 0; }
+.split-button-main:not(:disabled):hover, .split-button-setting:not(:disabled):hover, .split-button-setting[aria-expanded="true"] { background: var(--hover-surface); color: var(--foreground); }
+.split-button:has(:not(:disabled):hover) { border-color: var(--line-focus); }
+.split-button-main:disabled, .split-button-setting:disabled { opacity: 0.4; cursor: default; }
+/* Compact: the action is its icon alone, and the chip draws no edge until it carries a setting. */
+.split-button[data-compact] { min-block-size: var(--icon-size); }
+.split-button[data-compact]:not([data-split]) { border-color: transparent; }
+.split-button[data-compact] .split-button-main { justify-content: center; min-inline-size: var(--icon-size); padding-inline: var(--space-2); }
+.split-button-title { margin: 0; padding: var(--space-2) var(--space-3) var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .split-button-setting svg { transition: none; } }

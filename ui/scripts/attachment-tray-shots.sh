@@ -7,7 +7,7 @@ export CHROME_BIN="$(command -v chromium)"
 root="${FORGERIE_ROOT:-$(git rev-parse --path-format=absolute --git-common-dir)/..}"
 url="${ATTACHMENT_URL:-http://127.0.0.1:8521}"
 label="${1:?label}"; shift
-scenarios=("${@:-new-session-attach-folder new-session-attach-inline new-session-attach-many}")
+scenarios=("${@:-new-session-attach-folder new-session-attach-menu new-session-attach-many}")
 for scheme in dark light; do
   for scenario in ${scenarios[@]}; do
     node "$root/scripts/capture-postures.mjs" \
