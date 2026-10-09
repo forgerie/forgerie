@@ -25,9 +25,10 @@ const answer = (text: string, id = "reply"): TranscriptMessage => ({ id, role: "
 const reply = answer("Hello");
 const tool = (id: string, state: ToolState, name = "bash", args: unknown = { command: `echo ${id}` }) =>
   ({ type: "tool" as const, id, name, args, state });
-function Fixture({ messages = [], running = false, loading = false, disabled = false, onNew = async () => {}, onCancel = async () => {}, fileLinks }: {
+function Fixture({ messages = [], running = false, loading = false, disabled = false, onNew = async () => {}, onCancel = async () => {}, fileLinks, linkBase }: {
   messages?: TranscriptMessage[];
   fileLinks?: FileLinks;
+  linkBase?: string | null;
   running?: boolean;
   loading?: boolean;
   disabled?: boolean;
@@ -38,7 +39,7 @@ function Fixture({ messages = [], running = false, loading = false, disabled = f
   const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel,
     isRunning: running, isLoading: loading, isDisabled: disabled });
   return <AssistantRuntimeProvider runtime={runtime}>
-    <SessionFrame name="A long session title" status={running ? "Running" : "Connected"}><Thread fileLinks={fileLinks} /></SessionFrame>
+    <SessionFrame name="A long session title" status={running ? "Running" : "Connected"}><Thread fileLinks={fileLinks} linkBase={linkBase} onOpenFile={fileLinks ? (path) => { fileLinks.open(path); return true; } : undefined} /></SessionFrame>
   </AssistantRuntimeProvider>;
 }
 async function render(props: Parameters<typeof Fixture>[0] = {}) {
@@ -94,6 +95,59 @@ describe("Homepage-derived thread", () => {
     expect(links[0]?.href).toBe(new URL("src/sessionStore.ts", window.location.href).href);
     expect(links[1]?.getAttribute('href')).toBe("#details");
     expect(document.querySelector('.markdown')?.textContent).toBe("Read the source and the section.");
+  });
+
+  it("resolves reply links against the chat's workspace, including rich blocks and images", async () => {
+    const linkBase = new URL("/api/projects/astra/workspaces/feature/preview/", window.location.href).href;
+    await render({ linkBase, messages: [answer("Read [the report](docs/report.html#results), [the source](./src/main.ts), and ![the diagram](assets/diagram.png).\n\n```steps\n1. Open [the report](docs/report.html#results)\n```\n\n```status\n[x] Read [the report](docs/report.html#results)\n```")] });
+    const links = [...document.querySelectorAll<HTMLAnchorElement>('.message-assistant a')];
+    expect(links.map((link) => link.href)).toEqual([
+      `${linkBase}docs/report.html#results`, `${linkBase}src/main.ts`, `${linkBase}assets/diagram.png`,
+      `${linkBase}docs/report.html#results`, `${linkBase}docs/report.html#results`,
+    ]);
+  });
+
+  it("opens source and Markdown links in the workspace reader without navigating", async () => {
+    const open = vi.fn();
+    const linkBase = new URL("/api/projects/p/workspaces/w/preview/", window.location.href).href;
+    await render({ linkBase, fileLinks: { open, existing: async () => new Set() }, messages: [answer("[source](src/main.ts#L12) and [notes](docs/with%20spaces.md)")] });
+    const links = [...document.querySelectorAll<HTMLAnchorElement>('.markdown a')];
+    for (const link of links) await act(async () => {
+      const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+      link.dispatchEvent(click);
+      expect(click.defaultPrevented).toBe(true);
+    });
+    expect(open.mock.calls).toEqual([["src/main.ts"], ["docs/with spaces.md"]]);
+  });
+
+  it("keeps external URLs and anchors unchanged when file links have a workspace base", async () => {
+    const linkBase = new URL("/api/projects/p/workspaces/w/preview/", window.location.href).href;
+    await render({ linkBase, messages: [answer("[web](https://example.test/docs/report.html) [CDN](//cdn.example.test/x) [mail](mailto:me@example.test) [section](#details)")] });
+    expect([...document.querySelectorAll<HTMLAnchorElement>('.markdown a')].map((a) => a.getAttribute('href'))).toEqual([
+      "https://example.test/docs/report.html", "http://cdn.example.test/x", "mailto:me@example.test", "#details",
+    ]);
+  });
+
+  it("keeps pending file links inactive, then resolves them to the correct workspace without losing the draft", async () => {
+    const messages = [answer("[report](docs/report.html)\n\n```steps\n1. Read [report](docs/report.html)\n```\n\n```status\n[x] Read [report](docs/report.html)\n```\n\n[web](https://example.test/docs)")];
+    await render({ linkBase: null, messages });
+    expect(document.querySelectorAll('.message-assistant a')).toHaveLength(1);
+    const input = document.querySelector<ComposerInputElement>('[data-composer-input]')!;
+    await act(async () => { input.value = "Keep my draft"; input.dispatchEvent(new Event("input", { bubbles: true })); });
+    const firstBase = new URL("/api/projects/p/workspaces/first/preview/", window.location.href).href;
+    await render({ linkBase: firstBase, messages });
+    expect([...document.querySelectorAll<HTMLAnchorElement>('.message-assistant a')].slice(0, 3).map((a) => a.href)).toEqual(Array(3).fill(`${firstBase}docs/report.html`));
+    const secondBase = new URL("/api/projects/p/workspaces/second/preview/", window.location.href).href;
+    await render({ linkBase: secondBase, messages });
+    expect([...document.querySelectorAll<HTMLAnchorElement>('.message-assistant a')].slice(0, 3).map((a) => a.href)).toEqual(Array(3).fill(`${secondBase}docs/report.html`));
+    expect(document.querySelector('[data-composer-input]')).toBe(input);
+    expect(input.value).toBe("Keep my draft");
+  });
+
+  it("blocks relative traversal outside the workspace preview without enabling unsafe URLs", async () => {
+    const linkBase = new URL("/api/projects/p/workspaces/w/preview/", window.location.href).href;
+    await render({ linkBase, messages: [answer("[escape](../secret.html) [encoded escape](%2e%2e/secret.html) [unsafe](javascript:alert%281%29) [within](docs/../report.html)")] });
+    expect([...document.querySelectorAll<HTMLAnchorElement>('.markdown a')].map((a) => a.href)).toEqual([`${linkBase}report.html`]);
   });
 
   it("copies a response and reports clipboard denial", async () => {

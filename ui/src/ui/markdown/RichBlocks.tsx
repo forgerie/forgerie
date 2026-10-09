@@ -9,6 +9,7 @@ import { memo, useMemo, type ComponentProps } from "react";
 import { Streamdown } from "streamdown";
 import { QuoteFigure } from "../QuoteFigure";
 import { fragmentRehypePlugins, markdownElements, withoutNode } from "./markdownPolicy";
+import { useMarkdownLinkScope } from "./linkScope";
 import { calloutKind, parseComparison, parseSteps, type CalloutKind } from "./richBlockSyntax";
 import "./richBlocks.css";
 
@@ -44,10 +45,11 @@ const useStreaming = () => useAuiState((s) => s.part.status.type === "running");
 
 /** Markdown inside a rich block, under the same link and image policy as the stream. */
 const Fragment = memo(function Fragment({ text, streaming, className }: { text: string; streaming: boolean; className: string }) {
-  const rehypePlugins = useMemo(() => fragmentRehypePlugins(window.location.href), []);
+  const { origin } = useMarkdownLinkScope();
+  const rehypePlugins = useMemo(() => fragmentRehypePlugins(origin), [origin]);
   if (text === "") return null;
   // Repair unfinished tokens only while the reply streams, like the stream.
-  return <Streamdown className={`md-fragment ${className}`} mode="static" parseIncompleteMarkdown={streaming} remend={remend}
+  return <Streamdown key={origin} className={`md-fragment ${className}`} mode="static" parseIncompleteMarkdown={streaming} remend={remend}
     controls={false} skipHtml linkSafety={linkSafety} components={markdownElements} rehypePlugins={rehypePlugins}>{text}</Streamdown>;
 });
 const remend = { linkMode: "text-only" as const };

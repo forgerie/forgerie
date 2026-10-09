@@ -3,7 +3,7 @@ import { stat } from "node:fs/promises";
 import { extname } from "node:path";
 import type { PiWebPathAccessConfig } from "../../shared/apiTypes.js";
 import { MAX_DOCUMENT_PREVIEW_BYTES, MAX_DOCUMENT_PREVIEW_LABEL } from "../../shared/workspaceFiles.js";
-import { imageMimeTypeForPath } from "./imagePreviewService.js";
+import { DOCUMENT_PREVIEW_MIME_TYPES } from "../../shared/workspacePreviewMime.js";
 import { resolveWorkspacePathAccessTarget } from "./pathAccessPolicy.js";
 
 /**
@@ -13,19 +13,6 @@ import { resolveWorkspacePathAccessTarget } from "./pathAccessPolicy.js";
  * Anything else stays behind the JSON file API, so "render this workspace
  * file" can never become "download any workspace file raw".
  */
-const DOCUMENT_MIME_TYPES: Record<string, string | undefined> = {
-  ".css": "text/css",
-  ".htm": "text/html",
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".json": "application/json",
-  ".mjs": "text/javascript",
-  ".otf": "font/otf",
-  ".ttf": "font/ttf",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-};
-
 export interface WorkspaceDocumentPreview {
   path: string;
   mimeType: string;
@@ -35,7 +22,7 @@ export interface WorkspaceDocumentPreview {
 }
 
 export function documentMimeTypeForPath(path: string): string | undefined {
-  return DOCUMENT_MIME_TYPES[extname(path).toLowerCase()] ?? imageMimeTypeForPath(path);
+  return DOCUMENT_PREVIEW_MIME_TYPES[extname(path).toLowerCase()];
 }
 
 export async function readWorkspaceDocumentPreview(rootPath: string, path: string | undefined, pathAccess?: PiWebPathAccessConfig): Promise<WorkspaceDocumentPreview> {

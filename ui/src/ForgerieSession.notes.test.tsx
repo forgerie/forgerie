@@ -6,7 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { ForgerieSession } from "./ForgerieSession";
 import { browserTransport } from "./sessionStore";
 import { createDraftStore } from "./draftStore";
-import type { SessionStatus } from "./contracts";
+import type { PiMessage, SessionStatus } from "./contracts";
 import type { ComposerInputElement } from "./ui/ComposerEditor";
 
 let root: Root;
@@ -47,7 +47,7 @@ const DIFF = ["diff --git a/src/retry.ts b/src/retry.ts", "--- a/src/retry.ts", 
   "@@ -7,3 +7,3 @@", " import x;", "-const retries = 3;", "+const retries = 0;", " export {};", ""].join("\n");
 
 /** A session in a registered workspace with one changed file. `refusePrompt` makes Pi refuse the next prompt. */
-async function sessionWithChanges(options: { status?: SessionStatus; storage?: Storage } = {}) {
+async function sessionWithChanges(options: { status?: SessionStatus; storage?: Storage; messages?: PiMessage[] } = {}) {
   const status = options.status ?? idle;
   const requests: { path: string; body?: Record<string, unknown> }[] = [];
   const control = { refusePrompt: false };
@@ -71,7 +71,9 @@ async function sessionWithChanges(options: { status?: SessionStatus; storage?: S
     if (path === "/api/projects/p/workspaces/w/git/status") return Response.json({ isGitRepo: true, hash: "h", branch: "main", submodules: [],
       files: [{ path: "src/retry.ts", index: "unmodified", workingTree: "modified" }] });
     if (path.startsWith("/api/projects/p/workspaces/w/git/diff?")) return Response.json({ path: "src/retry.ts", staged: false, hash: "h", diff: DIFF, truncated: false });
-    if (path.includes("/messages?")) return Response.json({ messages: [], start: 0, total: 0 });
+    if (path === "/api/projects/p/workspaces/w/file?path=docs%2Freport.md") return Response.json({ path: "docs/report.md", content: "# Workspace report", size: 18, binary: false, truncated: false, version: "v:report" });
+    if (path === "/api/projects/p/workspaces/w/tree?path=") return Response.json({ entries: [], truncated: false });
+    if (path.includes("/messages?")) return Response.json({ messages: options.messages ?? [], start: 0, total: options.messages?.length ?? 0 });
     if (path.includes("/stream-snapshot?")) return Response.json({ partial: null, seq: 0 });
     if (path.includes("/status?")) return Response.json(status);
     if (path.includes("/commands?")) return Response.json([]);
@@ -101,6 +103,16 @@ const retryNote = (comment = "Keep the retry limit.") => ({ path: "src/retry.ts"
 ] });
 
 describe("notes on changes", () => {
+  it("wires reply links to this session's workspace and reads linked Markdown from that folder", async () => {
+    const api = await sessionWithChanges({ messages: [{ role: "assistant", content: [{ type: "text", text: "Read [the report](docs/report.md) and [the rendered report](docs/report.html#results)." }] }] });
+    await until(() => document.querySelectorAll('.message-assistant a').length === 2);
+    const links = [...document.querySelectorAll<HTMLAnchorElement>('.message-assistant a')];
+    expect(links[1]?.getAttribute('href')).toBe(new URL("/api/projects/p/workspaces/w/preview/docs/report.html#results", window.location.href).href);
+    await click(links[0]);
+    await until(() => api.requests.some((request) => request.path === "/api/projects/p/workspaces/w/file?path=docs%2Freport.md"));
+    expect(document.querySelector('dialog.changes-dialog .change-path')?.textContent).toBe("docs/report.md");
+  });
+
   it("turns selected diff lines into a note that goes with the next message as structured annotations, then leaves the tray", async () => {
     const api = await sessionWithChanges();
     await noteTheRetryLimit();

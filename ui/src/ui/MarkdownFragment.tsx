@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import { Streamdown } from "streamdown";
 import { fragmentRehypePlugins, markdownElements } from "./markdown/markdownPolicy";
+import { useMarkdownLinkScope } from "./markdown/linkScope";
 import "./MarkdownFragment.css";
 
 const linkSafety = { enabled: false };
@@ -12,9 +13,10 @@ const linkSafety = { enabled: false };
  * small, so a half-written token shows as typed until its closing mark lands.
  */
 export const MarkdownFragment = memo(function MarkdownFragment({ text, inline = false }: { text: string; inline?: boolean }) {
-  const rehypePlugins = useMemo(() => fragmentRehypePlugins(window.location.href), []);
+  const { origin } = useMarkdownLinkScope();
+  const rehypePlugins = useMemo(() => fragmentRehypePlugins(origin), [origin]);
   if (text === "") return null;
-  return <Streamdown className={inline ? "markdown-fragment markdown-fragment-inline" : "markdown-fragment"} mode="static"
+  return <Streamdown key={origin} className={inline ? "markdown-fragment markdown-fragment-inline" : "markdown-fragment"} mode="static"
     parseIncompleteMarkdown={false} controls={false} skipHtml linkSafety={linkSafety} components={markdownElements}
     rehypePlugins={rehypePlugins}>{text}</Streamdown>;
 });

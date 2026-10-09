@@ -5,7 +5,8 @@ import { useAuiState } from "@assistant-ui/react";
 import { memo, useMemo } from "react";
 import { CopyButton } from "./CopyButton";
 import { highlightCode } from "./highlightCode";
-import { ALLOWED_PROTOCOLS, markdownElements } from "./markdown/markdownPolicy";
+import { fragmentRehypePlugins, markdownElements } from "./markdown/markdownPolicy";
+import { useMarkdownLinkScope } from "./markdown/linkScope";
 import { rehypeCallouts } from "./markdown/rehypeCallouts";
 import { CalloutQuote, richBlocksByLanguage } from "./markdown/RichBlocks";
 import { blockFences, noHeader } from "./markdown/blockFences";
@@ -36,19 +37,17 @@ components.SyntaxHighlighter = SyntaxHighlighter;
 // CSS instead of its Tailwind controls, caret, or optional rendering plugins.
 const remend = { linkMode: "text-only" as const };
 const linkSafety = { enabled: false };
-// Runs after the security plugins, so only this plugin can mark a callout.
-const rehypePlugins = [rehypeCallouts];
 const componentsByLanguage = { ...richBlocksByLanguage, ...blockFences };
 
 /** `fileLinks` makes each file in a `files` block that exists open on a tap. Keep it stable: a new object re-renders every block. */
 export const MarkdownText = memo(function MarkdownText({ fileLinks }: { fileLinks?: FileLinks | undefined }) {
-  // Bare workspace paths need a base URL or rehype-harden labels them blocked.
-  const security = useMemo(() => ({ defaultOrigin: window.location.href,
-    allowedProtocols: ALLOWED_PROTOCOLS, allowDataImages: false }), []);
+  const { origin } = useMarkdownLinkScope();
+  // Resolve before hardening; only the final plugin can mark a callout.
+  const rehypePlugins = useMemo(() => [...fragmentRehypePlugins(origin), rehypeCallouts], [origin]);
   const byLanguage = useMemo(() => fileLinks ? { ...componentsByLanguage,
     files: { SyntaxHighlighter: ({ code }: SyntaxHighlighterProps) => <FileTree code={code} links={fileLinks} />, CodeHeader: noHeader } }
     : componentsByLanguage, [fileLinks]);
-  return <StreamdownTextPrimitive containerClassName="markdown" className="markdown-content" components={components} controls={false}
+  return <StreamdownTextPrimitive key={origin} containerClassName="markdown" className="markdown-content" components={components} controls={false}
     componentsByLanguage={byLanguage} rehypePlugins={rehypePlugins}
-    remend={remend} security={security} linkSafety={linkSafety} skipHtml smooth={false} defer />;
+    remend={remend} linkSafety={linkSafety} skipHtml smooth={false} defer />;
 });

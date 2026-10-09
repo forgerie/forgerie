@@ -10,6 +10,7 @@ import type { CommandBinding } from "./SlashCommands";
 import { CommandResultPanel, type CommandResultBinding } from "./CommandResultPanel";
 import { ImageViewerProvider } from "./ImageViewer";
 import type { FileLinks } from "./FileTree";
+import { MarkdownLinkContext } from "./markdown/linkScope";
 import { CompactionNotice, type CompactionBinding } from "./CompactionNotice";
 import type { ChatDraft } from "../chatDraft";
 import { QueuedMessages, type QueueBinding } from "./QueuedMessages";
@@ -22,7 +23,11 @@ import type { ComposerSessionKeys } from "./useComposerKeyboard";
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode. `working` says what a draft can
 // do while the session works; `queue` is what already waits.
-export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact, fileLinks }: {
+export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact, fileLinks, linkBase, linkError, onOpenFile }: {
+  /** Base URL for relative Markdown links. Null keeps file links inactive until the binding resolves their folder. */
+  linkBase?: string | null | undefined;
+  linkError?: string | undefined;
+  onOpenFile?: ((path: string) => boolean) | undefined;
   /** A feature view for a system message's custom metadata, such as a process event. */
   systemArtifact?: SystemArtifactView | undefined;
   /** Which files a reply names exist, and how one opens, for the rows of a `files` block. Keep it stable: a new object remounts every message. */
@@ -39,7 +44,8 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
   const components = useMemo(() => ({ UserMessage,
     AssistantMessage: fileLinks ? () => <AssistantMessage fileLinks={fileLinks} /> : AssistantMessage,
     SystemMessage: systemArtifact ? () => <SystemMessage artifact={systemArtifact} /> : SystemMessage }), [systemArtifact, fileLinks]);
-  return <ImageViewerProvider><ThreadPrimitive.Root className="thread">
+  const linkScope = useMemo(() => linkBase === undefined ? undefined : { base: linkBase, error: linkError, openFile: onOpenFile }, [linkBase, linkError, onOpenFile]);
+  return <MarkdownLinkContext.Provider value={linkScope}><ImageViewerProvider><ThreadPrimitive.Root className="thread">
     <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top">
       <div className="thread-column">
         <AuiIf condition={(s) => s.thread.isLoading && s.thread.messages.length === 0}>
@@ -68,5 +74,5 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
         </ThreadPrimitive.ViewportFooter>
       </div>
     </ThreadPrimitive.Viewport>
-  </ThreadPrimitive.Root></ImageViewerProvider>;
+  </ThreadPrimitive.Root></ImageViewerProvider></MarkdownLinkContext.Provider>;
 }

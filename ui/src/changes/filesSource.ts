@@ -15,7 +15,10 @@ const writeSchema = z.object({ version: z.string() });
 const conflictSchema = z.object({ code: z.literal("conflict"), version: z.string().optional() });
 
 /** The session's workspace as the editor's file source. */
-export type FilesSource = TextFileSource;
+export type FilesSource = TextFileSource & {
+  /** URL folder for renderable files, resolved through this same workspace. */
+  linkBase: (signal: AbortSignal) => Promise<string>;
+};
 
 /** Git's own folder holds no file a reader edits by hand, and writing in it can break the repository. */
 const HIDDEN = new Set([".git"]);
@@ -43,6 +46,7 @@ export function createFilesSource(cwd: string, request: ChangesRequest): FilesSo
     return `/api/projects/${encodeURIComponent(workspace.projectId)}/workspaces/${encodeURIComponent(workspace.workspaceId)}`;
   }
   return {
+    async linkBase(signal) { return `${await root(signal)}/preview/`; },
     async folder(path, signal): Promise<Folder> {
       const listing = await read(`${await root(signal)}/tree?${new URLSearchParams({ path })}`, treeSchema, signal);
       return {

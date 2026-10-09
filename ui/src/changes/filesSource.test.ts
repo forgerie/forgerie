@@ -41,6 +41,18 @@ function server(files: Record<string, string>) {
 describe("files source", () => {
   const signal = new AbortController().signal;
 
+  it("resolves the preview base through the session's registered workspace and reuses it for file reads", async () => {
+    const { request, calls } = server({ "a.md": "# A" });
+    const source = createFilesSource("/repo", request);
+    expect(await source.linkBase(signal)).toBe("/api/projects/p/workspaces/w/preview/");
+    expect(await source.read("a.md", signal)).toMatchObject({ type: "text", text: "# A" });
+    expect(calls.filter((call) => call.path === "/api/projects")).toHaveLength(1);
+  });
+
+  it("does not provide a preview base for a folder outside registered workspaces", async () => {
+    await expect(createFilesSource("/other", server({}).request).linkBase(signal)).rejects.toThrow("Files need a registered workspace");
+  });
+
   it("lists a folder without git's own folder, and marks links", async () => {
     const { request } = server({});
     expect(await createFilesSource("/repo", request).folder("", signal)).toEqual({ truncated: false, entries: [

@@ -38,7 +38,8 @@ import { createChangesSource } from "./changes/changesSource";
 import { workspacePath } from "./changes/workspacePath";
 import { existingFiles } from "./changes/existingFiles";
 import type { FileLinks } from "./ui/FileTree";
-import { createFilesSource } from "./changes/filesSource";
+import { createFilesSource, type FilesSource } from "./changes/filesSource";
+import { DOCUMENT_PREVIEW_MIME_TYPES } from "@shared/workspacePreviewMime";
 import { ChangesOpener, ChangesReview } from "./ui/ChangesReview";
 import type { NotesBinding } from "./ui/NoteTray";
 import type { WorktreeApi, WorktreeInfo } from "./worktrees/worktreeApi";
@@ -124,6 +125,26 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const notes = useSyncExternalStore(tray.subscribe, tray.notes);
   const [review, setReview] = useState<{ focusNoteId?: string; path?: string }>();
   const changes = useMemo(() => cwd ? { source: createChangesSource(cwd, browserTransport.request), files: createFilesSource(cwd, browserTransport.request) } : undefined, [cwd]);
+  const filesSource = changes?.files;
+  const [resolvedFileBase, setResolvedFileBase] = useState<{ source: FilesSource; result: { type: "ready"; base: string } | { type: "failed"; error: string } }>();
+  useEffect(() => {
+    if (!filesSource) return;
+    const controller = new AbortController();
+    filesSource.linkBase(controller.signal).then(
+      (base) => { if (!controller.signal.aborted) setResolvedFileBase({ source: filesSource, result: { type: "ready", base: new URL(base, window.location.href).href } }); },
+      (error: unknown) => { if (!controller.signal.aborted) setResolvedFileBase({ source: filesSource, result: { type: "failed", error: `File links are unavailable. ${error instanceof Error ? error.message : String(error)}` } }); },
+    );
+    return () => controller.abort();
+  }, [filesSource]);
+  // Never reuse another folder's base while this folder's lookup is pending.
+  const fileBase = resolvedFileBase?.source === filesSource ? resolvedFileBase?.result : undefined;
+  const openLinkedFile = useCallback((path: string) => {
+    const extension = /\.[^./]+$/u.exec(path)?.[0]?.toLowerCase();
+    if (extension && DOCUMENT_PREVIEW_MIME_TYPES[extension] !== undefined) return false;
+    if (cwd === undefined) return false;
+    setReview({ path: workspacePath(cwd, path) });
+    return true;
+  }, [cwd]);
   const pullRef = useMemo(() => sessionId && cwd ? { id: sessionId, cwd } : undefined, [sessionId, cwd]);
   const ownPulls = useMemo(() => catalogPulls?.filter((link) => link.session.cwd === cwd) ?? NO_LINKS, [catalogPulls, cwd]);
   const pull = useSessionPulls(pullRequests, pullRef, ownPulls);
@@ -285,6 +306,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           onClear: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); } }}
         working={workingSend(state.status, state.compaction, state.transcript.isRunning)}
         dialog={dialog} notes={notesBinding} fileLinks={fileLinks}
+        linkBase={fileBase?.type === "ready" ? fileBase.base : null} linkError={fileBase?.type === "failed" ? fileBase.error : undefined}
+        onOpenFile={readOnly ? undefined : openLinkedFile}
         model={{ model: state.status?.model, thinkingLevel: state.status?.thinkingLevel, disabled: state.connection.type !== "ready",
           listModels: store.listModels, listThinkingLevels: store.listThinkingLevels, onModel: store.setModel, onThinkingLevel: store.setThinkingLevel,
           context: contextUse(state.status), cycle: true }}

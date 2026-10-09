@@ -2,6 +2,8 @@
 // the fragments inside rich blocks. A fragment that skipped it would reopen
 // the remote images and unsafe links the stream already blocks.
 import { defaultRehypePlugins, type StreamdownProps } from "streamdown";
+import { markdownFileLink, useMarkdownLinkScope } from "./linkScope";
+import { rehypeLinkBase } from "./rehypeLinkBase";
 
 export const ALLOWED_PROTOCOLS = ["http:", "https:", "mailto:"];
 
@@ -18,8 +20,25 @@ export function withoutNode<T extends { node?: unknown }>(props: T): Omit<T, "no
 export const markdownElements: Components = {
   // Streamdown's default strong is a Tailwind-styled span. Keep semantic HTML.
   strong: "strong",
+  a: (props) => {
+    const { scope, origin } = useMarkdownLinkScope();
+    const { href, children, ...rest } = withoutNode(props);
+    const file = markdownFileLink(href, scope, origin);
+    if (file?.type === "unavailable") return <span title={scope?.error ?? "This file link cannot be opened in the current workspace."}>{children}</span>;
+    if (file?.type === "file" && scope?.openFile) {
+      return <a {...rest} href={href} title={file.path} onClick={(event) => {
+        if (scope.openFile?.(file.path)) event.preventDefault();
+      }}>{children}</a>;
+    }
+    return <a {...rest} href={href}>{children}</a>;
+  },
   // Keep text-only scope and do not load third-party images from a reply.
-  img: ({ src, alt }) => <a href={typeof src === "string" ? src : undefined}>{alt || "Image"}</a>,
+  img: ({ src, alt }) => {
+    const { scope, origin } = useMarkdownLinkScope();
+    const href = typeof src === "string" ? src : undefined;
+    if (markdownFileLink(href, scope, origin)?.type === "unavailable") return <span>{alt || "Image"}</span>;
+    return <a href={href}>{alt || "Image"}</a>;
+  },
   table: (props) => <div className="table-scroll" tabIndex={0} role="region" aria-label="Table">
     <table {...withoutNode(props)} />
   </div>,
@@ -31,9 +50,9 @@ const sanitizeEntry = defaultRehypePlugins["sanitize"]!;
 const hardenEntry = defaultRehypePlugins["harden"]!;
 const harden = Array.isArray(hardenEntry) ? hardenEntry[0] : hardenEntry;
 
-/** Rehype plugins for a fragment: sanitize, then harden links. */
+/** The stream and its fragments share one pipeline: sanitize, resolve references, then harden links. */
 export function fragmentRehypePlugins(defaultOrigin: string): NonNullable<StreamdownProps["rehypePlugins"]> {
-  return [sanitizeEntry, [harden, {
+  return [sanitizeEntry, [rehypeLinkBase, { origin: defaultOrigin }], [harden, {
     allowedImagePrefixes: ["*"], allowedLinkPrefixes: ["*"], allowedProtocols: ALLOWED_PROTOCOLS,
     allowDataImages: false, defaultOrigin,
   }]] as NonNullable<StreamdownProps["rehypePlugins"]>;
