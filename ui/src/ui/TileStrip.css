@@ -1,0 +1,12 @@
+/* One row of tiles that never grows taller: extra tiles scroll sideways, never up and down. */
+.tile-strip { container-type: inline-size; display: flex; flex-direction: column; gap: var(--space-2); min-inline-size: 0; }
+/* The end control follows the last tile, and wraps under the tiles once they need the whole row. */
+.tile-strip-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); min-inline-size: 0; }
+.tile-strip-tiles { flex: 0 1 auto; display: flex; gap: var(--space-3); min-inline-size: 0; overflow-x: auto; overscroll-behavior-x: contain;
+  scrollbar-width: thin; padding-block: var(--space-1); }
+.tile-strip-end { flex: none; display: flex; align-items: center; min-inline-size: 0; max-inline-size: 100%; }
+/* Lined up at the end; "safe" keeps the first tile reachable once the tiles overflow. */
+.tile-strip[data-align="end"] .tile-strip-tiles { justify-content: safe flex-end; }
+.tile-strip[data-align="end"] .tile-strip-row { justify-content: flex-end; }
+.tile-strip-alerts { display: flex; flex-direction: column; gap: var(--space-1); color: var(--destructive); font-size: var(--small-text); overflow-wrap: anywhere; }
+.tile-strip-alerts p { margin: 0; }

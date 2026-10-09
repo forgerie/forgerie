@@ -1,0 +1,28 @@
+/* A file as a square you can recognise. Width sets the size; a short pane takes it back,
+   so the tiles never cost the text field its lines. */
+.file-tile { --file-tile-size: min(clamp(4.5rem, 15cqi, 6rem), max(3.5rem, 16cqb)); position: relative; flex: none; display: flex; flex-direction: column; gap: var(--space-1);
+  inline-size: var(--file-tile-size); margin: 0; }
+.file-tile-face { position: relative; display: grid; place-items: center; inline-size: var(--file-tile-size); block-size: var(--file-tile-size); padding: 0; overflow: hidden;
+  border: 0; border-radius: var(--radius-surface); background: var(--tint-surface); color: var(--muted-foreground);
+  /* An inner hairline, so a dark screenshot keeps its edge on a dark page. */
+  box-shadow: inset 0 0 0 var(--hairline) var(--line); }
+button.file-tile-face { cursor: zoom-in; }
+button.file-tile-face:hover { box-shadow: inset 0 0 0 var(--hairline) var(--line-focus); }
+/* A screenshot is known by its top: the title bar, the header, the first line. */
+.file-tile-face img { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; object-fit: cover; object-position: top center; }
+.file-tile-face:has(img)::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 var(--hairline) var(--line); pointer-events: none; }
+.file-tile-type { font-family: var(--code-font); font-size: var(--small-text); font-weight: 600; letter-spacing: 0.02em; color: var(--muted-foreground); }
+.file-tile-caption { display: flex; flex-direction: column; min-inline-size: 0; line-height: 1.3; }
+.file-tile-name { overflow: hidden; color: var(--foreground); font-size: var(--label-text); text-overflow: ellipsis; white-space: nowrap; }
+.file-tile-note { color: var(--muted-foreground); font-size: var(--meta-text); }
+.file-tile[data-busy] .file-tile-face img, .file-tile[data-busy] .file-tile-type { opacity: 0.45; }
+.file-tile[data-failed] .file-tile-face { box-shadow: inset 0 0 0 calc(var(--hairline) * 2) var(--destructive); background: var(--destructive-wash); }
+.file-tile[data-failed] .file-tile-type { color: var(--destructive); }
+.file-tile[data-failed] .file-tile-note { color: var(--destructive); }
+/* Drawn small in the corner as an ink disc ringed in the page colour, so it reads on any picture; pressed at the control size. */
+.file-tile-remove { position: absolute; inset-block-start: var(--space-1); inset-inline-end: var(--space-1); display: grid; place-items: center;
+  inline-size: 1.25rem; block-size: 1.25rem; padding: 0; border: 0; border-radius: var(--radius-pill);
+  background: var(--foreground); color: var(--background); box-shadow: 0 0 0 calc(var(--hairline) * 2) var(--background); cursor: pointer; opacity: 0.88; }
+.file-tile-remove::before { content: ""; position: absolute; inset: calc((1.25rem - var(--control-size)) / 2); }
+.file-tile-remove:hover { opacity: 1; }
+.file-tile-remove:disabled { opacity: 0.4; cursor: default; }

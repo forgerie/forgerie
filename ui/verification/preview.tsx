@@ -718,6 +718,36 @@ const previewNewApi: NewSessionApi = {
 };
 const previewLaunches = createLaunchStore<LaunchDraft>(previewNewApi);
 const previewDeferred = createDeferredFiles();
+/** A dark app screenshot, like most of what gets pasted into Forgerie. */
+function darkScreenshot(width = 1147, height = 1102): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const context = canvas.getContext("2d")!;
+  context.fillStyle = "#050505"; context.fillRect(0, 0, width, height);
+  context.fillStyle = "#141414"; context.fillRect(56, 32, width - 112, height - 64);
+  context.fillStyle = "#e8e8e8"; context.fillRect(92, 52, 44, 44);
+  context.fillStyle = "#2a2a2a"; context.fillRect(92, 262, 380, 96); context.fillRect(852, 955, 222, 66);
+  context.fillStyle = "#e6e6e6"; context.fillRect(852, 955, 222, 66);
+  context.strokeStyle = "#f59e0b"; context.lineWidth = 4; context.strokeRect(66, 238, width - 132, 188);
+  context.fillStyle = "#9a9a9a"; context.font = "500 26px sans-serif";
+  context.fillText("New session", 184, 84); context.fillText("Describe what the agent should do first…", 92, 462);
+  return canvas.toDataURL("image/png");
+}
+/** Drops files on the dialog the way a person drags them in, so the real adapter takes them. */
+async function dropFiles(name: string) {
+  if (name === "new-session-attach-folder") attachmentDelivery.set("folder");
+  else attachmentDelivery.set("inline");
+  const files = [new File([await (await fetch(darkScreenshot())).blob()], "image.png", { type: "image/png" })];
+  if (name === "new-session-attach-many") {
+    for (const [index, hue] of [200, 20, 140].entries()) files.push(new File([await (await fetch(screenshot(`Capture ${index + 1}`, hue))).blob()], `fold-${index + 1}.png`, { type: "image/png" }));
+    files.push(new File(["notes"], "deployment-notes-with-a-long-filename.txt", { type: "text/plain" }));
+    files.push(new File([new Uint8Array(17 * 1024 * 1024)], "recording.mov", { type: "video/quicktime" }));
+  }
+  const transfer = new DataTransfer();
+  for (const file of files) transfer.items.add(file);
+  const zone = document.querySelector(".ns-body");
+  zone?.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+}
 /** The dialog over a session, as it opens in the app. No network. */
 function NewSessionPreview() {
   const [started, setStarted] = useState<string>();
@@ -726,6 +756,7 @@ function NewSessionPreview() {
   useEffect(() => {
     // Captures need the panel already open, or the launches already listed.
     const timers: ReturnType<typeof setTimeout>[] = [];
+    if (scenario.startsWith("new-session-attach")) timers.push(setTimeout(() => void dropFiles(scenario), 300));
     if (scenario === "new-session-destination") timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>(".destination-trigger")?.click(), 400));
     if (scenario === "new-session-rapidfire") {
       for (const [index, text] of ["First: fix the login form", "Second: add the regression tests", "Third: update the changelog"].entries()) {

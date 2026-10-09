@@ -174,8 +174,10 @@ describe("queueing attachments while the agent works", () => {
   const saved = (path: string) => vi.fn<SaveAttachment>().mockResolvedValue({ path, mimeType: "image/png", size: 2 });
   const add = (file: File) => act(async () => runtime.thread.composer.addAttachment(file));
   const picture = () => new File(["hi"], "picture.png", { type: "image/png" });
-  const option = (name: string) => [...document.querySelectorAll<HTMLLabelElement>(".delivery-option")]
-    .find((node) => node.textContent === name)?.querySelector("input");
+  const choice = () => document.querySelector('[role="group"][aria-labelledby]');
+  const option = (name: string) => [...choice()?.querySelectorAll<HTMLButtonElement>("button") ?? []].find((node) => node.textContent === name);
+  const pressed = (name: string) => option(name)?.getAttribute("aria-pressed") === "true";
+  const note = () => document.querySelector(".file-tile-note")?.textContent;
   const notice = () => document.querySelector(".ask-route")?.textContent ?? "";
 
   it("queues a file saved to the workspace as its path", async () => {
@@ -184,7 +186,7 @@ describe("queueing attachments while the agent works", () => {
     await render({ onNew, attachments: createAttachmentAdapter(save) });
     await add(new File(["notes"], "notes.txt", { type: "text/plain" }));
     // A file that is not an image always goes to the folder, so there is no choice to make.
-    expect(document.querySelector(".attachment-delivery")).toBeNull();
+    expect(choice()).toBeNull();
     expect(button("Queue message")?.disabled).toBe(false);
     await click(button("Queue message"));
     await vi.waitFor(() => expect(onNew).toHaveBeenCalledOnce());
@@ -197,20 +199,22 @@ describe("queueing attachments while the agent works", () => {
     const save = saved(".forgerie/attachments/picture.png");
     await render({ onNew, attachments: createAttachmentAdapter(save) });
     await add(picture());
-    expect(option("Attach to message (images only)")?.checked).toBe(true);
+    expect(choice()?.textContent).toContain("Send images");
+    expect(pressed("Inline")).toBe(true);
     expect(button("Queue message")?.disabled).toBe(true);
     expect(button("Steer")?.disabled).toBe(true);
-    expect(notice()).toContain("Images attached to a message cannot be queued");
+    expect(notice()).toContain("Inline images cannot be queued");
     await press("Enter");
     expect(onNew).not.toHaveBeenCalled();
 
     // The notice carries the way out, so it shows even when the chips scroll.
-    await click(button("Save to .forgerie/attachments"));
-    expect(option("Save to .forgerie/attachments")?.checked).toBe(true);
+    await click(button("Send images as files"));
+    expect(pressed("As files")).toBe(true);
     expect(attachmentDelivery.get()).toBe("folder");
     expect(localStorage.getItem("pi-web:attachment-delivery")).toBe("folder");
     expect(notice()).toBe("");
-    expect(document.querySelector(".attachment-detail")?.textContent).toBe("Saved in workspace on send");
+    // The choice says how the image travels; the tile does not say it again.
+    expect(note()).toBeUndefined();
     await click(button("Steer"));
     await vi.waitFor(() => expect(onNew).toHaveBeenCalledOnce());
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ kind: "file", name: "picture.png", mimeType: "image/png" }), expect.any(AbortSignal));
@@ -223,7 +227,7 @@ describe("queueing attachments while the agent works", () => {
     await render({ attachments: createAttachmentAdapter(saved(".forgerie/attachments/picture.png")) });
     await add(picture());
     expect(button("Queue message")?.disabled).toBe(false);
-    await click(option("Attach to message (images only)") ?? undefined);
+    await click(option("Inline"));
     expect(attachmentDelivery.get()).toBe("inline");
     expect(button("Queue message")?.disabled).toBe(true);
   });
@@ -233,7 +237,7 @@ describe("queueing attachments while the agent works", () => {
     const save = saved(".forgerie/attachments/picture.png");
     await render({ onNew, running: false, working: { queue: false, steer: false }, attachments: createAttachmentAdapter(save) });
     await add(picture());
-    expect(document.querySelector(".attachment-detail")?.textContent).toBe("Image");
+    expect(note()).toBeUndefined();
     await click(button("Send message"));
     await vi.waitFor(() => expect(onNew).toHaveBeenCalledOnce());
     expect(onNew.mock.calls[0]?.[0].attachments?.[0]?.content).toEqual([{ type: "image", image: "data:image/png;base64,aGk=" }]);

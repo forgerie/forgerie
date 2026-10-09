@@ -43,16 +43,16 @@ describe("assistant-ui attachment composer", () => {
       content: [{ type: "image", image: "data:image/png;base64,aGk=" }],
     }] });
     await render();
-    expect(document.querySelectorAll(".message-attachments .attachment-image")).toHaveLength(1);
+    expect(document.querySelectorAll(".message-attachments .file-tile img")).toHaveLength(1);
     expect(document.querySelector(".user-bubble")).toBeNull();
   });
   it("adds and removes a named chip with no upload until send", async () => {
     await render(); await add();
-    expect(document.querySelectorAll(".attachment")).toHaveLength(1);
-    expect(document.querySelector(".attachment-name")?.textContent).toBe("notes.txt");
+    expect(document.querySelectorAll(".file-tile")).toHaveLength(1);
+    expect(document.querySelector(".file-tile-name")?.textContent).toBe("notes.txt");
     expect(save).not.toHaveBeenCalled();
     await click(label("Remove notes.txt")!);
-    expect(document.querySelectorAll(".attachment")).toHaveLength(0);
+    expect(document.querySelectorAll(".file-tile")).toHaveLength(0);
     expect(save).not.toHaveBeenCalled();
   });
   it("accepts pasted and dropped files through the library input handlers", async () => {
@@ -160,6 +160,10 @@ describe("assistant-ui attachment composer", () => {
     await render();
     await add(new File([new Uint8Array(16 * 1024 * 1024 + 1)], "huge.bin"));
     expect(document.body.textContent).toContain("16 MiB");
+    // The reason shows once, under the tiles and named, and the tile says it was not added.
+    expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(document.querySelector('[role="alert"]')?.textContent).toMatch(/^huge\.bin: Files must be 16 MiB/);
+    expect(document.querySelector(".file-tile-note")?.textContent).toBe("Not added");
     expect(save).not.toHaveBeenCalled();
   });
   it("blocks send above the count limit and enables it again after removal", async () => {

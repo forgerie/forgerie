@@ -26,6 +26,11 @@ export function offersDeliveryChoice(attachments: readonly Attachment[]): boolea
   return attachments.some((attachment) => attachment.status.type !== "complete" && canInline(attachment));
 }
 
+/** An image too large for the message: it goes to the folder whatever the choice says. */
+export function oversizedImage(attachment: Pick<Attachment, "contentType" | "file" | "status">): boolean {
+  return attachment.status.type !== "complete" && imageTypes.has(attachment.contentType ?? "") && attachment.file !== undefined && !canInline(attachment);
+}
+
 /**
  * The attachment reaches Pi as an image in the prompt, not as a saved file's path.
  * Pi's queue keeps such an image, but Stop returns only queued text, so it cannot queue.

@@ -11,7 +11,7 @@ import { useAskMode, type AskBinding, type AskControl } from "./useAskMode";
 import { SlashCommands, type CommandBinding } from "./SlashCommands";
 import { AddAttachment, AttachmentDeliveryChoice, AttachmentErrors, ComposerAttachments, useAttachmentDelivery } from "./Attachments";
 import { MAX_ATTACHMENTS, sendsInline } from "../attachments";
-import { ATTACHMENT_FOLDER, attachmentDelivery } from "../attachmentDelivery";
+import { DELIVERY_WORDS, attachmentDelivery } from "../attachmentDelivery";
 import { isCompactCommand } from "../compaction";
 import type { CompactionBinding } from "./CompactionNotice";
 import { createChatDraft, type ChatDraft } from "../chatDraft";
@@ -228,9 +228,9 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
           : "Commands run in Pi. Questions stay open unless Pi closes them."}
       </p>}
       {workingDraft && inlineCount > 0 && <p className="ask-route" role="status">
-        <InfoIcon aria-hidden size={14} /><span>Images attached to a message cannot be queued.</span>
-        <button type="button" className="route-action" disabled={disabled || preparing} onClick={() => attachmentDelivery.set("folder")}>
-          Save to {ATTACHMENT_FOLDER}</button>
+        <InfoIcon aria-hidden size={14} /><span>{DELIVERY_WORDS.queueBlocked}</span>
+        <button type="button" className="route-action" disabled={disabled || preparing} onClick={() => attachmentDelivery.set("folder")}
+          title={DELIVERY_WORDS.toFilesTitle}>{DELIVERY_WORDS.toFiles}</button>
       </p>}
       {notesWait && <p className="composer-hint" role="status">
         <InfoIcon aria-hidden size={14} />Commands do not carry notes. Your notes wait for your next message.

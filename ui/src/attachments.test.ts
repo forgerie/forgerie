@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createAttachmentAdapter, INLINE_IMAGE_BYTES, MAX_ATTACHMENT_BYTES, offersDeliveryChoice, promptOf, sendsInline } from "./attachments";
+import { createAttachmentAdapter, INLINE_IMAGE_BYTES, MAX_ATTACHMENT_BYTES, offersDeliveryChoice, oversizedImage, promptOf, sendsInline } from "./attachments";
 import type { CompleteAttachment, PendingAttachment } from "@assistant-ui/react";
 
 async function pending(file: File): Promise<PendingAttachment> {
@@ -12,6 +12,12 @@ const image = (data = "aGk="): CompleteAttachment => ({ id: "image", type: "imag
   content: [{ type: "image", image: `data:image/png;base64,${data}` }] });
 
 describe("Forgerie attachments", () => {
+  it("names an image too large for the message, and nothing else", async () => {
+    expect(oversizedImage(await pending(new File([new Uint8Array(INLINE_IMAGE_BYTES + 1)], "big.png", { type: "image/png" })))).toBe(true);
+    expect(oversizedImage(await pending(new File([new Uint8Array(INLINE_IMAGE_BYTES)], "fits.png", { type: "image/png" })))).toBe(false);
+    expect(oversizedImage(await pending(new File([new Uint8Array(INLINE_IMAGE_BYTES + 1)], "big.txt", { type: "text/plain" })))).toBe(false);
+    expect(oversizedImage(image())).toBe(false);
+  });
   it("passes native images to the prompt without writing a workspace file", async () => {
     const save = vi.fn();
     const adapter = createAttachmentAdapter(save);

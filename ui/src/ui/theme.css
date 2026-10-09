@@ -56,8 +56,6 @@
   --space-5: 1.25rem;
   --space-6: 1.5rem;
   --space-8: 2rem;
-  --attachment-thumbnail-size: 3rem;
-  --attachment-name-width: 15rem;
   --code-keyword: #9653a8;
   --code-string: #296746;
   --code-number: #a64d15;
@@ -527,34 +525,11 @@ button:disabled { cursor: default; opacity: 0.4; }
 .tree-actions .tree-continue { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
 .tree-actions .tree-stop { margin-inline-end: auto; color: var(--destructive); }
 .composer-add-attachment { flex: none; }
-.composer-attachments, .message-attachments { display: flex; flex-wrap: wrap; gap: var(--space-2); min-inline-size: 0; }
-.composer-attachments:not(:empty) { padding: var(--space-3) var(--space-4) 0; max-block-size: max(4.75rem, 24cqb); overflow-y: auto; scrollbar-width: thin; }
-.message-attachments { justify-content: flex-end; margin-block-end: var(--space-2); max-inline-size: 100%; }
-.message-attachments:empty, .user-bubble:empty { display: none; }
-.attachment { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; max-inline-size: 100%; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--muted); }
-.attachment-info { min-inline-size: 0; max-inline-size: min(var(--attachment-name-width), 50cqi); display: flex; flex-direction: column; }
-.attachment-name { font-size: var(--small-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.attachment-detail { font-size: var(--meta-text); color: var(--muted-foreground); }
-.attachment-image { flex: none; padding: 0; border: 0; background: transparent; inline-size: var(--attachment-thumbnail-size); block-size: var(--attachment-thumbnail-size); cursor: zoom-in; }
-.attachment-image img { inline-size: 100%; block-size: 100%; object-fit: cover; border-radius: var(--radius-document); }
-.attachment-file, .attachment-remove { flex: none; }
-.attachment[data-error] { border-color: var(--destructive); }
-.attachment-error { font-size: var(--label-text); color: var(--destructive); overflow-wrap: anywhere; }
-/* Delivery: a full-width row after the chips, inside their scroll budget, so a
-   short window scrolls to it instead of losing the input. Segments like the
-   thinking levels; each option wraps whole, so a narrow bar stacks them. */
-.attachment-delivery { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); min-inline-size: 0; margin: 0; padding: 0; border: 0; }
-.attachment-delivery legend { float: left; margin-inline-end: var(--space-2); padding: 0; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
-/* Drawn 2rem tall to keep the row short; ::before keeps the full touch target. */
-.delivery-option { position: relative; display: inline-flex; align-items: center; min-block-size: 2rem; max-inline-size: 100%; padding-inline: var(--space-3); border-radius: var(--radius-control); color: var(--muted-foreground); font-size: var(--small-text); cursor: pointer; }
-.delivery-option::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
-.delivery-option input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: inherit; }
-.delivery-option span { overflow-wrap: anywhere; }
-.delivery-option:hover { background: var(--hover-surface); color: var(--foreground); }
-.delivery-option:has(:checked) { background: var(--active-surface); color: var(--foreground); font-weight: 500; }
-.delivery-option:has(:focus-visible) { outline: 2px solid var(--line-focus); outline-offset: 1px; }
-.attachment-delivery:disabled .delivery-option { cursor: default; opacity: 0.4; }
-.attachment-delivery:disabled .delivery-option:hover { background: transparent; color: var(--muted-foreground); }
+/* The tiles' own look lives in FileTile and TileStrip; these only place them. */
+.composer-attachments { padding: var(--space-3) var(--space-4) 0; min-inline-size: 0; }
+/* Full width: the strip measures its container, so it cannot shrink-wrap its tiles. They line up at the end. */
+.message-attachments { align-self: stretch; inline-size: 100%; margin-block-end: var(--space-2); min-inline-size: 0; }
+.user-bubble:empty { display: none; }
 /* Reply and tool images. Tiles never draw narrower than --gallery-tile; the
    column count comes from galleryPlan, so the last tile can open the rest. */
 .image-gallery { margin-block-start: var(--space-3); min-inline-size: 0; }
@@ -583,7 +558,7 @@ button:disabled { cursor: default; opacity: 0.4; }
 .viewer-stage[data-zoomed]:active { cursor: grabbing; }
 .viewer-stage img { display: block; max-inline-size: 100%; max-block-size: 100%; inline-size: auto; block-size: auto; object-fit: contain; border-radius: var(--radius-document); transform-origin: center; will-change: transform; -webkit-user-drag: none; }
 .viewer-foot .viewer-caption { flex: 1; min-inline-size: 0; margin: 0; padding-inline: var(--space-2); text-align: center; color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.attachment-notice { margin: 0; padding: var(--space-2) var(--space-4); color: var(--destructive); font-size: var(--small-text); }
+.attachment-notice { margin: 0; padding: var(--space-2) var(--space-4); color: var(--destructive); font-size: var(--small-text); white-space: pre-line; }
 .attachment-notice button { margin-inline-start: var(--space-2); }
 /* The way out of a blocked queue, beside the reason, so it shows even when the chips scroll. */
 .ask-route .route-action { flex: none; align-self: center; min-block-size: 2rem; padding-inline: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; color: var(--foreground); font-size: var(--small-text); }
@@ -985,7 +960,7 @@ summary.trace-line:hover { color: var(--foreground); }
 /* The writing area takes whatever height is left, behind a rule. */
 .ns-body { flex: 1 0 auto; min-block-size: 6rem; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4) var(--ns-pad) var(--space-2); border-block-start: 1px solid var(--line); }
 .ns-body[data-dragging] { outline: 2px solid var(--live); outline-offset: -4px; }
-.ns-body .composer-attachments:not(:empty) { flex: none; padding: 0; max-block-size: 30%; }
+.ns-body .composer-attachments { flex: none; padding: 0; }
 .ns-input { flex: 1 1 auto; min-block-size: 3rem; block-size: 100%; inline-size: 100%; background: transparent; color: var(--foreground);
   font-size: 1.0625rem; line-height: 1.6; }
 .ns-input { display: flex; flex-direction: column; }

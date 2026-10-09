@@ -6,6 +6,22 @@
 export type AttachmentDelivery = "inline" | "folder";
 export const ATTACHMENT_FOLDER = ".forgerie/attachments";
 
+/**
+ * The choice's words, in one place, so the switch and the queue notice use
+ * the same names: "Inline" and "As files".
+ */
+export const DELIVERY_WORDS = {
+  lead: "Send images",
+  options: [
+    { value: "inline", label: "Inline", title: "The model sees each image in this message. An inline image cannot wait in the queue." },
+    { value: "folder", label: "As files", title: `Each image is saved to ${ATTACHMENT_FOLDER} in the workspace, and the agent gets its path. The message can wait in the queue.` },
+  ],
+  queueBlocked: "Inline images cannot be queued.",
+  toFiles: "Send images as files",
+  toFilesTitle: `Save each image to ${ATTACHMENT_FOLDER}, so the message can wait in the queue`,
+  tooLarge: "Too large, sent as file",
+} as const;
+
 /** The classic UI's key, so the choice is the same in both UIs on one origin. Not sensitive. */
 export const ATTACHMENT_DELIVERY_KEY = "pi-web:attachment-delivery";
 
