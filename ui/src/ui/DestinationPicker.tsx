@@ -161,7 +161,7 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
         {projects.type === "loading" && <p className="model-hint" role="status">Loading projects…</p>}
         {projects.type === "failed" && <p className="model-hint" role="alert">Projects unavailable: {projects.message}</p>}
         {projects.type === "ready" && shownProjects.length === 0 && <p className="model-hint" role="status">
-          {needle ? `No project matches "${query.trim()}".` : "Forgerie knows no projects yet. Add one in the old client."}
+          {needle ? `No project matches "${query.trim()}".` : "Forgerie knows no projects yet. This app cannot add one yet."}
         </p>}
         <ul>{shownProjects.map((item) => {
           const here = binding.cwd === item.path || binding.cwd.startsWith(`${item.path}/`);

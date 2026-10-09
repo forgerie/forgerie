@@ -115,7 +115,7 @@ export function DialogLayer({ control }: { control: DialogControl }) {
     <div className="ask-body">
       <h2 className="ask-question" id={control.headingId}>{dialog.title}</h2>
       {dialog.message && <p className="ask-detail">{dialog.message}</p>}
-      {dialog.kind === "unknown" && <p className="ask-detail">This client cannot show this kind of question. Skip it, or answer it in the old client.</p>}
+      {dialog.kind === "unknown" && <p className="ask-detail">This app cannot show this kind of question. Skip it.</p>}
       {dialog.kind === "select" && <div className="dialog-options" role="group" aria-labelledby={control.headingId}>
         {(dialog.options ?? []).map((option) => <button key={option} type="button" className="dialog-option" disabled={control.blocked}
           onClick={() => control.answer(option)}>{option}</button>)}

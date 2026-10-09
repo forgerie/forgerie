@@ -1,8 +1,12 @@
-# Forgerie assistant-ui MVP
+# Forgerie browser app
 
-A standalone React + Vite client for one existing Pi session. It uses assistant-ui's `ExternalStoreRuntime` and adapts the [homepage demo UI](THIRD_PARTY_NOTICES.md), including formatted Markdown replies. The backend and original Lit client stay unchanged.
+Forgerie's browser app: React + Vite, built on assistant-ui's `ExternalStoreRuntime`, adapted from its [homepage demo UI](THIRD_PARTY_NOTICES.md). Forgerie's server serves the production build from `dist/client`. The root `npm run build` builds it, and the root `npm install` installs this folder's dependencies. The earlier Lit client is in Git history (removed after `main` `ec6ed17f`).
 
-## Run
+## Install and update
+
+The app is an installable PWA. Install it from the browser menu; it opens full screen (`display: "fullscreen"` in `public/manifest.webmanifest`). In a browser tab, the icon at the end of the session list's footer enters and leaves full screen. When a new build is deployed, an open app says "A new version of Forgerie is ready" with a Refresh button. It checks `build.json` when it comes back into view or online, and every minute while visible. It never reloads by itself.
+
+## Develop
 
 Keep Forgerie running on `http://127.0.0.1:8504`. From this directory:
 
@@ -37,11 +41,11 @@ The input bar shows the session's model and thinking level. Press it, or send `/
 
 When the agent hands off to a new session or spawns one, the reply shows an "Open session" button beside that call. See [handoff navigation](verification/handoff-navigation.md).
 
-Press Settings at the foot of the session list, then Agents, to create and edit the agents a session can hand work to. Each agent is one pi-subagents file in `~/.pi/agent/agents/`. Its name, description, model, and "Offer to sessions" (`advertise`) are a form; its instructions are a Markdown document. A save changes only the header lines you edited and writes the body back only if you edited it. Built-in agents are read-only; Customize saves your own copy, which replaces the built-in one. Changes apply to sessions started after the save. The file API lives in this Vite server (`src/agents/agentFilesApi.ts`), not in Forgerie's server.
+Press Settings at the foot of the session list, then Agents, to create and edit the agents a session can hand work to. Each agent is one pi-subagents file in `~/.pi/agent/agents/`. Its name, description, model, and "Offer to sessions" (`advertise`) are a form; its instructions are a Markdown document. A save changes only the header lines you edited and writes the body back only if you edited it. Built-in agents are read-only; Customize saves your own copy, which replaces the built-in one. Changes apply to sessions started after the save. The file API lives in Forgerie's server (`src/server/uiSettings/agentFiles.ts`).
 
 Type `!command` to run a shell command in the session's folder, or `!!command` to keep its output out of the agent's context. See [shell commands](verification/shell.md) for behavior and limits, including that a running command cannot be stopped from this client yet.
 
-This worktree uses the orphan branch `new-ui-mvp`. It has no shared history with `main`. It is not a replacement deployment or an npm release.
+This app was built on the orphan branch `new-ui-mvp` (tag `new-ui-mvp-orphan` keeps its original commits) and moved to `ui/` on `main`. Settings > Agents, Plugins, and Models read and write through Forgerie's server under `/aui/` (`src/server/uiSettings/`).
 
 ## Verify
 

@@ -130,7 +130,7 @@ describe("extension dialogs in the one input bar", () => {
   it("shows a dialog this client cannot draw, so it can still be skipped", async () => {
     const onCancel = vi.fn();
     await render({ dialog: { dialog: { dialogId: "u", kind: "unknown", title: "Pick a colour", askedAt: "now" }, onCancel } });
-    expect(layer()!.textContent).toContain("This client cannot show this kind of question");
+    expect(layer()!.textContent).toContain("This app cannot show this kind of question");
     await click(button("Skip", layer()!));
     expect(onCancel).toHaveBeenCalledOnce();
   });
