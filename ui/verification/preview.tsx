@@ -105,6 +105,18 @@ const richFollowUpReply = [
 const richFollowUpMessages = (text: string): TranscriptMessage[] => [
   say("followup-question", "user", "Are you saying that you add 4k tokens to every message?"), say("followup-answer", "assistant", text),
 ];
+// One fence per grammar group: a label the highlight.js common subset drops, a
+// YAML map, a diff, and a Dockerfile.
+const codeLanguagesReply = [
+  "The service is declared once, and its state path stays the same across updates.",
+  "```nix\n{ pkgs, ... }:\nlet\n  state = \"/var/lib/cliproxyapi\";\nin\n{\n  services.cliproxyapi = {\n    enable = true;\n    package = pkgs.cliproxyapi;\n    environment.HOME = state; # the nightly update changes only the version\n  };\n}\n```",
+  "```yaml\nservices:\n  cliproxyapi:\n    enable: true\n    state: /var/lib/cliproxyapi # survives the update\n```",
+  "```diff\n-  state = \"/var/lib/cliproxyapi/old\";\n+  state = \"/var/lib/cliproxyapi\";\n   restart = \"on-failure\";\n```",
+  "```dockerfile\nFROM alpine:3.20\nRUN apk add --no-cache curl\nCOPY entrypoint.sh /usr/local/bin/\nCMD [\"entrypoint.sh\"]\n```",
+].join("\n\n");
+const codeLanguagesMessages: TranscriptMessage[] = [
+  say("code-question", "user", "Show the service declaration."), say("code-answer", "assistant", codeLanguagesReply),
+];
 // Cut inside the comparison, the way a reply looks mid-stream.
 const richBlocksRunning = richBlocksReply.slice(0, richBlocksReply.indexOf("+ Rollback"));
 const testOutput = Array.from({ length: 40 }, (_, index) => ` ✓ src/transcript.test.ts > case ${index + 1} (${index % 7 + 1} ms)`).join("\n");
@@ -453,6 +465,7 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   "rich-report": richReportMessages(richReportReply), "rich-report-live": richReportMessages(""),
   "rich-answer": richAnswerMessages(richAnswerReply), "rich-answer-live": richAnswerMessages(""),
   "rich-followup": richFollowUpMessages(richFollowUpReply), "rich-followup-live": richFollowUpMessages(""),
+  "code-languages": codeLanguagesMessages,
   ...scenario === "images" || scenario === "images-viewer" ? { images: imageMessages(), "images-viewer": imageMessages() } : {},
   handoff: handoffMessages, "handoff-open": handoffMessages,
 };

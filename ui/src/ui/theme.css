@@ -740,11 +740,21 @@ summary.trace-line:hover { color: var(--foreground); }
   --tally-inset: var(--rail-indent);
   --rail-reach: var(--tally-gutter);
 }
-.hljs-keyword, .hljs-selector-tag, .hljs-literal { color: var(--code-keyword); }
-.hljs-string, .hljs-regexp, .hljs-attribute { color: var(--code-string); }
-.hljs-number, .hljs-symbol { color: var(--code-number); }
-.hljs-comment, .hljs-quote { color: var(--code-comment); }
-.hljs-title, .hljs-built_in, .hljs-type { color: var(--code-title); }
+/* Five colours, the same five the composer's draft uses (codeTokens.ts maps
+   the editor's tags onto them), so one word takes one colour on every surface.
+   A compound scope needs its full spelling: ".hljs-title" alone does not
+   match class="hljs-title function_". */
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-variable.language_ { color: var(--code-keyword); }
+.hljs-string, .hljs-regexp, .hljs-attribute, .hljs-char.escape_, .hljs-link, .hljs-template-tag, .hljs-template-variable { color: var(--code-string); }
+.hljs-number, .hljs-symbol, .hljs-bullet { color: var(--code-number); }
+.hljs-comment, .hljs-quote, .hljs-code, .hljs-doctag, .hljs-formula, .hljs-meta { color: var(--code-comment); }
+.hljs-title, .hljs-title.class_, .hljs-title.function_, .hljs-title.inherited__, .hljs-attr, .hljs-built_in, .hljs-class,
+.hljs-function, .hljs-name, .hljs-property, .hljs-section, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id,
+.hljs-selector-pseudo, .hljs-tag, .hljs-type { color: var(--code-title); }
+/* A diff fence: the added line takes the string colour, the removed line the
+   colour the app gives a warning. */
+.hljs-addition { color: var(--code-string); }
+.hljs-deletion { color: var(--destructive); }
 .setup { padding: var(--space-6); max-inline-size: var(--thread-max-width); margin-inline: auto; }
 .setup h1 { font-size: 1.25rem; font-weight: 500; }
 .setup code { font-family: var(--code-font); }

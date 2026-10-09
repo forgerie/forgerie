@@ -3,7 +3,7 @@ import type { Facet } from "@codemirror/state";
 import { languages } from "@codemirror/language-data";
 import { Autolink, parser as commonmark, parseCode, Strikethrough, TaskList, type MarkdownParser } from "@lezer/markdown";
 import type { EditorView } from "@codemirror/view";
-import hljs from "highlight.js/lib/common";
+import hljs from "./codeGrammars";
 
 /** The language word of a fence's info string: "ts" in "```ts title=x". */
 export function codeFenceTag(info: string | undefined): string | undefined {
@@ -11,9 +11,12 @@ export function codeFenceTag(info: string | undefined): string | undefined {
 }
 
 /**
- * The grammar for a draft's code fence. A draft colours exactly the fences the
- * transcript colours: highlight.js must know the tag. Unknown tags never get a
- * guessed grammar, so "javascript-extra" stays plain.
+ * The grammar for a draft's code fence. The same highlight.js instance the
+ * transcript highlights with decides whether a tag names a language, so both
+ * call a fence code. The draft then colours the tags the editor carries a
+ * grammar for, and the editor carries fewer than highlight.js does (143 against
+ * 193), so a nix or elixir draft draws labelled plain code. Unknown tags never
+ * get a guessed grammar, so "javascript-extra" stays plain.
  */
 export function composerCodeLanguage(info: string): LanguageDescription | null {
   const tag = codeFenceTag(info);
