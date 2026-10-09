@@ -60,6 +60,8 @@
 .tally-more[data-tone="warn"] { color: var(--ink-warn); }
 .tally-more[data-tone="live"] { color: var(--ink-live); }
 .tally-body { grid-column: 2; min-inline-size: 0; }
+/* A quiet row is one short line, so it takes less room above and below. */
+.tally:has(> .tally-toggle[data-wide]) { margin-block: var(--space-2); }
 /* A quiet line keeps the content's line box, so marks align the same way. */
 .tally-line {
   grid-column: 2; min-inline-size: 0;
@@ -90,7 +92,8 @@
   font-family: var(--code-font); font-size: var(--label-text); font-variant-ligatures: none;
   color: var(--muted-foreground); overflow-wrap: anywhere;
 }
-.tally-notes { color: var(--muted-foreground); font-size: var(--small-text); padding-block-end: var(--space-1); }
+.tally-section + .tally-section { margin-block-start: var(--space-1); padding-block-start: var(--space-1); border-block-start: var(--hairline) solid var(--line); }
+.tally-notes { color: var(--muted-foreground); font-size: var(--small-text); padding-block: var(--space-1); }
 @media (prefers-reduced-motion: reduce) {
   .tally-mark[data-tone="live"], .tally-line[data-live] { animation: none; }
   .tally-line[data-live] { background: none; color: var(--ink-live); }

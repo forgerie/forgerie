@@ -4,6 +4,9 @@ import "./TallyRow.css";
 /** One mark's state. `faint` is a mark for work that never finished. */
 export type TallyTone = "plain" | "bad" | "warn" | "live" | "faint";
 
+/** One part of an open panel. */
+export interface TallySection { key: string; notes?: ReactNode; body: ReactNode }
+
 /** The worst tone wins when marks are summed into one count. */
 const SEVERITY: readonly TallyTone[] = ["plain", "faint", "live", "warn", "bad"];
 const worst = (tones: readonly TallyTone[]): TallyTone =>
@@ -24,9 +27,10 @@ export function visibleMarks(marks: readonly TallyTone[], limit: number): { show
  * System molecule: content with a tally of toned marks in its margin, one
  * mark per unit of work, in order. The tally opens a panel under the content.
  * Without content, a quiet line stands in, and the whole row opens the panel.
- * The panel and notes render only while open.
+ * The panel lists the work in sections, each with optional notes, and renders
+ * only while open.
  */
-export function TallyRow({ marks, label, title, line, live = false, notes, panel, children, limit = 9 }: {
+export function TallyRow({ marks, label, title, line, live = false, sections, children, limit = 9 }: {
   marks: readonly TallyTone[];
   /** Accessible name of the toggle: what the marks count. */
   label: string;
@@ -35,9 +39,8 @@ export function TallyRow({ marks, label, title, line, live = false, notes, panel
   /** Shown in place of absent content. */
   line?: string;
   live?: boolean;
-  /** Secondary text at the top of the open panel. */
-  notes?: () => ReactNode;
-  panel: () => ReactNode;
+  /** The open panel's sections, in order. Notes are secondary text above a section's body. */
+  sections: () => readonly TallySection[];
   children?: ReactNode;
   limit?: number;
 }) {
@@ -62,8 +65,10 @@ export function TallyRow({ marks, label, title, line, live = false, notes, panel
       </>}
     {open && <div className="tally-panel" id={panelId}>
       {title && <div className="tally-title">{title}</div>}
-      {notes && <div className="tally-notes">{notes()}</div>}
-      {panel()}
+      {sections().map((section) => <section key={section.key} className="tally-section">
+        {section.notes && <div className="tally-notes">{section.notes}</div>}
+        {section.body}
+      </section>)}
     </div>}
   </div>;
 }

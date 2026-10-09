@@ -285,13 +285,31 @@ describe("Tools and reasoning", () => {
     expect(summaries()).toEqual(["ran read a.ts", "ran read b.ts"]);
   });
 
-  it("gives each message its own step, even when two steps hold only calls", async () => {
+  it("joins adjacent silent steps into one row, with one panel section per step", async () => {
+    const ran = (id: string) => tool(id, { type: "done", output: "", isError: false });
+    await render({ messages: [
+      { id: "a1", role: "assistant", parts: [ran("x")] },
+      { id: "a2", role: "assistant", parts: [{ type: "thinking", text: "Next **y**." }, ran("y"), ran("z")] },
+      { id: "a3", role: "assistant", parts: [{ type: "text", text: "Now check it." }, ran("w")] },
+      { id: "a4", role: "assistant", parts: [ran("v")] },
+      answer("Done.", "a5"),
+    ] });
+    expect(rows().map((row) => row.querySelector(".tally-line")?.textContent ?? row.querySelector(".tally-body")?.textContent))
+      .toEqual(["3 tool calls in 2 steps: bash \u00d73", "Now check it.", "1 tool call: bash echo v"]);
+    expect(marks(rows()[0]!)).toEqual(["plain", "plain", "plain"]);
+    const panel = await openRow(rows()[0]!);
+    const sections = [...panel.querySelectorAll(".tally-section")];
+    expect(sections).toHaveLength(2);
+    expect(sections[1]?.querySelector(".tally-notes strong")?.textContent).toBe("y");
+    expect(summaries()).toEqual(["ran bash echo x", "ran bash echo y", "ran bash echo z"]);
+  });
+
+  it("names the running call on a row of silent steps", async () => {
     await render({ messages: [
       { id: "a1", role: "assistant", parts: [tool("x", { type: "done", output: "", isError: false })] },
-      { id: "a2", role: "assistant", parts: [tool("y", { type: "done", output: "", isError: false }), tool("z", { type: "done", output: "", isError: false })] },
-      answer("Done.", "a3"),
-    ] });
-    expect(rows().map((row) => row.querySelector(".tally-line")?.textContent)).toEqual(["1 tool call: bash echo x", "2 tool calls: bash echo y +1"]);
+      { id: "a2", role: "assistant", parts: [tool("y", { type: "running", output: "" })] },
+    ], running: true });
+    expect(rows()[0]!.querySelector(".tally-line")?.textContent).toBe("2 tool calls in 2 steps: bash echo y +1");
   });
 
   it("marks failed and stopped calls, and opens a failure to its error", async () => {

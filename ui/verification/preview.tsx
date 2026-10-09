@@ -148,7 +148,11 @@ const stepMessages = (running: boolean): TranscriptMessage[] => {
       ok("s2c", "web_search", { query: "Anthropic oauth usage endpoint resets_at" }),
       tool("s2d", "web_fetch", { url: "https://platform.openai.com/docs/api-reference/usage" }, done("HTTP 403", true)),
       ok("s2e", "web_fetch", { url: "https://docs.anthropic.com/en/api/usage-cost-api" })),
-    step("s3", "", "", ...Array.from({ length: 11 }, (_, index) => ok(`s3-${index}`, "read", { path: `internal/runtime/usage_${index}.go` }))),
+    step("s3", "", "", ...Array.from({ length: 4 }, (_, index) => ok(`s3-${index}`, "read", { path: `internal/runtime/usage_${index}.go` }))),
+    // Silent steps in a row, the way a model that rarely narrates works.
+    step("s3b", "", "Check the loader too.", ok("s3b-a", "bash", { command: "rg -n \"func Load\" internal/auth" })),
+    step("s3c", "", "", ok("s3c-a", "read", { path: "internal/auth/loader.go" }), ok("s3c-b", "read", { path: "internal/auth/token.go" })),
+    step("s3d", "", "", ok("s3d-a", "bash", { command: "ls ~/.cli-proxy-api" })),
     step("s4", "The router already calls both usage endpoints for every account. Let me check the live router payload.", "",
       ok("s4a", "bash", { command: "curl -s localhost:8317/v0/management/usage | jq keys" })),
     step("s5", "Credentials live in `~/.cli-proxy-api`. I'll write a read-only probe that reuses the router's own credential loader and prints only reset fields, never ids or tokens.",

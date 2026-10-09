@@ -29,7 +29,7 @@ describe("TallyRow", () => {
 
   it("renders its panel only while open, and points the toggle at it", async () => {
     const panel = vi.fn(() => <p>detail</p>);
-    await act(async () => root.render(<TallyRow marks={["plain"]} label="1 call" title="bash" panel={panel}><p>Text</p></TallyRow>));
+    await act(async () => root.render(<TallyRow marks={["plain"]} label="1 call" title="bash" sections={() => [{ key: "a", body: panel() }]}><p>Text</p></TallyRow>));
     const toggle = document.querySelector<HTMLButtonElement>("button.tally-toggle")!;
     expect(toggle.getAttribute("aria-label")).toBe("1 call");
     expect(panel).not.toHaveBeenCalled();
@@ -41,7 +41,7 @@ describe("TallyRow", () => {
   });
 
   it("makes the quiet line part of the toggle when there is no content", async () => {
-    await act(async () => root.render(<TallyRow marks={["live"]} live label="1 call" line="bash npm test" panel={() => null} />));
+    await act(async () => root.render(<TallyRow marks={["live"]} live label="1 call" line="bash npm test" sections={() => []} />));
     const toggle = document.querySelector<HTMLButtonElement>("button.tally-toggle")!;
     expect(toggle.textContent).toBe("1 call: bash npm test");
     expect(toggle.querySelector(".tally-line")?.hasAttribute("data-live")).toBe(true);
@@ -49,7 +49,7 @@ describe("TallyRow", () => {
   });
 
   it("keeps a failure hidden in the tail visible on the count", async () => {
-    await act(async () => root.render(<TallyRow marks={["plain", "plain", "plain", "bad"]} limit={3} label="4 calls" panel={() => null}><p>x</p></TallyRow>));
+    await act(async () => root.render(<TallyRow marks={["plain", "plain", "plain", "bad"]} limit={3} label="4 calls" sections={() => []}><p>x</p></TallyRow>));
     expect(document.querySelectorAll(".tally-mark")).toHaveLength(2);
     const more = document.querySelector<HTMLElement>(".tally-more")!;
     expect(more.textContent).toBe("+2");

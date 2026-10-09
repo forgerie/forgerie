@@ -146,15 +146,22 @@ export function SkillLoadGroup({ indices, running, children }: { indices: readon
   </Disclosure>;
 }
 
-/** One step of a reply: the text that introduced some tool calls, and the calls. Indices point into the message's parts. */
+/** One step's own parts, as indices into the message's parts. */
+export interface StepSection { id: string; thoughts: number[]; tools: number[] }
+/**
+ * One row of a reply's steps. A narrated step is its own row: the text that
+ * introduced some calls, and the calls. Adjacent steps without text share one
+ * row, so a run of silent work reads as one line instead of a stack of them.
+ */
 export interface ToolStepView {
+  /** The first step's id. */
   id: string;
   /** Text parts the model wrote before the calls. Empty when it wrote none. */
   narration: number[];
-  thoughts: number[];
-  tools: number[];
+  /** Each step in the row, in order. */
+  sections: StepSection[];
   marks: TallyTone[];
-  /** Stands in for absent narration: the running call, else the first, and how many more. */
+  /** Stands in for absent narration. */
   line: string;
   /** Each tool name with its count, and the outcome. */
   title: string;
@@ -164,7 +171,8 @@ export interface ToolStepView {
 }
 
 type StepTool = Extract<PartState, { type: "tool-call" }>;
-const stepIdOf = (part: PartState): string | undefined => {
+/** The step a part belongs to, from the `parentId` the transcript gives it. */
+export const stepIdOf = (part: PartState): string | undefined => {
   const parentId = "parentId" in part ? part.parentId : undefined;
   return typeof parentId === "string" && parentId.startsWith(STEP_PREFIX) ? parentId.slice(STEP_PREFIX.length) : undefined;
 };
@@ -185,22 +193,34 @@ function toneOf(part: StepTool, later: readonly StepTool[]): TallyTone {
   return later.some((other) => targetOf(other) === target && toolView(other) === "done") ? "warn" : "bad";
 }
 
-/** The steps of one reply, in order. Parts belong to a step through the `parentId` the transcript gives them. */
+interface RawStep extends StepSection { narration: number[]; first: number; last: number }
+
+/** The rows of one reply, in order. Parts belong to a step through the `parentId` the transcript gives them. */
 export function planToolSteps(parts: readonly PartState[]): ToolStepView[] {
-  const steps = new Map<string, { narration: number[]; thoughts: number[]; tools: number[] }>();
+  const steps = new Map<string, RawStep>();
   const calls: StepTool[] = [];
   parts.forEach((part, index) => {
     const id = stepIdOf(part);
     if (id === undefined) return;
-    const step = steps.get(id) ?? { narration: [], thoughts: [], tools: [] };
+    const step = steps.get(id) ?? { id, narration: [], thoughts: [], tools: [], first: index, last: index };
     steps.set(id, step);
+    step.last = index;
     if (part.type === "text") step.narration.push(index);
     else if (part.type === "reasoning") step.thoughts.push(index);
     else if (part.type === "tool-call") { step.tools.push(index); calls.push(part); }
   });
-  return [...steps].flatMap(([id, step]) => {
-    const tools = step.tools.map((index) => parts[index] as StepTool);
-    if (tools.length === 0) return [];
+  // A silent step joins the row before it when that row is silent too and
+  // nothing sits between them, so merging never reorders the reply.
+  const rows: RawStep[][] = [];
+  for (const step of steps.values()) {
+    if (step.tools.length === 0) continue;
+    const row = rows.at(-1);
+    const previous = row?.at(-1);
+    if (row && previous && step.narration.length === 0 && row[0]!.narration.length === 0 && previous.last + 1 === step.first) row.push(step);
+    else rows.push([step]);
+  }
+  return rows.map((row) => {
+    const tools = row.flatMap((step) => step.tools.map((index) => parts[index] as StepTool));
     const marks = tools.map((part) => toneOf(part, calls.slice(calls.indexOf(part) + 1)));
     const count = (tone: TallyTone) => marks.filter((mark) => mark === tone).length;
     const outcome = [
@@ -211,24 +231,34 @@ export function planToolSteps(parts: readonly PartState[]): ToolStepView[] {
     const names = new Map<string, number>();
     for (const part of tools) names.set(part.toolName, (names.get(part.toolName) ?? 0) + 1);
     const counts = [...names].map(([name, n]) => n > 1 ? `${name} \u00d7${n}` : name).join(", ");
-    const current = tools.find((part) => toneOf(part, []) === "live") ?? tools[0]!;
-    return [{
-      id, ...step, marks,
-      line: `${targetOf(current)}${tools.length > 1 ? ` +${tools.length - 1}` : ""}`,
+    const running = tools.find((part) => toneOf(part, []) === "live");
+    // One step names its call; a run of steps names its tools, unless one is running now.
+    const lead = running ?? (row.length === 1 ? tools[0] : undefined);
+    const line = lead ? `${targetOf(lead)}${tools.length > 1 ? ` +${tools.length - 1}` : ""}` : counts;
+    const calls_ = `${plural(tools.length, "tool call")}${row.length > 1 ? ` in ${row.length} steps` : ""}`;
+    return {
+      id: row[0]!.id, narration: row[0]!.narration,
+      sections: row.map(({ id, thoughts, tools: own }) => ({ id, thoughts, tools: own })),
+      marks, line,
       title: outcome ? `${counts} (${outcome})` : counts,
-      label: `${plural(tools.length, "tool call")}${outcome ? `, ${outcome}` : ""}`,
-      live: marks.includes("live"),
-    }];
+      label: `${calls_}${outcome ? `, ${outcome}` : ""}`,
+      live: running !== undefined,
+    };
   });
 }
 
 /**
- * The current reply's steps by id. The selector returns text, so a reply
- * re-renders when a step changes, not on every streamed token.
+ * The current reply's rows by first step id, and each step's row. The
+ * selector returns text, so a reply re-renders when a step changes, not on
+ * every streamed token.
  */
-export function useToolSteps(): ReadonlyMap<string, ToolStepView> {
+export function useToolSteps(): { rows: ReadonlyMap<string, ToolStepView>; rowOf: ReadonlyMap<string, string> } {
   const plan = useAuiState((s) => JSON.stringify(planToolSteps(s.message.parts)));
-  return useMemo(() => new Map((JSON.parse(plan) as ToolStepView[]).map((step) => [step.id, step])), [plan]);
+  return useMemo(() => {
+    const views = JSON.parse(plan) as ToolStepView[];
+    return { rows: new Map(views.map((view) => [view.id, view])),
+      rowOf: new Map(views.flatMap((view) => view.sections.map((section) => [section.id, view.id] as const))) };
+  }, [plan]);
 }
 
 /**
