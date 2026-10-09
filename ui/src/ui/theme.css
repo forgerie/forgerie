@@ -289,6 +289,31 @@ button:disabled { cursor: default; opacity: 0.4; }
 [data-composer-input] .cm-md-marker { display: inline-block; min-inline-size: var(--md-list-step); padding-inline-end: 0.4em; box-sizing: border-box;
   text-indent: 0; text-align: end; color: var(--muted-foreground); user-select: none; }
 [data-composer-input] .cm-md-number { font-variant-numeric: tabular-nums; }
+/* Right-to-left lines hang and draw their bars from the right. */
+[data-composer-input] .cm-line.cm-md-quote[dir="rtl"] { background-position: right;
+  background-image: repeating-linear-gradient(to left, color-mix(in oklab, var(--muted-foreground) 30%, transparent) 0 var(--md-bar), transparent var(--md-bar) var(--md-quote-step)); }
+[data-composer-input] .cm-line[dir="rtl"] .cm-md-marker { text-align: start; }
+/* A task item's checkbox stands where its bullet would, drawn as the ask options draw theirs. */
+[data-composer-input] .cm-md-task { position: relative; display: inline-block; box-sizing: border-box; inline-size: 1rem; block-size: 1rem; vertical-align: -0.15em;
+  border: 1px solid var(--line-focus); border-radius: 0.3125rem; background: var(--background); cursor: pointer; }
+[data-composer-input] .cm-md-number .cm-md-task { margin-inline-start: 0.4em; }
+[data-composer-input] .cm-md-task[aria-checked="true"] { border-color: var(--foreground); background: var(--foreground); }
+[data-composer-input] .cm-md-task[aria-checked="true"]::after { content: ""; position: absolute; inset: 0; margin: auto; inline-size: 0.28rem; block-size: 0.5rem; border: solid var(--background); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+/* The box holds no in-flow content, so checking it never moves its baseline. */
+[data-composer-input] .cm-line.cm-md-done { color: var(--muted-foreground); }
+/* Inline Markdown: the text takes the transcript's look (.markdown strong, code, a), and its markers stay, muted. */
+[data-composer-input] .cm-md-mark { color: var(--muted-foreground); }
+[data-composer-input] :is(.cm-md-strong, .cm-md-heading) { font-weight: 600; }
+[data-composer-input] .cm-md-em { font-style: italic; }
+[data-composer-input] .cm-md-strike { text-decoration: line-through; }
+[data-composer-input] .cm-md-code { border-radius: var(--radius-document); background: var(--muted); padding-inline: 0.2em; font-family: var(--code-font); font-size: 0.875em; font-variant-ligatures: none; }
+[data-composer-input] .cm-md-link { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+[data-composer-input] .cm-md-url { color: var(--muted-foreground); }
+/* Only the words carry a link's or a strike's line. Their markers and the address stay plain. */
+[data-composer-input] :is(.cm-md-link, .cm-md-strike):is(.cm-md-mark, .cm-md-url) { color: var(--muted-foreground); text-decoration: none; }
+/* A leading command reads as the chip the slash list showed. It is still text. */
+[data-composer-input] .cm-leading-chip { border: 1px solid var(--line); border-radius: var(--radius-document); background: var(--muted); padding: 0 0.3em 0.05em;
+  font-family: var(--code-font); font-size: 0.875em; font-variant-ligatures: none; }
 .composer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: clamp(var(--space-2), 4cqi, var(--space-4)); padding: 0 var(--space-2) var(--space-2); }
 .compact-send { min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); font-size: var(--small-text); }
 /* While the agent works, Stop keeps Send's slot. Queue sits beside it, outlined

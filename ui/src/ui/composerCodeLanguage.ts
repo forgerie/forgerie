@@ -1,7 +1,7 @@
 import { defineLanguageFacet, Language, LanguageDescription, LanguageSupport, languageDataProp, ParseContext } from "@codemirror/language";
 import type { Facet } from "@codemirror/state";
 import { languages } from "@codemirror/language-data";
-import { parser as commonmark, parseCode, type MarkdownParser } from "@lezer/markdown";
+import { Autolink, parser as commonmark, parseCode, Strikethrough, TaskList, type MarkdownParser } from "@lezer/markdown";
 import type { EditorView } from "@codemirror/view";
 import hljs from "highlight.js/lib/common";
 
@@ -28,7 +28,14 @@ let editing: MarkdownEditing | undefined;
 const ownFacet = defineLanguageFacet();
 
 /**
- * CommonMark with fenced code parsed in its own grammar, as lang-markdown's
+ * The GFM the transcript draws that a draft can show while it is typed: task
+ * items, strikethrough, and bare links. Tables stay plain text in a draft, so
+ * the parser does not look for them.
+ */
+const DRAFT_GFM = [TaskList, Strikethrough, Autolink];
+
+/**
+ * CommonMark and `DRAFT_GFM`, with fenced code parsed in its own grammar, as lang-markdown's
  * `markdown()` builds it. lang-markdown itself also brings the HTML, CSS, and
  * JavaScript grammars for inline HTML, so it loads after the bar draws. Once it
  * has, the language shares its data facet, and its list and quote commands
@@ -57,7 +64,9 @@ function markdownWith(data: Facet<{ [name: string]: unknown }>): LanguageSupport
   // lang-markdown's parser carries its facet on the Document node. Before it loads, ours does.
   const base = editing ? editing.commonmarkLanguage.parser as MarkdownParser
     : commonmark.configure({ props: [languageDataProp.add({ Document: data })] });
-  return new LanguageSupport(new Language(data, base.configure(parseCode({ codeParser })), [], "markdown"));
+  const language = new Language(data, base.configure([...DRAFT_GFM, parseCode({ codeParser })]), [], "markdown");
+  // A URL pasted over selected text makes that text a link.
+  return new LanguageSupport(language, editing ? [editing.pasteURLAsLink] : []);
 }
 
 function codeParser(info: string) {

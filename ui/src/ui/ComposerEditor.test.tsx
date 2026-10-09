@@ -225,3 +225,64 @@ describe("lists and quotes in the composer", () => {
     await press("Home"); expect(input().selectionStart).toBe(2);
   });
 });
+
+describe("Markdown niceties in the composer", () => {
+  const box = () => document.querySelector<HTMLElement>(".cm-md-task");
+  const classed = (name: string) => [...input().querySelectorAll<HTMLElement>(`.${name}`)].map((node) => node.textContent);
+  it("draws a task item as a checkbox that a press or Ctrl+Shift+X checks, and Backspace turns back into a bullet", async () => {
+    await render(); await type("- [ ] buy milk");
+    expect(box()?.getAttribute("aria-checked")).toBe("false");
+    expect(input().querySelector(".cm-line")!.textContent).toBe("buy milk");
+    await act(async () => { box()!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+    expect(text()).toBe("- [x] buy milk"); expect(box()?.getAttribute("aria-checked")).toBe("true");
+    expect(input().querySelector(".cm-line")!.classList.contains("cm-md-done")).toBe(true);
+    await cursor(text().length); await press("X", { ctrlKey: true, shiftKey: true, keyCode: 88 });
+    expect(text()).toBe("- [ ] buy milk");
+    await cursor("- [ ] ".length); await press("Backspace"); expect(text()).toBe("- buy milk");
+  });
+  it("continues a task list with an unchecked item on Enter", async () => {
+    await render(); await act(async () => { await loadMarkdownEditing(); });
+    await type("- [x] done"); await press("Enter"); expect(text()).toBe("- [x] done\n- [ ] ");
+  });
+  it("styles bold, italic, struck, code, and link text, and mutes their markers", async () => {
+    await render(); await type("**bold** *it* ~~gone~~ `code` [site](https://example.com) # not a heading");
+    expect(classed("cm-md-strong").join("")).toBe("**bold**");
+    expect(classed("cm-md-em").join("")).toBe("*it*");
+    expect(classed("cm-md-strike").join("")).toBe("~~gone~~");
+    expect(classed("cm-md-code")).toEqual(["code"]);
+    expect(classed("cm-md-link")).toContain("site");
+    expect(classed("cm-md-url")).toEqual(["https://example.com"]);
+    expect(classed("cm-md-mark")).toEqual(expect.arrayContaining(["**", "*", "~~", "`"]));
+    await type("# Title"); expect(classed("cm-md-heading").join("")).toContain("Title");
+  });
+  it("draws a leading command as a chip, but not in an ask answer", async () => {
+    await render(); await type("/review the branch");
+    expect(classed("cm-leading-chip")).toEqual(["/review"]);
+    await type("please /review"); expect(classed("cm-leading-chip")).toEqual([]);
+    const ask: AskBinding = { ask: { askId: "a", askedAt: "now", questions: [{ id: "q", question: "Why?", options: [] }] }, phase: { type: "answering" }, offline: false, onSubmit: () => {}, onDismiss: () => {}, onChat: async () => {} };
+    await render({ ask }); await type("/review"); expect(classed("cm-leading-chip")).toEqual([]);
+  });
+  it("turns off correction and capitals while the caret is in a path, model, or command token", async () => {
+    await render();
+    const assisted = () => [input().getAttribute("spellcheck"), input().getAttribute("autocorrect"), input().getAttribute("autocapitalize"), input().getAttribute("writingsuggestions")];
+    await type("fix it"); expect(assisted()).toEqual(["true", "on", "sentences", "true"]);
+    for (const token of ["read @src/ui/the", "read @\"my folder/fi", "use #claude-op", "/revi"]) {
+      await type(token); expect(assisted(), token).toEqual(["false", "off", "off", "false"]);
+    }
+    await type("read @src/ui/theme.css and"); expect(assisted()).toEqual(["true", "on", "sentences", "true"]);
+    await type("mail me@example"); expect(assisted()[0]).toBe("true");
+  });
+  it("hangs a right-to-left item or quote from the right", async () => {
+    await render(); await type("> שלום עולם\n- مرحبا\n- hello");
+    const lines = [...input().querySelectorAll<HTMLElement>(".cm-line")];
+    expect(lines.map((line) => line.getAttribute("dir"))).toEqual(["rtl", "rtl", null]);
+  });
+  it("makes selected text a link when a URL is pasted over it", async () => {
+    await render(); await act(async () => { await loadMarkdownEditing(); });
+    await type("see the docs"); await act(async () => { view().dispatch({ selection: EditorSelection.range(8, 12) }); });
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { files: [], getData: () => "https://example.com/docs", types: ["text/plain"] } });
+    await act(async () => { input().dispatchEvent(event); });
+    await vi.waitFor(() => expect(text()).toBe("see the [docs](https://example.com/docs)"));
+  });
+});

@@ -25,6 +25,15 @@ import { NoteTray, type NotesBinding } from "./NoteTray";
 import { useComposerKeyboard, type ComposerSessionKeys } from "./useComposerKeyboard";
 import { ComposerEditor, type ComposerInputElement } from "./ComposerEditor";
 
+/**
+ * A file (`@path`, `@"a path"`, `!@path`), a model (`#id`), or a leading
+ * command (`/name`) under the caret. The keyboard must not correct or
+ * capitalize these, because they are names, not words.
+ */
+const LITERAL_TOKEN = /(?:^|\s)(?:!?@ ?(?:"[^"]*|\S*)|#\S*)$|^\/\S*$/u;
+/** The command word that `isCommand` sends to Pi. */
+const LEADING_COMMAND = /^\/[^\s/]\S*/u;
+
 /** `!` commands. The binding owns the server rules; the bar adds its own blockers. */
 export interface ShellBinding { availability: ShellAvailability; onRun: (text: string) => Promise<void> }
 
@@ -237,6 +246,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
         describedBy={control?.headingId ?? (dialogInput ? dialogControl.headingId : undefined)}
         enterKeyHint={control && !control.last && control.route === "answer" ? "next" : "send"}
         prose={!shellMode} keyShortcuts="Control+Alt+I"
+        literalToken={LITERAL_TOKEN} leadingChip={literal || shellMode ? undefined : LEADING_COMMAND}
         maxLength={control ? OTHER_TEXT_MAX_LENGTH : undefined}
         // One Enter route sees normalized modifiers before every mode, including ordinary chat.
         // Suggestions, shell clearing, Stop, and idle double Escape share it too.

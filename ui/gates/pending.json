@@ -352,7 +352,7 @@
   "ui/settings/SettingsView.tsx: AgentRow, SettingsView"
  ],
  "inline style beyond custom properties": [
-  "ui/Composer.tsx:363",
+  "ui/Composer.tsx:373",
   "ui/ImageGallery.tsx:47",
   "ui/ImageViewer.tsx:158",
   "ui/Picker.tsx:298"

@@ -34,6 +34,13 @@ const DRAFT = [
   "> a quoted line that runs long enough to wrap across the folded screen",
   "> > a nested quote",
 ].join("\n");
+const RICH = [
+  "/review the **composer** branch, *carefully*",
+  "- [ ] buy milk",
+  "- [x] ~~write tests~~ for `composerMarkup.ts`",
+  "> see [the docs](https://example.com/docs)",
+  "- שלום עולם",
+].join("\n");
 let cdp;
 try {
   await waitForDebugger(port);
@@ -107,7 +114,37 @@ try {
       await pressCombo(cdp, "backspace"); assert.equal(await draft(), "- hi\n");
       await clear(); await insert("> q"); await pressCombo(cdp, "enter"); assert.equal(await draft(), "> q\n> ");
       await pressCombo(cdp, "backspace"); assert.equal(await draft(), "> q\n");
-      result.combinations.push({ scheme, posture: posture.name, wraps: reading.wraps, home: true, press: true, backspace: true });
+      // Tasks: a tap checks one, Ctrl+Shift+X clears it, and Return continues with an unchecked item.
+      await clear(); await insert(RICH);
+      await until("document.querySelectorAll('.cm-md-task').length === 2");
+      const { data: richShot } = await cdp.send("Page.captureScreenshot", { format: "png" });
+      await writeFile(join(output, `${scheme}-${posture.name}-rich.png`), Buffer.from(richShot, "base64"));
+      const styles = await evaluate(cdp, `(() => {
+        const style = (name) => { const node = ${INPUT}.querySelector('.' + name + ':not(.cm-md-mark):not(.cm-md-url)'); return node ? getComputedStyle(node) : undefined; };
+        return { strong: style('cm-md-strong')?.fontWeight, em: style('cm-md-em')?.fontStyle, strike: style('cm-md-strike')?.textDecorationLine,
+          code: style('cm-md-code')?.fontFamily, link: style('cm-md-link')?.textDecorationLine, chip: document.querySelector('.cm-leading-chip')?.textContent,
+          rtl: [...${INPUT}.querySelectorAll('.cm-line')].filter((line) => line.getAttribute('dir') === 'rtl').length };
+      })()`);
+      assert.equal(styles.strong, "600"); assert.equal(styles.em, "italic"); assert.equal(styles.strike, "line-through");
+      assert.match(styles.code, /JetBrains Mono/u); assert.equal(styles.link, "underline"); assert.equal(styles.chip, "/review"); assert.equal(styles.rtl, 1);
+      await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 }); await sleep(300);
+      const tap = await evaluate(cdp, `(() => { document.querySelector('.cm-md-task').scrollIntoView({ block: 'nearest' }); const box = document.querySelector('.cm-md-task').getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; })()`);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [tap] });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await until(`${INPUT}.value.includes('- [x] buy milk')`);
+      await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+      await evaluate(cdp, `${INPUT}.focus()`);
+      const milk = await evaluate(cdp, `${INPUT}.value.indexOf('buy milk') + 'buy milk'.length`);
+      await evaluate(cdp, `${INPUT}.setSelectionRange(${milk}, ${milk})`);
+      const chord = { key: "X", code: "KeyX", windowsVirtualKeyCode: 88, modifiers: 10 };
+      await cdp.send("Input.dispatchKeyEvent", { ...chord, type: "rawKeyDown" }); await cdp.send("Input.dispatchKeyEvent", { ...chord, type: "keyUp" });
+      await until(`${INPUT}.value.includes('- [ ] buy milk')`);
+      await clear(); await insert("- [x] done"); await pressCombo(cdp, "enter"); assert.equal(await draft(), "- [x] done\n- [ ] ");
+      // Paths and models get no correction while the caret is in them.
+      await clear(); await insert("read @src/ui/the");
+      assert.equal(await evaluate(cdp, `${INPUT}.getAttribute('autocorrect')`), "off");
+      await insert("me.css now"); assert.equal(await evaluate(cdp, `${INPUT}.getAttribute('autocorrect')`), "on");
+      result.combinations.push({ scheme, posture: posture.name, wraps: reading.wraps, home: true, press: true, backspace: true, task: true, inline: true, chip: true, literal: true });
     }
   }
   assert.deepEqual(result.errors, []); assert.deepEqual(result.apiRequests, []);

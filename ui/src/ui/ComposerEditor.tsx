@@ -8,7 +8,7 @@ import { Annotation, Compartment, EditorSelection, EditorState, Prec, type Chang
 import { EditorView, keymap, placeholder as placeholderText } from "@codemirror/view";
 import { codeHighlighter } from "./codeTokens";
 import { completeComposerCodeFence, composerCodeBlock, leaveComposerCodeBlock, protectComposerCodeBlockBoundary } from "./composerCodeBlock";
-import { composerMarkup, composerMarkupLineStart, deleteComposerMarkup } from "./composerMarkup";
+import { composerMarkup, composerMarkupLineStart, deleteComposerMarkup, leadingChip, toggleComposerTask } from "./composerMarkup";
 import { composerMarkdown, continueMarkup, deleteMarkup, loadMarkdownEditing } from "./composerCodeLanguage";
 
 /**
@@ -45,8 +45,15 @@ export interface ComposerEditorProps {
   describedBy?: string | undefined;
   keyShortcuts?: string | undefined;
   enterKeyHint?: "send" | "next" | undefined;
-  /** Prose gets spelling, correction, and capitals. A shell command gets none. */
+  /** Prose gets spelling, correction, capitals, Markdown styling, and writing suggestions. A shell command gets none. */
   prose?: boolean;
+  /**
+   * Tested against the caret's line up to the caret. A match means the caret
+   * is in a token the keyboard must not correct or capitalize, such as a path.
+   */
+  literalToken?: RegExp | undefined;
+  /** A leading token that matches this pattern shows as a chip, such as a command the host runs. */
+  leadingChip?: RegExp | undefined;
   /** Typing stops growing the draft at this length. A change from outside the editor, such as dictation, may still pass it. */
   maxLength?: number | undefined;
   disabled?: boolean | undefined;
@@ -83,14 +90,13 @@ export function ComposerEditor(props: ComposerEditorProps) {
   const view = useRef<EditorView>(undefined);
   const latest = useRef({ props, triggers });
   latest.current = { props, triggers };
-  const compartments = useRef<{ editable: Compartment; attributes: Compartment; placeholder: Compartment; language: Compartment; markup: Compartment }>(undefined);
-  compartments.current ??= { editable: new Compartment(), attributes: new Compartment(), placeholder: new Compartment(), language: new Compartment(), markup: new Compartment() };
+  const compartments = useRef<{ editable: Compartment; attributes: Compartment; placeholder: Compartment; language: Compartment; markup: Compartment; chip: Compartment }>(undefined);
+  compartments.current ??= { editable: new Compartment(), attributes: new Compartment(), placeholder: new Compartment(), language: new Compartment(), markup: new Compartment(), chip: new Compartment() };
   const { inputRef } = props;
 
   const prose = props.prose !== false;
   const attributes: Record<string, string> = {
     "data-composer-input": "", "aria-label": props.label,
-    spellcheck: String(prose), autocorrect: prose ? "on" : "off", autocapitalize: prose ? "sentences" : "off",
     ...(props.describedBy ? { "aria-describedby": props.describedBy } : {}),
     ...(props.keyShortcuts ? { "aria-keyshortcuts": props.keyShortcuts } : {}),
     ...(props.enterKeyHint ? { enterkeyhint: props.enterKeyHint } : {}),
@@ -122,6 +128,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
           composerCodeBlock(),
           // A shell command is not Markdown: its `-` and `>` stay as typed.
           parts.markup.of(prose ? composerMarkup() : []),
+          parts.chip.of(props.leadingChip ? leadingChip(props.leadingChip) : []),
           indentOnInput(),
           indentUnit.of("  "),
           syntaxHighlighting(codeHighlighter),
@@ -129,6 +136,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
           EditorView.perLineTextDirection.of(true),
           parts.editable.of(editability(disabled)),
           parts.attributes.of(EditorView.contentAttributes.of(attributes)),
+          // The editor reads these again after every change and caret move.
+          EditorView.contentAttributes.of((editor) => keyboardAssistance(editor, latest.current.props)),
           parts.placeholder.of(placeholderText(props.placeholder)),
           EditorState.transactionFilter.of((transaction) => {
             const max = latest.current.props.maxLength;
@@ -166,6 +175,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
             { key: "ArrowDown", run: leaveComposerCodeBlock },
             { key: "Tab", run: indentMore, shift: indentLess },
             { key: "Home", run: composerMarkupLineStart },
+            { key: "Mod-Shift-x", run: (editor) => toggleComposerTask(editor) },
             { key: "Backspace", run: (editor) => protectComposerCodeBlockBoundary(editor, "backward") || deleteComposerMarkup(editor) || deleteMarkup(editor) },
             { key: "Delete", run: (editor) => protectComposerCodeBlockBoundary(editor, "forward") },
             ...historyKeymap,
@@ -207,8 +217,9 @@ export function ComposerEditor(props: ComposerEditorProps) {
       parts.attributes.reconfigure(EditorView.contentAttributes.of(JSON.parse(attributesKey) as Record<string, string>)),
       parts.placeholder.reconfigure(placeholderText(props.placeholder)),
       parts.markup.reconfigure(prose ? composerMarkup() : []),
+      parts.chip.reconfigure(props.leadingChip ? leadingChip(props.leadingChip) : []),
     ] });
-  }, [disabled, attributesKey, props.placeholder, prose]);
+  }, [disabled, attributesKey, props.placeholder, prose, props.leadingChip]);
 
   // The composer can change the text itself: recall, a chosen suggestion,
   // dictation, a restored draft. The editor takes the change as an edit, so
@@ -230,6 +241,18 @@ export function ComposerEditor(props: ComposerEditorProps) {
   }, [value]);
 
   return <div ref={host} className={props.className} />;
+}
+
+const proseAssistance = { spellcheck: "true", autocorrect: "on", autocapitalize: "sentences", writingsuggestions: "true" };
+const literalAssistance = { spellcheck: "false", autocorrect: "off", autocapitalize: "off", writingsuggestions: "false" };
+
+/** Prose gets the keyboard's help. A shell command, or a token such as a path under the caret, gets none. */
+function keyboardAssistance(view: EditorView, props: Pick<ComposerEditorProps, "prose" | "literalToken">): Record<string, string> {
+  if (props.prose === false) return literalAssistance;
+  if (!props.literalToken) return proseAssistance;
+  const { head } = view.state.selection.main;
+  const line = view.state.doc.lineAt(head);
+  return props.literalToken.test(view.state.sliceDoc(line.from, head)) ? literalAssistance : proseAssistance;
 }
 
 function editability(disabled: boolean) {
