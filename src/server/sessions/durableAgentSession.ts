@@ -11,6 +11,7 @@ import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durable
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { answerChildQuestion, childEntryText, childMessages, childWorkIsLive, isChildEntryKind, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
 import type { DurableChildHost } from "./durableChildHost.js";
+import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 
 export interface DurableAgentSessionOptions {
   services: AgentSessionServices;
@@ -69,8 +70,10 @@ export class DurableAgentSession implements PiAgentSession {
       ?? (saved.model === null ? undefined : this.modelRuntime.getModel(saved.model.provider, saved.model.modelId))
       ?? (defaultProvider === undefined || defaultModel === undefined ? undefined : this.modelRuntime.getModel(defaultProvider, defaultModel))
       ?? this.modelRuntime.getAvailableSnapshot()[0];
-    const savedLevel = this.validThinkingLevel(saved.thinkingLevel);
-    const level = options.initialThinkingLevel ?? savedLevel ?? this.settingsManager.getDefaultThinkingLevel() ?? "off";
+    // SDK context reports "off" even when no selection exists. Only an explicit entry overrides the default.
+    const hasSavedThinking = sessionManager.getBranch().some((entry) => entry.type === "thinking_level_change");
+    const savedLevel = hasSavedThinking && isKnownThinkingLevel(saved.thinkingLevel) ? saved.thinkingLevel : undefined;
+    const level = options.initialThinkingLevel ?? savedLevel ?? this.settingsManager.getDefaultThinkingLevel() ?? "medium";
     this.thinkingLevel = this.model === undefined ? "off" : clampThinkingLevel(this.model, level);
     const extensions = this.resourceLoader.getExtensions();
     this.runner = new ExtensionRunner(extensions.extensions, extensions.runtime, services.cwd, sessionManager, new ModelRegistry(this.modelRuntime));
@@ -138,6 +141,7 @@ export class DurableAgentSession implements PiAgentSession {
         return new NodeExecutionEnv({ cwd: cwd ?? this.options.services.cwd, ...(shellPath === undefined ? {} : { shellPath }) });
       } }),
     });
+    await this.restoreAgentSelection();
     await this.startChildAgents();
     this.stream = await watchEvents(this.journal.harness, this.journal.conversation.id, context);
     await this.applyEvent(this.stream.snapshot);
@@ -493,9 +497,18 @@ export class DurableAgentSession implements PiAgentSession {
     }
   }
 
-  private validThinkingLevel(level: string): PiAgentSession["thinkingLevel"] | undefined {
-    if (level === "off" || level === "minimal" || level === "low" || level === "medium" || level === "high" || level === "xhigh") return level;
-    return undefined;
+  private async restoreAgentSelection(): Promise<void> {
+    // A reopened root ignores creation options. Its native state, not the JSONL projection, owns the selection.
+    const agent = await this.journal.conversation.agent(context);
+    this.model = agent.model === undefined ? undefined : this.modelRuntime.getModel(agent.model.provider, agent.model.modelId);
+    this.thinkingLevel = agent.thinkingLevel;
+    const saved = this.sessionManager.buildSessionContext();
+    if (agent.model !== undefined && (saved.model?.provider !== agent.model.provider || saved.model.modelId !== agent.model.modelId)) {
+      this.sessionManager.appendModelChange(agent.model.provider, agent.model.modelId);
+    }
+    if (saved.thinkingLevel !== this.thinkingLevel || !this.sessionManager.getBranch().some((entry) => entry.type === "thinking_level_change")) {
+      this.sessionManager.appendThinkingLevelChange(this.thinkingLevel);
+    }
   }
 
   private applyChange(change: MessageChange): void {
