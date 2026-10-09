@@ -98,6 +98,8 @@ describe("sessionNameGenerator", () => {
       .toBe("Fix session naming");
     expect(sessionNameIntent('<skill name="se-debug" location="/skills/se-debug/SKILL.md">\nDebug workflow\n</skill>'))
       .toBe("/skill:se-debug");
+    expect(sessionNameIntent('<skill name="se-debug" location="/skills/se-debug/SKILL.md">\n---\nname: se-debug\n---\nDebug workflow\n</skill>\nFix session naming'))
+      .toBe("Fix session naming");
   });
 
   it("builds deterministic names only for skill commands without request text", () => {

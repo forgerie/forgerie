@@ -6,6 +6,7 @@ import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, sectio
 import type { PiAgentSession } from "./piSessionService.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { DurableSdkTools } from "./durableSdkTools.js";
+import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
 
 export interface DurableAgentSessionOptions {
@@ -210,7 +211,7 @@ export class DurableAgentSession implements PiAgentSession {
       text = await expandSdkPrompt(text, this.promptTemplates);
       if (command?.[1]?.startsWith("skill:") === true) {
         const skill = this.resourceLoader.getSkills().skills.find((candidate) => candidate.name === command[1]?.slice(6));
-        if (skill !== undefined) text = `<skill name="${skill.name}" location="${skill.filePath}">\n${await readFile(skill.filePath, "utf8")}\n</skill>\n${command[2] ?? ""}`;
+        if (skill !== undefined) text = formatSkillInvocation({ name: skill.name, location: skill.filePath, baseDir: skill.baseDir }, await readFile(skill.filePath, "utf8"), command[2] ?? "");
       }
     }
     const input = await this.extensionRunner.emitInput(text, options?.images, options?.source ?? "interactive", this.isStreaming ? options?.streamingBehavior : undefined);

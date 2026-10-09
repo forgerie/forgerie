@@ -145,11 +145,18 @@ async function promptResourceRecordsFromSkills(skills: readonly CanonicalSkillRe
 export function expandPromptResourceCommand(command: PromptResourceCommandRecord, argsText: string): string {
   if (command.source === "prompt") return substituteArgs(command.content, parseCommandArgs(argsText));
   const skillName = command.name.startsWith("skill:") ? command.name.slice("skill:".length) : command.name;
-  const body = stripFrontmatter(command.content).trim();
-  const location = command.filePath ?? command.origin;
-  const baseDir = command.baseDir ?? "";
-  const skillBlock = `<skill name="${skillName}" location="${location}">
-References are relative to ${baseDir}.
+  return formatSkillInvocation({ name: skillName, location: command.filePath ?? command.origin, baseDir: command.baseDir ?? "" }, command.content, argsText);
+}
+
+/**
+ * Expand a `/skill:name` command the way Pi's `AgentSession` does. The browser
+ * and session naming parse this exact shape, so every expansion path must
+ * produce it: no frontmatter, a blank line before the typed argument.
+ */
+export function formatSkillInvocation(skill: { name: string; location: string; baseDir: string }, fileContent: string, argsText: string): string {
+  const body = stripFrontmatter(fileContent).trim();
+  const skillBlock = `<skill name="${skill.name}" location="${skill.location}">
+References are relative to ${skill.baseDir}.
 
 ${body}
 </skill>`;

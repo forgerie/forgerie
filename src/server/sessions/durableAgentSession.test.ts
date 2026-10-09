@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, SessionManager, createAgentSessionServices, createCodemodeExtension, defineTool } from "@earendil-works/pi-coding-agent";
@@ -13,9 +13,13 @@ afterEach(async () => {
   await Promise.all(sessions.splice(0).map((session) => session.close()));
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
-async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[]) {
+async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[], skillFile?: string) {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-session-"));
   directories.push(directory);
+  if (skillFile !== undefined) {
+    await mkdir(join(directory, "skills", "handoff"), { recursive: true });
+    await writeFile(join(directory, "skills", "handoff", "SKILL.md"), skillFile);
+  }
   const modelRuntime = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json") });
   const provider = fauxProvider();
   modelRuntime.registerNativeProvider(provider.provider);
@@ -23,6 +27,7 @@ async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[
   if (model === undefined) throw new Error("Configured provider must have a model");
   const services = await createAgentSessionServices({ cwd: directory, agentDir: join(directory, "agent"), modelRuntime,
     resourceLoaderOptions: { noExtensions: true, noSkills: true, noContextFiles: true, noPromptTemplates: true,
+      ...(skillFile === undefined ? {} : { additionalSkillPaths: [join(directory, "skills", "handoff", "SKILL.md")] }),
       ...(codemode ? { extensionFactories: [{ name: "codemode", factory: createCodemodeExtension() }] } : {}) } });
   services.settingsManager.applyOverrides({ compaction: { enabled: false }, ...(defaultTools === undefined ? codemode ? { defaultTools: ["read", "bash", "edit", "write", "+codemode"] } : {} : { defaultTools }) });
   const manager = SessionManager.create(directory, join(directory, "sessions"));
@@ -93,6 +98,20 @@ describe("SDK-compatible Durable execution", () => {
     provider.setResponses([fauxAssistantMessage("after reload")]);
     await session.prompt("continue after reload");
     expect(provider.state.callCount).toBe(1);
+  });
+  it("expands a /skill: command in Pi's exact block shape so the browser can show it as a skill", async () => {
+    const skill = "---\nname: handoff\ndescription: Hand off the session.\n---\n\n# Handoff\n\nCall the tool.\n";
+    const { directory, provider, session } = await fixture([], false, undefined, skill);
+    provider.setResponses([fauxAssistantMessage("ok"), fauxAssistantMessage("ok")]);
+    const location = join(directory, "skills", "handoff", "SKILL.md");
+    const block = `<skill name="handoff" location="${location}">\nReferences are relative to ${join(directory, "skills", "handoff")}.\n\n# Handoff\n\nCall the tool.\n</skill>`;
+    const userTexts = () => session.messages.filter((message) => message.role === "user")
+      .map((message) => typeof message.content === "string" ? message.content : message.content.map((part) => part.type === "text" ? part.text : "").join(""));
+
+    await session.prompt("/skill:handoff resize the sidebar");
+    await session.prompt("/skill:handoff");
+
+    expect(userTexts()).toEqual([`${block}\n\nresize the sidebar`, block]);
   });
   it("does not grant replay safety to an extension that overrides read", async () => {
     const override = defineTool({ name: "read", label: "Effect", description: "A custom read with a write", parameters: Type.Object({}),

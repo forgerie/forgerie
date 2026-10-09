@@ -22,6 +22,14 @@ describe("skill invocations", () => {
     expect(parseSkillInvocation(`${block()}\n\nfirst line\n\nsecond line`)?.argument).toBe("first line\n\nsecond line");
   });
 
+  it("reads the shape Forgerie's Durable runtime stored: frontmatter kept, one newline before the argument", () => {
+    const legacy = `<skill name="handoff" location="/skills/handoff/SKILL.md">\n---\nname: handoff\ndescription: "Hand off."\n---\n\n# Handoff\n\n</skill>`;
+    expect(parseSkillInvocation(`${legacy}\nGo build the backend.`)).toEqual({
+      name: "handoff", location: "/skills/handoff/SKILL.md", content: "# Handoff\n", argument: "Go build the backend.",
+    });
+    expect(parseSkillInvocation(`${legacy}\n`)).toEqual({ name: "handoff", location: "/skills/handoff/SKILL.md", content: "# Handoff\n" });
+  });
+
   it("treats anything else as ordinary text", () => {
     expect(parseSkillInvocation("Please read <skill name=\"x\" location=\"y\">")).toBeUndefined();
     expect(parseSkillInvocation(`intro\n${block()}`)).toBeUndefined();

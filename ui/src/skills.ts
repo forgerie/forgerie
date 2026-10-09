@@ -6,13 +6,17 @@ export interface SkillInvocation { name: string; location: string; content: stri
 
 // Pi's own format (pi-coding-agent `formatSkillInvocation` / `parseSkillBlock`).
 // The whole message must be the block, so prose that quotes one stays text.
-const SKILL_BLOCK = /^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/;
+// Forgerie's Durable runtime briefly wrote one newline before the argument and
+// kept the SKILL.md frontmatter; those stored messages still parse.
+const SKILL_BLOCK = /^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n([\s\S]*))?$/;
+const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/;
 
 export function parseSkillInvocation(text: string): SkillInvocation | undefined {
   const match = SKILL_BLOCK.exec(text);
   if (!match) return undefined;
   const argument = match[4]?.trim();
-  return { name: match[1]!, location: match[2]!, content: match[3]!, ...(argument ? { argument } : {}) };
+  const content = match[3]!.replace(FRONTMATTER, "").replace(/^\s+/, "");
+  return { name: match[1]!, location: match[2]!, content, ...(argument ? { argument } : {}) };
 }
 
 /** The agent loading a skill: a `read` of that skill's `SKILL.md`. */

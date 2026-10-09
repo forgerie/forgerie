@@ -10,7 +10,7 @@ const FALLBACK_FILLER_WORDS = new Set([
 ]);
 const RELAY_HANDOFF_FIRST_LINE = /^Relay\s+"([^"\n]+)"\s+leg\s+(\d+)\s+begins now\.?\s*(?:\n|$)/;
 const SKILL_COMMAND = /^\/skill:([a-z0-9][a-z0-9_-]*)\s*$/i;
-const EXPANDED_SKILL = /^<skill name="([^"]+)" location="[^"]+">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/;
+const EXPANDED_SKILL = /^<skill name="([^"]+)" location="[^"]+">\n[\s\S]*?\n<\/skill>(?:\n([\s\S]*))?$/;
 
 export function sessionNameIntent(firstMessage: string): string {
   const input = firstMessage.trim();
