@@ -24,8 +24,9 @@ const answer = (text: string, id = "reply"): TranscriptMessage => ({ id, role: "
 const reply = answer("Hello");
 const tool = (id: string, state: ToolState, name = "bash", args: unknown = { command: `echo ${id}` }) =>
   ({ type: "tool" as const, id, name, args, state });
-function Fixture({ messages = [], running = false, loading = false, disabled = false, onNew = async () => {}, onCancel = async () => {} }: {
+function Fixture({ messages = [], running = false, loading = false, disabled = false, onNew = async () => {}, onCancel = async () => {}, onOpenFile }: {
   messages?: TranscriptMessage[];
+  onOpenFile?: (path: string) => void;
   running?: boolean;
   loading?: boolean;
   disabled?: boolean;
@@ -36,7 +37,7 @@ function Fixture({ messages = [], running = false, loading = false, disabled = f
   const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel,
     isRunning: running, isLoading: loading, isDisabled: disabled });
   return <AssistantRuntimeProvider runtime={runtime}>
-    <SessionFrame name="A long session title" status={running ? "Running" : "Connected"}><Thread /></SessionFrame>
+    <SessionFrame name="A long session title" status={running ? "Running" : "Connected"}><Thread onOpenFile={onOpenFile} /></SessionFrame>
   </AssistantRuntimeProvider>;
 }
 async function render(props: Parameters<typeof Fixture>[0] = {}) {
@@ -588,6 +589,17 @@ describe("Rich blocks, round two", () => {
     expect([...document.querySelectorAll('.path-tree-name')].map((name) => name.textContent)).toEqual(["src/server/", "app.ts", "guide.ts", "old.md"]);
     expect(document.querySelector('.path-tree-row[data-mark="deleted"] .path-tree-icon')?.getAttribute('aria-label')).toBe("deleted");
     expect(document.querySelector('.path-tree-note')?.textContent).toBe("wires it");
+    // Without a way to open files, the tree is only a listing.
+    expect(document.querySelector('.path-tree-open')).toBeNull();
+  });
+
+  it("opens a file named in a files fence by its full path", async () => {
+    const onOpenFile = vi.fn();
+    await render({ onOpenFile, messages: [answer("```files\nsrc/server/\n  ~ app.ts # wires it\n- old.md\n```")] });
+    const opens = [...document.querySelectorAll<HTMLButtonElement>('.path-tree-open')];
+    expect(opens.map((open) => open.title)).toEqual(["src/server/app.ts"]);
+    await act(async () => opens[0]!.click());
+    expect(onOpenFile).toHaveBeenCalledWith("src/server/app.ts");
   });
 
   it("renders a facts fence as a definition list with Markdown values", async () => {

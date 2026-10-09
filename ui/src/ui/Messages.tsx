@@ -51,8 +51,8 @@ function ResponseCopy() {
 
 // A step renders its parts by index: narration as the row's text, thinking
 // and calls in its panel.
-const stepText = { Text: MarkdownText };
-const stepThought = { Reasoning: MarkdownText };
+const stepText = { Text: () => <MarkdownText /> };
+const stepThought = { Reasoning: () => <MarkdownText /> };
 const stepTools = { tools: { Fallback: ToolCall } };
 function stepRow(step: ToolStepView) {
   const parts = (indices: readonly number[], components: Parameters<typeof MessagePrimitive.PartByIndex>[0]["components"]) =>
@@ -77,7 +77,8 @@ export function UserMessage() {
   </MessagePrimitive.Root>;
 }
 
-export function AssistantMessage() {
+/** `onOpenFile` opens a file a reply names in a `files` block. */
+export function AssistantMessage({ onOpenFile }: { onOpenFile?: ((path: string) => void) | undefined }) {
   const steps = useToolSteps();
   return <MessagePrimitive.Root className="message message-assistant" data-role="assistant" aria-label="Assistant reply">
     <div className="message-text">
@@ -92,8 +93,8 @@ export function AssistantMessage() {
             case "group-skills": return part.indices.length === 1 ? <>{children}</>
               : <SkillLoadGroup indices={part.indices} running={part.status.type === "running"}>{children}</SkillLoadGroup>;
             case "text": return part.text === "" && part.status.type === "running"
-              ? <TraceLine live label="working" /> : <MarkdownText />;
-            case "reasoning": return <div className="reasoning-text"><MarkdownText /></div>;
+              ? <TraceLine live label="working" /> : <MarkdownText onOpenFile={onOpenFile} />;
+            case "reasoning": return <div className="reasoning-text"><MarkdownText onOpenFile={onOpenFile} /></div>;
             case "tool-call": {
               const door = artifactDoor(part.artifact);
               return door ? <SessionDoorCall {...part} door={door} />
@@ -132,7 +133,7 @@ const summaryLabels: Record<HistorySummaryKind, string> = {
   compaction: "earlier messages compacted into a summary",
   branch: "summary of the branch left behind",
 };
-const summaryParts = { Text: MarkdownText };
+const summaryParts = { Text: () => <MarkdownText /> };
 
 function SummaryCopy() {
   const aui = useAui();

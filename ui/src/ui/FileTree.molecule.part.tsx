@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { FileTree } from "./FileTree";
 
 export const name = "File tree";
@@ -8,6 +9,13 @@ export default function Change() {
 }
 export function FlatPaths() {
   return <FileTree code={"+ ui/src/ui/Diagram.tsx\n+ ui/src/ui/Diagram.css\n~ ui/package.json"} />;
+}
+export function Openable() {
+  const [opened, setOpened] = useState<string>();
+  return <>
+    <FileTree onOpen={setOpened} code={"ui/src/ui/\n  + OptionRow.tsx # one choice: name, variant, details\n  ~ ModelPicker.tsx\n  - modelMenu.css\n~ ui/src/mentionSource.ts # now returns groups"} />
+    <p>{opened ?? "Nothing opened"}</p>
+  </>;
 }
 export function Unmarked() {
   return <FileTree code={"docs/\n  briefs/\n    reply-format.md\n  README.md"} />;

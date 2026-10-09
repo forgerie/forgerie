@@ -32,6 +32,8 @@ export interface ChangesBinding {
   notes: readonly DiffNote[];
   /** Open with this note in view. */
   focusNoteId?: string | undefined;
+  /** Open with this workspace file in the editor, shown in All files. */
+  openPath?: string | undefined;
   onAdd: (note: DiffNote) => void;
   onEdit: (id: string, comment: string) => void;
   onRemove: (id: string) => void;
@@ -99,7 +101,7 @@ const splitPath = (path: string) => {
  * right brings it in, and choosing a file puts it away. Either way the open
  * file, its scroll, and any note being written stay as they are.
  */
-function Review({ source, files: filesSource, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }: ChangesBinding) {
+function Review({ source, files: filesSource, notes, focusNoteId, openPath, onAdd, onEdit, onRemove, onClose }: ChangesBinding) {
   const titleId = useId();
   const filesId = useId();
   const barId = useId();
@@ -109,14 +111,14 @@ function Review({ source, files: filesSource, notes, focusNoteId, onAdd, onEdit,
   const bodyRef = useRef<HTMLDivElement>(null);
   const [changes, setChanges] = useState<Load<Changes>>({ type: "loading" });
   const [diffs, setDiffs] = useState<Record<string, Load<FileDiff>>>({});
-  const [pane, setPane] = useState<Pane>();
+  const [pane, setPane] = useState<Pane | undefined>(() => openPath === undefined ? undefined : { type: "file", path: openPath });
   const paneRef = useRef(pane);
   paneRef.current = pane;
   const current = pane?.type === "diff" ? pane.key : undefined;
-  const [lens, setLens] = useState<Lens>("changes");
+  const [lens, setLens] = useState<Lens>(openPath === undefined ? "changes" : "files");
   const [closing, setClosing] = useState(false);
   const [cursor, setCursor] = useState<string>();
-  const [fileCursor, setFileCursor] = useState<string>();
+  const [fileCursor, setFileCursor] = useState<string | undefined>(() => openPath === undefined ? undefined : fileKey(openPath));
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [layout, setLayout] = useState<ShellLayout>("overlay");
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -177,7 +179,7 @@ function Review({ source, files: filesSource, notes, focusNoteId, onAdd, onEdit,
         if (pick) { readDiff(pick); setCollapsed((shut) => without(shut, foldersAbove(nodes, pick.key))); }
       }
       // Arriving with several files and nothing asked for, the reader picks one first. Docked, the tree is already there.
-      if (keep === undefined) setSheetOpen(readable.length > 1 && !asked);
+      if (keep === undefined) setSheetOpen(readable.length > 1 && !asked && paneRef.current?.type !== "file");
     }, (error: unknown) => { if (!controller.signal.aborted) setChanges({ type: "failed", message: messageOf(error) }); });
   }, [source, readDiff]);
   useEffect(() => {
@@ -201,6 +203,16 @@ function Review({ source, files: filesSource, notes, focusNoteId, onAdd, onEdit,
   }, [source]);
   const files = useTextFiles(filesSource, onSaved);
   const unsaved = dirtyPaths(files.buffers);
+  // Opened for one file: read it, and open the folders above it so All files shows where it lives.
+  const askedPath = useRef(openPath);
+  const { openFile: readAsked, reveal: revealAsked } = files;
+  useEffect(() => {
+    const path = askedPath.current;
+    if (path === undefined) return;
+    askedPath.current = undefined;
+    readAsked(path);
+    revealAsked(path);
+  }, [readAsked, revealAsked]);
 
   // The tree docks from the review's own width. A ref callback, because the layout appears only once the changes have.
   const measure = useCallback((element: HTMLDivElement | null) => {

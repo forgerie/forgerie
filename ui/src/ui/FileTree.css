@@ -34,3 +34,16 @@
 .path-tree-name { min-inline-size: 0; overflow-wrap: anywhere; }
 .path-tree-row[data-mark="deleted"] .path-tree-name { color: var(--muted-foreground); text-decoration: line-through; text-decoration-color: var(--ink-bad); }
 .path-tree-note { flex: 1 1 12rem; min-inline-size: 0; color: var(--muted-foreground); font-family: var(--body-font); font-size: var(--small-text); }
+/* A file that opens. The underline is faint so the tree still reads as a
+   listing; it fills in under the pointer. The control spans the row's
+   height, so a finger has more than the text line to hit. */
+.path-tree-open {
+  display: inline-flex; align-items: baseline; column-gap: var(--space-2);
+  min-inline-size: 0; margin-block: -0.1875rem; padding: 0.1875rem 0;
+  border: 0; background: none; text-align: start;
+}
+.path-tree-open .path-tree-name {
+  text-decoration: underline; text-decoration-color: var(--line);
+  text-underline-offset: 0.2em;
+}
+.path-tree-open:hover .path-tree-name { color: var(--primary); text-decoration-color: currentColor; }

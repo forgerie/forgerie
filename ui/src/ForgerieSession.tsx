@@ -35,6 +35,7 @@ import type { ArchiveAvailability } from "./picker/archiveNext";
 import { createNoteTray } from "./changes/noteTray";
 import { annotationsOf, carriesNotes } from "./changes/diffNotes";
 import { createChangesSource } from "./changes/changesSource";
+import { workspacePath } from "./changes/workspacePath";
 import { createFilesSource } from "./changes/filesSource";
 import { ChangesOpener, ChangesReview } from "./ui/ChangesReview";
 import type { NotesBinding } from "./ui/NoteTray";
@@ -119,7 +120,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   // Notes on diff lines wait here, saved with the drafts, until a chat message carries them.
   const [tray] = useState(() => createNoteTray(saved));
   const notes = useSyncExternalStore(tray.subscribe, tray.notes);
-  const [review, setReview] = useState<{ focusNoteId?: string }>();
+  const [review, setReview] = useState<{ focusNoteId?: string; path?: string }>();
+  // A file a reply names opens in the review's editor. Stable, so the thread's messages do not remount.
+  const openFile = useCallback((path: string) => { if (cwd) setReview({ path: workspacePath(cwd, path) }); }, [cwd]);
   const changes = useMemo(() => cwd ? { source: createChangesSource(cwd, browserTransport.request), files: createFilesSource(cwd, browserTransport.request) } : undefined, [cwd]);
   const pullRef = useMemo(() => sessionId && cwd ? { id: sessionId, cwd } : undefined, [sessionId, cwd]);
   const ownPulls = useMemo(() => catalogPulls?.filter((link) => link.session.cwd === cwd) ?? NO_LINKS, [catalogPulls, cwd]);
@@ -273,7 +276,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         queue={{ items: state.status?.queuedMessages ?? [], disabled: state.sending || state.connection.type !== "ready",
           onClear: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); } }}
         working={workingSend(state.status, state.compaction, state.transcript.isRunning)}
-        dialog={dialog} notes={notesBinding}
+        dialog={dialog} notes={notesBinding} onOpenFile={changes && !readOnly ? openFile : undefined}
         model={{ model: state.status?.model, thinkingLevel: state.status?.thinkingLevel, disabled: state.connection.type !== "ready",
           listModels: store.listModels, listThinkingLevels: store.listThinkingLevels, onModel: store.setModel, onThinkingLevel: store.setThinkingLevel,
           context: contextUse(state.status), cycle: true }}
@@ -287,7 +290,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onContinue={(targetId, summary) => { void store.continueTree(targetId, summary).then(applyTree); }}
         onFork={(entryId) => { void store.forkTree(entryId).then(applyTree); }}
         onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}
-      {review && changes && <ChangesReview source={changes.source} files={changes.files} notes={notes} focusNoteId={review.focusNoteId}
+      {review && changes && <ChangesReview source={changes.source} files={changes.files} notes={notes} focusNoteId={review.focusNoteId} openPath={review.path}
         onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setReview(undefined)} />}
       {childrenOpen && <ChildAgentsPanel children={children.children} openId={children.open?.conversationId}
         transcript={children.open?.transcript} error={children.error ?? children.open?.error} actions={{

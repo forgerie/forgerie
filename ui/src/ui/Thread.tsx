@@ -21,9 +21,11 @@ import type { ComposerSessionKeys } from "./useComposerKeyboard";
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode. `working` says what a draft can
 // do while the session works; `queue` is what already waits.
-export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact }: {
+export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact, onOpenFile }: {
   /** A feature view for a system message's custom metadata, such as a process event. */
-  systemArtifact?: SystemArtifactView | undefined; ask?: AskBinding; dialog?: DialogBinding; attachments?: boolean; notes?: NotesBinding | undefined;
+  systemArtifact?: SystemArtifactView | undefined;
+  /** Opens a file a reply names, such as a row of a `files` block. Keep it stable: a new function remounts every message. */
+  onOpenFile?: ((path: string) => void) | undefined; ask?: AskBinding; dialog?: DialogBinding; attachments?: boolean; notes?: NotesBinding | undefined;
   /** A line above the input bar that belongs to this thread, such as a new session's destination. */
   beforeComposer?: ReactNode;
   /** Drawn before the first message, such as a worktree still being set up. */
@@ -33,8 +35,9 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
   /** A readout on the input bar's action row, such as the session's branch. */
   inputContext?: ReactNode; mentions?: MentionSource | undefined; commands?: CommandBinding; commandResult?: CommandResultBinding; compaction?: CompactionBinding; shell?: ShellBinding; sessionKeys?: ComposerSessionKeys | undefined; queue?: QueueBinding; working?: WorkingSend; model?: ModelBinding; chatDraft?: ChatDraft }) {
   // One component identity per view function, so messages do not remount on each render.
-  const components = useMemo(() => ({ UserMessage, AssistantMessage,
-    SystemMessage: systemArtifact ? () => <SystemMessage artifact={systemArtifact} /> : SystemMessage }), [systemArtifact]);
+  const components = useMemo(() => ({ UserMessage,
+    AssistantMessage: onOpenFile ? () => <AssistantMessage onOpenFile={onOpenFile} /> : AssistantMessage,
+    SystemMessage: systemArtifact ? () => <SystemMessage artifact={systemArtifact} /> : SystemMessage }), [systemArtifact, onOpenFile]);
   return <ImageViewerProvider><ThreadPrimitive.Root className="thread">
     <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top">
       <div className="thread-column">

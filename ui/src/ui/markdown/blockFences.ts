@@ -16,7 +16,7 @@ import { FileTree } from "../FileTree";
 import { Timeline } from "../Timeline";
 
 // The generic code header (language name and copy) does not belong on a block that is not code.
-const noHeader = () => null;
+export const noHeader = () => null;
 
 export const blockFences: ComponentsByLanguage = {
   status: { SyntaxHighlighter: Checklist, CodeHeader: noHeader },

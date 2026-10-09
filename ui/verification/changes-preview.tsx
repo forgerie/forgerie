@@ -1,9 +1,10 @@
 // Dev-only, network-free preview of the changes review and the note tray over a session.
 // Scenarios: changes (on arrival), changes-file (LoginForm.tsx chosen in the tree), changes-selecting, changes-tray, changes-empty,
 // files (All files, opened at the file on screen), files-edit (README.md with unsaved edits), files-conflict (that save meets a change on disk),
-// files-closing (closing with unsaved edits).
+// files-closing (closing with unsaved edits), reply-files (a reply's files block, review closed),
+// reply-file-open (a file in that block tapped, so the review opens at it in the editor).
 // Notes and files live in local state only. Nothing reaches Pi, git, or the disk.
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, useExternalStoreRuntime } from "@assistant-ui/react";
 import type { TranscriptMessage } from "../src/transcript";
@@ -117,12 +118,18 @@ const say = (id: string, role: TranscriptMessage["role"], text: string): Transcr
 const messages: TranscriptMessage[] = [
   say("q", "user", "Fix it at the form layer, so SSO keeps calling the validator directly."),
   say("a", "assistant", "Done. The form now refuses an empty password before it calls `onSubmit`, and a new test covers it. The SSO path is unchanged."),
+  ...scenario.startsWith("reply-") ? [say("b", "assistant", "The files:\n\n```files\nsrc/auth/\n  ~ LoginForm.tsx # refuses an empty password\n  + LoginForm.test.tsx\n  - legacyValidate.ts\n~ README.md # documents the rule\n```")] : [],
 ];
 
 function Preview() {
   const [tray] = useState(() => { const created = createNoteTray(); for (const item of seeded) created.add(item); return created; });
   const notes = useSyncExternalStore(tray.subscribe, tray.notes);
-  const [open, setOpen] = useState<{ focusNoteId?: string } | undefined>(scenario === "changes-tray" ? undefined : {});
+  const [open, setOpen] = useState<{ focusNoteId?: string; path?: string } | undefined>(scenario === "changes-tray" || scenario.startsWith("reply-") ? undefined : {});
+  useEffect(() => {
+    if (scenario !== "reply-file-open") return;
+    const timer = setTimeout(() => document.querySelector<HTMLElement>(".path-tree-open")?.click(), 300);
+    return () => clearTimeout(timer);
+  }, []);
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages(messages, false), onNew: async () => {} });
   // The file and selecting scenarios choose a file in the tree; selecting then needs two taps and some typing.
   // The files scenarios switch the tree to All files, open src/auth, and open README.md to type in it.
@@ -187,13 +194,14 @@ function Preview() {
     }, 300);
     return () => clearTimeout(timer);
   }, []);
+  const openFile = useCallback((path: string) => setOpen({ path }), []);
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name="Reject empty passwords" status="Connected" actions={<>
       <ChangesOpener notes={notes.length} onOpen={() => setOpen({})} />
       <TreeOpener idle onOpen={() => {}} />
     </>}>
-      <Thread notes={{ notes, onRemove: tray.remove, onOpen: (focusNoteId) => setOpen({ focusNoteId }), onSendAlone: async () => {} }} />
-      {open && <ChangesReview source={source} files={files} notes={notes} focusNoteId={open.focusNoteId}
+      <Thread onOpenFile={openFile} notes={{ notes, onRemove: tray.remove, onOpen: (focusNoteId) => setOpen({ focusNoteId }), onSendAlone: async () => {} }} />
+      {open && <ChangesReview source={source} files={files} notes={notes} focusNoteId={open.focusNoteId} openPath={open.path}
         onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setOpen(undefined)} />}
     </SessionFrame>
   </AssistantRuntimeProvider>;
