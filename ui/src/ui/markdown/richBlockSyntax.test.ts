@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseComparison, parseSteps, readCalloutMarker } from "./richBlockSyntax";
+import { countMarks, parseCheckList, parseComparison, parseFacts, parseFileTree, parseSteps, readCalloutMarker } from "./richBlockSyntax";
 
 describe("callout markers", () => {
   it("reads GitHub alert markers in any case and reports how much to remove", () => {
@@ -56,5 +56,63 @@ describe("compare", () => {
   it("returns what has arrived so far", () => {
     expect(parseComparison("## Fen")).toEqual({ caption: "", options: [{ title: "Fen", recommended: false, summary: "", pros: [], cons: [] }] });
     expect(parseComparison("Picking a")).toEqual({ caption: "Picking a", options: [] });
+  });
+});
+
+describe("files", () => {
+  it("nests indented lines under a directory and reads marks and notes", () => {
+    expect(parseFileTree("src/server/\n  ~ app.ts # wires the guide\n  + guide.ts\n- old.md")).toEqual([
+      { name: "src/server", directory: true, note: "", children: [
+        { name: "app.ts", directory: false, mark: "changed", note: "wires the guide", children: [] },
+        { name: "guide.ts", directory: false, mark: "added", note: "", children: [] },
+      ] },
+      { name: "old.md", directory: false, mark: "deleted", note: "", children: [] },
+    ]);
+  });
+
+  it("builds the same tree from whole paths and counts the marks", () => {
+    const tree = parseFileTree("+ ui/src/ui/A.tsx\n+ ui/src/ui/A.css\n~ ui/package.json");
+    expect(tree).toEqual([{ name: "ui", directory: true, note: "", children: [
+      { name: "src/ui", directory: true, note: "", children: [
+        { name: "A.tsx", directory: false, mark: "added", note: "", children: [] },
+        { name: "A.css", directory: false, mark: "added", note: "", children: [] },
+      ] },
+      { name: "package.json", directory: false, mark: "changed", note: "", children: [] },
+    ] }]);
+    expect(countMarks(tree)).toEqual({ added: 2, changed: 1, deleted: 0 });
+  });
+
+  it("keeps a hyphenated file name that is not a mark", () => {
+    expect(parseFileTree("my-file.ts")[0]).toMatchObject({ name: "my-file.ts" });
+    expect(parseFileTree("-my-file.ts")[0]).toMatchObject({ name: "-my-file.ts" });
+  });
+});
+
+describe("status", () => {
+  it("reads every state, the title, and indented detail", () => {
+    expect(parseCheckList("Release\n[x] Build\n[~] Review\n[ ] Deploy\n[!] Visual\n    Clips the composer.\n[-] Tablet\n- [X] Lint")).toEqual({
+      title: "Release",
+      items: [
+        { state: "done", text: "Build", detail: "" },
+        { state: "active", text: "Review", detail: "" },
+        { state: "todo", text: "Deploy", detail: "" },
+        { state: "failed", text: "Visual", detail: "Clips the composer." },
+        { state: "skipped", text: "Tablet", detail: "" },
+        { state: "done", text: "Lint", detail: "" },
+      ],
+    });
+  });
+
+  it("reads an item cut off mid-stream", () => {
+    expect(parseCheckList("[x] Bui").items).toEqual([{ state: "done", text: "Bui", detail: "" }]);
+    expect(parseCheckList("[").items).toEqual([]);
+  });
+});
+
+describe("facts", () => {
+  it("reads Label: value lines and keeps colons inside the value", () => {
+    expect(parseFacts("Tests: 1017 passed\nStarted: 21:17:02\nnot a fact")).toEqual([
+      { label: "Tests", value: "1017 passed" }, { label: "Started", value: "21:17:02" },
+    ]);
   });
 });

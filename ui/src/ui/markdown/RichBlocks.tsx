@@ -5,7 +5,7 @@
 import { useAuiState } from "@assistant-ui/react";
 import type { ComponentsByLanguage, SyntaxHighlighterProps } from "@assistant-ui/react-streamdown";
 import { CheckIcon, InfoIcon, LightbulbIcon, MessageSquareWarningIcon, OctagonAlertIcon, TriangleAlertIcon, type LucideIcon } from "lucide-react";
-import { memo, useMemo, type ComponentProps, type CSSProperties } from "react";
+import { memo, useMemo, type ComponentProps } from "react";
 import { Streamdown } from "streamdown";
 import { fragmentRehypePlugins, markdownElements, withoutNode } from "./markdownPolicy";
 import { calloutKind, parseComparison, parseSteps, type CalloutKind } from "./richBlockSyntax";
@@ -68,7 +68,7 @@ function CompareBlock({ code }: SyntaxHighlighterProps) {
   if (caption === "" && options.length === 0) return null;
   return <section className="rich-compare" aria-label={caption === "" ? "Comparison" : undefined}>
     <Fragment className="rich-compare-caption" text={caption} streaming={streaming} />
-    {options.length > 0 && <div className="rich-compare-options" style={{ "--options": options.length } as CSSProperties}>
+    {options.length > 0 && <div className="rich-compare-options" style={{ "--options": options.length }}>
       {options.map((option, index) => <article key={index} className="rich-option" data-recommended={option.recommended || undefined}>
         <header className="rich-option-header">
           <div className="rich-option-title" role="heading" aria-level={4}>

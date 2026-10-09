@@ -1,0 +1,6 @@
+.markdown-fragment { min-inline-size: 0; overflow-wrap: anywhere; }
+.markdown-fragment p { margin-block: var(--space-2); }
+.markdown-fragment > :first-child { margin-block-start: 0; }
+.markdown-fragment > :last-child { margin-block-end: 0; }
+/* Inline: one line of text that sits beside other content. */
+.markdown-fragment-inline p { margin: 0; display: inline; }

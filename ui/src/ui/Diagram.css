@@ -1,0 +1,43 @@
+/* A diagram. The custom properties below are the palette drawDiagram reads
+   at draw time and hands to Mermaid, so a diagram follows the app's theme. */
+.diagram {
+  --diagram-background: var(--background);
+  --diagram-fill: var(--tint-surface);
+  --diagram-ink: var(--foreground);
+  --diagram-stroke: var(--line-focus);
+  --diagram-line: var(--muted-foreground);
+  --diagram-accent: var(--live);
+  /** Smallest scale a wide diagram shrinks to before it scrolls instead. @label Diagram minimum scale @min 0.3 @max 1 @step 0.05 */
+  --diagram-min-scale: 0.62;
+  margin: var(--space-4) 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-document);
+  overflow: hidden;
+  font-family: var(--body-font);
+  font-size: var(--small-text);
+}
+.diagram-canvas { overflow-x: auto; padding: var(--space-4) var(--space-3); }
+.diagram-canvas svg {
+  display: block; margin-inline: auto; block-size: auto;
+  inline-size: max(min(100%, var(--diagram-width)), calc(var(--diagram-width) * var(--diagram-min-scale)));
+}
+.diagram-code {
+  margin: 0; padding: var(--space-3) 0.875rem; overflow-x: auto;
+  background: var(--code-surface); color: var(--muted-foreground);
+  font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; line-height: 1.65; tab-size: 2;
+}
+.diagram-code code { white-space: pre; }
+.diagram-status { padding: var(--space-2) var(--space-3); border-block-end: var(--hairline) solid var(--line); color: var(--ink-warn); }
+/* Source disclosure beside the copy button. An open source shows below its
+   toggle inside the same frame. */
+.diagram-footer {
+  display: flex; align-items: flex-start; gap: var(--space-2);
+  padding-inline: var(--space-3) var(--space-1);
+  border-block-start: var(--hairline) solid var(--line);
+  background: var(--tint-surface);
+  color: var(--muted-foreground);
+}
+.diagram-source { flex: 1 1 auto; min-inline-size: 0; }
+.diagram-source-toggle { display: flex; align-items: center; min-block-size: var(--control-size); cursor: pointer; }
+.diagram-copy { display: flex; align-items: center; flex: none; min-block-size: var(--control-size); }
+.diagram-source > .diagram-code { margin-block-end: var(--space-2); border-radius: var(--radius-document); }

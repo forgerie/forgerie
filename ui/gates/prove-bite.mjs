@@ -9,8 +9,9 @@ import { dirname, join } from "node:path";
 
 const ui = new URL("..", import.meta.url).pathname;
 const plants = {
-  // part without component; part does not render its component
-  "src/ui/Ghost.atom.part.tsx": `import { CopyButton } from "./CopyButton";\nexport default function Ghost() { return <CopyButton label="x" getText={() => ""} />; }\n`,
+  // part without component; part does not render its component; a part in a layer that has none yet
+  // ("layer without parts" bites when its list changes, so this must name a layer still missing from pending.json)
+  "src/ui/Ghost.organism.part.tsx": `import { CopyButton } from "./CopyButton";\nexport default function Ghost() { return <CopyButton label="x" getText={() => ""} />; }\n`,
   // a component with: no consumer, a domain noun, product copy, raw px, raw colour in style, inline style, state read, second component
   "src/ui/SessionPlant.tsx": `import { useContext, createContext } from "react";\nconst C = createContext(0);\nexport function SessionPlant() { useContext(C); return <p style={{ color: "#ff0000", width: "12px" }}>Plant this sentence here</p>; }\nexport function SecondPlant() { return null; }\n`,
   // part without layer, computed metadata, randomness, state read, no default function, renders nothing

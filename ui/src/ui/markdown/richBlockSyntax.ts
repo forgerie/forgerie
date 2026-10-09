@@ -104,3 +104,103 @@ function dedent(lines: string[]): string {
   const cut = indents.length === 0 ? 0 : Math.min(...indents);
   return lines.map((line) => line.slice(cut)).join("\n");
 }
+
+export type FileMark = "added" | "changed" | "deleted";
+export type FileNode = { name: string; directory: boolean; mark?: FileMark; note: string; children: FileNode[] };
+
+const MARKS: Record<string, FileMark> = { "+": "added", "~": "changed", "-": "deleted" };
+const FILE_LINE = /^([ \t]*)(?:([+~-])[ \t]+)?(.*?)(?:[ \t]+#[ \t]+(.*))?$/;
+
+/**
+ * Builds a file tree from a `files` block. Each line is a path, optionally
+ * marked `+` (added), `~` (changed) or `-` (deleted), with an optional
+ * ` # note`. A path ending in `/` is a directory; deeper-indented lines under
+ * it are inside it. A line may also hold a whole path (`src/ui/Diagram.tsx`).
+ */
+export function parseFileTree(body: string): FileNode[] {
+  const root: FileNode = { name: "", directory: true, note: "", children: [] };
+  const parents: { indent: number; node: FileNode }[] = [];
+  for (const line of body.split(/\r?\n/)) {
+    if (line.trim() === "") continue;
+    const match = FILE_LINE.exec(line.replace(/\t/g, "  "))!;
+    const indent = match[1]!.length;
+    const path = match[3]!.trim();
+    if (path === "") continue;
+    while (parents.length > 0 && parents.at(-1)!.indent >= indent) parents.pop();
+    let node = parents.at(-1)?.node ?? root;
+    const segments = path.split("/").filter((segment) => segment !== "");
+    const directory = path.endsWith("/");
+    segments.forEach((segment, index) => {
+      const last = index === segments.length - 1;
+      const isDirectory = !last || directory;
+      let child = node.children.find((candidate) => candidate.name === segment && candidate.directory === isDirectory);
+      if (child === undefined) {
+        child = { name: segment, directory: isDirectory, note: "", children: [] };
+        node.children.push(child);
+      }
+      if (last) {
+        const mark = match[2] === undefined ? undefined : MARKS[match[2]];
+        if (mark !== undefined) child.mark = mark;
+        if (match[4] !== undefined) child.note = match[4].trim();
+      }
+      node = child;
+    });
+    if (directory) parents.push({ indent, node });
+  }
+  return root.children.map(compactDirectories);
+}
+
+/** Joins a chain of unmarked single-child directories into one row (`src/ui/`). */
+function compactDirectories(node: FileNode): FileNode {
+  let current = node;
+  while (current.directory && current.mark === undefined && current.note === ""
+    && current.children.length === 1 && current.children[0]!.directory) {
+    const only = current.children[0]!;
+    current = { ...only, name: `${current.name}/${only.name}` };
+  }
+  return { ...current, children: current.children.map(compactDirectories) };
+}
+
+export function countMarks(nodes: FileNode[]): Record<FileMark, number> {
+  const counts: Record<FileMark, number> = { added: 0, changed: 0, deleted: 0 };
+  const walk = (list: FileNode[]) => { for (const node of list) { if (node.mark) counts[node.mark] += 1; walk(node.children); } };
+  walk(nodes);
+  return counts;
+}
+
+export const CHECK_STATES = ["done", "active", "todo", "failed", "skipped"] as const;
+export type CheckState = typeof CHECK_STATES[number];
+export type CheckItem = { state: CheckState; text: string; detail: string };
+export type CheckList = { title: string; items: CheckItem[] };
+
+const CHECK_MARKS: Record<string, CheckState> = { x: "done", X: "done", "~": "active", " ": "todo", "": "todo", "!": "failed", "-": "skipped" };
+const CHECK_LINE = /^ ?(?:[-*][ \t]+)?\[([xX~!\- ]?)\](?:[ \t]+(.*))?$/;
+
+/**
+ * Reads a `status` block. `[x]` done, `[~]` in progress, `[ ]` to do,
+ * `[!]` failed, `[-]` skipped. Indented lines under an item are its detail.
+ * Text before the first item is the title.
+ */
+export function parseCheckList(body: string): CheckList {
+  const title: string[] = [];
+  const items: { state: CheckState; text: string; detail: string[] }[] = [];
+  for (const line of body.split(/\r?\n/)) {
+    const check = CHECK_LINE.exec(line);
+    if (check) { items.push({ state: CHECK_MARKS[check[1] ?? ""] ?? "todo", text: (check[2] ?? "").trim(), detail: [] }); continue; }
+    const current = items.at(-1);
+    if (current === undefined) { title.push(line); continue; }
+    current.detail.push(line);
+  }
+  return { title: title.join(" ").trim(), items: items.map((item) => ({ ...item, detail: dedent(item.detail).trim() })) };
+}
+
+export type Fact = { label: string; value: string };
+const FACT_LINE = /^\s*([^:]+?):[ \t]+(.+)$/;
+
+/** Reads a `facts` block: one `Label: value` per line. Other lines are skipped. */
+export function parseFacts(body: string): Fact[] {
+  return body.split(/\r?\n/).flatMap((line) => {
+    const fact = FACT_LINE.exec(line);
+    return fact ? [{ label: fact[1]!.trim(), value: fact[2]!.trim() }] : [];
+  });
+}

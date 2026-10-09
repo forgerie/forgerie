@@ -58,6 +58,18 @@ const richBlocksReply = [
 const richBlocksMessages = (text: string): TranscriptMessage[] => [
   say("rich-question", "user", "Is it safe to run the index migration now?"), say("rich-answer", "assistant", text),
 ];
+// A finished-work report: the round-two blocks, written the way the guide asks.
+const richReportReply = [
+  "The reply guide now reaches every hosted session, and four new blocks render.",
+  "```facts\nTests: 1017 passed\nGates: 36 passed\nRatchet: 667 to 665\nDeploy: pending\n```",
+  "```status\nRelease checks\n[x] Type check and lint\n[x] Unit and gate tests\n[~] Visual review on four postures\n[!] Full root suite\n    One provider-policy test timed out under load. It passes alone and on `main`.\n[ ] Restart sessiond\n```",
+  "```files\nsrc/shared/\n  + replyFormatGuide.ts # moved from the server, now the single source\nsrc/server/sessions/\n  ~ piSessionService.ts # injects the guide\n  + replyFormatGuide.acceptance.test.ts\nui/src/ui/\n  + Checklist.tsx\n  + FileTree.tsx\n  + FactList.tsx\n  + Diagram.tsx\n  ~ theme.css # block tokens\n- src/server/sessions/replyFormatGuide.ts\n```",
+  "The guide travels this path before every turn:",
+  "```diagram\nsequenceDiagram\n  participant L as Resource loader\n  participant S as Session\n  participant M as Model\n  L->>L: appendSystemPromptOverride adds the guide\n  S->>L: read options before each turn\n  S->>M: system prompt with addendum\n  M-->>S: reply with rich blocks\n```",
+].join("\n\n");
+const richReportMessages = (text: string): TranscriptMessage[] => [
+  say("report-question", "user", "Where did round two land?"), say("report-answer", "assistant", text),
+];
 // Cut inside the comparison, the way a reply looks mid-stream.
 const richBlocksRunning = richBlocksReply.slice(0, richBlocksReply.indexOf("+ Rollback"));
 const testOutput = Array.from({ length: 40 }, (_, index) => ` ✓ src/transcript.test.ts > case ${index + 1} (${index % 7 + 1} ms)`).join("\n");
@@ -316,6 +328,7 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   "streamdown-live": [], "streamdown-running": streamdownMessages(streamdownFrames[1]!),
   "rich-blocks": richBlocksMessages(richBlocksReply), "rich-blocks-running": richBlocksMessages(richBlocksRunning),
   "rich-blocks-live": richBlocksMessages(""),
+  "rich-report": richReportMessages(richReportReply), "rich-report-live": richReportMessages(""),
   ...scenario === "images" || scenario === "images-viewer" ? { images: imageMessages(), "images-viewer": imageMessages() } : {},
   handoff: handoffMessages, "handoff-open": handoffMessages,
 };
@@ -355,15 +368,16 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
   const [queue, setQueue] = useState<QueuedMessage[]>(queueScenarios[scenario] ?? []);
-  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running" || scenario === "rich-blocks-running" || scenario === "rich-blocks-live");
+  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running" || scenario === "rich-blocks-running" || scenario === "rich-blocks-live" || scenario === "rich-report-live");
   // Streams the rich-block reply in small chunks, like a model, then completes.
   useEffect(() => {
-    if (scenario !== "rich-blocks-live") return;
+    if (scenario !== "rich-blocks-live" && scenario !== "rich-report-live") return;
+    const [reply, messagesFor] = scenario === "rich-blocks-live" ? [richBlocksReply, richBlocksMessages] : [richReportReply, richReportMessages];
     let length = 0;
     const timer = setInterval(() => {
-      length = Math.min(richBlocksReply.length, length + 6);
-      setMessages(richBlocksMessages(richBlocksReply.slice(0, length)));
-      if (length === richBlocksReply.length) { clearInterval(timer); setRunning(false); }
+      length = Math.min(reply.length, length + 6);
+      setMessages(messagesFor(reply.slice(0, length)));
+      if (length === reply.length) { clearInterval(timer); setRunning(false); }
     }, 30);
     return () => clearInterval(timer);
   }, []);

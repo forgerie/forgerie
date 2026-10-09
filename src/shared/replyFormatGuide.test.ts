@@ -8,9 +8,10 @@ describe("reply format guide", () => {
     expect(withReplyFormatGuide(once)).toEqual(once);
   });
 
-  it("shows each block in the syntax the browser app parses", () => {
+  it("shows an example of every block the browser app renders", () => {
     expect(REPLY_FORMAT_GUIDE).toContain("> [!WARNING]\n> ");
-    expect(REPLY_FORMAT_GUIDE).toMatch(/```steps\n1\. .+\n {3}\S/);
-    expect(REPLY_FORMAT_GUIDE).toMatch(/```compare\n## .+ \(recommended\)\n/);
+    for (const language of ["steps", "compare", "status", "files", "facts", "diagram"]) {
+      expect(REPLY_FORMAT_GUIDE).toContain("```" + language + "\n");
+    }
   });
 });

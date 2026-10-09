@@ -19,7 +19,7 @@ assert.ok(chromeBin, "Chromium is required");
 const chrome = launchChrome(chromeBin, port, profile);
 const base = process.env.APP_URL ?? "http://127.0.0.1:8510/";
 const output = resolve("verification/local/rich-blocks");
-const result = { postures: [], errors: [] };
+const result = { postures: [], report: [], errors: [] };
 await mkdir(join(output, "shots"), { recursive: true });
 
 async function until(cdp, expression, timeout = 10_000) {
@@ -74,6 +74,41 @@ try {
         await until(cdp, `document.querySelectorAll('.rich-option').length === 1`);
         await evaluate(cdp, `document.querySelector('.rich-compare').scrollIntoView({ block: 'start' })`);
         await shot(cdp, `${label}-running`);
+        // Round two: a report with facts, status, files and a real Mermaid diagram.
+        await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-report", base).href });
+        await until(cdp, `document.querySelector('.diagram')?.dataset.drawing === 'drawn'`, 20_000);
+        const report = await evaluate(cdp, `(() => {
+          const canvas = document.querySelector('.diagram-canvas');
+          const svg = canvas.querySelector('svg');
+          const cells = [...document.querySelectorAll('.fact-list-cell')].map((cell) => cell.getBoundingClientRect());
+          const rows = new Set(cells.map((rect) => Math.round(rect.top))).size;
+          return {
+            pageOverflow: document.documentElement.scrollWidth > innerWidth,
+            factRows: rows,
+            factMinWidth: Math.round(Math.min(...cells.map((rect) => rect.width))),
+            checklist: [...document.querySelectorAll('.checklist-item')].map((item) => item.dataset.state).join(','),
+            summary: document.querySelector('.checklist-summary').textContent,
+            files: document.querySelectorAll('.path-tree-name').length,
+            diagramScale: Math.round(svg.getBoundingClientRect().width / Number(canvas.style.getPropertyValue('--diagram-width').replace('px', '')) * 100) / 100,
+            diagramScrolls: canvas.scrollWidth > canvas.clientWidth,
+            svgFill: getComputedStyle(svg.querySelector('rect.actor, rect') ?? svg).fill,
+          };
+        })()`);
+        assert.equal(report.pageOverflow, false, `${label}: report page overflows`);
+        assert.equal(report.checklist, "done,done,active,failed,todo");
+        assert.equal(report.summary, "2 of 5 done, 1 failed, 1 in progress");
+        assert.ok(report.factMinWidth >= 120, `${label}: fact cells too narrow (${report.factMinWidth})`);
+        assert.ok(report.diagramScale >= 0.6, `${label}: diagram shrank below its minimum scale (${report.diagramScale})`);
+        result.report.push({ scheme, posture: posture.name, ...report });
+        for (const [name, selector] of [["facts", ".fact-list"], ["status", ".checklist"], ["files", ".path-tree"], ["diagram", ".diagram"]]) {
+          await evaluate(cdp, `document.querySelector('${selector}').scrollIntoView({ block: 'start' })`);
+          await shot(cdp, `${label}-${name}`);
+        }
+        if (posture === FOLD8_POSTURES[0]) {
+          await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-report-live", base).href });
+          await until(cdp, `document.querySelector('.markdown')?.dataset.status === 'complete' && document.querySelector('.diagram')?.dataset.drawing === 'drawn'`, 40_000);
+          assert.equal(await evaluate(cdp, `document.querySelectorAll('.diagram').length`), 1);
+        }
         if (posture === FOLD8_POSTURES[0]) {
           // Stream the whole reply in 6-character chunks; it must end complete.
           await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-blocks-live", base).href });
@@ -86,6 +121,7 @@ try {
   assert.deepEqual(result.errors, []);
   await writeFile(join(output, "acceptance.json"), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result.postures.map(({ scheme, posture, column, optionsInOneRow }) => ({ scheme, posture, column, optionsInOneRow }))));
+  console.log(JSON.stringify(result.report, null, 1));
 } finally {
   chrome.kill("SIGTERM"); await sleep(300);
   if (chrome.exitCode === null) chrome.kill("SIGKILL");

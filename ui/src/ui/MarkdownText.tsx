@@ -8,6 +8,7 @@ import { highlightCode } from "./highlightCode";
 import { ALLOWED_PROTOCOLS, markdownElements } from "./markdown/markdownPolicy";
 import { rehypeCallouts } from "./markdown/rehypeCallouts";
 import { CalloutQuote, richBlocksByLanguage } from "./markdown/RichBlocks";
+import { blockFences } from "./markdown/blockFences";
 
 function CodeHeader({ language, code }: CodeHeaderProps) {
   return <div className="code-header">
@@ -36,12 +37,13 @@ const remend = { linkMode: "text-only" as const };
 const linkSafety = { enabled: false };
 // Runs after the security plugins, so only this plugin can mark a callout.
 const rehypePlugins = [rehypeCallouts];
+const componentsByLanguage = { ...richBlocksByLanguage, ...blockFences };
 
 export const MarkdownText = memo(function MarkdownText() {
   // Bare workspace paths need a base URL or rehype-harden labels them blocked.
   const security = useMemo(() => ({ defaultOrigin: window.location.href,
     allowedProtocols: ALLOWED_PROTOCOLS, allowDataImages: false }), []);
   return <StreamdownTextPrimitive containerClassName="markdown" className="markdown-content" components={components} controls={false}
-    componentsByLanguage={richBlocksByLanguage} rehypePlugins={rehypePlugins}
+    componentsByLanguage={componentsByLanguage} rehypePlugins={rehypePlugins}
     remend={remend} security={security} linkSafety={linkSafety} skipHtml smooth={false} defer />;
 });

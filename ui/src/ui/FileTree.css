@@ -1,0 +1,36 @@
+/* A change's files. Same frame as a code sheet, because it is about code.
+   The icon carries the mark; the name stays full contrast so it is readable
+   in every tone. */
+.path-tree {
+  margin-block: var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-document);
+  background: var(--code-surface);
+  overflow: hidden;
+}
+.path-tree-summary {
+  padding: var(--space-2) var(--space-3);
+  border-block-end: var(--hairline) solid var(--line);
+  background: var(--tint-surface);
+  color: var(--muted-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums;
+}
+.path-tree > .path-tree-list.path-tree-list { padding: var(--space-2) var(--space-3); overflow-x: auto; }
+.path-tree .path-tree-list { margin: 0; padding: 0; list-style: none; }
+.path-tree .path-tree-item { margin: 0; }
+/* A nested level hangs from a hairline under its directory's icon. */
+.path-tree .path-tree-item > .path-tree-list {
+  margin-inline-start: 0.5rem; padding-inline-start: 0.875rem;
+  border-inline-start: var(--hairline) solid var(--line);
+}
+.path-tree-row {
+  display: flex; align-items: baseline; flex-wrap: wrap; column-gap: var(--space-2);
+  padding-block: 0.1875rem;
+  font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; line-height: 1.5;
+}
+.path-tree-icon { flex: none; align-self: center; inline-size: 0.9375rem; block-size: 0.9375rem; color: var(--muted-foreground); }
+.path-tree-row[data-mark="added"] .path-tree-icon { color: var(--ink-good); }
+.path-tree-row[data-mark="changed"] .path-tree-icon { color: var(--ink-warn); }
+.path-tree-row[data-mark="deleted"] .path-tree-icon { color: var(--ink-bad); }
+.path-tree-name { min-inline-size: 0; overflow-wrap: anywhere; }
+.path-tree-row[data-mark="deleted"] .path-tree-name { color: var(--muted-foreground); text-decoration: line-through; text-decoration-color: var(--ink-bad); }
+.path-tree-note { flex: 1 1 12rem; min-inline-size: 0; color: var(--muted-foreground); font-family: var(--body-font); font-size: var(--small-text); }

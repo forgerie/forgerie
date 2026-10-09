@@ -1,0 +1,20 @@
+/* Headline values. Each cell draws its leading and top hairline; the frame
+   draws the trailing and bottom one. Rules never double, and an unfilled last
+   row shows the page instead of a grey block. */
+.fact-list {
+  --fact-min: 8.5rem;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--fact-min)), 1fr));
+  margin-block: var(--space-4); margin-inline: 0;
+  border-inline-end: var(--hairline) solid var(--line);
+  border-block-end: var(--hairline) solid var(--line);
+  border-radius: var(--radius-document);
+  overflow: hidden;
+}
+.fact-list-cell {
+  display: flex; flex-direction: column; gap: var(--space-1); min-inline-size: 0;
+  padding: var(--space-2) var(--space-3);
+  border-inline-start: var(--hairline) solid var(--line);
+  border-block-start: var(--hairline) solid var(--line);
+}
+.fact-list-label { color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.4; overflow-wrap: anywhere; }
+.fact-list-value { margin: 0; font-size: 1.0625rem; font-weight: 600; line-height: 1.35; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

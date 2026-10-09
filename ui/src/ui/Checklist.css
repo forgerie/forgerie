@@ -1,0 +1,35 @@
+/* A status snapshot. Same frame language as a code sheet: hairline border,
+   tinted header strip, document radius. Colour only marks state. */
+.checklist {
+  margin-block: var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-document);
+  overflow: hidden;
+}
+.checklist-header {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+  column-gap: var(--space-3); row-gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--tint-surface);
+}
+.checklist-title { font-weight: 600; min-inline-size: 0; overflow-wrap: anywhere; }
+.checklist-summary { color: var(--muted-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums; }
+/* One segment per item, in order. Gaps let each item count on its own. */
+.checklist-meter { display: flex; gap: var(--hairline); block-size: var(--meter-height); background: var(--tint-surface); }
+.checklist-segment { flex: 1 1 0; background: var(--meter-rest); }
+.checklist-segment[data-state="done"] { background: var(--tone-good); }
+.checklist-segment[data-state="active"] { background: var(--tone-live); }
+.checklist-segment[data-state="failed"] { background: var(--tone-bad); }
+.checklist .checklist-items { margin: 0; padding: var(--space-2) var(--space-3) var(--space-3); list-style: none; }
+.checklist .checklist-item {
+  display: grid; grid-template-columns: 1.125rem minmax(0, 1fr); column-gap: var(--space-2);
+  margin-block-start: var(--space-2);
+}
+.checklist-icon { grid-row: 1; inline-size: 1.125rem; block-size: 1.125rem; margin-block-start: 0.1875rem; color: var(--muted-foreground); }
+.checklist-item[data-state="done"] .checklist-icon { color: var(--ink-good); }
+.checklist-item[data-state="active"] .checklist-icon { color: var(--ink-live); }
+.checklist-item[data-state="failed"] .checklist-icon { color: var(--ink-bad); }
+.checklist-text { grid-column: 2; }
+.checklist-item[data-state="skipped"] .checklist-text { color: var(--muted-foreground); }
+.checklist-item[data-state="failed"] .checklist-text { font-weight: 550; }
+.checklist-detail { grid-column: 2; margin-block-start: var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); }

@@ -8,6 +8,16 @@ import { useThreadMessages } from "../useThreadMessages";
 import { Thread } from "./Thread";
 import { SessionFrame } from "./SessionFrame";
 import type { ComposerInputElement } from "./ComposerEditor";
+import { DIAGRAM_QUIET_MS } from "./Diagram";
+
+// Mermaid needs a real layout engine. The thread tests check our side: when
+// we draw, what we pass, and what we show when Mermaid refuses.
+const mermaid = vi.hoisted(() => ({
+  initialize: vi.fn(),
+  parse: vi.fn(async (source: string) => { if (source.includes("(((")) throw new Error("Parse error"); return true; }),
+  render: vi.fn(async (id: string, source: string) => ({ svg: `<svg id="${id}" viewBox="0 0 640 120"><text>drawn</text></svg>`, source })),
+}));
+vi.mock("mermaid", () => ({ default: mermaid }));
 
 let root: Root;
 const answer = (text: string, id = "reply"): TranscriptMessage => ({ id, role: "assistant", parts: [{ type: "text", text }] });
@@ -545,5 +555,64 @@ describe("Rich blocks", () => {
     expect(document.querySelector('.rich-steps a[href="https://example.test/docs"]')).not.toBeNull();
     expect(document.querySelector('.rich-steps a[href^="javascript:"]')).toBeNull();
     expect(document.querySelector('.rich-steps img')).toBeNull();
+  });
+});
+
+describe("Rich blocks, round two", () => {
+  it("renders a status fence as a checklist with a count and labelled states", async () => {
+    await render({ messages: [answer("```status\nRelease checks\n[x] Build\n[!] Visual\n    Clips the composer.\n[ ] Deploy\n```")] });
+    expect(document.querySelector('.checklist-title')?.textContent).toBe("Release checks");
+    expect(document.querySelector('.checklist-summary')?.textContent).toBe("1 of 3 done, 1 failed");
+    expect([...document.querySelectorAll('.checklist-item')].map((item) => item.getAttribute('data-state'))).toEqual(["done", "failed", "todo"]);
+    expect(document.querySelectorAll('.checklist-segment')).toHaveLength(3);
+    expect(document.querySelector('.checklist-item[data-state="failed"] .checklist-icon')?.getAttribute('aria-label')).toBe("Failed");
+    expect(document.querySelector('.checklist-detail')?.textContent).toBe("Clips the composer.");
+    expect(document.querySelector('.code-header')).toBeNull();
+  });
+
+  it("renders a files fence as a marked tree with a summary", async () => {
+    await render({ messages: [answer("```files\nsrc/server/\n  ~ app.ts # wires it\n  + guide.ts\n- old.md\n```")] });
+    expect(document.querySelector('.path-tree-summary')?.textContent).toBe("1 added, 1 changed, 1 deleted");
+    expect([...document.querySelectorAll('.path-tree-name')].map((name) => name.textContent)).toEqual(["src/server/", "app.ts", "guide.ts", "old.md"]);
+    expect(document.querySelector('.path-tree-row[data-mark="deleted"] .path-tree-icon')?.getAttribute('aria-label')).toBe("deleted");
+    expect(document.querySelector('.path-tree-note')?.textContent).toBe("wires it");
+  });
+
+  it("renders a facts fence as a definition list with Markdown values", async () => {
+    await render({ messages: [answer("```facts\nTests: 1017 passed\nSlowest: `policy.test.ts`\n```")] });
+    expect([...document.querySelectorAll('.fact-list dt')].map((label) => label.textContent)).toEqual(["Tests", "Slowest"]);
+    expect(document.querySelector('.fact-list dd code')?.textContent).toBe("policy.test.ts");
+  });
+
+  it("shows diagram source while it streams, then draws once the source is still", async () => {
+    vi.useFakeTimers();
+    try {
+      await render({ messages: [answer("```diagram\nflowchart LR\n  A --> B")], running: true });
+      expect(document.querySelector('.diagram-code')?.textContent).toContain("A --> B");
+      await render({ messages: [answer("```diagram\nflowchart LR\n  A --> B --> C\n```")] });
+      expect(mermaid.render).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(DIAGRAM_QUIET_MS + 10); });
+      expect(mermaid.render).toHaveBeenCalledOnce();
+      expect(mermaid.render.mock.calls[0]![1]).toBe("flowchart LR\n  A --> B --> C\n");
+      expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({ securityLevel: "strict", startOnLoad: false }));
+      const canvas = document.querySelector<HTMLElement>('.diagram-canvas')!;
+      expect(canvas.querySelector('svg text')?.textContent).toBe("drawn");
+      expect(canvas.getAttribute('role')).toBe("img");
+      expect(canvas.style.getPropertyValue('--diagram-width')).toBe("640px");
+      expect(document.querySelector('.diagram-source-toggle')?.textContent).toBe("Source");
+      expect(button("Copy diagram source")).not.toBeNull();
+    } finally { vi.useRealTimers(); mermaid.render.mockClear(); }
+  });
+
+  it("keeps the source readable and says so when Mermaid cannot draw it", async () => {
+    vi.useFakeTimers();
+    try {
+      await render({ messages: [answer("```mermaid\nflowchart LR\n  A --> (((\n```")] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(DIAGRAM_QUIET_MS + 10); });
+      expect(document.querySelector('.diagram')?.getAttribute('data-drawing')).toBe("failed");
+      expect(document.querySelector('.diagram-status')?.textContent).toContain("could not be drawn");
+      expect(document.querySelector('.diagram-code')?.textContent).toContain("A --> (((");
+      expect(mermaid.render).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
   });
 });

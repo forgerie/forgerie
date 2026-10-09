@@ -68,6 +68,19 @@
   --diff-add: oklch(0.6 0.15 150);
   --diff-remove: oklch(0.6 0.2 25);
   --diff-modify: oklch(0.6 0.13 70);
+  /* Rich reply blocks. Tones reuse the diff hues so "added", "done" and
+     "strength" read the same everywhere; ink mixes keep small text legible. */
+  --hairline: 1px;
+  --meter-height: 4px;
+  --tone-good: var(--diff-add);
+  --tone-bad: var(--diff-remove);
+  --tone-warn: var(--diff-modify);
+  --tone-live: var(--live);
+  --ink-good: color-mix(in oklab, var(--diff-add) 78%, var(--foreground));
+  --ink-bad: color-mix(in oklab, var(--diff-remove) 78%, var(--foreground));
+  --ink-warn: color-mix(in oklab, var(--diff-modify) 70%, var(--foreground));
+  --ink-live: color-mix(in oklab, var(--live) 75%, var(--foreground));
+  --meter-rest: color-mix(in oklab, var(--foreground) 10%, transparent);
 }
 @media (prefers-color-scheme: dark) {
   :root {
