@@ -1,0 +1,1546 @@
+[
+  {
+    "file": "scripts/managed-processes-package.test.mjs",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "scripts/test-changed.test.mjs",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "scripts/verify-staged.test.mjs",
+    "status": "passed",
+    "message": "",
+    "passed": 14,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/buildContents.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/cli.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/config.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 53,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/piWebVersionReport.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "scripts/lib/fold8-postures.test.mjs",
+    "status": "passed",
+    "message": "",
+    "passed": 1,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "scripts/lib/posture-page.test.mjs",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/activeAgentProfileProvider.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/app.activeAgentProfile.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/app.agentConfig.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 1,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/app.compression.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 1,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/app.localAliases.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 1,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/app.piPackages.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 1,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/app.piWebStatus.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/app.projects.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/app.retiredFeatures.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 30,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/app.workspaceFiles.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/browserMessageProjection.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 11,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/configRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/gitRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/piPackageRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 8,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/piPackageService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 10,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/piWebStatus.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workingDirectory.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 2
+  },
+  {
+    "file": "src/server/workspaceExplorerRoutes.preview.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/sessiond/activeAgentProfile.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/sessiond/sessionDaemonClient.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/shared/activity.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/shared/appPlugins.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/shared/capabilities.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/shared/codemodeScript.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/shared/piWebStatusParsing.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/shared/promptAttachments.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 16,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/shared/promptResourceCommand.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/shared/replyFormatGuide.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/shared/speechContracts.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/shared/speechPolicy.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/shared/thinkingLevels.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/activity/workspaceActivityRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 1,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/activity/workspaceActivityService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/azureDevops/azureDevopsClient.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 11,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/azureDevops/azureDevopsPat.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/backlog/azureDevopsBacklog.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 8,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/backlog/backlogArchive.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/backlog/backlogClaimStore.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/backlog/backlogItem.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/backlog/backlogLifecycle.acceptance.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/backlog/backlogRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 8,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/backlog/backlogScanner.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 11,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/backlog/githubBacklog.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/git/gitEnv.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 1,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/git/gitService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 16,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/github/githubAgent.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 19,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/github/githubApp.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 11,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/github/githubIssues.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 12,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/github/githubPullRead.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/github/githubRemote.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 19,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/github/githubRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/github/pullRequestService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 18,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/github/pullRequestWatch.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/projects/directorySuggestions.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/projects/projectGroups.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/projects/projectWorkspaces.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/projects/relatedPullSessions.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 1,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/realtime/sessionEventHub.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 14,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/resources/promptLibrary.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 13,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/resources/promptLibraryRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/resources/promptResourceCatalog.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 11,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/resources/promptResourceRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessiond/agentHttpDispatcher.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 10,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessiond/agentProcessEnvironment.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 10,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessiond/sessionProxyRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 14,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessiond/sessionServiceDependencies.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/speech/liveSpeechService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/speech/speechAudio.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 10,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/speech/speechRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 12,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/speech/speechService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/speech/whisperProcess.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 16,
+    "failed": [],
+    "skipped": 1
+  },
+  {
+    "file": "src/server/storage/projectStore.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/uiSettings/forgerieProfile.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/uiSettings/modelPrefsFiles.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/uiSettings/pluginService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 13,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/uiSettings/routes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/agentSpawnedMarks.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 11,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/agentSpawnedRepair.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/askAnswerDelivery.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/askUserTool.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 8,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/attachmentService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 10,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/bundledCliproxyProvider.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 10,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/bundledForgerieSkills.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/bundledManagedProcesses.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/bundledSubagents.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/commandCatalog.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 8,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/delegationProgress.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/durableAgentSession.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 10,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/durableAgentSession.thinking.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/durableChildAgents.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 12,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/durableChildRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/durableJson.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/durableOwnership.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/durableSessionJournal.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/editPreview.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 10,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/endTurnTool.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/extensionDialogWaiters.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 13,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/githubTools.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/globalProviderPolicy.acceptance.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/globalProviderPolicy.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/handoffSessionTool.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/inFlightSpawnedSessions.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/messagePaging.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/modelCatalogRefresher.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 23,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/modelRuntime.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/parentSessionLocator.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 12,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/pendingExtensionDialogStore.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 16,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionManagerGateway.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 34,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.archiveCleanup.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 14,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.askUser.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 20,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.asksCatalog.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.codemode.acceptance.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.crossWorkspace.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 17,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.defaults.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.delegationTools.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.durable.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 1,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.extensionDialogs.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 33,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.handoffSession.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.historicalChildren.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.lifecycle.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 33,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.machineListing.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.messages.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.pin.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.promoteSpawned.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.promptQueue.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 42,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.pullRequests.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.questionTools.acceptance.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.spawnSession.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 16,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.startupProgress.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 14,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.tabs.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.tree.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 26,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.unread.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 15,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.warnings.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 15,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.worktreeCleanup.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/piSessionService.worktrees.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/plainTextTheme.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/processBridge.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 15,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/processRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/promptDiffAnnotations.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 32,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/providerOAuthCompatibility.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 1,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/replyFormatGuide.acceptance.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionArchiveInitialization.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionArchiveStore.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 19,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionArchiveTree.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionAsks.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 21,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionCatalogMetadata.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 2,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionCatalogScanner.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 8,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionCleanup.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionCommandService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 34,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionCompactionQueue.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionFileHeader.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 18,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionNameGenerator.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 13,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionNotificationStore.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 15,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionPinStore.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionResponse.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionRoutes.diffAnnotations.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 8,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 47,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionSummaryScanner.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 49,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionTabsStore.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionTitleBridge.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionTreeProjection.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/sessionUnreadStore.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 20,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/spawnSessionTool.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 8,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/sessions/spawnTargetResolver.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/documentPreviewService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/fileContentService.delete.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/fileContentService.move.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 11,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/fileContentService.read.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/fileContentService.version.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/fileContentService.write.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 9,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/fileSuggestions.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 18,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/fileTreeService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 5,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/gitWorktreeDiscovery.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/pathAccessPolicy.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/pathSafety.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/projectPiWebConfig.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 18,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/projectWorkspaceCwds.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/sessionWorktreeRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 4,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/sessionWorktreeStore.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/sessionWorktrees.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 15,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/workspaceService.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 6,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/worktreeCleanupJob.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 7,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/worktreeCleanupRoutes.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 3,
+    "failed": [],
+    "skipped": 0
+  },
+  {
+    "file": "src/server/workspaces/worktreeHooks.test.ts",
+    "status": "passed",
+    "message": "",
+    "passed": 1,
+    "failed": [],
+    "skipped": 0
+  }
+]

@@ -1,0 +1,10 @@
+[
+  {
+    "file": "src/shared/appPlugins.test.ts",
+    "status": "failed",
+    "message": "undefined is not an object (evaluating 'z.string')",
+    "passed": 0,
+    "failed": [],
+    "skipped": 0
+  }
+]

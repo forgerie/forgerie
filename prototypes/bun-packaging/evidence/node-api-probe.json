@@ -1,0 +1,20 @@
+{
+  "runtime": "node",
+  "exitCode": 0,
+  "stderr": "",
+  "probe": {
+    "node": "24.13.0",
+    "bun": null,
+    "zodDirectImport": "function",
+    "undiciAgentClose": "function",
+    "configuredDispatcherClose": "function",
+    "bodyRejected": true,
+    "error": {
+      "name": "TypeError",
+      "message": "terminated",
+      "causeCode": "UND_ERR_BODY_TIMEOUT"
+    },
+    "elapsedMs": 1058.9557839999998,
+    "gatePassed": true
+  }
+}

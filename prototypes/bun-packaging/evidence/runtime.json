@@ -1,0 +1,7 @@
+{
+  "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64-baseline.zip",
+  "archiveSha256": "c678040f14fe0440eb839d37cbd0ce4c051a32da72806ac97de6a6aab6bf728f",
+  "binarySha256AfterPatch": "8d7f69981603fc2900b59c04fd1ffdc5acda02eda7ba1203fe025ff85d031af7",
+  "version": "1.4.2",
+  "dynamicLinker": "/nix/store/l0l2ll1lmylczj1ihqn351af2kyp5x19-glibc-2.42-51/lib/ld-linux-x86-64.so.2"
+}

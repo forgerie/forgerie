@@ -1,0 +1,6 @@
+{
+  "sourceCommit": "81501269b25877e8f37cf19b9c32a38d7728f6f9",
+  "lockSha256": "afd1e53db3d53b9a30aa2ae7bc4d6628c843129174fff8eb0fae51f8fa719ea9",
+  "hostKernel": "Linux 6.18.17 x86_64 GNU/Linux",
+  "note": "Compatibility evidence only. Test and smoke timings ran under shared-host load and are not benchmark results."
+}

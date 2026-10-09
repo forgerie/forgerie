@@ -1,0 +1,18 @@
+{
+  "runtime": "bun",
+  "exitCode": 1,
+  "stderr": "",
+  "probe": {
+    "node": "26.3.0",
+    "bun": "1.4.2",
+    "zodDirectImport": "function",
+    "undiciAgentClose": "undefined",
+    "undiciResolved": "undici",
+    "installedUndiciAgentClose": "function",
+    "configuredDispatcherClose": "undefined",
+    "body": "first;second",
+    "bodyRejected": false,
+    "elapsedMs": 1527.502616,
+    "gatePassed": false
+  }
+}

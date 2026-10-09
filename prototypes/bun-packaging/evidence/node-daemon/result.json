@@ -1,0 +1,40 @@
+{
+  "runtime": "node",
+  "exe": "/nix/store/h4apbnz8p5fmjwcmzlaxcjm5vr70d97x-nodejs-slim-24.13.0/bin/node",
+  "entry": "/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-packaging/dist/server/sessiond.js",
+  "results": [
+    {
+      "transport": "tcp",
+      "startupMs": 5483.395391999999,
+      "restartMs": 2846.0570529999995,
+      "sessionId": "01a122e7-2b95-71fe-b0f1-e0ce8e236302",
+      "checks": [
+        "health",
+        "HTTP validation",
+        "WebSocket event and reconnect",
+        "session creation",
+        "external extension command",
+        "shell subprocess",
+        "restart discovery",
+        "SIGTERM cleanup"
+      ]
+    },
+    {
+      "transport": "unix",
+      "startupMs": 3143.9486309999993,
+      "restartMs": 2194.498541000001,
+      "sessionId": "01a122e7-4dda-736c-b1f2-8d43e499d73b",
+      "checks": [
+        "health",
+        "HTTP validation",
+        "WebSocket event and reconnect",
+        "session creation",
+        "external extension command",
+        "shell subprocess",
+        "restart discovery",
+        "SIGTERM cleanup"
+      ]
+    }
+  ],
+  "failure": null
+}

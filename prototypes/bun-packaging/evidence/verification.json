@@ -1,0 +1,9 @@
+{
+  "command": [
+    "/nix/store/sy0c7j0npsq33d9zhnnzvjnzc52f4y0p-nodejs-24.13.0/bin/npm",
+    "run",
+    "verify"
+  ],
+  "exitCode": 0,
+  "seconds": 189.35391114698723
+}

@@ -1,0 +1,34 @@
+{
+  "runtime": "bun",
+  "command": [
+    "/tmp/forgerie-bun-spikes/bun-1.4.2",
+    "--bun",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "prototypes/bun-packaging/vitest.spike.config.mjs",
+    "--reporter=default",
+    "--reporter=json",
+    "--outputFile=/tmp/forgerie-bun-spikes/bun-zod-only/vitest.json",
+    "src/shared/appPlugins.test.ts"
+  ],
+  "cwd": "/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-packaging",
+  "exitCode": 1,
+  "seconds": 1.116667710011825,
+  "sourceCommit": "81501269b25877e8f37cf19b9c32a38d7728f6f9",
+  "profile": "/tmp/forgerie-bun-spikes/bun-zod-only/isolated-remr3q8o",
+  "tests": {
+    "numTotalTests": 0,
+    "numPassedTests": 0,
+    "numFailedTests": 0,
+    "numPendingTests": 0,
+    "numTotalTestSuites": 1,
+    "numPassedTestSuites": 0,
+    "numFailedTestSuites": 1,
+    "success": false
+  },
+  "workerRuntimes": [
+    "node=26.3.0 bun=1.4.2"
+  ],
+  "workerFiles": 1
+}

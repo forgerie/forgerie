@@ -1,0 +1,16 @@
+{
+  "runtime": "bun",
+  "exitCode": 1,
+  "stderr": "",
+  "probe": {
+    "node": "26.3.0",
+    "bun": "1.4.2",
+    "zodDirectImport": "function",
+    "undiciAgentClose": "undefined",
+    "configuredDispatcherClose": "undefined",
+    "body": "first;second",
+    "bodyRejected": false,
+    "elapsedMs": 1515.143769,
+    "gatePassed": false
+  }
+}
