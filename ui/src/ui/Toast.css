@@ -1,5 +1,6 @@
-/* One card: the message, its action and dismiss on the first row; a detail
-   wraps onto its own full-width line, so the buttons never squeeze it. */
+/* One card: the message, the detail's chevron, the action and dismiss on the
+   first row; an open detail wraps onto its own full-width line, so the buttons
+   never squeeze it. */
 .toast { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
   border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--popover);
   box-shadow: 0 var(--space-2) var(--space-6) var(--scrim-shadow); font-size: var(--small-text); line-height: 1.5; pointer-events: auto; }
@@ -7,13 +8,17 @@
 .toast-message { flex: 1 1 0; min-inline-size: 0; margin: 0; padding-block: var(--space-1); overflow-wrap: anywhere; color: var(--muted-foreground); text-wrap: pretty; }
 .toast-message strong { font-weight: inherit; color: var(--foreground); }
 .toast[data-tone="alert"] .toast-message { color: var(--destructive); }
+.toast-detail[hidden] { display: none; }
 .toast-detail { flex: 1 0 100%; margin: 0; padding: 0 var(--space-2) var(--space-1) 0; overflow-wrap: anywhere; color: var(--muted-foreground); text-wrap: pretty; }
 /* Drawn small, pressed large: each button keeps a control-sized hit area, centred. */
-.toast-action, .toast-dismiss { position: relative; flex: none; display: grid; place-items: center; block-size: var(--icon-size);
+.toast-action, .toast-more, .toast-dismiss { position: relative; flex: none; display: grid; place-items: center; block-size: var(--icon-size);
   border: 0; border-radius: var(--radius-control); background: transparent; transition: color 150ms; }
-.toast-action::before, .toast-dismiss::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+.toast-action::before, .toast-more::before, .toast-dismiss::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
   inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
 .toast-action { padding-inline: var(--space-2); color: var(--foreground); font-weight: 500; }
-.toast-dismiss { inline-size: var(--icon-size); color: var(--muted-foreground); }
-.toast-dismiss:hover { color: var(--foreground); }
-.toast-dismiss svg { inline-size: 0.875rem; block-size: 0.875rem; }
+.toast-more, .toast-dismiss { inline-size: var(--icon-size); color: var(--muted-foreground); }
+.toast-more:hover, .toast-dismiss:hover, .toast-more[aria-expanded="true"] { color: var(--foreground); }
+.toast-more svg, .toast-dismiss svg { inline-size: 0.875rem; block-size: 0.875rem; }
+.toast-more svg { transition: rotate 150ms; }
+.toast-more[aria-expanded="true"] svg { rotate: 180deg; }
+@media (prefers-reduced-motion: reduce) { .toast-more svg { transition: none; } }

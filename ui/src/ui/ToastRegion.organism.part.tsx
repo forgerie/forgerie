@@ -8,8 +8,8 @@ export default function Stacked() {
   return <>
     <ToastRegion />
     <Toast message="A new version is ready." action={{ label: "Refresh", onPress: () => {} }} onDismiss={() => {}} dismissLabel="Not now" />
-    <Toast message={<>Archived <strong>Account meters plugin backport</strong></>} action={{ label: "Undo", onPress: () => {} }} onDismiss={() => {}}
-      detail="Kept worktree account-meters-plugin-backport: its folder or branch changed outside Forgerie." />
+    <Toast message={<>Archived <strong>Account meters plugin backport</strong>. Worktree kept.</>} action={{ label: "Undo", onPress: () => {} }} onDismiss={() => {}}
+      detail="The folder or branch of the worktree account-meters-plugin-backport changed outside Forgerie." />
   </>;
 }
 export function One() {

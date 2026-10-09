@@ -10,12 +10,14 @@ export interface SessionWrites {
   deleteArchived: (ref: SessionRef) => Promise<void>;
 }
 export interface Target extends SessionRef { name?: string | undefined }
+/** What a command left behind: a short title that always shows, and the reason, shown on request. */
+export interface Note { title: string; text: string }
 export type Toast =
   /** `note` says what the archive left behind, such as a worktree the server kept and why. */
-  | { type: "undo"; target: Target; note?: string | undefined }
+  | { type: "undo"; target: Target; note?: Note | undefined }
   | { type: "info"; text: string }
   /** Information that stays until dismissed. */
-  | { type: "note"; text: string }
+  | { type: "note"; note: Note }
   | { type: "error"; text: string };
 export interface RowActionsState {
   toast?: Toast | undefined;
@@ -41,7 +43,7 @@ export function createRowActions(deps: {
   const timers: Timers = deps.timers ?? { set: (run, ms) => setTimeout(run, ms), clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) };
   let state: RowActionsState = { pending: new Set() };
   /** The latest note per session, for an archive reply that arrives after it. */
-  const notes = new Map<string, string>();
+  const notes = new Map<string, Note>();
   let toastTimer: unknown;
   const listeners = new Set<() => void>();
   const update = (next: RowActionsState) => { state = next; for (const listener of listeners) listener(); };
@@ -118,12 +120,12 @@ export function createRowActions(deps: {
      * Say what an archive left behind. It joins that archive's undo offer, which
      * then stays until dismissed; after the offer is gone it stands alone.
      */
-    annotate(sessionId: string, note: string) {
+    annotate(sessionId: string, note: Note) {
       notes.set(sessionId, note);
       const toast = state.toast;
       // An archive still in flight shows the note with its undo offer.
       if (state.pending.has(sessionId)) return;
-      show(toast?.type === "undo" && toast.target.id === sessionId ? { ...toast, note } : { type: "note", text: note });
+      show(toast?.type === "undo" && toast.target.id === sessionId ? { ...toast, note } : { type: "note", note });
     },
     dismiss: () => show(undefined),
     dispose: () => { timers.clear(toastTimer); listeners.clear(); },

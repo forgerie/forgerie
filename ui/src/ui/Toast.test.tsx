@@ -32,6 +32,27 @@ describe("toast", () => {
     expect(document.querySelector(".here > .toast")?.textContent).toBe("Saved");
   });
 
+  it("keeps the detail closed until the reader opens it, and closes it again", () => {
+    act(() => root.render(<Toast message="Archived Zed. Worktree kept." detail="It has commits that are not on main." />));
+    const more = document.querySelector<HTMLButtonElement>(".toast-more");
+    const detail = document.querySelector<HTMLElement>(".toast-detail");
+    expect(more?.getAttribute("aria-expanded")).toBe("false");
+    expect(more?.getAttribute("aria-controls")).toBe(detail?.id);
+    expect(detail?.hidden).toBe(true);
+    act(() => more?.click());
+    expect(more?.getAttribute("aria-expanded")).toBe("true");
+    expect(more?.getAttribute("aria-label")).toBe("Hide details");
+    expect(detail?.hidden).toBe(false);
+    act(() => more?.click());
+    expect(detail?.hidden).toBe(true);
+  });
+
+  it("draws no chevron without a detail", () => {
+    act(() => root.render(<Toast message="Copied" />));
+    expect(document.querySelector(".toast-more")).toBeNull();
+    expect(document.querySelector(".toast-detail")).toBeNull();
+  });
+
   it("runs its action and its dismiss, and draws neither when not given", () => {
     const onPress = vi.fn();
     const onDismiss = vi.fn();

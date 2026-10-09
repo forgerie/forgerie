@@ -92,27 +92,29 @@ describe("the catalog's worktrees", () => {
 describe("archive notes", () => {
   const writes = { setPinned: async () => {}, setArchived: async () => {}, deleteArchived: async () => {} };
   const timers = { set: () => 0, clear: () => {} };
+  const kept = { title: "Worktree kept", text: "The worktree fix has commits that are not on main." };
+  const shared = { title: "Worktree kept", text: "Another session still works in the worktree fix." };
 
   it("joins a kept worktree's reason to the archive's undo offer, and keeps it on screen", async () => {
     const actions = createRowActions({ writes, copy: async () => true, timers });
     await actions.archive({ id: "s1", cwd: "/w", name: "Fix" });
-    actions.annotate("s1", "Kept worktree fix: 2 commits are not on main");
-    expect(actions.getSnapshot().toast).toEqual({ type: "undo", target: { id: "s1", cwd: "/w", name: "Fix" }, note: "Kept worktree fix: 2 commits are not on main" });
+    actions.annotate("s1", kept);
+    expect(actions.getSnapshot().toast).toEqual({ type: "undo", target: { id: "s1", cwd: "/w", name: "Fix" }, note: kept });
   });
 
   it("shows a note that arrives before the archive's reply", async () => {
     let finish!: () => void;
     const actions = createRowActions({ writes: { ...writes, setArchived: () => new Promise<void>((done) => { finish = done; }) }, copy: async () => true, timers });
     const archived = actions.archive({ id: "s1", cwd: "/w" });
-    actions.annotate("s1", "Kept worktree fix: shared");
+    actions.annotate("s1", shared);
     finish();
     await archived;
-    expect(actions.getSnapshot().toast).toMatchObject({ type: "undo", note: "Kept worktree fix: shared" });
+    expect(actions.getSnapshot().toast).toMatchObject({ type: "undo", note: shared });
   });
 
   it("stands alone once the undo offer is gone", () => {
     const actions = createRowActions({ writes, copy: async () => true, timers });
-    actions.annotate("s1", "Kept worktree fix: shared");
-    expect(actions.getSnapshot().toast).toEqual({ type: "note", text: "Kept worktree fix: shared" });
+    actions.annotate("s1", shared);
+    expect(actions.getSnapshot().toast).toEqual({ type: "note", note: shared });
   });
 });

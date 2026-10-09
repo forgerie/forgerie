@@ -170,10 +170,12 @@ function RowMenu({ row, confirming, onConfirm, onRun, onClose }: {
 
 /** The result of a session command, such as an archive with its undo. It shows in the page's toast region. */
 export function PickerToast({ toast, onUndo, onDismiss }: { toast: ActionMessage; onUndo?: (() => void) | undefined; onDismiss?: (() => void) | undefined }) {
-  return <Toast tone={toast.type === "error" ? "alert" : "plain"} onDismiss={onDismiss}
-    message={toast.type === "undo" ? <>Archived <strong>{toast.target.name ?? "Untitled session"}</strong></> : toast.text}
-    action={toast.type === "undo" && onUndo ? { label: "Undo", onPress: onUndo } : undefined}
-    detail={toast.type === "undo" ? toast.note : undefined} />;
+  const note = toast.type === "undo" || toast.type === "note" ? toast.note : undefined;
+  // The note's title stays in view; its reason opens on request.
+  const message = toast.type === "undo" ? <>Archived <strong>{toast.target.name ?? "Untitled session"}</strong>{note ? `. ${note.title}.` : null}</>
+    : toast.type === "note" ? toast.note.title : toast.text;
+  return <Toast tone={toast.type === "error" ? "alert" : "plain"} onDismiss={onDismiss} message={message} detail={note?.text}
+    action={toast.type === "undo" && onUndo ? { label: "Undo", onPress: onUndo } : undefined} />;
 }
 
 /**

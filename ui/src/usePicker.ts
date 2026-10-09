@@ -64,6 +64,7 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
       ...(session.pullRequests ? { pullRequests: session.pullRequests } : {}) } : undefined;
   }, [state.sessions]);
   // An archive can keep its worktree. Its reason arrives as a worktree event and joins the archive's message.
+  // Keyed by the note's words, so the same note is not news twice.
   const archiveNotes = useRef<Map<string, string> | undefined>(undefined);
   useEffect(() => {
     if (state.connection.type !== "ready") return;
@@ -71,8 +72,10 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
     const notes = archiveNotes.current ?? new Map<string, string>();
     for (const session of state.sessions) {
       const note = session.worktree && session.archived ? archiveNote(session.worktree) : undefined;
-      if (!note || notes.get(session.id) === note) continue;
-      notes.set(session.id, note);
+      if (!note) continue;
+      const key = `${note.title}\n${note.text}`;
+      if (notes.get(session.id) === key) continue;
+      notes.set(session.id, key);
       // What was already true when the list loaded is not news.
       if (!first) commands.annotate(session.id, note);
     }

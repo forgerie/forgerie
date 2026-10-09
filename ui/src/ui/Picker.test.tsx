@@ -323,11 +323,17 @@ describe("row commands", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("offers undo after an archive, with the kept worktree on its own line, and reports a refusal as an alert", () => {
+  it("offers undo after an archive, names a kept worktree in the title, and reports a refusal as an alert", () => {
     const onUndo = vi.fn();
-    act(() => root.render(<PickerToast toast={{ type: "undo", target: { id: "z", cwd: "/c", name: "Zed" }, note: "Kept worktree fix: shared." }} onUndo={onUndo} />));
-    expect(host.querySelector('.toast[role="status"] .toast-message')?.textContent).toBe("Archived Zed");
-    expect(host.querySelector(".toast-detail")?.textContent).toBe("Kept worktree fix: shared.");
+    const note = { title: "Worktree kept", text: "Another session still works in the worktree fix." };
+    act(() => root.render(<PickerToast toast={{ type: "undo", target: { id: "z", cwd: "/c", name: "Zed" }, note }} onUndo={onUndo} />));
+    expect(host.querySelector('.toast[role="status"] .toast-message')?.textContent).toBe("Archived Zed. Worktree kept.");
+    expect(host.querySelector(".toast-detail")?.textContent).toBe(note.text);
+    act(() => root.render(<PickerToast toast={{ type: "note", note }} />));
+    expect(host.querySelector(".toast-message")?.textContent).toBe("Worktree kept");
+    act(() => root.render(<PickerToast toast={{ type: "undo", target: { id: "z", cwd: "/c", name: "Zed" } }} onUndo={onUndo} />));
+    expect(host.querySelector(".toast-message")?.textContent).toBe("Archived Zed");
+    expect(host.querySelector(".toast-more")).toBeNull();
     act(() => host.querySelector<HTMLButtonElement>(".toast-action")?.click());
     expect(onUndo).toHaveBeenCalled();
     const onDismiss = vi.fn();

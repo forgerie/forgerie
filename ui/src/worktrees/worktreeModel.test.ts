@@ -82,11 +82,13 @@ describe("Land and Discard outcomes", () => {
   it("reads receipts and archive cleanup", () => {
     expect(receiptText({ kind: "landed", sha: "abcdef0123", at: "t" }, "main")).toBe("Landed on main at abcdef0");
     expect(receiptText({ kind: "discarded", at: "t" }, "main")).toBe("Worktree discarded");
-    expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason: "unlanded-commits" } }))
-      .toBe("Kept worktree fix: it has commits that are not on main. Land or discard it to remove it.");
-    expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason: "shared" } })).toBe("Kept worktree fix: another session still works in it.");
-    expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason: "checkout-changed" } })).toBe("Kept worktree fix: its folder or branch changed outside Forgerie.");
-    expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason: "a new reason" } })).toBe("Kept worktree fix: a new reason.");
+    const kept = (reason: string) => archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason } });
+    expect(kept("unlanded-commits")).toEqual({ title: "Worktree kept", text: "The worktree fix has commits that are not on main. Land or discard it to remove it." });
+    expect(kept("shared")?.text).toBe("Another session still works in the worktree fix.");
+    expect(kept("checkout-changed")?.text).toBe("The folder or branch of the worktree fix changed outside Forgerie.");
+    expect(kept("a new reason")?.text).toBe("The worktree fix was kept: a new reason");
+    expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "removed", cleanup: { kind: "failed", error: "busy" } } }))
+      .toEqual({ title: "Worktree not removed", text: "The worktree fix was not removed: busy" });
     expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "retained", reason: "already-completed" } })).toBeUndefined();
     expect(archiveNote({ branch: "fix", defaultBranch: "main", archiveCleanup: { kind: "removed", cleanup: { kind: "done" } } })).toBeUndefined();
   });
