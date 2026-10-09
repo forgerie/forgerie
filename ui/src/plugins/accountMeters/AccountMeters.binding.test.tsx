@@ -45,7 +45,6 @@ describe("account meters", () => {
   it("reads the configured address and draws every account's bars, with their words for a screen reader", async () => {
     await render(settings({ endpoint: "http://127.0.0.1:8317/quota" }));
     expect(reads).toEqual(["http://127.0.0.1:8317/quota"]);
-    expect([...document.querySelectorAll(".lane-grid-name")].map((node) => node.textContent)).toEqual(["Claude", "Codex"]);
     expect(lanes()).toEqual([
       "Five-hour: 73% left, resets in 4h, 0 points ahead of an even spend.",
       "Seven-day: 20% left, resets in 4d, 30 points behind an even spend.",
@@ -60,17 +59,25 @@ describe("account meters", () => {
     expect(lanes()[0]).toMatch(/^Seven-day: 20%/u);
     expect(lanes()).toHaveLength(3);
   });
-  it("closes to one line per provider and remembers the choice", async () => {
+  it("names each service by its mark, with the name for hover and screen readers", async () => {
+    await render(settings());
+    const names = [...document.querySelectorAll(".lane-grid-name")];
+    expect(names.map((node) => [node.getAttribute("title"), node.textContent, node.querySelector("svg.glyph") !== null])).toEqual([["Claude", "", true], ["Codex", "", true]]);
+    expect([...document.querySelectorAll(".lane-grid-group")].map((node) => node.getAttribute("aria-label"))).toEqual(["Claude", "Codex"]);
+  });
+  it("closes to the header alone and remembers the choice", async () => {
     await render(settings());
     expect(header().getAttribute("aria-expanded")).toBe("true");
     await act(async () => header().click());
     expect(header().getAttribute("aria-expanded")).toBe("false");
-    expect(lanes()).toEqual(["Seven-day: 20% left, resets in 4d, 30 points behind an even spend.",
-      "Seven-day: 95% left, resets in 4d, 45 points ahead of an even spend."]);
+    expect(document.querySelector(".shelf-body")).toBeNull();
+    expect(lanes()).toEqual([]);
     await act(async () => root.unmount());
     root = createRoot(document.body.appendChild(document.createElement("div")));
     await render(settings());
     expect(header().getAttribute("aria-expanded")).toBe("false");
+    await act(async () => header().click());
+    expect(lanes()).toHaveLength(4);
   });
   it("says why there is nothing to draw, and retries on request", async () => {
     answer = () => Promise.reject(new Error("Cannot reach cliproxyapi.hummingbird-lake.ts.net."));

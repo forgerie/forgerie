@@ -45,27 +45,35 @@ export interface LaneBlock {
   spans: readonly LaneSpan[];
   action?: LaneAction | undefined;
 }
-export interface LaneGroup { key: string; name: string; note?: string | undefined; blocks: readonly LaneBlock[] }
+export interface LaneGroup {
+  key: string;
+  /** The group's name. Drawn as text unless the group has an icon; always its accessible name and hover text. */
+  name: string;
+  /** Drawn instead of the name, such as a service's mark. */
+  icon?: ReactNode;
+  note?: string | undefined;
+  blocks: readonly LaneBlock[];
+}
 
 /**
  * System molecule: named groups of measurement lanes on one set of columns,
  * so lanes start and end together and read against each other across groups.
  * Columns: group name, row label (only when some row has one), mark, value,
  * a trailing cell that may span rows, and a block action (only when some
- * block has one). `dense` sets groups at line spacing; `faded` takes
- * confidence away without adding alarm; `flush` drops the list inset, for a
- * grid that does not sit under a group header.
+ * block has one). A group is named by its icon when it has one. `faded`
+ * takes confidence away without adding alarm; `flush` drops the list inset,
+ * for a grid that does not sit under a group header.
  */
-export function LaneGrid({ groups, captions = true, dense = false, faded = false, flush = false }: {
-  groups: readonly LaneGroup[]; captions?: boolean; dense?: boolean; faded?: boolean; flush?: boolean;
+export function LaneGrid({ groups, captions = true, faded = false, flush = false }: {
+  groups: readonly LaneGroup[]; captions?: boolean; faded?: boolean; flush?: boolean;
 }) {
   const labelled = groups.some((group) => group.blocks.some((block) => block.rows.some((row) => row.label !== undefined)));
   const acting = groups.some((group) => group.blocks.some((block) => block.action !== undefined));
   return <div className="lane-grid-frame">
-    <div className="lane-grid" data-labelled={labelled || undefined} data-acting={acting || undefined} data-dense={dense || undefined}
+    <div className="lane-grid" data-labelled={labelled || undefined} data-acting={acting || undefined}
       data-faded={faded || undefined} data-flush={flush || undefined}>
       {groups.map((group) => <div key={group.key} className="lane-grid-group" role="group" aria-label={group.name}>
-        <span className="lane-grid-name" aria-hidden="true">{group.name}</span>
+        <span className="lane-grid-name" data-icon={group.icon ? true : undefined} title={group.name} aria-hidden="true">{group.icon ?? group.name}</span>
         {group.blocks.length === 0 ? <span className="lane-grid-note" style={{ "--row": 1 }}>{group.note}</span>
           : group.blocks.map((block) => {
             const captioned = captions && block.caption !== undefined && block.caption !== "";

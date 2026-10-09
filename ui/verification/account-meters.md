@@ -4,7 +4,7 @@ Account meters show how much quota each AI account has left. They sit at the foo
 
 ## What a line says
 
-Each provider names itself once. Each account under it draws one line per window the CLIProxyAPI router reports.
+Each provider is named once, by its mark (Claude, OpenAI for Codex, Google for Antigravity, OpenRouter); hover the mark for its name. Every account under it draws one line per window the CLIProxyAPI router reports. An account with more than one line labels them (`5h`, `7d`, `Fable`, `Gemini`). An account with nothing to draw shows a quiet dash; its words say why.
 
 - **The bar** is the share left. A 3px cut in the bar marks an even spend: the share that would be left if the window were spent at a constant rate.
 - **Hatching** between the fill and the cut means the window runs dry before it resets. The clock turns red with `↓`.
@@ -21,11 +21,9 @@ A reading older than five minutes fades, and the header says how old it is. If t
 
 ## Room
 
-The meters may take half of the height they share with the session list. The rules are in `src/plugins/accountMeters/meterPlan.ts`:
+The meters always show every account. They may take half of the height they share with the session list; past that they scroll, and the last line fades while there is more. Account addresses are shown only when they fit (`showNames` in `src/plugins/accountMeters/meterPlan.ts`); they stay in each account's hover text and screen-reader words.
 
-1. Every account is shown while it fits. Otherwise the meters show one line per provider: the routed account's longest window.
-2. Account addresses are shown only while they fit too. They stay in each account's hover text and screen-reader words.
-3. The Quota header switches between every account and one line per provider. The choice is kept in this browser and is kept whatever the room. If it does not fit, the meters scroll, and the last line fades while there is more.
+The Quota header opens and closes the meters. Closed, the header is all that is left. The choice is kept in this browser.
 
 ## Settings
 
@@ -43,7 +41,7 @@ It follows [the decomposition](../docs/decomposition.md):
 |---|---|---|
 | `src/ui/Shelf.tsx` | system organism | the section at the foot of a list: header, scroller, room report |
 | `src/ui/LaneGrid.tsx` | system molecule | groups of lanes on shared columns |
-| `src/ui/PaceBar.tsx`, `SignalDot.tsx`, `Figure.tsx` | system atoms | the bar, the pool dot, a share or clock |
+| `src/ui/PaceBar.tsx`, `SignalDot.tsx`, `Figure.tsx`, `Glyph.tsx` | system atoms | the bar, the pool dot, a share or clock, a service mark |
 | `src/ui/ErrorBoundary.tsx` | system atom | keeps a plugin that throws in its own place |
 | `src/plugins/accountMeters/AccountMeters.tsx` | shape | turns meter rows into lanes; no styles of its own |
 | `src/plugins/accountMeters/AccountMeters.binding.tsx` | binding | reads the router, the stored choice, and the room |
@@ -59,25 +57,28 @@ Each component has a part beside it. `src/plugins/accountMeters/fixtures/quota.t
 APP_URL=http://127.0.0.1:8504/ OUT=verification/local/meters-shots node scripts/meters-shots.mjs
 # Every state of every new part, on the four postures (start ./scripts/caliper-dev.mjs first).
 # caliper-render --url <dev url> --part src/plugins/accountMeters/AccountMeters.organism.part.tsx --state '*' --device '*'
-MODE=glance APP_URL=... node scripts/meters-shots.mjs   # the header's one-line choice
+CLOSED=1 APP_URL=... node scripts/meters-shots.mjs      # closed from the header
 OFFLINE=1 APP_URL=... node scripts/meters-shots.mjs     # the router unreachable
 
 # Settings drives the meters without a reload. Writes and restores the plugin's settings.
 APP_URL=http://127.0.0.1:8504/ QUOTA_FILE=/tmp/quota.json node scripts/meters-settings-acceptance.mjs
 ```
 
-Measured on 2026-10-09 with the live router (4 providers, 7 accounts, five windows turned off):
+Measured on 2026-10-09 against the live reading (4 providers, 7 accounts, five windows turned off), open, with the project-group controls of `main` above the list:
 
-| Posture | Picker | Meters | Mode | List keeps |
+| Posture | Picker | Meters | List keeps | Scrolls |
 |---|---|---|---|---|
-| Unfolded portrait | 287 × 783 | 223px | every account | 403px |
-| Unfolded landscape | 287 × 553 | 127px | one line per provider | 269px |
-| Folded portrait | 287 × 638 | 223px | every account | 258px |
-| Folded landscape | 287 × 374 | 109px, scrolls | one line per provider | 109px |
-| Docked 1280 × 860 | 281 × 860 | 223px | every account | 480px |
+| Unfolded portrait | 287 × 783 | 223px | 227px | no |
+| Unfolded landscape | 287 × 553 | 110px | 110px | yes |
+| Folded portrait | 287 × 638 | 153px | 153px | yes |
+| Folded landscape | 287 × 374 | 37px, header only | 16px | n/a |
+| Docked 1280 × 860 | 281 × 860 | 223px | 304px | no |
+
+Closed, the meters are the 37px header at every posture.
 
 ## Limits
 
 - The sizes in `meterPlan.ts` mirror `src/ui/LaneGrid.css` and `src/ui/Shelf.css`. Change both together.
 - The plugin's manifest is in `src/shared/appPluginManifests.ts`, because the server lists and validates it, and sends its settings with the catalog so Settings never imports a plugin.
-- In folded landscape, one line per provider needs about 126px and has 109px, so the last provider scrolls.
+- In folded landscape the project-group controls leave the list and the meters 53px between them. The Quota header keeps its 37px, so the open meters show no lanes there until the space grows. Press the header to close them.
+- The provider marks are in `providerMarks.ts`, from Simple Icons (CC0). They are their owners' trademarks. OpenAI's mark comes from Simple Icons 13.0.0, because later versions removed it.

@@ -27,7 +27,7 @@ const codex = { expiresAt: ["2026-10-22T20:26:38Z", "2026-10-29T18:51:16Z", "202
 
 describe("reset marker", () => {
   it("marks each account that has a reset, and no other", () => {
-    const rows = meterModel(payload({ claude, codex }), {}, "every", now, ZONE);
+    const rows = meterModel(payload({ claude, codex }), {}, now, ZONE);
     expect(rows.flatMap((provider) => provider.accounts.map((account) => [account.key, account.reset?.count]))).toEqual([
       ["claude/me@work.example", 1], ["codex/a@example", 3], ["codex/b@example", undefined],
     ]);
@@ -35,19 +35,19 @@ describe("reset marker", () => {
   });
 
   it("drops resets that have lapsed, and counts the rest", () => {
-    const rows = meterModel(payload({ codex: { ...codex, expiresAt: ["2026-10-01T00:00:00Z", "2026-10-29T18:51:16Z"] } }), {}, "every", now, ZONE);
+    const rows = meterModel(payload({ codex: { ...codex, expiresAt: ["2026-10-01T00:00:00Z", "2026-10-29T18:51:16Z"] } }), {}, now, ZONE);
     expect(rows[1]?.accounts[0]?.reset).toMatchObject({ count: 1, soonest: "Oct 29" });
   });
 
   it("flags a reset that lapses within the soon window, one millisecond either side", () => {
     const at = (offset: number) => new Date(now.getTime() + RESET_SOON_MS + offset).toISOString();
-    const soon = (offset: number) => meterModel(payload({ codex: { expiresAt: [at(offset)], restartsWindows: true } }), {}, "every", now, ZONE)[1]?.accounts[0]?.reset?.soon;
+    const soon = (offset: number) => meterModel(payload({ codex: { expiresAt: [at(offset)], restartsWindows: true } }), {}, now, ZONE)[1]?.accounts[0]?.reset?.soon;
     expect(soon(0)).toBe(true);
     expect(soon(1)).toBe(false);
   });
 
   it("ignores a malformed reset field rather than failing the reading", () => {
-    expect(meterModel(payload({ codex: { expiresAt: "soon" } }), {}, "every", now, ZONE)[1]?.accounts[0]?.reset).toBeUndefined();
+    expect(meterModel(payload({ codex: { expiresAt: "soon" } }), {}, now, ZONE)[1]?.accounts[0]?.reset).toBeUndefined();
   });
 });
 

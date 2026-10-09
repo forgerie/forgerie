@@ -2,20 +2,21 @@ import { useState } from "react";
 import { accountMetersManifest } from "@shared/appPluginManifests";
 import type { AppPluginProps } from "../appPlugin";
 import { AccountMeters, type MetersView } from "./AccountMeters";
-import { meterModel, type MeterMode } from "./meterModel";
-import { meterLayout, type MeterChoice } from "./meterPlan";
+import { meterModel } from "./meterModel";
+import { showNames } from "./meterPlan";
 import { isStale, spanLabel } from "./quotaData";
 import { useQuota, type QuotaRead } from "./useQuota";
 
-const MODE_KEY = "forgerie.accountMeters.mode";
+/** Whether the reader closed the meters. Open unless they did. */
+const CLOSED_KEY = "forgerie.accountMeters.closed";
 const endpointDef = accountMetersManifest.settings.find((def) => def.id === "endpoint");
 const DEFAULT_ENDPOINT = endpointDef?.type === "url" ? endpointDef.default : "";
-/** The reader's choice from the header. Until they make one, the room decides. */
-function readChoice(): MeterChoice {
-  try { const stored = localStorage.getItem(MODE_KEY); return stored === "glance" || stored === "every" ? stored : "auto"; } catch { return "auto"; }
+function readOpen(): boolean {
+  try { return localStorage.getItem(CLOSED_KEY) !== "true"; } catch { return true; }
 }
-function writeChoice(mode: MeterMode) {
-  try { localStorage.setItem(MODE_KEY, mode); } catch { /* A private window keeps the choice for this page only. */ }
+function writeOpen(open: boolean) {
+  try { if (open) localStorage.removeItem(CLOSED_KEY); else localStorage.setItem(CLOSED_KEY, "true"); }
+  catch { /* A private window keeps the choice for this page only. */ }
 }
 
 /**
@@ -25,18 +26,16 @@ function writeChoice(mode: MeterMode) {
 export function AccountMetersShelf({ settings, read, clock = () => new Date() }: AppPluginProps & { read?: QuotaRead; clock?: () => Date }) {
   const configured = settings["endpoint"];
   const quota = useQuota(typeof configured === "string" ? configured : DEFAULT_ENDPOINT, read);
-  const [choice, setChoice] = useState(readChoice);
+  const [open, setOpen] = useState(readOpen);
   const [room, setRoom] = useState(0);
   const now = clock();
   const { payload } = quota;
-  const layout = payload ? meterLayout(room, choice, (mode) => meterModel(payload, settings, mode, now)) : undefined;
-  const mode = layout?.mode ?? (choice === "auto" ? "every" : choice);
   const age = payload ? spanLabel(Math.max(0, now.getTime() - new Date(payload.updatedAt).getTime())) : "";
   const stale = payload !== undefined && isStale(payload.updatedAt, now);
-  const view: MetersView = payload ? { type: "ready", providers: meterModel(payload, settings, mode, now), names: layout?.names ?? true,
-    doubtful: quota.error !== undefined || stale }
+  const providers = payload ? meterModel(payload, settings, now) : undefined;
+  const view: MetersView = providers ? { type: "ready", providers, names: showNames(room, providers), doubtful: quota.error !== undefined || stale }
     : quota.loading ? { type: "loading" } : { type: "failed", message: quota.error ?? "Quota data is unavailable." };
   const status = payload === undefined ? undefined : quota.error !== undefined ? `Offline, ${age} old` : stale ? `${age} old` : undefined;
-  const toggle = () => { const next = mode === "every" ? "glance" : "every"; setChoice(next); writeChoice(next); };
-  return <AccountMeters view={view} mode={mode} status={status} statusHint={quota.error} onToggle={toggle} onRetry={quota.retry} onRoom={setRoom} />;
+  const toggle = () => { setOpen(!open); writeOpen(!open); };
+  return <AccountMeters view={view} open={open} status={status} statusHint={quota.error} onToggle={toggle} onRetry={quota.retry} onRoom={setRoom} />;
 }

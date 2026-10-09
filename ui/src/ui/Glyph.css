@@ -1,0 +1,2 @@
+/* A mark at the size of its text: an em square, aligned with the line. */
+.glyph { display: block; flex: none; inline-size: 1em; block-size: 1em; }

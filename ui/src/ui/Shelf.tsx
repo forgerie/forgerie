@@ -43,12 +43,14 @@ function useMoreBelow(ref: RefObject<HTMLElement | null>): boolean {
 
 /**
  * System organism: a section at the foot of a list. A group header (chevron,
- * title, a rule to the edge, an optional status) switches it between its two
- * forms; the body scrolls on its own and fades its last line while there is
- * more below. It takes at most half of the element it sits in, and reports
- * that element's height so its owner can choose what fits.
+ * title, a rule to the edge, an optional status) opens and closes it; closed,
+ * the header is all there is. The body scrolls on its own and fades its last
+ * line while there is more below. It takes at most half of the element it
+ * sits in, and reports that element's height so its owner can choose what fits.
  */
-export function Shelf({ title, label, open, onToggle, toggleHint, status, statusHint, message, onRoom, children }: {
+export function Shelf({ id, title, label, open, onToggle, toggleHint, status, statusHint, message, onRoom, children }: {
+  /** The body's id, which the header controls. */
+  id: string;
   title: string;
   /** The section's accessible name. */
   label: string;
@@ -68,13 +70,13 @@ export function Shelf({ title, label, open, onToggle, toggleHint, status, status
   useRoom(section, onRoom);
   const more = useMoreBelow(body);
   return <section ref={section} className="shelf" aria-label={label}>
-    <button type="button" className="shelf-header" aria-expanded={open} onClick={onToggle} title={toggleHint}>
+    <button type="button" className="shelf-header" aria-expanded={open} aria-controls={id} onClick={onToggle} title={toggleHint}>
       <ChevronDownIcon className="shelf-chevron" aria-hidden /><span>{title}</span><span className="shelf-rule" aria-hidden="true" />
       {status ? <span className="shelf-status" title={statusHint}>{status}</span> : null}
     </button>
-    <div ref={body} className="shelf-body" data-more={more || undefined}>
+    {open ? <div id={id} ref={body} className="shelf-body" data-more={more || undefined}>
       {message ? <p className="shelf-message" role={message.alert ? "alert" : "status"}>{message.text}
         {message.action ? <button type="button" onClick={message.action.onPress}>{message.action.label}</button> : null}</p> : children}
-    </div>
+    </div> : null}
   </section>;
 }

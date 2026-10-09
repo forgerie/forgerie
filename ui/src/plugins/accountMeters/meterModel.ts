@@ -1,10 +1,7 @@
 import {
-  accountDrained, formatAmount, isUnmeteredWindow, longestWindow, orderedWindows, providerRouting, routedAccount, visibleWindows,
+  accountDrained, formatAmount, isUnmeteredWindow, orderedWindows, providerRouting, visibleWindows,
   windowCountdown, windowLabel, windowStanding, type QuotaAccount, type QuotaPayload, type QuotaWindow, type Standing,
 } from "./quotaData";
-
-/** Every account and every bar, or one line per provider: its routed account's longest window. */
-export type MeterMode = "every" | "glance";
 
 /** What a lane's slot draws. */
 export type Mark =
@@ -76,21 +73,12 @@ export function shortDate(instant: string | Date, zone?: string): string {
 }
 
 /** The meters as rows, from one payload. Pure: the caller passes the clock. */
-export function meterModel(payload: QuotaPayload, settings: Readonly<Record<string, unknown>>, mode: MeterMode, now: Date, zone?: string): MeterProvider[] {
+export function meterModel(payload: QuotaPayload, settings: Readonly<Record<string, unknown>>, now: Date, zone?: string): MeterProvider[] {
   return payload.providers.map((provider) => {
-    const pinned = providerRouting(provider) === "pinned";
-    if (mode === "every") {
-      const choice = pinned && provider.accounts.length > 1;
-      return { id: provider.id, name: provider.name, accounts: provider.accounts.map((account) =>
-        meterAccount(provider.id, account, visibleWindows(orderedWindows(account), settings), choice, now, zone)) };
-    }
-    const account = routedAccount(provider);
-    if (account === undefined) {
-      return { id: provider.id, name: provider.name, accounts: provider.accounts.length === 0 ? []
-        : [{ key: `${provider.id}/`, email: "", reset: undefined, routed: false, out: true, lines: [], clocks: [], empty: "No account in service" }] };
-    }
-    const longest = longestWindow(visibleWindows(orderedWindows(account), settings), now);
-    return { id: provider.id, name: provider.name, accounts: [meterAccount(provider.id, account, longest ? [longest] : [], false, now, zone)] };
+    // The routed mark answers a question only where the router pins one of several accounts.
+    const marksRouted = providerRouting(provider) === "pinned" && provider.accounts.length > 1;
+    return { id: provider.id, name: provider.name, accounts: provider.accounts.map((account) =>
+      meterAccount(provider.id, account, visibleWindows(orderedWindows(account), settings), marksRouted, now, zone)) };
   });
 }
 

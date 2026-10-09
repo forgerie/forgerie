@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  accountDrained, formatAmount, isStale, isUnmeteredWindow, longestWindow, orderedWindows, PACE_MARGIN_POINTS, parseQuotaPayload,
-  providerRouting, routedAccount, spanLabel, visibleWindows, windowCountdown, windowLabel, windowPaceFraction, windowStanding,
+  accountDrained, formatAmount, isStale, isUnmeteredWindow, orderedWindows, PACE_MARGIN_POINTS, parseQuotaPayload,
+  providerRouting, spanLabel, visibleWindows, windowCountdown, windowLabel, windowPaceFraction, windowStanding,
 } from "./quotaData";
 
 // Ported from the original client plugin's quota-data.test.js. The cases and
@@ -49,11 +49,6 @@ describe("the quota contract", () => {
     expect(() => parseQuotaPayload(badDate)).toThrow("cannot read");
     expect(() => parseQuotaPayload({ ...payload, version: 2 })).toThrow("cannot read");
   });
-  it("gives no routed account when the selected one is unavailable", () => {
-    const unavailable = clone(); unavailable.providers[0]!.accounts[0]!.available = false;
-    expect(routedAccount(parseQuotaPayload(unavailable).providers[0]!)).toBeUndefined();
-    expect(routedAccount(parseQuotaPayload(payload).providers[0]!)?.email).toBe("person@example.com");
-  });
 });
 
 describe("which windows to draw, and in what order", () => {
@@ -86,24 +81,6 @@ describe("which windows to draw, and in what order", () => {
     expect(isUnmeteredWindow({ id: "antigravity_gemini" })).toBe(true);
     expect(isUnmeteredWindow({ id: "antigravity_claude" })).toBe(false);
     expect(isUnmeteredWindow(undefined)).toBe(false);
-  });
-});
-
-describe("the longest window", () => {
-  const now = new Date("2026-08-15T02:15:00Z");
-  it("decides by length, not by pressure", () => {
-    const fiveHour = { id: "five_hour", remainingPercent: 4, resetsAt: "2026-08-15T06:00:00Z" };
-    const sevenDay = { id: "seven_day", remainingPercent: 90, resetsAt: "2026-08-16T00:00:00Z" };
-    expect(longestWindow([fiveHour, sevenDay], now)?.id).toBe("seven_day");
-    expect(longestWindow([sevenDay, fiveHour], now)?.id).toBe("seven_day");
-    expect(longestWindow([], now)).toBeUndefined();
-  });
-  it("falls back to the furthest reset for pools, and breaks a tie toward the emptiest", () => {
-    const gemini = { id: "antigravity_gemini", remainingPercent: 100, resetsAt: "2026-08-15T06:00:00Z" };
-    const claude = { id: "antigravity_claude", remainingPercent: 3, resetsAt: "2026-08-18T02:15:00Z" };
-    const gptOss = { id: "antigravity_gpt_oss", remainingPercent: 41, resetsAt: "2026-08-18T02:15:00Z" };
-    expect(longestWindow([gemini, claude, gptOss], now)?.id).toBe("antigravity_claude");
-    expect(longestWindow([{ id: "mystery", remainingPercent: 1, resetsAt: null }, gemini], now)?.id).toBe("antigravity_gemini");
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { meterModel } from "./meterModel";
-import { meterHeight, meterLayout, METER_SHARE, METER_SIZES } from "./meterPlan";
+import { meterHeight, METER_SHARE, METER_SIZES, showNames } from "./meterPlan";
 import { parseQuotaPayload } from "./quotaData";
 
 const now = new Date("2026-10-09T04:00:00Z");
@@ -29,8 +29,8 @@ const payload = parseQuotaPayload({
   ],
 });
 
-describe("the meters, every account", () => {
-  const [claude, codex, openrouter, antigravity] = meterModel(payload, {}, "every", now);
+describe("the meters", () => {
+  const [claude, codex, openrouter, antigravity] = meterModel(payload, {}, now);
   it("labels lines only where an account has more than one, and shares one clock between lines that reset together", () => {
     const account = claude!.accounts[0]!;
     expect(account.lines.map((line) => [line.label, line.share, line.clock.text])).toEqual([["5h", "73", "4h"], ["7d", "20", "↓4d"], ["Fable", "55", "4d"]]);
@@ -58,51 +58,28 @@ describe("the meters, every account", () => {
     expect(antigravity!.accounts[0]!.lines[1]).toMatchObject({ mark: { kind: "pool", refusing: true }, words: "Gemini: refusing work, the provider reports no level, resets in 20h." });
   });
   it("hides the bars the user turned off, and says so when nothing is left", () => {
-    const [hidden] = meterModel(payload, { five_hour: false, seven_day: false, weekly_fable: false }, "every", now);
+    const [hidden] = meterModel(payload, { five_hour: false, seven_day: false, weekly_fable: false }, now);
     expect(hidden!.accounts[0]!.empty).toBe("Every bar is turned off");
   });
 });
 
-describe("the meters at a glance", () => {
-  it("draws one line per provider: the routed account's longest window", () => {
-    const glance = meterModel(payload, {}, "glance", now);
-    expect(glance.map((provider) => provider.accounts.map((account) => account.lines.map((line) => line.id)))).toEqual([
-      [["seven_day"]], [["seven_day"]], [["openrouter_credits"]], [["antigravity_claude"]]]);
-    expect(glance.every((provider) => provider.accounts.every((account) => !account.routed && account.lines.every((line) => line.label === undefined)))).toBe(true);
-  });
-  it("says so when no account is in service", () => {
-    const down = structuredClone(payload);
-    down.providers[0]!.accounts[0]!.available = false;
-    expect(meterModel(down, {}, "glance", now)[0]!.accounts).toEqual([{ key: "claude/", email: "", reset: undefined, routed: false, out: true, lines: [], clocks: [], empty: "No account in service" }]);
-  });
-});
-
 describe("what fits in the room the meters share with the list", () => {
-  const rows = (mode: "every" | "glance") => meterModel(payload, {}, mode, now);
+  const rows = meterModel(payload, {}, now);
   const size = METER_SIZES;
-  const every = meterHeight(rows("every"), false, "every");
-  const named = meterHeight(rows("every"), true, "every");
-  const glance = meterHeight(rows("glance"), false, "glance");
+  const bare = meterHeight(rows, false);
+  const named = meterHeight(rows, true);
   it("adds up the meters' height from the sizes in the stylesheet", () => {
     // Claude 3 lines; Codex 1 + 1 (empty); OpenRouter 1; Antigravity 2.
     const lines = 3 * size.line + 2 * size.lineGap + 2 * size.line + size.accountGap + size.line + 2 * size.line + size.lineGap;
-    expect(every).toBe(size.header + size.padding + lines + 3 * size.providerGap);
-    expect(named - every).toBe(5 * (size.email + size.lineGap));
-    // One line per provider, at line spacing.
-    expect(glance).toBe(size.header + size.padding + 4 * size.line + 3 * size.lineGap);
+    expect(bare).toBe(size.header + size.padding + lines + 3 * size.providerGap);
+    expect(named - bare).toBe(5 * (size.email + size.lineGap));
   });
   const room = (height: number) => Math.ceil(height / METER_SHARE);
-  it("shows every account while it fits, with addresses only while they fit too", () => {
-    expect(meterLayout(room(named), "auto", rows)).toMatchObject({ mode: "every", names: true });
-    expect(meterLayout(room(named) - 3, "auto", rows)).toMatchObject({ mode: "every", names: false });
-    expect(meterLayout(room(every), "auto", rows)).toMatchObject({ mode: "every", names: false });
+  it("draws addresses only while they fit, either side of the line", () => {
+    expect(showNames(room(named), rows)).toBe(true);
+    expect(showNames(room(named) - 3, rows)).toBe(false);
   });
-  it("falls back to one line per provider when every account does not fit, until the reader chooses", () => {
-    expect(meterLayout(room(every) - 3, "auto", rows).mode).toBe("glance");
-    expect(meterLayout(room(every) - 3, "every", rows).mode).toBe("every");
-    expect(meterLayout(10_000, "glance", rows)).toMatchObject({ mode: "glance", names: true });
-  });
-  it("draws everything while the room is unmeasured", () => {
-    expect(meterLayout(0, "auto", rows)).toEqual({ mode: "every", names: true, budget: undefined });
+  it("draws addresses while the room is unmeasured", () => {
+    expect(showNames(0, rows)).toBe(true);
   });
 });

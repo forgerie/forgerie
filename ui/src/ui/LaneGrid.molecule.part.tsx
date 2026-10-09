@@ -3,6 +3,7 @@ import { PaceBar } from "./PaceBar";
 import { SignalDot } from "./SignalDot";
 import { RotateCcwIcon } from "lucide-react";
 import { Figure } from "./Figure";
+import { Glyph } from "./Glyph";
 
 export const name = "Lane grid";
 export const note = "Groups of measurement lanes on shared columns, with captions, markers, and spanning trailing cells";
@@ -38,9 +39,10 @@ export default function Captioned() {
 export function Uncaptioned() {
   return <LaneGrid groups={groups} captions={false} />;
 }
-export function Dense() {
-  return <LaneGrid dense captions={false} groups={groups.map((group) => ({ ...group, blocks: group.blocks.slice(0, 1).map((block) =>
-    ({ ...block, rows: block.rows.slice(0, 1).map((row) => ({ ...row, label: undefined })), spans: block.spans.slice(0, 1), marked: false })) }))} />;
+export function WithIcons() {
+  // Simple shapes stand in for service marks.
+  const marks = ["M12 2 22 22H2Z", "M2 2h20v20H2Z", "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20Z", "M12 2 22 12 12 22 2 12Z"];
+  return <LaneGrid captions={false} groups={groups.map((group, index) => ({ ...group, icon: <Glyph path={marks[index % marks.length]!} /> }))} />;
 }
 export function Faded() {
   return <LaneGrid faded captions={false} groups={groups} />;

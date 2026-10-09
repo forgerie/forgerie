@@ -124,16 +124,6 @@ export function providerRouting(provider: Pick<QuotaProvider, "routing">): "pinn
   return provider.routing;
 }
 
-/**
- * The account a provider is routing to right now, or `undefined`. A selected
- * account the router has marked unavailable is not returned: its numbers
- * describe an account that cannot serve the next request.
- */
-export function routedAccount(provider: Pick<QuotaProvider, "accounts">): QuotaAccount | undefined {
-  const account = provider.accounts.find((candidate) => candidate.selected);
-  return account?.available ? account : undefined;
-}
-
 /** An account's windows, shortest first. Stable, so an unrecognised window keeps its arrival order after the known ones. */
 export function orderedWindows<W extends WindowFacts>(account: { windows: readonly W[] } | undefined): W[] {
   return [...(account?.windows ?? [])].sort((left, right) => windowRank(left.id) - windowRank(right.id));
@@ -205,46 +195,6 @@ export function windowLabel(quotaWindow: WindowFacts): string | undefined {
   const hours = length / (HOUR_MS / 1000);
   if (Number.isInteger(hours) && hours >= 1) return `${String(hours)}h`;
   return undefined;
-}
-
-/**
- * The window with the longest horizon: the budget you plan around. Decided by
- * the window's length where known, otherwise by how far off its reset is. A
- * tie goes to the emptiest window, so a provider running several pools of one
- * horizon shows the one that stops work first.
- */
-export function longestWindow<W extends WindowFacts>(windows: readonly W[], now: Date): W | undefined {
-  let longest: W | undefined;
-  for (const quotaWindow of windows) {
-    if (longest === undefined || outlasts(quotaWindow, longest, now)) longest = quotaWindow;
-  }
-  return longest;
-}
-
-function outlasts(candidate: WindowFacts, incumbent: WindowFacts, now: Date): boolean {
-  const reach = windowHorizonSeconds(candidate, now);
-  const held = windowHorizonSeconds(incumbent, now);
-  if (reach === 0 && held > 0) return false;
-  if (held === 0 && reach > 0) return true;
-  // A metered window is a real budget. Prefer one that still has headroom over
-  // an unmetered pool whose consumption nobody measures.
-  const candidateUnmetered = isUnmeteredWindow(candidate);
-  const incumbentUnmetered = isUnmeteredWindow(incumbent);
-  if (candidateUnmetered !== incumbentUnmetered) {
-    if (incumbentUnmetered && (candidate.remainingPercent ?? 0) > 0) return true;
-    if (candidateUnmetered && (incumbent.remainingPercent ?? 0) > 0) return false;
-  }
-  if (reach !== held) return reach > held;
-  return (candidate.remainingPercent ?? 0) < (incumbent.remainingPercent ?? 0);
-}
-
-/** How far ahead a window reaches: its stated length, or the time until it resets. Neither ranks it last. */
-function windowHorizonSeconds(quotaWindow: WindowFacts, now: Date): number {
-  const length = windowSeconds(quotaWindow);
-  if (length !== undefined) return length;
-  if (quotaWindow.resetsAt === null || quotaWindow.resetsAt === undefined) return 0;
-  const seconds = (new Date(quotaWindow.resetsAt).getTime() - now.getTime()) / 1000;
-  return Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
 }
 
 /**

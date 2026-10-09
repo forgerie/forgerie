@@ -5,9 +5,9 @@
 // The quota response is served through CDP request interception, so any app
 // origin works whatever the router's CORS list says. QUOTA_FILE is a saved
 // /quota JSON; without it the script reads the live router once from Node.
-// MODE=every or MODE=glance stores that header choice first; by default the room decides. OFFLINE=1
+// CLOSED=1 closes the meters from the header first; by default they are open. OFFLINE=1
 // fails every quota read, to capture the error state.
-//   APP_URL=http://127.0.0.1:8520/ OUT=/tmp/meters MODE=every node scripts/meters-shots.mjs
+//   APP_URL=http://127.0.0.1:8520/ OUT=/tmp/meters CLOSED=1 node scripts/meters-shots.mjs
 import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,8 +20,7 @@ const { FOLD8_POSTURES } = await import(pathToFileURL(join(repo, "scripts/lib/fo
 
 const base = process.env.APP_URL ?? "http://127.0.0.1:8520/";
 const out = process.env.OUT ?? "verification/local/meters-shots";
-// auto: no stored choice, so the room decides. every / glance: the reader's choice from the header.
-const mode = ["every", "glance"].includes(process.env.MODE) ? process.env.MODE : "auto";
+const closed = process.env.CLOSED === "1";
 const offline = process.env.OFFLINE === "1";
 const scale = Number(process.env.SCALE ?? "2");
 const schemes = (process.env.SCHEMES ?? "dark,light").split(",");
@@ -57,7 +56,7 @@ try {
         await loaded;
       };
       await load();
-      await evaluate(cdp, mode === "auto" ? `(localStorage.removeItem("forgerie.accountMeters.mode"), true)` : `(localStorage.setItem("forgerie.accountMeters.mode", ${JSON.stringify(mode)}), true)`);
+      await evaluate(cdp, closed ? `(localStorage.setItem("forgerie.accountMeters.closed", "true"), true)` : `(localStorage.removeItem("forgerie.accountMeters.closed"), true)`);
       await load();
       const ready = async (predicate, what) => {
         for (let i = 0; i < 240; i += 1) {
@@ -71,13 +70,13 @@ try {
       };
       await ready(`document.querySelectorAll(".picker-row").length > 0`, "picker rows");
       await evaluate(cdp, `(document.querySelector(".app-opener")?.getAttribute("aria-expanded") === "false" && document.querySelector(".app-opener").click(), true)`);
-      await ready(`!!document.querySelector(${offline ? '".shelf-message[role=alert]"' : '".lane-grid"'})`, "meters");
+      await ready(`!!document.querySelector(${closed ? '".shelf-header[aria-expanded=false]"' : offline ? '".shelf-message[role=alert]"' : '".lane-grid"'})`, "meters");
       await sleep(600);
       await evaluate(cdp, `Promise.all([document.fonts.load('500 13px "Public Sans Variable"'), document.fonts.load('11px "JetBrains Mono Variable"')]).then(() => document.fonts.ready).then(() => true)`);
       await sleep(200);
       const box = await evaluate(cdp, `(() => { const r = document.querySelector(".picker").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
       const meters = await evaluate(cdp, `(() => {
-        const section = document.querySelector('section[aria-label="Account meters"]'), body = document.querySelector(".shelf-body"), list = document.querySelector(".picker-list");
+        const section = document.querySelector('section[aria-label="Account meters"]'), body = document.querySelector(".shelf-body") ?? section, list = document.querySelector(".picker-list");
         return { height: Math.round(section.getBoundingClientRect().height), scrolls: body.scrollHeight > body.clientHeight + 1,
           list: Math.round(list?.getBoundingClientRect().height ?? 0), names: document.querySelectorAll(".lane-grid-caption").length,
           lane: Math.round(document.querySelector(".lane-grid-mark")?.getBoundingClientRect().width ?? 0),

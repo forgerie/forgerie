@@ -46,15 +46,16 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `SignalDot` (atom): a yes-or-no signal with no level, neutral when on and danger when off.
 - `PaceBar` (atom): a budget's share left against an even spend: a cut at pace, a hatch for a shortfall, a warn-to-danger bar for a surplus.
 - `ErrorBoundary` (atom): replaces children that throw while drawing with a fallback, so everything around them keeps working.
-- `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, with optional captions, a marked block, trailing cells that span rows, and a small action chip per block.
+- `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, each group named by text or an icon, with optional captions, a marked block, trailing cells that span rows, and a small action chip per block.
 - `Consequence` (molecule): one consequence the reader must see before acting, set apart by a wash and an icon, plain or warn.
 - `FloatingPanel` (atom): the surface of a window-level panel that scrolls inside the height it gets; its host places it, and it sits inside the window edges until then.
 - `OptionRow` (atom): one choice as a button: a name, a variant, a leading mark, short details (a path gives way at its start), and a check on the choice in effect.
 - `OptionList` (molecule): choices in named groups with search, one status line and a foot command; rows take focus, or follow a text field's highlight.
-- `Shelf` (organism): a section at the foot of a list that switches between two forms from a group header, scrolls on its own, and reports the room it sits in.
+- `Shelf` (organism): a section at the foot of a list that opens and closes from a group header (closed, the header alone), scrolls on its own, and reports the room it sits in.
 - `BadgeButton` (atom): an icon button drawn small with a control-sized hit area, a live-colour count of what waits on the reader, and a working dot.
 - `SheetDialog` (organism): a modal sheet that is a card while the window has room and meets each edge as the room runs out, with back, title, actions, close, a scrolling body, and a footer.
 - `StatusRow` (molecule): one pressable row for a running thing: a tone dot, a name, a detail, and a status that wraps under the name when the row is narrow.
 - `ExchangeLog` (molecule): one worker's record, oldest first: words with the speaker in a margin, one line per action, and folded output.
 - `ReplyBox` (molecule): a short text field with send and an optional second action; Enter sends and the text stays until the send succeeds.
 - `QuestionCard` (molecule): a question that waits on the reader, with a reply box while open and the answer once given.
+- `Glyph` (atom): a one-colour mark from an SVG path on a 24-unit grid, at the size and colour of the text beside it.

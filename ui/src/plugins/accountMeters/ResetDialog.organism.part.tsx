@@ -16,8 +16,8 @@ function preview(key: string): ResetPreview {
 /** The dialog opens at window level, so each state draws the meters it opened from behind it. */
 function Asking({ account }: { account: string }) {
   return <>
-    <AccountMeters mode="every" onToggle={() => {}} onRetry={() => {}} onAskReset={() => {}}
-      view={{ type: "ready", providers: meterModel(QUOTA_WITH_RESETS, SETTINGS, "every", NOW, ZONE), names: true, doubtful: false }} />
+    <AccountMeters open onToggle={() => {}} onRetry={() => {}} onAskReset={() => {}}
+      view={{ type: "ready", providers: meterModel(QUOTA_WITH_RESETS, SETTINGS, NOW, ZONE), names: true, doubtful: false }} />
     <ResetDialog preview={preview(account)} onUse={() => {}} onCancel={() => {}} />
   </>;
 }

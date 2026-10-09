@@ -2,8 +2,12 @@
    the list's insets, and a group header that opens and closes. It takes at
    most half the element it sits in (METER_SHARE in meterPlan.ts); past that
    its body scrolls. */
-.shelf { flex: 0 1 auto; display: flex; flex-direction: column; min-block-size: 0; max-block-size: 50%;
+/* The header never yields: it is the only way to open or close the shelf, so
+   the minimum is the header itself, even when half the room is less. */
+.shelf { flex: 0 1 auto; display: flex; flex-direction: column; min-block-size: calc(2.25rem + var(--hairline)); max-block-size: 50%;
   padding: 0 var(--space-3) var(--space-3); border-block-start: var(--hairline) solid var(--line); }
+/* Closed, the header is the whole shelf. */
+.shelf:not(:has(.shelf-body)) { padding-block-end: 0; }
 
 /* Drawn 36px tall, pressed at the full control size: the extra reaches into the padding. */
 .shelf-header { position: relative; flex: none; display: flex; align-items: center; gap: var(--space-1); inline-size: 100%; block-size: 2.25rem;
