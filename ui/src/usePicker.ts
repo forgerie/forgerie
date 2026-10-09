@@ -60,7 +60,7 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
   const find = useCallback((id: string) => {
     const session = state.sessions.find((candidate) => candidate.id === id);
     return session ? { id: session.id, cwd: session.cwd, ...(session.name ? { name: session.name } : {}), ...(session.worktree ? { worktree: session.worktree } : {}),
-      ...(session.pullRequest ? { pullRequest: session.pullRequest } : {}) } : undefined;
+      ...(session.pullRequests ? { pullRequests: session.pullRequests } : {}) } : undefined;
   }, [state.sessions]);
   // An archive can keep its worktree. Its reason arrives as a worktree event and joins the archive's message.
   const archiveNotes = useRef<Map<string, string> | undefined>(undefined);

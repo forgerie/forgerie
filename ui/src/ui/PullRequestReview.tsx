@@ -3,30 +3,37 @@ import { createPortal } from "react-dom";
 import {
   ChevronRightIcon, CircleCheckIcon, CircleDashedIcon, CircleMinusIcon, CircleXIcon, ExternalLinkIcon, EyeIcon,
   GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon, LoaderCircleIcon, MessageSquareIcon,
-  RefreshCwIcon, XIcon,
+  PlusIcon, RefreshCwIcon, TriangleAlertIcon, XIcon,
 } from "lucide-react";
 import {
-  ago, approvals, clock, commentsPrompt, duration, failedChecks, markOf, mergeBlock, sortedChecks, verdict, verdictAction,
+  ago, approvals, clock, commentsPrompt, duration, failedChecks, markOf, mergeBlock, sortedChecks, verdict, verdictAction, worstOf,
   type CheckState, type PullCheck, type PullComment, type PullLink, type PullRequest, type PullReview, type PullTone, type PullWatch,
 } from "../pullRequests/pullRequestModel";
-import type { PullLoad, SessionPull } from "../pullRequests/useSessionPull";
+import type { PullItem } from "../pullRequests/pullRequestApi";
+import type { PullsLoad, SessionPulls } from "../pullRequests/useSessionPull";
 import "./pullRequest.css";
 
-export type { PullLoad } from "../pullRequests/useSessionPull";
+export type { PullsLoad } from "../pullRequests/useSessionPull";
 
 export interface PullRequestBinding {
-  load: PullLoad;
-  link: PullLink | undefined;
-  notice: SessionPull["notice"];
+  load: PullsLoad;
+  /** The pull request on show. Undefined: none is linked, or the reader is linking another. */
+  selected: number | undefined;
+  onSelect: (number: number) => void;
+  /** Numbers being read again; their rows keep the last read meanwhile. */
+  reading: ReadonlySet<number>;
+  notice: SessionPulls["notice"];
   writing: boolean;
   /** Milliseconds since the epoch, for "12m ago" labels. */
   now: number;
   onRefresh: () => void;
   /** Put a message in the message box. The reader sends it. */
   onAsk: (message: string) => void;
-  onWatch: (on: boolean) => void;
-  onLink: (number: number) => void;
-  onMerge: () => void;
+  onWatch: (number: number, on: boolean) => void;
+  /** Resolves true once the server linked it. */
+  onLink: (number: number) => Promise<boolean>;
+  onUnlink: (number: number) => void;
+  onMerge: (number: number) => void;
   onClose: () => void;
 }
 
@@ -40,32 +47,42 @@ const CHECK_ICON: Record<CheckState, typeof CircleXIcon> = {
 const CHECK_WORD: Record<CheckState, string> = { failed: "Failed", cancelled: "Cancelled", running: "Running", queued: "Queued", passed: "Passed" };
 const STATE_WORD: Record<PullRequest["state"], string> = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" };
 
+const plural = (count: number, one: string, many: string) => `${String(count)} ${count === 1 ? one : many}`;
+
 /**
- * Header control. The dot carries the verdict's tone, so a failed check shows
- * from the thread without opening anything; the label says it in words.
- * Without a linked pull request it stays a plain icon that opens the link form.
+ * Header control. The dot carries the most urgent verdict among the session's
+ * pull requests, so one failure shows from the thread even when another is
+ * ready; the label names which one. Without a link it stays a plain icon that
+ * opens the link form.
  */
-export function PullRequestOpener({ pr, link, onOpen }: { pr?: PullRequest | undefined; link?: PullLink | undefined; onOpen: () => void }) {
-  const mark = pr ? markOf(pr) : undefined;
-  const label = pr ? `Pull request ${mark?.number ?? ""}: ${verdict(pr).sentence}`
-    : link ? `Pull request #${String(link.number)}` : "Link a pull request";
-  return <button type="button" className="icon-button quiet-button pr-opener" aria-label={label} title={label} data-tone={mark?.tone}
-    data-linked={link || pr ? true : undefined} onClick={onOpen}>
+export function PullRequestOpener({ pulls, links, onOpen }: { pulls: readonly PullRequest[]; links: readonly PullLink[]; onOpen: () => void }) {
+  const worst = worstOf(pulls);
+  const count = Math.max(links.length, pulls.length);
+  const label = worst ? `${count > 1 ? `${plural(count, "pull request", "pull requests")}. Most urgent: ` : "Pull request "}#${String(worst.pr.number)}: ${verdict(worst.pr).sentence}`
+    : count > 0 ? plural(count, "pull request", "pull requests") : "Link a pull request";
+  return <button type="button" className="icon-button quiet-button pr-opener" aria-label={label} title={label} data-tone={worst?.tone}
+    data-linked={count > 0 ? true : undefined} onClick={onOpen}>
     <GitPullRequestIcon aria-hidden size={18} />
-    {mark && <span className="pr-dot" aria-hidden />}
+    {worst && <span className="pr-dot" aria-hidden />}
+    {count > 1 && <span className="pr-count" aria-hidden>{count}</span>}
   </button>;
 }
 
 /**
- * A picker row's pull request: the number, and an eye while the agent watches
- * it. The catalog carries the link, not GitHub's verdict, so a row never
- * claims a state it has not read.
+ * A picker row's pull requests: the newest number, how many more, and an eye
+ * while the agent watches any of them. The catalog carries links, not
+ * GitHub's verdicts, so a row never claims a state it has not read.
  */
-export function PullRequestRowMark({ link }: { link: PullLink }) {
-  const watching = link.watch.kind === "watching";
-  const sentence = `Pull request #${String(link.number)}${watching ? ", watched by the agent" : ""}`;
-  return <span className="pr-row-mark" data-watch={link.watch.kind} title={sentence} aria-label={sentence}>
-    {watching ? <EyeIcon aria-hidden /> : <GitPullRequestIcon aria-hidden />}#{link.number}
+export function PullRequestRowMark({ links }: { links: readonly PullLink[] }) {
+  const newest = links.at(-1);
+  if (!newest) return null;
+  const watched = links.filter((link) => link.watch.kind === "watching").length;
+  const more = links.length - 1;
+  const sentence = `${links.length === 1 ? `Pull request #${String(newest.number)}` : `${String(links.length)} pull requests: ${links.map((link) => `#${String(link.number)}`).join(", ")}`}`
+    + (watched > 0 ? `, ${watched === links.length ? (links.length === 1 ? "watched" : "all watched") : `${String(watched)} watched`} by the agent` : "");
+  return <span className="pr-row-mark" data-watch={watched > 0 ? "watching" : "off"} title={sentence} aria-label={sentence}>
+    {watched > 0 ? <EyeIcon aria-hidden /> : <GitPullRequestIcon aria-hidden />}#{newest.number}
+    {more > 0 && <span className="pr-row-more" aria-hidden>+{more}</span>}
   </span>;
 }
 
@@ -78,7 +95,7 @@ export function PullRequestReview(props: PullRequestBinding) {
   return createPortal(<Review {...props} />, document.body);
 }
 
-function Review({ load, link, notice, writing, now, onRefresh, onAsk, onWatch, onLink, onMerge, onClose }: PullRequestBinding) {
+function Review({ load, selected, onSelect, reading, notice, writing, now, onRefresh, onAsk, onWatch, onLink, onUnlink, onMerge, onClose }: PullRequestBinding) {
   const titleId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const pressedBackdrop = useRef(false);
@@ -94,50 +111,97 @@ function Review({ load, link, notice, writing, now, onRefresh, onAsk, onWatch, o
     element?.addEventListener("cancel", cancel);
     return () => element?.removeEventListener("cancel", cancel);
   }, [onClose]);
-  const pr = load.type === "ready" ? load.value : undefined;
+  const items = load.type === "ready" ? load.items : [];
+  const [adding, setAdding] = useState(false);
+  const item = adding ? undefined : items.find((candidate) => candidate.link.number === selected) ?? items.at(-1);
+  const pr = item?.pull ?? undefined;
   const ask = (message: string) => { onClose(); onAsk(message); };
+  const link = async (number: number) => { if (await onLink(number)) { setAdding(false); onSelect(number); } };
   return <dialog ref={dialog} className="tree-dialog pr-dialog" aria-labelledby={titleId}
     onPointerDown={(event) => { pressedBackdrop.current = event.target === dialog.current; }}
     onClick={(event) => { if (event.target === dialog.current && pressedBackdrop.current) onClose(); pressedBackdrop.current = false; }}>
     <div className="tree-sheet">
       <header className="tree-head">
-        <h2 id={titleId}>Pull request</h2>
+        <h2 id={titleId}>{items.length > 1 ? "Pull requests" : "Pull request"}</h2>
         {/* The head gives way first: the base is where it lands, and the session chip repeats the head. */}
         <span className="tree-count pr-where" title={pr ? `#${String(pr.number)} ${pr.head} → ${pr.base}` : undefined}>{pr ? <><b>#{pr.number}</b>
           <span className="pr-where-head">{pr.head}</span><span className="pr-where-base">→ {pr.base}</span></>
-          : link ? <b>#{link.number}</b> : null}</span>
-        <button type="button" className="icon-button quiet-button" aria-label="Read the pull request again" title="Read again"
+          : item ? <b>#{item.link.number}</b> : null}</span>
+        <button type="button" className="icon-button quiet-button" aria-label={items.length > 1 ? "Read the pull requests again" : "Read the pull request again"} title="Read again"
           disabled={load.type === "loading"} onClick={onRefresh}><RefreshCwIcon aria-hidden size={18} /></button>
         {pr && <a className="icon-button quiet-button" href={pr.url} target="_blank" rel="noreferrer" aria-label="Open on GitHub" title="Open on GitHub">
           <ExternalLinkIcon aria-hidden size={18} /></a>}
         <button type="button" className="icon-button quiet-button" aria-label="Close pull request" title="Close" onClick={onClose}>
           <XIcon aria-hidden size={18} /></button>
       </header>
+      {items.length > 0 && <PullStrip items={items} current={item?.link.number} adding={adding} reading={reading}
+        onSelect={(number) => { setAdding(false); onSelect(number); }} onAdd={() => setAdding(true)} />}
       <div className="pr-body">
         {notice && <p className="pr-notice" data-tone={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-        {load.type === "loading" && <p className="changes-message" role="status">Reading the pull request from GitHub…</p>}
+        {load.type === "loading" && <p className="changes-message" role="status">Reading pull requests from GitHub…</p>}
         {load.type === "failed" && <div className="changes-message" role="alert"><p>{load.message}</p>
           <button type="button" onClick={onRefresh}>Try again</button></div>}
-        {load.type === "none" && <LinkForm writing={writing} onLink={onLink} />}
-        {pr && <PullBody pr={pr} watch={link?.watch ?? { kind: "off" }} now={now} writing={writing} onAsk={ask} onWatch={onWatch} />}
+        {load.type === "ready" && (items.length === 0 || adding) && <LinkForm writing={writing} first={items.length === 0}
+          onLink={(number) => { void link(number); }} onCancel={items.length > 0 ? () => setAdding(false) : undefined} />}
+        {item && !item.pull && <div className="changes-message" role="alert">
+          <p>Forgerie could not read pull request #{item.link.number}. {item.error ?? ""}</p>
+          <button type="button" onClick={onRefresh}>Try again</button></div>}
+        {item && pr && <PullBody key={item.link.number} pr={pr} watch={item.link.watch} now={now} writing={writing} onAsk={ask}
+          onWatch={(on) => onWatch(item.link.number, on)} />}
+        {item && <UnlinkRow number={item.link.number} watching={item.link.watch.kind === "watching"} writing={writing} onUnlink={onUnlink} />}
       </div>
-      {pr && <MergeFoot pr={pr} writing={writing} onMerge={onMerge} />}
+      {item && pr && <MergeFoot key={item.link.number} pr={pr} writing={writing} onMerge={() => onMerge(item.link.number)} />}
     </div>
   </dialog>;
 }
 
-/** No pull request is linked yet. The agent links one when it opens it; the reader can link an existing one here. */
-function LinkForm({ writing, onLink }: { writing: boolean; onLink: (number: number) => void }) {
+/**
+ * The session's pull requests, one tab each, plus a way to link another. Tabs
+ * wrap onto more lines rather than scroll, so every pull request stays one
+ * tap away at any width. Each tab names its number and what holds it.
+ */
+function PullStrip({ items, current, adding, reading, onSelect, onAdd }: { items: readonly PullItem[]; current: number | undefined; adding: boolean;
+  reading: ReadonlySet<number>; onSelect: (number: number) => void; onAdd: () => void }) {
+  return <div className="pr-strip">
+    <div role="tablist" aria-label="Pull requests in this session" className="pr-tabs">
+      {items.map((item) => {
+        const mark = item.pull ? markOf(item.pull) : undefined;
+        const Icon = mark ? TONE_ICON[mark.tone] : TriangleAlertIcon;
+        const watched = item.link.watch.kind === "watching";
+        const label = `#${String(item.link.number)}: ${item.pull ? verdict(item.pull).sentence : "could not be read"}${watched ? " Watched by the agent." : ""}`;
+        return <button key={`${item.link.repo}#${String(item.link.number)}`} type="button" role="tab" className="pr-tab" data-tone={mark?.tone ?? "blocked"}
+          aria-selected={!adding && current === item.link.number} aria-label={label} title={label} aria-busy={reading.has(item.link.number) || undefined}
+          onClick={() => onSelect(item.link.number)}>
+          <Icon aria-hidden size={14} className="pr-tab-icon" /><b>#{item.link.number}</b>
+          <span className="pr-tab-short">{mark?.short ?? "unread"}</span>
+          {watched && <EyeIcon aria-hidden size={13} className="pr-tab-eye" />}
+        </button>;
+      })}
+    </div>
+    <button type="button" className="pr-tab pr-tab-add" aria-pressed={adding} onClick={onAdd}><PlusIcon aria-hidden size={14} />Link another</button>
+  </div>;
+}
+
+/** Removing a link is quiet and reversible: link the number again to bring it back. */
+function UnlinkRow({ number, watching, writing, onUnlink }: { number: number; watching: boolean; writing: boolean; onUnlink: (number: number) => void }) {
+  return <p className="pr-unlink"><button type="button" className="pr-text-button" disabled={writing} onClick={() => onUnlink(number)}>
+    Unlink #{number} from this session</button>{watching ? " Its watch stops too." : ""}</p>;
+}
+
+/** Link an existing pull request. The agent links the ones it opens on its own. */
+function LinkForm({ writing, first, onLink, onCancel }: { writing: boolean; first: boolean; onLink: (number: number) => void; onCancel?: (() => void) | undefined }) {
   const inputId = useId();
   const [value, setValue] = useState("");
   const number = /^\d+$/.test(value.trim()) ? Number(value.trim()) : undefined;
   return <form className="pr-link" onSubmit={(event) => { event.preventDefault(); if (number && number > 0) onLink(number); }}>
-    <p>No pull request is linked to this session. When the agent opens one, it links it here.</p>
+    {first ? <p>No pull request is linked to this session. When the agent opens one, it links it here.</p>
+      : <p>A session can follow several pull requests. Each keeps its own watch.</p>}
     <label htmlFor={inputId}>Link an open pull request from this project's repository</label>
     <div className="pr-link-row">
       <span aria-hidden>#</span>
-      <input id={inputId} inputMode="numeric" autoComplete="off" placeholder="142" value={value} onChange={(event) => setValue(event.target.value)} />
+      <input id={inputId} inputMode="numeric" autoComplete="off" placeholder="142" value={value} autoFocus={!first} onChange={(event) => setValue(event.target.value)} />
       <button type="submit" className="pr-button primary" disabled={!number || writing}>{writing ? "Linking…" : "Link"}</button>
+      {onCancel && <button type="button" className="pr-button" onClick={onCancel}>Cancel</button>}
     </div>
   </form>;
 }

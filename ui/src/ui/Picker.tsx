@@ -104,7 +104,7 @@ function PickerRow({ row, selected, pending, held, showPin, menuOpen, onSelect, 
     <span className="picker-sub">
       <span className="picker-where" title={session.cwd}>{location.project}{location.branch ? <> · <span className="picker-branch">{location.branch}</span></> : null}</span>
       {session.worktree ? <WorktreeRowMark info={session.worktree} /> : null}
-      {session.pullRequest ? <PullRequestRowMark link={session.pullRequest} /> : null}
+      {session.pullRequests?.length ? <PullRequestRowMark links={session.pullRequests} /> : null}
       {held ? <span className="picker-from-backlog" title="Holds a backlog item" aria-label="Holds a backlog item"><ListTodoIcon aria-hidden /></span> : null}
       {row.agents || row.processes ? <span className="picker-work">
         {row.agents ? <span title={`${count(row.agents, "agent", "agents")} working`} aria-label={`${count(row.agents, "agent", "agents")} working`}>{AGENTS}{row.agents}</span> : null}

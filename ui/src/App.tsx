@@ -322,7 +322,7 @@ export function App() {
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
       initialError={commandSelection?.session.id === selectedId ? commandSelection.error : undefined}
       drafts={drafts} onSwitchSession={switchSession}
-      worktree={picker.find(selectedId)?.worktree} pullRequest={picker.find(selectedId)?.pullRequest} worktrees={worktreeApi} onNewSession={() => { void startNew(); }}
+      worktree={picker.find(selectedId)?.worktree} pullRequests={picker.find(selectedId)?.pullRequests} worktrees={worktreeApi} onNewSession={() => { void startNew(); }}
       archive={{ availability: picker.archiveState(selectedId), onArchive: () => { void archiveNext(selectedId); } }} />
     // The picker covers this area whenever nothing is selected, so it holds no
     // message of its own: the picker is the instruction.

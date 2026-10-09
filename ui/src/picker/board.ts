@@ -20,8 +20,8 @@ export interface PickerSession {
   starting?: boolean | undefined;
   /** The session-owned worktree it runs in, or ran in before Land or Discard removed it. */
   worktree?: WorktreeInfo | undefined;
-  /** The pull request linked to this session, and whether the agent watches it. */
-  pullRequest?: PullLink | undefined;
+  /** The pull requests linked to this session, oldest first, each with its own watch. */
+  pullRequests?: readonly PullLink[] | undefined;
 }
 export interface PickerStatus {
   isStreaming: boolean;
@@ -111,7 +111,7 @@ export function rowState(session: PickerSession, status: PickerStatus | undefine
   if (status?.isStreaming === true || status?.isCompacting === true || status?.isBashRunning === true || activity?.phase === "active") return "working";
   if (status?.needsResponse ?? requestsResponse(session.response)) return "blocked";
   // A watched pull request keeps its session at work between wakes (T3's rule). A request for a response still wins.
-  if (status?.watchingPullRequest === true || session.pullRequest?.watch.kind === "watching") return "working";
+  if (status?.watchingPullRequest === true || session.pullRequests?.some((link) => link.watch.kind === "watching") === true) return "working";
   return unread ? "unread" : "open";
 }
 

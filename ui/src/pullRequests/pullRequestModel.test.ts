@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ago, commentsPrompt, duration, fixChecksPrompt, markOf, mergeBlock, sortedChecks, verdict, verdictAction,
+  ago, commentsPrompt, duration, firstToShow, fixChecksPrompt, markOf, mergeBlock, sortedChecks, verdict, verdictAction, worstOf,
   type PullCheck, type PullComment, type PullRequest, type PullReview,
 } from "./pullRequestModel";
 
@@ -88,6 +88,23 @@ describe("prompts", () => {
     expect(verdictAction(pr({ mergeability: "unknown" }))).toBeUndefined();
     expect(verdictAction(pr())).toBeUndefined();
     expect(verdictAction(pr({ state: "merged", checks: [check("1", "failed")] }))).toBeUndefined();
+  });
+});
+
+describe("several pull requests", () => {
+  const failed = pr({ number: 1, checks: [check("1", "failed")], ...blocked("Every check must pass on this head commit.") });
+  const ready = pr({ number: 2 });
+  const merged = pr({ number: 3, state: "merged" });
+  it("takes the most urgent verdict for the header, whatever the order", () => {
+    expect(worstOf([ready, merged, failed])).toEqual({ tone: "failed", pr: failed });
+    expect(worstOf([merged, ready])?.tone).toBe("ready");
+    expect(worstOf([])).toBeUndefined();
+  });
+  it("opens on the most urgent live pull request, else the newest link", () => {
+    const item = (value: PullRequest | null, number = value?.number ?? 9) => ({ link: { number }, pull: value });
+    expect(firstToShow([item(ready), item(failed), item(merged)])).toBe(1);
+    expect(firstToShow([item(merged), item(null, 7)])).toBe(7);
+    expect(firstToShow([])).toBeUndefined();
   });
 });
 

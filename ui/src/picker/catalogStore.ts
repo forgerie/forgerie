@@ -4,7 +4,7 @@ import { asksSchema, deleteArchivedSchema, listingSchema, parseCatalogEvent, pro
 import type { PickerActivity, PickerProject, PickerSession, PickerStatus } from "./board";
 import type { SessionTransport } from "../sessionStore";
 import { mergeRecord, parseWorktreeEvent, type WorktreeRecord } from "../worktrees/worktreeApi";
-import { parsePullEvent, pullCatalogSchema, type PullLink } from "../pullRequests/pullRequestApi";
+import { parsePullEvent, pullCatalogSchema, sameLink, type PullLink } from "../pullRequests/pullRequestApi";
 
 /** How far the picker's copy of the machine catalog can be trusted. */
 export type CatalogConnection =
@@ -39,8 +39,8 @@ export type LocalChange =
   | { type: "local.deleted"; sessionId: string }
   /** A session worktree changed: setup, Land, Discard, archive cleanup, or a branch rename. */
   | { type: "session.worktree"; worktree: WorktreeRecord }
-  /** A session's pull request link or watch changed, including each wake. */
-  | { type: "session.pull-request"; link: PullLink };
+  /** One of a session's pull request links or watches changed, including each wake, or the link was removed. */
+  | { type: "session.pull-request"; link: PullLink; removed: boolean };
 
 /** Apply one live event or confirmed local change. Pure so replay after a snapshot uses the same rules. */
 export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | LocalChange): CatalogState {
@@ -79,12 +79,18 @@ export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | Loc
       return changed ? { ...state, sessions } : state;
     }
     case "session.pull-request": {
-      const { link } = event;
+      const { link, removed } = event;
       let changed = false;
       const sessions = state.sessions.map((session) => {
         if (session.id !== link.session.id) return session;
+        const current = session.pullRequests ?? [];
+        const kept = current.filter((item) => !sameLink(item, link));
+        const known = kept.length !== current.length;
+        if (removed && !known) return session;
         changed = true;
-        return { ...session, pullRequest: link };
+        // A changed link keeps its place; a new one goes last, as the server lists them.
+        const pullRequests = removed ? kept : known ? current.map((item) => sameLink(item, link) ? link : item) : [...current, link];
+        return { ...session, pullRequests };
       });
       return changed ? { ...state, sessions } : state;
     }
@@ -105,8 +111,9 @@ export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | Loc
 
 function withPulls(sessions: PickerSession[], links: readonly PullLink[]): PickerSession[] {
   if (links.length === 0) return sessions;
-  const byId = new Map(links.map((link) => [link.session.id, link]));
-  return sessions.map((session) => { const link = byId.get(session.id); return link ? { ...session, pullRequest: link } : session; });
+  const byId = new Map<string, PullLink[]>();
+  for (const link of links) byId.set(link.session.id, [...byId.get(link.session.id) ?? [], link]);
+  return sessions.map((session) => { const pullRequests = byId.get(session.id); return pullRequests ? { ...session, pullRequests } : session; });
 }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 /** About one frame at 60 Hz. */
@@ -217,7 +224,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
           }
           const pull = parsePullEvent(value);
           if (pull) {
-            const change: LocalChange = { type: "session.pull-request", link: pull };
+            const change: LocalChange = { type: "session.pull-request", ...pull };
             if (current.buffer) current.buffer.push(change); else updateLive(applyCatalogEvent(state, change));
             return;
           }

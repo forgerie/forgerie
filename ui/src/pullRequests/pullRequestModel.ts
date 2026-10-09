@@ -156,3 +156,27 @@ export function clock(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
+
+/** Urgency, highest first: what needs the reader, then what they can act on, then what is finished. */
+const URGENCY: readonly PullTone[] = ["failed", "blocked", "waiting", "ready", "draft", "merged", "closed"];
+const rank = (tone: PullTone) => URGENCY.indexOf(tone);
+
+/**
+ * The header's state for a session with several pull requests: the most
+ * urgent verdict among those GitHub read. A read that failed has no verdict,
+ * so it neither paints the dot nor hides another pull request's failure.
+ */
+export function worstOf(pulls: readonly PullRequest[]): { tone: PullTone; pr: PullRequest } | undefined {
+  let worst: { tone: PullTone; pr: PullRequest } | undefined;
+  for (const pr of pulls) {
+    const { tone } = verdict(pr);
+    if (!worst || rank(tone) < rank(worst.tone)) worst = { tone, pr };
+  }
+  return worst;
+}
+
+/** Which pull request the panel opens on: the most urgent live one, else the newest. */
+export function firstToShow(items: readonly { link: { number: number }; pull: PullRequest | null }[]): number | undefined {
+  const live = items.flatMap((item) => item.pull && (item.pull.state === "open" || item.pull.state === "draft") ? [item.pull] : []);
+  return worstOf(live)?.pr.number ?? items.at(-1)?.link.number;
+}

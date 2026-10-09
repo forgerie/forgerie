@@ -59,28 +59,45 @@ export const pullLinkSchema = z.object({
 });
 export type PullLink = z.infer<typeof pullLinkSchema>;
 
-const sessionPullSchema = z.object({ link: pullLinkSchema.nullable(), pull: pullRequestSchema.nullable() });
+const sessionPullSchema = z.object({ link: pullLinkSchema, pull: pullRequestSchema });
 export type SessionPull = z.infer<typeof sessionPullSchema>;
+/** One linked pull request. A failed read keeps its link, with `pull: null` and the server's reason. */
+const pullItemSchema = z.object({ link: pullLinkSchema, pull: pullRequestSchema.nullable(), error: text.optional() });
+export type PullItem = z.infer<typeof pullItemSchema>;
+const sessionPullsSchema = z.object({ items: z.array(pullItemSchema) });
 export const pullCatalogSchema = z.object({ links: z.array(pullLinkSchema) });
 const mergedSchema = z.object({ text, url: text.optional() });
 const errorSchema = z.object({ error: z.string() });
 
-/** `session.pull-request` on the machine and session streams: a link or watch changed. */
-export const pullEventSchema = z.object({ type: z.literal("session.pull-request"), link: pullLinkSchema });
-export function parsePullEvent(value: unknown): PullLink | undefined {
-  if (typeof value !== "object" || value === null || (value as { type?: unknown }).type !== "session.pull-request") return undefined;
-  return pullEventSchema.parse(value).link;
+/**
+ * On the machine and session streams: `session.pull-request` when a link or
+ * watch changed, `session.pull-request.unlinked` when a link was removed.
+ * A session can link several pull requests; each event carries one.
+ */
+export const pullEventSchema = z.object({ type: z.enum(["session.pull-request", "session.pull-request.unlinked"]), link: pullLinkSchema });
+export type PullEvent = { link: PullLink; removed: boolean };
+export function parsePullEvent(value: unknown): PullEvent | undefined {
+  const type = typeof value === "object" && value !== null ? (value as { type?: unknown }).type : undefined;
+  if (type !== "session.pull-request" && type !== "session.pull-request.unlinked") return undefined;
+  const event = pullEventSchema.parse(value);
+  return { link: event.link, removed: event.type === "session.pull-request.unlinked" };
 }
+/** The identity of one link: the session, the repository (without case, as GitHub compares it), and the number. */
+export const sameLink = (a: PullLink, b: PullLink) => a.session.id === b.session.id && a.number === b.number && a.repo.toLowerCase() === b.repo.toLowerCase();
 
 export type MergeMethod = "rebase" | "squash" | "merge";
 export interface PullSessionRef { id: string; cwd: string }
 export type PullRequestFn = (path: string, init: RequestInit) => Promise<Response>;
 
 export interface PullRequestApi {
-  read(ref: PullSessionRef, signal?: AbortSignal): Promise<SessionPull>;
+  /** Every linked pull request, oldest first, each read from GitHub. */
+  list(ref: PullSessionRef, signal?: AbortSignal): Promise<PullItem[]>;
+  read(ref: PullSessionRef, number: number, signal?: AbortSignal): Promise<SessionPull>;
+  /** Adds a link. It never replaces another pull request's link. */
   link(ref: PullSessionRef, number: number): Promise<SessionPull>;
-  watch(ref: PullSessionRef): Promise<PullLink>;
-  stopWatch(ref: PullSessionRef): Promise<PullLink | null>;
+  unlink(ref: PullSessionRef, number: number): Promise<PullLink>;
+  watch(ref: PullSessionRef, number: number): Promise<PullLink>;
+  stopWatch(ref: PullSessionRef, number: number): Promise<PullLink>;
   /** Confirmation binds the repository, number, and head SHA the reader saw. */
   merge(ref: PullSessionRef, pr: Pick<PullRequest, "repo" | "number" | "headSha">, method: MergeMethod): Promise<{ text: string; url?: string | undefined }>;
 }
@@ -89,7 +106,9 @@ export interface PullRequestApi {
 const TIMEOUT_MS = 45_000;
 
 export function createPullRequestApi(request: PullRequestFn, prefix = "/api"): PullRequestApi {
-  const path = (ref: PullSessionRef, tail = "") => `${prefix}/sessions/${encodeURIComponent(ref.id)}/pull-request${tail}`;
+  const path = (ref: PullSessionRef, tail = "") => `${prefix}/sessions/${encodeURIComponent(ref.id)}/pull-requests${tail}`;
+  const one = (ref: PullSessionRef, number: number, tail = "") => path(ref, `/${String(number)}${tail}`);
+  const query = (ref: PullSessionRef) => `?${new URLSearchParams({ cwd: ref.cwd })}`;
   async function call<T>(url: string, schema: z.ZodType<T>, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
     const response = await request(url, { ...init, cache: "no-store",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS) });
@@ -102,10 +121,12 @@ export function createPullRequestApi(request: PullRequestFn, prefix = "/api"): P
   }
   const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   return {
-    read: (ref, signal) => call(`${path(ref)}?${new URLSearchParams({ cwd: ref.cwd })}`, sessionPullSchema, {}, signal),
+    list: async (ref, signal) => (await call(`${path(ref)}${query(ref)}`, sessionPullsSchema, {}, signal)).items,
+    read: (ref, number, signal) => call(`${one(ref, number)}${query(ref)}`, sessionPullSchema, {}, signal),
     link: (ref, number) => call(path(ref), sessionPullSchema, json("PUT", { cwd: ref.cwd, number })),
-    watch: (ref) => call(path(ref, "/watch"), pullLinkSchema, json("POST", { cwd: ref.cwd })),
-    stopWatch: (ref) => call(`${path(ref, "/watch")}?${new URLSearchParams({ cwd: ref.cwd })}`, pullLinkSchema.nullable(), { method: "DELETE" }),
-    merge: (ref, pr, method) => call(path(ref, "/merge"), mergedSchema, json("POST", { cwd: ref.cwd, repo: pr.repo, number: pr.number, headSha: pr.headSha, method })),
+    unlink: (ref, number) => call(`${one(ref, number)}${query(ref)}`, pullLinkSchema, { method: "DELETE" }),
+    watch: (ref, number) => call(one(ref, number, "/watch"), pullLinkSchema, json("POST", { cwd: ref.cwd })),
+    stopWatch: (ref, number) => call(`${one(ref, number, "/watch")}${query(ref)}`, pullLinkSchema, { method: "DELETE" }),
+    merge: (ref, pr, method) => call(one(ref, pr.number, "/merge"), mergedSchema, json("POST", { cwd: ref.cwd, repo: pr.repo, headSha: pr.headSha, method })),
   };
 }

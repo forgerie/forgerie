@@ -103,19 +103,26 @@ function start(api: Awaited<ReturnType<typeof machine>>) {
 describe("pull request links", () => {
   const watching = { kind: "watching", since: "2026-10-07T21:00:00.000Z", wakes: 0 };
   const link = { session: { id: "a", cwd: "/code/forgerie" }, repo: "o/r", number: 142, watch: { kind: "off" } };
-  it("joins each session's link from the server's catalog, then follows link events", async () => {
-    const api = await machine({ pulls: [link] });
+  it("joins every link a session has, then follows link, watch, and unlink events one pull request at a time", async () => {
+    const second = { ...link, number: 143 };
+    const api = await machine({ pulls: [link, second] });
     const store = start(api);
+    const pulls = () => store.getSnapshot().sessions.find((session) => session.id === "a")?.pullRequests;
     await until(store, () => store.getSnapshot().connection.type === "ready");
-    expect(store.getSnapshot().sessions.find((session) => session.id === "a")?.pullRequest).toEqual(link);
-    api.emit({ type: "session.pull-request", link: { ...link, watch: watching } });
-    await until(store, () => store.getSnapshot().sessions.find((session) => session.id === "a")?.pullRequest?.watch.kind === "watching");
+    expect(pulls()).toEqual([link, second]);
+    api.emit({ type: "session.pull-request", link: { ...second, watch: watching } });
+    await until(store, () => pulls()?.[1]?.watch.kind === "watching");
+    expect(pulls()?.[0]).toEqual(link);
+    api.emit({ type: "session.pull-request", link: { ...link, number: 150 } });
+    await until(store, () => pulls()?.length === 3);
+    api.emit({ type: "session.pull-request.unlinked", link: { ...link, repo: "O/R" } });
+    await until(store, () => pulls()?.map((item) => item.number).join() === "143,150");
   });
   it("still lists sessions when the server has no pull request catalog", async () => {
     const api = await machine();
     const store = start(api);
     await until(store, () => store.getSnapshot().connection.type === "ready");
-    expect(store.getSnapshot().sessions.map((session) => session.pullRequest)).toEqual([undefined, undefined]);
+    expect(store.getSnapshot().sessions.map((session) => session.pullRequests)).toEqual([undefined, undefined]);
   });
 });
 

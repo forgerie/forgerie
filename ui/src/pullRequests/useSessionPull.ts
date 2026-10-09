@@ -1,99 +1,134 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { MergeMethod, PullLink, PullRequest, PullRequestApi, PullSessionRef } from "./pullRequestApi";
+import { sameLink, type MergeMethod, type PullItem, type PullLink, type PullRequestApi, type PullSessionRef } from "./pullRequestApi";
 
-/** What the panel draws. `none`: the session has no linked pull request. */
-export type PullLoad =
+/** What the panel draws. `ready` with no items: the session links no pull request. */
+export type PullsLoad =
   | { type: "loading" }
-  | { type: "none" }
-  | { type: "ready"; value: PullRequest }
+  | { type: "ready"; items: readonly PullItem[] }
   | { type: "failed"; message: string };
 
-export interface SessionPull {
-  link: PullLink | undefined;
-  load: PullLoad;
+export interface SessionPulls {
+  /** The catalog's links: known before GitHub is read, so the header can show at once. */
+  links: readonly PullLink[];
+  load: PullsLoad;
+  /** Numbers being read again after a change. Their rows keep the last read meanwhile. */
+  reading: ReadonlySet<number>;
   /** The last write's outcome, in words: a refusal or a merge receipt. */
   notice: { tone: "error" | "done"; text: string } | undefined;
   /** A write is in flight. Writes do not overlap. */
   writing: boolean;
   refresh: () => void;
-  linkNumber: (number: number) => Promise<void>;
-  setWatch: (on: boolean) => Promise<void>;
-  merge: (method: MergeMethod) => Promise<void>;
+  linkNumber: (number: number) => Promise<boolean>;
+  unlink: (number: number) => Promise<void>;
+  setWatch: (number: number, on: boolean) => Promise<void>;
+  merge: (number: number, method: MergeMethod) => Promise<void>;
   clearNotice: () => void;
 }
 
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
-/** Changes that mean GitHub may say something new: another PR, a watch change, or a wake. */
-export const linkKey = (link: PullLink | undefined) => link ? `${link.repo}#${String(link.number)}:${link.watch.kind}:${link.watch.kind === "watching" ? String(link.watch.wakes) : ""}` : "";
+/** What makes a link worth reading again: a new watch state or a new wake. */
+export const linkKey = (link: PullLink) => `${link.repo.toLowerCase()}#${String(link.number)}:${link.watch.kind}:${link.watch.kind === "watching" ? String(link.watch.wakes) : ""}`;
+const upsert = (items: readonly PullItem[], next: PullItem) =>
+  items.some((item) => sameLink(item.link, next.link)) ? items.map((item) => sameLink(item.link, next.link) ? next : item) : [...items, next];
 
 /**
- * Binding: one session's pull request. Reads once on open, again when the
- * catalog reports a new link, watch state, or wake, and on request. Each read
- * costs several GitHub requests, so nothing polls here; the server's watcher
- * is the poller.
+ * Binding: every pull request linked to one session. Reads them all once on
+ * open and on request. After that, a catalog change rereads only the pull
+ * request it names: each read costs several GitHub requests, and the server's
+ * watcher, not this client, is the poller.
  */
-export function useSessionPull(api: PullRequestApi, ref: PullSessionRef | undefined, catalogLink: PullLink | undefined): SessionPull {
-  const [link, setLink] = useState<PullLink | undefined>(catalogLink);
-  const [load, setLoad] = useState<PullLoad>({ type: "loading" });
-  const [notice, setNotice] = useState<SessionPull["notice"]>();
+export function useSessionPulls(api: PullRequestApi, ref: PullSessionRef | undefined, catalogLinks: readonly PullLink[]): SessionPulls {
+  const [load, setLoad] = useState<PullsLoad>({ type: "loading" });
+  const [reading, setReading] = useState<ReadonlySet<number>>(new Set());
+  const [notice, setNotice] = useState<SessionPulls["notice"]>();
   const [writing, setWriting] = useState(false);
   const [generation, setGeneration] = useState(0);
-  const pending = useRef<AbortController | undefined>(undefined);
   const id = ref?.id;
   const cwd = ref?.cwd;
+  const loaded = load.type === "ready";
 
-  // The catalog's live link wins over an older read: it carries watch changes and wakes.
-  const catalogKey = linkKey(catalogLink);
-  // Keyed on the link's meaning, not its object identity: the catalog rebuilds objects on unrelated events.
-  const latest = useRef(catalogLink);
-  latest.current = catalogLink;
-  useEffect(() => { if (latest.current) setLink(latest.current); }, [catalogKey]);
-
+  // Full read: on open, on refresh.
+  const seen = useRef(new Map<string, string>());
+  const latestCatalog = useRef(catalogLinks);
+  latestCatalog.current = catalogLinks;
   useEffect(() => {
     if (!id || !cwd) return;
-    pending.current?.abort();
     const controller = new AbortController();
-    pending.current = controller;
     setLoad((current) => current.type === "ready" ? current : { type: "loading" });
-    api.read({ id, cwd }, controller.signal).then((result) => {
+    api.list({ id, cwd }, controller.signal).then((items) => {
       if (controller.signal.aborted) return;
-      setLink(result.link ?? undefined);
-      setLoad(result.pull ? { type: "ready", value: result.pull } : result.link
-        ? { type: "failed", message: `Pull request #${String(result.link.number)} is linked, but the server sent no data for it. Read it again.` }
-        : { type: "none" });
+      seen.current = new Map(latestCatalog.current.map((link) => [`${link.repo.toLowerCase()}#${String(link.number)}`, linkKey(link)]));
+      setLoad({ type: "ready", items });
     }, (error: unknown) => {
-      if (controller.signal.aborted) return;
-      setLoad({ type: "failed", message: messageOf(error) });
+      if (!controller.signal.aborted) setLoad({ type: "failed", message: messageOf(error) });
     });
     return () => controller.abort();
-  }, [api, id, cwd, catalogKey, generation]);
+  }, [api, id, cwd, generation]);
+
+  // Partial reads: a catalog link that appeared or changed is read again; a link that went away leaves.
+  const catalogKey = catalogLinks.map(linkKey).join("|");
+  useEffect(() => {
+    if (!id || !cwd || !loaded) return;
+    const links = latestCatalog.current;
+    const now = new Map(links.map((link) => [`${link.repo.toLowerCase()}#${String(link.number)}`, linkKey(link)]));
+    const changed = links.filter((link) => seen.current.get(`${link.repo.toLowerCase()}#${String(link.number)}`) !== linkKey(link));
+    const gone = [...seen.current.keys()].filter((key) => !now.has(key));
+    seen.current = now;
+    if (gone.length > 0) setLoad((current) => current.type !== "ready" ? current
+      : { type: "ready", items: current.items.filter((item) => !gone.includes(`${item.link.repo.toLowerCase()}#${String(item.link.number)}`)) });
+    if (changed.length === 0) return;
+    const controller = new AbortController();
+    setReading((current) => new Set([...current, ...changed.map((link) => link.number)]));
+    for (const link of changed) {
+      // The link itself is news: show the new watch state before GitHub answers.
+      setLoad((current) => current.type !== "ready" ? current
+        : { type: "ready", items: upsert(current.items, { ...(current.items.find((item) => sameLink(item.link, link)) ?? { pull: null }), link }) });
+      api.read({ id, cwd }, link.number, controller.signal).then(
+        (result) => { if (!controller.signal.aborted) setLoad((current) => current.type !== "ready" ? current : { type: "ready", items: upsert(current.items, result) }); },
+        (error: unknown) => { if (!controller.signal.aborted) setLoad((current) => current.type !== "ready" ? current
+          : { type: "ready", items: upsert(current.items, { ...(current.items.find((item) => sameLink(item.link, link)) ?? { pull: null }), link, error: messageOf(error) }) }); },
+      ).finally(() => setReading((current) => { const next = new Set(current); next.delete(link.number); return next; }));
+    }
+    return () => controller.abort();
+  }, [api, id, cwd, loaded, catalogKey]);
 
   const refresh = useCallback(() => { setLoad({ type: "loading" }); setGeneration((value) => value + 1); }, []);
-  const write = useCallback(async (run: (ref: PullSessionRef) => Promise<void>) => {
-    if (!id || !cwd) return;
+  const write = useCallback(async (run: (target: PullSessionRef) => Promise<void>): Promise<boolean> => {
+    if (!id || !cwd) return false;
     setWriting(true);
     setNotice(undefined);
-    try { await run({ id, cwd }); }
-    catch (error) { setNotice({ tone: "error", text: messageOf(error) }); }
+    try { await run({ id, cwd }); return true; }
+    catch (error) { setNotice({ tone: "error", text: messageOf(error) }); return false; }
     finally { setWriting(false); }
   }, [id, cwd]);
+  const items = load.type === "ready" ? load.items : [];
+  const patch = (next: PullItem) => setLoad((current) => current.type !== "ready" ? current : { type: "ready", items: upsert(current.items, next) });
+  const itemOf = (number: number) => items.find((item) => item.link.number === number);
 
   return {
-    link, load, notice, writing, refresh, clearNotice: () => setNotice(undefined),
-    linkNumber: (number) => write(async (target) => {
-      const result = await api.link(target, number);
-      setLink(result.link ?? undefined);
-      setLoad(result.pull ? { type: "ready", value: result.pull } : { type: "none" });
-    }),
-    setWatch: (on) => write(async (target) => {
-      const next = on ? await api.watch(target) : await api.stopWatch(target);
-      if (next) setLink(next);
-    }),
-    merge: (method) => write(async (target) => {
-      if (load.type !== "ready") throw new Error("Read the pull request before you merge it.");
-      const result = await api.merge(target, load.value, method);
-      setNotice({ tone: "done", text: result.text });
-      refresh();
-    }),
+    links: catalogLinks, load, reading, notice, writing, refresh, clearNotice: () => setNotice(undefined),
+    linkNumber: (number) => write(async (target) => { patch(await api.link(target, number)); }),
+    unlink: async (number) => {
+      await write(async (target) => {
+        const removed = await api.unlink(target, number);
+        setLoad((current) => current.type !== "ready" ? current : { type: "ready", items: current.items.filter((item) => !sameLink(item.link, removed)) });
+      });
+    },
+    setWatch: async (number, on) => {
+      await write(async (target) => {
+        const link = on ? await api.watch(target, number) : await api.stopWatch(target, number);
+        const item = itemOf(number);
+        patch({ ...(item ?? { pull: null }), link });
+      });
+    },
+    merge: async (number, method) => {
+      await write(async (target) => {
+        const pull = itemOf(number)?.pull;
+        if (!pull) throw new Error("Read the pull request before you merge it.");
+        const result = await api.merge(target, pull, method);
+        setNotice({ tone: "done", text: result.text });
+        patch(await api.read(target, number));
+      });
+    },
   };
 }

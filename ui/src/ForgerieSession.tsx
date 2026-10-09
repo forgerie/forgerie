@@ -38,15 +38,17 @@ import { WorktreeChip } from "./ui/WorktreeChip";
 import { SessionMenu, WorktreeDialog, type WorktreeCommand } from "./ui/WorktreeActions";
 import { WorktreeReceipt, WorktreeSetupCard } from "./ui/WorktreeSetupCard";
 import { createPullRequestApi, type PullLink } from "./pullRequests/pullRequestApi";
-import { useSessionPull } from "./pullRequests/useSessionPull";
+import { useSessionPulls } from "./pullRequests/useSessionPull";
+import { firstToShow } from "./pullRequests/pullRequestModel";
 import { PullRequestOpener, PullRequestReview } from "./ui/PullRequestReview";
 
 const pullRequests = createPullRequestApi(browserTransport.request);
+const NO_LINKS: readonly PullLink[] = [];
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequest: catalogPull, worktrees, onNewSession }: {
+export function ForgerieSession({ id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, worktrees, onNewSession }: {
   /** The catalog's live view of this session's pull request link and watch. */
-  pullRequest?: PullLink | undefined;
+  pullRequests?: readonly PullLink[] | undefined;
   onUnread?: ((listener: (id: string) => void) => () => void) | undefined;
   id: string; known?: Session | undefined; initialDraft?: string | undefined;
   /** The catalog's live view of this session's worktree: state, setup, and branch as events report them. */
@@ -96,8 +98,12 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const [review, setReview] = useState<{ focusNoteId?: string }>();
   const changes = useMemo(() => cwd ? createChangesSource(cwd, browserTransport.request) : undefined, [cwd]);
   const pullRef = useMemo(() => sessionId && cwd ? { id: sessionId, cwd } : undefined, [sessionId, cwd]);
-  const pull = useSessionPull(pullRequests, pullRef, catalogPull);
+  const pull = useSessionPulls(pullRequests, pullRef, catalogPulls ?? NO_LINKS);
   const [pullOpen, setPullOpen] = useState(false);
+  const [pullSelected, setPullSelected] = useState<number>();
+  const pullItems = pull.load.type === "ready" ? pull.load.items : [];
+  const readPulls = useMemo(() => pullItems.flatMap((item) => item.pull ? [item.pull] : []), [pullItems]);
+  const linkedCount = Math.max(pull.links.length, pullItems.length);
   /** Send a chat message with every waiting note. Only the notes it carried leave the tray, and only once Pi accepted it. */
   const sendWithNotes = useCallback(async (text: string, images: PromptAttachment[] | undefined, steer: boolean) => {
     const carried = carriesNotes(text) ? tray.notes() : [];
@@ -193,8 +199,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
       actions={<>
         {/* A landed or discarded worktree has no folder left to diff. */}
         {/* Linked: always, even read-only, so a landed session still shows its pull request. Unlinked: only where the agent could still open one. */}
-        {pullRef && (pull.link || (!readOnly && pull.load.type === "none")) && <PullRequestOpener pr={pull.load.type === "ready" ? pull.load.value : undefined}
-          link={pull.link} onOpen={() => { pull.clearNotice(); setPullOpen(true); }} />}
+        {pullRef && (linkedCount > 0 || (!readOnly && pull.load.type === "ready")) && <PullRequestOpener pulls={readPulls} links={pull.links}
+          onOpen={() => { pull.clearNotice(); setPullSelected(firstToShow(pullItems)); setPullOpen(true); }} />}
         {changes && !readOnly && <ChangesOpener notes={notes.length} onOpen={() => setReview({})} />}
         <TreeOpener idle={treeAvailable} onOpen={() => onIdleAction("tree")} />
         {archive && <ArchiveNextButton onArchive={archive.onArchive}
@@ -236,9 +242,11 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}
       {review && changes && <ChangesReview source={changes} notes={notes} focusNoteId={review.focusNoteId}
         onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setReview(undefined)} />}
-      {pullOpen && <PullRequestReview load={pull.load} link={pull.link} notice={pull.notice} writing={pull.writing} now={Date.now()}
-        onRefresh={pull.refresh} onWatch={(on) => { void pull.setWatch(on); }} onLink={(number) => { void pull.linkNumber(number); }}
-        onMerge={() => { void pull.merge("rebase"); }} onClose={() => setPullOpen(false)}
+      {pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
+        notice={pull.notice} writing={pull.writing} now={Date.now()}
+        onRefresh={pull.refresh} onWatch={(number, on) => { void pull.setWatch(number, on); }} onLink={pull.linkNumber}
+        onUnlink={(number) => { void pull.unlink(number); }}
+        onMerge={(number) => { void pull.merge(number, "rebase"); }} onClose={() => setPullOpen(false)}
         onAsk={(message) => { if (!readOnly) runtimeRef.current?.thread.composer.setText(message); }} />}
       {worktreeCommand && worktree && worktrees && <WorktreeDialog command={worktreeCommand} info={worktree} api={worktrees}
         onAsk={readOnly ? undefined : (prompt) => send(prompt)} onDone={() => { void refreshWorktree(); }} onClose={() => setWorktreeCommand(undefined)} />}

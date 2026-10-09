@@ -1,5 +1,5 @@
 // Dev-only, network-free preview of a session's pull request.
-// ?scenario= failed (default), waiting, blocked, ready, watching, stopped, conflict, unknown, nochecks, draft, merged, closed, unlinked, refused,
+// ?scenario= failed (default), several, waiting, blocked, ready, watching, stopped, conflict, unknown, nochecks, draft, merged, closed, unlinked, refused,
 // loading, error, asked (after "Ask the agent to fix": the panel closed, the message box holds the request),
 // header (the panel closed: the header dot), rows (the session list's marks for every tone).
 // Nothing reaches GitHub or Pi. Fixtures use the server's wire shapes (src/pullRequests/pullRequestApi.ts).
@@ -14,7 +14,9 @@ import { SessionFrame } from "../src/ui/SessionFrame";
 import { AppShell } from "../src/ui/AppShell";
 import { ChangesOpener } from "../src/ui/ChangesReview";
 import { TreeOpener } from "../src/ui/SessionTreeNavigator";
-import { PullRequestOpener, PullRequestReview, PullRequestRowMark, type PullLoad } from "../src/ui/PullRequestReview";
+import { PullRequestOpener, PullRequestReview, PullRequestRowMark, type PullsLoad } from "../src/ui/PullRequestReview";
+import type { PullItem } from "../src/pullRequests/pullRequestApi";
+import { firstToShow } from "../src/pullRequests/pullRequestModel";
 import { fixChecksPrompt, type PullCheck, type PullLink, type PullRequest, type PullWatch } from "../src/pullRequests/pullRequestModel";
 import "../src/ui/theme.css";
 
@@ -114,13 +116,20 @@ const messages: TranscriptMessage[] = [
 
 function Preview() {
   const pr = PRS[scenario] ?? PRS.failed!;
-  const [watch, setWatch] = useState<PullWatch>(WATCH[scenario] ?? { kind: "off" });
-  const value = pr;
-  const link = scenario === "unlinked" ? undefined : linkOf(pr, watch);
-  const load: PullLoad = scenario === "loading" ? { type: "loading" }
-    : scenario === "unlinked" ? { type: "none" }
+  // "several": three pull requests in one session, one failing, one watched, one unreadable.
+  const initial: PullItem[] = scenario === "unlinked" ? []
+    : scenario === "several" ? [
+      { link: linkOf({ ...PRS.ready!, number: 139 }), pull: { ...PRS.ready!, number: 139, title: "Split the session list into its own store", head: "refactor/session-store" } },
+      { link: linkOf(PRS.failed!, WATCH.watching), pull: PRS.failed! },
+      { link: linkOf({ ...PRS.waiting!, number: 151 }), pull: null, error: "GitHub refused the read: the PR head branch was deleted." },
+    ]
+    : [{ link: linkOf(pr, WATCH[scenario]), pull: pr }];
+  const [items, setItems] = useState(initial);
+  const [selected, setSelected] = useState(firstToShow(initial));
+  const setWatch = (number: number, watch: PullWatch) => setItems((current) => current.map((item) => item.link.number === number ? { ...item, link: { ...item.link, watch } } : item));
+  const load: PullsLoad = scenario === "loading" ? { type: "loading" }
     : scenario === "error" ? { type: "failed", message: "GitHub refused the read: Forgerie's GitHub App cannot see simonwjackson/forgerie. Install the app on that repository from the backlog, then try again." }
-    : { type: "ready", value };
+    : { type: "ready", items };
   const notice = scenario === "refused" ? { tone: "error" as const, text: "The PR head changed after confirmation; read it again." } : undefined;
   const [open, setOpen] = useState(scenario !== "header" && scenario !== "asked" && scenario !== "rows");
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages(messages, false), onNew: async () => {} });
@@ -131,14 +140,16 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
   const frame = <SessionFrame name="Reject empty passwords" status="Connected" actions={<>
-    <PullRequestOpener pr={load.type === "ready" ? value : undefined} link={link} onOpen={() => setOpen(true)} />
+    <PullRequestOpener pulls={load.type === "ready" ? items.flatMap((item) => item.pull ? [item.pull] : []) : []} links={items.map((item) => item.link)} onOpen={() => setOpen(true)} />
     <ChangesOpener notes={0} onOpen={() => {}} />
     <TreeOpener idle onOpen={() => {}} />
   </>}>
     <Thread />
-    {open && <PullRequestReview load={load} link={link} notice={notice} writing={false} now={NOW} onRefresh={() => {}} onAsk={ask}
-      onWatch={(on) => setWatch(on ? { kind: "watching", since: new Date().toISOString(), wakes: 0 } : { kind: "stopped", at: new Date().toISOString(), reason: "Stopped from the panel." })}
-      onLink={() => {}} onMerge={() => {}} onClose={() => setOpen(false)} />}
+    {open && <PullRequestReview load={load} selected={selected} onSelect={setSelected} reading={new Set()} notice={notice} writing={false} now={NOW}
+      onRefresh={() => {}} onAsk={ask}
+      onWatch={(number, on) => setWatch(number, on ? { kind: "watching", since: new Date().toISOString(), wakes: 0 } : { kind: "stopped", at: new Date().toISOString(), reason: "Stopped from the panel." })}
+      onLink={async () => false} onUnlink={(number) => setItems((current) => current.filter((item) => item.link.number !== number))}
+      onMerge={() => {}} onClose={() => setOpen(false)} />}
   </SessionFrame>;
   return <AssistantRuntimeProvider runtime={runtime}>
     {scenario === "rows" ? <AppShell open onOpenChange={() => {}} picker={() => <MockPicker />} thread={frame} /> : frame}
@@ -147,13 +158,13 @@ function Preview() {
 
 /** The session list as Picker.tsx draws it, with each row's pull request mark where the worktree mark sits. */
 function MockPicker() {
-  const rows: { title: string; branch: string; time: string; link: PullLink; state?: string }[] = [
-    { title: "Reject empty passwords", branch: "fix/empty-password", time: "28m", link: linkOf(PRS.failed!, WATCH.watching), state: "working" },
-    { title: "Land the picker redesign", branch: "picker-redesign", time: "4m", link: linkOf({ ...PRS.ready!, number: 145 }) },
-    { title: "Stream check logs into the transcript", branch: "spike/check-logs", time: "18m", link: linkOf({ ...PRS.draft!, number: 144 }) },
-    { title: "Speed up session listing on a busy machine with long names", branch: "speed-up-session-listing", time: "26m", link: linkOf({ ...PRS.waiting!, number: 1043 }, WATCH.watching), state: "working" },
-    { title: "Address review on the cookie change", branch: "fix/cookie-review", time: "40m", link: linkOf({ ...PRS.blocked!, number: 140 }, WATCH.stopped) },
-    { title: "Ship the backlog launcher", branch: "feat/backlog-launcher", time: "3h", link: linkOf({ ...PRS.merged!, number: 131 }) },
+  const rows: { title: string; branch: string; time: string; links: PullLink[]; state?: string }[] = [
+    { title: "Reject empty passwords", branch: "fix/empty-password", time: "28m", links: [linkOf({ ...PRS.ready!, number: 139 }), linkOf(PRS.failed!, WATCH.watching), linkOf({ ...PRS.waiting!, number: 151 })], state: "working" },
+    { title: "Land the picker redesign", branch: "picker-redesign", time: "4m", links: [linkOf({ ...PRS.ready!, number: 145 })] },
+    { title: "Stream check logs into the transcript", branch: "spike/check-logs", time: "18m", links: [linkOf({ ...PRS.draft!, number: 144 })] },
+    { title: "Speed up session listing on a busy machine with long names", branch: "speed-up-session-listing", time: "26m", links: [linkOf({ ...PRS.waiting!, number: 1043 }, WATCH.watching)], state: "working" },
+    { title: "Address review on the cookie change", branch: "fix/cookie-review", time: "40m", links: [linkOf({ ...PRS.blocked!, number: 140 }, WATCH.stopped)] },
+    { title: "Ship the backlog launcher", branch: "feat/backlog-launcher", time: "3h", links: [linkOf({ ...PRS.merged!, number: 131 })] },
   ];
   return <section className="picker" aria-label="Sessions">
     <header className="picker-header">
@@ -168,7 +179,7 @@ function MockPicker() {
         <span className="picker-title">{row.title}</span>
         <span className="picker-time" data-live={row.state === "working" || undefined}>{row.time}</span>
         <span className="picker-sub"><span className="picker-where">forgerie · <span className="picker-branch">{row.branch}</span></span>
-          <PullRequestRowMark link={row.link} /></span>
+          <PullRequestRowMark links={row.links} /></span>
       </div>)}
     </div>
   </section>;
