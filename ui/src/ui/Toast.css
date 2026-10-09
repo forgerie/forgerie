@@ -3,7 +3,8 @@
    open detail sits under it; the foot holds the detail's first words on the
    left and the action on the right. */
 .toast { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: var(--space-1);
-  padding: var(--space-3) var(--space-2) var(--space-2) var(--space-4);
+  /* Top and bottom match once the first line's half-leading is counted, with or without a foot. */
+  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
   border: var(--hairline) solid var(--line); border-radius: var(--radius-thread); background: var(--modal-surface);
   box-shadow: var(--float-shadow); font-size: var(--small-text); line-height: 1.5; pointer-events: auto;
   animation: toast-in 240ms cubic-bezier(0.2, 0.9, 0.3, 1); }
@@ -11,11 +12,16 @@
 @keyframes toast-in { from { opacity: 0; translate: 1.5rem 0; } }
 .toast:dir(rtl) { animation-name: toast-in-rtl; }
 @keyframes toast-in-rtl { from { opacity: 0; translate: -1.5rem 0; } }
-/* A failure says so in the trace's alert grammar: a rail and a wash in the failure tone, never a red box or red words.
-   The rail stops short of the rounded corners, so it stays a straight line. */
-.toast[data-tone="alert"] { position: relative; background: var(--float-alert-surface); }
-.toast[data-tone="alert"]::after { content: ""; position: absolute; inset-block: var(--space-3); inset-inline-start: var(--space-1);
-  inline-size: calc(var(--hairline) * 3); border-radius: var(--radius-pill); background: var(--destructive); }
+/* A failure keeps the plain card: a floating card has its own edge, so a tint or a rail on it reads as a stain.
+   One mark in the failure tone stands before the message, centred on its first line, and the text, the detail
+   and the foot all start at the message's edge. */
+.toast[data-tone="alert"] { grid-template-columns: auto minmax(0, 1fr) auto; padding-inline-start: var(--space-3); }
+.toast-mark { grid-column: 1; grid-row: 1; display: grid; place-items: center; block-size: calc(var(--small-text) * 1.5);
+  margin-block-start: 0.0625rem; margin-inline-end: var(--space-1); color: var(--destructive); }
+.toast-mark svg { inline-size: 1rem; block-size: 1rem; }
+.toast[data-tone="alert"] .toast-message { grid-column: 2; }
+.toast[data-tone="alert"] .toast-dismiss { grid-column: 3; }
+.toast[data-tone="alert"] :is(.toast-detail, .toast-foot) { grid-column: 2 / -1; }
 .toast-message { grid-column: 1; margin: 0; padding-block-start: 0.0625rem; overflow-wrap: anywhere; color: var(--quiet-foreground); text-wrap: pretty; }
 .toast-message strong { font-weight: 600; color: var(--foreground); }
 .toast[data-tone="alert"] .toast-message { color: var(--foreground); font-weight: 500; }
@@ -39,6 +45,11 @@
 /* The one thing the toast offers, drawn as the app's offer: the live colour as a wash. */
 .toast-action { margin-inline-start: auto; padding-inline: var(--space-3); background: var(--offer-wash); color: var(--ink-live); font-weight: 500; }
 .toast-action:hover { background: var(--offer-wash-hover); }
+/* Beside a failure the live colour would be a second accent, so the action is a plain button. */
+.toast[data-tone="alert"] .toast-action { background: var(--float-action); color: var(--foreground); }
+.toast[data-tone="alert"] .toast-action:hover { background: var(--float-action-hover); }
+/* With no detail beside it, the action follows the message's edge, so the card reads as one column, not two corners. */
+.toast[data-tone="alert"] .toast-foot:not(:has(.toast-preview, .toast-more)) .toast-action { margin-inline-start: 0; }
 .toast-dismiss { grid-column: 2; grid-row: 1; margin-block-start: calc(-1 * var(--space-1)); inline-size: var(--icon-size); color: var(--muted-foreground); }
 .toast-dismiss:hover { background: var(--hover-surface); color: var(--foreground); }
 .toast-dismiss svg { inline-size: 0.875rem; block-size: 0.875rem; }

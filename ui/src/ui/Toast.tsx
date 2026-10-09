@@ -1,4 +1,4 @@
-import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, CircleAlertIcon, XIcon } from "lucide-react";
 import { useId, useLayoutEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import "./Toast.css";
@@ -16,7 +16,7 @@ export interface ToastAction { label: string; onPress: () => void }
  * The detail shows as its own first words, faded. When it is longer than its
  * line, it ends in "…" and a chevron, and a tap opens the whole text. A detail
  * that fits shows in full and opens nothing. So write a detail with the useful
- * words first. The alert tone marks a failure.
+ * words first. The alert tone marks a failure with a mark beside the message.
  *
  * It always shows in the page's `ToastRegion`, wherever it is rendered. With
  * no region on the page (a test, a part), it shows in place.
@@ -60,6 +60,7 @@ export function Toast({ tone = "plain", message, detail, action, onDismiss, dism
       {closed}<ChevronDownIcon aria-hidden /></button>
     : <p className="toast-preview">{closed}</p>;
   const card = <div className="toast" data-tone={tone} role={tone === "alert" ? "alert" : "status"}>
+    {tone === "alert" ? <span className="toast-mark" aria-hidden><CircleAlertIcon /></span> : null}
     <p className="toast-message">{message}</p>
     {onDismiss ? <button type="button" className="toast-dismiss" aria-label={dismissLabel} title={dismissLabel} onClick={onDismiss}><XIcon aria-hidden /></button> : null}
     {hasDetail ? <p id={detailId} className="toast-detail" hidden={!open}>{detail}</p> : null}

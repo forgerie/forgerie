@@ -84,7 +84,9 @@
   /* Something that floats over the page without stopping it, such as a toast:
      the modal's layers at a lower height. */
   --float-shadow: 0 1px 2px oklch(0 0 0 / 0.06), 0 0.25rem 0.75rem -0.25rem oklch(0 0 0 / 0.14), 0 1rem 2rem -0.75rem oklch(0 0 0 / 0.2);
-  --float-alert-surface: color-mix(in oklab, var(--destructive) 6%, var(--modal-surface));
+  /* A plain button on a floating card, where the live colour would compete with a failure's mark. */
+  --float-action: color-mix(in oklab, var(--foreground) 8%, transparent);
+  --float-action-hover: color-mix(in oklab, var(--foreground) 13%, transparent);
   /* Diff rows: drawn as faint washes, so the live blue of a note stays the loudest mark on a line. */
   --diff-add: oklch(0.6 0.15 150);
   --diff-remove: oklch(0.6 0.2 25);

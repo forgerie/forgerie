@@ -37,6 +37,14 @@ describe("toast", () => {
     expect(region?.querySelector('[role="alert"]')?.textContent).toBe("Second");
   });
 
+  it("marks a failure beside its message, and the mark says nothing to a screen reader", () => {
+    act(() => root.render(<><Toast tone="alert" message="Failed" /><Toast message="Plain" /></>));
+    const [alert, plain] = [...document.querySelectorAll(".toast")];
+    expect(alert?.querySelector(".toast-mark")?.getAttribute("aria-hidden")).toBe("true");
+    expect(alert?.textContent).toBe("Failed");
+    expect(plain?.querySelector(".toast-mark")).toBeNull();
+  });
+
   it("shows in place when the page has no region", () => {
     act(() => root.render(<div className="here"><Toast message="Saved" /></div>));
     expect(document.querySelector(".here > .toast")?.textContent).toBe("Saved");
