@@ -39,11 +39,11 @@ The client uses the existing `/tree/navigate`, `/tree/fork`, and `/abort` endpoi
 Run from this app directory with the dev server running. Set `APP_URL` if the server uses another port.
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/tree-acceptance.mjs
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/tree-shots.mjs
+nix shell nixpkgs#nodejs_24 -c npm run verify
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/tree-acceptance.mjs
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/tree-shots.mjs
 SESSION_ID=<idle session with two user messages> \
-  nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/real-tree-check.mjs
+  nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/real-tree-check.mjs
 ```
 
 `tree-acceptance.mjs` uses the network-free `verification/tree-preview.html`. It checks five states in both color schemes at the four Fold postures, a 475 × 280 keyboard window, and a 280 × 500 pane. Every drawn control must sit inside the window, every hit area must be at least 40 px tall, and every row at least 44 px tall. It also checks that the lens, search, and selection survive fold and rotation, and the keyboard flow.

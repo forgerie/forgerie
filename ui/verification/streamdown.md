@@ -53,8 +53,8 @@ Streamdown adds about 112.29 kB gzip to the entry at that baseline. The final re
 Run in the MVP worktree with its dev server on 8510. Set `APP_URL` for a separate task preview port.
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
-nix shell nixpkgs#nodejs_22 -c npm audit
+nix shell nixpkgs#nodejs_24 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm audit
 ./scripts/streamdown-acceptance.mjs
 ./scripts/streamdown-shots.sh
 ```

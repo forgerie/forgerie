@@ -40,7 +40,7 @@ A shell command is not an agent run. `isBashRunning` no longer sets the thread's
 Run from this app directory with the dev server running:
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 ./scripts/shell-acceptance.mjs
 ./scripts/shell-shots.mjs
 ./scripts/real-shell-acceptance.mjs

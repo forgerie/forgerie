@@ -25,7 +25,7 @@ Sessions made by `spawn_session`, `spawn_subsession`, handoff, and pi-subagents 
 From this app directory, with the dev server running (`APP_URL` defaults to port 8512 in the live check):
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 FORGERIE_ROOT=../.. APP_URL=http://127.0.0.1:8510/ ./scripts/real-worktree-check.mjs
 ```
 

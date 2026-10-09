@@ -56,7 +56,7 @@ Nothing is retried. Each failure says which step failed:
 Run from this app directory with the dev server running. Set `APP_URL` when it is not on 8510 and `SHOT_DIR` to keep captures apart from other sessions.
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 ./scripts/new-session-acceptance.mjs
 ./scripts/new-session-shots.mjs
 ./scripts/real-new-session-check.mjs

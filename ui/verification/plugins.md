@@ -41,11 +41,11 @@ Verified on 2026-10-07 in `new-ui-mvp`:
 
 | Check | Evidence |
 |---|---|
-| Build, TypeScript, lint, and tests | `nix shell nixpkgs#nodejs_22 -c npm run verify` passed 87 test files and 830 tests. |
+| Build, TypeScript, lint, and tests | `nix shell nixpkgs#nodejs_24 -c npm run verify` passed 87 test files and 830 tests. |
 | Active profile | Live `/aui/agents` and `/aui/plugins` match sessiond's `/api/pi-web/runtime` profile, `/home/simonwjackson/.local/share/forgerie/agent`. |
 | Settings HTTP contract | A real Vite server writes an Agent into that runtime profile, even when config names another profile. Plugin requests reject cross-origin writes, unconfirmed restart, stale revisions, invalid JSON objects, and bodies over 100 KB. |
 | Pi mutations | Real temporary profiles and Pi's resolver test install, filtered-package disable/restore, extension overrides, and unregistering without deleting code. Throwing extensions prove discovery does not execute them. |
-| Browser acceptance | `nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/plugins-acceptance.mjs` passed against the branch's live dev server on port 8510. |
+| Browser acceptance | `nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/plugins-acceptance.mjs` passed against the branch's live dev server on port 8510. |
 | Visual acceptance | The run writes 58 PNGs to `verification/local/plugins/`. Settings, Agents, the Plugins list, a package detail, the quota detail, and the fixture's pending-restart list cover all four Fold CSS viewports in both themes. The header menu and the restart confirmation also cover both folded shapes in both themes. The install form covers both folded shapes in dark. Reviewed captures show real package names, paths written from `~`, the menu and window fully inside the screen, and no clipped labels. |
 | State and safety | The browser run finds all four plugin groups, checks horizontal overflow, opens and closes the header menu, carries an unsaved JSON draft through every posture transition, and cancels restart confirmation. Real settings hashes remain unchanged. |
 

@@ -22,7 +22,7 @@ The record names the command `/skill:name`, which matches the slash menu. Pi doe
 Run from this app directory with the dev server running:
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 ./scripts/skills-acceptance.mjs
 ./scripts/skills-shots.mjs
 SESSION_ID=<existing-session-with-skills> ./scripts/real-skills-check.mjs

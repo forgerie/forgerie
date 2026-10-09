@@ -59,7 +59,7 @@ Limits:
 Run from this app directory with the dev server running:
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 ./scripts/queue-acceptance.mjs
 ./scripts/queue-shots.mjs
 ./scripts/real-queue-acceptance.mjs

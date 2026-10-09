@@ -63,5 +63,5 @@ One queue run of five failed by 1.8 px: in the 475 × 280 pane, Add attachment s
 Repeat the browser check against the Vite preview with:
 
 ```sh
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/composer-rich-acceptance.mjs
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/composer-rich-acceptance.mjs
 ```

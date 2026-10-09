@@ -55,7 +55,7 @@ The client sends the notes in the `diffAnnotations` field of the existing `POST 
 Run from this app directory with the dev server running. Set `APP_URL` if the server uses another port.
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npx vitest run src/changes src/ForgerieSession.notes.test.tsx
+nix shell nixpkgs#nodejs_24 -c npx vitest run src/changes src/ForgerieSession.notes.test.tsx
 APP_URL=http://127.0.0.1:8511 ./scripts/changes-acceptance.mjs
 APP_URL=http://127.0.0.1:8511 ./scripts/changes-shots.mjs
 ```

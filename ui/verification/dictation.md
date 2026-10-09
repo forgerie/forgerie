@@ -17,7 +17,7 @@ Start from this app directory:
 FORGERIE_AUI_ALLOWED_HOSTS=zao.hummingbird-lake.ts.net \
 FORGERIE_AUI_TLS_CERT=$HOME/.local/share/forgerie-aui-tls/zao.crt \
 FORGERIE_AUI_TLS_KEY=$HOME/.local/share/forgerie-aui-tls/zao.key \
-nix shell nixpkgs#nodejs_22 -c npm run dev
+nix shell nixpkgs#nodejs_24 -c npm run dev
 ```
 
 Open `https://zao.hummingbird-lake.ts.net:8510/`. Give the browser microphone permission. Certificates expire and need renewal through the same command. Restart Vite after renewal. Keys must stay outside Git. This remains a dev process, not a persistent systemd deployment.
@@ -51,7 +51,7 @@ Repeat browser capture with a speech WAV:
 
 ```sh
 DICTATION_WAV=/path/to/spoken-test.wav APP_URL=http://127.0.0.1:8510 \
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/dictation-acceptance.mjs
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/dictation-acceptance.mjs
 ```
 
 The WAV is a Chromium test input, not an upload format. The script never sends a Pi prompt. Without `DICTATION_WAV`, it checks only the network-free fixture and posture matrix.

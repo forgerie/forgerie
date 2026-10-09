@@ -41,7 +41,7 @@ The queue browser script now sends a physical Shift keydown before Shift+Enter. 
 Evidence remains local in `verification/local/composer-keyboard/acceptance.json`, `/tmp/forgerie-composer-audit-*.log`, and `/tmp/forgerie-composer-audit-shots/`. Initial composer captures remain in `/tmp/forgerie-composer-keyboard-shots/`. Repeat the network-free keyboard check with:
 
 ```sh
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/composer-keyboard-acceptance.mjs
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/composer-keyboard-acceptance.mjs
 ```
 
 ## Costs and limits

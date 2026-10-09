@@ -33,7 +33,7 @@ When the daemon set a deadline, the head shows it, for example "Closes in 4m 32s
 Run from this app directory with the dev server running:
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 ./scripts/dialog-acceptance.mjs
 ./scripts/dialog-shots.mjs
 ./scripts/real-dialog-check.mjs

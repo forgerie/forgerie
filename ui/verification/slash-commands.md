@@ -17,9 +17,9 @@ The same picker works in ask mode. Palette navigation has Enter precedence over 
 Run from this app directory:
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 APP_URL=http://127.0.0.1:8510 LIVE_SESSION=<idle-session-id> \
-  nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/slash-acceptance.mjs
+  nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/slash-acceptance.mjs
 ```
 
 Omit `LIVE_SESSION` for fixture-only acceptance. The live check executes only `/session`, not a model prompt. Fixture rendering uses injected command data, not network interception.

@@ -33,13 +33,13 @@ The snapshot contains assistant content, not tool execution progress or results.
 Run automated checks in the app directory:
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 ```
 
 Run the real browser check with this app available on 8510:
 
 ```sh
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/resume-acceptance.mjs
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/resume-acceptance.mjs
 ```
 
 Set `APP_URL` to test another port. Set `FORGERIE_ROOT` if the app does not sit two directories below the main checkout. The script uses the shared posture CDP harness, not raw Chromium window sizes.

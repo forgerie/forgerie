@@ -34,9 +34,9 @@ The current API has no command ID. Receipt detection therefore depends on Pi's e
 Run from this app directory with the standalone dev server running:
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/compaction-acceptance.mjs
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/compaction-shots.mjs
+nix shell nixpkgs#nodejs_24 -c npm run verify
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/compaction-acceptance.mjs
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/compaction-shots.mjs
 ```
 
 Set `APP_URL` for another port. Set `SHOT_DIR` to change the screenshot directory. Screenshots use the parent repository's canonical posture script. Set `FORGERIE_ROOT` if the parent checkout moves.

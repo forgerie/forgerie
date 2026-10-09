@@ -39,9 +39,9 @@ If the server refuses anyway, nothing moves, and the reason shows in the message
 Run from this app directory with the dev server running. Set `APP_URL` if the server uses another port.
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 SESSION_ID=<idle session whose current entry is not a user message> \
-  nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/real-archive-next-check.mjs
+  nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/real-archive-next-check.mjs
 ```
 
 `real-archive-next-check.mjs` never archives `SESSION_ID`. It forks the session at its current entry, opens the fork, presses the button, and checks that the fork is archived, that the app opened another session or the list, and that the undo offer shows. The fork stays archived. It sends no prompt.

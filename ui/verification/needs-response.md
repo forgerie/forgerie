@@ -43,7 +43,7 @@ Use the deterministic fixture:
 ```sh
 APP_URL='http://127.0.0.1:8510/verification/worktree-preview.html?scenario=response-picker' \
 OUT=verification/local/explicit-response \
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/picker-shots.mjs
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/picker-shots.mjs
 ```
 
 The fixture includes an explicit request, active work, an unread undeclared

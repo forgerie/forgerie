@@ -89,7 +89,7 @@ Run it without credentials:
 
 ```bash
 cd verification/pi-durable-audit
-nix shell nixpkgs#nodejs_22 -c npm ci --ignore-scripts
+nix shell nixpkgs#nodejs_24 -c npm ci --ignore-scripts
 ./smoke.mjs
 ./crash-test.mjs
 ```

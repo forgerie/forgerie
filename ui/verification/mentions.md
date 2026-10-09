@@ -36,10 +36,10 @@ The popup uses unstable assistant-ui APIs. A future SDK upgrade must repeat keyb
 Run from the React MVP worktree with its dev server available:
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
-APP_URL=http://127.0.0.1:8510/ nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/mentions-acceptance.mjs
-APP_URL=http://127.0.0.1:8510/ SESSION_ID=<existing-session-id> nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/mentions-acceptance.mjs
-APP_URL=http://127.0.0.1:8510/ nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/mentions-shots.mjs
+nix shell nixpkgs#nodejs_24 -c npm run verify
+APP_URL=http://127.0.0.1:8510/ nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/mentions-acceptance.mjs
+APP_URL=http://127.0.0.1:8510/ SESSION_ID=<existing-session-id> nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/mentions-acceptance.mjs
+APP_URL=http://127.0.0.1:8510/ nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/mentions-shots.mjs
 ```
 
 The live check sends no prompt and changes no model. Reports and captures remain ignored under `verification/local/`.

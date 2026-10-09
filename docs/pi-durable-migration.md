@@ -77,7 +77,7 @@ The earlier full test run failed one codemode progress test. Both nested tools c
 Repeat full verification with:
 
 ```bash
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 ```
 
 This result proves the checked mechanisms. It does not prove feature parity, delegated execution, integrated restart recovery, or production readiness.

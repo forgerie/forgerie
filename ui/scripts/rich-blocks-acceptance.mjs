@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Rich blocks in the network-free preview: every Fold posture, both schemes.
 // Captures each block in view, checks layout invariants, and streams the
 // reply live to prove nothing throws while blocks are half-written.

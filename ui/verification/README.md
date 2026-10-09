@@ -209,7 +209,7 @@ are fixed and covered by tests.
 Repeat from this app directory, against the running HTTPS UI:
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 ATTACHMENT_URL=https://zao.hummingbird-lake.ts.net:8510 ./scripts/attachments-acceptance.mjs  # costs three model replies
 ATTACHMENT_URL=https://zao.hummingbird-lake.ts.net:8510 ./scripts/attachment-shots.sh
 ```
@@ -375,7 +375,7 @@ The [Podia disconnected conversation](https://mobbin.com/screens/469ef97c-ed6f-4
 Repeat the read-only browser check from this worktree:
 
 ```sh
-SESSION_ID=<existing-idle-id> nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/reconnect-acceptance.mjs
+SESSION_ID=<existing-idle-id> nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/reconnect-acceptance.mjs
 ```
 
 Evidence stays in ignored `verification/local/reconnect-acceptance.json` and `verification/local/reconnect-shots/`. For the main posture script, set `CHROME_BIN` to the Chromium executable if its login-shell discovery cannot see the Nix shell's PATH.
@@ -450,10 +450,10 @@ From this worktree, with Forgerie and the MVP dev server running:
 
 ```sh
 # Read-only history, reload, and posture-transition checks.
-SESSION_ID=<existing-id> nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/acceptance.mjs
+SESSION_ID=<existing-id> nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/acceptance.mjs
 
 # Adds a real hello prompt to the selected session and consumes model usage.
-SESSION_ID=<existing-id> nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/acceptance.mjs --send
+SESSION_ID=<existing-id> nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/acceptance.mjs --send
 ```
 
 Choose an idle session without an open ask form or dialog. The script expects existing text history and a text reply. Its CDP helpers come from the main Forgerie checkout. `FORGERIE_ROOT` overrides that location if the worktree moves. `APP_URL` overrides the default `http://127.0.0.1:8510/`.
@@ -461,7 +461,7 @@ Choose an idle session without an open ask form or dialog. The script expects ex
 From the main Forgerie checkout, capture each color scheme separately:
 
 ```sh
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/capture-postures.mjs \
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/capture-postures.mjs \
   --url 'http://127.0.0.1:8510/?session=<existing-id>' \
   --out .worktree/new-ui-mvp/verification/local/shots \
   --label dark --color-scheme dark
@@ -494,18 +494,18 @@ Open `http://127.0.0.1:8510/verification/preview.html` for the separate dev-only
 From the worktree, run the browser fixture checks with:
 
 ```sh
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/visual-acceptance.mjs
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/visual-acceptance.mjs
 ```
 
 Tool and reasoning checks. None of them sends a prompt:
 
 ```sh
 # Opens disclosures in the fixture at every posture and theme, checks layout, saves screenshots.
-nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/trace-acceptance.mjs
+nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/trace-acceptance.mjs
 # Compares tool lines, failures, and reasoning with a real session's API history.
-SESSION_ID=<existing-id> nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/real-trace-check.mjs
+SESSION_ID=<existing-id> nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/real-trace-check.mjs
 # Samples a session while it runs tools, then compares open and total tool lines with the API.
-SESSION_ID=<running-id> WATCH_SECONDS=75 nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/live-trace-watch.mjs
+SESSION_ID=<running-id> WATCH_SECONDS=75 nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/live-trace-watch.mjs
 ```
 
 Set `CHROME_BIN` if `chromium` is not on `PATH` inside the shell. All three write to ignored `verification/local/`.

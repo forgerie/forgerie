@@ -34,9 +34,9 @@ The app claims a sideways drag only in the direction that can move the list. The
 ## Verification
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run verify
 SESSION_ID=<any session with messages> \
-  nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node scripts/swipe-acceptance.mjs
+  nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/swipe-acceptance.mjs
 ```
 
 `swipe-acceptance.mjs` sends real touch input through Chromium's touch emulation at all four Fold postures. It only reads; it sends nothing to the session.
