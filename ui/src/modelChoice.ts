@@ -81,7 +81,7 @@ export const modelGroups = (models: readonly SessionModel[], query = "", options
 
 function matches(model: SessionModel, needle: string): boolean {
   if (needle === "") return true;
-  return [model.provider, model.id, model.name, model.provider && providerLabel(model.provider)]
+  return [modelKey(model), model.provider, model.id, model.name, model.provider && providerLabel(model.provider)]
     .some((field) => field?.toLowerCase().includes(needle));
 }
 

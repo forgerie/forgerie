@@ -104,6 +104,25 @@ try {
   assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), "@src/main.ts ");
   await pressCombo(cdp, "enter");
   assert.ok(await evaluate(cdp, `document.querySelector('.ask-question').textContent.startsWith('Which checks')`));
+  await cdp.send("Page.navigate", { url: page("mentions-prefs") });
+  await until(`!!document.querySelector('[aria-label="Message"]')`);
+  for (const scheme of ["light", "dark"]) {
+    await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
+    for (const posture of FOLD8_POSTURES) {
+      await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
+      await draft("#");
+      await until(`document.querySelectorAll('.mention-option').length === 3`);
+      const labels = await evaluate(cdp, `[...document.querySelectorAll('.mention-option .mention-description > span')].map(node => node.textContent)`);
+      assert.deepEqual(labels, ["provider/careful", "provider/fast", "provider/balanced"], "Only shown models, with favorites in Settings order");
+      await pressCombo(cdp, "tab");
+      assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), "#provider/careful ");
+      await draft("#hidden");
+      await until(`document.body.textContent.includes('No matching models.')`);
+      assert.equal(await evaluate(cdp, `document.querySelectorAll('.mention-option').length`), 0);
+      await pressCombo(cdp, "escape");
+      report.cases.push({ scheme, posture: posture.name, preferences: true, labels });
+    }
+  }
   assert.equal(report.apiRequests.length, 0, "Preview must not make API requests");
 
   if (process.env.SESSION_ID) {

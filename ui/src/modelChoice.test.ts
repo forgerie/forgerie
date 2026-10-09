@@ -32,6 +32,7 @@ describe("model groups", () => {
   it("filters by name, ID, or provider, and leaves out models it cannot pick", () => {
     expect(modelGroups([opus, haiku, codex], "codex").flatMap((group) => group.rows.map((row) => row.id))).toEqual(["gpt-5.6-sol"]);
     expect(modelGroups([opus, haiku, codex], "HAIKU").flatMap((group) => group.rows.map((row) => row.id))).toEqual(["claude-haiku-4-5-20251001"]);
+    expect(modelGroups([opus, haiku], "CLIPROXYAPI/CLAUDE-OPUS").flatMap((group) => group.rows.map((row) => row.key))).toEqual(["cliproxyapi/claude-opus-5-5"]);
     expect(modelGroups([opus, haiku], "openai")).toEqual([]);
     expect(modelGroups([{ name: "Unnamed" }, { provider: "x" }])).toEqual([]);
   });

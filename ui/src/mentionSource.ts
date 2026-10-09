@@ -3,6 +3,8 @@ import type { Unstable_TriggerItem } from "@assistant-ui/react";
 import type { Session } from "./contracts";
 import { errorSchema } from "./contracts";
 import { workspaceOf } from "./workspaceOf";
+import { modelPrefsSchema } from "@shared/modelPrefsContract";
+import { modelMenu } from "./modelChoice";
 
 export interface MentionSource {
   readonly key: string;
@@ -44,12 +46,12 @@ export function createMentionSource(session: Session, request: MentionRequest,
       return files.slice(0, LIMIT).map((file) => ({ id: file.path, type: "file", label: file.path, description: file.kind }));
     },
     async models(query, signal) {
-      const { models } = await read(modelsPath, modelsSchema, signal);
-      const needle = query.toLowerCase();
-      return models.filter((model) => `${model.provider}/${model.id}`.toLowerCase().includes(needle)
-        || model.name?.toLowerCase().includes(needle)).slice(0, LIMIT)
-        .map((model) => ({ id: `${model.provider}/${model.id}`, type: "model", label: `${model.provider}/${model.id}`,
-          ...(model.name && model.name !== model.id ? { description: model.name } : {}) }));
+      const [{ models }, prefs] = await Promise.all([
+        read(modelsPath, modelsSchema, signal), read("/aui/model-prefs", modelPrefsSchema, signal),
+      ]);
+      return modelMenu(models, query, { prefs }).groups.flatMap((group) => group.rows).slice(0, LIMIT)
+        .map((model) => ({ id: model.key, type: "model", label: model.key,
+          ...(model.label !== model.id ? { description: model.label } : {}) }));
     },
   };
 }

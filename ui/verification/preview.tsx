@@ -13,7 +13,7 @@ import { DictationProvider } from "../src/DictationProvider";
 import type { PendingAsk, PendingDialog, SessionModel } from "../src/contracts";
 import type { DialogPhase } from "../src/dialog";
 import type { CommandBinding } from "../src/ui/SlashCommands";
-import type { MentionSource } from "../src/mentionSource";
+import { createMentionSource, type MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
 import { NewSession, type LaunchDraft } from "../src/NewSession";
 import { createLaunchStore } from "../src/launches";
@@ -215,6 +215,21 @@ const previewMentions: MentionSource = {
   models: async (query) => Array.from({ length: 12 }, (_, i) => ({ id: `provider/model-${i}`, type: "model", label: `provider/model-${i}`,
     description: `Coding model ${i}` })).filter((item) => item.id.includes(query)),
 };
+// The real discovery adapter, configured with local responses rather than network interception.
+const prefsMentionRoutes: Record<string, unknown> = {
+  "/aui/model-prefs": { revision: "preview", favorites: ["provider/careful:high", "provider/fast"], visible: ["provider/balanced"],
+    defaultModel: "provider/careful", defaultThinkingLevel: "high", favoritesPath: "/preview/settings.json", visiblePath: "/preview/visible-models.json", home: "/preview" },
+  "/preview/models": { models: [
+    ...Array.from({ length: 15 }, (_, i) => ({ provider: "provider", id: `hidden-${i}` })),
+    { provider: "provider", id: "balanced", name: "Balanced model" },
+    { provider: "provider", id: "fast", name: "Fast model" },
+    { provider: "provider", id: "careful", name: "Careful model" },
+  ] },
+};
+const prefsPreviewMentions = createMentionSource({ id: "preview", cwd: "/preview" }, async (path) => {
+  if (!(path in prefsMentionRoutes)) throw new Error(`Unknown preview route ${path}`);
+  return Response.json(prefsMentionRoutes[path]);
+}, "/preview/models");
 const pixel = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAMElEQVR4nGMwTVxNEjp+5SlJiGHUglELRi0YtWDUglELRi0YtWDUglELRi0YKhYAANtngmqrX9EgAAAAAElFTkSuQmCC";
 const attachmentPreview = scenario.startsWith("attachments");
 /** A labelled stand-in screenshot, drawn locally so the preview needs no files. */
@@ -625,7 +640,7 @@ function Preview() {
           setRuntimeChoice((current) => ({ model, level: model.reasoning ? (current.level === "off" ? "medium" : current.level) : "off" }));
         },
         onThinkingLevel: async (level) => { setRuntimeChoice((current) => ({ ...current, level })); },
-      }} commands={scenario.startsWith("slash") || scenario.startsWith("mentions") || compactionPreview ? previewCommands : undefined} mentions={scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
+      }} commands={scenario.startsWith("slash") || scenario.startsWith("mentions") || compactionPreview ? previewCommands : undefined} mentions={scenario === "mentions-prefs" ? prefsPreviewMentions : scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
         onSubmit: () => setAsk(undefined), onDismiss: () => setAsk(undefined),
         onChat: async (text) => { setAsk(undefined); exchange(text); } }} />
       </SessionDoorsProvider>
