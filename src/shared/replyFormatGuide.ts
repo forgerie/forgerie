@@ -70,6 +70,41 @@ Bundle: +4.2 kB gzip
 Postures: 4 of 4
 ${FENCE}
 
+**claims**: findings that mix checked facts with judgement. Start each with \`verified:\` (you checked it), \`inferred:\` (fits the evidence, not proven), \`opinion:\` (your judgement), or \`unknown:\` (you could not tell). Lines indented under a claim are its evidence.
+
+${FENCE}claims
+verified: sessiond started at 18:22, before the change landed
+  \`systemctl --user show forgerie-sessiond -p ActiveEnterTimestamp\`
+inferred: no live session has the change yet
+opinion: restart now, because no run is in progress
+${FENCE}
+
+**commands**: shell commands the user will copy and run, in order. One command per line. A \`# \` line above a command says what it does. End a line with \`\\\` to continue the command on the next line.
+
+${FENCE}commands
+# Rebuild the browser app
+npm run build
+# Restart the unit that serves it
+systemctl --user restart forgerie-web.service
+${FENCE}
+
+**details**: supporting material the reader may skip, such as a full option list or a long excerpt. The first line is the summary, in plain text, and stays visible. The rest shows when the reader opens it.
+
+${FENCE}details
+All options the migration accepts
+- \`--dry-run\` prints the plan and writes nothing.
+- \`--backup <dir>\` keeps a copy before writing.
+${FENCE}
+
+**bars**: three to eight numbers of the same kind, compared on one scale. A title line, then \`Label: value\` lines; the value may carry a unit. Plot only numbers you measured or were given. Use **facts** instead for values of different kinds.
+
+${FENCE}bars
+Slowest test files, seconds
+buildContents: 28.7 s
+archiveNext: 7.2 s
+Thread: 3.3 s
+${FENCE}
+
 **diagram**: Mermaid source for a flow, a sequence, or a state machine that prose would struggle to describe. Keep labels short.
 
 ${FENCE}diagram

@@ -10,7 +10,7 @@ describe("reply format guide", () => {
 
   it("shows an example of every block the browser app renders", () => {
     expect(REPLY_FORMAT_GUIDE).toContain("> [!WARNING]\n> ");
-    for (const language of ["steps", "compare", "status", "files", "facts", "diagram"]) {
+    for (const language of ["steps", "compare", "status", "files", "facts", "diagram", "claims", "commands", "details", "bars"]) {
       expect(REPLY_FORMAT_GUIDE).toContain("```" + language + "\n");
     }
   });

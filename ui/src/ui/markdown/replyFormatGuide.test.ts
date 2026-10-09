@@ -1,6 +1,6 @@
 import { REPLY_FORMAT_GUIDE } from "@shared/replyFormatGuide";
 import { describe, expect, it } from "vitest";
-import { parseCheckList, parseComparison, parseFacts, parseFileTree, parseSteps, readCalloutMarker } from "./richBlockSyntax";
+import { parseBars, parseCheckList, parseClaims, parseCommands, parseComparison, parseDisclosure, parseFacts, parseFileTree, parseSteps, readCalloutMarker } from "./richBlockSyntax";
 import { blockFences } from "./blockFences";
 import { richBlocksByLanguage } from "./RichBlocks";
 
@@ -32,5 +32,18 @@ describe("the injected reply format guide", () => {
     expect(legacy!.children[0]).toMatchObject({ name: "guide.md", mark: "deleted" });
     expect(parseFacts(example("facts"))).toHaveLength(3);
     expect(example("diagram")).toMatch(/^flowchart /);
+    const claims = parseClaims(example("claims")).claims;
+    expect(claims.map((claim) => claim.confidence)).toEqual(["verified", "inferred", "opinion"]);
+    expect(claims[0]!.detail).toMatch(/^`systemctl/);
+    expect(parseCommands(example("commands"))).toEqual([
+      { note: "Rebuild the browser app", command: "npm run build" },
+      { note: "Restart the unit that serves it", command: "systemctl --user restart forgerie-web.service" },
+    ]);
+    const details = parseDisclosure(example("details"));
+    expect(details.summary).toBe("All options the migration accepts");
+    expect(details.body.split("\n")).toHaveLength(2);
+    const bars = parseBars(example("bars"));
+    expect(bars.title).toBe("Slowest test files, seconds");
+    expect(bars.bars.map((bar) => bar.value)).toEqual([28.7, 7.2, 3.3]);
   });
 });

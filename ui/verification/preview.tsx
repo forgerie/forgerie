@@ -70,6 +70,18 @@ const richReportReply = [
 const richReportMessages = (text: string): TranscriptMessage[] => [
   say("report-question", "user", "Where did round two land?"), say("report-answer", "assistant", text),
 ];
+// An answer to a diagnosis question: the round-three blocks.
+const richAnswerReply = [
+  "Live sessions do not have the guide yet. The fix is one restart.",
+  "```claims\nWhy no session has the guide\nverified: sessiond started at 18:22, before the guide landed at 21:20\n  `systemctl --user show forgerie-sessiond -p ActiveEnterTimestamp`\ninferred: every live session still has the old system prompt\nopinion: restart now, because no run is in progress\nunknown: whether a delegated agent saw an earlier copy\n```",
+  "```commands\n# Restart the session daemon so new turns read the guide\nsystemctl --user restart forgerie-sessiond.service\n# Confirm the unit came back\nsystemctl --user is-active forgerie-sessiond.service\n```",
+  "The guide adds a fixed cost to every turn. It grew each round:",
+  "```bars\nGuide size, characters\nRound 1: 1,882\nRound 2: 2,830\nRound 3: 4,366\n```",
+  "```details\nWhat the restart interrupts\nA restart ends any run in progress. The transcript is kept, and the session resumes from its last saved turn.\n\n- Background processes started by a run stop.\n- Open browser tabs reconnect on their own.\n```",
+].join("\n\n");
+const richAnswerMessages = (text: string): TranscriptMessage[] => [
+  say("answer-question", "user", "Why does my session ignore the reply guide?"), say("answer-answer", "assistant", text),
+];
 // Cut inside the comparison, the way a reply looks mid-stream.
 const richBlocksRunning = richBlocksReply.slice(0, richBlocksReply.indexOf("+ Rollback"));
 const testOutput = Array.from({ length: 40 }, (_, index) => ` ✓ src/transcript.test.ts > case ${index + 1} (${index % 7 + 1} ms)`).join("\n");
@@ -329,6 +341,7 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   "rich-blocks": richBlocksMessages(richBlocksReply), "rich-blocks-running": richBlocksMessages(richBlocksRunning),
   "rich-blocks-live": richBlocksMessages(""),
   "rich-report": richReportMessages(richReportReply), "rich-report-live": richReportMessages(""),
+  "rich-answer": richAnswerMessages(richAnswerReply), "rich-answer-live": richAnswerMessages(""),
   ...scenario === "images" || scenario === "images-viewer" ? { images: imageMessages(), "images-viewer": imageMessages() } : {},
   handoff: handoffMessages, "handoff-open": handoffMessages,
 };
@@ -368,11 +381,15 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
   const [queue, setQueue] = useState<QueuedMessage[]>(queueScenarios[scenario] ?? []);
-  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running" || scenario === "rich-blocks-running" || scenario === "rich-blocks-live" || scenario === "rich-report-live");
+  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running" || scenario === "rich-blocks-running" || scenario === "rich-blocks-live" || scenario === "rich-report-live" || scenario === "rich-answer-live");
   // Streams the rich-block reply in small chunks, like a model, then completes.
   useEffect(() => {
-    if (scenario !== "rich-blocks-live" && scenario !== "rich-report-live") return;
-    const [reply, messagesFor] = scenario === "rich-blocks-live" ? [richBlocksReply, richBlocksMessages] : [richReportReply, richReportMessages];
+    const live: Record<string, [string, (text: string) => TranscriptMessage[]]> = {
+      "rich-blocks-live": [richBlocksReply, richBlocksMessages], "rich-report-live": [richReportReply, richReportMessages],
+      "rich-answer-live": [richAnswerReply, richAnswerMessages],
+    };
+    if (!(scenario in live)) return;
+    const [reply, messagesFor] = live[scenario]!;
     let length = 0;
     const timer = setInterval(() => {
       length = Math.min(reply.length, length + 6);

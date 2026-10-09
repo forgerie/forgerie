@@ -1,0 +1,28 @@
+/* Numbers on one scale. Three shared columns: labels take what they need up
+   to a share of the width and wrap past it, values take what they need, and
+   the bars get the rest. Rows align through subgrid. */
+.bar-chart {
+  /** Widest share of the chart the label column may take. @label Bar label share @min 20 @max 60 @step 5 */
+  --bar-label-share: 40%;
+  margin: var(--space-4) 0;
+}
+.bar-chart-title { margin-block-end: var(--space-2); font-weight: 600; overflow-wrap: anywhere; }
+.bar-chart .bar-chart-rows {
+  display: grid; grid-template-columns: fit-content(var(--bar-label-share)) minmax(3rem, 1fr) auto;
+  column-gap: var(--space-3); row-gap: var(--space-2);
+  margin: 0; padding: 0; list-style: none;
+}
+.bar-chart .bar-chart-row {
+  grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center;
+  margin: 0;
+}
+.bar-chart-label { min-inline-size: 0; font-size: var(--small-text); line-height: 1.4; overflow-wrap: anywhere; }
+.bar-chart-track { display: block; block-size: 0.75rem; border-radius: var(--radius-document); background: var(--meter-rest); overflow: hidden; }
+.bar-chart-bar {
+  display: block; block-size: 100%;
+  inline-size: max(var(--bar-min), var(--bar-share));
+  border-radius: var(--radius-document);
+  background: var(--bar-fill);
+}
+.bar-chart-bar[data-empty] { inline-size: 0; }
+.bar-chart-value { font-size: var(--small-text); font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }

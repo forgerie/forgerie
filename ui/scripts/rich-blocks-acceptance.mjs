@@ -19,7 +19,7 @@ assert.ok(chromeBin, "Chromium is required");
 const chrome = launchChrome(chromeBin, port, profile);
 const base = process.env.APP_URL ?? "http://127.0.0.1:8510/";
 const output = resolve("verification/local/rich-blocks");
-const result = { postures: [], report: [], errors: [] };
+const result = { postures: [], report: [], answer: [], errors: [] };
 await mkdir(join(output, "shots"), { recursive: true });
 
 async function until(cdp, expression, timeout = 10_000) {
@@ -104,6 +104,42 @@ try {
           await evaluate(cdp, `document.querySelector('${selector}').scrollIntoView({ block: 'start' })`);
           await shot(cdp, `${label}-${name}`);
         }
+        // Round three: claims, commands, bars and details.
+        await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-answer", base).href });
+        await until(cdp, `document.querySelectorAll('.bar-chart-bar').length === 3`);
+        const answer = await evaluate(cdp, `(() => {
+          const bars = [...document.querySelectorAll('.bar-chart-bar')].map((bar) => bar.getBoundingClientRect().width);
+          const tracks = [...document.querySelectorAll('.bar-chart-track')].map((track) => Math.round(track.getBoundingClientRect().left));
+          const badges = [...document.querySelectorAll('.claim-list-badge')].map((badge) => Math.round(badge.getBoundingClientRect().width));
+          const summary = document.querySelector('.disclosure-summary').getBoundingClientRect();
+          return {
+            pageOverflow: document.documentElement.scrollWidth > innerWidth,
+            barRatios: bars.map((width) => Math.round(width / bars[2] * 100) / 100),
+            tracksAligned: new Set(tracks).size === 1,
+            badgeWidth: Math.min(...badges),
+            claimsWrapped: [...document.querySelectorAll('.claim-list-item')].some((item) => item.querySelector('.claim-list-body').getBoundingClientRect().top > item.querySelector('.claim-list-badge').getBoundingClientRect().bottom),
+            summaryHeight: Math.round(summary.height),
+            detailsOpen: document.querySelector('details.disclosure').open,
+            copyButtons: document.querySelectorAll('.command-list button').length,
+          };
+        })()`);
+        assert.equal(answer.pageOverflow, false, `${label}: answer page overflows`);
+        assert.ok(Math.abs(answer.barRatios[0] - 0.43) < 0.03 && Math.abs(answer.barRatios[1] - 0.65) < 0.03, `${label}: bars not to scale ${answer.barRatios}`);
+        assert.equal(answer.tracksAligned, true, `${label}: bar tracks do not line up`);
+        assert.ok(answer.summaryHeight >= 44, `${label}: details summary below the touch size (${answer.summaryHeight})`);
+        assert.equal(answer.detailsOpen, false);
+        assert.equal(answer.copyButtons, 3);
+        result.answer.push({ scheme, posture: posture.name, ...answer });
+        for (const [name, selector] of [["claims", ".claim-list"], ["commands", ".command-list"], ["bars", ".bar-chart"]]) {
+          await evaluate(cdp, `document.querySelector('${selector}').scrollIntoView({ block: 'start' })`);
+          await shot(cdp, `${label}-${name}`);
+        }
+        await evaluate(cdp, `document.querySelector('.disclosure-summary').click(); document.querySelector('.disclosure').scrollIntoView({ block: 'start' })`);
+        await shot(cdp, `${label}-details-open`);
+        if (posture === FOLD8_POSTURES[0]) {
+          await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-answer-live", base).href });
+          await until(cdp, `document.querySelector('.markdown')?.dataset.status === 'complete' && document.querySelectorAll('.bar-chart-bar').length === 3`, 40_000);
+        }
         if (posture === FOLD8_POSTURES[0]) {
           await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-report-live", base).href });
           await until(cdp, `document.querySelector('.markdown')?.dataset.status === 'complete' && document.querySelector('.diagram')?.dataset.drawing === 'drawn'`, 40_000);
@@ -121,7 +157,7 @@ try {
   assert.deepEqual(result.errors, []);
   await writeFile(join(output, "acceptance.json"), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result.postures.map(({ scheme, posture, column, optionsInOneRow }) => ({ scheme, posture, column, optionsInOneRow }))));
-  console.log(JSON.stringify(result.report, null, 1));
+  console.log(JSON.stringify(result.answer));
 } finally {
   chrome.kill("SIGTERM"); await sleep(300);
   if (chrome.exitCode === null) chrome.kill("SIGKILL");

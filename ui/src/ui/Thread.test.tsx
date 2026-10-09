@@ -616,3 +616,46 @@ describe("Rich blocks, round two", () => {
     } finally { vi.useRealTimers(); }
   });
 });
+
+describe("Rich blocks, round three", () => {
+  it("renders a claims fence with a text label per confidence and evidence under its claim", async () => {
+    await render({ messages: [answer("```claims\nverified: built at 21:20\n  `git log -1`\ninferred: no session has it\nopinion: restart now\nunknown: child agents\n```")] });
+    const items = [...document.querySelectorAll('.claim-list-item')];
+    expect(items.map((item) => item.getAttribute('data-confidence'))).toEqual(["verified", "inferred", "opinion", "unknown"]);
+    expect(items.map((item) => item.querySelector('.claim-list-badge')?.textContent)).toEqual(["Verified", "Inferred", "Opinion", "Unknown"]);
+    expect(items[0]!.querySelector('.claim-list-detail code')?.textContent).toBe("git log -1");
+    expect(document.querySelector('.code-header')).toBeNull();
+  });
+
+  it("renders a details fence closed and keeps it open while the reply grows", async () => {
+    await render({ messages: [answer("```details\nAll options\n- `--dry-run` writes nothing.")], running: true });
+    const details = document.querySelector<HTMLDetailsElement>('details.disclosure')!;
+    expect(details.open).toBe(false);
+    expect(details.querySelector('.disclosure-title')?.textContent).toBe("All options");
+    details.open = true;
+    await render({ messages: [answer("```details\nAll options\n- `--dry-run` writes nothing.\n- `--backup` keeps a copy.\n```\n\nDone.")] });
+    expect(document.querySelector('details.disclosure')).toBe(details);
+    expect(details.open).toBe(true);
+    expect(details.querySelectorAll('.disclosure-body li')).toHaveLength(2);
+  });
+
+  it("renders a commands fence with notes, per-command copy, and copy all", async () => {
+    await render({ messages: [answer("```commands\n# Rebuild\nnpm run build\n# Restart\n$ systemctl --user restart web\n```")] });
+    expect([...document.querySelectorAll('.command-list-note')].map((note) => note.textContent)).toEqual(["Rebuild", "Restart"]);
+    expect([...document.querySelectorAll('.command-list-code')].map((code) => code.textContent)).toEqual(["npm run build", "systemctl --user restart web"]);
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    await act(async () => document.querySelectorAll<HTMLButtonElement>('button[aria-label="Copy command"]')[1]!.click());
+    expect(writeText).toHaveBeenLastCalledWith("systemctl --user restart web");
+    await act(async () => button("Copy all commands").click());
+    expect(writeText).toHaveBeenLastCalledWith("npm run build\nsystemctl --user restart web");
+  });
+
+  it("renders a bars fence on one scale from zero with every value as text", async () => {
+    await render({ messages: [answer("```bars\nSlowest, seconds\nbuild: 28 s\nthread: 7 s\nnone: 0 s\n```")] });
+    expect(document.querySelector('.bar-chart-title')?.textContent).toBe("Slowest, seconds");
+    const bars = [...document.querySelectorAll<HTMLElement>('.bar-chart-bar')];
+    expect(bars.map((bar) => bar.style.getPropertyValue('--bar-share'))).toEqual(["100%", "25%", "0%"]);
+    expect(bars[2]!.hasAttribute('data-empty')).toBe(true);
+    expect([...document.querySelectorAll('.bar-chart-value')].map((value) => value.textContent)).toEqual(["28 s", "7 s", "0 s"]);
+  });
+});

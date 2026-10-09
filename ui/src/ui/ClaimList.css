@@ -1,0 +1,29 @@
+/* Findings with confidence. No frame: claims are the agent's own prose, so
+   they sit in the reading column, split by hairlines. The badge column keeps
+   a fixed width while the row fits it and the text; below that the text
+   wraps under the badge. */
+.claim-list {
+  --claim-badge: 6.5rem;
+  --claim-text-min: 14rem;
+  margin-block: var(--space-4);
+}
+.claim-list-title { margin-block-end: var(--space-2); font-weight: 600; overflow-wrap: anywhere; }
+.claim-list .claim-list-items { margin: 0; padding: 0; list-style: none; border-block-start: var(--hairline) solid var(--line); }
+.claim-list .claim-list-item {
+  display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); row-gap: var(--space-1);
+  margin: 0; padding-block: var(--space-2);
+  border-block-end: var(--hairline) solid var(--line);
+}
+.claim-list-badge {
+  flex: 0 0 var(--claim-badge);
+  display: inline-flex; align-items: center; gap: 0.375rem;
+  color: var(--muted-foreground);
+  font-size: var(--small-text); font-weight: 600; line-height: 1.4;
+}
+.claim-list-icon { flex: none; inline-size: 0.9375rem; block-size: 0.9375rem; }
+.claim-list-item[data-confidence="verified"] .claim-list-badge { color: var(--ink-good); }
+.claim-list-item[data-confidence="inferred"] .claim-list-badge { color: var(--ink-live); }
+.claim-list-item[data-confidence="opinion"] .claim-list-badge { color: var(--ink-voice); }
+.claim-list-body { flex: 1 1 var(--claim-text-min); min-inline-size: 0; }
+.claim-list-item[data-confidence="unknown"] .claim-list-body { color: var(--muted-foreground); }
+.claim-list-detail { margin-block-start: var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); }

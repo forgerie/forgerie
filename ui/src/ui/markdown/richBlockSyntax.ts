@@ -204,3 +204,96 @@ export function parseFacts(body: string): Fact[] {
     return fact ? [{ label: fact[1]!.trim(), value: fact[2]!.trim() }] : [];
   });
 }
+
+export const CONFIDENCES = ["verified", "inferred", "opinion", "unknown"] as const;
+export type Confidence = typeof CONFIDENCES[number];
+export type Claim = { confidence: Confidence; text: string; detail: string };
+export type ClaimSet = { title: string; claims: Claim[] };
+
+const CLAIM_LINE = /^ ?(?:[-*][ \t]+)?(verified|inferred|opinion|unknown)[ \t]*:[ \t]*(.*)$/i;
+
+/**
+ * Reads a `claims` block: `verified:`, `inferred:`, `opinion:` or `unknown:`
+ * starts a claim. Lines under a claim are its evidence. Text before the first
+ * claim is the title.
+ */
+export function parseClaims(body: string): ClaimSet {
+  const title: string[] = [];
+  const claims: { confidence: Confidence; text: string; detail: string[] }[] = [];
+  for (const line of body.split(/\r?\n/)) {
+    const claim = CLAIM_LINE.exec(line);
+    if (claim) { claims.push({ confidence: claim[1]!.toLowerCase() as Confidence, text: claim[2]!.trim(), detail: [] }); continue; }
+    const current = claims.at(-1);
+    if (current === undefined) { title.push(line); continue; }
+    current.detail.push(line);
+  }
+  return { title: title.join(" ").trim(), claims: claims.map((claim) => ({ ...claim, detail: dedent(claim.detail).trim() })) };
+}
+
+export type Disclosure = { summary: string; body: string };
+
+/** Reads a `details` block: the first non-empty line is the summary, the rest is the body. */
+export function parseDisclosure(body: string): Disclosure {
+  const lines = body.split(/\r?\n/);
+  const first = lines.findIndex((line) => line.trim() !== "");
+  if (first === -1) return { summary: "", body: "" };
+  return { summary: lines[first]!.trim(), body: dedent(lines.slice(first + 1)).trim() };
+}
+
+export type Command = { note: string; command: string };
+
+/**
+ * Reads a `commands` block. A `# ` line describes the command below it. A
+ * leading `$ ` is dropped. A line that ends in `\` continues on the next line.
+ */
+export function parseCommands(body: string): Command[] {
+  const commands: Command[] = [];
+  let note: string[] = [];
+  let pending: string[] = [];
+  const flush = () => {
+    if (pending.length === 0) return;
+    commands.push({ note: note.join(" "), command: pending.join("\n") });
+    note = [];
+    pending = [];
+  };
+  for (const raw of body.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    if (pending.length > 0) {
+      pending.push(line);
+      if (!line.endsWith("\\")) flush();
+      continue;
+    }
+    if (line.trim() === "") continue;
+    const comment = /^\s*#(?:[ \t]+(.*))?$/.exec(line);
+    if (comment) { note.push((comment[1] ?? "").trim()); continue; }
+    pending.push(line.trim().replace(/^\$[ \t]+/, ""));
+    if (!line.endsWith("\\")) flush();
+  }
+  // A command cut off mid-stream, or a last note still waiting for its command.
+  if (pending.length > 0) flush();
+  else if (note.length > 0) commands.push({ note: note.join(" "), command: "" });
+  return commands;
+}
+
+export type Bar = { label: string; value: number; display: string };
+export type BarSet = { title: string; bars: Bar[] };
+
+const BAR_LINE = /^\s*([^:]+?):[ \t]*(.*\d.*)$/;
+const NUMBER = /-?\d[\d,]*(?:\.\d+)?/;
+
+/**
+ * Reads a `bars` block: one `Label: value` per line, where the value holds a
+ * number and may hold a unit. A line before the first bar is the title.
+ */
+export function parseBars(body: string): BarSet {
+  const title: string[] = [];
+  const bars: Bar[] = [];
+  for (const line of body.split(/\r?\n/)) {
+    if (line.trim() === "") continue;
+    const bar = BAR_LINE.exec(line);
+    const number = bar ? NUMBER.exec(bar[2]!) : null;
+    if (bar && number) { bars.push({ label: bar[1]!.trim(), value: Number(number[0].replace(/,/g, "")), display: bar[2]!.trim() }); continue; }
+    if (bars.length === 0) title.push(line.trim());
+  }
+  return { title: title.join(" "), bars };
+}

@@ -10,6 +10,10 @@ The agent writes plain Markdown. The browser app renders three structures from i
 | Status | `status` fence: `[x]` done, `[~]` in progress, `[ ]` not started, `[!]` failed, `[-]` skipped; a first unmarked line is the title. | `Checklist`: a count, an in-order meter, and one labelled icon per item. "In progress" is a still mark, because a reply is a snapshot. |
 | Files | `files` fence: paths marked `+`, `~` or `-`, with ` # note`; indentation under a `dir/` line nests. | `FileTree`: a marked tree with a count; single-child directories fold into one row. |
 | Facts | `facts` fence: `Label: value` lines. | `FactList`: cells that share a row at 8.5rem minimum each and wrap by container width. |
+| Claims | `claims` fence: `verified:`, `inferred:`, `opinion:`, `unknown:` lines; indented evidence; optional title. | `ClaimList`: a text label and icon per confidence, the claim, and its evidence in a quieter voice. |
+| Commands | `commands` fence: one command per line, `# ` note above, `\` continues a line, `$ ` dropped. | `CommandList`: one row per command with its note and copy button, plus copy all. Long commands wrap under a hanging indent. |
+| Details | `details` fence: first line is the plain-text summary, the rest is Markdown. | `Disclosure`: closed by default, uncontrolled so it stays open while the reply streams. |
+| Bars | `bars` fence: a title, then `Label: value` lines with a number and optional unit. | `BarChart`: bars from zero on one scale, labels capped at 40% of the width, each value also as text. |
 | Diagram | `diagram` (or `mermaid`) fence with Mermaid source. | `Diagram`: the source until it has been still for 250 ms, then the drawing. A wide drawing keeps 0.62 scale or more and scrolls. Invalid source stays visible with a note. |
 
 ## How it works
@@ -42,6 +46,15 @@ Round two, checked on 2026-10-08:
 | Gates | 36 pass. `check-pending.mjs main`: 667 to 665, nothing grew. `prove-bite.mjs`: 36 of 36 bite (the "layer without parts" plant now uses the organism layer, since an atom part exists). |
 | `scripts/rich-blocks-acceptance.mjs` | All four postures, both schemes: no overflow, fact cells at least 146 px, checklist states and count exact, real Mermaid draws, diagram scale at least 0.62 (scrolls at folded portrait). The report streams live to completion with one diagram. |
 | Visual review | Read the facts, status, files and diagram PNGs. |
+
+Round three, checked on 2026-10-09:
+
+| Check | Result |
+|---|---|
+| `npm run verify` | Static checks pass. Root: 226 of 228 files; `globalProviderPolicy.acceptance` and `smartTurnProcess` failed on timing under load and pass alone. UI passes. |
+| Gates | 36 pass with no new exceptions; `prove-bite.mjs` 36 of 36. |
+| `scripts/rich-blocks-acceptance.mjs` | All four postures, both schemes: no overflow, bars at 0.43 and 0.65 of the largest (exact ratios), bar tracks aligned, details summary 44 px tall, three copy buttons. The answer streams live to completion. |
+| Visual review | Read the claims, commands, bars and open-details PNGs. Long commands first scrolled out of view at folded portrait; they now wrap. |
 
 ## Repeat
 

@@ -1,0 +1,22 @@
+/* Material the reader may skip. Closed, it is one quiet row the size of a
+   control; open, its body hangs from a hairline under the marker. */
+.disclosure { margin-block: var(--space-3); }
+.disclosure-summary {
+  display: flex; align-items: center; gap: var(--space-2);
+  min-block-size: var(--control-size);
+  list-style: none; cursor: pointer;
+  border-radius: var(--radius-document);
+  color: var(--muted-foreground);
+}
+.disclosure-summary::-webkit-details-marker { display: none; }
+.disclosure-summary:hover { color: var(--foreground); }
+.disclosure-marker { flex: none; inline-size: 1rem; block-size: 1rem; transition: transform 150ms; }
+.disclosure[open] > .disclosure-summary { color: var(--foreground); }
+.disclosure[open] > .disclosure-summary .disclosure-marker { transform: rotate(90deg); }
+.disclosure-title { min-inline-size: 0; font-weight: 550; overflow-wrap: anywhere; }
+.disclosure-body {
+  margin-inline-start: 0.5rem; padding-inline-start: calc(var(--space-2) + 0.5rem);
+  padding-block: var(--space-1) var(--space-2);
+  border-inline-start: var(--hairline) solid var(--line);
+}
+@media (prefers-reduced-motion: reduce) { .disclosure-marker { transition: none; } }

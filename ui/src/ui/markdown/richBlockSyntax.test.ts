@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countMarks, parseCheckList, parseComparison, parseFacts, parseFileTree, parseSteps, readCalloutMarker } from "./richBlockSyntax";
+import { countMarks, parseBars, parseCheckList, parseClaims, parseCommands, parseComparison, parseDisclosure, parseFacts, parseFileTree, parseSteps, readCalloutMarker } from "./richBlockSyntax";
 
 describe("callout markers", () => {
   it("reads GitHub alert markers in any case and reports how much to remove", () => {
@@ -114,5 +114,54 @@ describe("facts", () => {
     expect(parseFacts("Tests: 1017 passed\nStarted: 21:17:02\nnot a fact")).toEqual([
       { label: "Tests", value: "1017 passed" }, { label: "Started", value: "21:17:02" },
     ]);
+  });
+});
+
+describe("claims", () => {
+  it("reads each confidence, the title, and the evidence under a claim", () => {
+    expect(parseClaims("Why the guide is missing\nverified: sessiond started at 18:22\n  `systemctl show` says so.\nInferred: no session has it\n- opinion: restart now\nunknown: child agents")).toEqual({
+      title: "Why the guide is missing",
+      claims: [
+        { confidence: "verified", text: "sessiond started at 18:22", detail: "`systemctl show` says so." },
+        { confidence: "inferred", text: "no session has it", detail: "" },
+        { confidence: "opinion", text: "restart now", detail: "" },
+        { confidence: "unknown", text: "child agents", detail: "" },
+      ],
+    });
+  });
+});
+
+describe("details", () => {
+  it("makes the first line the summary and dedents the rest", () => {
+    expect(parseDisclosure("\nFull log, 40 lines\n  line one\n  line two")).toEqual({ summary: "Full log, 40 lines", body: "line one\nline two" });
+    expect(parseDisclosure("Only a summ")).toEqual({ summary: "Only a summ", body: "" });
+  });
+});
+
+describe("commands", () => {
+  it("attaches notes, drops prompts, and joins continued lines", () => {
+    expect(parseCommands("# Rebuild\n$ npm run build\n\n# Restart both\n# then check\nsystemctl --user restart \\\n  web sessiond\nls")).toEqual([
+      { note: "Rebuild", command: "npm run build" },
+      { note: "Restart both then check", command: "systemctl --user restart \\\n  web sessiond" },
+      { note: "", command: "ls" },
+    ]);
+  });
+
+  it("keeps a command or note cut off mid-stream", () => {
+    expect(parseCommands("# Rebuild\nnpm run bu")).toEqual([{ note: "Rebuild", command: "npm run bu" }]);
+    expect(parseCommands("# Rebu")).toEqual([{ note: "Rebu", command: "" }]);
+  });
+});
+
+describe("bars", () => {
+  it("reads the title, numbers with units and separators, and skips text after the bars", () => {
+    expect(parseBars("Slowest files, seconds\nbuildContents: 28.7 s\narchiveNext: 7.2\nbig: 1,250 ms\nnot a bar")).toEqual({
+      title: "Slowest files, seconds",
+      bars: [
+        { label: "buildContents", value: 28.7, display: "28.7 s" },
+        { label: "archiveNext", value: 7.2, display: "7.2" },
+        { label: "big", value: 1250, display: "1,250 ms" },
+      ],
+    });
   });
 });

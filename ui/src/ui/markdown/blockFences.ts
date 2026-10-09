@@ -3,8 +3,12 @@
 // highlighter. The language names are part of the reply format guide
 // (src/shared/replyFormatGuide.ts); keep the two in step.
 import type { ComponentsByLanguage } from "@assistant-ui/react-streamdown";
+import { BarChart } from "../BarChart";
 import { Checklist } from "../Checklist";
+import { ClaimList } from "../ClaimList";
+import { CommandList } from "../CommandList";
 import { Diagram } from "../Diagram";
+import { Disclosure } from "../Disclosure";
 import { FactList } from "../FactList";
 import { FileTree } from "../FileTree";
 
@@ -16,6 +20,10 @@ export const blockFences: ComponentsByLanguage = {
   files: { SyntaxHighlighter: FileTree, CodeHeader: noHeader },
   facts: { SyntaxHighlighter: FactList, CodeHeader: noHeader },
   diagram: { SyntaxHighlighter: Diagram, CodeHeader: noHeader },
+  claims: { SyntaxHighlighter: ClaimList, CodeHeader: noHeader },
+  details: { SyntaxHighlighter: Disclosure, CodeHeader: noHeader },
+  commands: { SyntaxHighlighter: CommandList, CodeHeader: noHeader },
+  bars: { SyntaxHighlighter: BarChart, CodeHeader: noHeader },
   // Agents also write the language Mermaid itself names.
   mermaid: { SyntaxHighlighter: Diagram, CodeHeader: noHeader },
 };

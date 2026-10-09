@@ -1,0 +1,31 @@
+/* Commands to run. A code sheet split into rows; each row keeps its own copy
+   control at the trailing edge. A long command wraps at spaces under a
+   hanging indent, so every part is visible on a narrow screen and the "$"
+   still marks where each command starts. Copying is unaffected. */
+.command-list {
+  margin-block: var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-document);
+  background: var(--code-surface);
+  overflow: hidden;
+}
+.command-list .command-list-items { margin: 0; padding: 0; list-style: none; }
+.command-list .command-list-item { margin: 0; padding: var(--space-2) var(--space-1) var(--space-2) var(--space-3); }
+.command-list .command-list-item + .command-list-item { border-block-start: var(--hairline) solid var(--line); }
+.command-list-note { margin-block-end: var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); }
+.command-list-row { display: flex; align-items: center; gap: var(--space-2); }
+.command-list-code {
+  flex: 1 1 auto; min-inline-size: 0; margin: 0;
+  padding-inline-start: 2ch; text-indent: -2ch;
+  font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; line-height: 1.65;
+}
+.command-list-code code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.command-list-code::before { content: "$ "; color: var(--muted-foreground); user-select: none; }
+.command-list-footer {
+  display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2);
+  padding-inline: var(--space-3) var(--space-1);
+  border-block-start: var(--hairline) solid var(--line);
+  background: var(--tint-surface);
+  color: var(--muted-foreground);
+}
+.command-list-footer-label { font-size: var(--small-text); }

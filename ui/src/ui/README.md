@@ -16,3 +16,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `FileTree` (molecule): shows the files a change touched as a tree, marked added, changed or deleted, with single-child directories folded.
 - `FactList` (molecule): shows a few headline values from `Label: value` lines; cells share a row and wrap by container width.
 - `Diagram` (molecule): draws Mermaid source once it stops changing, keeps a readable scale by scrolling, and shows the source when it cannot draw.
+- `ClaimList` (molecule): shows findings tagged verified, inferred, opinion or unknown, with a text label and evidence under each.
+- `Disclosure` (molecule): hides supporting material behind a one-line summary, closed by default and uncontrolled so it stays open while text streams.
+- `CommandList` (molecule): lists shell commands to run in order, each with a note and its own copy button, plus copy all.
+- `BarChart` (molecule): draws a few numbers of one kind as bars from zero, with each value also stated as text.
