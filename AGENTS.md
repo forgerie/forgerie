@@ -98,6 +98,11 @@ tracks `main` without a NixOS rebuild.
   dropped with a warning; point the profile at Forgerie's bundled path instead.
   Upgrade by bumping the exact version, then run `npm run verify` and the
   package smoke test.
+- Durable child agents are the opt-in successor (`durableChildren`): the
+  `child_agent` tool runs children inside the parent session's Durable
+  storage, and the browser opens, steers, stops, and answers them without a
+  parent turn. Both systems load side by side until the Durable one covers
+  the uses of pi-subagents. See `docs/child-agents.md`.
 
 ## Acceptance device and visual testing
 

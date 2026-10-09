@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS, DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_UPLOADS_FOLDER, agentDirEnvSource, agentSessionDirEnvKeys, askUserEnabled, codemodeEnabled, effectiveAgentConfig, effectivePiWebConfig, hasAgentDirEnvOverride, hasAgentSessionDirEnvOverride, loadPiWebConfig, maxUploadBytes, offlineModeEnabled, savePiWebConfig, spawnSessionsEnabled, subsessionsEnabled } from "./config.js";
+import { DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS, DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_UPLOADS_FOLDER, agentDirEnvSource, agentSessionDirEnvKeys, askUserEnabled, codemodeEnabled, durableChildrenEnabled, effectiveAgentConfig, effectivePiWebConfig, hasAgentDirEnvOverride, hasAgentSessionDirEnvOverride, loadPiWebConfig, maxUploadBytes, offlineModeEnabled, savePiWebConfig, spawnSessionsEnabled, subsessionsEnabled } from "./config.js";
 
 let tempDir: string;
 let configPath: string;
@@ -351,6 +351,26 @@ describe("codemodeEnabled", () => {
   it("rejects a config value that is not a boolean", async () => {
     await writeFile(configPath, `${JSON.stringify({ codemode: "yes" }, null, 2)}\n`, "utf8");
     expect(() => loadPiWebConfig(testOptions())).toThrow("Forgerie config codemode must be a boolean");
+  });
+});
+
+describe("durableChildrenEnabled", () => {
+  it("is off by default, and the env var overrides the config", () => {
+    expect(durableChildrenEnabled({}, {})).toBe(false);
+    expect(durableChildrenEnabled({}, { durableChildren: true })).toBe(true);
+    expect(durableChildrenEnabled({ PI_WEB_DURABLE_CHILDREN: "0" }, { durableChildren: true })).toBe(false);
+    expect(durableChildrenEnabled({ PI_WEB_DURABLE_CHILDREN: "1" }, {})).toBe(true);
+  });
+
+  it("survives a Settings save, which does not send it", async () => {
+    await writeFile(configPath, `${JSON.stringify({ durableChildren: true }, null, 2)}\n`, "utf8");
+    savePiWebConfig({ askUser: false }, testOptions());
+    expect(loadPiWebConfig(testOptions()).config.durableChildren).toBe(true);
+  });
+
+  it("rejects a config value that is not a boolean", async () => {
+    await writeFile(configPath, `${JSON.stringify({ durableChildren: "yes" }, null, 2)}\n`, "utf8");
+    expect(() => loadPiWebConfig(testOptions())).toThrow("Forgerie config durableChildren must be a boolean");
   });
 });
 

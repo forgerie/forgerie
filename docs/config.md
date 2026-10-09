@@ -76,7 +76,7 @@ Process restarts depend on the key:
 - `host` / `port`: restart the gateway web/API service or process.
 - `FORGERIE_WHISPER_STT_WORKER` / `FORGERIE_SPEECH_ALLOWED_HOSTS`: restart the gateway web/API service or process. The speech worker is web-owned, not session-daemon-owned. `FORGERIE_SMART_TURN_WORKER` is ignored while automatic turn detection is disabled.
 - `maxUploadBytes`: restart both the web/API process and the session daemon on that machine.
-- `agent.command` / `agent.dir` / `spawnSessions` / `subsessions` / `askUser` / `codemode` / `extensionDialogsTimeoutMs`: restart the session daemon on that machine.
+- `agent.command` / `agent.dir` / `spawnSessions` / `subsessions` / `askUser` / `codemode` / `durableChildren` / `extensionDialogsTimeoutMs`: restart the session daemon on that machine.
 - `pathAccess`: applies on the next request; existing file views may need a browser refresh.
 - `uploads.defaultFolder`: applies to newly opened Files upload dialogs and new direct drag/drop batches after config/workspace refresh.
 - `plugins`: reload the browser tab after changing Forgerie plugin enablement.
@@ -284,6 +284,7 @@ Rows with JSON key `—` are runtime-only environment variables, not config-file
 | Tracked subsessions (beta) | `subsessions` | `PI_WEB_SUBSESSIONS` | Global/session daemon | Not supported locally; also requires `spawnSessions` | Restart session daemon on that machine |
 | Agent can post question forms | `askUser` | `PI_WEB_ASK_USER` | Global/session daemon | Not supported locally | Restart session daemon on that machine |
 | Agent can run tool scripts | `codemode` | `PI_WEB_CODEMODE` | Global/session daemon | Not supported locally | Restart session daemon on that machine |
+| Durable child agents (opt-in) | `durableChildren` | `PI_WEB_DURABLE_CHILDREN` | Global/session daemon; config file only, not in Settings | Not supported locally | Restart session daemon on that machine; see [child agents](child-agents.md) |
 | Extension dialog auto-cancel timeout | `extensionDialogsTimeoutMs` | — | Global/session daemon | Not supported locally | Restart session daemon on that machine |
 | Plugin enablement/settings | `plugins.<id>.enabled`, `plugins.<id>.settings` | — | Global | Not core local config; plugins may read their own project files | Reload browser tab |
 | Keyboard shortcuts | `shortcuts.<actionId>` | — | Global | Not supported locally | Applies after settings save/config refresh |

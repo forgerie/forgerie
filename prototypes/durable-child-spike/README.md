@@ -1,5 +1,9 @@
 # PROTOTYPE: Durable-native child agents
 
+> Outcome: built. The feature ships behind `durableChildren`; see `docs/child-agents.md`. Findings 1 to 4 and 6 are fixed
+> there (child tools, resume after restart, steers recorded in the parent, routes and UI). Finding 5 (steer at the next
+> tool round) and the cost in finding 4 (each report is a parent turn) remain.
+
 Date: 2026-10-09. Branch: `spike/durable-child`. Packages: `@earendil-works/pi-durable` 1.1.0, `chord` 1.1.0, `pi-ai` 1.1.0.
 Throwaway. Not deployed. Not merged to `main`.
 

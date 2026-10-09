@@ -202,7 +202,7 @@ export function savePiWebConfig(config: PiWebConfig, options: LoadOptions = {}):
   delete existing["subsessions"];
   delete existing["askUser"];
   delete existing["codemode"];
-  delete existing["durableChildren"];
+  // durableChildren is file-only: Settings does not send it, so a save keeps the file's value.
   delete existing["agent"];
   const merged = { ...existing, ...piWebConfigRecord(normalized) };
   mkdirSync(dirname(path), { recursive: true });
