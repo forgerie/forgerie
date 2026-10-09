@@ -34,15 +34,15 @@ function failedStep(setup: WorktreeSetup, hookSeen: boolean): SetupStep["key"] {
 
 /**
  * Whether a setup belongs on screen. A running setup always shows. A failed
- * one stays, so its exit code and log are reachable. A clean one leaves no
- * trace once the session's first turn is live; before that it stays, so
- * nothing collapses in the gap between setup and the first reply.
+ * one stays, so its exit code and log are reachable. A clean one shows only
+ * for a confirmed empty conversation. Unloaded history is not an empty
+ * conversation, even when the catalog already reports setup as complete.
  */
-export function visibleSetup(setup: WorktreeSetup | undefined, turnLive: boolean): WorktreeSetup | undefined {
+export function visibleSetup(setup: WorktreeSetup | undefined, conversation: "loading" | "empty" | "live"): WorktreeSetup | undefined {
   if (!setup) return undefined;
   if (setup.phase === "failed") return setup;
   if (setup.phase !== "done") return setup;
-  return turnLive ? undefined : setup;
+  return conversation === "empty" ? setup : undefined;
 }
 
 /** The last lines of a log, so a card never grows without bound. The full log is one press away. */

@@ -27,11 +27,17 @@ describe("worktree setup", () => {
     expect(setupSteps(setup("failed", { error: "fatal: invalid reference" }), false).map((step) => step.state)).toEqual(["failed", "waiting"]);
   });
 
-  it("hides a clean setup once the turn is live, and keeps a failed or running one", () => {
-    expect(visibleSetup(setup("done"), false)?.phase).toBe("done");
-    expect(visibleSetup(setup("done"), true)).toBeUndefined();
-    expect(visibleSetup(setup("failed"), true)?.phase).toBe("failed");
-    expect(visibleSetup(setup("hook"), true)?.phase).toBe("hook");
+  it("shows a clean setup only for a confirmed empty conversation", () => {
+    expect(visibleSetup(setup("done"), "loading")).toBeUndefined();
+    expect(visibleSetup(setup("done"), "empty")?.phase).toBe("done");
+    expect(visibleSetup(setup("done"), "live")).toBeUndefined();
+  });
+
+  it.each(["loading", "empty", "live"] as const)("keeps failed and running setup visible with %s history", (conversation) => {
+    expect(visibleSetup(undefined, conversation)).toBeUndefined();
+    for (const phase of ["creating", "hook", "starting", "failed"] as const) {
+      expect(visibleSetup(setup(phase), conversation)?.phase).toBe(phase);
+    }
   });
 });
 

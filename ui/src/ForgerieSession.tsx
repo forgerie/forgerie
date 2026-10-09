@@ -209,7 +209,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     void send(`/${action}`).catch(() => { /* The store exposes the error. */ });
   };
   const [worktreeCommand, setWorktreeCommand] = useState<WorktreeCommand>();
-  const setup = worktree?.owned ? visibleSetup(worktree.setup, state.transcript.messages.length > 0 || state.transcript.isRunning) : undefined;
+  const setup = worktree?.owned ? visibleSetup(worktree.setup,
+    state.connection.type !== "ready" ? "loading" : state.transcript.messages.length > 0 || state.transcript.isRunning ? "live" : "empty") : undefined;
   const folded = useMemo(() => foldChildEntries(foldProcessEvents(state.transcript.messages)), [state.transcript.messages]);
   const messages = useThreadMessages(folded, state.transcript.isRunning);
   const childrenAvailable = children.available === true;
