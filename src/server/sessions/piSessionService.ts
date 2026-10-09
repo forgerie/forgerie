@@ -2550,6 +2550,20 @@ export class PiSessionService implements SessionRouteService {
     return this.statusFromSession(session);
   }
 
+  /** Resolve the editor's lens without opening a runtime or accepting a client-supplied cwd. */
+  async resourceEditorSession(sessionId: string): Promise<{ cwd: string; readOnlyReason?: string } | undefined> {
+    const active = this.active.get(sessionId);
+    const archived = (await this.archiveStore.list()).find((record) => record.sessionId === sessionId);
+    const listed = active === undefined && archived === undefined
+      ? (await (this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll())).find((record) => record.id === sessionId)
+      : undefined;
+    const cwd = active?.runtime.cwd ?? archived?.cwd ?? listed?.cwd;
+    if (cwd === undefined) return undefined;
+    const readonly = await this.sessionWorktrees?.store.readOnly({ id: sessionId, cwd });
+    return { cwd, ...(archived !== undefined ? { readOnlyReason: "Archived sessions are read-only. Restore this session before editing resources." }
+      : readonly === undefined ? {} : { readOnlyReason: "This session's worktree is no longer writable." }) };
+  }
+
   async commands(ref: PiSessionRef): Promise<ClientCommand[]> {
     const session = await this.getOrOpen(ref);
     return buildActiveCommandList({

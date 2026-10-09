@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { WebSocket, type RawData } from "ws";
 import { SessionDaemonClient } from "../../sessiond/sessionDaemonClient.js";
+import { RESOURCE_EDITOR_BODY_LIMIT } from "../../shared/resourceEditor.js";
 
 export interface SessionProxyDaemon {
   request(method: string, path: string, body?: unknown): Promise<{ statusCode: number; headers: Record<string, string>; body: string }>;
@@ -14,6 +15,8 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
       reply.code(upstream.statusCode);
       const contentType = upstream.headers["content-type"];
       if (contentType !== undefined && contentType !== "") reply.header("content-type", contentType);
+      const retryAfter = upstream.headers["retry-after"];
+      if (retryAfter !== undefined && retryAfter !== "") reply.header("retry-after", retryAfter);
       if (upstream.body === "") return undefined;
       const value: unknown = JSON.parse(upstream.body);
       return value;
@@ -45,6 +48,10 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
   // Prompt authoring targets the agent profile, not a session, so the prompt
   // dialog can save without one open.
   app.all(`${prefix}/prompts`, (request, reply) => proxy(request, reply));
+  // The daemon owns resource discovery and writes for its configured profile.
+  app.all(`${prefix}/resources`, (request, reply) => proxy(request, reply));
+  app.all(`${prefix}/resources/*`, { bodyLimit: RESOURCE_EDITOR_BODY_LIMIT }, (request, reply) => proxy(request, reply));
+  app.all(`${prefix}/sessions/:sessionId/resources/:resourceId`, { bodyLimit: RESOURCE_EDITOR_BODY_LIMIT }, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/project-groups`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/project-groups/*`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/project-workspaces`, (request, reply) => proxy(request, reply));

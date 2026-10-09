@@ -46,6 +46,23 @@ function currentNotify(fake: { session: Pick<PiAgentSession, "extensionRunner"> 
 }
 
 describe("PiSessionService lifecycle, listing, and reload", () => {
+  it("resolves resource-editor checkouts by exact session ID without opening a runtime", async () => {
+    const createAgentRuntime = vi.fn(runtimeCreator(fakeRuntime().runtime));
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR, modelRuntime: testModelRuntime, createAgentRuntime,
+      sessionManager: sessionGateway([sessionRecord("known-worktree", "/workspace/.worktree/feature")]),
+      archiveStore: { ...emptyArchiveStore(), list: () => Promise.resolve([{ sessionId: "archived", cwd: "/workspace/old", archivedAt: "2026-01-01T00:00:00.000Z" }]) },
+    });
+    try {
+      expect(await service.resourceEditorSession("known-worktree")).toEqual({ cwd: "/workspace/.worktree/feature" });
+      expect(await service.resourceEditorSession("known")).toBeUndefined();
+      expect(await service.resourceEditorSession("unknown")).toBeUndefined();
+      expect(await service.resourceEditorSession("archived")).toEqual({ cwd: "/workspace/old", readOnlyReason: "Archived sessions are read-only. Restore this session before editing resources." });
+      expect(createAgentRuntime).not.toHaveBeenCalled();
+      expect(service.activeCount()).toBe(0);
+    } finally { await service.dispose(); }
+  });
+
   it("starts sessions through an injected runtime creator", async () => {
     const hub = new CapturingSessionEventHub();
     const fake = fakeRuntime();

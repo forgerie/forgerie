@@ -68,6 +68,9 @@ import { PromptResourceCatalogService } from "./resources/promptResourceCatalog.
 import { AgentDirPromptLibrary } from "./resources/promptLibrary.js";
 import { registerPromptLibraryRoutes } from "./resources/promptLibraryRoutes.js";
 import { registerPromptResourceRoutes } from "./resources/promptResourceRoutes.js";
+import { ResourceEditorService } from "./resources/resourceEditorService.js";
+import { ResourceEditorError } from "./resources/resourceEditorFiles.js";
+import { registerResourceEditorRoutes } from "./resources/resourceEditorRoutes.js";
 
 const daemonEnvironment: NodeJS.ProcessEnv = Object.freeze({ ...process.env });
 const { config } = effectivePiWebConfig({ env: daemonEnvironment });
@@ -242,6 +245,11 @@ async function createSessionDaemonRuntime() {
   });
   const promptResources = new PromptResourceCatalogService({ agentDir: activeAgentProfile.dir });
   const promptLibrary = new AgentDirPromptLibrary(activeAgentProfile.dir);
+  const resourceEditor = new ResourceEditorService({ agentDir: activeAgentProfile.dir, session: async (id) => {
+    const context = await sessions.resourceEditorSession(id);
+    if (context === undefined) throw new ResourceEditorError("not-found", "Session not found.");
+    return context;
+  } });
   const runtimeComponent = Object.freeze({
     ...getPiWebRuntimeComponent("sessiond", SESSIOND_RUNTIME_CAPABILITIES),
     activeAgentProfile,
@@ -260,10 +268,10 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
-  return { eventHub, workspaceActivity, sessions, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup };
+  return { eventHub, workspaceActivity, sessions, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, runtimeComponent, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup }: SessionDaemonRuntime): void {
   registerBacklogRoutes(app, backlog);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);
@@ -276,6 +284,7 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, ru
   registerDurableChildRoutes(app, sessions);
   registerPromptResourceRoutes(app, promptResources);
   registerPromptLibraryRoutes(app, promptLibrary);
+  registerResourceEditorRoutes(app, resourceEditor);
 
   app.get("/health", () => ({
     ok: true,
