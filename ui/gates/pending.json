@@ -373,10 +373,9 @@
   "ui/Composer.tsx:358",
   "ui/ImageGallery.tsx:47",
   "ui/ImageViewer.tsx:158",
-  "ui/Picker.tsx:267"
+  "ui/Picker.tsx:271"
  ],
  "layer without parts": [
-  "organism",
   "page",
   "template"
  ],

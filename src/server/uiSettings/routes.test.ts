@@ -53,6 +53,14 @@ describe("settings HTTP routes", () => {
     expect((await post("/aui/plugins", "a".repeat(100_001))).statusCode).toBe(413);
   });
 
+  it("tells the browser app which bundled plugins are on, with every setting resolved", async () => {
+    const { app, post } = await settingsServer();
+    const states: { plugins: { id: string; enabled: boolean; settings: Record<string, unknown> }[] } = (await app.inject("/aui/app-plugins")).json();
+    expect(states.plugins.map((plugin) => [plugin.id, plugin.enabled])).toEqual([["cliproxyapi-quota", true]]);
+    expect(states.plugins[0]?.settings["seven_day"]).toBe(true);
+    expect((await post("/aui/app-plugins", {})).statusCode).toBe(405);
+  });
+
   it("reads, writes, and deletes one agent file only from the version the reader saw", async () => {
     const { app, dir } = await settingsServer();
     await writeFile(join(dir, "agents", "scout.md"), "---\nname: scout\ndescription: |\n  Finds things\n  fast\nfallbackModels: a, b\n---\nLook.");

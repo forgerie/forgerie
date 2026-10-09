@@ -11,12 +11,17 @@ const limits = { maxBytes: 100_000, tooLarge: "Plugin settings are limited to 10
  *   GET  /aui/plugins           the plugin catalog and its revision
  *   POST /aui/plugins           { revision, change } (409 if the revision moved)
  *   POST /aui/plugins/restart   { revision, confirm: true }
+ *   GET  /aui/app-plugins       the browser app's bundled plugins: on or off, and their settings
  */
 export function pluginMiddleware(service: PluginService): Middleware {
   return (request, response, next) => {
     const path = new URL(request.url ?? "/", "http://local").pathname;
-    if (path !== "/aui/plugins" && path !== "/aui/plugins/restart") { next(); return; }
+    if (path !== "/aui/plugins" && path !== "/aui/plugins/restart" && path !== "/aui/app-plugins") { next(); return; }
     const handle = async () => {
+      if (path === "/aui/app-plugins") {
+        if (request.method !== "GET") throw new SettingsHttpError(405, "Use GET.");
+        return service.appStates();
+      }
       if (request.method === "GET" && path === "/aui/plugins") return service.list();
       if (request.method !== "POST") throw new SettingsHttpError(405, "Use GET or POST.");
       refuseCrossSite(request, "Plugin changes must come from this settings page.");

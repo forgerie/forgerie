@@ -6,6 +6,7 @@ import { z } from "zod";
 import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { extensionName, PluginService, sourceName, type PluginServices } from "./pluginService.js";
 import type { ForgerieProfile, Gateway } from "./forgerieProfile.js";
+import type { AppPluginManifest } from "../../shared/appPlugins.js";
 
 let root: string;
 let profile: ForgerieProfile;
@@ -13,6 +14,8 @@ let service: PluginService;
 let stamp: string[];
 let restarts: number;
 let packagePath: string;
+let services: PluginServices;
+let gateway: Gateway;
 const recordSchema = z.record(z.string(), z.unknown());
 const readJson = async (path: string) => recordSchema.parse(JSON.parse(await readFile(path, "utf8")));
 const json = (path: string, value: unknown) => writeFile(path, JSON.stringify(value));
@@ -36,11 +39,11 @@ beforeEach(async () => {
   await json(join(profile.dir, "settings.json"), { packages: [{ source: packagePath, extensions: ["index.ts"], themes: [] }], extensions: ["!extensions/*.ts"], theme: "keep-me", arbitrary: { preserve: true } });
   await json(profile.configPath, { host: "127.0.0.1", port: 8504, plugins: { quota: { settings: { five_hour: false }, custom: "keep" }, other: { enabled: false } } });
   stamp = ["web-1", "daemon-1"]; restarts = 0;
-  const services: PluginServices = {
+  services = {
     read: () => Promise.resolve({ available: true, stamp: [...stamp] }),
     restart: () => { restarts += 1; stamp = ["web-2", "daemon-2"]; return Promise.resolve(); },
   };
-  const gateway: Gateway = async (path, init) => {
+  gateway = async (path, init) => {
     if (path === "/api/plugins") return { plugins: [ { id: "quota", source: "local", scope: "local", enabled: true }, { id: "other", source: "bundled", scope: "bundled", enabled: false } ] };
     if (path === "/api/config") {
       if (init?.method === "PUT") {
@@ -66,7 +69,7 @@ describe("plugin management", () => {
   it("lists real Pi resources, browser plugins, and built-ins without executing extension code", async () => {
     const catalog = await service.list();
     expect(catalog.profileDir).toBe(profile.dir);
-    expect(catalog.plugins.map((entry) => entry.kind)).toEqual(["package", "extension", "forgerie", "forgerie", "builtin", "builtin", "builtin", "builtin"]);
+    expect(catalog.plugins.map((entry) => entry.kind)).toEqual(["package", "extension", "forgerie", "forgerie", "app", "builtin", "builtin", "builtin", "builtin"]);
     expect(catalog.plugins.find((entry) => entry.kind === "extension")).toMatchObject({ name: "loose", description: "", enabled: false });
     expect(catalog.restartRequired).toBe(false);
   });
@@ -163,5 +166,43 @@ describe("plugin management", () => {
     const restarted = await service.restart(now.revision);
     expect(restarts).toBe(1);
     expect(restarted.restartRequired).toBe(false);
+  });
+});
+
+describe("plugins bundled with the browser app", () => {
+  const meters: AppPluginManifest = { id: "quota", name: "Account meters", description: "Draws quota.", settings: [
+    { type: "url", id: "endpoint", label: "Quota address", description: "", default: "https://router.example/quota" },
+    { type: "boolean", id: "five_hour", label: "Five-hour window", description: "", default: true },
+    { type: "boolean", id: "seven_day", label: "Seven-day window", description: "", default: true },
+  ] };
+  const bundled = () => new PluginService({ profile: () => Promise.resolve(profile), gateway, services, appPlugins: [meters] });
+  it("takes over the original client plugin's id and keeps the settings saved under it", async () => {
+    const catalog = await bundled().list();
+    expect(catalog.plugins.filter((entry) => entry.id.endsWith(":quota"))).toEqual([{ id: "app:quota", kind: "app", name: "Account meters", source: "Forgerie",
+      description: "Draws quota.", enabled: true, settings: { endpoint: "https://router.example/quota", five_hour: false, seven_day: true }, fields: meters.settings }]);
+    expect(await bundled().appStates()).toEqual({ plugins: [{ id: "quota", enabled: true,
+      settings: { endpoint: "https://router.example/quota", five_hour: false, seven_day: true } }] });
+  });
+  it("saves settings and the on switch without asking for a restart, storing only what differs from a default", async () => {
+    const service = bundled();
+    const catalog = await service.list();
+    const saved = await service.change(catalog.revision, { type: "settings", id: "app:quota",
+      settings: { endpoint: "http://127.0.0.1:8317/quota", five_hour: true, seven_day: false } });
+    const off = await service.change(saved.revision, { type: "toggle", id: "app:quota", enabled: false });
+    expect(off.restartRequired).toBe(false);
+    expect((await readJson(profile.configPath))["plugins"]).toEqual({
+      quota: { enabled: false, settings: { endpoint: "http://127.0.0.1:8317/quota", seven_day: false }, custom: "keep" }, other: { enabled: false } });
+    expect((await service.appStates()).plugins[0]).toEqual({ id: "quota", enabled: false,
+      settings: { endpoint: "http://127.0.0.1:8317/quota", five_hour: true, seven_day: false } });
+  });
+  it("refuses settings the plugin does not declare and writes nothing", async () => {
+    const service = bundled();
+    const catalog = await service.list();
+    const before = await readFile(profile.configPath, "utf8");
+    await expect(service.change(catalog.revision, { type: "settings", id: "app:quota", settings: { endpoint: "file:///etc/passwd" } }))
+      .rejects.toMatchObject({ status: 400, message: "Quota address must be an http or https address." });
+    await expect(service.change(catalog.revision, { type: "settings", id: "app:quota", settings: { stray: true } })).rejects.toMatchObject({ status: 400 });
+    await expect(service.change(catalog.revision, { type: "remove", id: "app:quota" })).rejects.toMatchObject({ status: 400 });
+    expect(await readFile(profile.configPath, "utf8")).toBe(before);
   });
 });

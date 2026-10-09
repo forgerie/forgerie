@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ForgerieSession } from "./ForgerieSession";
 import { usePicker, type StartingSession } from "./usePicker";
 import type { Row } from "./picker/board";
@@ -20,6 +20,7 @@ import { heldSessions, itemParam, listOf, openCount, readBacklogPlace, readItemP
 import { createGitHubApi, readSetupReturn, submitToGitHub } from "./backlog/githubApi";
 import type { GitHubAppPage } from "./backlog/useGitHubApp";
 import { useBacklogList } from "./backlog/useBacklogList";
+import { appPluginStore } from "./plugins/appPluginStates";
 // Settings carry the prompt editor; the chat never pays for it.
 const SettingsView = lazy(() => import("./ui/settings/SettingsView").then((module) => ({ default: module.SettingsView })));
 // The backlog renders item files as documents; the chat never pays for it either.
@@ -70,7 +71,8 @@ const readBacklogOrSetup = () => readBacklog() ?? (readSetupReturn(window.locati
 const DIALOG_ENTRY = { newSession: newStartupToken() };
 
 /** Composition root: owns the selected session (in the URL), the sheet, and sessions being started. */
-export function App() {
+/** `shelves`: plugin shelves for the foot of the session list. The entry passes their binding in. */
+export function App({ shelves }: { shelves?: ReactNode } = {}) {
   const [selectedId, setSelectedId] = useState(readSelected);
   const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string; error?: string }>();
   // The new-session dialog: the folder it starts in, over the open session.
@@ -311,7 +313,7 @@ export function App() {
       onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} onClose={closeComposer} />
     : null;
   const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
-    <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} /></Suspense>
+    <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} /></Suspense>
     : backlog ? <Suspense fallback={<SessionFrame name="Backlog" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
       <BacklogView place={backlog} binding={{ load: backlogList.load, onRefresh: refreshBacklog, api: backlogApi, look: picker.look,
         onPlace: placeBacklog, onClose: () => placeBacklog(undefined),
@@ -331,6 +333,7 @@ export function App() {
     : <SessionFrame name="No session open" status=""><div className="thread-empty" /></SessionFrame>;
   return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention} toast={toast}
     picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs} message={orphanNotice}
+      shelves={shelves}
       actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
         onBacklog: () => placeBacklog(backlog ?? {}), backlogOpen: backlog !== undefined,

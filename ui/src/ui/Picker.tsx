@@ -168,10 +168,12 @@ export function PickerToast({ toast, onUndo, onDismiss }: { toast: Toast; onUndo
  * in; selections, commands, and arrangement changes go out. Only open menus
  * live here.
  */
-export function Picker({ view, prefs, onPrefs, actions, message }: {
+export function Picker({ view, prefs, onPrefs, actions, message, shelves }: {
   view: PickerView; prefs: PickerPrefs; onPrefs: (prefs: PickerPrefs) => void; actions: PickerActions;
   /** The app's message line, when it is not the list's own: a background start that went wrong. */
   message?: ReactNode;
+  /** Plugin shelves, drawn between the list and Backlog and Settings. */
+  shelves?: ReactNode;
 }) {
   const [menu, setMenu] = useState<"board" | undefined>();
   const [rowMenu, setRowMenu] = useState<{ id: string; confirming: boolean } | undefined>();
@@ -263,6 +265,8 @@ export function Picker({ view, prefs, onPrefs, actions, message }: {
       <SquarePenIcon aria-hidden size={16} />New session</button> : null}
     {connection.type === "reconnecting" ? <p className="picker-notice" role="status"><span aria-hidden="true">&gt;</span> Reconnecting…</p> : null}
     {connection.type === "failed" && !empty ? <p className="picker-notice" data-tone="error" role="alert">{connection.message}<button onClick={actions.onRetry}>Retry now</button></p> : null}
+    {/* The room the list shares with plugin shelves. A shelf measures it to decide how much of it to take. */}
+    <div className="picker-room">
     {connection.type === "loading" && empty ? <div className="picker-list" role="status" aria-label="Loading sessions">
       {[38, 90, 70, 38, 90, 70].map((width, index) => <span key={index} className="picker-skeleton" style={{ inlineSize: `${String(width)}%` }} />)}
     </div> : connection.type === "failed" && empty ? <div className="picker-state" role="alert">
@@ -294,6 +298,8 @@ export function Picker({ view, prefs, onPrefs, actions, message }: {
           </div>}
         </div>)}
     </div>}
+    {shelves}
+    </div>
     {view.toast ? <PickerToast toast={view.toast} onUndo={actions.onUndo} onDismiss={actions.onDismissToast} /> : message}
     {actions.onSettings || actions.onBacklog ? <div className="picker-footer">
       {actions.onBacklog ? <button className="picker-new" onClick={actions.onBacklog} aria-current={actions.backlogOpen ? "page" : undefined}

@@ -20,7 +20,16 @@
 
 /* Settings: the document's body, sized to what it holds. */
 .plugin-settings .settings-hint { margin-block: 0 var(--space-3); }
+/* An app plugin's own settings: the heading names the rows directly under it. */
+.plugin-fields { margin-block-start: 0; }
 .plugin-json { field-sizing: content; min-block-size: 6lh; padding-block: var(--space-3); line-height: 1.6; tab-size: 2; resize: vertical; }
 .plugin-json[aria-invalid] { border-color: color-mix(in oklab, var(--destructive) 60%, var(--line)); }
 .plugin-problem { margin: var(--space-2) 0 0; color: var(--destructive); font-size: var(--small-text); }
 @media (prefers-reduced-motion: reduce) { .plugin-form input, .plugin-json { transition: none; } }
+
+/* An app plugin's address setting: the install field's look, inside a property row. */
+.plugin-url { display: block; inline-size: 100%; min-inline-size: 0; min-block-size: var(--control-size); padding: var(--space-2) var(--space-3); border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-control); background: var(--code-surface); color: var(--foreground); font-family: var(--code-font); font-size: var(--code-size);
+  transition: border-color 150ms; }
+.plugin-url:focus-visible { outline: none; border-color: var(--line-focus); }
+@media (prefers-reduced-motion: reduce) { .plugin-url { transition: none; } }

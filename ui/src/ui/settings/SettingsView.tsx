@@ -9,6 +9,7 @@ import { SettingsFrame } from "./SettingsFrame";
 import { SettingsRow } from "./SettingsRow";
 import { PluginsView } from "./PluginsView";
 import { ModelsView } from "./ModelsView";
+import type { PluginCatalog } from "@shared/pluginsContract";
 import "./settings.css";
 
 type ListLoad = { type: "loading" } | { type: "failed"; message: string } | { type: "ready"; value: AgentList };
@@ -52,17 +53,19 @@ function AgentRow({ agent, replaced, onOpen }: { agent: AgentSummary; replaced: 
  * from the session list; each page keeps its place in the URL, so Back, a
  * reload, a fold, and a rotation return to the same page.
  */
-export function SettingsView({ place, onPlace, onClose }: {
+export function SettingsView({ place, onPlace, onClose, onPluginCatalog }: {
   place: SettingsPlace;
   /** Go to another settings page. `replace` swaps this history entry instead of adding one. */
   onPlace: (place: SettingsPlace, replace?: boolean) => void;
   onClose?: (() => void) | undefined;
+  /** Each plugin catalog Settings > Plugins reads, so the app's plugins follow a change at once. */
+  onPluginCatalog?: ((catalog: PluginCatalog) => void) | undefined;
 }) {
   const { load, refresh } = useAgentList();
   const close = onClose ? <button type="button" className="picker-icon" aria-label="Close settings" title="Close settings" onClick={onClose}><XIcon aria-hidden size={16} /></button> : null;
 
   if (place.section === "plugins") return <PluginsView selected={place.plugin}
-    onOpen={(plugin) => onPlace({ section: "plugins", plugin })} onBack={() => onPlace({ section: "root" })} onClose={onClose} />;
+    onOpen={(plugin) => onPlace({ section: "plugins", plugin })} onBack={() => onPlace({ section: "root" })} onClose={onClose} onCatalog={onPluginCatalog} />;
 
   if (place.section === "models") return <ModelsView onBack={() => onPlace({ section: "root" })} onClose={onClose} />;
 
@@ -78,7 +81,7 @@ export function SettingsView({ place, onPlace, onClose }: {
           onOpen={() => onPlace({ section: "models" })} />
         <SettingsRow name={<><BotIcon aria-hidden size={16} />Agents</>} description="Roles a session can hand work to, each with its own model and instructions."
           onOpen={() => onPlace({ section: "agents" })} />
-        <SettingsRow name={<><PuzzleIcon aria-hidden size={16} />Plugins</>} description="Pi packages and extensions, and Forgerie's browser plugins."
+        <SettingsRow name={<><PuzzleIcon aria-hidden size={16} />Plugins</>} description="Pi packages and extensions, and Forgerie's own plugins, such as account meters."
           onOpen={() => onPlace({ section: "plugins" })} />
       </ul>
     </SettingsFrame>;

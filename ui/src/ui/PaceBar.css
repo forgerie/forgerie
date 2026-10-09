@@ -1,0 +1,16 @@
+/* A budget meter: neutral ink on a quiet ground. The tones appear only for a
+   problem, so warn and danger always mean something is wrong. */
+.pace-bar { position: relative; display: block; inline-size: 100%; block-size: var(--meter-height); }
+.pace-bar-ground, .pace-bar-fill, .pace-bar-hatch, .pace-bar-surplus { position: absolute; inset-block: 0; border-radius: calc(var(--meter-height) / 2); }
+.pace-bar-ground { inset-inline: 0; background: var(--meter-rest); }
+.pace-bar-fill { inset-inline-start: 0; inline-size: var(--fill); background: var(--meter-ink); }
+/* The cut at pace: ground and fill break on either side of it. */
+.pace-bar-ground[data-side="before"] { inset-inline-end: auto; inline-size: calc(var(--pace) - var(--meter-cut) / 2); }
+.pace-bar-ground[data-side="after"] { inset-inline-start: calc(var(--pace) + var(--meter-cut) / 2); }
+.pace-bar-fill[data-side="before"] { inline-size: min(var(--fill), calc(var(--pace) - var(--meter-cut) / 2)); }
+.pace-bar-fill[data-side="after"], .pace-bar-surplus { inset-inline-start: calc(var(--pace) + var(--meter-cut) / 2); inline-size: calc(var(--fill) - var(--pace) - var(--meter-cut) / 2); }
+/* Runs out before the period ends: the shortfall to pace, hatched. */
+.pace-bar-hatch { inset-inline-start: var(--fill); inline-size: calc(var(--pace) - var(--fill) - var(--meter-cut) / 2); background: var(--meter-hatch); }
+/* Left unspent: solid at every distance. Danger is laid over warn at --heat. */
+.pace-bar-surplus { background: var(--tone-warn); }
+.pace-bar-surplus::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--destructive); opacity: var(--heat); }

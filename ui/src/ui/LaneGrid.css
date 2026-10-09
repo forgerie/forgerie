@@ -1,0 +1,37 @@
+/* Named groups of lanes on one set of columns. Names start under a group
+   header's words, as rows do in the session list. Sizes here are mirrored in
+   plugins/accountMeters/meterPlan.ts (METER_SIZES); change both. */
+.lane-grid-frame { container: lane-grid / inline-size; }
+.lane-grid { display: grid; row-gap: 0.625rem; column-gap: var(--space-2); padding-inline: calc(var(--space-2) + 1rem) var(--space-2);
+  grid-template-columns: [name] minmax(0, max-content) [label lane] minmax(2.5rem, 1fr) [value] max-content [trail] max-content [end];
+  font-size: var(--meta-text); line-height: 1rem; transition: opacity 150ms; }
+/* The row-label column exists only when some row has a label. */
+.lane-grid[data-labelled] {
+  grid-template-columns: [name] minmax(0, max-content) [label] minmax(0, max-content) [lane] minmax(2.5rem, 1fr) [value] max-content [trail] max-content [end]; }
+.lane-grid[data-dense] { row-gap: 0.125rem; }
+.lane-grid[data-faded] { opacity: 0.5; }
+
+.lane-grid-group { display: grid; grid-column: name / end; grid-template-columns: subgrid; row-gap: 0.375rem; align-items: start; }
+.lane-grid-name { grid-column: name; grid-row: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--foreground); font-size: var(--label-text); font-weight: 500; line-height: var(--lane-line); }
+
+.lane-grid-block { position: relative; display: grid; grid-column: label / end; grid-template-columns: subgrid;
+  grid-template-rows: repeat(var(--rows), var(--lane-line)); row-gap: 0.125rem; align-items: center; min-inline-size: 0; }
+.lane-grid-block[data-captioned] { grid-template-rows: var(--lane-line) repeat(var(--rows), var(--lane-line)); }
+/* The riser beside a marked block's lanes, in the gutter. */
+.lane-grid-block[data-marked]::before { content: ""; position: absolute; inset-block: 0.3125rem; inset-inline-start: calc(var(--space-2) / -2 - var(--hairline));
+  inline-size: var(--lane-marker); border-radius: var(--hairline); background: var(--line-focus); }
+.lane-grid-block[data-marked][data-captioned]::before { inset-block-start: calc(var(--lane-line) + 0.125rem + 0.3125rem); }
+.lane-grid-caption { grid-column: label / end; grid-row: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.lane-grid-block[data-struck] .lane-grid-caption { text-decoration: line-through; opacity: 0.7; }
+.lane-grid-note { grid-column: label / end; grid-row: var(--row); color: var(--muted-foreground); line-height: var(--lane-line); }
+
+.lane-grid-label { grid-column: label; grid-row: var(--row); min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted-foreground); font-family: var(--code-font); }
+.lane-grid-mark { grid-column: lane; grid-row: var(--row); display: flex; align-items: center; min-inline-size: 0; block-size: 100%; }
+.lane-grid-value { grid-column: value; grid-row: var(--row); justify-self: end; }
+/* Centred on the rows it covers. */
+.lane-grid-trail { grid-column: trail; grid-row: var(--row) / var(--row-end); justify-self: end; align-self: center; }
+/* A value yields before a lane does; the row's words keep it. */
+@container lane-grid (inline-size < 14rem) { .lane-grid-value { display: none; } }
+@media (prefers-reduced-motion: reduce) { .lane-grid { transition: none; } }

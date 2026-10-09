@@ -1,0 +1,6 @@
+/* A figure: the code face, as times and counts are everywhere in the app. */
+.figure { font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted-foreground); }
+.figure[data-tone="plain"] { color: var(--foreground); }
+.figure[data-tone="warn"] { color: var(--ink-warn); }
+.figure[data-tone="bad"] { color: var(--destructive); }
+.figure[data-tone="faint"] { opacity: 0.5; }

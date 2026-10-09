@@ -10,6 +10,8 @@ import { z } from "zod";
 import { activeForgerieProfile, type ForgerieProfile, type Gateway } from "./forgerieProfile.js";
 import { isErrnoCode, SettingsHttpError } from "./http.js";
 import { changeSchema, type ManagedPlugin, type PluginCatalog, type PluginChange } from "../../shared/pluginsContract.js";
+import { AppSettingsError, resolveAppSettings, storedAppSettings, type AppPluginManifest, type AppPluginStates } from "../../shared/appPlugins.js";
+import { APP_PLUGIN_MANIFESTS } from "../../shared/appPluginManifests.js";
 
 const objectSchema = z.record(z.string(), z.unknown());
 const packageSchema = z.union([z.string(), z.looseObject({ source: z.string() })]);
@@ -30,6 +32,7 @@ const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const packageSource = (entry: z.infer<typeof packageSchema>) => typeof entry === "string" ? entry : entry.source;
 const packageId = (source: string) => `package:${source}`;
 const extensionId = (path: string) => `extension:${path}`;
+const appId = (id: string) => `app:${id}`;
 const exec = promisify(execFile);
 
 /** A name for a source with no readable package.json: the npm name, the repository, or the folder. */
@@ -97,8 +100,11 @@ export class PluginService {
     profile?: () => Promise<ForgerieProfile>;
     gateway: Gateway;
     services?: PluginServices;
+    /** Plugins bundled with the browser app. Defaults to the shipped list. */
+    appPlugins?: readonly AppPluginManifest[];
   }) {}
   private get gateway() { return this.options.gateway; }
+  private get appPlugins() { return this.options.appPlugins ?? APP_PLUGIN_MANIFESTS; }
   private get services() { return this.options.services ?? localPluginServices; }
   private profile() { return this.options.profile ? this.options.profile() : activeForgerieProfile(this.gateway); }
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -114,6 +120,16 @@ export class PluginService {
     const config = webConfigSchema.parse(parseJson(configText, profile.configPath));
     return { profile, settingsPath, settingsText, configText, settings, config,
       revision: hash(JSON.stringify([profile.revision, settingsText, configText])) };
+  }
+  /**
+   * What the browser app needs to render its bundled plugins: on or off, and
+   * every setting resolved. Reads Forgerie's config only, so the app can ask
+   * on every load without resolving Pi packages or reading service state.
+   */
+  async appStates(): Promise<AppPluginStates> {
+    const { config } = await this.snapshot();
+    return { plugins: this.appPlugins.map((manifest) => ({ id: manifest.id, enabled: config.plugins[manifest.id]?.enabled !== false,
+      settings: { ...resolveAppSettings(manifest, config.plugins[manifest.id]?.settings) } })) };
   }
   async list(): Promise<PluginCatalog> {
     const data = await this.snapshot();
@@ -140,9 +156,15 @@ export class PluginService {
       ...packages,
       ...resolved.extensions.filter((entry) => entry.metadata.origin === "top-level" && entry.metadata.scope === "user" && !entry.path.startsWith("builtin:")).map((entry): ManagedPlugin => ({
         id: extensionId(entry.path), kind: "extension", name: extensionName(entry.path), source: entry.path, enabled: entry.enabled, description: "" })),
-      ...webListSchema.parse(web).plugins.map((entry): ManagedPlugin => ({
+      // A bundled plugin that replaces an original-client plugin owns its id and its config entry.
+      ...webListSchema.parse(web).plugins.filter((entry) => !this.appPlugins.some((manifest) => manifest.id === entry.id)).map((entry): ManagedPlugin => ({
         id: `forgerie:${entry.id}`, kind: "forgerie", name: entry.id, source: entry.source, description: "",
         enabled: config.plugins[entry.id]?.enabled !== false, settings: config.plugins[entry.id]?.settings ?? {},
+      })),
+      ...this.appPlugins.map((manifest): ManagedPlugin => ({
+        id: appId(manifest.id), kind: "app", name: manifest.name, source: "Forgerie", description: manifest.description,
+        enabled: config.plugins[manifest.id]?.enabled !== false, settings: { ...resolveAppSettings(manifest, config.plugins[manifest.id]?.settings) },
+        fields: [...manifest.settings],
       })),
       ...builtins.map(([name, description]): ManagedPlugin => ({
         id: `builtin:${name}`, kind: "builtin", name, source: "Forgerie", description,
@@ -168,8 +190,19 @@ export class PluginService {
       if (change.type !== "add" && plugin === undefined) throw new PluginError(404, "This plugin is no longer listed. Reload.");
       if (plugin?.kind === "builtin") throw new PluginError(403, "Built-in add-ons are part of Forgerie and are read-only.");
       if (change.type === "remove" && plugin?.kind !== "package") throw new PluginError(400, "Only Pi packages can be removed here. Turn extensions and browser plugins off instead.");
-      if (change.type === "settings" && plugin?.kind !== "forgerie") throw new PluginError(400, "Only Forgerie browser plugins have settings here.");
+      if (change.type === "settings" && plugin?.kind !== "forgerie" && plugin?.kind !== "app") throw new PluginError(400, "Only Forgerie browser plugins have settings here.");
       if (change.type === "add" && before.plugins.some((entry) => entry.kind === "package" && entry.source === change.source)) throw new PluginError(409, "This package is already listed. Turn it on to restore it.");
+      if (plugin?.kind === "app") {
+        // The browser app reads these on its next load and after each save. No service holds them, so nothing restarts.
+        const manifest = this.appPlugins.find((entry) => appId(entry.id) === plugin.id);
+        if (manifest === undefined) throw new PluginError(404, "This plugin is no longer listed. Reload.");
+        const old = data.config.plugins[manifest.id] ?? {};
+        let settings: Record<string, unknown> | undefined;
+        try { settings = change.type === "settings" ? storedAppSettings(manifest, change.settings) : undefined; }
+        catch (error) { if (error instanceof AppSettingsError) throw new PluginError(400, error.message); throw error; }
+        await this.writeWebEntry(data, manifest.id, settings !== undefined ? { ...old, settings } : change.type === "toggle" ? { ...old, enabled: change.enabled } : old);
+        return this.list();
+      }
       // Mark before mutation: a partial install or interrupted write still needs a restart.
       const services = await this.services.read();
       const pendingPath = join(data.profile.dir, "forgerie-plugin-restart.json");
@@ -183,11 +216,7 @@ export class PluginService {
         const id = plugin.id.slice("forgerie:".length);
         const old = data.config.plugins[id] ?? {};
         const entry = change.type === "settings" ? { ...old, settings: change.settings } : change.type === "toggle" ? { ...old, enabled: change.enabled } : old;
-        // Update only this entry through the existing server config route, retaining the other keys.
-        const current = z.object({ config: objectSchema }).parse(await this.gateway("/api/config"));
-        if (hash(await textAt(data.profile.configPath)) !== hash(data.configText)) throw new PluginError(409, "Forgerie config changed. Reload before saving.");
-        await this.gateway("/api/config", { method: "PUT", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ config: { ...current.config, plugins: { ...data.config.plugins, [id]: entry } } }) });
+        await this.writeWebEntry(data, id, entry);
       } else {
         const next = { ...data.settings };
         if (plugin.kind === "package") {
@@ -217,6 +246,13 @@ export class PluginService {
       }
       return this.list();
     });
+  }
+  /** Update one `plugins[id]` entry through the server's config route, retaining the other keys. */
+  private async writeWebEntry(data: { profile: { configPath: string }; configText: string; config: { plugins: Record<string, unknown> } }, id: string, entry: Record<string, unknown>) {
+    const current = z.object({ config: objectSchema }).parse(await this.gateway("/api/config"));
+    if (hash(await textAt(data.profile.configPath)) !== hash(data.configText)) throw new PluginError(409, "Forgerie config changed. Reload before saving.");
+    await this.gateway("/api/config", { method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ config: { ...current.config, plugins: { ...data.config.plugins, [id]: entry } } }) });
   }
   restart(revision: string): Promise<PluginCatalog> {
     return this.enqueue(async () => {

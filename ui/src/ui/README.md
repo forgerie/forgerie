@@ -28,3 +28,9 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `AsideList` (molecule): lists findings outside the question, each with a high, medium or low pill that reads without colour.
 - `Timeline` (molecule): shows events in order with their times in one aligned column, joined by a rail.
 - `QuoteFigure` (molecule): shows a quotation with its source as a caption in the code face.
+- `Figure` (atom): one short figure (a share, a clock, an amount) in the code face with tabular digits, toned plain, muted, warn, bad or faint.
+- `SignalDot` (atom): a yes-or-no signal with no level, neutral when on and danger when off.
+- `PaceBar` (atom): a budget's share left against an even spend: a cut at pace, a hatch for a shortfall, a warn-to-danger bar for a surplus.
+- `ErrorBoundary` (atom): replaces children that throw while drawing with a fallback, so everything around them keeps working.
+- `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, with optional captions, a marked block, and trailing cells that span rows.
+- `Shelf` (organism): a section at the foot of a list that switches between two forms from a group header, scrolls on its own, and reports the room it sits in.

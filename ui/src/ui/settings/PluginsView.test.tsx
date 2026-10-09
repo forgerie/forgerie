@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginsView, plainName, tildify } from "./PluginsView";
 import type { PluginsApi } from "../../plugins/pluginsApi";
 import type { PluginCatalog, PluginChange } from "@shared/pluginsContract";
+import { resolveAppSettings } from "@shared/appPlugins";
+import { accountMetersManifest } from "@shared/appPluginManifests";
 
 let root: Root;
 let catalog: PluginCatalog;
@@ -30,13 +32,18 @@ beforeEach(() => {
   catalog = { profileDir: "/home/me/.forgerie/agent", configPath: "/home/me/.config/forgerie.json", home: "/home/me", revision: "v1", restartRequired: false, restartAvailable: true,
     plugins: [ { id: "package:pi-goal", kind: "package", name: "@narumitw/pi-goal", source: "npm:@narumitw/pi-goal", version: "0.49.6", installed: true, description: "Autonomous /goal completion.", enabled: true },
       { id: "package:gone", kind: "package", name: "pi-gone", source: "/home/me/code/pi-gone", installed: false, description: "", enabled: false },
+      { id: "app:cliproxyapi-quota", kind: "app", name: "Account meters", source: "Forgerie", description: "Shows how much quota each AI account has left, at the foot of the session list.",
+        enabled: true, settings: resolveAppSettings(accountMetersManifest, { five_hour: false }), fields: [...accountMetersManifest.settings] },
       { id: "forgerie:quota", kind: "forgerie", name: "quota", source: "local", description: "", enabled: true, settings: { five_hour: false } },
       { id: "builtin:pi-subagents", kind: "builtin", name: "pi-subagents", source: "Forgerie", description: "Lets a session hand work to the agents in Settings.", enabled: true } ] };
   api = { list: async () => catalog,
     change: async (revision, change) => {
       if (revision !== catalog.revision) throw new Error("Reload before saving");
       calls.push(change);
-      catalog = { ...catalog, revision: "v2", restartRequired: true, plugins: catalog.plugins.map((entry) => change.type === "toggle" && entry.id === change.id ? { ...entry, enabled: change.enabled } : entry) };
+      // App plugins apply at once; everything else waits for a restart.
+      catalog = { ...catalog, revision: "v2", restartRequired: catalog.restartRequired || !("id" in change && change.id.startsWith("app:")),
+        plugins: catalog.plugins.map((entry) => change.type === "toggle" && entry.id === change.id ? { ...entry, enabled: change.enabled }
+          : change.type === "settings" && entry.id === change.id ? { ...entry, settings: change.settings } : entry) };
       return catalog;
     },
     restart: async () => { restarts += 1; catalog = { ...catalog, restartRequired: false }; return catalog; },
@@ -56,15 +63,16 @@ describe("plugin words", () => {
 describe("Plugins settings", () => {
   it("lists real names and descriptions, and speaks only for unusual rows", async () => {
     await render();
-    expect([...document.querySelectorAll("section")].map((node) => node.getAttribute("aria-label"))).toEqual(["Pi packages", "Pi extensions", "Forgerie plugins", "Built in"]);
+    expect([...document.querySelectorAll("section")].map((node) => node.getAttribute("aria-label"))).toEqual(["Pi packages", "Pi extensions", "Forgerie plugins", "Original client plugins", "Built in"]);
     const rows = [...document.querySelectorAll(".agent-row")].map((node) => node.textContent);
     expect(rows[0]).toBe("pi-goal0.49.6Autonomous /goal completion.");
     expect(rows[1]).toBe("pi-gone~/code/pi-goneTurned offNot installed");
-    expect(rows[2]).toBe("quotaInstalled on this machine");
+    expect(rows[2]).toBe("Account metersShows how much quota each AI account has left, at the foot of the session list.");
+    expect(rows[3]).toBe("quotaInstalled on this machine");
     expect(document.querySelector(".agent-row[data-dimmed]")!.textContent).toContain("pi-gone");
     expect(document.body.textContent).toContain("Saved in ~/.forgerie/agent");
     expect(document.body.textContent).not.toContain("Restart Forgerie to apply");
-    await act(async () => (document.querySelectorAll<HTMLButtonElement>(".agent-row")[2]!).click());
+    await act(async () => (document.querySelectorAll<HTMLButtonElement>(".agent-row")[3]!).click());
     expect(selected).toBe("forgerie:quota");
     expect(calls).toEqual([]);
   });
@@ -151,6 +159,25 @@ describe("Plugins settings", () => {
     fail = false; await click("Retry");
     expect(document.body.textContent).not.toContain("Gateway unavailable");
     expect(document.body.textContent).toContain("Pi packages");
+  });
+  it("draws an app plugin's settings as a form: switches save at once, an address waits for Save", async () => {
+    const seen: PluginCatalog[] = [];
+    selected = "app:cliproxyapi-quota";
+    await act(async () => root.render(<PluginsView selected={selected} api={api} onOpen={() => {}} onBack={() => {}} onCatalog={(value) => seen.push(value)} />)); await settle();
+    expect(document.querySelector("h2.agent-name")!.textContent).toBe("Account meters");
+    expect(button("Five-hour window").getAttribute("aria-checked")).toBe("false");
+    await click("Seven-day window");
+    const saved = { ...resolveAppSettings(accountMetersManifest, { five_hour: false }), seven_day: false };
+    expect(calls).toEqual([{ type: "settings", id: "app:cliproxyapi-quota", settings: saved }]);
+    expect(document.querySelector(".notice[data-tone=pending]")).toBeNull();
+    expect(button("Save").disabled).toBe(true);
+    await type("input[type=url]", "http://127.0.0.1:8317/quota");
+    expect(status()).toBe("Unsaved changes");
+    expect(calls).toHaveLength(1);
+    await click("Save");
+    expect(calls[1]).toEqual({ type: "settings", id: "app:cliproxyapi-quota", settings: { ...saved, endpoint: "http://127.0.0.1:8317/quota" } });
+    expect(status()).toBe("Saved");
+    expect(seen.at(-1)!.plugins.find((entry) => entry.id === "app:cliproxyapi-quota")!.settings).toMatchObject({ seven_day: false, endpoint: "http://127.0.0.1:8317/quota" });
   });
   it("shows a read failure and retries", async () => {
     let fail = true;
