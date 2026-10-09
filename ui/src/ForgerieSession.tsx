@@ -13,7 +13,7 @@ import { ProcessEventView } from "./processes/ProcessEventView";
 import type { ChildEntryArtifact, ProcessEventArtifact } from "./transcript";
 import type { SystemArtifactView } from "./ui/Messages";
 import { Thread } from "./ui/Thread";
-import { SessionFrame } from "./ui/SessionFrame";
+import { SessionFrame, type StatusTone } from "./ui/SessionFrame";
 import type { AskBinding } from "./ui/useAskMode";
 import type { CommandResult } from "./commands";
 import { createMentionSource } from "./mentionSource";
@@ -240,15 +240,16 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     : state.connection.type === "failed" ? state.connection.message
     : sendError ?? state.commandError ?? state.transcript.error;
   const dialogs = state.status?.pendingDialogs ?? [];
-  const status = readOnly ? (worktree?.state.kind === "landed" ? "Landed" : worktree?.state.kind === "discarded" ? "Discarded" : "Read-only")
-    : state.connection.type === "loading" ? "Connecting"
-    : state.connection.type === "reconnecting" ? "Reconnecting"
-    : state.connection.type === "failed" ? "Disconnected"
-    : dialogs.length > 0 ? "Waiting for you"
-    : state.sending ? "Sending" : state.compaction.type === "running" ? "Compacting"
-    : state.compaction.type === "queued" ? "Compaction queued" : state.transcript.isRunning ? "Running"
-    : isBashRunning(state) ? "Running shell command"
-    : state.ask.type === "open" ? "Waiting for you" : "Connected";
+  const [status, statusTone]: [string, StatusTone] = readOnly
+    ? [worktree?.state.kind === "landed" ? "Landed" : worktree?.state.kind === "discarded" ? "Discarded" : "Read-only", "neutral"]
+    : state.connection.type === "loading" ? ["Connecting", "neutral"]
+    : state.connection.type === "reconnecting" ? ["Reconnecting", "warn"]
+    : state.connection.type === "failed" ? ["Disconnected", "bad"]
+    : dialogs.length > 0 ? ["Waiting for you", "attention"]
+    : state.sending ? ["Sending", "live"] : state.compaction.type === "running" ? ["Compacting", "live"]
+    : state.compaction.type === "queued" ? ["Compaction queued", "neutral"] : state.transcript.isRunning ? ["Running", "live"]
+    : isBashRunning(state) ? ["Running shell command", "live"]
+    : state.ask.type === "open" ? ["Waiting for you", "attention"] : ["Connected", "quiet"];
   const oldestDialog = dialogs[0];
   const dialog: DialogBinding | undefined = oldestDialog && {
     dialog: oldestDialog, count: dialogs.length, phase: phaseFor(state.dialogPhase, oldestDialog.dialogId),
@@ -269,7 +270,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
 
   return <AssistantRuntimeProvider runtime={runtime}>
     <DictationProvider adapter={dictation}>
-    <SessionFrame name={state.session?.name ?? "Session"} status={status} error={error}
+    <SessionFrame name={state.session?.name ?? "Session"} status={status} statusTone={statusTone} error={error}
       recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}
       actions={<>
         {/* A landed or discarded worktree has no folder left to diff. */}

@@ -102,6 +102,17 @@ const retryNote = (comment = "Keep the retry limit.") => ({ path: "src/retry.ts"
   { kind: "add", newLineNumber: 8, text: "const retries = 0;" },
 ] });
 
+describe("session header status", () => {
+  it("keeps a healthy idle session's status for screen readers only, and shows a live chip while the agent runs", async () => {
+    await sessionWithChanges();
+    expect(document.querySelector<HTMLElement>(".connection-status")?.dataset.tone).toBe("quiet");
+    await act(async () => root.unmount());
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await sessionWithChanges({ status: { ...idle, isStreaming: true } });
+    expect(document.querySelector<HTMLElement>(".connection-status")?.dataset.tone).toBe("live");
+  });
+});
+
 describe("notes on changes", () => {
   it("wires reply links to this session's workspace and reads linked Markdown from that folder", async () => {
     const api = await sessionWithChanges({ messages: [{ role: "assistant", content: [{ type: "text", text: "Read [the report](docs/report.md) and [the rendered report](docs/report.html#results)." }] }] });
