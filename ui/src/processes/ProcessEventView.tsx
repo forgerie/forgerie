@@ -52,11 +52,11 @@ export function ProcessEventView({ event, onLoadOutput }: {
     }
   }
   const meaning = exitMeaning(event.exitCode);
-  return <AlertCard label={`Process ${event.name} failed`} title={`${event.name} failed`} time={time}
+  return <AlertCard label={`Process ${event.name} failed`} subject={event.name} title="failed" time={time}
     code={event.command} codeLabel="Command"
     output={output.type === "shown" ? output.text : undefined} outputLabel={`Recent output of ${event.name}`}
     actions={onLoadOutput ? [{ label: output.type === "shown" ? "Hide output" : output.type === "loading" ? "Loading output…" : "Show output",
-      disabled: output.type === "loading", onPress: () => { void toggle(); } }] : []}>
+      disabled: output.type === "loading", expanded: output.type === "shown", onPress: () => { void toggle(); } }] : []}>
     {event.exitCode === undefined ? <p>{event.summary}</p> : <p>
       Exit code <strong>{event.exitCode}</strong>{event.duration ? ` after ${event.duration}` : ""}.{meaning ? ` ${meaning}` : ""}
     </p>}

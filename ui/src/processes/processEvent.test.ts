@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { eventPhrase, exitMeaning, foldProcessEvents, parseProcessEvent } from "./processEvent";
-import { failedXml, matchedXml, stoppedXml, succeededXml } from "./fixtures/processEvents";
+import { eventPhrase, exitMeaning, foldProcessEvents, parseProcessEvent, readableDuration } from "./processEvent";
+import { failedLongXml, failedXml, matchedXml, stoppedXml, succeededXml } from "./fixtures/processEvents";
 
 describe("process events", () => {
   it("reads a success with its decoded command and duration", () => {
@@ -16,6 +16,15 @@ describe("process events", () => {
     expect(eventPhrase(event)).toBe("failed with exit code 127");
     expect(exitMeaning(127)).toBe("The shell could not find the command.");
     expect(exitMeaning(42)).toBeUndefined();
+  });
+
+  it("counts a long run in minutes, not seconds", () => {
+    expect(parseProcessEvent(failedLongXml)?.duration).toBe("2m 25s");
+    expect(readableDuration("59s")).toBe("59s");
+    expect(readableDuration("60s")).toBe("1m");
+    expect(readableDuration("3661s")).toBe("1h 1m 1s");
+    expect(readableDuration("1.5s")).toBe("1.5s");
+    expect(readableDuration("2m 5s")).toBe("2m 5s");
   });
 
   it("reads a kill by signal without mistaking it for a duration", () => {

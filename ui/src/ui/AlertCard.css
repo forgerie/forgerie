@@ -1,25 +1,51 @@
-/* The one loud thing an event can be. Its weight comes from a border in the
-   failure tone and a heading, not from a filled background. */
-.alert-card { position: relative; isolation: isolate; container-type: inline-size; min-inline-size: 0; margin-block: var(--space-2);
-  border: 0.0625rem solid var(--destructive); border-radius: var(--radius-surface); font-size: var(--small-text); }
-/* Softens the border to a hairline tint: the tone at partial opacity. */
-.alert-card::before { content: ""; position: absolute; inset: -0.0625rem; z-index: -1; border-radius: inherit;
-  border: 0.0625rem solid var(--background); opacity: 0.55; pointer-events: none; }
-.alert-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); padding: var(--space-3) var(--space-4) 0; }
-.alert-card-dot { flex: none; inline-size: 0.5rem; block-size: 0.5rem; border-radius: 50%; background: var(--destructive); }
+/* The one loud thing an event can be, said in the trace's own grammar: a rail
+   and a wash in the failure tone, like a quoted line, never a red box. The
+   rail stands where an event line's dot stands, and the text starts where an
+   event line's subject starts, so the card reads as the same line, promoted. */
+.alert-card { container-type: inline-size; min-inline-size: 0; margin-block: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-3) calc(0.5rem + var(--space-2) - var(--hairline) * 2);
+  border-inline-start: calc(var(--hairline) * 2) solid var(--destructive);
+  border-start-end-radius: var(--radius-document); border-end-end-radius: var(--radius-document);
+  background: var(--destructive-wash); font-size: var(--small-text); }
+
+.alert-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); min-block-size: 1.75rem; align-content: center; }
 .alert-card-title { flex: 1 1 auto; min-inline-size: 0; margin: 0; overflow-wrap: anywhere;
-  font-family: var(--code-font); font-size: var(--text-size); font-weight: 600; }
-.alert-card-time { flex: none; color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
-.alert-card-text { margin: var(--space-1) var(--space-4) 0; line-height: var(--line-height); }
-.alert-card-text strong { color: var(--destructive); }
-.alert-card-code, .alert-card-output { margin: var(--space-3) var(--space-4) 0; padding: var(--space-2) var(--space-3); overflow-x: auto;
-  border: 0.0625rem solid var(--line); border-radius: var(--radius-document); background: var(--code-surface);
-  font-family: var(--code-font); font-size: var(--code-size); white-space: pre; }
-.alert-card-output { max-block-size: 16rem; overflow-y: auto; }
-.alert-card-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
-.alert-card-action { min-block-size: var(--control-size); padding-inline: var(--space-4); border: 0.0625rem solid var(--line);
-  border-radius: var(--radius-control); background: var(--background); font-size: var(--small-text); }
-.alert-card-action[data-primary] { border-color: transparent; background: var(--primary); color: var(--primary-foreground); }
-.alert-card-action:not(:disabled):hover { border-color: var(--line-focus); }
-.alert-card:not(:has(.alert-card-actions)) { padding-block-end: var(--space-3); }
+  font-size: var(--small-text); font-weight: 600; color: var(--foreground); }
+/* With a subject, the title is the phrase after it: plain words, so the subject leads. */
+.alert-card-title[data-phrase] { font-weight: 450; color: var(--quiet-foreground); }
+.alert-card-subject { font-family: var(--code-font); font-weight: 600; color: var(--foreground); }
+.alert-card-time { flex: none; margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
+
+.alert-card-text { color: var(--quiet-foreground); line-height: var(--line-height); }
 .alert-card-text > p { margin: 0; }
+.alert-card-text strong { color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* The command wraps instead of scrolling sideways, with its continuation lines
+   hung under the first, so the whole of it is readable at any width. A very
+   long one scrolls inside a few lines. */
+.alert-card-code { margin: var(--space-2) 0 0; padding-inline-start: 2ch; text-indent: -2ch; max-block-size: calc(5lh); overflow-y: auto;
+  color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--code-size); line-height: 1.6;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Actions are quiet text buttons: showing output is a look, not a commitment.
+   Drawn at the icon size, pressed at the control size. */
+.alert-card-actions { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin-block-start: var(--space-2); }
+.alert-card-action { position: relative; display: inline-flex; align-items: center; gap: var(--space-1);
+  block-size: var(--icon-size); margin-inline-start: calc(-1 * var(--space-3)); padding-inline: var(--space-2) var(--space-3);
+  border: 0; border-radius: var(--radius-document); background: transparent; color: var(--foreground);
+  font-size: var(--small-text); font-weight: 550; }
+.alert-card-action + .alert-card-action { margin-inline-start: 0; }
+.alert-card-action::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
+.alert-card-action:not(:disabled):hover { background: var(--hover-surface); }
+.alert-card-marker { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); transition: transform 150ms; }
+.alert-card-action[aria-expanded="true"] .alert-card-marker { transform: rotate(90deg); }
+
+/* Output opens under the action that asked for it, on the page's own surface,
+   so a log reads as a log and not as part of the explanation. */
+.alert-card-output { margin: var(--space-1) 0 0; padding: var(--space-2) var(--space-3); max-block-size: 16rem; overflow: auto;
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-document); background: var(--background);
+  color: var(--foreground); font-family: var(--code-font); font-size: var(--code-size); line-height: 1.6;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (prefers-reduced-motion: reduce) { .alert-card-marker { transition: none; } }

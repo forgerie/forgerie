@@ -35,3 +35,14 @@ export const matchedXml = `<process_event type="log_match" kind="log_match" proc
 export const fixtureTime = 1791493440000;
 
 export const failedLog = "> vite preview --port 4318\nsh: ./node_modules/.bin/vite: No such file or directory";
+
+/** A long command and a duration past a minute: the shape of a real deploy that failed. */
+export const failedLongXml = `<process_event type="lifecycle" kind="crash" process_id="proc_a1c4" process_name="zao-avahi-switch" status="exited">
+  <summary>Process "zao-avahi-switch" failed with exit code 4 after 145s.</summary>
+  <command>systemd-run --user --scope --unit=zao-avahi-switch -p MemoryHigh=6G -p MemoryMax=8G nice -n 10 nixos-rebuild switch --flake .#zao --target-host root@zao --use-substitutes</command>
+  <exit_code>4</exit_code>
+  <end_reason>exit</end_reason>
+  <logs_hint>Use process output/logs for process proc_a1c4 to inspect recent output.</logs_hint>
+</process_event>`;
+
+export const failedLongLog = "building the system configuration...\nerror: builder for '/nix/store/7x1k…-avahi-0.8.drv' failed with exit code 1\nerror: 1 dependencies of derivation '/nix/store/q9fz…-nixos-system-zao.drv' failed to build";

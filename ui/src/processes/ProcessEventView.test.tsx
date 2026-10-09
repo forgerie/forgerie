@@ -41,10 +41,13 @@ describe("process event view", () => {
     await act(async () => root.render(<ProcessEventView event={parseProcessEvent(failedXml)!} onLoadOutput={load} />));
     expect(document.querySelector(".alert-card-title")?.textContent).toBe("oe-preview failed");
     expect(document.querySelector(".alert-card-text")?.textContent).toBe("Exit code 127 after 0s. The shell could not find the command.");
+    expect(document.querySelector(".alert-card-subject")?.textContent).toBe("oe-preview");
+    expect(button("Show output")?.getAttribute("aria-expanded")).toBe("false");
     await act(async () => button("Show output")!.click());
     expect(button("Loading output…")?.disabled).toBe(true);
     await act(async () => finish("vite: not found"));
     expect(document.querySelector(".alert-card-output")?.textContent).toBe("vite: not found");
+    expect(button("Hide output")?.getAttribute("aria-expanded")).toBe("true");
     await act(async () => button("Hide output")!.click());
     expect(document.querySelector(".alert-card-output")).toBeNull();
     expect(load).toHaveBeenCalledOnce();

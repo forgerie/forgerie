@@ -40,6 +40,16 @@ const child = (body: string, name: string) => {
   return match ? decode(match[1]!) : undefined;
 };
 
+/** "145s" reads as "2m 25s": a reader counts minutes, not a pile of seconds. Other forms pass through. */
+export function readableDuration(text: string): string {
+  const match = /^(\d+)s$/.exec(text);
+  if (!match) return text;
+  const total = Number(match[1]);
+  if (total < 60) return text;
+  const hours = Math.floor(total / 3600), minutes = Math.floor((total % 3600) / 60), seconds = total % 60;
+  return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", seconds ? `${seconds}s` : ""].filter(Boolean).join(" ");
+}
+
 /** Reads one event, or undefined when the text is not a process event this app knows. */
 export function parseProcessEvent(text: string, at?: number): ProcessEvent | undefined {
   const root = /<process_event\b([^>]*)>([\s\S]*?)<\/process_event>/.exec(text);
@@ -61,7 +71,7 @@ export function parseProcessEvent(text: string, at?: number): ProcessEvent | und
   if (exit !== undefined && /^-?\d+$/.test(exit.trim())) event.exitCode = Number(exit);
   if (signal !== undefined) event.signal = signal;
   const duration = / after ([\dhms. ]+?)\.?$/.exec(summary)?.[1];
-  if (duration !== undefined) event.duration = duration.trim();
+  if (duration !== undefined) event.duration = readableDuration(duration.trim());
   const matchedLine = child(body, "matched_line");
   if (matchedLine !== undefined) event.matchedLine = matchedLine.trim();
   if (pattern !== undefined) event.pattern = decode(pattern);
