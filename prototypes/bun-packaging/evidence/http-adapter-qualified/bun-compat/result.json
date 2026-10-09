@@ -1,0 +1,1217 @@
+{
+  "runtime": "bun",
+  "command": [
+    "/tmp/forgerie-bun-spikes/bun-1.4.2",
+    "--bun",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "prototypes/bun-packaging/vitest.http-adapter.config.mjs",
+    "--reporter=default",
+    "--reporter=json",
+    "--outputFile=/tmp/forgerie-bun-spikes/http-adapter-qualified/bun-compat/vitest.json"
+  ],
+  "exitCode": 1,
+  "sdkOfflineForced": false,
+  "sourceCommit": "886b49b69d026b7febce6a6a508de0e0af840780",
+  "tests": {
+    "numTotalTests": 1711,
+    "numPassedTests": 1706,
+    "numFailedTests": 2,
+    "numPendingTests": 3,
+    "numTotalTestSuites": 469,
+    "numPassedTestSuites": 450,
+    "numFailedTestSuites": 19,
+    "success": false
+  },
+  "files": [
+    {
+      "file": "scripts/managed-processes-package.test.mjs",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "scripts/test-changed.test.mjs",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "scripts/verify-staged.test.mjs",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/buildContents.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/cli.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/config.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/piWebVersionReport.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "scripts/lib/fold8-postures.test.mjs",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "scripts/lib/posture-page.test.mjs",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/activeAgentProfileProvider.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/app.activeAgentProfile.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/app.agentConfig.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/app.compression.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/app.localAliases.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/app.piPackages.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/app.piWebStatus.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/app.projects.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/app.retiredFeatures.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/app.workspaceFiles.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/browserMessageProjection.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/configRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/gitRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/piPackageRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/piPackageService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/piWebStatus.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workingDirectory.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaceExplorerRoutes.preview.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/shared/activity.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/shared/appPlugins.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.string')",
+      "failed": []
+    },
+    {
+      "file": "src/shared/capabilities.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/shared/codemodeScript.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/shared/piWebStatusParsing.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/shared/promptAttachments.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/shared/promptResourceCommand.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/shared/replyFormatGuide.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/shared/speechContracts.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/shared/speechPolicy.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/shared/thinkingLevels.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/sessiond/activeAgentProfile.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/sessiond/sessionDaemonClient.test.ts",
+      "status": "failed",
+      "message": "",
+      "failed": [
+        {
+          "name": "bounded diagnostic requests cancels a stalled http response without changing normal requests",
+          "messages": [
+            "Error: expected [Function] to throw error matching /abort|timeout/i but got 'The operation timed out.'\n    at __VITEST_REJECTS__ (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/expect/dist/index.js:1747:20)\n    at propertyGetter (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/chai/index.js:1570:26)\n    at get (native)\n    at /home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/src/sessiond/sessionDaemonClient.test.ts:99:97\n    at processTicksAndRejections (native)"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "src/server/activity/workspaceActivityRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/activity/workspaceActivityService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/azureDevops/azureDevopsClient.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/azureDevops/azureDevopsPat.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/backlog/azureDevopsBacklog.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/backlog/backlogArchive.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/backlog/backlogClaimStore.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/backlog/backlogItem.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/backlog/backlogLifecycle.acceptance.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/backlog/backlogRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/backlog/backlogScanner.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/backlog/githubBacklog.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/git/gitEnv.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/git/gitService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/github/githubAgent.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/github/githubApp.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/github/githubIssues.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/github/githubPullRead.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/github/githubRemote.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/github/githubRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/github/pullRequestService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/github/pullRequestWatch.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/projects/directorySuggestions.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/projects/projectGroups.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/projects/projectWorkspaces.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/projects/relatedPullSessions.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/resources/promptLibrary.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/resources/promptLibraryRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/resources/promptResourceCatalog.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/resources/promptResourceRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/resources/resourceEditorRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/resources/resourceEditorService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/realtime/sessionEventHub.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/speech/liveSpeechService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/speech/speechAudio.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/speech/speechRoutes.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/speech/speechService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/speech/whisperProcess.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessiond/agentHttpDispatcher.test.ts",
+      "status": "failed",
+      "message": "",
+      "failed": [
+        {
+          "name": "configureAgentHttpDispatcher terminates an idle body once the configured timeout elapses",
+          "messages": [
+            "Error\n    at task (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:1784:31)\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/src/server/sessiond/agentHttpDispatcher.test.ts:169:30)\n    at runWithSuite (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:2258:8)\n    at collect (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:1889:10)\n    at collect (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:1893:54)\n    at async <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:2462:50)\n    at async collectTests (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:2433:9)\n    at async startTests (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:3278:23)\n    at async <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/vitest/dist/chunks/base.B6Opl8PE.js:90:18)\n    at async run (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/vitest/dist/chunks/base.B6Opl8PE.js:81:15)\n    at async runBaseTests (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/vitest/dist/chunks/base.B6Opl8PE.js:200:8)\n    at async executeTests (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/vitest/dist/chunks/init-forks.H5ZuobOQ.js:29:10)\n    at async execute (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/vitest/dist/chunks/init.k9zZ9sLh.js:158:16)\n    at processTicksAndRejections (unknown:7:39)"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "src/server/sessiond/agentProcessEnvironment.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessiond/sessionProxyRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessiond/sessionServiceDependencies.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/uiSettings/forgerieProfile.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/uiSettings/modelPrefsFiles.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/uiSettings/pluginService.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/uiSettings/routes.test.ts",
+      "status": "failed",
+      "message": "undefined is not an object (evaluating 'z.object')",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/agentSpawnedMarks.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/agentSpawnedRepair.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/askAnswerDelivery.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/askUserTool.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/attachmentService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/bundledCliproxyProvider.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/bundledForgerieSkills.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/bundledManagedProcesses.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/bundledSubagents.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/commandCatalog.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/delegationProgress.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/durableAgentSession.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/durableAgentSession.thinking.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/durableChildAgents.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/durableChildRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/durableJson.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/durableOwnership.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/durableSessionJournal.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/editPreview.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/endTurnTool.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/extensionDialogWaiters.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/githubTools.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/globalProviderPolicy.acceptance.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/globalProviderPolicy.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/handoffSessionTool.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/inFlightSpawnedSessions.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/messagePaging.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/modelCatalogRefresher.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/modelRuntime.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/parentSessionLocator.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/pendingExtensionDialogStore.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionManagerGateway.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.archiveCleanup.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.askUser.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.asksCatalog.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.codemode.acceptance.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.crossWorkspace.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.defaults.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.delegationTools.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.durable.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.extensionDialogs.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.handoffSession.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.historicalChildren.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.lifecycle.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.machineListing.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.messages.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.pin.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.promoteSpawned.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.promptQueue.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.pullRequests.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.questionTools.acceptance.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.spawnSession.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.startupProgress.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.tabs.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.tree.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.unread.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.warnings.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.worktreeCleanup.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/piSessionService.worktrees.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/plainTextTheme.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/processBridge.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/processRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/promptDiffAnnotations.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/providerOAuthCompatibility.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/replyFormatGuide.acceptance.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionArchiveInitialization.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionArchiveStore.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionArchiveTree.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionAsks.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionCatalogMetadata.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionCatalogScanner.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionCleanup.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionCommandService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionCompactionQueue.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionFileHeader.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionNameGenerator.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionNotificationStore.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionPinStore.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionResponse.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionRoutes.diffAnnotations.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionSummaryScanner.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionTabsStore.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionTitleBridge.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionTreeProjection.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/sessionUnreadStore.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/spawnSessionTool.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/sessions/spawnTargetResolver.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/documentPreviewService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/fileContentService.delete.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/fileContentService.move.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/fileContentService.read.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/fileContentService.version.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/fileContentService.write.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/fileSuggestions.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/fileTreeService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/gitWorktreeDiscovery.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/pathAccessPolicy.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/pathSafety.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/projectPiWebConfig.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/projectWorkspaceCwds.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/sessionWorktreeRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/sessionWorktreeStore.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/sessionWorktrees.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/workspaceService.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/worktreeCleanupJob.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/worktreeCleanupRoutes.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/workspaces/worktreeHooks.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    },
+    {
+      "file": "src/server/storage/projectStore.test.ts",
+      "status": "passed",
+      "message": "",
+      "failed": []
+    }
+  ],
+  "workerRuntimes": [
+    "node=26.3.0 bun=1.4.2"
+  ],
+  "adapterWorkers": 195
+}

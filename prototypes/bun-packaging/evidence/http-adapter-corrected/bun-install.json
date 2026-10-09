@@ -1,0 +1,247 @@
+{
+  "command": [
+    "/tmp/forgerie-bun-spikes/bun-1.4.2",
+    "/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs",
+    "install"
+  ],
+  "exitCode": 1,
+  "stderr": "[http-adapter] idle body terminates with configured timeout: failed\n[http-adapter] idle headers terminate with configured timeout: passed\n[http-adapter] zero disables body timeout across 1500ms gap: passed\n[http-adapter] zero disables headers timeout across 1500ms gap: passed\n[http-adapter] active stream survives longer than idle budget: passed\n[http-adapter] already-aborted request never reaches origin: passed\n[http-adapter] abort while waiting for headers: passed\n[http-adapter] AbortSignal.timeout is propagated: passed\n[http-adapter] abort after first streamed body chunk: failed\n[http-adapter] reader cancellation closes origin response: passed\n[http-adapter] mid-stream socket failure rejects body: failed\n[http-adapter] gzip JSON decompresses: passed\n[http-adapter] deflate JSON decompresses: passed\n[http-adapter] br JSON decompresses: passed\n[http-adapter] gzip SSE delivers first event before stream ends: passed\n[http-adapter] Response clone and global constructor agree: passed\n[http-adapter] Request and FormData upload: passed\n[http-adapter] ReadableStream upload with duplex half: passed\n[http-adapter] TLS validates locally trusted CA: passed\n[http-adapter] HTTP_PROXY routing and fixture proxy auth: passed\n[http-adapter] http_proxy routing and fixture proxy auth: passed\n[http-adapter] HTTPS_PROXY routing and fixture proxy auth: passed\n[http-adapter] https_proxy routing and fixture proxy auth: passed\n[http-adapter] NO_PROXY bypasses configured proxy: passed\n[http-adapter] lowercase proxy settings take precedence: passed\n[http-adapter] compressed JSON through TLS proxy: passed\n[http-adapter] idle timeout through TLS proxy: failed\n[http-adapter] abort through TLS proxy: failed\n[http-adapter] requests still work after timeout and abort: passed\n[http-adapter] dispatcher destruction settles: passed\n[http-adapter] server cleanup settles: passed\n",
+  "probe": {
+    "mode": "install",
+    "configuration": {
+      "mode": "install",
+      "fetchIsInstalled": true,
+      "responseIsInstalled": true,
+      "websocketIsInstalled": true
+    },
+    "runtime": {
+      "node": "26.3.0",
+      "bun": "1.4.2"
+    },
+    "installedUndici": "8.10.2",
+    "checks": [
+      {
+        "name": "idle body terminates with configured timeout",
+        "passed": false,
+        "elapsedMs": 6002.234456,
+        "error": {
+          "name": "Error",
+          "message": "Probe action did not settle within 6000ms",
+          "stack": "Error: Probe action did not settle within 6000ms\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:108:91)"
+        }
+      },
+      {
+        "name": "idle headers terminate with configured timeout",
+        "passed": true,
+        "elapsedMs": 1002.714653,
+        "detail": {
+          "name": "TypeError",
+          "message": "fetch failed",
+          "causeCode": "UND_ERR_HEADERS_TIMEOUT"
+        }
+      },
+      {
+        "name": "zero disables body timeout across 1500ms gap",
+        "passed": true,
+        "elapsedMs": 1506.205054000001
+      },
+      {
+        "name": "zero disables headers timeout across 1500ms gap",
+        "passed": true,
+        "elapsedMs": 1503.3412640000006
+      },
+      {
+        "name": "active stream survives longer than idle budget",
+        "passed": true,
+        "elapsedMs": 2102.994693999999
+      },
+      {
+        "name": "already-aborted request never reaches origin",
+        "passed": true,
+        "elapsedMs": 1.763758000000962
+      },
+      {
+        "name": "abort while waiting for headers",
+        "passed": true,
+        "elapsedMs": 113.65452600000026
+      },
+      {
+        "name": "AbortSignal.timeout is propagated",
+        "passed": true,
+        "elapsedMs": 110.96679700000095
+      },
+      {
+        "name": "abort after first streamed body chunk",
+        "passed": false,
+        "elapsedMs": 6007.035870999998,
+        "error": {
+          "name": "Error",
+          "message": "Probe action did not settle within 6000ms",
+          "stack": "Error: Probe action did not settle within 6000ms\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:108:91)"
+        }
+      },
+      {
+        "name": "reader cancellation closes origin response",
+        "passed": true,
+        "elapsedMs": 13.687828999998601
+      },
+      {
+        "name": "mid-stream socket failure rejects body",
+        "passed": false,
+        "elapsedMs": 6001.140451000003,
+        "error": {
+          "name": "Error",
+          "message": "Probe action did not settle within 6000ms",
+          "stack": "Error: Probe action did not settle within 6000ms\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:108:91)"
+        }
+      },
+      {
+        "name": "gzip JSON decompresses",
+        "passed": true,
+        "elapsedMs": 4.406866999997874
+      },
+      {
+        "name": "deflate JSON decompresses",
+        "passed": true,
+        "elapsedMs": 1.879558000000543
+      },
+      {
+        "name": "br JSON decompresses",
+        "passed": true,
+        "elapsedMs": 2.1654860000016924
+      },
+      {
+        "name": "gzip SSE delivers first event before stream ends",
+        "passed": true,
+        "elapsedMs": 402.8336569999992
+      },
+      {
+        "name": "Response clone and global constructor agree",
+        "passed": true,
+        "elapsedMs": 2.780370000000403
+      },
+      {
+        "name": "Request and FormData upload",
+        "passed": true,
+        "elapsedMs": 6.5316879999991215
+      },
+      {
+        "name": "ReadableStream upload with duplex half",
+        "passed": true,
+        "elapsedMs": 2.0117669999999634
+      },
+      {
+        "name": "TLS validates locally trusted CA",
+        "passed": true,
+        "elapsedMs": 7.801164000000426
+      },
+      {
+        "name": "HTTP_PROXY routing and fixture proxy auth",
+        "passed": true,
+        "elapsedMs": 10.131953999996767
+      },
+      {
+        "name": "http_proxy routing and fixture proxy auth",
+        "passed": true,
+        "elapsedMs": 3.240276000000449
+      },
+      {
+        "name": "HTTPS_PROXY routing and fixture proxy auth",
+        "passed": true,
+        "elapsedMs": 7.523420999998052
+      },
+      {
+        "name": "https_proxy routing and fixture proxy auth",
+        "passed": true,
+        "elapsedMs": 4.998779999998078
+      },
+      {
+        "name": "NO_PROXY bypasses configured proxy",
+        "passed": true,
+        "elapsedMs": 2.4259799999999814
+      },
+      {
+        "name": "lowercase proxy settings take precedence",
+        "passed": true,
+        "elapsedMs": 2.674244000001636
+      },
+      {
+        "name": "compressed JSON through TLS proxy",
+        "passed": true,
+        "elapsedMs": 5.755462000000989
+      },
+      {
+        "name": "idle timeout through TLS proxy",
+        "passed": false,
+        "elapsedMs": 6017.2570909999995,
+        "error": {
+          "name": "Error",
+          "message": "Probe action did not settle within 6000ms",
+          "stack": "Error: Probe action did not settle within 6000ms\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:108:91)"
+        }
+      },
+      {
+        "name": "abort through TLS proxy",
+        "passed": false,
+        "elapsedMs": 6030.173599000002,
+        "error": {
+          "name": "Error",
+          "message": "Probe action did not settle within 6000ms",
+          "stack": "Error: Probe action did not settle within 6000ms\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:108:91)"
+        }
+      },
+      {
+        "name": "requests still work after timeout and abort",
+        "passed": true,
+        "elapsedMs": 24.358602000000246
+      },
+      {
+        "name": "dispatcher destruction settles",
+        "passed": true,
+        "elapsedMs": 2.0463420000014594,
+        "detail": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "name": "server cleanup settles",
+        "passed": true,
+        "elapsedMs": 5.1443750000034925,
+        "detail": [
+          null,
+          null,
+          null
+        ]
+      }
+    ],
+    "passed": 26,
+    "failed": 5
+  }
+}

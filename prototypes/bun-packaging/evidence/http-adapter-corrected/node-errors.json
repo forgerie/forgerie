@@ -1,0 +1,51 @@
+{
+  "command": [
+    "/nix/store/sy0c7j0npsq33d9zhnnzvjnzc52f4y0p-nodejs-24.13.0/bin/node",
+    "prototypes/bun-packaging/http-error-probe.mjs"
+  ],
+  "exitCode": 0,
+  "stderr": "",
+  "probe": {
+    "node": "24.13.0",
+    "bun": null,
+    "results": [
+      {
+        "name": "ReadableStream default error rejects pending read",
+        "passed": true,
+        "error": {
+          "name": "Error",
+          "message": "fixture-stream-error"
+        },
+        "elapsedMs": 1.6523609999999849
+      },
+      {
+        "name": "ReadableStream bytes error rejects pending read",
+        "passed": true,
+        "error": {
+          "name": "Error",
+          "message": "fixture-stream-error"
+        },
+        "elapsedMs": 0.6791450000000054
+      },
+      {
+        "name": "npm undici default Agent body timeout rejects text",
+        "passed": true,
+        "error": {
+          "name": "TypeError",
+          "message": "terminated",
+          "causeCode": "UND_ERR_BODY_TIMEOUT"
+        },
+        "elapsedMs": 1033.541966
+      },
+      {
+        "name": "npm undici default Agent abort rejects pending read",
+        "passed": true,
+        "error": {
+          "name": "AbortError",
+          "message": "This operation was aborted"
+        },
+        "elapsedMs": 12.972688000000062
+      }
+    ]
+  }
+}

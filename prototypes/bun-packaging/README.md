@@ -82,10 +82,12 @@ nix shell nixpkgs#nodejs_24 -c node prototypes/bun-packaging/daemon-smoke.mjs bu
 
 Raw runs stay under `/tmp/forgerie-bun-spikes`. `save-evidence.py` preserves bounded summaries and compressed original test logs in `evidence/`; it never copies profile databases or credentials. Early runner failures remain only in the temporary run directory.
 
-## Next decision
+## Bounded HTTP adapter follow-up
 
-A bounded Bun-specific HTTP adapter experiment can establish whether this blocker has a small fix. Its cost is maintaining another fetch/configuration path and qualifying provider, proxy, compression, abort and stream behavior. It does not establish a performance benefit.
+The approved adapter experiment also fails. Node passes all 31 HTTP checks. Bun with the installed npm dispatcher and full `undici.install()` passes 26, but pending body errors still hang after idle timeouts, aborts and socket failures. The failure reproduces with npm undici's default Agent outside Forgerie and Vitest.
 
-After that experiment, rerun gate 1 and complete gate 2 before compiling. Keep the package manager, lock and framework fixed. If compatibility work grows or performance gains do not justify it, keep Node.
+[HTTP-ADAPTER.md](HTTP-ADAPTER.md) records the five configurations, compatibility rerun, adapted daemon smoke, costs and reproduction commands. Its source baseline is `886b49b6`, distinct from the original comparison above. The npm lock is unchanged.
+
+Keep Node. Do not proceed to compilation, Nix packaging or performance testing until the compatibility gate passes and lifecycle qualification is complete. Further transport or runtime work needs a separate bounded plan; this experiment does not demonstrate a small fix or a performance benefit.
 
 Workspace-service lifecycle and two-node recovery remain separate pool experiments. Neither is solved by selecting Bun or compiling an executable.

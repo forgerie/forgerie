@@ -1,0 +1,10 @@
+{
+  "sourceCommit": "886b49b69d026b7febce6a6a508de0e0af840780",
+  "lockSha256": "afd1e53db3d53b9a30aa2ae7bc4d6628c843129174fff8eb0fae51f8fa719ea9",
+  "privateBuildPatch": {
+    "originalSha256": "4090e7c675b9c30f3b23b0455aee8880cb34713bb58a58f2672e1c95d869ff3b",
+    "patchedSha256": "e3f7e91cd3c820716fc590ae5e89b0186365360ac92c5d9ab674ca293481bbcb",
+    "edit": "Only the import specifier changes in an additional private compiled module."
+  },
+  "qualification": "Loopback HTTP/TLS only. Synthetic CA/proxy credentials. No live providers. Shared-host durations are not benchmarks."
+}

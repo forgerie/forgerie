@@ -1,0 +1,227 @@
+{
+  "command": [
+    "/nix/store/sy0c7j0npsq33d9zhnnzvjnzc52f4y0p-nodejs-24.13.0/bin/node",
+    "/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs",
+    "native"
+  ],
+  "exitCode": 0,
+  "stderr": "[http-adapter] idle body terminates with configured timeout: passed\n[http-adapter] idle headers terminate with configured timeout: passed\n[http-adapter] zero disables body timeout across 1500ms gap: passed\n[http-adapter] zero disables headers timeout across 1500ms gap: passed\n[http-adapter] active stream survives longer than idle budget: passed\n[http-adapter] already-aborted request never reaches origin: passed\n[http-adapter] abort while waiting for headers: passed\n[http-adapter] AbortSignal.timeout is propagated: passed\n[http-adapter] abort after first streamed body chunk: passed\n[http-adapter] reader cancellation closes origin response: passed\n[http-adapter] mid-stream socket failure rejects body: passed\n[http-adapter] gzip JSON decompresses: passed\n[http-adapter] deflate JSON decompresses: passed\n[http-adapter] br JSON decompresses: passed\n[http-adapter] gzip SSE delivers first event before stream ends: passed\n[http-adapter] Response clone and global constructor agree: passed\n[http-adapter] Request and FormData upload: passed\n[http-adapter] ReadableStream upload with duplex half: passed\n[http-adapter] TLS validates locally trusted CA: passed\n[http-adapter] HTTP_PROXY routing and fixture proxy auth: passed\n[http-adapter] http_proxy routing and fixture proxy auth: passed\n[http-adapter] HTTPS_PROXY routing and fixture proxy auth: passed\n[http-adapter] https_proxy routing and fixture proxy auth: passed\n[http-adapter] NO_PROXY bypasses configured proxy: passed\n[http-adapter] lowercase proxy settings take precedence: passed\n[http-adapter] compressed JSON through TLS proxy: passed\n[http-adapter] idle timeout through TLS proxy: passed\n[http-adapter] abort through TLS proxy: passed\n[http-adapter] requests still work after timeout and abort: passed\n[http-adapter] dispatcher destruction settles: passed\n[http-adapter] server cleanup settles: passed\n",
+  "probe": {
+    "mode": "native",
+    "configuration": {},
+    "runtime": {
+      "node": "24.13.0",
+      "bun": null
+    },
+    "installedUndici": "8.10.2",
+    "checks": [
+      {
+        "name": "idle body terminates with configured timeout",
+        "passed": true,
+        "elapsedMs": 1008.866982,
+        "detail": {
+          "name": "TypeError",
+          "message": "terminated",
+          "causeCode": "UND_ERR_BODY_TIMEOUT"
+        }
+      },
+      {
+        "name": "idle headers terminate with configured timeout",
+        "passed": true,
+        "elapsedMs": 1000.515566,
+        "detail": {
+          "name": "TypeError",
+          "message": "fetch failed",
+          "causeCode": "UND_ERR_HEADERS_TIMEOUT"
+        }
+      },
+      {
+        "name": "zero disables body timeout across 1500ms gap",
+        "passed": true,
+        "elapsedMs": 1506.3832039999998
+      },
+      {
+        "name": "zero disables headers timeout across 1500ms gap",
+        "passed": true,
+        "elapsedMs": 1505.2197480000004
+      },
+      {
+        "name": "active stream survives longer than idle budget",
+        "passed": true,
+        "elapsedMs": 2102.962525
+      },
+      {
+        "name": "already-aborted request never reaches origin",
+        "passed": true,
+        "elapsedMs": 2.1317760000001726
+      },
+      {
+        "name": "abort while waiting for headers",
+        "passed": true,
+        "elapsedMs": 113.1630439999999
+      },
+      {
+        "name": "AbortSignal.timeout is propagated",
+        "passed": true,
+        "elapsedMs": 112.11679900000036
+      },
+      {
+        "name": "abort after first streamed body chunk",
+        "passed": true,
+        "elapsedMs": 14.752158999999665
+      },
+      {
+        "name": "reader cancellation closes origin response",
+        "passed": true,
+        "elapsedMs": 13.47383499999978
+      },
+      {
+        "name": "mid-stream socket failure rejects body",
+        "passed": true,
+        "elapsedMs": 105.1099179999992
+      },
+      {
+        "name": "gzip JSON decompresses",
+        "passed": true,
+        "elapsedMs": 10.109489000000394
+      },
+      {
+        "name": "deflate JSON decompresses",
+        "passed": true,
+        "elapsedMs": 4.6498480000009295
+      },
+      {
+        "name": "br JSON decompresses",
+        "passed": true,
+        "elapsedMs": 5.571781999999075
+      },
+      {
+        "name": "gzip SSE delivers first event before stream ends",
+        "passed": true,
+        "elapsedMs": 403.5625609999988
+      },
+      {
+        "name": "Response clone and global constructor agree",
+        "passed": true,
+        "elapsedMs": 3.8130609999989247
+      },
+      {
+        "name": "Request and FormData upload",
+        "passed": true,
+        "elapsedMs": 15.27943100000084
+      },
+      {
+        "name": "ReadableStream upload with duplex half",
+        "passed": true,
+        "elapsedMs": 2.875973000000158
+      },
+      {
+        "name": "TLS validates locally trusted CA",
+        "passed": true,
+        "elapsedMs": 11.735290000000532
+      },
+      {
+        "name": "HTTP_PROXY routing and fixture proxy auth",
+        "passed": true,
+        "elapsedMs": 10.173166000000492
+      },
+      {
+        "name": "http_proxy routing and fixture proxy auth",
+        "passed": true,
+        "elapsedMs": 3.5574950000009267
+      },
+      {
+        "name": "HTTPS_PROXY routing and fixture proxy auth",
+        "passed": true,
+        "elapsedMs": 9.923895000001721
+      },
+      {
+        "name": "https_proxy routing and fixture proxy auth",
+        "passed": true,
+        "elapsedMs": 11.720090999999229
+      },
+      {
+        "name": "NO_PROXY bypasses configured proxy",
+        "passed": true,
+        "elapsedMs": 2.11691399999836
+      },
+      {
+        "name": "lowercase proxy settings take precedence",
+        "passed": true,
+        "elapsedMs": 2.9176279999992403
+      },
+      {
+        "name": "compressed JSON through TLS proxy",
+        "passed": true,
+        "elapsedMs": 6.387656999999308
+      },
+      {
+        "name": "idle timeout through TLS proxy",
+        "passed": true,
+        "elapsedMs": 920.2875089999998,
+        "detail": {
+          "name": "TypeError",
+          "message": "terminated",
+          "causeCode": "UND_ERR_BODY_TIMEOUT"
+        }
+      },
+      {
+        "name": "abort through TLS proxy",
+        "passed": true,
+        "elapsedMs": 19.28855399999884
+      },
+      {
+        "name": "requests still work after timeout and abort",
+        "passed": true,
+        "elapsedMs": 36.03643099999863
+      },
+      {
+        "name": "dispatcher destruction settles",
+        "passed": true,
+        "elapsedMs": 4.398146999999881,
+        "detail": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "name": "server cleanup settles",
+        "passed": true,
+        "elapsedMs": 0.7928080000001501,
+        "detail": [
+          null,
+          null,
+          null
+        ]
+      }
+    ],
+    "passed": 31,
+    "failed": 0
+  }
+}

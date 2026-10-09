@@ -1,0 +1,40 @@
+{
+  "runtime": "bun",
+  "exe": "/tmp/forgerie-bun-spikes/bun-1.4.2",
+  "entry": "/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/dist/server/sessiond.js",
+  "results": [
+    {
+      "transport": "tcp",
+      "startupMs": 4334.603821000001,
+      "restartMs": 4945.545850999999,
+      "sessionId": "01a1230e-7987-7154-8125-b8ff2b4f3e1a",
+      "checks": [
+        "health",
+        "HTTP validation",
+        "WebSocket event and reconnect",
+        "session creation",
+        "external extension command",
+        "shell subprocess",
+        "restart discovery",
+        "SIGTERM cleanup"
+      ]
+    },
+    {
+      "transport": "unix",
+      "startupMs": 6054.153494,
+      "restartMs": 3406.7751449999996,
+      "sessionId": "01a1230e-b03e-742b-9e24-ef920078f211",
+      "checks": [
+        "health",
+        "HTTP validation",
+        "WebSocket event and reconnect",
+        "session creation",
+        "external extension command",
+        "shell subprocess",
+        "restart discovery",
+        "SIGTERM cleanup"
+      ]
+    }
+  ],
+  "failure": null
+}

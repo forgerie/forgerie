@@ -1,0 +1,223 @@
+{
+  "command": [
+    "/tmp/forgerie-bun-spikes/bun-1.4.2",
+    "/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs",
+    "native"
+  ],
+  "exitCode": 1,
+  "stderr": "[http-adapter] idle body terminates with configured timeout: failed\n[http-adapter] idle headers terminate with configured timeout: failed\n[http-adapter] zero disables body timeout across 1500ms gap: passed\n[http-adapter] zero disables headers timeout across 1500ms gap: passed\n[http-adapter] active stream survives longer than idle budget: passed\n[http-adapter] already-aborted request never reaches origin: passed\n[http-adapter] abort while waiting for headers: passed\n[http-adapter] AbortSignal.timeout is propagated: passed\n[http-adapter] abort after first streamed body chunk: passed\n[http-adapter] reader cancellation closes origin response: passed\n[http-adapter] mid-stream socket failure rejects body: passed\n[http-adapter] gzip JSON decompresses: passed\n[http-adapter] deflate JSON decompresses: passed\n[http-adapter] br JSON decompresses: passed\n[http-adapter] gzip SSE delivers first event before stream ends: passed\n[http-adapter] Response clone and global constructor agree: passed\n[http-adapter] Request and FormData upload: passed\n[http-adapter] ReadableStream upload with duplex half: passed\n[http-adapter] TLS validates locally trusted CA: passed\n[http-adapter] HTTP_PROXY routing and fixture proxy auth: failed\n[http-adapter] http_proxy routing and fixture proxy auth: failed\n[http-adapter] HTTPS_PROXY routing and fixture proxy auth: failed\n[http-adapter] https_proxy routing and fixture proxy auth: failed\n[http-adapter] NO_PROXY bypasses configured proxy: passed\n[http-adapter] lowercase proxy settings take precedence: failed\n[http-adapter] compressed JSON through TLS proxy: passed\n[http-adapter] idle timeout through TLS proxy: failed\n[http-adapter] abort through TLS proxy: passed\n[http-adapter] requests still work after timeout and abort: passed\n[http-adapter] dispatcher destruction settles: passed\n[http-adapter] server cleanup settles: passed\n",
+  "probe": {
+    "mode": "native",
+    "configuration": {},
+    "runtime": {
+      "node": "26.3.0",
+      "bun": "1.4.2"
+    },
+    "installedUndici": "8.10.2",
+    "checks": [
+      {
+        "name": "idle body terminates with configured timeout",
+        "passed": false,
+        "elapsedMs": 1514.1705699999998,
+        "error": {
+          "name": "AssertionError",
+          "message": "Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'UND_ERR_BODY_TIMEOUT'\n",
+          "stack": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'UND_ERR_BODY_TIMEOUT'\n\n    at rejectsWithCode (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:119:10)\n    at async <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:172:26)\n    at async check (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:109:34)\n    at processTicksAndRejections (native:7:39)"
+        }
+      },
+      {
+        "name": "idle headers terminate with configured timeout",
+        "passed": false,
+        "elapsedMs": 1501.807182,
+        "error": {
+          "name": "AssertionError",
+          "message": "Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'UND_ERR_HEADERS_TIMEOUT'\n",
+          "stack": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'UND_ERR_HEADERS_TIMEOUT'\n\n    at rejectsWithCode (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:119:10)\n    at processTicksAndRejections (native:7:39)"
+        }
+      },
+      {
+        "name": "zero disables body timeout across 1500ms gap",
+        "passed": true,
+        "elapsedMs": 1502.466227
+      },
+      {
+        "name": "zero disables headers timeout across 1500ms gap",
+        "passed": true,
+        "elapsedMs": 1501.227121
+      },
+      {
+        "name": "active stream survives longer than idle budget",
+        "passed": true,
+        "elapsedMs": 2101.2437230000005
+      },
+      {
+        "name": "already-aborted request never reaches origin",
+        "passed": true,
+        "elapsedMs": 0.9600500000015018
+      },
+      {
+        "name": "abort while waiting for headers",
+        "passed": true,
+        "elapsedMs": 101.37047300000086
+      },
+      {
+        "name": "AbortSignal.timeout is propagated",
+        "passed": true,
+        "elapsedMs": 100.80607899999995
+      },
+      {
+        "name": "abort after first streamed body chunk",
+        "passed": true,
+        "elapsedMs": 12.804974000000584
+      },
+      {
+        "name": "reader cancellation closes origin response",
+        "passed": true,
+        "elapsedMs": 13.092898999999306
+      },
+      {
+        "name": "mid-stream socket failure rejects body",
+        "passed": true,
+        "elapsedMs": 101.69642199999907
+      },
+      {
+        "name": "gzip JSON decompresses",
+        "passed": true,
+        "elapsedMs": 3.8465219999998226
+      },
+      {
+        "name": "deflate JSON decompresses",
+        "passed": true,
+        "elapsedMs": 1.1293270000005577
+      },
+      {
+        "name": "br JSON decompresses",
+        "passed": true,
+        "elapsedMs": 2.684857000000193
+      },
+      {
+        "name": "gzip SSE delivers first event before stream ends",
+        "passed": true,
+        "elapsedMs": 403.67856700000084
+      },
+      {
+        "name": "Response clone and global constructor agree",
+        "passed": true,
+        "elapsedMs": 0.5927339999998367
+      },
+      {
+        "name": "Request and FormData upload",
+        "passed": true,
+        "elapsedMs": 0.901053999999931
+      },
+      {
+        "name": "ReadableStream upload with duplex half",
+        "passed": true,
+        "elapsedMs": 0.7469860000001063
+      },
+      {
+        "name": "TLS validates locally trusted CA",
+        "passed": true,
+        "elapsedMs": 2.6333139999987907
+      },
+      {
+        "name": "HTTP_PROXY routing and fixture proxy auth",
+        "passed": false,
+        "elapsedMs": 0.5978810000015073,
+        "error": {
+          "name": "AssertionError",
+          "message": "Expected values to be strictly equal:\n\n0 !== 1\n",
+          "stack": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n0 !== 1\n\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:255:12)\n    at async check (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:109:34)\n    at processTicksAndRejections (native:7:39)"
+        }
+      },
+      {
+        "name": "http_proxy routing and fixture proxy auth",
+        "passed": false,
+        "elapsedMs": 0.32040500000039174,
+        "error": {
+          "name": "AssertionError",
+          "message": "Expected values to be strictly equal:\n\n0 !== 1\n",
+          "stack": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n0 !== 1\n\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:255:12)\n    at async check (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:109:34)\n    at processTicksAndRejections (native:7:39)"
+        }
+      },
+      {
+        "name": "HTTPS_PROXY routing and fixture proxy auth",
+        "passed": false,
+        "elapsedMs": 0.3199239999994461,
+        "error": {
+          "name": "AssertionError",
+          "message": "Expected values to be strictly equal:\n\n0 !== 1\n",
+          "stack": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n0 !== 1\n\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:255:12)\n    at async check (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:109:34)\n    at processTicksAndRejections (native:7:39)"
+        }
+      },
+      {
+        "name": "https_proxy routing and fixture proxy auth",
+        "passed": false,
+        "elapsedMs": 0.2865860000001703,
+        "error": {
+          "name": "AssertionError",
+          "message": "Expected values to be strictly equal:\n\n0 !== 1\n",
+          "stack": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n0 !== 1\n\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:255:12)\n    at async check (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:109:34)\n    at processTicksAndRejections (native:7:39)"
+        }
+      },
+      {
+        "name": "NO_PROXY bypasses configured proxy",
+        "passed": true,
+        "elapsedMs": 0.2928889999984676
+      },
+      {
+        "name": "lowercase proxy settings take precedence",
+        "passed": false,
+        "elapsedMs": 0.30707799999981944,
+        "error": {
+          "name": "AssertionError",
+          "message": "Expected values to be strictly equal:\n\n0 !== 1\n",
+          "stack": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n0 !== 1\n\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:263:81)\n    at async check (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:109:34)\n    at processTicksAndRejections (native:7:39)"
+        }
+      },
+      {
+        "name": "compressed JSON through TLS proxy",
+        "passed": true,
+        "elapsedMs": 0.5782079999989946
+      },
+      {
+        "name": "idle timeout through TLS proxy",
+        "passed": false,
+        "elapsedMs": 1501.5977289999992,
+        "error": {
+          "name": "AssertionError",
+          "message": "Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'UND_ERR_BODY_TIMEOUT'\n",
+          "stack": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'UND_ERR_BODY_TIMEOUT'\n\n    at rejectsWithCode (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/prototypes/bun-packaging/http-adapter-probe.mjs:119:10)\n    at processTicksAndRejections (native:7:39)"
+        }
+      },
+      {
+        "name": "abort through TLS proxy",
+        "passed": true,
+        "elapsedMs": 11.067900000000009
+      },
+      {
+        "name": "requests still work after timeout and abort",
+        "passed": true,
+        "elapsedMs": 1.5811739999990095
+      },
+      {
+        "name": "dispatcher destruction settles",
+        "passed": true,
+        "elapsedMs": 0.07466500000009546,
+        "detail": []
+      },
+      {
+        "name": "server cleanup settles",
+        "passed": true,
+        "elapsedMs": 0.3592320000007021,
+        "detail": [
+          null,
+          null,
+          null
+        ]
+      }
+    ],
+    "passed": 23,
+    "failed": 8
+  }
+}

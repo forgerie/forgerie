@@ -1,0 +1,37 @@
+{
+  "matrix": [],
+  "bunCompatibility": {
+    "tests": {
+      "numTotalTests": 1711,
+      "numPassedTests": 1706,
+      "numFailedTests": 2,
+      "numPendingTests": 3,
+      "numTotalTestSuites": 469,
+      "numPassedTestSuites": 450,
+      "numFailedTestSuites": 19,
+      "success": false
+    },
+    "filesTotal": 195,
+    "filesPassed": 178,
+    "filesFailed": 17,
+    "importFailures": 15,
+    "assertionFailures": [
+      {
+        "name": "bounded diagnostic requests cancels a stalled http response without changing normal requests",
+        "messages": [
+          "Error: expected [Function] to throw error matching /abort|timeout/i but got 'The operation timed out.'\n    at __VITEST_REJECTS__ (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/expect/dist/index.js:1747:20)\n    at propertyGetter (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/chai/index.js:1570:26)\n    at get (native)\n    at /home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/src/sessiond/sessionDaemonClient.test.ts:99:97\n    at processTicksAndRejections (native)"
+        ]
+      },
+      {
+        "name": "configureAgentHttpDispatcher terminates an idle body once the configured timeout elapses",
+        "messages": [
+          "Error\n    at task (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:1784:31)\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/src/server/sessiond/agentHttpDispatcher.test.ts:169:30)\n    at runWithSuite (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:2258:8)\n    at collect (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:1889:10)\n    at collect (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:1893:54)\n    at async <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:2462:50)\n    at async collectTests (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:2433:9)\n    at async startTests (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/@vitest/runner/dist/chunk-artifact.js:3278:23)\n    at async <anonymous> (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/vitest/dist/chunks/base.B6Opl8PE.js:90:18)\n    at async run (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/vitest/dist/chunks/base.B6Opl8PE.js:81:15)\n    at async runBaseTests (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/vitest/dist/chunks/base.B6Opl8PE.js:200:8)\n    at async executeTests (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/vitest/dist/chunks/init-forks.H5ZuobOQ.js:29:10)\n    at async execute (/home/simonwjackson/code/sandbox/forgerie/.worktrees/spike-bun-http/node_modules/vitest/dist/chunks/init.k9zZ9sLh.js:158:16)\n    at processTicksAndRejections (unknown:7:39)"
+        ]
+      }
+    ],
+    "workerRuntimes": [
+      "node=26.3.0 bun=1.4.2"
+    ],
+    "adapterWorkers": 195
+  }
+}

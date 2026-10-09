@@ -1,0 +1,10 @@
+{
+  "command": [
+    "/nix/store/sy0c7j0npsq33d9zhnnzvjnzc52f4y0p-nodejs-24.13.0/bin/npm",
+    "run",
+    "verify"
+  ],
+  "exitCode": 1,
+  "sourceCommit": "886b49b69d026b7febce6a6a508de0e0af840780",
+  "node": "v24.13.0"
+}

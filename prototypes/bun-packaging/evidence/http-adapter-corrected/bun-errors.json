@@ -1,0 +1,50 @@
+{
+  "command": [
+    "/tmp/forgerie-bun-spikes/bun-1.4.2",
+    "prototypes/bun-packaging/http-error-probe.mjs"
+  ],
+  "exitCode": 1,
+  "stderr": "",
+  "probe": {
+    "node": "26.3.0",
+    "bun": "1.4.2",
+    "results": [
+      {
+        "name": "ReadableStream default error rejects pending read",
+        "passed": true,
+        "error": {
+          "name": "Error",
+          "message": "fixture-stream-error"
+        },
+        "elapsedMs": 0.37433499999997366
+      },
+      {
+        "name": "ReadableStream bytes error rejects pending read",
+        "passed": true,
+        "error": {
+          "name": "Error",
+          "message": "fixture-stream-error"
+        },
+        "elapsedMs": 0.04171800000000303
+      },
+      {
+        "name": "npm undici default Agent body timeout rejects text",
+        "passed": false,
+        "error": {
+          "name": "Error",
+          "message": "Promise did not settle within 3000ms"
+        },
+        "elapsedMs": 3000.856714
+      },
+      {
+        "name": "npm undici default Agent abort rejects pending read",
+        "passed": false,
+        "error": {
+          "name": "Error",
+          "message": "Promise did not settle within 3000ms"
+        },
+        "elapsedMs": 3015.531147
+      }
+    ]
+  }
+}
