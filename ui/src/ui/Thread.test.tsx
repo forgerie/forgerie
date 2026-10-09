@@ -414,8 +414,39 @@ describe("Tools and reasoning", () => {
     expect(rows()).toHaveLength(1);
     expect(marks(rows()[0]!)).toEqual(["plain"]);
     expect(rows()[0]!.querySelector(".tally-line")?.textContent).toBe("1 tool call: bash git status");
-    expect(document.querySelector(".message-assistant .message-text > details.skill-load > summary .trace-text")?.textContent)
+    expect(document.querySelector(".message-assistant .rail-section-body > details.skill-load > summary .trace-text")?.textContent)
       .toBe("loaded skill simple-english");
+  });
+
+  it("hangs the work from one rail and closes it with a rule before the answer once the reply settles", async () => {
+    const work: TranscriptMessage[] = [
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "Let me look." }, tool("x", { type: "done", output: "", isError: false })] },
+      { id: "a2", role: "assistant", parts: [tool("y", { type: "done", output: "no", isError: true }), tool("z", { type: "interrupted" })] },
+      { id: "a3", role: "assistant", parts: [{ type: "thinking", text: "Enough." }, { type: "text", text: "The **answer**." }] },
+    ];
+    await render({ messages: work });
+    const sections = document.querySelectorAll(".message-assistant .rail-section");
+    expect(sections).toHaveLength(1);
+    const body = sections[0]!.querySelector(".rail-section-body")!;
+    expect(body.querySelectorAll(":scope > .tally")).toHaveLength(2);
+    // The answer's thinking is work too; the answer is not.
+    expect(body.querySelector("details.chain-of-thought")).not.toBeNull();
+    expect(body.textContent).not.toContain("The answer.");
+    expect(sections[0]!.querySelector(".rail-section-end")?.textContent).toBe("3 tool calls, 1 failed, 1 stopped");
+    expect(sections[0]!.nextElementSibling?.querySelector("strong")?.textContent).toBe("answer");
+    // While the reply streams, the last text may still introduce a call, so no rule yet.
+    await render({ messages: work, running: true });
+    expect(document.querySelector(".message-assistant .rail-section")).not.toBeNull();
+    expect(document.querySelector(".message-assistant .rail-section-end")).toBeNull();
+  });
+
+  it("draws no rule when no answer follows the work, and no rail for a reply without steps", async () => {
+    await render({ messages: [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "Checking." }, tool("x", { type: "interrupted" })] }] });
+    expect(document.querySelector(".message-assistant .rail-section")).not.toBeNull();
+    expect(document.querySelector(".message-assistant .rail-section-end")).toBeNull();
+    await render({ messages: [{ id: "b", role: "assistant", parts: [{ type: "thinking", text: "Hmm." }, { type: "text", text: "Plain answer." }] }] });
+    expect(document.querySelector(".message-assistant .rail-section")).toBeNull();
+    expect(document.querySelector(".message-assistant details.chain-of-thought")).not.toBeNull();
   });
 
   it("shows a working line between steps but not while a call runs", async () => {

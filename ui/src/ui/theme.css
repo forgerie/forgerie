@@ -712,6 +712,15 @@ summary.trace-line:hover { color: var(--foreground); }
 /* A reply keeps a margin for the marks beside its steps, whether or not it
    has steps yet, so text does not move when the first tool call arrives. */
 .message-assistant { padding-inline-start: var(--tally-gutter); --tally-hang: var(--tally-gutter); }
+/* A reply's work hangs from a rail, indented from it. Step rows keep their
+   marks in the margin while their text takes the same indent, and the rule
+   that closes the work reaches back to the margin's edge. */
+.message-assistant {
+  /** Space between the work's rail and its text. @label Work rail indent @min 0.25 @max 1.5 @step 0.125 */
+  --rail-indent: 0.75rem;
+  --tally-inset: var(--rail-indent);
+  --rail-reach: var(--tally-gutter);
+}
 .hljs-keyword, .hljs-selector-tag, .hljs-literal { color: var(--code-keyword); }
 .hljs-string, .hljs-regexp, .hljs-attribute { color: var(--code-string); }
 .hljs-number, .hljs-symbol { color: var(--code-number); }

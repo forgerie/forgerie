@@ -1,21 +1,23 @@
 /* Content with a tally in its margin. The margin column is --tally-gutter
    wide. A container that already indents its content by that much sets
    --tally-hang, and the row hangs its marks into the indent, so content
-   with and without a tally shares one left edge. */
+   with and without a tally shares one left edge. A container that indents
+   again, to draw between the marks and the content, sets --tally-inset to
+   that indent: the marks stay where they were and the content moves in. */
 .tally {
   /** Side of one mark. @label Tally mark size @min 0.25 @max 0.75 @step 0.0625 */
   --tally-mark: 0.4375rem;
   --tally-gap: 0.1875rem;
   display: grid;
-  grid-template-columns: var(--tally-gutter) minmax(0, 1fr);
+  grid-template-columns: calc(var(--tally-gutter) + var(--tally-inset, 0rem)) minmax(0, 1fr);
   align-items: start;
   margin-block: var(--space-3);
-  margin-inline-start: calc(-1 * var(--tally-hang, 0rem));
+  margin-inline-start: calc(-1 * (var(--tally-hang, 0rem) + var(--tally-inset, 0rem)));
 }
 .tally-toggle {
   grid-column: 1; position: relative;
   display: flex; justify-content: flex-end;
-  margin: 0; padding: 0 var(--space-2) 0 0;
+  margin: 0; padding: 0 calc(var(--space-2) + var(--tally-inset, 0rem)) 0 0;
   border: 0; border-radius: var(--radius-document);
   background: none; color: var(--muted-foreground);
   line-height: inherit; text-align: start;
@@ -30,7 +32,7 @@
   grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start;
   padding: 0; min-inline-size: 0;
 }
-.tally-toggle[data-wide] .tally-marks { margin-inline-end: var(--space-2); }
+.tally-toggle[data-wide] .tally-marks { margin-inline-end: calc(var(--space-2) + var(--tally-inset, 0rem)); }
 .tally-toggle:hover .tally-line, .tally-toggle:hover .tally-mark { color: var(--foreground); }
 .tally-toggle:hover .tally-mark[data-tone="plain"] { background: var(--foreground); }
 /* One line box tall, so the first row of marks centres on the first line of content. */
@@ -67,7 +69,8 @@
   grid-column: 2; min-inline-size: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--code-font); font-size: var(--label-text); font-variant-ligatures: none;
-  line-height: calc(var(--text-size) * var(--line-height));
+  /* The toggle's line box, so the marks centre on this line at any text size. */
+  line-height: 1lh;
   color: var(--muted-foreground);
 }
 .tally-line[data-live] {

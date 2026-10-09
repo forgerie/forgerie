@@ -161,7 +161,7 @@ const stepMessages = (running: boolean): TranscriptMessage[] => {
     step("s6", "", "Missing module path. Run it from the router module.",
       ok("s6a", "edit", { path: "/tmp/probe-resets/main.go" }),
       tool("s6b", "bash", { command: "go run /tmp/probe-resets" }, running ? { type: "running", output: "building" } : done("codex reset_at=2026-10-09T14:00Z"))),
-    ...running ? [] : [say("s7", "assistant", "Yes. Both providers report a reset time, and the router already fetches it. It drops the field before the meters see it.\n\nCodex returns `reset_at` per window. Claude returns `resets_at` under `five_hour` and `seven_day`.")],
+    ...running ? [] : [say("s7", "assistant", "Yes. Both providers report when each quota window resets, and the router already fetches it. It drops the field before the meters see it, so the fix is in the router, not the plugin.\n\n**What each provider sends.** The probe read all four accounts:\n\n- Codex returns `reset_at` for each window, as a Unix time.\n\n- Claude returns `resets_at` under `five_hour` and `seven_day`, as an ISO date.\n\n**What it takes.** The router's `usage.go` copies `used` and `limit` and skips the rest. Passing `resets_at` through is about 20 lines, plus one field in the meters plugin.\n\nShould I make the router change first?")],
   ];
 };
 

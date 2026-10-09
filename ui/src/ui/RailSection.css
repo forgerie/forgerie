@@ -1,0 +1,35 @@
+/* Supporting content on a rail. The body is set smaller and muted, so what
+   follows the section reads as the main text. The rail is a hairline at the
+   body's start edge; the body's content keeps --rail-indent from it. A
+   container sets --rail-indent when its children must know the indent. */
+.rail-section { margin-block-end: var(--space-6); }
+.rail-section[data-closed] { margin-block-end: var(--space-4); }
+.rail-section-body {
+  position: relative;
+  padding-inline-start: var(--rail-indent, var(--space-3));
+  font-size: var(--small-text);
+  color: var(--muted-foreground);
+}
+/* Starts near the middle of the first line, so it does not poke above the first row. */
+.rail-section-body::before {
+  content: ""; position: absolute;
+  inset-block: calc(0.5lh - var(--space-1)) 0;
+  inset-inline-start: 0;
+  inline-size: var(--hairline);
+  background: var(--line-focus);
+}
+/* The closing rule: a short stub in the margin, the label, then the rest of the width. */
+.rail-section-end {
+  display: flex; align-items: center; gap: var(--space-3);
+  margin-block-start: var(--space-6);
+  margin-inline-start: calc(-1 * var(--rail-reach, 0rem));
+  font-family: var(--code-font); font-size: var(--label-text); font-variant-ligatures: none;
+  color: var(--muted-foreground);
+}
+.rail-section-end::before {
+  content: ""; flex: none;
+  inline-size: max(0rem, calc(var(--rail-reach, 0rem) - var(--space-3)));
+  border-block-start: var(--hairline) solid var(--line-focus);
+}
+.rail-section-end::after { content: ""; flex: 1; border-block-start: var(--hairline) solid var(--line-focus); }
+.rail-section-label { flex: none; max-inline-size: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

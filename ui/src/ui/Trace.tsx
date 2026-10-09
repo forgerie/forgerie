@@ -248,16 +248,42 @@ export function planToolSteps(parts: readonly PartState[]): ToolStepView[] {
 }
 
 /**
- * The current reply's rows by first step id, and each step's row. The
- * selector returns text, so a reply re-renders when a step changes, not on
- * every streamed token.
+ * Where a reply's work ends and its answer begins. The answer is the text
+ * after the last step: the only text a step does not own. `lastStep` is the
+ * index of the last part a step owns, and `summary` totals the work.
  */
-export function useToolSteps(): { rows: ReadonlyMap<string, ToolStepView>; rowOf: ReadonlyMap<string, string> } {
-  const plan = useAuiState((s) => JSON.stringify(planToolSteps(s.message.parts)));
+export interface ReplyBoundary {
+  lastStep: number;
+  /** True when text the model wrote follows the last step. */
+  answered: boolean;
+  summary: string;
+}
+export function replyBoundary(parts: readonly PartState[], rows: readonly ToolStepView[]): ReplyBoundary | undefined {
+  const lastStep = parts.findLastIndex((part) => stepIdOf(part) !== undefined);
+  if (lastStep < 0) return undefined;
+  const answered = parts.some((part, index) => index > lastStep && part.type === "text" && part.text.trim() !== "");
+  const marks = rows.flatMap((row) => row.marks);
+  const count = (tone: TallyTone) => marks.filter((mark) => mark === tone).length;
+  const summary = [plural(marks.length, "tool call"), count("bad") > 0 ? `${count("bad")} failed` : "",
+    count("faint") > 0 ? `${count("faint")} stopped` : ""].filter(Boolean).join(", ");
+  return { lastStep, answered, summary };
+}
+
+/**
+ * The current reply's rows by first step id, each step's row, and the
+ * boundary between work and answer. The selector returns text, so a reply
+ * re-renders when a step changes, not on every streamed token.
+ */
+export function useToolSteps(): { rows: ReadonlyMap<string, ToolStepView>; rowOf: ReadonlyMap<string, string>; boundary: ReplyBoundary | undefined } {
+  const plan = useAuiState((s) => {
+    const rows = planToolSteps(s.message.parts);
+    return JSON.stringify({ rows, boundary: replyBoundary(s.message.parts, rows) ?? null });
+  });
   return useMemo(() => {
-    const views = JSON.parse(plan) as ToolStepView[];
+    const { rows: views, boundary } = JSON.parse(plan) as { rows: ToolStepView[]; boundary: ReplyBoundary | null };
     return { rows: new Map(views.map((view) => [view.id, view])),
-      rowOf: new Map(views.flatMap((view) => view.sections.map((section) => [section.id, view.id] as const))) };
+      rowOf: new Map(views.flatMap((view) => view.sections.map((section) => [section.id, view.id] as const))),
+      boundary: boundary ?? undefined };
   }, [plan]);
 }
 

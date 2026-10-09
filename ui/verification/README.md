@@ -1,5 +1,16 @@
 # Verification and limits
 
+## Work and answer
+
+In a reply with steps, the work hangs from a rail (`RailSection`): step rows, skill loads, session doors, and the last thinking before the answer, set in smaller muted text, with a hairline between the marks and the text. The answer is the text after the last step, the only text a step does not own, and it stays outside the rail at full size. Once the reply settles and an answer follows, a rule labelled with the totals ("20 tool calls, 1 failed, 1 stopped") closes the rail. A reply without steps is unchanged. The variants and the choice are on the branch `proto/turn-separation` (A + B + C).
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | `npm run verify` in `ui/` passed. New tests cover the rail, the rule after settling, no rule while streaming or without an answer, and no rail without steps. |
+| Visual review. | The `steps` and `steps-running` preview scenarios were captured at all four Fold postures in both schemes, framed on the boundary, with no page overflow. Unfolded portrait (light), folded portrait (dark) and folded landscape (light, running) were read. |
+
+Cost: while a reply streams, text after the last step may still introduce a call, so it shows at full size and shrinks into the rail if a call follows; the rule appears only when the reply settles, and pushes the answer down by one line. Work text sits 0.75rem further in than the answer. Text the model writes between two steps in a message without calls (rare) splits the rail.
+
 ## Steps in a reply
 
 A reply shows its tool work as steps. A step is one Pi assistant message that calls a tool: the sentence that introduced the calls stays in the reply, and one mark per call sits in the margin beside it (`TallyRow`). Marks are grey for a call that ran, red for a failure, amber for a failure that a later call of the same tool on the same target fixed, blue while running, and hollow when stopped. Tapping the marks opens the step's thinking and calls; each call still opens to its input and output. A step without a sentence shows one quiet line naming the running or first call, and the whole line opens it. Past nine calls, the tail becomes a count in the worst tone it hides.

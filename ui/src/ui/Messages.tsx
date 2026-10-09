@@ -10,6 +10,7 @@ import type { FileLinks } from "./FileTree";
 import { CopyButton } from "./CopyButton";
 import { ChainOfThoughtGroup, SkillLoad, SkillLoadGroup, stepIdOf, ToolCall, TraceLine, useToolSteps, WorkingLine, type ToolStepView } from "./Trace";
 import { TallyRow } from "./TallyRow";
+import { RailSection } from "./RailSection";
 import { UserMessageAttachments } from "./Attachments";
 import { ReplyGallery } from "./ImageGallery";
 import { SkillInvocationRecord } from "./SkillInvocation";
@@ -19,7 +20,7 @@ import { skillLoadOf } from "../skills";
 // the fold, reasoning reads as text and each tool is one line, so no fold
 // opens only to show another fold.
 type StepKey = `group-step:${string}`;
-type GroupKey = "group-chainOfThought" | "group-skills" | StepKey;
+type GroupKey = "group-chainOfThought" | "group-skills" | "group-work" | StepKey;
 const groupActivity = groupPartByType<GroupKey>({
   reasoning: ["group-chainOfThought"],
   "tool-call": ["group-chainOfThought"],
@@ -35,15 +36,26 @@ const skillGroup = ["group-skills"] as const;
 // marks its parts with a `parentId`, so the boundary between two steps is
 // the message boundary, not a guess from part types. Adjacent silent steps
 // share a row, so a step's group is its row.
+//
+// In a reply with steps, everything but the model's own text is work, and
+// work hangs from one rail. Text a step does not own is the answer, so it
+// stays outside: the rail ends where the answer begins.
 const STEP_GROUP = "group-step:";
+const WORK: readonly GroupKey[] = ["group-work"];
 const isStepKey = (key: string): key is StepKey => key.startsWith(STEP_GROUP);
+function activityPath(part: PartState, context: GroupByContext): readonly GroupKey[] {
+  if (part.type !== "tool-call") return groupActivity(part, context);
+  if (artifactDoor(part.artifact)) return [];
+  return skillLoadOf(part.toolName, part.args) ? skillGroup : groupActivity(part, context);
+}
 function groupAssistantParts(rowOf: ReadonlyMap<string, string>) {
+  const hasSteps = rowOf.size > 0;
   return (part: PartState, context: GroupByContext): readonly GroupKey[] => {
     const step = stepIdOf(part);
-    if (step !== undefined) return [`${STEP_GROUP}${rowOf.get(step) ?? step}`];
-    if (part.type !== "tool-call") return groupActivity(part, context);
-    if (artifactDoor(part.artifact)) return [];
-    return skillLoadOf(part.toolName, part.args) ? skillGroup : groupActivity(part, context);
+    if (step !== undefined) return [...WORK, `${STEP_GROUP}${rowOf.get(step) ?? step}`];
+    if (!hasSteps) return activityPath(part, context);
+    if (part.type === "text" || part.type === "image") return [];
+    return [...WORK, ...activityPath(part, context)];
   };
 }
 
@@ -88,6 +100,11 @@ export function AssistantMessage({ fileLinks }: { fileLinks?: FileLinks | undefi
     thought: { Reasoning: () => <MarkdownText fileLinks={fileLinks} /> },
   }), [fileLinks]);
   const groupBy = useMemo(() => groupAssistantParts(steps.rowOf), [steps]);
+  // While the reply streams, text after the last step may still turn out to
+  // introduce a call, so the rule waits until the reply settles.
+  const settled = useAuiState((s) => s.message.status?.type !== "running");
+  const boundary = steps.boundary;
+  const closing = settled && boundary?.answered ? boundary : undefined;
   return <MessagePrimitive.Root className="message message-assistant" data-role="assistant" aria-label="Assistant reply">
     <div className="message-text">
       <MessagePrimitive.GroupedParts groupBy={groupBy}>
@@ -97,6 +114,7 @@ export function AssistantMessage({ fileLinks }: { fileLinks?: FileLinks | undefi
             return step ? stepRow(step, stepParts) : <>{children}</>;
           }
           switch (part.type) {
+            case "group-work": return <RailSection {...(closing && part.indices.includes(closing.lastStep) ? { end: closing.summary } : {})}>{children}</RailSection>;
             case "group-chainOfThought": return <ChainOfThoughtGroup indices={part.indices} running={part.status.type === "running"}>{children}</ChainOfThoughtGroup>;
             case "group-skills": return part.indices.length === 1 ? <>{children}</>
               : <SkillLoadGroup indices={part.indices} running={part.status.type === "running"}>{children}</SkillLoadGroup>;

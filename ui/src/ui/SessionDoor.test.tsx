@@ -91,7 +91,7 @@ describe("Handoff doors", () => {
     const ran = (id: string): TranscriptPart => tool(id, "bash", { command: `echo ${id}` }, { type: "done", output: "", isError: false });
     await render(reply(ran("before"), tool("s", "spawn_session", { prompt: "Audit" }, handedOff()), ran("after")));
     expect(document.querySelectorAll(".message-assistant .tally .tally-mark")).toHaveLength(2);
-    const order = [...document.querySelectorAll(".message-assistant .message-text > *")].map((node) =>
+    const order = [...document.querySelectorAll(".message-assistant .rail-section-body > *")].map((node) =>
       node.matches(".tally") ? "step" : node.matches(".session-door") ? "door" : node.className);
     expect(order).toEqual(["step", "door"]);
   });
