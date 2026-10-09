@@ -17,12 +17,13 @@ export interface LoadedPiWebConfig {
   config: PiWebConfig;
 }
 
-export interface EffectivePiWebConfig extends Omit<PiWebConfig, "uploads" | "spawnSessions" | "subsessions" | "askUser" | "codemode" | "agent" | "extensionDialogsTimeoutMs"> {
+export interface EffectivePiWebConfig extends Omit<PiWebConfig, "uploads" | "spawnSessions" | "subsessions" | "askUser" | "codemode" | "durableChildren" | "agent" | "extensionDialogsTimeoutMs"> {
   uploads: NonNullable<PiWebConfig["uploads"]>;
   spawnSessions: boolean;
   subsessions: boolean;
   askUser: boolean;
   codemode: boolean;
+  durableChildren: boolean;
   extensionDialogsTimeoutMs: number;
   agent: Required<NonNullable<PiWebConfig["agent"]>>;
 }
@@ -173,6 +174,8 @@ export function resolveEffectivePiWebConfig(loaded: LoadedPiWebConfig, options: 
       askUser: askUserEnabled(env, loaded.config),
       // Always resolved (on by default); scripts reach only tools already active.
       codemode: codemodeEnabled(env, loaded.config),
+      // Resolved off by default while Durable child agents are new.
+      durableChildren: durableChildrenEnabled(env, loaded.config),
       // Always resolved; the unattended-dialog safety valve, not a gate.
       extensionDialogsTimeoutMs: loaded.config.extensionDialogsTimeoutMs ?? DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS,
       agent: { command: agent.command, dir: agent.dir },
@@ -199,6 +202,7 @@ export function savePiWebConfig(config: PiWebConfig, options: LoadOptions = {}):
   delete existing["subsessions"];
   delete existing["askUser"];
   delete existing["codemode"];
+  delete existing["durableChildren"];
   delete existing["agent"];
   const merged = { ...existing, ...piWebConfigRecord(normalized) };
   mkdirSync(dirname(path), { recursive: true });
@@ -227,6 +231,7 @@ function piWebConfigRecord(config: PiWebConfig): Record<string, unknown> {
     ...(config.subsessions !== undefined ? { subsessions: config.subsessions } : {}),
     ...(config.askUser !== undefined ? { askUser: config.askUser } : {}),
     ...(config.codemode !== undefined ? { codemode: config.codemode } : {}),
+    ...(config.durableChildren !== undefined ? { durableChildren: config.durableChildren } : {}),
     ...(config.agent !== undefined ? { agent: config.agent } : {}),
   };
 }
@@ -245,6 +250,7 @@ function parsePiWebConfig(value: Record<string, unknown>, path: string): PiWebCo
     ...(value["subsessions"] !== undefined ? { subsessions: parseSubsessions(value["subsessions"], path) } : {}),
     ...(value["askUser"] !== undefined ? { askUser: parseAskUser(value["askUser"], path) } : {}),
     ...(value["codemode"] !== undefined ? { codemode: parseCodemode(value["codemode"], path) } : {}),
+    ...(value["durableChildren"] !== undefined ? { durableChildren: parseDurableChildren(value["durableChildren"], path) } : {}),
     ...(value["extensionDialogsTimeoutMs"] !== undefined ? { extensionDialogsTimeoutMs: parseExtensionDialogsTimeoutMs(value["extensionDialogsTimeoutMs"], path) } : {}),
     ...(value["agent"] !== undefined ? { agent: parseAgentConfig(value["agent"], path) } : {}),
   };
@@ -333,6 +339,22 @@ export function codemodeEnabled(env: NodeJS.ProcessEnv = process.env, config: Pi
   const fromEnv = env["PI_WEB_CODEMODE"];
   if (fromEnv !== undefined && fromEnv !== "") return fromEnv === "1" || fromEnv.toLowerCase() === "true";
   return config.codemode ?? true;
+}
+
+function parseDurableChildren(value: unknown, path: string): boolean {
+  if (typeof value !== "boolean") throw new Error(`Forgerie config durableChildren must be a boolean: ${path}`);
+  return value;
+}
+
+/**
+ * Whether hosted sessions get the `child_agent` tool for Durable child agents.
+ * Off by default. The env var `PI_WEB_DURABLE_CHILDREN` takes precedence over
+ * the `durableChildren` config key.
+ */
+export function durableChildrenEnabled(env: NodeJS.ProcessEnv = process.env, config: PiWebConfig = {}): boolean {
+  const fromEnv = env["PI_WEB_DURABLE_CHILDREN"];
+  if (fromEnv !== undefined && fromEnv !== "") return fromEnv === "1" || fromEnv.toLowerCase() === "true";
+  return config.durableChildren ?? false;
 }
 
 const OFFLINE_ENV_KEYS = ["PI_WEB_OFFLINE", "PI_OFFLINE"] as const;

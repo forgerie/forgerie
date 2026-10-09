@@ -1,25 +1,38 @@
 /**
- * SPIKE (spike/durable-child). Durable-native child agents inside a Forgerie session.
+ * Durable-native child agents inside a Forgerie session.
  *
  * A child is an ordinary Durable conversation in the parent session's own storage. A background anchor task of the
  * parent conversation owns it, so the parent's Esc does not reach it, and its work survives a restart with the parent's
- * storage. A child asks the user through a write entry in the parent: the parent model gets no turn.
+ * storage. A child asks the user through an entry in the parent transcript: the parent model gets no turn.
  *
- * Pattern from pi-durable test/examples/23-subagent-background.ts. Not production code.
+ * Pattern from pi-durable test/examples/23-subagent-background.ts. Findings: prototypes/durable-child-spike/README.md.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Context } from "@earendil-works/chord";
 import { Type, type AssistantMessage } from "@earendil-works/pi-ai";
 import {
-  AssistantEntry, LiveDoc, configure, defineDoc, defineExtension, defineTask, defineTool,
-  type Conversation, type ConversationId, type EntryId, type Extension, type Harness, type TaskId, type Tx,
+  AssistantEntry, LiveDoc, configure, defineDoc, defineExtension, defineTask, defineTool, section,
+  type Conversation, type ConversationId, type EntryId, type Extension, type Harness, type TaskGraph, type TaskId,
+  type ToolRegistration, type Tx,
 } from "@earendil-works/pi-durable";
+import { CodingTools } from "@earendil-works/pi-durable/tools";
+import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
 
+export const CHILD_TOOL_NAME = "child_agent";
 export const CHILD_QUESTION_KIND = "forgerie.child-question";
 export const CHILD_ANSWER_KIND = "forgerie.child-answer";
+/** The user steered or stopped a child from its view. The parent model sees it, so it does not undo the user. */
+export const CHILD_NOTE_KIND = "forgerie.child-note";
+const CHILD_ENTRY_KINDS = new Set([CHILD_QUESTION_KIND, CHILD_ANSWER_KIND, CHILD_NOTE_KIND]);
+export const isChildEntryKind = (kind: string): boolean => CHILD_ENTRY_KINDS.has(kind);
 
-type ChildRecord = { conversationId: ConversationId; reported: EntryId[] };
+// defineDoc needs JSON-compatible type aliases; interfaces lack the index signature.
+/* eslint-disable @typescript-eslint/consistent-type-definitions */
+type ChildRecord = { conversationId: ConversationId; reported: EntryId[]; agent: string | null; createdAt: number };
 type ChildQuestion = { child: ConversationId; childName: string; question: string; answer: string | null; askedAt: number };
+type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean };
+type ReporterState = { phase: "deliver" } | { phase: "report"; report?: string };
+/* eslint-enable @typescript-eslint/consistent-type-definitions */
 
 const Children = defineDoc<{ agents: Record<string, ChildRecord>; reporters: Record<string, TaskId> }>({
   kind: "forgerie.durable-children", version: 1, scope: "conversation", history: "latest", fork: "initial",
@@ -33,16 +46,18 @@ const Questions = defineDoc<{ items: Record<string, ChildQuestion> }>({
 const textOf = (message: AssistantMessage | undefined): string =>
   (message?.content ?? []).flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
 
+const isAssistant = (message: unknown): message is AssistantMessage =>
+  typeof message === "object" && message !== null && "role" in message && message.role === "assistant";
+
 const Anchor = defineTask<null, { phase: "done" }, null>({
   name: "forgerie.child-anchor", version: 1, initial: () => ({ phase: "done" }),
   phases: { done: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context) },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });
 
-type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean };
-type ReporterState = { phase: "deliver" } | { phase: "report"; report?: string };
+const REPORTER_KIND = "forgerie.child-reporter";
 const Reporter = defineTask<ReporterInput, ReporterState, null>({
-  name: "forgerie.child-reporter", version: 1, initial: () => ({ phase: "deliver" }),
+  name: REPORTER_KIND, version: 1, initial: () => ({ phase: "deliver" }),
   phases: {
     deliver: async (reporter, runtime, context) => {
       const { name, conversationId, message, followUp } = reporter.input;
@@ -57,12 +72,13 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
         const agent = (await tx.doc(Children, runtime.conversationId)).agents[name];
         if (agent === undefined || agent.reported.includes(settled.answer)) return next();
         agent.reported.push(settled.answer);
-        const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0] as AssistantMessage | undefined;
-        return next(`[subagent ${name} answered, no reply needed] ${textOf(answer)}`);
+        const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0];
+        return next(`[subagent ${name} answered, no reply needed] ${textOf(isAssistant(answer) ? answer : undefined)}`);
       }, context);
     },
     report: async (reporter, runtime, context) => {
-      const report = reporter.state.checkpoint.phase === "report" ? reporter.state.checkpoint.report : undefined;
+      const checkpoint: ReporterState = reporter.state.checkpoint;
+      const report = "report" in checkpoint ? checkpoint.report : undefined;
       if (report !== undefined) {
         const main = await runtime.conversation(runtime.conversationId, context);
         await main?.submit({ type: "input", content: report, whenBusy: "followUp", requestId: `child-report:${String(reporter.id)}` }, context);
@@ -73,7 +89,9 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });
 
-async function parentOf(api: { conversationId: ConversationId; commit<T>(change: (tx: Tx) => T | Promise<T>, context: Context): Promise<T> }, context: Context): Promise<ConversationId> {
+interface CommitApi { conversationId: ConversationId; commit<T>(change: (tx: Tx) => T | Promise<T>, context: Context): Promise<T> }
+
+async function parentOf(api: CommitApi, context: Context): Promise<ConversationId> {
   const parent = await api.commit(async (tx) => (await tx.conversation(api.conversationId))?.owner?.conversationId, context);
   if (parent === undefined) throw new Error("This conversation has no parent to ask");
   return parent;
@@ -82,7 +100,7 @@ async function parentOf(api: { conversationId: ConversationId; commit<T>(change:
 /** A child's only way to reach the human. Named apart from Forgerie's ask_user so the parent's tool is not replaced. */
 const askHumanTool = defineTool({
   name: "ask_human",
-  description: "Ask the human user a question and wait for the answer. Use only when you are blocked.",
+  description: "Ask the human user one question and wait for the answer. Use it only when you are blocked and cannot decide yourself.",
   parameters: Type.Object({ question: Type.String() }),
   // A rerun finds the same question by the call's task id, so it never asks twice.
   replay: "safe",
@@ -90,7 +108,6 @@ const askHumanTool = defineTool({
     const parentId = await parentOf(api, context);
     const questionId = `q:${String(api.taskId)}`;
     // One commit records the question and appends its transcript entry, so a rerun after a crash finds both or neither.
-    // ConversationHandle.submit only types inputs, so the entry is appended directly; it has no model part.
     await api.commit(async (tx) => {
       const doc = await tx.doc(Questions, parentId);
       if (doc.items[questionId] !== undefined) return;
@@ -102,14 +119,22 @@ const askHumanTool = defineTool({
     for (;;) {
       const answer = (await api.snapshot(Questions, parentId, context))?.items[questionId]?.answer;
       if (typeof answer === "string") return { content: [{ type: "text" as const, text: `The user answered: ${answer}` }] };
-      await sleep(150);
+      await sleep(250);
     }
   },
 });
 
-export interface DurableChildAgentsOptions {
-  /** Tools every child gets in addition to ask_human. The spike passes a test tool; real children need a loadout. */
-  childTools?: readonly ReturnType<typeof defineTool>[];
+/** Agent-file tool names mapped to Durable's coding tools. Search tools need a shell here. */
+const CODING_TOOL_FOR: Record<string, string> = { read: "read", write: "write", edit: "edit", bash: "bash", grep: "bash", find: "bash", ls: "bash" };
+const codingTools: readonly ToolRegistration[] = CodingTools.tools ?? [];
+
+function childToolsFor(profile: ChildAgentProfile | undefined, extra: readonly ToolRegistration[]): ToolRegistration[] {
+  const wanted = profile?.tools === undefined ? undefined : new Set(profile.tools.flatMap((tool) => {
+    const mapped = CODING_TOOL_FOR[tool];
+    return mapped === undefined ? [tool] : [mapped];
+  }));
+  const coding = codingTools.filter((tool) => wanted === undefined || wanted.has(tool.name));
+  return [askHumanTool, ...coding, ...extra.filter((tool) => wanted === undefined || wanted.has(tool.name))];
 }
 
 export interface DurableChildExtensions {
@@ -119,15 +144,46 @@ export interface DurableChildExtensions {
   childOnly: readonly Extension[];
 }
 
-export function durableChildExtensions(options: DurableChildAgentsOptions = {}): DurableChildExtensions {
-  const ChildTools = defineExtension({ name: "forgerie.child-tools", tools: [askHumanTool, ...(options.childTools ?? [])] });
-  const subagentTool = defineTool({
-    name: "subagent",
-    description: "Start or message a background subagent. Actions: spawn (name, message) and send (name, message). Its answer is reported back to you when it arrives. The user can open, steer, and stop it.",
-    parameters: Type.Object({ action: Type.Union([Type.Literal("spawn"), Type.Literal("send")]), name: Type.String(), message: Type.String() }),
+export interface DurableChildExtensionOptions {
+  /** Agent files a spawn may name. Without one, every child is a general helper. */
+  catalog?: ChildAgentCatalog;
+  /** Names and descriptions shown in the tool description; resolved when the session opens. */
+  agents?: readonly Pick<ChildAgentProfile, "name" | "description">[];
+  /** The project's AGENTS.md text, for children whose agent file inherits project context. */
+  projectContext?: string;
+  /** Extra tools every child may use. Tests pass a deterministic one. */
+  extraTools?: readonly ToolRegistration[];
+}
+
+export function durableChildExtensions(options: DurableChildExtensionOptions = {}): DurableChildExtensions {
+  const extraTools = options.extraTools ?? [];
+  const ChildTools = defineExtension({
+    name: "forgerie.child-tools",
+    tools: [askHumanTool, ...codingTools, ...extraTools],
+    sections: [section("environment", (input) => input.env === undefined ? undefined : `Working directory: ${input.env.cwd}`)],
+  });
+  const agentList = (options.agents ?? []).map((agent) => `- ${agent.name}: ${agent.description}`).join("\n");
+  const childTool = defineTool({
+    name: CHILD_TOOL_NAME,
+    description: [
+      "Run a background child agent in this session. Actions: spawn (name, message, optional agent) and send (name, message).",
+      "A child works on its own; its answer is reported back to you as a new message when it arrives. Do not wait or poll.",
+      "The user can open a child, steer it, stop it, and answer its questions. Several spawns in one reply run in parallel.",
+      ...(agentList === "" ? [] : [`Agents (pass one as \`agent\`; omit for a general helper):\n${agentList}`]),
+    ].join("\n"),
+    parameters: Type.Object({
+      action: Type.Union([Type.Literal("spawn"), Type.Literal("send")]),
+      name: Type.String({ description: "Short unique name for this child, such as ui or api." }),
+      message: Type.String({ description: "The full task. The child does not see this conversation." }),
+      agent: Type.Optional(Type.String({ description: "Agent file name for spawn." })),
+    }),
     replay: "unsafe",
     execute: async (args, api, context) => {
       const { action, name, message } = args;
+      const profile = action === "spawn" && args.agent !== undefined ? await options.catalog?.find(args.agent) : undefined;
+      if (action === "spawn" && args.agent !== undefined && profile === undefined) {
+        return { content: [{ type: "text" as const, text: `No agent named ${args.agent}.${agentList === "" ? "" : ` Choose one of:\n${agentList}`}` }], isError: true };
+      }
       const result = await api.commit(async (tx) => {
         const state = await tx.doc(Children, api.conversationId);
         const background = { ownership: { kind: "conversation" }, background: true } as const;
@@ -135,68 +191,105 @@ export function durableChildExtensions(options: DurableChildAgentsOptions = {}):
           if (Object.hasOwn(state.agents, name)) return `${name} already exists; use send.`;
           const anchor = await tx.createTask(Anchor, null, background);
           const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
-          await configure(tx, child.id, { extensions: [ChildTools], instructions: `You are the subagent "${name}". Work on the requests you receive.` });
-          state.agents[name] = { conversationId: child.id, reported: [] };
-        } else if (!Object.hasOwn(state.agents, name)) return `No subagent named ${name}.`;
+          const project = profile?.inheritProjectContext !== false && options.projectContext !== undefined && options.projectContext !== ""
+            ? `\n\n<project_context>\n${options.projectContext}\n</project_context>` : "";
+          await configure(tx, child.id, {
+            extensions: [ChildTools],
+            tools: childToolsFor(profile, extraTools),
+            ...(profile?.model === undefined ? {} : { model: profile.model }),
+            ...(profile?.thinkingLevel === undefined ? {} : { thinkingLevel: profile.thinkingLevel }),
+            instructions: `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked.${project}`,
+          });
+          state.agents[name] = { conversationId: child.id, reported: [], agent: profile?.name ?? null, createdAt: Date.now() };
+        } else if (!Object.hasOwn(state.agents, name)) return `No child named ${name}.`;
         const agent = state.agents[name];
-        if (agent === undefined) return `No subagent named ${name}.`;
+        if (agent === undefined) return `No child named ${name}.`;
         state.reporters[String(api.taskId)] = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false }, background);
-        return action === "send" ? `Sent to ${name}.` : `Started ${name}.`;
+        return action === "send" ? `Sent to ${name}.` : `Started ${name}${profile === undefined ? "" : ` (${profile.name})`}.`;
       }, context);
       const current = (await api.snapshot(Children, api.conversationId, context))?.agents[name];
-      return { content: [{ type: "text" as const, text: result }], ...(current === undefined ? {} : { details: { name, conversationId: current.conversationId } }) };
+      return { content: [{ type: "text" as const, text: result }], ...(current === undefined ? {} : { details: { name, conversationId: Number(current.conversationId) } }) };
     },
   });
   return {
-    parent: [defineExtension({ name: "forgerie.subagents", tasks: [Anchor, Reporter], tools: [subagentTool] })],
+    parent: [defineExtension({ name: "forgerie.child-agents", tasks: [Anchor, Reporter], tools: [childTool] })],
     childOnly: [ChildTools],
   };
 }
 
+/** Whether any child work is still live: a child's own task, or a reporter that has not delivered yet. */
+export function childWorkIsLive(graph: TaskGraph, parent: ConversationId): boolean {
+  return Object.values(graph.tasks).some((task) => task.kind === REPORTER_KIND || task.conversationId !== parent);
+}
+
 // ─── Host operations: what Forgerie's server and UI call. No model turn in any of them. ───
 
-export interface DurableChildSummary { name: string; conversationId: number; busy: boolean; pendingQuestions: number }
+export interface DurableChildSummary {
+  name: string;
+  conversationId: number;
+  agent: string | null;
+  busy: boolean;
+  createdAt: number;
+  /** Open questions, oldest first. */
+  questions: { questionId: string; question: string; askedAt: number }[];
+}
 
 export async function listChildren(harness: Harness, parent: ConversationId, context: Context): Promise<DurableChildSummary[]> {
   const agents = (await harness.snapshot(Children, parent, context))?.agents ?? {};
-  const questions = Object.values((await harness.snapshot(Questions, parent, context))?.items ?? {});
-  return Promise.all(Object.entries(agents).map(async ([name, agent]) => ({
-    name, conversationId: Number(agent.conversationId),
+  const questions = Object.entries((await harness.snapshot(Questions, parent, context))?.items ?? {});
+  const children = await Promise.all(Object.entries(agents).map(async ([name, agent]) => ({
+    name, conversationId: Number(agent.conversationId), agent: agent.agent, createdAt: agent.createdAt,
     busy: (await harness.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined,
-    pendingQuestions: questions.filter((question) => question.child === agent.conversationId && question.answer === null).length,
+    questions: questions.filter(([, question]) => question.child === agent.conversationId && question.answer === null)
+      .map(([questionId, question]) => ({ questionId, question: question.question, askedAt: question.askedAt }))
+      .sort((a, b) => a.askedAt - b.askedAt),
   })));
+  return children.sort((a, b) => a.createdAt - b.createdAt);
 }
 
 async function ownedChild(harness: Harness, parent: ConversationId, conversationId: number, context: Context) {
   const agents = (await harness.snapshot(Children, parent, context))?.agents ?? {};
-  const agent = Object.values(agents).find((candidate) => Number(candidate.conversationId) === conversationId);
-  if (agent === undefined) throw new Error(`Conversation ${String(conversationId)} is not a child of this session`);
-  const child = await harness.conversation(agent.conversationId, context);
+  const found = Object.entries(agents).find(([, candidate]) => Number(candidate.conversationId) === conversationId);
+  if (found === undefined) throw new Error(`Conversation ${String(conversationId)} is not a child of this session`);
+  const child = await harness.conversation(found[1].conversationId, context);
   if (child === undefined) throw new Error(`Child conversation ${String(conversationId)} is missing`);
-  return child;
+  return { name: found[0], child };
 }
 
-/** The child transcript as model messages, for a child view. */
+/** The child transcript as model messages, plus its in-flight answer, for a child view. */
 export async function childMessages(harness: Harness, parent: ConversationId, conversationId: number, context: Context) {
-  const child = await ownedChild(harness, parent, conversationId, context);
+  const { child } = await ownedChild(harness, parent, conversationId, context);
   const view = await child.context(context);
-  return view.entries.flatMap((entry) => entry.model ?? []).filter((message) => message.role !== "system");
+  const live = await harness.snapshot(LiveDoc, child.id, context);
+  const partial = live?.generation?.message;
+  return {
+    messages: view.entries.flatMap((entry) => entry.model ?? []).filter((message) => message.role !== "system"),
+    busy: live?.run !== undefined,
+    ...(partial === undefined ? {} : { partial }),
+  };
 }
 
-/** The user typing into an opened child: a steer while it works, a follow-up input when it is idle. */
-export async function messageChild(harness: Harness, parent: ConversationId, conversationId: number, text: string, context: Context): Promise<void> {
-  const child = await ownedChild(harness, parent, conversationId, context);
+async function noteInParent(parent: Conversation, text: string, data: Record<string, string | number>, context: Context): Promise<void> {
+  await parent.submit({ type: "write", entry: { kind: CHILD_NOTE_KIND, model: [{ role: "user", content: [{ type: "text", text }], timestamp: Date.now() }], data: { ...data, text } } }, context);
+}
+
+/** The user typing into an opened child: a steer while it works, a new input when it is idle. */
+export async function messageChild(harness: Harness, parent: Conversation, conversationId: number, text: string, context: Context): Promise<void> {
+  const { name, child } = await ownedChild(harness, parent.id, conversationId, context);
   await child.submit({ type: "input", content: text, whenBusy: "steer" }, context);
+  await noteInParent(parent, `[the user told child ${name} directly] ${text}`, { child: conversationId, childName: name, action: "message" }, context);
 }
 
-export async function stopChild(harness: Harness, parent: ConversationId, conversationId: number, context: Context): Promise<void> {
-  await (await ownedChild(harness, parent, conversationId, context)).abort(context);
+export async function stopChild(harness: Harness, parent: Conversation, conversationId: number, context: Context): Promise<void> {
+  const { name, child } = await ownedChild(harness, parent.id, conversationId, context);
+  await child.abort(context);
+  await noteInParent(parent, `[the user stopped child ${name}]`, { child: conversationId, childName: name, action: "stop" }, context);
 }
 
-export async function answerChildQuestion(harness: Harness, parent: Conversation, questionId: string, answer: string, context: Context): Promise<void> {
+export async function answerChildQuestion(parent: Conversation, questionId: string, answer: string, context: Context): Promise<void> {
   const accepted = await parent.commit(async (tx) => {
     const item = (await tx.doc(Questions, parent.id)).items[questionId];
-    if (item === undefined || item.answer !== null) return false;
+    if (item?.answer !== null) return false;
     item.answer = answer;
     return true;
   }, context);
@@ -204,9 +297,11 @@ export async function answerChildQuestion(harness: Harness, parent: Conversation
   await parent.submit({ type: "write", requestId: `answer:${questionId}`, entry: { kind: CHILD_ANSWER_KIND, data: { questionId, answer } } }, context);
 }
 
-/** One line for the transcript card of a child question or the user's answer. */
+/** One line for the transcript card of a child entry. */
 export function childEntryText(kind: string, data: unknown): string {
-  const record = typeof data === "object" && data !== null ? data as Record<string, unknown> : {};
-  const field = (key: string) => (typeof record[key] === "string" ? record[key] : "");
-  return kind === CHILD_QUESTION_KIND ? `${field("childName") || "subagent"} asks: ${field("question")}` : `Answered: ${field("answer")}`;
+  const record: Record<string, unknown> = typeof data === "object" && data !== null ? Object.fromEntries(Object.entries(data)) : {};
+  const field = (key: string): string => { const value = record[key]; return typeof value === "string" ? value : ""; };
+  if (kind === CHILD_QUESTION_KIND) return `${field("childName") || "child"} asks: ${field("question")}`;
+  if (kind === CHILD_NOTE_KIND) return field("action") === "stop" ? `You stopped ${field("childName")}.` : `You told ${field("childName")}: ${field("text").replace(/^\[[^\]]*\]\s*/, "")}`;
+  return `Answered: ${field("answer")}`;
 }

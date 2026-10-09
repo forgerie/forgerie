@@ -25,7 +25,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientNewSessionModelSelection, ClientSession, ClientSessionCleanupExecuteResponse, ClientSessionCleanupPreviewResponse, ClientSessionModel, ClientSessionStatus, ClientSessionTreeForkRequest, ClientSessionTreeForkResult, ClientSessionTreeNavigateRequest, ClientSessionTreeNavigateResult, ClientThinkingLevel, SessionStreamSnapshot, SessionUiEvent } from "../types.js";
 import { DurableAgentSession } from "./durableAgentSession.js";
-import type { DurableChildExtensions } from "./durableChildAgents.js";
+import type { DurableChildHost, DurableChildSessionRef } from "./durableChildHost.js";
 import { DurableSessionRuntime, type DurableRuntimeFactory, type DurableRuntimeResult } from "./durableSessionRuntime.js";
 import { projectBrowserMessage } from "../browserMessageProjection.js";
 import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
@@ -840,7 +840,7 @@ function createDefaultRuntimeFactory(
   handoff?: HandoffSessionFn,
   github?: GitHubToolDeps,
   projectTools?: ProjectToolDeps,
-  durableChildAgents?: DurableChildExtensions,
+  durableChildAgents?: DurableChildHost,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels }) => {
     const processBridgeSlot = createProcessBridgeSlot();
@@ -933,8 +933,8 @@ export interface PiSessionServiceDependencies {
   tabsStore?: SessionTabsRepository;
   createRuntime?: PiWebCreateAgentSessionRuntimeFactory;
   createAgentRuntime?: CreateAgentRuntime;
-  /** SPIKE: Durable-native child agents for every session the default factory opens. */
-  durableChildAgents?: DurableChildExtensions;
+  /** Durable-native child agents (the child_agent tool) for every session the default factory opens. */
+  durableChildAgents?: DurableChildHost;
   modelRuntime: ModelRuntime;
   heartbeatIntervalMs?: number;
   workspaceActivity?: Pick<WorkspaceActivityService, "applySessionStatus" | "applySessionActivity" | "removeSession" | "reconcileSessionActivity">;
@@ -2768,7 +2768,7 @@ export class PiSessionService implements SessionRouteService {
 
   publishPullWatchStatus(id: string): void { this.publishStatusForSessionId(id); }
 
-  /** SPIKE: the server half of "open a child". Each call reaches the child through the parent's Durable storage. */
+  /** The server half of "open a child". Each call reaches the child through the parent's Durable storage. */
   async durableChildren(ref: PiSessionRef) { return (await this.durableSession(ref)).durableChildren(); }
   async durableChildMessages(ref: PiSessionRef, conversationId: number) { return (await this.durableSession(ref)).durableChildMessages(conversationId); }
   async messageDurableChild(ref: PiSessionRef, conversationId: number, text: string) { await (await this.durableSession(ref)).messageDurableChild(conversationId, text); }
@@ -2776,8 +2776,26 @@ export class PiSessionService implements SessionRouteService {
   async answerDurableChildQuestion(ref: PiSessionRef, questionId: string, answer: string) { await (await this.durableSession(ref)).answerDurableChildQuestion(questionId, answer); }
   private async durableSession(ref: PiSessionRef): Promise<DurableAgentSession> {
     const session = await this.getOrOpen(ref);
-    if (!(session instanceof DurableAgentSession)) throw new Error("Durable children need a Durable session");
+    if (!(session instanceof DurableAgentSession) || !session.hostsDurableChildren) throw new Error("This session does not host child agents");
     return session;
+  }
+
+  /**
+   * Reopen sessions that had live child work when the daemon stopped. A child runs only while its parent session is
+   * open, so without this a restart pauses every child until someone opens its parent.
+   */
+  async resumeDurableChildren(refs: readonly DurableChildSessionRef[]): Promise<{ resumed: string[]; failed: { id: string; error: string }[] }> {
+    const resumed: string[] = [];
+    const failed: { id: string; error: string }[] = [];
+    for (const ref of refs) {
+      try {
+        await this.getActive(ref);
+        resumed.push(ref.id);
+      } catch (error) {
+        failed.push({ id: ref.id, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return { resumed, failed };
   }
 
   async messages(ref: PiSessionRef, page?: { before?: number; limit?: number }): Promise<ClientMessagePage> {

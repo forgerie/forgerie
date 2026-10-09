@@ -8,7 +8,9 @@ import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
-import { CHILD_ANSWER_KIND, CHILD_QUESTION_KIND, answerChildQuestion, childEntryText, childMessages, listChildren, messageChild, stopChild, type DurableChildExtensions } from "./durableChildAgents.js";
+import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
+import { answerChildQuestion, childEntryText, childMessages, childWorkIsLive, isChildEntryKind, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
+import type { DurableChildHost } from "./durableChildHost.js";
 
 export interface DurableAgentSessionOptions {
   services: AgentSessionServices;
@@ -18,8 +20,8 @@ export interface DurableAgentSessionOptions {
   initialThinkingLevel?: PiAgentSession["thinkingLevel"];
   scopedModels?: PiAgentSession["scopedModels"];
   sessionStartEvent?: SessionStartEvent;
-  /** SPIKE: Durable-native child agents. */
-  childAgents?: DurableChildExtensions;
+  /** Durable-native child agents. Omitted: the session has no child_agent tool. */
+  childAgents?: DurableChildHost;
 }
 
 /** SDK resources and extension hooks around a Durable execution engine. No AgentSession is constructed. */
@@ -50,6 +52,8 @@ export class DurableAgentSession implements PiAgentSession {
   private basePrompt: BuildSystemPromptOptions;
   private closed = false;
   private bound = false;
+  private childWatch: { stop(): Promise<unknown> } | undefined;
+  private childrenLive: boolean | undefined;
 
   private constructor(private readonly options: DurableAgentSessionOptions) {
     const { services, sessionManager } = options;
@@ -128,24 +132,47 @@ export class DurableAgentSession implements PiAgentSession {
       settings: { contextRetentionMs: 0, steeringMode: this.settingsManager.getSteeringMode(), followUpMode: this.settingsManager.getFollowUpMode(),
         compaction: { enabled: this.settingsManager.getCompactionEnabled(), reserveTokens: this.settingsManager.getCompactionReserveTokens(this.model), keepRecentTokens: this.settingsManager.getCompactionKeepRecentTokens(this.model) } },
       onReport: (error) => { this.extensionRunner.emitError({ extensionPath: "<durable>", event: "runtime", error: String(error) }); },
+      // Only Durable's own coding tools use the environment. Child agents run them; the parent uses the SDK tools.
+      ...(this.options.childAgents === undefined ? {} : { env: ({ cwd }: { cwd?: string }) => {
+        const shellPath = this.settingsManager.getShellPath();
+        return new NodeExecutionEnv({ cwd: cwd ?? this.options.services.cwd, ...(shellPath === undefined ? {} : { shellPath }) });
+      } }),
     });
-    const childAgents = this.options.childAgents;
-    if (childAgents !== undefined) {
-      for (const extension of [...childAgents.parent, ...childAgents.childOnly]) this.registry.install(extension);
-      // Children select these explicitly. The parent must not, or ask_human and test tools join its loadout.
-      await this.journal.conversation.configure({ extensions: { remove: [...childAgents.childOnly] } }, context);
-    }
+    await this.startChildAgents();
     this.stream = await watchEvents(this.journal.harness, this.journal.conversation.id, context);
     await this.applyEvent(this.stream.snapshot);
     this.stream.start(async (events) => { for (const event of events) await this.applyEvent(event); });
   }
 
-  // ─── SPIKE: host operations on Durable children. None of them starts a parent turn. ───
+  // ─── Host operations on Durable children. None of them starts a parent turn. ───
+  get hostsDurableChildren(): boolean { return this.options.childAgents !== undefined; }
   durableChildren() { return listChildren(this.journal.harness, this.journal.conversation.id, context); }
   durableChildMessages(conversationId: number) { return childMessages(this.journal.harness, this.journal.conversation.id, conversationId, context); }
-  messageDurableChild(conversationId: number, text: string) { return messageChild(this.journal.harness, this.journal.conversation.id, conversationId, text, context); }
-  stopDurableChild(conversationId: number) { return stopChild(this.journal.harness, this.journal.conversation.id, conversationId, context); }
-  answerDurableChildQuestion(questionId: string, answer: string) { return answerChildQuestion(this.journal.harness, this.journal.conversation, questionId, answer, context); }
+  messageDurableChild(conversationId: number, text: string) { return messageChild(this.journal.harness, this.journal.conversation, conversationId, text, context); }
+  stopDurableChild(conversationId: number) { return stopChild(this.journal.harness, this.journal.conversation, conversationId, context); }
+  answerDurableChildQuestion(questionId: string, answer: string) { return answerChildQuestion(this.journal.conversation, questionId, answer, context); }
+
+  private async startChildAgents(): Promise<void> {
+    const host = this.options.childAgents;
+    if (host === undefined) return;
+    const projectContext = this.resourceLoader.getAgentsFiles().agentsFiles.map((file) => `## ${file.path}\n\n${file.content}`).join("\n\n");
+    const extensions = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext });
+    for (const extension of [...extensions.parent, ...extensions.childOnly]) this.registry.install(extension);
+    // Children select these explicitly. The parent must not, or ask_human and the coding tools join its loadout.
+    await this.journal.conversation.configure({ extensions: { remove: [...extensions.childOnly] } }, context);
+    const watch = await this.journal.harness.watchTaskGraph(context);
+    this.childWatch = watch;
+    const ref = { id: this.sessionId, cwd: this.options.services.cwd };
+    const update = (live: boolean) => {
+      // Every graph change can move a child between working and idle; the browser refetches the list.
+      this.emit({ type: "durable_children_changed" });
+      if (live === this.childrenLive) return;
+      this.childrenLive = live;
+      host.liveChanged(ref, live);
+    };
+    update(childWorkIsLive(watch.value, this.journal.conversation.id));
+    watch.start((graph) => { update(childWorkIsLive(graph, this.journal.conversation.id)); return Promise.resolve(); });
+  }
 
   subscribe(listener: (event: unknown) => void): () => void {
     this.listeners.add(listener);
@@ -402,6 +429,7 @@ export class DurableAgentSession implements PiAgentSession {
     if (this.closed) return;
     this.closed = true;
     this.bashController?.abort();
+    await this.childWatch?.stop();
     await this.journal.close();
     await this.stream?.stop();
     await this.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
@@ -448,8 +476,8 @@ export class DurableAgentSession implements PiAgentSession {
       case "compaction_end": this.compacting = false; this.emit({ type: "compaction_end", reason: event.reason, result: undefined, aborted: false, willRetry: false }); break;
       case "task_failed": this.report(event.message); break;
       case "entry_appended":
-        // SPIKE: a child's question or the user's answer is a write entry. Show it live as a display-only message.
-        if (event.entry.kind === CHILD_QUESTION_KIND || event.entry.kind === CHILD_ANSWER_KIND) {
+        // A child's question, the user's answer, or a steer is a write entry. Show it live as a display-only message.
+        if (isChildEntryKind(event.entry.kind)) {
           this.emit({ type: "message_end", message: { role: "custom", customType: event.entry.kind, content: childEntryText(event.entry.kind, event.entry.data), display: true, details: event.entry.data, timestamp: Date.now() } });
         }
         this.emit(event);

@@ -33,6 +33,9 @@ import { registerPullRequestRoutes } from "./github/pullRequestRoutes.js";
 import { defaultSessionNameIndexFilePath } from "./sessions/sessionNameIndex.js";
 import { registerSessionRoutes } from "./sessions/sessionRoutes.js";
 import { registerProcessRoutes } from "./sessions/processRoutes.js";
+import { registerDurableChildRoutes } from "./sessions/durableChildRoutes.js";
+import { LiveChildSessionIndex, createDurableChildHost } from "./sessions/durableChildHost.js";
+import { bundledSubagentsPackagePath } from "./sessions/bundledSubagents.js";
 import { SessionNotificationStore } from "./sessions/sessionNotificationStore.js";
 import { initializeSessionArchive } from "./sessions/sessionArchiveInitialization.js";
 import { SessionArchiveStore, defaultSessionArchiveFilePath } from "./sessions/sessionArchiveStore.js";
@@ -179,6 +182,7 @@ async function createSessionDaemonRuntime() {
   const groups = new ProjectGroups(join(piWebDataDir(daemonEnvironment), "project-groups.json"), projectWorkspaceDeps.projects);
   const relatedWork = new ProjectWorkspaces({ ...projectWorkspaceDeps, groups, worktrees: sessionWorktrees, agentDir: activeAgentProfile.dir,
     writable: async (ref) => { await sessionWorktrees.store.assertWritable(ref); return (await sessions.inspectPullSession(ref)).available; } });
+  const liveChildren = config.durableChildren ? new LiveChildSessionIndex(join(piWebDataDir(daemonEnvironment), "durable-children-live.json")) : undefined;
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
     modelRuntime: auth.runtime,
     agentDir: activeAgentProfile.dir,
@@ -194,6 +198,12 @@ async function createSessionDaemonRuntime() {
     subsessionsEnabled: config.subsessions,
     askUserEnabled: config.askUser,
     codemodeEnabled: config.codemode,
+    ...(liveChildren === undefined ? {} : { durableChildAgents: createDurableChildHost({
+      // pi-subagents' built-in agents (worker, reviewer, scout) run as Durable children too.
+      builtinAgentsDir: join(bundledSubagentsPackagePath(), "agents"),
+      index: liveChildren,
+      onIndexError: (error) => { app.log.warn({ err: error }, "durable child index write failed"); },
+    }) }),
     github: {
       target: (ref, id) => relatedWork.toolCwd(ref, id),
       read: (cwd, request) => githubAgent.read(cwd, request),
@@ -246,7 +256,7 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
-  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects };
+  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren };
 }
 
 function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects }: SessionDaemonRuntime): void {
@@ -259,6 +269,7 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessio
   registerProjectGroupRoutes(app, groups, projects, relatedWork);
   registerSessionRoutes(app, sessions, eventHub, "", userSessions);
   registerProcessRoutes(app, sessions);
+  registerDurableChildRoutes(app, sessions);
   registerTerminalRoutes(app, terminals);
   registerPromptResourceRoutes(app, promptResources);
   registerPromptLibraryRoutes(app, promptLibrary);
@@ -279,8 +290,21 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessio
   app.get("/runtime", () => runtimeComponent);
 }
 
-async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, catalogRefresher, pulls }: SessionDaemonRuntime): Promise<void> {
+async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, catalogRefresher, pulls, liveChildren }: SessionDaemonRuntime): Promise<void> {
   pulls.start();
+  // Children run only while their parent session is open. Reopen the sessions that had live children at shutdown.
+  if (liveChildren !== undefined) {
+    void liveChildren.list().then((refs) => sessions.resumeDurableChildren(refs)).then(async (report) => {
+      for (const failure of report.failed) {
+        app.log.warn(failure, "could not resume a session with durable children");
+        if (/session not found/i.test(failure.error)) {
+          const ref = (await liveChildren.list()).find((candidate) => candidate.id === failure.id);
+          if (ref !== undefined) await liveChildren.set(ref, false);
+        }
+      }
+      if (report.resumed.length > 0) app.log.info({ resumed: report.resumed }, "resumed sessions with durable children");
+    }, (error: unknown) => { app.log.warn({ err: error }, "durable child resume failed"); });
+  }
   let shuttingDown = false;
   async function shutdown(signal: NodeJS.Signals): Promise<void> {
     if (shuttingDown) return;

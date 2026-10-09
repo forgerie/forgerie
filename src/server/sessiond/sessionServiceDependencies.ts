@@ -34,6 +34,8 @@ export interface SessionServiceDependencyInput {
   askUserEnabled: boolean;
   /** Whether hosted sessions start with Pi's `codemode` tool active. */
   codemodeEnabled: boolean;
+  /** Durable child agents; omitted when the operator has not enabled them. */
+  durableChildAgents?: NonNullable<PiSessionServiceDependencies["durableChildAgents"]>;
   /** GitHub work on each session's own repo, as Forgerie's GitHub App. */
   github: NonNullable<PiSessionServiceDependencies["github"]>;
   pullRequestWatches?: PiSessionServiceDependencies["pullRequestWatches"];
@@ -69,6 +71,7 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
     subsessionsEnabled: input.spawnTargets !== undefined && input.subsessionsEnabled,
     askUserEnabled: input.askUserEnabled,
     codemodeEnabled: input.codemodeEnabled,
+    ...(input.durableChildAgents === undefined ? {} : { durableChildAgents: input.durableChildAgents }),
     github: input.github,
     ...(input.pullRequestWatches === undefined ? {} : { pullRequestWatches: input.pullRequestWatches }),
     extensionDialogsTimeoutMs: input.extensionDialogsTimeoutMs,

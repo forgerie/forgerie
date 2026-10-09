@@ -105,6 +105,12 @@ export interface PiWebConfigValues {
    */
   codemode?: boolean;
   /**
+   * When true, hosted sessions get the `child_agent` tool: background child
+   * agents that run inside the session's own Durable storage, which the user
+   * can open, steer, stop, and answer. Off by default while it is new.
+   */
+  durableChildren?: boolean;
+  /**
    * How long an extension dialog may wait for an answer before the daemon
    * auto-cancels it, in milliseconds. Applies only when the extension set no
    * `timeout` of its own (the sooner of the two wins); `0` waits forever.

@@ -1,0 +1,86 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import type { ToolRegistration } from "@earendil-works/pi-durable";
+import { durableChildExtensions, type DurableChildExtensions } from "./durableChildAgents.js";
+import { ChildAgentCatalog } from "./durableChildProfiles.js";
+
+export interface DurableChildSessionRef { id: string; cwd: string }
+
+/** What a Durable session needs from the daemon to host child agents. */
+export interface DurableChildHost {
+  extensions(input: { cwd: string; agentDir: string; projectContext: string }): Promise<DurableChildExtensions>;
+  /** Called when a session gains or loses live child work, so a restarted daemon can resume it. */
+  liveChanged(ref: DurableChildSessionRef, live: boolean): void;
+}
+
+/**
+ * Sessions with live child work. A child runs only while its parent session is open, and sessiond opens sessions on
+ * demand. After a restart, sessiond reopens every session listed here.
+ */
+export class LiveChildSessionIndex {
+  private refs = new Map<string, DurableChildSessionRef>();
+  private loaded: Promise<void> | undefined;
+  private writing: Promise<void> = Promise.resolve();
+
+  constructor(private readonly path: string) {}
+
+  async list(): Promise<DurableChildSessionRef[]> {
+    await this.load();
+    return [...this.refs.values()];
+  }
+
+  set(ref: DurableChildSessionRef, live: boolean): Promise<void> {
+    this.writing = this.writing.then(async () => {
+      await this.load();
+      const had = this.refs.has(ref.id);
+      if (live === had) return;
+      if (live) this.refs.set(ref.id, { id: ref.id, cwd: ref.cwd });
+      else this.refs.delete(ref.id);
+      await mkdir(dirname(this.path), { recursive: true });
+      const temp = `${this.path}.${String(process.pid)}.tmp`;
+      await writeFile(temp, `${JSON.stringify([...this.refs.values()], null, 2)}\n`, "utf8");
+      await rename(temp, this.path);
+    });
+    return this.writing;
+  }
+
+  private load(): Promise<void> {
+    this.loaded ??= readFile(this.path, "utf8").then((text) => {
+      const parsed: unknown = JSON.parse(text);
+      if (!Array.isArray(parsed)) return;
+      for (const item of parsed.values()) {
+        const ref = sessionRef(item);
+        if (ref !== undefined) this.refs.set(ref.id, ref);
+      }
+    }, () => undefined);
+    return this.loaded;
+  }
+}
+
+function sessionRef(value: unknown): DurableChildSessionRef | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const id: unknown = Reflect.get(value, "id");
+  const cwd: unknown = Reflect.get(value, "cwd");
+  return typeof id === "string" && typeof cwd === "string" ? { id, cwd } : undefined;
+}
+
+export interface DurableChildHostOptions {
+  /** Built-in agent files, after project and profile files. */
+  builtinAgentsDir?: string;
+  index?: LiveChildSessionIndex;
+  extraTools?: readonly ToolRegistration[];
+  onIndexError?: (error: unknown) => void;
+}
+
+export function createDurableChildHost(options: DurableChildHostOptions = {}): DurableChildHost {
+  return {
+    async extensions({ cwd, agentDir, projectContext }) {
+      const catalog = ChildAgentCatalog.forSession(cwd, agentDir, options.builtinAgentsDir);
+      const agents = await catalog.list();
+      return durableChildExtensions({ catalog, agents, projectContext, ...(options.extraTools === undefined ? {} : { extraTools: options.extraTools }) });
+    },
+    liveChanged(ref, live) {
+      void options.index?.set(ref, live).catch((error: unknown) => { options.onIndexError?.(error); });
+    },
+  };
+}

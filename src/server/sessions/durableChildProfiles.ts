@@ -1,0 +1,86 @@
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+/** What a Durable child runs with, read from one agent file. */
+export interface ChildAgentProfile {
+  name: string;
+  description: string;
+  model?: { provider: string; modelId: string };
+  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  /** Tool names from the file; undefined offers every child tool. */
+  tools?: readonly string[];
+  /** The file body. */
+  prompt: string;
+  /** Whether the child also gets the project's AGENTS.md files. Default true. */
+  inheritProjectContext: boolean;
+}
+
+const THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+type Thinking = NonNullable<ChildAgentProfile["thinkingLevel"]>;
+const isThinking = (value: string): value is Thinking => THINKING.has(value);
+
+/**
+ * Agent files in the format pi-subagents uses, so one file serves both runtimes. Project files win over user files,
+ * and user files win over built-in ones, as in pi-subagents. Only flat frontmatter values are read.
+ */
+export class ChildAgentCatalog {
+  constructor(private readonly dirs: readonly string[]) {}
+
+  /** Project `.pi/agents`, then the profile's `agents`, then any built-in folder. */
+  static forSession(cwd: string, agentDir: string, builtinDir?: string): ChildAgentCatalog {
+    return new ChildAgentCatalog([join(cwd, ".pi", "agents"), join(agentDir, "agents"), ...(builtinDir === undefined ? [] : [builtinDir])]);
+  }
+
+  async list(): Promise<ChildAgentProfile[]> {
+    const byName = new Map<string, ChildAgentProfile>();
+    for (const dir of this.dirs) {
+      for (const file of await markdownFiles(dir)) {
+        const profile = parseChildAgentFile(await readFile(file, "utf8"), file);
+        if (profile !== undefined && !byName.has(profile.name)) byName.set(profile.name, profile);
+      }
+    }
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async find(name: string): Promise<ChildAgentProfile | undefined> {
+    return (await this.list()).find((profile) => profile.name === name);
+  }
+}
+
+async function markdownFiles(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  return entries.filter((entry) => entry.isFile() && entry.name.endsWith(".md")).map((entry) => join(dir, entry.name)).sort();
+}
+
+/** Undefined for a file without frontmatter, a disabled agent, or one pi-subagents would refuse. */
+export function parseChildAgentFile(text: string, path = "agent.md"): ChildAgentProfile | undefined {
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n")) return undefined;
+  const end = normalized.indexOf("\n---", 3);
+  if (end === -1) return undefined;
+  const fields = new Map<string, string>();
+  for (const line of normalized.slice(4, end).split("\n")) {
+    const match = /^([\w-]+):\s*(.*)$/.exec(line);
+    if (match?.[1] === undefined) continue;
+    const value = (match[2] ?? "").trim();
+    fields.set(match[1], /^(["']).*\1$/.test(value) ? value.slice(1, -1) : value);
+  }
+  if (fields.get("disabled") === "true" || fields.has("fallbackModels")) return undefined;
+  const name = fields.get("name") ?? path.split("/").at(-1)?.replace(/\.md$/, "") ?? "";
+  if (name === "") return undefined;
+  let modelSpec = fields.get("model");
+  let thinkingLevel = fields.get("thinking");
+  const suffix = modelSpec === undefined ? undefined : /^(.*):(off|minimal|low|medium|high|xhigh)$/.exec(modelSpec);
+  if (suffix !== null && suffix !== undefined) { modelSpec = suffix[1]; thinkingLevel = suffix[2]; }
+  const slash = modelSpec?.indexOf("/") ?? -1;
+  const tools = fields.get("tools")?.split(",").map((tool) => tool.trim()).filter((tool) => tool !== "");
+  return {
+    name,
+    description: fields.get("description") ?? "",
+    ...(modelSpec !== undefined && slash > 0 ? { model: { provider: modelSpec.slice(0, slash), modelId: modelSpec.slice(slash + 1) } } : {}),
+    ...(thinkingLevel !== undefined && isThinking(thinkingLevel) ? { thinkingLevel } : {}),
+    ...(tools === undefined || tools.length === 0 ? {} : { tools }),
+    prompt: normalized.slice(end + 4).trim(),
+    inheritProjectContext: fields.get("inheritProjectContext") !== "false",
+  };
+}
