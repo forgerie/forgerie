@@ -1,0 +1,153 @@
+{
+  "mode": "faux",
+  "model": {
+    "provider": "faux",
+    "modelId": "faux-1"
+  },
+  "at": "2026-10-09T05:25:03.900Z",
+  "results": [
+    {
+      "id": "C1",
+      "name": "child is an ordinary conversation, owned via the parent's anchor task, watchable by a UI",
+      "pass": true,
+      "evidence": {
+        "childId": 15,
+        "owner": {
+          "conversationId": 1,
+          "taskId": 14
+        },
+        "viewEntries": 8,
+        "eventTypes": [
+          "message_start",
+          "message_end",
+          "usage_changed",
+          "tool_execution_start",
+          "tool_execution_end",
+          "turn_end",
+          "turn_start",
+          "submission",
+          "inbox_update",
+          "run_end"
+        ]
+      }
+    },
+    {
+      "id": "C2",
+      "name": "host steer reaches the running child at its next tool boundary",
+      "pass": true,
+      "evidence": {
+        "workStepsEnded": 2,
+        "childUserMessages": [
+          "TASK-A run work 4 times. Call the work tool once per step, one call per reply, step 1 to 4 with of=4.",
+          "STEER: finish now"
+        ],
+        "lastChildAnswer": "Steered: finishing early.",
+        "parentAssistantsBeforeSteer": 2,
+        "reports": [
+          "[subagent builder answered, no reply needed] Steered: finishing early."
+        ]
+      }
+    },
+    {
+      "id": "C3a",
+      "name": "host stop ends the child's work; parent gets no turn",
+      "pass": true,
+      "evidence": {
+        "abortResolvedMs": 27,
+        "workStepsEnded": 1,
+        "childBusy": false,
+        "rootBusy": false,
+        "parentAssistantsBefore": 5,
+        "parentAssistantsAfter": 5,
+        "reports": []
+      }
+    },
+    {
+      "id": "C3b",
+      "name": "parent abort (Esc) leaves the background child running to completion",
+      "pass": true,
+      "evidence": {
+        "workStepsEnded": 3,
+        "reports": [
+          "[subagent survivor answered, no reply needed] All 3 steps done."
+        ]
+      }
+    },
+    {
+      "id": "C5",
+      "name": "child question is a parent write entry with no parent turn; answer reaches the child",
+      "pass": true,
+      "evidence": {
+        "questionEntries": [
+          {
+            "kind": "spike.child-question",
+            "model": null,
+            "data": {
+              "questionId": "q:126",
+              "child": 111,
+              "question": "Which colour should the button be?"
+            }
+          }
+        ],
+        "rootBusyAtQuestion": false,
+        "parentAssistantsAtQuestion": 10,
+        "parentAssistantsBeforeAnswer": 10,
+        "parentAssistantsRightAfterAnswer": 10,
+        "childLastAnswer": "Thanks. User answered: Teal",
+        "reports": [
+          "[subagent asker answered, no reply needed] Thanks. User answered: Teal"
+        ]
+      }
+    },
+    {
+      "id": "C4a",
+      "name": "restart mid-tool: child resumes, one child conversation, report delivered once",
+      "pass": true,
+      "evidence": {
+        "conversationsBefore": 5,
+        "conversationsAfter": 6,
+        "reportersBefore": 5,
+        "reportersAfter": 5,
+        "workStepEnds": [
+          1,
+          2,
+          2,
+          3,
+          4
+        ],
+        "workAttempts": [
+          "1:start:2810279",
+          "1:end:2810279",
+          "2:start:2810279",
+          "2:end:2810279",
+          "2:start:2810279",
+          "2:end:2810279",
+          "3:start:2810279",
+          "3:end:2810279",
+          "4:start:2810279",
+          "4:end:2810279"
+        ],
+        "reports": [
+          "[subagent runner answered, no reply needed] All 4 steps done."
+        ]
+      }
+    },
+    {
+      "id": "C4b",
+      "name": "restart mid-question: same question kept, not duplicated, answer after restart reaches the child",
+      "pass": true,
+      "evidence": {
+        "questionId": "q:201",
+        "questionEntriesInParent": 1,
+        "askAttempts": [
+          "2810279:created=true",
+          "2810279:created=false"
+        ],
+        "childLastAnswer": "Thanks. User answered: Amber",
+        "reports": [
+          "[subagent waiter answered, no reply needed] Thanks. User answered: Amber"
+        ]
+      }
+    }
+  ]
+}
