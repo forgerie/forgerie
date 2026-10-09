@@ -1,0 +1,39 @@
+{
+  "sdkVersion": "1.1.0",
+  "gitVersion": "git version 2.53.0",
+  "checksPassed": 8,
+  "checks": [
+    {
+      "name": "parent-cwd-context-discovery",
+      "evidence": "Bundle instructions load; neither member's child AGENTS.md loads automatically."
+    },
+    {
+      "name": "member-context-override",
+      "evidence": "Public agentsFilesOverride includes both member instruction files with original paths. This tests loading, not model obedience or precedence."
+    },
+    {
+      "name": "duplicate-skill-names",
+      "evidence": "Two different skills named check produce one visible skill and one collision diagnostic."
+    },
+    {
+      "name": "qualified-skill-loader",
+      "evidence": "skillsOverride preserves two qualified skill names and original file paths. Slash-command invocation and extension compatibility are not tested."
+    },
+    {
+      "name": "settings-scope-and-reload",
+      "evidence": "Parent cwd does not merge child settings. Per-member trusted settings differ. An in-memory bundle override works but reload drops it."
+    },
+    {
+      "name": "non-git-session-persistence",
+      "evidence": "A non-Git parent cwd persists, reopens with the same ID/cwd, and lists using an explicit session directory. No model run or Forgerie lifecycle tested."
+    },
+    {
+      "name": "worktree-git-storage",
+      "evidence": "A worktree shares its repository common Git directory but has a separate index. Different repos remain independent."
+    },
+    {
+      "name": "partial-landing-after-preflight",
+      "evidence": "After both rebases pass, a concurrent B update causes B fast-forward to fail. A remains landed. This demonstrates the race, not a production coordinator."
+    }
+  ]
+}
