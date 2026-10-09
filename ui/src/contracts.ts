@@ -35,6 +35,8 @@ export const piMessageSchema = z.object({
   truncated: z.boolean().optional(),
   fullOutputPath: z.string().optional(),
   excludeFromContext: z.boolean().optional(),
+  // custom messages only: what wrote it, such as `forgerie:pull-request`.
+  customType: z.string().optional(),
   // Server-made system messages only: `compaction` or `branch_summary` marks a summary of earlier history.
   source: z.string().optional(),
 });

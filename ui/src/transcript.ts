@@ -3,6 +3,7 @@ import { outputOf, partsOf, textOf, type PiMessage, type SessionEvent } from "./
 import { imageSource } from "./images";
 import { handoffDoorOf, type HandoffDoor } from "./handoffDoor";
 import { parseSkillInvocation, type SkillInvocation } from "./skills";
+import { PULL_NOTICE_TYPE, pullNoticeOf, type PullNotice } from "./pullRequests/pullNotice";
 import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCopy, reopenRun, runFromRecord, shellText, startedRun, unknownRun,
   type ShellEnd, type ShellRun } from "./shellRun";
 
@@ -36,6 +37,8 @@ export interface TranscriptMessage {
   failure?: "error" | "cancelled";
   /** A system message that summarizes earlier history. Its text is the summary alone. */
   summary?: HistorySummaryKind;
+  /** A pull request event the server wrote into the transcript: a watcher wake or a merge from the panel. */
+  pullNotice?: PullNotice;
 }
 /** Compaction replaces earlier messages with a summary; a branch summary describes the branch the session left. */
 export type HistorySummaryKind = "compaction" | "branch";
@@ -97,6 +100,10 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
   const summary = asSummary(message, id);
   if (summary) return summary;
   const role = message.role;
+  if (role === "custom" && message.customType === PULL_NOTICE_TYPE) {
+    const text = textOf(message);
+    return { id, role: "system", parts: [{ type: "text", text }], pullNotice: pullNoticeOf(text, message.details), key: keyOf(message) };
+  }
   if (role === "bashExecution") return { id, role: "shell", parts: [{ type: "shell", run: runFromRecord(message) }], key: keyOf(message) };
   if (role !== "user" && role !== "assistant" && role !== "system") return undefined;
   const invoked = role === "user" ? skillOf(message) : undefined;
@@ -430,12 +437,16 @@ export function artifactDoor(artifact: unknown): HandoffDoor | undefined {
 export type ShellArtifact = { shell: ShellRun };
 /** UI data of a history summary row, carried as the system message's custom metadata. */
 export type SummaryArtifact = { summary: HistorySummaryKind };
+/** UI data of a pull request event row, carried as the system message's custom metadata. */
+export type PullNoticeArtifact = { pullNotice: PullNotice };
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
   if (message.role === "shell") {
     const run = shellRunOf(message)!;
     return { id: message.id, role: "system", content: [{ type: "text", text: shellText(run) }],
       metadata: { custom: { shell: run } satisfies ShellArtifact } };
   }
+  if (message.pullNotice) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
+    metadata: { custom: { pullNotice: message.pullNotice } satisfies PullNoticeArtifact } };
   if (message.summary) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { summary: message.summary } satisfies SummaryArtifact } };
   if (message.role !== "assistant") {

@@ -61,7 +61,7 @@ client does not poll; the server's watcher does.
 ## Preview
 
 Open `/verification/pull-request-preview.html?scenario=<name>` on the dev
-server. Scenarios: `failed` (default), `several`, `waiting`, `blocked`, `ready`,
+server. Scenarios: `failed` (default), `several`, `notes`, `waiting`, `blocked`, `ready`,
 `watching`, `stopped`, `conflict`, `unknown`, `nochecks`, `draft`, `merged`,
 `closed`, `unlinked`, `refused`, `loading`, `error`, `asked`, `header`,
 `rows`. Fixtures use the server's wire shapes.
@@ -80,3 +80,16 @@ APP_URL=http://127.0.0.1:8510 ./scripts/pull-request-shots.mjs
 - The unlinked button shows in every project, including ones without a
   GitHub repository. Linking there fails with the server's reason.
 - Merge always uses rebase. Squash and merge-commit are not offered.
+
+## In the thread
+
+The server writes pull request events into the session transcript as
+`forgerie:pull-request` messages. The thread shows each as one quiet line;
+press it to read the full text the agent read.
+
+- **Merge from the panel.** "You merged #142 into main (rebased) from the
+  pull request panel." The agent reads it too, so it knows not to merge or
+  push again. It starts no agent turn.
+- **Watcher wake.** "#142: 1 check failed. The agent was woken." The line
+  names what woke it: failed checks, a conflict, new comments, or passing
+  checks.

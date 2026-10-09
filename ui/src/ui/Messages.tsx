@@ -1,7 +1,8 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
 import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui, useAuiState, type GroupByContext, type PartState } from "@assistant-ui/react";
 import { useState } from "react";
-import { artifactDoor, type HistorySummaryKind, type ShellArtifact, type SummaryArtifact } from "../transcript";
+import { artifactDoor, type HistorySummaryKind, type PullNoticeArtifact, type ShellArtifact, type SummaryArtifact } from "../transcript";
+import { PullNoticeRow } from "./PullNoticeRow";
 import { SessionDoorCall } from "./SessionDoor";
 import { ShellRun } from "./ShellRun";
 import { MarkdownText } from "./MarkdownText";
@@ -89,6 +90,10 @@ function isShellArtifact(value: Record<string, unknown> | undefined): value is S
   const shell = value?.["shell"];
   return typeof shell === "object" && shell !== null && "result" in shell;
 }
+function isPullNoticeArtifact(value: Record<string, unknown> | undefined): value is PullNoticeArtifact {
+  const notice = value?.["pullNotice"];
+  return typeof notice === "object" && notice !== null && "kind" in notice;
+}
 function isSummaryArtifact(value: Record<string, unknown> | undefined): value is SummaryArtifact {
   return value?.["summary"] === "compaction" || value?.["summary"] === "branch";
 }
@@ -133,6 +138,7 @@ export function SystemMessage() {
     <ShellRun run={custom.shell} />
   </MessagePrimitive.Root>;
   if (isSummaryArtifact(custom)) return <HistorySummary kind={custom.summary} />;
+  if (isPullNoticeArtifact(custom)) return <PullNoticeRow notice={custom.pullNotice} />;
   return <MessagePrimitive.Root className="message message-system" data-role="system">
     <span className="system-label">System</span>
     <div className="message-text"><MessagePrimitive.Parts /></div>

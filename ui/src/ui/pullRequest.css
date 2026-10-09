@@ -184,3 +184,17 @@
 .pr-text-button { min-block-size: 2.25rem; padding: 0; border: 0; background: none; color: var(--muted-foreground); font: inherit;
   text-decoration: underline; text-underline-offset: 0.2em; }
 .pr-text-button:not(:disabled):hover { color: var(--foreground); }
+
+/* A pull request event in the thread: a quiet line with the icon in the event's tone. */
+.pr-notice-row { --pr-tone: var(--muted-foreground); }
+.pr-notice-row[data-notice="merged"] { --pr-tone: var(--pr-merged); }
+.pr-notice-line { display: flex; align-items: flex-start; gap: var(--space-2); min-block-size: var(--control-size); padding-block: var(--space-2);
+  cursor: pointer; list-style: none; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.45; border-radius: var(--radius-document); }
+.pr-notice-line::-webkit-details-marker { display: none; }
+.pr-notice-line:hover { color: var(--foreground); }
+.pr-notice-line:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }
+.pr-notice-icon { flex: none; margin-block-start: 0.125rem; color: var(--pr-tone); }
+.pr-notice-row[data-notice="merged"] .pr-notice-line { color: var(--foreground); }
+.pr-notice-text { margin: 0 0 var(--space-2); max-block-size: min(20rem, 45cqb); overflow: auto; padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line); border-radius: var(--radius-document); background: var(--code-surface); font-family: var(--code-font);
+  font-size: var(--code-size); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
