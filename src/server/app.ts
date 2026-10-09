@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyServerOptions } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import fastifyCompress from "@fastify/compress";
 import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
@@ -15,41 +15,24 @@ import { registerSessionProxyRoutes, type SessionProxyDaemon } from "./sessiond/
 import { registerWorkspaceExplorerRoutes } from "./workspaceExplorerRoutes.js";
 import { registerPromptResourceCatalogProxyRoutes } from "./resources/promptResourceRoutes.js";
 import { registerGitRoutes } from "./gitRoutes.js";
-import { registerTerminalProxyRoutes } from "./terminalProxyRoutes.js";
-import { registerWorkspaceDeletionRoutes } from "./workspaces/workspaceDeletionRoutes.js";
-import { sessionWorktreeOwnershipProbe } from "./workspaces/worktreeOwnership.js";
 import { createUnavailableSpeechService, registerSpeechRoutes } from "./speech/speechRoutes.js";
 import type { SpeechService } from "./speech/speechService.js";
 import type { SpeechRuntimePolicy } from "../shared/speechPolicy.js";
-import { createFilePiWebConfigService, registerConfigRoutes, registerLocalMachineConfigRoutes, type PiWebConfigService } from "./configRoutes.js";
-import { PiWebPluginService } from "./piWebPluginService.js";
+import { createFilePiWebConfigService, registerConfigRoutes, type PiWebConfigService } from "./configRoutes.js";
 import { createActiveProfilePiPackageService, type PiPackageService } from "./piPackageService.js";
 import { registerPiPackageRoutes } from "./piPackageRoutes.js";
-import { createPiWebStatusCache, type PiWebStatusCache } from "./piWebStatusCache.js";
-import { getPiWebRuntime, getPiWebStatus, getPiWebVersionStatus } from "./piWebStatus.js";
-import {
-  ActiveAgentProfileAccessError,
-  requireActiveAgentProfile,
-  SessionDaemonActiveAgentProfileProvider,
-  type ActiveAgentProfileProvider,
-} from "./activeAgentProfileProvider.js";
-import { MachineService } from "./machines/machineService.js";
-import { registerMachineRoutes } from "./machines/machineRoutes.js";
-import { registerMachineProxyRoutes } from "./machines/machineProxyRoutes.js";
+import { getPiWebRuntime, getPiWebVersionStatus } from "./piWebStatus.js";
+import { SessionDaemonActiveAgentProfileProvider, type ActiveAgentProfileProvider } from "./activeAgentProfileProvider.js";
 import { registerUiSettingsRoutes, type UiSettingsOptions } from "./uiSettings/routes.js";
-import { proxyMachinePluginAsset, registerMachinePluginProxyRoutes } from "./machines/machinePluginProxyRoutes.js";
 import type { Project, Workspace, WorkspaceEffectiveConfig } from "./types.js";
 
 export interface AppDependencies {
   uiSettings?: UiSettingsOptions;
   projects?: ProjectService;
   workspaces?: WorkspaceService;
-  machines?: MachineService;
   sessionDaemon?: SessionProxyDaemon;
   agentProfileProvider?: ActiveAgentProfileProvider;
-  piWebPlugins?: Pick<PiWebPluginService, "manifest" | "plugins" | "readAsset">;
   piPackages?: PiPackageService;
-  piWebStatusCache?: PiWebStatusCache;
   config?: PiWebConfigService;
   speech?: SpeechService;
   speechPolicy?: SpeechRuntimePolicy;
@@ -115,34 +98,9 @@ async function workspaceEffectiveConfig(projectPath: string, config?: Pick<PiWeb
   return { uploads: await loadEffectiveProjectUploadsConfig(projectPath, globalConfig) };
 }
 
-async function readEffectiveConfig(config: Pick<PiWebConfigService, "read">) {
-  return (await config.read()).effectiveConfig;
-}
-
-function invalidatePiWebStatusOnWrite(config: PiWebConfigService, statusCache: Pick<PiWebStatusCache, "invalidate">): PiWebConfigService {
-  return {
-    read: () => config.read(),
-    write: async (nextConfig) => {
-      const response = await config.write(nextConfig);
-      statusCache.invalidate();
-      return response;
-    },
-  };
-}
-
-async function withProfileDependency<T>(reply: FastifyReply, operation: () => Promise<T>): Promise<T | FastifyReply> {
-  try {
-    return await operation();
-  } catch (error) {
-    if (!(error instanceof ActiveAgentProfileAccessError)) throw error;
-    return reply.code(503).send({ error: error.message });
-  }
-}
-
 export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? true, ...(deps.bodyLimit === undefined ? {} : { bodyLimit: deps.bodyLimit }) });
-  // Vite proxies development API requests here, while production and machine-scoped
-  // API requests already terminate here, so this is the shared browser HTTP edge.
+  // Vite and the production browser share this HTTP edge.
   await app.register(fastifyCompress, {
     globalCompression: true,
     globalDecompression: false,
@@ -153,62 +111,21 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
   const projects = deps.projects ?? new ProjectService(new ProjectStore());
   const workspaces = deps.workspaces ?? new WorkspaceService();
   const configService = deps.config ?? createFilePiWebConfigService();
-  const readConfig = () => readEffectiveConfig(configService);
   const sessionDaemon = deps.sessionDaemon ?? new SessionDaemonClient();
   const agentProfileProvider = deps.agentProfileProvider ?? new SessionDaemonActiveAgentProfileProvider(sessionDaemon);
-  const piWebPlugins = deps.piWebPlugins ?? new PiWebPluginService({
-    configProvider: readConfig,
-    agentDirProvider: async () => (await requireActiveAgentProfile(agentProfileProvider)).dir,
-  });
+
   const piPackages = deps.piPackages ?? createActiveProfilePiPackageService(agentProfileProvider);
-  const piWebStatusCache = deps.piWebStatusCache ?? createPiWebStatusCache(
-    async ({ force }) => {
-      const activeAgentProfile = await agentProfileProvider.getActiveAgentProfile();
-      return getPiWebStatus(sessionDaemon, {
-        forceReleaseCheck: force,
-        ...(activeAgentProfile.status === "available" ? { activeAgentProfile: activeAgentProfile.profile } : {}),
-      });
-    },
-    { onError: (error) => { app.log.warn({ err: error }, "failed to refresh Forgerie status cache"); } },
-  );
-  const machines = deps.machines ?? new MachineService(undefined, {
-    localRuntime: () => getPiWebRuntime(sessionDaemon),
-  });
-
-  app.get("/pi-web-plugins/manifest.json", async (_request, reply) => withProfileDependency(reply, () => piWebPlugins.manifest()));
-
-  app.get<{ Params: { pluginId: string; "*": string } }>("/pi-web-plugins/:pluginId/*", async (request, reply) => {
-    if (await proxyMachinePluginAsset(machines, request.params.pluginId, request.params["*"], request.url, reply)) return;
-
-    return withProfileDependency(reply, async () => {
-      const asset = await piWebPlugins.readAsset(request.params.pluginId, request.params["*"]);
-      if (asset === undefined) return reply.code(404).send({ error: "Plugin asset not found" });
-      return reply.type(asset.contentType).send(asset.content);
-    });
-  });
-
-  app.get<{ Querystring: { refresh?: string } }>("/api/pi-web/status", async (request) => request.query.refresh === "1"
-    ? piWebStatusCache.refresh({ force: true })
-    : piWebStatusCache.get());
-  app.get("/api/pi-web/version", async () => {
-    const activeAgentProfile = await agentProfileProvider.getActiveAgentProfile();
-    return getPiWebVersionStatus(sessionDaemon, activeAgentProfile.status === "available" ? { activeAgentProfile: activeAgentProfile.profile } : {});
-  });
+  // Local runtime diagnostics never query a release registry or execute installers.
+  app.get("/api/pi-web/status", async () => getPiWebVersionStatus(sessionDaemon));
+  app.get("/api/pi-web/version", async () => getPiWebVersionStatus(sessionDaemon));
   app.get("/api/pi-web/runtime", async () => getPiWebRuntime(sessionDaemon));
-  app.get("/api/plugins", async (_request, reply) => withProfileDependency(reply, () => piWebPlugins.plugins()));
-  app.get("/api/machines/local/plugins", async (_request, reply) => withProfileDependency(reply, () => piWebPlugins.plugins()));
   registerPiPackageRoutes(app, piPackages);
-  registerPiPackageRoutes(app, piPackages, "/api/machines/local");
-  const invalidatingConfigService = invalidatePiWebStatusOnWrite(configService, piWebStatusCache);
-  registerConfigRoutes(app, invalidatingConfigService);
-  registerLocalMachineConfigRoutes(app, invalidatingConfigService);
+  registerConfigRoutes(app, configService);
 
   registerSpeechRoutes(app, deps.speech ?? createUnavailableSpeechService(), { ...(deps.speechPolicy === undefined ? {} : { policy: deps.speechPolicy }), ...(deps.speechAllowedHosts === undefined ? {} : { speechAllowedHosts: deps.speechAllowedHosts }) });
 
-  registerMachineRoutes(app, machines);
-  registerMachinePluginProxyRoutes(app, machines);
-
   registerLocalProjectRoutes(app, projects, workspaces, "/api", { config: configService });
+  // The current browser still uses this local-only URL. No machine registry or remote proxy exists.
   registerLocalProjectRoutes(app, projects, workspaces, "/api/machines/local", { config: configService });
 
   registerSessionProxyRoutes(app, sessionDaemon);
@@ -219,20 +136,16 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
   registerPromptResourceCatalogProxyRoutes(app, projects, workspaces, sessionDaemon, "/api/machines/local");
   registerGitRoutes(app, projects, workspaces);
   registerGitRoutes(app, projects, workspaces, "/api/machines/local");
-  registerTerminalProxyRoutes(app, projects, workspaces, sessionDaemon);
-  registerTerminalProxyRoutes(app, projects, workspaces, sessionDaemon, "/api/machines/local");
-  const worktreeOwnership = sessionWorktreeOwnershipProbe(sessionDaemon);
-  registerWorkspaceDeletionRoutes(app, projects, workspaces, sessionDaemon, "/api", undefined, worktreeOwnership);
-  registerWorkspaceDeletionRoutes(app, projects, workspaces, sessionDaemon, "/api/machines/local", undefined, worktreeOwnership);
-
-  registerMachineProxyRoutes(app, machines);
   await registerUiSettingsRoutes(app, deps.uiSettings);
 
   const packagedClientDist = join(dirname(fileURLToPath(import.meta.url)), "..", "client");
   const clientDist = deps.clientDist ?? (existsSync(packagedClientDist) ? packagedClientDist : join(process.cwd(), "dist", "client"));
   if (clientDist !== false && existsSync(clientDist)) {
     await app.register(fastifyStatic, { root: clientDist });
-    app.setNotFoundHandler((_request, reply) => reply.sendFile("index.html"));
+    app.setNotFoundHandler((request, reply) => {
+      if (request.url.startsWith("/api/") || request.url.startsWith("/pi-web-plugins/")) return reply.code(404).send({ error: "Route not found" });
+      return reply.sendFile("index.html");
+    });
   }
 
   return app;

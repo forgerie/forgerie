@@ -18,7 +18,7 @@ A new session in a Git project starts in a fresh Git worktree by default: its ow
 | Landed or discarded | The session stays in the list and opens. Its row says "landed <sha>" or "discarded". Where the input bar was, a receipt says what happened, that the conversation is read-only, and offers New session. |
 | Archive | The server removes a clean, landed, unshared worktree by itself; the client says nothing. If it keeps one, the archive's undo line adds why ("Kept worktree fix-login: it has commits that are not on main. Land or discard it to remove it.") and stays until dismissed. |
 
-Sessions made by `spawn_session`, `spawn_subsession`, handoff, and pi-subagents are not affected: the server keeps them in their parent's folder.
+Sessions made by `spawn_session`, handoff, and pi-subagents are not affected: the server keeps them in their parent's folder.
 
 ## Verification
 

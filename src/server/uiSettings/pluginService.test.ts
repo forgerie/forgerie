@@ -44,7 +44,6 @@ beforeEach(async () => {
     restart: () => { restarts += 1; stamp = ["web-2", "daemon-2"]; return Promise.resolve(); },
   };
   gateway = async (path, init) => {
-    if (path === "/api/plugins") return { plugins: [ { id: "quota", source: "local", scope: "local", enabled: true }, { id: "other", source: "bundled", scope: "bundled", enabled: false } ] };
     if (path === "/api/config") {
       if (init?.method === "PUT") {
         const input = z.object({ config: z.unknown() }).parse(JSON.parse(String(init.body)));
@@ -66,10 +65,10 @@ beforeEach(async () => {
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe("plugin management", () => {
-  it("lists real Pi resources, browser plugins, and built-ins without executing extension code", async () => {
+  it("lists real Pi resources, app plugins, and built-ins without executing extension code", async () => {
     const catalog = await service.list();
     expect(catalog.profileDir).toBe(profile.dir);
-    expect(catalog.plugins.map((entry) => entry.kind)).toEqual(["package", "extension", "forgerie", "forgerie", "app", "builtin", "builtin", "builtin", "builtin"]);
+    expect(catalog.plugins.map((entry) => entry.kind)).toEqual(["package", "extension", "app", "builtin", "builtin", "builtin", "builtin"]);
     expect(catalog.plugins.find((entry) => entry.kind === "extension")).toMatchObject({ name: "loose", description: "", enabled: false });
     expect(catalog.restartRequired).toBe(false);
   });
@@ -77,7 +76,6 @@ describe("plugin management", () => {
     const catalog = await service.list();
     expect(catalog.plugins[0]).toMatchObject({ kind: "package", name: "@tests/test-plugin", source: packagePath, version: "1.2.3",
       description: "Adds a test tool.", installed: true, filtered: true });
-    expect(catalog.plugins.filter((entry) => entry.kind === "forgerie").map((entry) => entry.description)).toEqual(["", ""]);
     expect(catalog.plugins.find((entry) => entry.id === "builtin:pi-subagents")?.description).toContain("agents in Settings");
     expect(catalog.home).not.toBe("");
   });
@@ -123,15 +121,6 @@ describe("plugin management", () => {
     expect((await readJson(join(profile.dir, "settings.json")))["extensions"]).toEqual(["!extensions/*.ts", `-${entry.source}`]);
     expect(await readFile(entry.source, "utf8")).toContain("Do not execute");
   });
-  it("edits one browser plugin without losing another plugin or config fields", async () => {
-    const catalog = await service.list();
-    const changed = await service.change(catalog.revision, { type: "settings", id: "forgerie:quota", settings: { five_hour: true, new_value: { x: 1 } } });
-    const off = await service.change(changed.revision, { type: "toggle", id: "forgerie:quota", enabled: false });
-    expect(off.plugins.find((entry) => entry.id === "forgerie:quota")?.enabled).toBe(false);
-    const config = await readJson(profile.configPath);
-    expect(config["port"]).toBe(8504);
-    expect(config["plugins"]).toEqual({ quota: { enabled: false, settings: { five_hour: true, new_value: { x: 1 } }, custom: "keep" }, other: { enabled: false } });
-  });
   it("unregisters a package without deleting its code", async () => {
     const catalog = await service.list();
     await service.change(catalog.revision, { type: "remove", id: `package:${packagePath}` });
@@ -148,10 +137,10 @@ describe("plugin management", () => {
   it("rejects stale writes, built-in edits, invalid removals, and unknown targets", async () => {
     const catalog = await service.list();
     await json(profile.configPath, { port: 9999, plugins: {} });
-    await expect(service.change(catalog.revision, { type: "toggle", id: "forgerie:quota", enabled: false })).rejects.toMatchObject({ status: 409 });
+    await expect(service.change(catalog.revision, { type: "toggle", id: "app:cliproxyapi-quota", enabled: false })).rejects.toMatchObject({ status: 409 });
     const current = await service.list();
     await expect(service.change(current.revision, { type: "toggle", id: "builtin:pi-subagents", enabled: false })).rejects.toMatchObject({ status: 403 });
-    await expect(service.change(current.revision, { type: "remove", id: "forgerie:quota" })).rejects.toMatchObject({ status: 400 });
+    await expect(service.change(current.revision, { type: "remove", id: "app:cliproxyapi-quota" })).rejects.toMatchObject({ status: 400 });
     await expect(service.change(current.revision, { type: "toggle", id: "missing", enabled: false })).rejects.toMatchObject({ status: 404 });
   });
   it("retains the pending restart across reads and clears it only when both units restart", async () => {

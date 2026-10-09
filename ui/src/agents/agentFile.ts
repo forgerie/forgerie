@@ -13,7 +13,6 @@ export interface AgentFile {
 
 /** Fields the form edits. Every other header line is carried through untouched. */
 export const FORM_FIELDS = ["name", "description", "model", "thinking", "fallbackModels", "advertise"] as const;
-export type FormField = (typeof FORM_FIELDS)[number];
 
 export function parseAgentFile(text: string): AgentFile {
   const normalized = text.replace(/\r\n/g, "\n");

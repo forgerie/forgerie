@@ -4,9 +4,9 @@ Use live behavior tests when you want to know how the relay skill behaves **righ
 
 ## Basic idea
 
-Run each eval as a **tracked subsession** so you can inspect what happened afterward. The subsession acts like the agent using the relay skill. The parent session acts as the evaluator.
+Run each eval through an available delegated-agent tool that exposes the runner's transcript. The child acts as the agent using the relay skill. The parent session acts as the evaluator. Bind a durable result and consume it before review.
 
-Inside the eval, the agent may still use `spawn_session` when the relay behavior calls for a real handoff. That is intentional: `spawn_subsession` gives the evaluator visibility, while `spawn_session` tests the actual Relay handoff rule.
+Inside the eval, the agent still uses `spawn_session` when the relay behavior calls for a real handoff. Delegation gives the evaluator visibility. `spawn_session` tests the actual Relay handoff rule.
 
 ## What to test
 
@@ -44,7 +44,7 @@ This lets you verify that the parent called `spawn_session` without starting an 
 
 ## Running the evals
 
-For each eval, spawn a tracked subsession with a prompt that says:
+For each eval, delegate one child with a prompt that says:
 
 - read the skill under test, e.g. `skills/relay/SKILL.md`
 - execute the eval prompt
@@ -88,7 +88,7 @@ This matters for the "spawn exactly once" assertion: a failed first `spawn_sessi
 
 ## Reviewing results
 
-After each subsession finishes, review both transcript and files:
+After each child finishes, review both transcript and files:
 
 - Did it read `charter.md` and `status.md` before acting?
 - Did it avoid reading `log.md` end-to-end unless explicitly targeted?
@@ -108,7 +108,7 @@ Record a short result summary in the eval workspace, for example:
 
 ## Interpreting negative tests
 
-If the harness explicitly tells the subsession to read the relay skill, you cannot fairly test whether the skill would have triggered on its own. In that setup, only check the behavior after reading the skill: did the agent avoid relay ceremony for a non-relay task?
+If the harness explicitly tells the child to read the relay skill, you cannot fairly test whether the skill would have triggered on its own. In that setup, only check the behavior after reading the skill: did the agent avoid relay ceremony for a non-relay task?
 
 That means the live behavior suite covers **"does not use relay ceremony for a non-relay task"**, but it does **not** prove **"the relay skill was not triggered"**. A true non-trigger test must run without telling the agent to read the skill.
 
@@ -134,4 +134,4 @@ Keep this separate from behavior evals. Behavior evals intentionally load the sk
 
 ## Why not Docker/static checks?
 
-Static checks can confirm that certain words exist in `SKILL.md`, but they do not show whether an agent follows the skill. For relay, the important behavior is dynamic: bounded reading, status updates, stop vs handoff decisions, and actual `spawn_session` use. Use live subsessions for that.
+Static checks can confirm that certain words exist in `SKILL.md`, but they do not show whether an agent follows the skill. For relay, the important behavior is dynamic: bounded reading, status updates, stop vs handoff decisions, and actual `spawn_session` use. Use delegated children with inspectable transcripts for that.

@@ -85,20 +85,4 @@ describe("WorkspaceActivityService", () => {
     expect(service.snapshot().workspaces).toMatchObject([{ cwd: "/other", hasSessionActivity: true, hasTerminalActivity: false }]);
     expect(events.at(-1)).toMatchObject({ type: "workspace.activity", activity: { cwd: "/repo", hasSessionActivity: false, hasTerminalActivity: false } });
   });
-
-  it("combines sessions and terminals and clears closed terminals", () => {
-    const events: RealtimeEvent[] = [];
-    const service = new WorkspaceActivityService({ publishRealtime: (event) => events.push(event) });
-
-    service.applySessionActivity("/repo", { sessionId: "s1", phase: "active", label: "running tool", detail: "read", at: "now" });
-    service.updateTerminal({ id: "t1", cwd: "/repo", exited: false });
-
-    expect(service.snapshot().workspaces).toMatchObject([{ cwd: "/repo", hasSessionActivity: true, hasTerminalActivity: true }]);
-
-    service.removeSession("s1");
-    service.updateTerminal({ id: "t1", cwd: "/repo", exited: true });
-
-    expect(service.snapshot().workspaces).toEqual([]);
-    expect(events.at(-1)).toMatchObject({ type: "workspace.activity", activity: { cwd: "/repo", hasSessionActivity: false, hasTerminalActivity: false } });
-  });
 });

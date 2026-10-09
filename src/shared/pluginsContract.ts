@@ -2,10 +2,9 @@ import { z } from "zod";
 import { appSettingDefSchema } from "./appPlugins.js";
 
 /**
- * `forgerie`: a browser plugin for the original client, which this app does not load.
  * `app`: a plugin bundled with this app (`appPlugins.ts`). Its changes need no restart.
  */
-export const pluginKindSchema = z.enum(["package", "extension", "forgerie", "app", "builtin"]);
+export const pluginKindSchema = z.enum(["package", "extension", "app", "builtin"]);
 export const pluginSchema = z.object({
   id: z.string(), kind: pluginKindSchema, name: z.string(), source: z.string(),
   /** What the plugin does, in its author's words. Empty when it does not say. */

@@ -28,8 +28,12 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
 
-      - name: Install dependencies
+      # The root prepare script also installs the browser's locked dependencies.
+      - name: Install server and browser dependencies
         run: npm ci
 
       - name: Verify static checks

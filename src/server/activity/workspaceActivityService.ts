@@ -1,5 +1,5 @@
 import { isSessionActive, isWorkspaceActivityActive } from "../../shared/activity.js";
-import type { RealtimeEvent, SessionActivity, SessionStatus, TerminalInfo, WorkspaceActivity, WorkspaceActivityResponse } from "../../shared/apiTypes.js";
+import type { RealtimeEvent, SessionActivity, SessionStatus, WorkspaceActivity, WorkspaceActivityResponse } from "../../shared/apiTypes.js";
 
 export interface WorkspaceActivityPublisher {
   publishRealtime(event: RealtimeEvent): void;
@@ -11,13 +11,8 @@ interface SessionRecord {
   activity?: SessionActivity;
 }
 
-interface TerminalRecord {
-  cwd: string;
-}
-
 export class WorkspaceActivityService {
   private readonly sessions = new Map<string, SessionRecord>();
-  private readonly terminals = new Map<string, TerminalRecord>();
 
   constructor(private readonly publisher?: WorkspaceActivityPublisher) {}
 
@@ -59,19 +54,6 @@ export class WorkspaceActivityService {
     if (changed) this.publishCwd(cwd);
   }
 
-  updateTerminal(terminal: Pick<TerminalInfo, "id" | "cwd" | "exited">): void {
-    const previousCwd = this.terminals.get(terminal.id)?.cwd;
-    if (terminal.exited) this.terminals.delete(terminal.id);
-    else this.terminals.set(terminal.id, { cwd: terminal.cwd });
-    this.publishChangedCwds(previousCwd, terminal.cwd);
-  }
-
-  removeTerminal(terminalId: string, cwd?: string): void {
-    const previousCwd = this.terminals.get(terminalId)?.cwd ?? cwd;
-    this.terminals.delete(terminalId);
-    this.publishCwd(previousCwd);
-  }
-
   snapshot(): WorkspaceActivityResponse {
     return {
       workspaces: this.activeCwds().map((cwd) => this.summaryForCwd(cwd)).filter(isWorkspaceActivityActive),
@@ -99,7 +81,6 @@ export class WorkspaceActivityService {
     for (const record of this.sessions.values()) {
       if (isSessionActive(record.status, record.activity)) cwds.add(record.cwd);
     }
-    for (const record of this.terminals.values()) cwds.add(record.cwd);
     return [...cwds].sort((a, b) => a.localeCompare(b));
   }
 
@@ -107,7 +88,7 @@ export class WorkspaceActivityService {
     return {
       cwd,
       hasSessionActivity: [...this.sessions.values()].some((record) => record.cwd === cwd && isSessionActive(record.status, record.activity)),
-      hasTerminalActivity: [...this.terminals.values()].some((terminal) => terminal.cwd === cwd),
+      hasTerminalActivity: false,
       updatedAt: new Date().toISOString(),
     };
   }

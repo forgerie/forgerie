@@ -1,7 +1,6 @@
 import { SPEECH_POLICY, type SpeechRuntimePolicy } from "../../shared/speechPolicy.js";
 import { validateSpeechPcm, type ValidatedSpeechPcm } from "./speechAudio.js";
 import { SpeechProcessError, type SpeechComponentStatus, type SpeechOperationOptions } from "./speechProcess.js";
-import type { SmartTurnDecision } from "./smartTurnProcess.js";
 import type { WhisperTranscription } from "./whisperProcess.js";
 
 export type SpeechCapability = "ready" | "manual-only" | "unavailable" | "warming";
@@ -16,44 +15,29 @@ export interface SpeechBackend {
   status(): SpeechComponentStatus;
   start(): Promise<void>;
   close(): Promise<void>;
-  checkTurn?(pcm: ValidatedSpeechPcm, options?: SpeechOperationOptions): Promise<SmartTurnDecision>;
   transcribe?(pcm: ValidatedSpeechPcm, options?: SpeechOperationOptions): Promise<WhisperTranscription>;
 }
 
 export interface SpeechService {
   status(): SpeechServiceStatus;
   warm(): Promise<void>;
-  checkTurn(pcmBytes: Uint8Array, options?: SpeechOperationOptions): Promise<SmartTurnDecision>;
   transcribe(pcmBytes: Uint8Array, options?: SpeechOperationOptions): Promise<WhisperTranscription>;
   close(): Promise<void>;
 }
 
 export interface SpeechServiceOptions {
-  readonly smartTurn: SpeechBackend;
   readonly whisper: SpeechBackend;
   readonly policy?: SpeechRuntimePolicy;
 }
 
 export function createSpeechService(options: SpeechServiceOptions): SpeechService {
   const policy = options.policy ?? SPEECH_POLICY;
-  const smartQueue = new ServiceAdmissionQueue<SmartTurnDecision>("Smart Turn", policy);
   const whisperQueue = new ServiceAdmissionQueue<WhisperTranscription>("Whisper", policy);
   let closed = false;
   return {
-    status: () => serviceStatus(options.smartTurn.status(), options.whisper.status()),
+    status: () => serviceStatus(options.whisper.status()),
     warm: async () => {
-      await Promise.allSettled([options.smartTurn.start(), options.whisper.start()]);
-    },
-    checkTurn: (pcmBytes, operationOptions = {}) => {
-      if (closed) return Promise.reject(new SpeechProcessError("closed", "Speech service is closed."));
-      if (options.smartTurn.checkTurn === undefined || options.smartTurn.status() === "unavailable") return Promise.reject(new SpeechProcessError("unavailable", "Smart Turn is unavailable."));
-      let pcm: ValidatedSpeechPcm;
-      try {
-        pcm = validateSpeechPcm(pcmBytes, { operation: "endpoint", policy });
-      } catch (error) {
-        return Promise.reject(error instanceof Error ? error : new Error(String(error)));
-      }
-      return smartQueue.enqueue(pcm.bytes.byteLength, operationOptions.signal, (timeoutMs) => options.smartTurn.checkTurn?.(pcm, { timeoutMs: Math.min(timeoutMs, policy.timing.endpointDeadlineMs) }) ?? Promise.reject(new SpeechProcessError("unavailable", "Smart Turn is unavailable.")));
+      await Promise.allSettled([options.whisper.start()]);
     },
     transcribe: (pcmBytes, operationOptions = {}) => {
       if (closed) return Promise.reject(new SpeechProcessError("closed", "Speech service is closed."));
@@ -68,9 +52,8 @@ export function createSpeechService(options: SpeechServiceOptions): SpeechServic
     },
     close: async () => {
       closed = true;
-      smartQueue.close();
       whisperQueue.close();
-      await Promise.allSettled([options.smartTurn.close(), options.whisper.close()]);
+      await Promise.allSettled([options.whisper.close()]);
     },
   };
 }
@@ -80,18 +63,17 @@ export function speechServiceUnavailable(reason: string): SpeechBackend {
     status: () => "unavailable",
     start: () => Promise.resolve(),
     close: () => Promise.resolve(),
-    checkTurn: () => Promise.reject(new SpeechProcessError("unavailable", `Smart Turn unavailable: ${reason}`)),
     transcribe: () => Promise.reject(new SpeechProcessError("unavailable", `Whisper unavailable: ${reason}`)),
   };
 }
 
-function serviceStatus(smartTurn: SpeechComponentStatus, whisper: SpeechComponentStatus): SpeechServiceStatus {
+function serviceStatus(whisper: SpeechComponentStatus): SpeechServiceStatus {
   let capability: SpeechCapability;
-  if (whisper === "ready" && smartTurn === "ready") capability = "ready";
-  else if (whisper === "ready") capability = "manual-only";
+  if (whisper === "ready") capability = "manual-only";
   else if (whisper === "warming") capability = "warming";
   else capability = "unavailable";
-  return { smartTurn, whisper, capability };
+  // Keep the inert status field while existing browsers still expect this wire shape.
+  return { smartTurn: "unavailable", whisper, capability };
 }
 
 class ServiceAdmissionQueue<T> {

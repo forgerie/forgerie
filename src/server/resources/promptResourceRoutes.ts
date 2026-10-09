@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { PROMPT_RESOURCE_CATALOG_PROXY_TIMEOUT_MS } from "../../shared/federatedRoutes.js";
+// The catalog route keeps its bounded daemon wait independently of federation.
+const PROMPT_RESOURCE_CATALOG_PROXY_TIMEOUT_MS = 15_000;
 import type { PromptResourceCatalogResponse } from "../../shared/promptResourceCommand.js";
 import type { ProjectService } from "../projects/projectService.js";
 import type { WorkspaceService } from "../workspaces/workspaceService.js";

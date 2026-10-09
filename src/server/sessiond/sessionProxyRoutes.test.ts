@@ -113,12 +113,10 @@ describe("machine-scoped session proxy routes", () => {
     ]);
   });
 
-  it("strips the machine prefix before forwarding auth requests", async () => {
+  it("does not forward retired browser auth requests", async () => {
     const response = await app.inject({ method: "POST", url: "/api/machines/local/auth/api-key/interactive", payload: { providerId: "p" } });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true });
-    expect(daemon.requests).toEqual([{ method: "POST", path: "/auth/api-key/interactive", body: { providerId: "p" } }]);
+    expect(response.statusCode).toBe(404);
+    expect(daemon.requests).toEqual([]);
   });
 
   it("forwards sessiond health and runtime aliases to daemon endpoints", async () => {

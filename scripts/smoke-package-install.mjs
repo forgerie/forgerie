@@ -1,19 +1,13 @@
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const NPM_VERSION = "12.0.1";
-const MARKER = "forgerie-package-pty-ok";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
-if (process.platform === "win32") {
-  throw new Error("The installed-package PTY smoke test requires a POSIX shell");
-}
 
 const npmExecPath = process.env["npm_execpath"];
 if (npmExecPath === undefined || npmExecPath === "") {
@@ -52,16 +46,21 @@ try {
     tarballPath,
     "--prefix",
     globalPrefix,
-    "--allow-scripts=node-pty",
     "--no-audit",
     "--no-fund",
   ], root);
 
   const packageRoot = join(globalPrefix, "lib", "node_modules", "forgerie");
-  await smokeInstalledTerminalService(packageRoot);
   await smokeInstalledManagedProcesses(packageRoot);
   await smokeInstalledSubagents(packageRoot);
-  console.log(`Installed-package PTY and managed-process smoke tests passed with npm ${NPM_VERSION}.`);
+  const cli = join(globalPrefix, "bin", "forgerie");
+  const cliOptions = { cwd: root, encoding: "utf8", timeout: 10_000 };
+  const version = await execFileAsync(process.execPath, [cli, "--version"], cliOptions);
+  const expected = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")).version;
+  if (version.stdout.trim() !== expected) throw new Error("Installed CLI reports the wrong package version");
+  const help = await execFileAsync(process.execPath, [cli, "--help"], cliOptions);
+  if (!help.stdout.includes("Services must already exist")) throw new Error("Installed CLI does not describe existing-unit controls");
+  console.log(`Installed-package checks passed with npm ${NPM_VERSION}: patched process sources, pinned subagent version, CLI, and retired-file exclusion. No delegated agent was launched.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }
@@ -82,6 +81,19 @@ function packageTarballFilename(output) {
   const parsed = JSON.parse(json);
   if (!Array.isArray(parsed) || parsed.length !== 1 || typeof parsed[0]?.filename !== "string") {
     throw new Error("npm pack returned an unexpected result");
+  }
+  const retiredPaths = [
+    "dist/docker/", "dist/nativeServices/", "dist/plugin-api", "dist/server/machines/",
+    "dist/server/terminals/", "dist/server/terminalProxyRoutes", "dist/server/piWebPluginService",
+    "dist/server/sessions/authService", "dist/server/sessions/authRoutes",
+    "dist/server/sessions/oauthLoginFlowService", "dist/server/sessions/spawnSubsessionTool",
+    "dist/server/sessions/subsessionTranscript", "dist/server/speech/smartTurnProcess",
+    "pi-web-plugins/", "plugin-api/", "docker/", "nix/smart-turn.nix", "speech/smart_turn_worker.py",
+  ];
+  if (!Array.isArray(parsed[0].files)) throw new Error("npm pack did not return its file inventory");
+  for (const file of parsed[0].files) {
+    if (typeof file?.path !== "string") throw new Error("npm pack returned an invalid file inventory");
+    if (retiredPaths.some((path) => file.path.startsWith(path))) throw new Error(`Packed retired file: ${file.path}`);
   }
   return parsed[0].filename;
 }
@@ -105,54 +117,5 @@ async function smokeInstalledSubagents(packageRoot) {
   const expected = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")).dependencies["pi-subagents"];
   if (manifest.version !== expected) {
     throw new Error(`Installed package bundles pi-subagents ${String(manifest.version)}, expected ${expected}`);
-  }
-}
-
-async function smokeInstalledTerminalService(packageRoot) {
-  const requireFromPackage = createRequire(join(packageRoot, "package.json"));
-  const nodePtyPackageJsonPath = requireFromPackage.resolve("node-pty/package.json");
-  const nodePtyPackage = JSON.parse(await readFile(nodePtyPackageJsonPath, "utf8"));
-  if (typeof nodePtyPackage.version !== "string" || nodePtyPackage.version.includes("-")) {
-    throw new Error(`Installed package resolved a non-stable node-pty version: ${String(nodePtyPackage.version)}`);
-  }
-
-  const terminalModuleUrl = pathToFileURL(join(packageRoot, "dist", "server", "terminals", "terminalService.js")).href;
-  const { TerminalService } = await import(terminalModuleUrl);
-  const previousShell = process.env["SHELL"];
-  process.env["SHELL"] = "/bin/sh";
-  const service = new TerminalService();
-  try {
-    const run = service.runCommand({
-      origin: "package-smoke",
-      projectId: "package-smoke",
-      workspaceId: "package-smoke",
-      cwd: packageRoot,
-      title: "Installed package PTY smoke test",
-      command: `printf '%s' '${MARKER}'`,
-    });
-    let output = "";
-    let detach = () => undefined;
-    const exitCode = await new Promise((resolvePromise, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`Timed out waiting for installed node-pty output: ${JSON.stringify(output)}`)), 10_000);
-      try {
-        detach = service.attach(run.terminalId, {
-          output: (data) => { output += data; },
-          exit: (code) => {
-            clearTimeout(timeout);
-            resolvePromise(code);
-          },
-        });
-      } catch (error) {
-        clearTimeout(timeout);
-        reject(error);
-      }
-    });
-    detach();
-    if (exitCode !== 0) throw new Error(`Installed PTY command exited with ${String(exitCode)}`);
-    if (!output.includes(MARKER)) throw new Error(`Installed PTY output did not contain ${MARKER}: ${JSON.stringify(output)}`);
-  } finally {
-    service.dispose();
-    if (previousShell === undefined) delete process.env["SHELL"];
-    else process.env["SHELL"] = previousShell;
   }
 }

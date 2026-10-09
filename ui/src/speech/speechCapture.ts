@@ -1,5 +1,5 @@
 import speechCaptureWorkletUrl from "./speechCaptureWorklet.ts?worker&url";
-import { SPEECH_POLICY, type SpeechRuntimePolicy } from "./speechPolicy";
+import { SPEECH_POLICY, type SpeechRuntimePolicy } from "@shared/speechPolicy";
 
 export type SpeechCaptureFailureKind = "unsupported" | "permission_denied" | "device_unavailable" | "worklet_load_failed" | "context_failed" | "startup_stalled" | "track_ended" | "limit_reached" | "worklet_failed" | "cancelled";
 

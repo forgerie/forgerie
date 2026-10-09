@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ActiveAgentProfileDescriptor, PiWebConfigResponse, PiWebPluginInfo } from "../shared/apiTypes.js";
+import type { ActiveAgentProfileDescriptor, PiWebConfigResponse } from "../shared/apiTypes.js";
 import type { SessionDaemonAgentProfileResult } from "../sessiond/sessionDaemonClient.js";
 import type { ActiveAgentProfileProvider } from "./activeAgentProfileProvider.js";
 import { buildApp } from "./app.js";
@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 describe("buildApp active profile composition", () => {
-  it("routes package and package-backed plugin reads through the same refreshable provider", async () => {
+  it("routes package reads through the same refreshable provider", async () => {
     const firstAgentDir = join(tempDir, "first-agent");
     const secondAgentDir = join(tempDir, "second-agent");
     const firstPackageDir = join(tempDir, "first-package");
@@ -42,22 +42,16 @@ describe("buildApp active profile composition", () => {
 
     try {
       const firstPackages = await app.inject({ method: "GET", url: "/api/pi-packages" });
-      const firstPlugins = await app.inject({ method: "GET", url: "/api/plugins" });
       expect(firstPackages.statusCode).toBe(200);
       expect(packageSources(firstPackages.json())).toContain(firstPackageDir);
-      expect(pluginIds(firstPlugins.json())).toContain("profile-first");
-      expect(pluginIds(firstPlugins.json())).not.toContain("profile-second");
 
       result = { status: "available", profile: activeProfile("b", "second-agent", secondAgentDir) };
 
       const secondPackages = await app.inject({ method: "GET", url: "/api/pi-packages" });
-      const secondPlugins = await app.inject({ method: "GET", url: "/api/plugins" });
       expect(secondPackages.statusCode).toBe(200);
       expect(packageSources(secondPackages.json())).toContain(secondPackageDir);
       expect(packageSources(secondPackages.json())).not.toContain(firstPackageDir);
-      expect(pluginIds(secondPlugins.json())).toContain("profile-second");
-      expect(pluginIds(secondPlugins.json())).not.toContain("profile-first");
-      expect(getActiveAgentProfile).toHaveBeenCalledTimes(4);
+      expect(getActiveAgentProfile).toHaveBeenCalledTimes(2);
     } finally {
       await app.close();
     }
@@ -76,15 +70,9 @@ describe("buildApp active profile composition", () => {
 
     try {
       const packages = await app.inject({ method: "GET", url: "/api/pi-packages" });
-      const plugins = await app.inject({ method: "GET", url: "/api/plugins" });
-      const manifest = await app.inject({ method: "GET", url: "/pi-web-plugins/manifest.json" });
 
       expect(packages.statusCode).toBe(503);
       expect(packages.json()).toEqual({ error: `Active agent profile is ${status}: ${status} daemon profile` });
-      expect(plugins.statusCode).toBe(503);
-      expect(plugins.json()).toEqual({ error: `Active agent profile is ${status}: ${status} daemon profile` });
-      expect(manifest.statusCode).toBe(503);
-      expect(manifest.json()).toEqual({ error: `Active agent profile is ${status}: ${status} daemon profile` });
     } finally {
       await app.close();
     }
@@ -125,9 +113,7 @@ function emptyConfigService(): PiWebConfigService {
     envOverrides: {
       host: false,
       port: false,
-      allowedHosts: false,
       spawnSessions: false,
-      subsessions: false,
       askUser: false,
       codemode: false,
       agentCommand: false,
@@ -144,11 +130,6 @@ function emptyConfigService(): PiWebConfigService {
 function packageSources(value: unknown): string[] {
   if (!isRecord(value) || !Array.isArray(value["packages"])) return [];
   return value["packages"].flatMap((entry) => isRecord(entry) && typeof entry["source"] === "string" ? [entry["source"]] : []);
-}
-
-function pluginIds(value: unknown): PiWebPluginInfo["id"][] {
-  if (!isRecord(value) || !Array.isArray(value["plugins"])) return [];
-  return value["plugins"].flatMap((entry) => isRecord(entry) && typeof entry["id"] === "string" ? [entry["id"]] : []);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

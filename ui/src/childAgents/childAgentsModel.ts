@@ -22,7 +22,6 @@ export const childTranscriptSchema = z.object({
   busy: z.boolean(),
   partial: piMessageSchema.optional(),
 });
-export type ChildQuestion = z.infer<typeof childQuestionSchema>;
 export type ChildSummary = z.infer<typeof childSummarySchema>;
 export type ChildTranscript = z.infer<typeof childTranscriptSchema>;
 

@@ -18,6 +18,8 @@ export class SessionDaemonClient {
   private readonly baseUrl = sessiondHttpUrl();
   private readonly socketPath = sessiondSocketPath();
 
+  constructor(private readonly options: { requestTimeoutMs?: number } = {}) {}
+
   async request(method: string, path: string, body?: unknown): Promise<{ statusCode: number; headers: Record<string, string>; body: string }> {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     if (this.baseUrl !== undefined && this.baseUrl !== "") return this.requestUrl(method, path, payload);
@@ -38,7 +40,7 @@ export class SessionDaemonClient {
   }
 
   private async requestUrl(method: string, path: string, payload?: string) {
-    const init: RequestInit = { method };
+    const init: RequestInit = { method, ...(this.options.requestTimeoutMs === undefined ? {} : { signal: AbortSignal.timeout(this.options.requestTimeoutMs) }) };
     if (payload !== undefined && payload !== "") {
       init.headers = { "content-type": "application/json" };
       init.body = payload;
@@ -56,6 +58,7 @@ export class SessionDaemonClient {
       const request = http.request(
         {
           socketPath: this.socketPath,
+          ...(this.options.requestTimeoutMs === undefined ? {} : { signal: AbortSignal.timeout(this.options.requestTimeoutMs) }),
           path,
           method,
           headers: payload !== undefined && payload !== ""

@@ -25,7 +25,6 @@ import {
 const TEST_AGENT_DIR = "/tmp/pi-web-test-agent";
 // Unread identities are persisted after platform-native cwd canonicalization.
 const WORKSPACE_CWD = resolve("/workspace");
-const FEATURE_CWD = resolve("/workspace-feature");
 const tempRoots: string[] = [];
 
 afterEach(async () => {
@@ -359,161 +358,6 @@ describe("PiSessionService daemon-owned unread state", () => {
     }
   });
 
-  it("excludes live tracked sub-sessions, then restores ordinary tracking after detach", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pi-web-unread-live-subsessions-"));
-    tempRoots.push(root);
-    const parentFile = join(root, "parent.jsonl");
-    const childFile = join(root, "child.jsonl");
-    await writeFile(childFile, `${JSON.stringify({ type: "session", version: 3, id: "child-1", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/workspace-feature", parentSession: parentFile })}\n`, "utf8");
-    const unreadStore = new SessionUnreadStore({ createCatalogId: () => "catalog-test" });
-    const hub = new CapturingSessionEventHub();
-    const parent = fakeRuntime("parent-1", { sessionFile: parentFile });
-    const child = fakeRuntime("child-1", {
-      sessionFile: childFile,
-      sessionManager: fakeSessionManager("/workspace-feature"),
-    });
-    child.session.prompt = () => {
-      completeRuntimeWork(child);
-      return Promise.resolve();
-    };
-    const runtimes = [parent.runtime, child.runtime];
-    let runtimeIndex = 0;
-    const createAgentRuntime: RuntimeCreator = () => Promise.resolve(runtimes[runtimeIndex++] ?? child.runtime);
-    const service = new PiSessionService(hub, {
-      agentDir: TEST_AGENT_DIR,
-      modelRuntime: testModelRuntime,
-      createAgentRuntime,
-      sessionManager: sessionGateway([]),
-      archiveStore: emptyArchiveStore(),
-      spawnTargets: { resolveSpawnTarget: () => Promise.resolve({ allowed: true, cwd: "/workspace-feature" }) },
-      heartbeatIntervalMs: 60_000,
-      unreadStore,
-    });
-
-    try {
-      await service.start("/workspace");
-      await service.spawnSubsession({
-        spawningCwd: "/workspace",
-        parentSessionId: "parent-1",
-        parentSessionFile: parentFile,
-        prompt: "do the slice",
-        cwd: "/workspace-feature",
-      });
-      completeRuntimeWork(child);
-
-      expect((await service.unreadCatalog()).sessions.some((summary) => summary.sessionId === "child-1")).toBe(false);
-      expect(unreadEvents(hub).some((event) => event.sessionId === "child-1" && event.unread !== null)).toBe(false);
-
-      await service.detachParent(sessionRef("child-1", "/workspace-feature"));
-      completeRuntimeWork(child);
-      expect((await service.unreadCatalog()).sessions).toContainEqual(expect.objectContaining({
-        sessionId: "child-1",
-        cwd: FEATURE_CWD,
-      }));
-    } finally {
-      await service.dispose();
-    }
-  });
-
-  it("clears accidental unread when a reciprocal persisted tracked link is verified after restart", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pi-web-unread-subsessions-"));
-    tempRoots.push(root);
-    const parentFile = join(root, "parent.jsonl");
-    const childFile = join(root, "child.jsonl");
-    await writeFile(parentFile, `${JSON.stringify({ type: "session", version: 3, id: "parent-1", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/workspace" })}\n`, "utf8");
-    await writeFile(childFile, `${JSON.stringify({ type: "session", version: 3, id: "child-1", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/workspace-feature", parentSession: parentFile })}\n`, "utf8");
-
-    const unreadStore = new SessionUnreadStore({ createCatalogId: () => "catalog-test" });
-    completeStoreWork(unreadStore, "child-1", FEATURE_CWD);
-    const hub = new CapturingSessionEventHub();
-    const parentManager = fakeSessionManager("/workspace", {
-      getEntries: () => [{
-        type: "custom",
-        customType: "pi-web.subsession.link",
-        data: { version: 1, spawnedBySessionId: "parent-1", spawnedSessionId: "child-1", spawnedSessionFile: childFile, cwd: "/workspace-feature" },
-      }],
-    });
-    const parent = fakeRuntime("parent-1", { sessionFile: parentFile, sessionManager: parentManager });
-    const service = new PiSessionService(hub, {
-      agentDir: TEST_AGENT_DIR,
-      modelRuntime: testModelRuntime,
-      createAgentRuntime: runtimeCreator(parent.runtime),
-      sessionManager: {
-        create: () => parentManager,
-        list: () => Promise.resolve([]),
-        listAll: () => Promise.resolve([]),
-        listParentSessionPaths: () => Promise.resolve([]),
-        invalidateSessionFile: () => undefined,
-        resolveSessionFile: () => Promise.resolve(undefined),
-        open: () => fakeSessionManager("/workspace-feature"),
-      },
-      archiveStore: emptyArchiveStore(),
-      heartbeatIntervalMs: 60_000,
-      unreadStore,
-    });
-
-    try {
-      await service.start("/workspace");
-      await expect(service.listSubsessions("parent-1", parentFile)).resolves.toEqual([
-        { sessionId: "child-1", cwd: "/workspace-feature", status: "idle" },
-      ]);
-
-      expect((await service.unreadCatalog()).sessions).toEqual([]);
-      expect(unreadEvents(hub).at(-1)).toMatchObject({ sessionId: "child-1", cwd: FEATURE_CWD, unread: null });
-    } finally {
-      await service.dispose();
-    }
-  });
-
-  it("retries tracked-child hydration after a linked child is temporarily unavailable", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pi-web-unread-subsessions-retry-"));
-    tempRoots.push(root);
-    const parentFile = join(root, "parent.jsonl");
-    const childFile = join(root, "child.jsonl");
-    await writeFile(parentFile, `${JSON.stringify({ type: "session", version: 3, id: "parent-1", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/workspace" })}\n`, "utf8");
-
-    const unreadStore = new SessionUnreadStore({ createCatalogId: () => "catalog-test" });
-    completeStoreWork(unreadStore, "child-1", FEATURE_CWD);
-    const parentManager = fakeSessionManager("/workspace", {
-      getEntries: () => [{
-        type: "custom",
-        customType: "pi-web.subsession.link",
-        data: { version: 1, spawnedBySessionId: "parent-1", spawnedSessionId: "child-1", spawnedSessionFile: childFile, cwd: "/workspace-feature" },
-      }],
-    });
-    const parent = fakeRuntime("parent-1", { sessionFile: parentFile, sessionManager: parentManager });
-    const service = new PiSessionService(new CapturingSessionEventHub(), {
-      agentDir: TEST_AGENT_DIR,
-      modelRuntime: testModelRuntime,
-      createAgentRuntime: runtimeCreator(parent.runtime),
-      sessionManager: {
-        create: () => parentManager,
-        list: () => Promise.resolve([]),
-        listAll: () => Promise.resolve([]),
-        listParentSessionPaths: () => Promise.resolve([]),
-        invalidateSessionFile: () => undefined,
-        resolveSessionFile: () => Promise.resolve(undefined),
-        open: () => fakeSessionManager("/workspace-feature"),
-      },
-      archiveStore: emptyArchiveStore(),
-      heartbeatIntervalMs: 60_000,
-      unreadStore,
-    });
-
-    try {
-      await service.start("/workspace");
-      await expect(service.listSubsessions("parent-1", parentFile)).resolves.toEqual([]);
-
-      await writeFile(childFile, `${JSON.stringify({ type: "session", version: 3, id: "child-1", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/workspace-feature", parentSession: parentFile })}\n`, "utf8");
-      await expect(service.listSubsessions("parent-1", parentFile)).resolves.toEqual([
-        { sessionId: "child-1", cwd: "/workspace-feature", status: "idle" },
-      ]);
-      expect((await service.unreadCatalog()).sessions).toEqual([]);
-    } finally {
-      await service.dispose();
-    }
-  });
-
   it("does not re-exclude a detached child from persisted markers after restart", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-web-unread-detached-subsessions-"));
     tempRoots.push(root);
@@ -564,7 +408,6 @@ describe("PiSessionService daemon-owned unread state", () => {
 
     try {
       await service.status(sessionRef("child-1", "/workspace-feature"));
-      await expect(service.listSubsessions("parent-1", parentFile)).resolves.toEqual([]);
       expect((await service.unreadCatalog()).sessions).toMatchObject([
         { sessionId: "child-1", cwd: "/workspace-feature" },
       ]);

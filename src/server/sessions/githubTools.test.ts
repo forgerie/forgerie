@@ -23,7 +23,7 @@ describe("GitHub tools", () => {
   });
   it("adds github_read and github_write to every hosted session, delegated or not, only when GitHub is wired", () => {
     const github: GitHubToolDeps = { read: () => Promise.resolve(""), write: () => Promise.resolve({ text: "" }) };
-    const names = (delegation: boolean) => createPiWebCustomToolDefinitions("/workspace", delegation, undefined, undefined, undefined, undefined, github).map((tool) => tool.name);
+    const names = (delegation: boolean) => createPiWebCustomToolDefinitions("/workspace", delegation, undefined, undefined, undefined, github).map((tool) => tool.name);
     expect(names(true)).toEqual(["edit", "github_read", "github_write"]);
     expect(names(false)).toEqual(["edit", "github_read", "github_write"]);
     expect(createPiWebCustomToolDefinitions("/workspace", true).map((tool) => tool.name)).toEqual(["edit"]);

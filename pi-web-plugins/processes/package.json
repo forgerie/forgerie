@@ -1,9 +1,0 @@
-{
-  "name": "@pi-web/processes-plugin",
-  "private": true,
-  "piWeb": {
-    "plugins": [
-      { "id": "processes", "module": "pi-web-plugin.js" }
-    ]
-  }
-}

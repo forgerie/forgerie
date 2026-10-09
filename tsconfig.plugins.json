@@ -1,8 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true
-  },
-  "include": ["pi-web-plugins/**/*.ts"],
-  "exclude": ["pi-web-plugins/**/*.test.ts"]
-}

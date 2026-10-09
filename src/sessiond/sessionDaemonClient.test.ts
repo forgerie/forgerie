@@ -1,5 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionDaemonClient } from "./sessionDaemonClient.js";
+
+afterEach(() => vi.unstubAllEnvs());
 
 const activeAgentProfile = {
   schemaVersion: 1,
@@ -64,6 +70,39 @@ describe("SessionDaemonClient active agent profile protocol", () => {
       status: "invalid",
       error: "session daemon runtime response did not include an active agent profile",
     });
+  });
+});
+
+describe("bounded diagnostic requests", () => {
+  it.skipIf(process.platform === "win32").each(["http", "socket"] as const)("cancels a stalled %s response without changing normal requests", async (transport) => {
+    const dir = await mkdtemp(join(tmpdir(), "forgerie-daemon-deadline-"));
+    const socketPath = join(dir, "daemon.sock");
+    const server = createServer((request, response) => {
+      if (request.url === "/ready") { response.writeHead(200); response.end("ready"); }
+      else if (request.url === "/streaming") { response.writeHead(200); response.write("partial body"); }
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        if (transport === "http") server.listen(0, "127.0.0.1", resolve);
+        else server.listen(socketPath, resolve);
+      });
+      if (transport === "http") {
+        const address = server.address();
+        if (address === null || typeof address === "string") throw new Error("Expected an HTTP listen address");
+        vi.stubEnv("PI_WEB_SESSIOND_URL", `http://127.0.0.1:${String(address.port)}`);
+      } else {
+        vi.stubEnv("PI_WEB_SESSIOND_URL", "");
+        vi.stubEnv("PI_WEB_SESSIOND_SOCKET", socketPath);
+      }
+      expect((await new SessionDaemonClient().request("GET", "/ready")).body).toBe("ready");
+      await expect(new SessionDaemonClient({ requestTimeoutMs: 100 }).request("GET", "/stalled")).rejects.toThrow(/abort|timeout/i);
+      await expect(new SessionDaemonClient({ requestTimeoutMs: 100 }).request("GET", "/streaming")).rejects.toThrow(/abort|timeout/i);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => { server.close(() => { resolve(); }); });
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

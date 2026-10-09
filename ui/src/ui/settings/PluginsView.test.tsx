@@ -34,7 +34,6 @@ beforeEach(() => {
       { id: "package:gone", kind: "package", name: "pi-gone", source: "/home/me/code/pi-gone", installed: false, description: "", enabled: false },
       { id: "app:cliproxyapi-quota", kind: "app", name: "Account meters", source: "Forgerie", description: "Shows how much quota each AI account has left, at the foot of the session list.",
         enabled: true, settings: resolveAppSettings(accountMetersManifest, { five_hour: false }), fields: [...accountMetersManifest.settings] },
-      { id: "forgerie:quota", kind: "forgerie", name: "quota", source: "local", description: "", enabled: true, settings: { five_hour: false } },
       { id: "builtin:pi-subagents", kind: "builtin", name: "pi-subagents", source: "Forgerie", description: "Lets a session hand work to the agents in Settings.", enabled: true } ] };
   api = { list: async () => catalog,
     change: async (revision, change) => {
@@ -61,20 +60,30 @@ describe("plugin words", () => {
 });
 
 describe("Plugins settings", () => {
-  it("lists real names and descriptions, and speaks only for unusual rows", async () => {
+  it("lists Pi packages, extensions, current app plugins, and built-ins without the retired browser plugins", async () => {
     await render();
-    expect([...document.querySelectorAll("section")].map((node) => node.getAttribute("aria-label"))).toEqual(["Pi packages", "Pi extensions", "Forgerie plugins", "Original client plugins", "Built in"]);
+    expect([...document.querySelectorAll("section")].map((node) => node.getAttribute("aria-label"))).toEqual(["Pi packages", "Pi extensions", "Forgerie plugins", "Built in"]);
     const rows = [...document.querySelectorAll(".agent-row")].map((node) => node.textContent);
     expect(rows[0]).toBe("pi-goal0.49.6Autonomous /goal completion.");
     expect(rows[1]).toBe("pi-gone~/code/pi-goneTurned offNot installed");
-    expect(rows[2]).toBe("Account metersShows how much quota each AI account has left, at the foot of the session list.");
-    expect(rows[3]).toBe("quotaInstalled on this machine");
-    expect(document.querySelector(".agent-row[data-dimmed]")!.textContent).toContain("pi-gone");
+    expect(rows[2]).toContain("Account meters");
+    expect(document.body.textContent).not.toContain("Original client plugins");
     expect(document.body.textContent).toContain("Saved in ~/.forgerie/agent");
-    expect(document.body.textContent).not.toContain("Restart Forgerie to apply");
-    await act(async () => (document.querySelectorAll<HTMLButtonElement>(".agent-row")[3]!).click());
-    expect(selected).toBe("forgerie:quota");
+    await act(async () => document.querySelectorAll<HTMLButtonElement>(".agent-row")[3]!.click());
+    expect(selected).toBe("builtin:pi-subagents");
     expect(calls).toEqual([]);
+  });
+  it("discards an unsaved app address without saving or storing it in the browser", async () => {
+    selected = "app:cliproxyapi-quota";
+    await render();
+    const previous = document.querySelector<HTMLInputElement>("input[type=url]")!.value;
+    await type("input[type=url]", "http://127.0.0.1:9000/quota");
+    expect(status()).toBe("Unsaved changes");
+    expect(calls).toEqual([]);
+    await command("Discard changes");
+    expect(document.querySelector<HTMLInputElement>("input[type=url]")!.value).toBe(previous);
+    expect(localStorage.length).toBe(0);
+    expect(status()).toBeUndefined();
   });
   it("installs from the header, then reports it without restarting", async () => {
     selected = "new"; await render();
@@ -106,32 +115,6 @@ describe("Plugins settings", () => {
     selected = "builtin:pi-subagents"; await render();
     expect(button("Load pi-subagents").disabled).toBe(true);
     expect(document.body.textContent).toContain("You cannot turn it off here.");
-  });
-  it("validates a JSON object and saves settings only on demand", async () => {
-    selected = "forgerie:quota"; await render();
-    await type("textarea", "[]");
-    expect(document.querySelector("[role=alert]")!.textContent).toContain("JSON object");
-    expect(button("Save").disabled).toBe(true);
-    await type("textarea", '{"five_hour": true}');
-    expect(status()).toBe("Unsaved changes");
-    expect(calls).toEqual([]);
-    await click("Save");
-    expect(calls).toEqual([{ type: "settings", id: "forgerie:quota", settings: { five_hour: true } }]);
-    expect(button("Save").disabled).toBe(true);
-    expect(localStorage.length).toBe(0);
-  });
-  it("holds an unsaved draft across navigation and refuses to silently rebase it", async () => {
-    selected = "forgerie:quota"; await render();
-    await type("textarea", '{"five_hour": false, "private_key": "not-in-browser-storage"}');
-    selected = undefined; await render();
-    catalog = { ...catalog, revision: "outside-change" };
-    selected = "forgerie:quota"; await render();
-    await command("Read plugins again");
-    await click("Save");
-    expect(document.body.textContent).toContain("Reload before saving");
-    expect(localStorage.length).toBe(0);
-    await command("Discard changes");
-    expect(status()).toBeUndefined();
   });
   it("confirms a restart in a window, and Cancel restarts nothing", async () => {
     selected = "package:pi-goal"; await render();

@@ -2,27 +2,12 @@ import type { FastifyInstance } from "fastify";
 import { agentDirEnvSource, hasAgentDirEnvOverride, hasAgentSessionDirEnvOverride, loadPiWebConfig, parseAgentConfig, parseUploadsConfig, resolveEffectivePiWebConfig, savePiWebConfig, type AgentPathHost, type LoadOptions, type PiWebConfig } from "../config.js";
 import type { PiWebAgentDirEnvSource, PiWebConfigEnvOverrides, PiWebConfigResponse, PiWebConfigValues } from "../shared/apiTypes.js";
 import { isPiWebPluginId } from "../shared/pluginIds.js";
-import { isLegacyDefaultShortcutPreference } from "../shared/shortcutMigrations.js";
-import { parseStoredShortcutValue } from "../shared/shortcutSyntax.js";
 
 export interface PiWebConfigService {
   read: () => PiWebConfigResponse | Promise<PiWebConfigResponse>;
   write: (config: PiWebConfigValues) => PiWebConfigResponse | Promise<PiWebConfigResponse>;
 }
 
-export const SELECTED_MACHINE_CONFIG_KEYS = [
-  "plugins",
-  "pathAccess",
-  "uploads",
-  "maxUploadBytes",
-  "spawnSessions",
-  "subsessions",
-  "askUser",
-  "codemode",
-  "agent",
-] as const satisfies readonly (keyof PiWebConfigValues)[];
-
-const SELECTED_MACHINE_CONFIG_KEY_SET = new Set<string>(SELECTED_MACHINE_CONFIG_KEYS);
 
 export function createFilePiWebConfigService(options: LoadOptions = {}): PiWebConfigService {
   return {
@@ -66,51 +51,6 @@ export function registerConfigRoutes(app: FastifyInstance, service: PiWebConfigS
   });
 }
 
-export function registerLocalMachineConfigRoutes(app: FastifyInstance, service: PiWebConfigService = createFilePiWebConfigService()): void {
-  app.get("/api/machines/local/config", async (_request, reply) => {
-    try {
-      return selectedMachineConfigResponse(await service.read());
-    } catch (error) {
-      return reply.code(500).send({ error: errorMessage(error) });
-    }
-  });
-
-  app.put<{ Body: { config?: unknown } | undefined }>("/api/machines/local/config", async (request, reply) => {
-    try {
-      const current = await service.read();
-      const patch = parseSelectedMachineConfigRequest(request.body?.config);
-      return selectedMachineConfigResponse(await service.write(mergeSelectedMachineConfig(current.config, patch)));
-    } catch (error) {
-      const status = isConfigValidationError(error) ? 400 : 500;
-      return reply.code(status).send({ error: errorMessage(error) });
-    }
-  });
-}
-
-export function parseSelectedMachineConfigRequest(value: unknown, agentPathHost: AgentPathHost = "current"): PiWebConfig {
-  if (!isRecord(value)) throw new Error("Forgerie selected-machine config update must include a config object");
-  for (const key of Object.keys(value)) {
-    if (!SELECTED_MACHINE_CONFIG_KEY_SET.has(key)) throw new Error(`Forgerie selected-machine config key is not allowed: ${key}`);
-  }
-  try {
-    return pickSelectedMachineConfig(parseConfigRequest(value, agentPathHost));
-  } catch (error) {
-    throw new Error(selectedMachineConfigErrorMessage(error), { cause: error });
-  }
-}
-
-export function mergeSelectedMachineConfig(current: PiWebConfigValues, patch: PiWebConfigValues): PiWebConfig {
-  return { ...current, ...pickSelectedMachineConfig(patch) };
-}
-
-export function selectedMachineConfigResponse(response: PiWebConfigResponse): PiWebConfigResponse {
-  return {
-    ...response,
-    config: pickSelectedMachineConfig(response.config),
-    effectiveConfig: pickSelectedMachineConfig(response.effectiveConfig),
-  };
-}
-
 export function parsePiWebConfigResponseBody(value: unknown, source = "Forgerie config response"): PiWebConfigResponse {
   const record = requireResponseRecord(value, source);
   return {
@@ -127,14 +67,11 @@ function parseConfigRequest(value: unknown, agentPathHost: AgentPathHost = "curr
   const config: PiWebConfig = {};
   const host = value["host"];
   const port = value["port"];
-  const allowedHosts = value["allowedHosts"];
-  const shortcuts = value["shortcuts"];
   const plugins = value["plugins"];
   const pathAccess = value["pathAccess"];
   const uploads = value["uploads"];
   const maxUploadBytes = value["maxUploadBytes"];
   const spawnSessions = value["spawnSessions"];
-  const subsessions = value["subsessions"];
   const askUser = value["askUser"];
   const codemode = value["codemode"];
   const agent = value["agent"];
@@ -146,8 +83,6 @@ function parseConfigRequest(value: unknown, agentPathHost: AgentPathHost = "curr
     if (typeof port !== "number") throw new Error("Forgerie config port must be a number");
     config.port = port;
   }
-  if (allowedHosts !== undefined) config.allowedHosts = parseAllowedHostsRequest(allowedHosts);
-  if (shortcuts !== undefined) config.shortcuts = parseShortcutsRequest(shortcuts);
   if (plugins !== undefined) config.plugins = parsePluginsRequest(plugins);
   if (pathAccess !== undefined) config.pathAccess = parsePathAccessRequest(pathAccess);
   if (uploads !== undefined) config.uploads = parseUploadsConfig(uploads, "request");
@@ -155,10 +90,6 @@ function parseConfigRequest(value: unknown, agentPathHost: AgentPathHost = "curr
   if (spawnSessions !== undefined) {
     if (typeof spawnSessions !== "boolean") throw new Error("Forgerie config spawnSessions must be a boolean");
     config.spawnSessions = spawnSessions;
-  }
-  if (subsessions !== undefined) {
-    if (typeof subsessions !== "boolean") throw new Error("Forgerie config subsessions must be a boolean");
-    config.subsessions = subsessions;
   }
   if (askUser !== undefined) {
     if (typeof askUser !== "boolean") throw new Error("Forgerie config askUser must be a boolean");
@@ -170,44 +101,6 @@ function parseConfigRequest(value: unknown, agentPathHost: AgentPathHost = "curr
   }
   if (agent !== undefined) config.agent = parseAgentRequest(agent, agentPathHost);
   return config;
-}
-
-function pickSelectedMachineConfig(config: PiWebConfigValues): PiWebConfig {
-  return {
-    ...(config.plugins !== undefined ? { plugins: config.plugins } : {}),
-    ...(config.pathAccess !== undefined ? { pathAccess: config.pathAccess } : {}),
-    ...(config.uploads !== undefined ? { uploads: config.uploads } : {}),
-    ...(config.maxUploadBytes !== undefined ? { maxUploadBytes: config.maxUploadBytes } : {}),
-    ...(config.spawnSessions !== undefined ? { spawnSessions: config.spawnSessions } : {}),
-    ...(config.subsessions !== undefined ? { subsessions: config.subsessions } : {}),
-    ...(config.askUser !== undefined ? { askUser: config.askUser } : {}),
-    ...(config.codemode !== undefined ? { codemode: config.codemode } : {}),
-    ...(config.agent !== undefined ? { agent: config.agent } : {}),
-  };
-}
-
-function selectedMachineConfigErrorMessage(error: unknown): string {
-  const message = errorMessage(error);
-  if (message.startsWith("Forgerie config ")) return `Forgerie selected-machine config ${message.slice("Forgerie config ".length)}`;
-  return `Forgerie selected-machine config ${message}`;
-}
-
-function parseAllowedHostsRequest(value: unknown): string[] | true {
-  if (value === true) return true;
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-    throw new Error("Forgerie config allowedHosts must be true or an array of strings");
-  }
-  return value;
-}
-
-function parseShortcutsRequest(value: unknown): Record<string, string | null> {
-  if (!isRecord(value)) throw new Error("Forgerie config shortcuts must be an object");
-  return Object.fromEntries(Object.entries(value).flatMap(([actionId, shortcut]): [string, string | null][] => {
-    if (isLegacyDefaultShortcutPreference(actionId, shortcut)) return [];
-    const parsed = parseStoredShortcutValue(shortcut);
-    if (!parsed.ok) throw new Error(`Forgerie config shortcut ${actionId} is invalid: ${parsed.message}`);
-    return [[actionId, parsed.value]];
-  }));
 }
 
 function parsePathAccessRequest(value: unknown): NonNullable<PiWebConfig["pathAccess"]> {
@@ -256,9 +149,7 @@ function parsePiWebConfigEnvOverridesResponse(value: unknown, source: string): P
   return {
     host: requireResponseBoolean(record, "host", source),
     port: requireResponseBoolean(record, "port", source),
-    allowedHosts: requireResponseBoolean(record, "allowedHosts", source),
     spawnSessions: requireResponseBoolean(record, "spawnSessions", source),
-    subsessions: requireResponseBoolean(record, "subsessions", source),
     askUser: requireResponseBoolean(record, "askUser", source),
     codemode: requireResponseBoolean(record, "codemode", source),
     agentCommand: requireResponseBoolean(record, "agentCommand", source),
@@ -298,9 +189,7 @@ function piWebConfigEnvOverrides(env: NodeJS.ProcessEnv, config: PiWebConfig = {
   return {
     host: isEnvSet(env["PI_WEB_HOST"]),
     port: isEnvSet(env["PI_WEB_PORT"]) || isEnvSet(env["PORT"]),
-    allowedHosts: isEnvSet(env["PI_WEB_ALLOWED_HOSTS"]),
     spawnSessions: isEnvSet(env["PI_WEB_SPAWN_SESSIONS"]),
-    subsessions: isEnvSet(env["PI_WEB_SUBSESSIONS"]),
     askUser: isEnvSet(env["PI_WEB_ASK_USER"]),
     codemode: isEnvSet(env["PI_WEB_CODEMODE"]),
     agentCommand: isEnvSet(env["PI_WEB_AGENT_COMMAND"]),

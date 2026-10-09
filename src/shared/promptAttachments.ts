@@ -43,13 +43,6 @@ const maxSavedAttachmentFilenameLength = "attachment-".length
 /** Hard bound enforced by the workspace writer and used for pre-save text budgeting. */
 export const MAX_SAVED_ATTACHMENT_RELATIVE_PATH_LENGTH = DEFAULT_SAVED_ATTACHMENT_FOLDER.length + 1 + maxSavedAttachmentFilenameLength;
 
-/** Maximum text used by `@path` references separated with one space. */
-export function maximumSavedAttachmentReferencesLength(attachmentCount: number): number {
-  if (attachmentCount <= 0) return 0;
-  const referenceLength = 1 + MAX_SAVED_ATTACHMENT_RELATIVE_PATH_LENGTH;
-  return attachmentCount * referenceLength + attachmentCount - 1;
-}
-
 export function isSupportedImageMimeType(value: unknown): value is SupportedImageMimeType {
   return typeof value === "string" && supportedImageMimeTypes.has(value);
 }

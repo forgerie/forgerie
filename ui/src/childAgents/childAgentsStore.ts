@@ -123,4 +123,3 @@ export function createChildAgentsStore(request: Request, ref: () => SessionRef |
     dispose() { disposed = true; clearTimeout(refreshTimer); clearTimeout(pollTimer); listeners.clear(); },
   };
 }
-export type ChildAgentsStore = ReturnType<typeof createChildAgentsStore>;

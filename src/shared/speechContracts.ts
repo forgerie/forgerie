@@ -1,6 +1,6 @@
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
-import { SPEECH_MAX_TRANSCRIPT_CHARS, SPEECH_POLICY, SPEECH_SAMPLE_RATE_HZ } from "./speechPolicy.js";
+import { SPEECH_MAX_TRANSCRIPT_CHARS, SPEECH_SAMPLE_RATE_HZ } from "./speechPolicy.js";
 
 export const SpeechComponentStatusSchema = Type.Union([
   Type.Literal("warming"),
@@ -28,12 +28,6 @@ export const SpeechServiceStatusResponseSchema = Type.Object({
   whisper: SpeechComponentStatusSchema,
   capability: SpeechCapabilitySchema,
   limits: SpeechLimitsSchema,
-}, { additionalProperties: false });
-
-export const SpeechTurnDecisionResponseSchema = Type.Object({
-  complete: Type.Boolean(),
-  probability: Type.Number({ minimum: 0, maximum: 1 }),
-  samples: Type.Integer({ minimum: 0, maximum: SPEECH_POLICY.audio.endpointWindowSamples }),
 }, { additionalProperties: false });
 
 export const SpeechTranscriptionResponseSchema = Type.Object({
@@ -67,18 +61,12 @@ export const SpeechErrorResponseSchema = Type.Object({
 }, { additionalProperties: false });
 
 export type SpeechServiceStatusResponse = Static<typeof SpeechServiceStatusResponseSchema>;
-export type SpeechTurnDecisionResponse = Static<typeof SpeechTurnDecisionResponseSchema>;
 export type SpeechTranscriptionResponse = Static<typeof SpeechTranscriptionResponseSchema>;
 export type SpeechErrorKind = Static<typeof SpeechErrorKindSchema>;
 export type SpeechErrorResponse = Static<typeof SpeechErrorResponseSchema>;
 
 export function parseSpeechServiceStatusResponse(value: unknown): SpeechServiceStatusResponse {
   assertSpeechServiceStatusResponse(value);
-  return value;
-}
-
-export function parseSpeechTurnDecisionResponse(value: unknown): SpeechTurnDecisionResponse {
-  assertSpeechTurnDecisionResponse(value);
   return value;
 }
 
@@ -94,10 +82,6 @@ export function parseSpeechErrorResponse(value: unknown): SpeechErrorResponse {
 
 function assertSpeechServiceStatusResponse(value: unknown): asserts value is SpeechServiceStatusResponse {
   if (!Check(SpeechServiceStatusResponseSchema, value)) throw new Error("Invalid speech status response.");
-}
-
-function assertSpeechTurnDecisionResponse(value: unknown): asserts value is SpeechTurnDecisionResponse {
-  if (!Check(SpeechTurnDecisionResponseSchema, value)) throw new Error("Invalid speech turn decision response.");
 }
 
 function assertSpeechTranscriptionResponse(value: unknown): asserts value is SpeechTranscriptionResponse {

@@ -6,9 +6,8 @@ import fastifyWebsocket from "@fastify/websocket";
 import { WorkspaceActivityService } from "./activity/workspaceActivityService.js";
 import { registerWorkspaceActivityRoutes } from "./activity/workspaceActivityRoutes.js";
 import { SessionEventHub } from "./realtime/sessionEventHub.js";
-import { AuthService } from "./sessions/authService.js";
+import { createModelRuntimeForAgentDir } from "./sessions/modelRuntime.js";
 import { bootstrapAndFreezeGlobalExtensionProviders } from "./sessions/globalProviderPolicy.js";
-import { registerAuthRoutes } from "./sessions/authRoutes.js";
 import { ModelCatalogRefresher } from "./sessions/modelCatalogRefresher.js";
 import { PiSessionService } from "./sessions/piSessionService.js";
 import { createPiSessionManagerGateway } from "./sessions/piSessionManagerGateway.js";
@@ -57,8 +56,6 @@ import { UserSessionWorktrees, registerSessionWorktreeRoutes } from "./workspace
 import { WorktreeCleanupJob } from "./workspaces/worktreeCleanupJob.js";
 import { registerWorktreeCleanupRoutes } from "./workspaces/worktreeCleanupRoutes.js";
 import { sessiondSocketPath } from "../sessiond/config.js";
-import { TerminalService } from "./terminals/terminalService.js";
-import { registerTerminalRoutes } from "./terminals/terminalRoutes.js";
 import { getPiWebRuntimeComponent } from "./piWebStatus.js";
 import { SESSIOND_RUNTIME_CAPABILITIES } from "../shared/capabilities.js";
 import { agentSessionDirEnvKeys, effectivePiWebConfig, maxUploadBytes, offlineModeEnabled, piWebDataDir } from "../config.js";
@@ -82,7 +79,7 @@ const activeAgentProfile = createActiveAgentProfileDescriptor({
 const app = Fastify({ logger: true, bodyLimit: maxUploadBytes(daemonEnvironment, config) });
 await app.register(fastifyWebsocket);
 
-// Agent-executed processes (bash tool, terminals, subsessions) are spawned from
+// Agent-executed processes (bash tool, subsessions) are spawned from
 // this process and inherit its environment, so hide the daemon's own
 // configuration keys before any of them can start. The daemon keeps using the
 // captured daemonEnvironment above; its runtime stores resolve their paths from
@@ -135,22 +132,21 @@ async function createSessionDaemonRuntime() {
   const pinStore = new SessionPinStore(defaultSessionPinFilePath(daemonEnvironment));
   const tabsStore = new SessionTabsStore(defaultSessionTabsFilePath(daemonEnvironment));
   const workspaceActivity = new WorkspaceActivityService(eventHub);
-  const auth = await AuthService.create({ agentDir: activeAgentProfile.dir, logger: app.log });
+  const modelRuntime = await createModelRuntimeForAgentDir(activeAgentProfile.dir);
   // Capture providers registered by global extensions while the runtime is
   // still mutable, then freeze every later extension-provider mutation before
   // any real session can load project resources.
-  await bootstrapAndFreezeGlobalExtensionProviders(auth.runtime, activeAgentProfile.dir, app.log);
+  await bootstrapAndFreezeGlobalExtensionProviders(modelRuntime, activeAgentProfile.dir, app.log);
   // The shared model runtime is constructed offline so request paths never
   // wait on provider-catalog fetches; this is the single bounded network
-  // refresher, and auth changes (login/logout) ask it for a prompt run. It
+  // refresher. It
   // stays fully inert when the operator asked for offline behavior.
   const catalogRefresher = new ModelCatalogRefresher({
-    runtime: auth.runtime,
+    runtime: modelRuntime,
     logger: app.log,
     offline: offlineModeEnabled(daemonEnvironment),
   });
   catalogRefresher.start();
-  auth.subscribe(() => { catalogRefresher.requestRefresh(); });
   // Cross-workspace session relationships are reported regardless of whether
   // agents may spawn sessions: children can predate a config change, and the
   // session tree should stay honest about them either way.
@@ -176,7 +172,6 @@ async function createSessionDaemonRuntime() {
     },
     async beforeRemoval(record) {
       const affected = await sessions.prepareWorktreeRemoval(record.path);
-      for (const cwd of new Set([record.path, ...affected.map((session) => session.cwd)])) terminals.closeForCwd(cwd);
       return affected;
     },
   });
@@ -186,7 +181,7 @@ async function createSessionDaemonRuntime() {
     writable: async (ref) => { await sessionWorktrees.store.assertWritable(ref); return (await sessions.inspectPullSession(ref)).available; } });
   const liveChildren = config.durableChildren ? new LiveChildSessionIndex(join(piWebDataDir(daemonEnvironment), "durable-children-live.json")) : undefined;
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
-    modelRuntime: auth.runtime,
+    modelRuntime: modelRuntime,
     agentDir: activeAgentProfile.dir,
     archiveStore: withBacklogClaimRelease(archiveStore, backlogClaims),
     pinStore,
@@ -197,7 +192,6 @@ async function createSessionDaemonRuntime() {
     projectWorkspaces,
     sessionWorktrees,
     projectTools: { work: relatedWork, worktrees: sessionWorktrees },
-    subsessionsEnabled: config.subsessions,
     askUserEnabled: config.askUser,
     codemodeEnabled: config.codemode,
     ...(liveChildren === undefined ? {} : { durableChildAgents: createDurableChildHost({
@@ -246,8 +240,6 @@ async function createSessionDaemonRuntime() {
     },
     onError: (error, sessionId) => { app.log.error({ err: error, sessionId }, "pull request watch failed"); },
   });
-  auth.subscribe((change) => { sessions.applyAuthChange(change); });
-  const terminals = new TerminalService(eventHub, workspaceActivity);
   const promptResources = new PromptResourceCatalogService({ agentDir: activeAgentProfile.dir });
   const promptLibrary = new AgentDirPromptLibrary(activeAgentProfile.dir);
   const runtimeComponent = Object.freeze({
@@ -269,22 +261,20 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
-  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup };
+  return { eventHub, workspaceActivity, sessions, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, runtimeComponent, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup }: SessionDaemonRuntime): void {
   registerBacklogRoutes(app, backlog);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);
   registerWorkspaceActivityRoutes(app, workspaceActivity);
-  registerAuthRoutes(app, auth);
   registerWorktreeCleanupRoutes(app, worktreeCleanup);
   registerSessionWorktreeRoutes(app, userSessions);
   registerProjectGroupRoutes(app, groups, projects, relatedWork);
   registerSessionRoutes(app, sessions, eventHub, "", userSessions);
   registerProcessRoutes(app, sessions);
   registerDurableChildRoutes(app, sessions);
-  registerTerminalRoutes(app, terminals);
   registerPromptResourceRoutes(app, promptResources);
   registerPromptLibraryRoutes(app, promptLibrary);
 
@@ -304,7 +294,7 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessio
   app.get("/runtime", () => runtimeComponent);
 }
 
-async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup }: SessionDaemonRuntime): Promise<void> {
+async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup }: SessionDaemonRuntime): Promise<void> {
   pulls.start();
   let shuttingDown = false;
   const startCleanup = () => { if (!shuttingDown) worktreeCleanup.start(); };
@@ -336,9 +326,7 @@ async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, cat
     };
     await attempt("stop worktree cleanup", () => worktreeCleanup.stop());
     await attempt("dispose PR watches", () => { pulls.dispose(); });
-    await attempt("dispose terminals", () => { terminals.dispose(); });
     await attempt("dispose catalog refresher", () => { catalogRefresher.dispose(); });
-    await attempt("dispose auth", () => { auth.dispose(); });
     await attempt("dispose sessions", () => sessions.dispose());
     await attempt("flush session unread state", () => unreadStore.flush());
     await attempt("close server", () => app.close());

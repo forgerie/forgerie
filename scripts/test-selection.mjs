@@ -8,25 +8,11 @@ const FULL_TEST_TRIGGER_FILES = new Set([
 
 const RELATED_SOURCE_DIRECTORIES = [
   "extensions/",
-  "pi-web-plugins/",
-  "plugin-api/",
   "scripts/",
   "src/",
 ];
 
-// `vitest related` follows imports. These suites also inspect repository files at runtime.
-const DOCKER_TESTS = [
-  "src/docker/piWebDockerDocs.test.ts",
-  "src/docker/piWebDockerEntrypoint.test.ts",
-  "src/server/dockerControlAssets.test.ts",
-  "src/server/dockerDevDependencySync.test.ts",
-];
-
-const DOCKER_DOCS_TEST = "src/docker/piWebDockerDocs.test.ts";
-const DOCS_SITE_TEST = "scripts/docs-site.test.mjs";
-const INSTALL_SCRIPT_TEST = "src/installScript.test.ts";
-const PLUGIN_PUBLIC_API_TEST = "pi-web-plugins/pluginPublicApi.test.ts";
-const SMART_TURN_PROCESS_TEST = "src/server/speech/smartTurnProcess.test.ts";
+// `vitest related` follows imports. This suite also launches a worker read at runtime.
 const WHISPER_PROCESS_TEST = "src/server/speech/whisperProcess.test.ts";
 
 export function parseNullDelimitedPaths(output) {
@@ -84,18 +70,6 @@ function relatedTestInputs(paths) {
   for (const path of paths) {
     if (isRelatedSourcePath(path)) inputs.add(path);
 
-    if (path.startsWith("docker/")) {
-      addAll(inputs, DOCKER_TESTS);
-    } else if (path === "README.md" || path.startsWith("docs/")) {
-      inputs.add(DOCKER_DOCS_TEST);
-    }
-
-    if (path === "docs/site.js" || path === "docs/styles.css") inputs.add(DOCS_SITE_TEST);
-    if (path.startsWith("pi-web-plugins/")) inputs.add(PLUGIN_PUBLIC_API_TEST);
-    if (path === "install.sh") inputs.add(INSTALL_SCRIPT_TEST);
-    if (path === "nix/smart-turn.nix" || path === "speech/smart_turn_worker.py") {
-      inputs.add(SMART_TURN_PROCESS_TEST);
-    }
     if (path === "nix/whisper-stt.nix" || path === "speech/whisper_worker.py") {
       inputs.add(WHISPER_PROCESS_TEST);
     }
@@ -111,15 +85,10 @@ function isFullTestTrigger(path) {
 }
 
 function isRelatedSourcePath(path) {
-  if (path === "plugin-api.d.ts") return true;
   if (!/\.(?:[cm]?[jt]s|[jt]sx|json)$/u.test(path)) return false;
   return RELATED_SOURCE_DIRECTORIES.some((directory) => path.startsWith(directory));
 }
 
 function normalizeRepoPath(path) {
   return path.replaceAll("\\", "/").replace(/^\.\//u, "");
-}
-
-function addAll(target, values) {
-  for (const value of values) target.add(value);
 }

@@ -24,7 +24,6 @@ const LINTABLE_ROOT_FILES = new Set([
 
 const LINTABLE_DIRECTORIES = [
   "extensions/",
-  "pi-web-plugins/",
   "src/",
 ];
 

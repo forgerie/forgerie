@@ -17,10 +17,8 @@ export type Workspace = z.infer<typeof workspaceSchema>;
 export const newSessionModelsSchema = z.object({
   models: z.array(sessionModelSchema), model: sessionModelSchema.optional(), thinkingLevel: z.string(),
 });
-export type NewSessionModels = z.infer<typeof newSessionModelsSchema>;
 
 /** Where the new session starts. `label` is what a person reads. */
-export interface Destination { cwd: string; label: string }
 /** What the author picked before the session exists. Absent: Pi's default. */
 export interface AgentChoice { model?: SessionModel | undefined; thinkingLevel?: string | undefined }
 

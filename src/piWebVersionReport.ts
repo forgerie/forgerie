@@ -3,241 +3,46 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { effectivePiWebConfig } from "./config.js";
 import { SessionDaemonClient } from "./sessiond/sessionDaemonClient.js";
-import type { PiWebComponentStatus, PiWebInstallationInfo, PiWebVersionResponse } from "./shared/apiTypes.js";
 import { parsePiWebComponentStatus, parsePiWebVersionResponse } from "./shared/piWebStatusParsing.js";
-
-const PI_WEB_PACKAGE_NAME = "forgerie";
-const PI_WEB_VERSION_TIMEOUT_MS = 2000;
-const PI_WEB_VERSION_ENDPOINT_PATH = "/api/pi-web/version";
-const PI_WEB_STATUS_ENDPOINT_PATH = "/api/pi-web/status";
-const DEFAULT_PACKAGE_VERSION = "0.0.0-dev";
-
-interface PackageInfo {
-  name: string;
-  version: string;
-  path: string;
-}
-
-interface RunningVersionInfo {
-  generatedAt?: string;
-  web?: PiWebComponentStatus;
-  sessiond?: PiWebComponentStatus;
-  webError?: string;
-  sessiondError?: string;
-}
+import type { PiWebComponentStatus } from "./shared/apiTypes.js";
 
 export function packageVersion(): string {
-  return readPackageInfo()?.version ?? DEFAULT_PACKAGE_VERSION;
+  const path = join(dirname(dirname(fileURLToPath(import.meta.url))), "package.json");
+  const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+  if (typeof value !== "object" || value === null || !("version" in value) || typeof value.version !== "string") throw new Error(`Package metadata has no version: ${path}`);
+  return value.version;
 }
 
-export async function printPiWebVersionReport(): Promise<void> {
-  console.log("Forgerie version");
-  printInstalledPackageVersions();
-  printRunningVersionInfo(await collectRunningVersionInfo());
-}
-
-function packageRootPath(): string {
-  return dirname(dirname(fileURLToPath(import.meta.url)));
-}
-
-function packageJsonPath(): string {
-  return join(packageRootPath(), "package.json");
-}
-
-function readPackageInfo(): PackageInfo | undefined {
-  const path = packageJsonPath();
-  try {
-    return parsePackageInfo(JSON.parse(readFileSync(path, "utf8")), path);
-  } catch {
-    return undefined;
-  }
-}
-
-function parsePackageInfo(value: unknown, path: string): PackageInfo | undefined {
-  if (!isRecord(value)) return undefined;
-  const name = value["name"];
-  const version = value["version"];
-  if (typeof name !== "string" || name === "" || typeof version !== "string" || version === "") return undefined;
-  return { name, version, path };
-}
-
-function webVersionEndpoint(): { endpoint?: string; error?: string } {
+/** Local diagnostics only: no npm registry, package installation, or service mutation. */
+export async function printPiWebVersionReport(): Promise<boolean> {
+  console.log(`Forgerie installed: ${packageVersion()}`);
   try {
     const { config } = effectivePiWebConfig();
-    const host = httpClientHost(config.host);
-    const port = config.port ?? 8504;
-    return { endpoint: `http://${urlHost(host)}:${String(port)}${PI_WEB_VERSION_ENDPOINT_PATH}` };
+    const host = config.host === "0.0.0.0" || config.host === "::" || config.host === undefined ? "127.0.0.1" : config.host;
+    const urlHost = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+    const response = await fetch(`http://${urlHost}:${String(config.port ?? 8504)}/api/pi-web/version`, { signal: AbortSignal.timeout(2000) });
+    if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
+    const parsed = parsePiWebVersionResponse(await response.json());
+    if (parsed === undefined) throw new Error("Web server returned invalid version information");
+    printComponent(parsed.components.web);
+    printComponent(parsed.components.sessiond);
+    return parsed.components.web.available && parsed.components.sessiond.available;
   } catch (error) {
-    return { error: `could not read Forgerie config: ${errorMessage(error)}` };
-  }
-}
-
-function httpClientHost(configuredHost: string | undefined): string {
-  const host = configuredHost === undefined || configuredHost === "" ? "127.0.0.1" : configuredHost;
-  if (host === "0.0.0.0" || host === "::" || host === "[::]") return "127.0.0.1";
-  return host;
-}
-
-function urlHost(host: string): string {
-  if (host.startsWith("[") || !host.includes(":")) return host;
-  return `[${host}]`;
-}
-
-function statusEndpointFor(versionEndpoint: string): string {
-  if (!versionEndpoint.endsWith(PI_WEB_VERSION_ENDPOINT_PATH)) return versionEndpoint;
-  return `${versionEndpoint.slice(0, -PI_WEB_VERSION_ENDPOINT_PATH.length)}${PI_WEB_STATUS_ENDPOINT_PATH}`;
-}
-
-async function fetchPiWebVersionResponse(endpoint: string): Promise<PiWebVersionResponse> {
-  const response = await fetch(endpoint, {
-    headers: { accept: "application/json" },
-    signal: AbortSignal.timeout(PI_WEB_VERSION_TIMEOUT_MS),
-  });
-  if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
-  const parsed: unknown = await response.json();
-  const status = parsePiWebVersionResponse(parsed);
-  if (status === undefined) throw new Error("response did not include Forgerie version information");
-  return status;
-}
-
-async function collectRunningVersionInfo(): Promise<RunningVersionInfo> {
-  const endpoint = webVersionEndpoint();
-  if (endpoint.endpoint !== undefined) {
+    console.log(`Web/UI: unavailable — ${error instanceof Error ? error.message : String(error)}`);
     try {
-      const status = await fetchPiWebVersionResponse(endpoint.endpoint);
-      return { generatedAt: status.generatedAt, web: status.components.web, sessiond: status.components.sessiond };
-    } catch (error) {
-      let webError = `${endpoint.endpoint}: ${errorMessage(error)}`;
-      const statusEndpoint = statusEndpointFor(endpoint.endpoint);
-      if (statusEndpoint !== endpoint.endpoint && isHttpNotFound(error)) {
-        try {
-          const status = await fetchPiWebVersionResponse(statusEndpoint);
-          return { generatedAt: status.generatedAt, web: status.components.web, sessiond: status.components.sessiond };
-        } catch (statusError) {
-          webError = `${webError}; ${statusEndpoint}: ${errorMessage(statusError)}`;
-        }
-      }
-      return runningVersionInfoWithSessiondFallback({ webError });
+      const response = await new SessionDaemonClient({ requestTimeoutMs: 2000 }).request("GET", "/health");
+      const value: unknown = JSON.parse(response.body);
+      const version = typeof value === "object" && value !== null && "version" in value ? parsePiWebComponentStatus(value.version) : undefined;
+      if (response.statusCode !== 200 || version === undefined) throw new Error("Invalid session daemon health response", { cause: error });
+      printComponent(version);
+    } catch (daemonError) {
+      console.log(`Session daemon: unavailable — ${daemonError instanceof Error ? daemonError.message : String(daemonError)}`);
     }
-  }
-
-  return runningVersionInfoWithSessiondFallback({ webError: endpoint.error ?? "web/API status endpoint unavailable" });
-}
-
-async function runningVersionInfoWithSessiondFallback(base: { webError: string }): Promise<RunningVersionInfo> {
-  const sessiond = await collectRunningSessiondInfo();
-  return {
-    webError: base.webError,
-    ...(sessiond.component === undefined ? {} : { sessiond: sessiond.component }),
-    ...(sessiond.error === undefined ? {} : { sessiondError: sessiond.error }),
-  };
-}
-
-async function collectRunningSessiondInfo(): Promise<{ component?: PiWebComponentStatus; error?: string }> {
-  try {
-    const response = await withTimeout(
-      new SessionDaemonClient().request("GET", "/health"),
-      PI_WEB_VERSION_TIMEOUT_MS,
-      "session daemon health check timed out",
-    );
-    if (response.statusCode < 200 || response.statusCode >= 300) throw new Error(`HTTP ${String(response.statusCode)}`);
-    const parsed: unknown = response.body === "" ? undefined : JSON.parse(response.body);
-    const version = isRecord(parsed) ? parsed["version"] : undefined;
-    const component = parsePiWebComponentStatus(version);
-    if (component === undefined) throw new Error("health response did not include version information");
-    return { component };
-  } catch (error) {
-    return { error: errorMessage(error) };
+    return false;
   }
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timeout = setTimeout(() => {
-          reject(new Error(timeoutMessage));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
-  }
-}
-
-function isHttpNotFound(error: unknown): boolean {
-  return error instanceof Error && error.message === "HTTP 404";
-}
-
-function printInstalledPackageVersions(): void {
-  const info = readPackageInfo();
-  console.log("Installed packages:");
-  if (info === undefined) {
-    console.log(`? ${PI_WEB_PACKAGE_NAME}: unknown`);
-    console.log(`  missing package metadata: ${packageJsonPath()}`);
-    return;
-  }
-  console.log(`✓ ${info.name}: ${info.version}`);
-  console.log(`  ${info.path}`);
-}
-
-function printRunningVersionInfo(info: RunningVersionInfo): void {
-  console.log("Running services:");
-  if (info.web === undefined) printUnavailableComponent("Web/UI", info.webError);
-  else printComponentVersion(info.web);
-  if (info.sessiond === undefined) printUnavailableComponent("Session daemon", info.sessiondError);
-  else printComponentVersion(info.sessiond);
-  if (info.generatedAt !== undefined) console.log(`  reported by web/API at ${info.generatedAt}`);
-}
-
-function printComponentVersion(component: PiWebComponentStatus): void {
-  const icon = component.available ? component.stale ? "!" : "✓" : "?";
-  const status = !component.available ? "unavailable" : component.stale ? "restart needed" : "current";
-  console.log(`${icon} ${component.label}: ${status}`);
-  if (component.available || component.runtimeVersion !== undefined || component.installedVersion !== undefined) {
-    console.log(`  running: ${formatVersion(component.runtimeVersion)}; installed: ${formatVersion(component.installedVersion)}`);
-  }
-  const installation = installationLabel(component.installation);
-  if (installation !== undefined) console.log(`  installation: ${installation}`);
+function printComponent(component: PiWebComponentStatus): void {
+  console.log(`${component.label}: ${component.available ? component.runtimeVersion ?? "unknown version" : "unavailable"}${component.stale ? " (restart needed)" : ""}`);
   if (component.error !== undefined) console.log(`  ${component.error}`);
-}
-
-function printUnavailableComponent(label: string, error: string | undefined): void {
-  console.log(`? ${label}: unavailable`);
-  if (error !== undefined && error !== "") console.log(`  ${error}`);
-}
-
-function installationLabel(installation: PiWebInstallationInfo | undefined): string | undefined {
-  if (installation === undefined) return undefined;
-  if (installation.kind === "pi-package") {
-    const source = installation.source ?? "Pi package";
-    const scope = installation.scope === undefined ? "" : ` · ${installation.scope}`;
-    const path = installation.path === undefined ? "" : ` · ${installation.path}`;
-    return `${source}${scope}${path}`;
-  }
-  if (installation.kind === "npm-global") {
-    const npmRoot = installation.npmRoot === undefined ? "" : ` · ${installation.npmRoot}`;
-    const path = installation.path === undefined ? "" : ` · ${installation.path}`;
-    return `global npm package${npmRoot}${path}`;
-  }
-  if (installation.kind === "local") return installation.path === undefined ? "local checkout" : `local checkout · ${installation.path}`;
-  if (installation.kind === "docker") {
-    const mode = installation.dockerMode === "dev" ? "Docker development runtime" : "Docker runtime";
-    return installation.path === undefined ? mode : `${mode} · ${installation.path}`;
-  }
-  return installation.path === undefined ? "installation unknown" : `installation unknown · ${installation.path}`;
-}
-
-function formatVersion(version: string | undefined): string {
-  return version === undefined || version === "" ? "unknown" : version;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

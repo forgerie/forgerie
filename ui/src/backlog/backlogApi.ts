@@ -67,7 +67,6 @@ export const backlogLaunchSchema = z.object({
   initialPrompt: z.string(),
   reused: z.boolean().catch(false),
 });
-export type BacklogLaunch = z.infer<typeof backlogLaunchSchema>;
 
 export const backlogErrorSchema = z.object({
   kind: z.enum(["invalid-request", "not-found", "conflict", "unavailable"]).catch("unavailable"),

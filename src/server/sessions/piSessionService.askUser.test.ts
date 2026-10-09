@@ -49,8 +49,8 @@ describe("ask_user registration", () => {
   it("offers ask_user whenever the capability is configured, including to restricted tracked children", () => {
     const askUser = { open: vi.fn() };
 
-    const unrestricted = createPiWebCustomToolDefinitions("/workspace", true, undefined, undefined, askUser);
-    const restricted = createPiWebCustomToolDefinitions("/workspace", false, undefined, undefined, askUser);
+    const unrestricted = createPiWebCustomToolDefinitions("/workspace", true, undefined, askUser);
+    const restricted = createPiWebCustomToolDefinitions("/workspace", false, undefined, askUser);
 
     expect(unrestricted.map((definition) => definition.name)).toEqual(["edit", "ask_user"]);
     expect(restricted.map((definition) => definition.name)).toEqual(["edit", "ask_user"]);

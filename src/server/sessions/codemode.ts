@@ -4,9 +4,9 @@ import { CODEMODE_TOOL_NAME } from "../../shared/codemodeScript.js";
 /**
  * Exposure for Forgerie tools that only work as the model's own call.
  *
- * They end the run (`ask_user`, `handoff_session`, `yield_to_subsessions`)
- * or start a session the transcript must show (`spawn_session`,
- * `spawn_subsession`). A script's call is not a transcript entry and cannot
+ * They end the run (`ask_user`, `handoff_session`, `end_turn`)
+ * or start a session the transcript must show (`spawn_session`).
+ * A script's call is not a transcript entry and cannot
  * end the run, so the model declares them while scripts never reach them.
  * `pi-subagents` declares `subagent` the same way.
  */

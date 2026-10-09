@@ -17,7 +17,6 @@ export type AgentScope = AgentSummary["scope"];
 const listSchema = z.object({ home: z.string(), userDir: z.string(), agents: z.array(agentSummarySchema) });
 export type AgentList = z.infer<typeof listSchema>;
 const fileSchema = z.object({ scope: z.enum(["user", "builtin"]), file: z.string(), text: z.string(), mtimeMs: z.number() });
-export type AgentFileText = z.infer<typeof fileSchema>;
 
 /** A write the server refused because the file moved on. Reloading is the way out. */
 export class AgentConflict extends Error {}

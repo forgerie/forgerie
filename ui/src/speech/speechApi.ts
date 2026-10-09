@@ -2,13 +2,11 @@ import {
   parseSpeechErrorResponse,
   parseSpeechServiceStatusResponse,
   parseSpeechTranscriptionResponse,
-  parseSpeechTurnDecisionResponse,
   type SpeechErrorKind,
   type SpeechServiceStatusResponse,
   type SpeechTranscriptionResponse,
-  type SpeechTurnDecisionResponse,
-} from "./speechContracts";
-import { SPEECH_PCM_BYTES_PER_SAMPLE } from "./speechPolicy";
+} from "@shared/speechContracts";
+import { SPEECH_PCM_BYTES_PER_SAMPLE } from "@shared/speechPolicy";
 
 export type SpeechApiErrorKind = SpeechErrorKind | "cancelled" | "network" | "invalid_response";
 
@@ -42,16 +40,6 @@ export interface SpeechApiRequestOptions {
 
 export async function getSpeechStatus(options: SpeechApiRequestOptions = {}): Promise<SpeechServiceStatusResponse> {
   return speechJsonRequest("api/speech/status", parseSpeechServiceStatusResponse, { method: "GET" }, options);
-}
-
-export async function checkSpeechTurn(pcm: Float32Array, options: SpeechApiRequestOptions = {}): Promise<SpeechTurnDecisionResponse> {
-  throwIfCallerAborted(options.signal);
-  const body = speechPcmRequestBody(pcm);
-  return speechJsonRequest("api/speech/check-turn", parseSpeechTurnDecisionResponse, {
-    method: "POST",
-    headers: { "content-type": "application/octet-stream" },
-    body: body.buffer,
-  }, options);
 }
 
 export async function transcribeSpeech(pcm: Float32Array, options: SpeechApiRequestOptions = {}): Promise<SpeechTranscriptionResponse> {

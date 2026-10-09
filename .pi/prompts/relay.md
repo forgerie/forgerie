@@ -33,7 +33,7 @@ The phase immediately before the pull-request phase is a whole-work review:
 - A remediation runner fixes and commits only that task, then dispatches a fresh whole-work reviewer.
 - Repeat until a reviewer records an explicit approval and the exact reviewed HEAD in `log.md`; `status.md` then points to that approval record and names the pull-request leg.
 
-The whole-work reviewer decides how much independent review is proportionate and records that decision in `log.md`. It may review directly or use `spawn_subsession` for focused or independent report-only reviews, then `yield_to_subsessions` and consolidate their findings. Subreview prompts must identify the repository, base, exact diff scope, charter finish line and designated supporting material, canonical quality instructions, and the prohibition on code changes. Do not assume particular model IDs are available. The Relay handoff remains one `spawn_session` at the end of the leg.
+The whole-work reviewer decides how much independent review is proportionate and records that decision in `log.md`. It can review directly or use an available delegated-agent tool for focused, report-only reviews. It must consume each result before consolidating the findings. Subreview prompts must identify the repository, base, exact diff scope, charter finish line and designated supporting material, canonical quality instructions, and the prohibition on code changes. Do not assume particular model IDs are available. The Relay handoff remains one `spawn_session` at the end of the leg.
 
 ## Pull-request finish
 

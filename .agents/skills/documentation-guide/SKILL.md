@@ -45,16 +45,13 @@ A feature belongs in the README only when it materially changes the top-level pr
 | Content | Canonical destination |
 | --- | --- |
 | Product overview and shortest successful start | `README.md` |
-| Website landing-page summaries and navigation | `docs/index.html` |
-| Requirements, installation modes, PATH setup, service managers, WSL, and manual operation | `docs/install.html` |
-| Troubleshooting, diagnostics, known failure modes, and edge cases | `docs/faq.html` |
-| Configuration keys, files, precedence, defaults, and reload behavior | `docs/config.md` and `docs/config.html` |
-| Remote access and deployment model | `docs/remote-first.html` |
-| Machine federation and selected-machine behavior | `docs/machines.html` |
-| Plugin and Pi package behavior | `docs/plugins.md` and `docs/plugins.html` |
+| Existing service units, deployment, diagnostics, and rollback | `docs/deployment.md` |
+| Configuration keys, files, precedence, defaults, and reload behavior | `docs/config.md` |
+| Pi packages, extensions, and current browser-app plugins | `docs/plugins.md` |
+| Retired upstream features and compatibility limits | `docs/fork-cleanup.md` |
 | Internal invariants that maintainers need while changing code | Focused code comments, `AGENTS.md`, or a dedicated developer document |
 
-When a topic has both Markdown and HTML representations, inspect the local convention and keep user-visible claims synchronized. Do not copy large passages into multiple surfaces merely for convenience.
+The standalone HTML documentation site is retired. Keep detailed guidance in the canonical Markdown page rather than recreating the site.
 
 ## Placement decision
 

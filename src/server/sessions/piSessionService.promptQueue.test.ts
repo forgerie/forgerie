@@ -10,7 +10,7 @@ import { fingerprintPromptResourceCommand, fingerprintPromptResourceDeliveryText
 import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
 import { PiSessionService } from "./piSessionService.js";
 import { buildActiveCommandCatalog, buildPromptResourceCatalogFromResources } from "./commandCatalog.js";
-import { CapturingSessionEventHub, createTestModelRuntime, fakeRuntime, runtimeCreator, seedCredential, sessionGateway, sessionRecord, sessionRef, TEST_MODEL_ID, TEST_MODEL_PROVIDER, testModel, testModelRuntime, type RuntimeCreator } from "./piSessionService.testSupport.js";
+import { CapturingSessionEventHub, fakeRuntime, runtimeCreator, sessionGateway, sessionRecord, sessionRef, testModel, testModelRuntime, type RuntimeCreator } from "./piSessionService.testSupport.js";
 
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
   ...(await importOriginal<typeof PiCodingAgent>()),
@@ -1336,51 +1336,6 @@ target`, options: { expandPromptTemplates: false } },
     } finally {
       await rm(agentDir, { recursive: true, force: true });
     }
-  });
-
-  it("refreshes auth state and dedupes warnings when logout removes the current model's credentials", async () => {
-    const hub = new CapturingSessionEventHub();
-    // The shared model runtime reads a live credential store. Mutating the store
-    // and refreshing here simulates the committed snapshot that
-    // ModelRuntime.login()/logout() establishes before AuthService emits.
-    // applyAuthChange then only needs to notify active sessions.
-    const credentials = new InMemoryCredentialStore();
-    await seedCredential(credentials, "anthropic", { type: "api_key", key: "sk-test" });
-    const modelRuntime = await createTestModelRuntime(credentials);
-    const model = modelRuntime.getModel(TEST_MODEL_PROVIDER, TEST_MODEL_ID);
-    if (model === undefined) throw new Error("Expected Anthropic model fixture");
-    const fake = fakeRuntime("auth-session", { model, modelRuntime });
-
-    const service = new PiSessionService(hub, {
-      agentDir: TEST_AGENT_DIR,
-      modelRuntime,
-      createAgentRuntime: runtimeCreator(fake.runtime),
-      sessionManager: sessionGateway([sessionRecord("auth-session")]),
-      heartbeatIntervalMs: 60_000,
-    });
-
-    await service.status(sessionRef("auth-session"));
-    hub.sessionEvents.length = 0;
-    hub.globalEvents.length = 0;
-
-    await credentials.delete("anthropic");
-    await modelRuntime.refresh();
-    service.applyAuthChange({ removedProviderId: "anthropic" });
-    service.applyAuthChange({ removedProviderId: "anthropic" });
-
-    const warningCount = () => hub.sessionEvents.filter(({ event }) => event.type === "command.output" && event.level === "error" && event.message.includes(`${TEST_MODEL_PROVIDER}/${TEST_MODEL_ID}`)).length;
-    expect(warningCount()).toBe(1);
-    expect(hub.globalEvents.some((event) => event.type === "status.update" && event.status.sessionId === "auth-session")).toBe(true);
-
-    await seedCredential(credentials, "anthropic", { type: "api_key", key: "sk-new" });
-    await modelRuntime.refresh();
-    service.applyAuthChange();
-    await credentials.delete("anthropic");
-    await modelRuntime.refresh();
-    service.applyAuthChange({ removedProviderId: "anthropic" });
-    expect(warningCount()).toBe(2);
-
-    await service.dispose();
   });
 
   it("clears queued messages when stopping a session runtime", async () => {

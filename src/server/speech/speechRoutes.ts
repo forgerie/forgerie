@@ -1,6 +1,6 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { SPEECH_POLICY, SPEECH_SAMPLE_RATE_HZ, type SpeechRuntimePolicy } from "../../shared/speechPolicy.js";
-import { parseSpeechTranscriptionResponse, parseSpeechTurnDecisionResponse, type SpeechErrorKind, type SpeechErrorResponse, type SpeechServiceStatusResponse } from "../../shared/speechContracts.js";
+import { parseSpeechTranscriptionResponse, type SpeechErrorKind, type SpeechErrorResponse, type SpeechServiceStatusResponse } from "../../shared/speechContracts.js";
 import { SpeechAudioValidationError, type SpeechPcmOperation } from "./speechAudio.js";
 import { SpeechProcessError } from "./speechProcess.js";
 import { createSpeechService, speechServiceUnavailable, type SpeechService } from "./speechService.js";
@@ -12,7 +12,6 @@ export interface SpeechRouteOptions {
 
 export function createUnavailableSpeechService(): SpeechService {
   return createSpeechService({
-    smartTurn: speechServiceUnavailable("runtime_not_configured"),
     whisper: speechServiceUnavailable("runtime_not_configured"),
   });
 }
@@ -20,7 +19,6 @@ export function createUnavailableSpeechService(): SpeechService {
 export function registerSpeechRoutes(app: FastifyInstance, service: SpeechService, options: SpeechRouteOptions = {}): void {
   const policy = options.policy ?? SPEECH_POLICY;
   const admission = new SpeechBodyAdmission(policy);
-  const endpointBudget = new TokenBudget(policy.admission.globalEndpointChecksPerWindow, policy.admission.globalWindowMs);
   const transcriptionBudget = new TokenBudget(policy.admission.globalTranscriptionsPerWindow, policy.admission.globalWindowMs);
   const browserAllowedHosts = canonicalHostSet(options.speechAllowedHosts ?? []);
 
@@ -33,12 +31,6 @@ export function registerSpeechRoutes(app: FastifyInstance, service: SpeechServic
   app.get("/api/speech/status", async (_request, reply) => {
     return sendNoStore(reply, statusResponse(service, policy));
   });
-
-  app.post<{ Body: Buffer }>("/api/speech/check-turn", {
-    bodyLimit: policy.audio.endpointWindowBytes,
-    errorHandler: speechParserErrorHandler(policy, "endpoint"),
-    onRequest: [speechRequestGuard(policy, admission, endpointBudget, "endpoint", browserAllowedHosts)],
-  }, async (request, reply) => handlePcmOperation(request, reply, async (signal) => parseSpeechTurnDecisionResponse(await service.checkTurn(request.body, { signal }))));
 
   app.post<{ Body: Buffer }>("/api/speech/transcribe", {
     bodyLimit: policy.audio.maxTurnBytes,

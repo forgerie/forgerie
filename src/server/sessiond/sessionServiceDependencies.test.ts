@@ -28,7 +28,6 @@ function daemonCollaborators(patch: Partial<SessionServiceDependencyInput> = {})
     notificationStore: new SessionNotificationStore(),
     unreadStore: new SessionUnreadStore(),
     catalogRefreshStatus: { isRefreshInFlight: () => false },
-    subsessionsEnabled: false,
     askUserEnabled: true,
     codemodeEnabled: true,
     github: { read: () => Promise.reject(new Error("unused")), write: () => Promise.reject(new Error("unused")) },
@@ -82,18 +81,6 @@ describe("sessiond session service dependency assembly", () => {
     // Pins the note to the refresher's answer, so the test above cannot pass on
     // wording that is always appended.
     expect(details).toEqual(["Starting the Pi session", "Loading session extensions"]);
-  });
-
-  it("keeps tracked subsessions off unless spawning is configured as well", () => {
-    const spawnTargets = { resolveSpawnTarget: () => Promise.reject(new Error("not used")) };
-
-    const withoutSpawnTargets = sessionServiceDependencies(daemonCollaborators({ subsessionsEnabled: true }));
-    const withSpawnTargets = sessionServiceDependencies(daemonCollaborators({ subsessionsEnabled: true, spawnTargets }));
-
-    expect(withoutSpawnTargets.spawnTargets).toBeUndefined();
-    expect(withoutSpawnTargets.subsessionsEnabled).toBe(false);
-    expect(withSpawnTargets.spawnTargets).toBe(spawnTargets);
-    expect(withSpawnTargets.subsessionsEnabled).toBe(true);
   });
 
   it("passes the ask-user preference through to the session service", () => {

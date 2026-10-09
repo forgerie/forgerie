@@ -4,8 +4,6 @@ import { basename, dirname, isAbsolute, join, normalize, resolve } from "node:pa
 import type { PiWebAgentDirEnvSource, PiWebConfigValues } from "./shared/apiTypes.js";
 import { isPiCompanionCommand, usesPiCodingAgentStateCompatibility } from "./shared/activeAgentProfile.js";
 import { isPiWebPluginId, piWebPluginIdPattern } from "./shared/pluginIds.js";
-import { isLegacyDefaultShortcutPreference } from "./shared/shortcutMigrations.js";
-import { parseStoredShortcutValue } from "./shared/shortcutSyntax.js";
 
 export { isPiCompanionCommand };
 
@@ -17,10 +15,9 @@ export interface LoadedPiWebConfig {
   config: PiWebConfig;
 }
 
-export interface EffectivePiWebConfig extends Omit<PiWebConfig, "uploads" | "spawnSessions" | "subsessions" | "askUser" | "codemode" | "durableChildren" | "agent" | "extensionDialogsTimeoutMs"> {
+export interface EffectivePiWebConfig extends Omit<PiWebConfig, "uploads" | "spawnSessions" | "askUser" | "codemode" | "durableChildren" | "agent" | "extensionDialogsTimeoutMs"> {
   uploads: NonNullable<PiWebConfig["uploads"]>;
   spawnSessions: boolean;
-  subsessions: boolean;
   askUser: boolean;
   codemode: boolean;
   durableChildren: boolean;
@@ -153,7 +150,6 @@ export function resolveEffectivePiWebConfig(loaded: LoadedPiWebConfig, options: 
   const env = options.env ?? process.env;
   const host = env["PI_WEB_HOST"];
   const port = env["PI_WEB_PORT"] ?? env["PORT"];
-  const allowedHosts = env["PI_WEB_ALLOWED_HOSTS"];
   const maxUpload = env["PI_WEB_MAX_UPLOAD_BYTES"];
   const agent = effectiveAgentConfig(env, loaded.config);
   return {
@@ -162,14 +158,11 @@ export function resolveEffectivePiWebConfig(loaded: LoadedPiWebConfig, options: 
       ...loaded.config,
       ...(host !== undefined && host !== "" ? { host } : {}),
       ...(port !== undefined && port !== "" ? { port: parsePort(port, "PI_WEB_PORT") } : {}),
-      ...(allowedHosts !== undefined && allowedHosts !== "" ? { allowedHosts: parseAllowedHostsEnv(allowedHosts) } : {}),
       ...(maxUpload !== undefined && maxUpload !== "" ? { maxUploadBytes: parseMaxUploadBytes(maxUpload, "PI_WEB_MAX_UPLOAD_BYTES") } : {}),
       uploads: effectiveUploadsConfig(loaded.config),
       // Always resolved (on by default) so the effective config is the single
       // source of truth for the runtime state and the settings UI toggle.
       spawnSessions: spawnSessionsEnabled(env, loaded.config),
-      // Beta capability, resolved off by default.
-      subsessions: subsessionsEnabled(env, loaded.config),
       // Always resolved (on by default); the user is present for every ask.
       askUser: askUserEnabled(env, loaded.config),
       // Always resolved (on by default); scripts reach only tools already active.
@@ -221,14 +214,11 @@ function piWebConfigRecord(config: PiWebConfig): Record<string, unknown> {
   return {
     ...(config.host !== undefined ? { host: config.host } : {}),
     ...(config.port !== undefined ? { port: config.port } : {}),
-    ...(config.allowedHosts !== undefined ? { allowedHosts: config.allowedHosts } : {}),
-    ...(config.shortcuts !== undefined ? { shortcuts: config.shortcuts } : {}),
     ...(config.plugins !== undefined ? { plugins: config.plugins } : {}),
     ...(config.pathAccess !== undefined ? { pathAccess: config.pathAccess } : {}),
     ...(config.uploads !== undefined ? { uploads: config.uploads } : {}),
     ...(config.maxUploadBytes !== undefined ? { maxUploadBytes: config.maxUploadBytes } : {}),
     ...(config.spawnSessions !== undefined ? { spawnSessions: config.spawnSessions } : {}),
-    ...(config.subsessions !== undefined ? { subsessions: config.subsessions } : {}),
     ...(config.askUser !== undefined ? { askUser: config.askUser } : {}),
     ...(config.codemode !== undefined ? { codemode: config.codemode } : {}),
     ...(config.durableChildren !== undefined ? { durableChildren: config.durableChildren } : {}),
@@ -240,14 +230,11 @@ function parsePiWebConfig(value: Record<string, unknown>, path: string): PiWebCo
   return {
     ...(value["host"] !== undefined ? { host: parseString(value["host"], "host", path) } : {}),
     ...(value["port"] !== undefined ? { port: parsePort(value["port"], "port", path) } : {}),
-    ...(value["allowedHosts"] !== undefined ? { allowedHosts: parseAllowedHosts(value["allowedHosts"], path) } : {}),
-    ...(value["shortcuts"] !== undefined ? { shortcuts: parseShortcuts(value["shortcuts"], path) } : {}),
     ...(value["plugins"] !== undefined ? { plugins: parsePlugins(value["plugins"], path) } : {}),
     ...(value["pathAccess"] !== undefined ? { pathAccess: parsePathAccessConfig(value["pathAccess"], path) } : {}),
     ...(value["uploads"] !== undefined ? { uploads: parseUploadsConfig(value["uploads"], path) } : {}),
     ...(value["maxUploadBytes"] !== undefined ? { maxUploadBytes: parseMaxUploadBytes(value["maxUploadBytes"], "maxUploadBytes", path) } : {}),
     ...(value["spawnSessions"] !== undefined ? { spawnSessions: parseSpawnSessions(value["spawnSessions"], path) } : {}),
-    ...(value["subsessions"] !== undefined ? { subsessions: parseSubsessions(value["subsessions"], path) } : {}),
     ...(value["askUser"] !== undefined ? { askUser: parseAskUser(value["askUser"], path) } : {}),
     ...(value["codemode"] !== undefined ? { codemode: parseCodemode(value["codemode"], path) } : {}),
     ...(value["durableChildren"] !== undefined ? { durableChildren: parseDurableChildren(value["durableChildren"], path) } : {}),
@@ -277,25 +264,6 @@ export function spawnSessionsEnabled(env: NodeJS.ProcessEnv = process.env, confi
   const fromEnv = env["PI_WEB_SPAWN_SESSIONS"];
   if (fromEnv !== undefined && fromEnv !== "") return fromEnv === "1" || fromEnv.toLowerCase() === "true";
   return config.spawnSessions ?? true;
-}
-
-function parseSubsessions(value: unknown, path: string): boolean {
-  if (typeof value !== "boolean") throw new Error(`Forgerie config subsessions must be a boolean: ${path}`);
-  return value;
-}
-
-/**
- * Beta: whether LLMs may start tracked child sessions via the spawn_subsession
- * family of tools. Off by default while the capability stabilizes, so it can
- * ship in main without affecting releases; enable with the env var
- * `PI_WEB_SUBSESSIONS` or the `subsessions` config key. The env var takes
- * precedence over the config file. Subsessions also require spawnSessions to be
- * enabled (they share the same project-scope resolver).
- */
-export function subsessionsEnabled(env: NodeJS.ProcessEnv = process.env, config: PiWebConfig = {}): boolean {
-  const fromEnv = env["PI_WEB_SUBSESSIONS"];
-  if (fromEnv !== undefined && fromEnv !== "") return fromEnv === "1" || fromEnv.toLowerCase() === "true";
-  return config.subsessions ?? false;
 }
 
 function parseAskUser(value: unknown, path: string): boolean {
@@ -363,10 +331,7 @@ const OFFLINE_ENV_KEYS = ["PI_WEB_OFFLINE", "PI_OFFLINE"] as const;
  * Whether the operator asked Forgerie (or pi itself) to stay offline, meaning
  * background network access must be skipped. Matches the "set and non-empty"
  * semantics used for the other runtime-only env switches.
- *
- * Deliberately narrower than `piWebStatus`'s update-check suppression: the
- * `*_SKIP_VERSION_CHECK` keys only silence release lookups, while these keys ask
- * for no background network at all.
+ * Local version diagnostics never perform release lookups.
  */
 export function offlineModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return OFFLINE_ENV_KEYS.some((key) => isEnvSet(env[key]));
@@ -451,19 +416,6 @@ function parsePort(value: unknown, key: string, path = "environment"): number {
   return port;
 }
 
-function parseAllowedHosts(value: unknown, path: string): string[] | true {
-  if (value === true) return true;
-  if (!isNonEmptyStringArray(value)) {
-    throw new Error(`Forgerie config allowedHosts must be true or an array of non-empty strings: ${path}`);
-  }
-  return value;
-}
-
-function parseAllowedHostsEnv(value: string): string[] | true {
-  if (value === "true") return true;
-  return value.split(",").map((host) => host.trim()).filter((host) => host !== "");
-}
-
 export function parsePathAccessConfig(value: unknown, path: string): NonNullable<PiWebConfigValues["pathAccess"]> {
   if (!isRecord(value)) throw new Error(`Forgerie config pathAccess must be an object: ${path}`);
   const allowedPaths = value["allowedPaths"];
@@ -537,16 +489,6 @@ function isAbsoluteLike(value: string): boolean {
   return isAbsolute(value) || withForwardSlashes.startsWith("/") || /^[A-Za-z]:\//.test(withForwardSlashes);
 }
 
-function parseShortcuts(value: unknown, path: string): Record<string, string | null> {
-  if (!isRecord(value)) throw new Error(`Forgerie config shortcuts must be an object: ${path}`);
-  return Object.fromEntries(Object.entries(value).flatMap(([actionId, shortcut]): [string, string | null][] => {
-    if (isLegacyDefaultShortcutPreference(actionId, shortcut)) return [];
-    const parsed = parseStoredShortcutValue(shortcut);
-    if (!parsed.ok) throw new Error(`Forgerie config shortcut ${actionId} is invalid: ${parsed.message}: ${path}`);
-    return [[actionId, parsed.value]];
-  }));
-}
-
 function parsePlugins(value: unknown, path: string): NonNullable<PiWebConfigValues["plugins"]> {
   if (!isRecord(value) || Array.isArray(value)) throw new Error(`Forgerie config plugins must be an object: ${path}`);
   return Object.fromEntries(Object.entries(value).map(([pluginId, config]) => {
@@ -566,9 +508,5 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string" && item !== "");
-}
-
-export function examplePiWebConfig(config: PiWebConfig = {}): string {
-  return `${JSON.stringify({ host: config.host ?? "127.0.0.1", port: config.port ?? 8504, allowedHosts: config.allowedHosts ?? [] }, null, 2)}\n`;
 }
 

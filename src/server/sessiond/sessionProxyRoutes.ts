@@ -39,8 +39,6 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
   });
 
   app.all(`${prefix}/activity`, (request, reply) => proxy(request, reply));
-  app.all(`${prefix}/auth`, (request, reply) => proxy(request, reply));
-  app.all(`${prefix}/auth/*`, (request, reply) => proxy(request, reply));
   // Models a composer may choose from before any session exists, so this sits
   // beside the session routes rather than under one.
   app.all(`${prefix}/models`, (request, reply) => proxy(request, reply));

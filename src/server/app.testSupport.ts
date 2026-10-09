@@ -1,16 +1,12 @@
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Readable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach } from "vitest";
 import { buildApp } from "./app.js";
 import { createUnavailableSpeechService } from "./speech/speechRoutes.js";
 import { ProjectService } from "./projects/projectService.js";
 import { ProjectStore } from "./storage/projectStore.js";
-import type { MachineClient } from "./machines/machineClient.js";
-import { MachineService } from "./machines/machineService.js";
-import { MachineStore } from "./machines/machineStore.js";
 import { WorkspaceService } from "./workspaces/workspaceService.js";
 import type { PiPackageService } from "./piPackageService.js";
 import type { SessionProxyDaemon } from "./sessiond/sessionProxyRoutes.js";
@@ -21,7 +17,6 @@ interface AppTestContext {
   readonly app: FastifyInstance;
   readonly tempDir: string;
   readonly projectDir: string;
-  remoteClient: MachineClient | undefined;
   readonly sessionDaemonRequests: CapturedSessionDaemonRequest[];
   readonly piPackageRequests: CapturedPiPackageRequest[];
   piWebConfig: PiWebConfigValues;
@@ -31,7 +26,6 @@ interface AppTestContext {
 let app: FastifyInstance | undefined;
 let tempDir: string | undefined;
 let projectDir: string | undefined;
-let remoteClient: MachineClient | undefined;
 let sessionDaemonRequests: CapturedSessionDaemonRequest[] = [];
 let piPackageRequests: CapturedPiPackageRequest[] = [];
 let piWebConfig: PiWebConfigValues = {};
@@ -49,12 +43,6 @@ export const appTestContext: AppTestContext = {
   get projectDir() {
     if (projectDir === undefined) throw new Error("App test projectDir was not initialized");
     return projectDir;
-  },
-  get remoteClient() {
-    return remoteClient;
-  },
-  set remoteClient(client) {
-    remoteClient = client;
   },
   get sessionDaemonRequests() {
     return sessionDaemonRequests;
@@ -76,45 +64,28 @@ export const appTestContext: AppTestContext = {
   },
 };
 
-export function registerAppTestHooks(): void {
+export function registerAppTestHooks(options: { clientDist?: boolean } = {}): void {
   beforeEach(async () => {
     tempDir = await realpath(await mkdtemp(join(tmpdir(), "pi-web-app-test-")));
     projectDir = join(tempDir, "project");
-    remoteClient = undefined;
     sessionDaemonRequests = [];
     piPackageRequests = [];
     piWebConfig = {};
     agentProfileResult = { status: "available", profile: appTestAgentProfile(join(tempDir, "agent")) };
+    const clientDist = options.clientDist === true ? join(tempDir, "client") : false;
+    if (clientDist !== false) {
+      await mkdir(clientDist);
+      await writeFile(join(clientDist, "index.html"), "<!doctype html><title>Forgerie test shell</title>");
+    }
     app = await buildApp({
       projects: new ProjectService(new ProjectStore(join(tempDir, "projects.json"))),
       workspaces: new WorkspaceService(),
-      machines: new MachineService(new MachineStore(join(tempDir, "machines.json")), {
-        remoteClientFactory: () => {
-          if (remoteClient === undefined) throw new Error("No remote machine client configured");
-          return remoteClient;
-        },
-        now: () => new Date("2026-05-25T00:00:00.000Z"),
-        localRuntime: () => Promise.resolve({
-          packageName: "forgerie",
-          generatedAt: "2026-05-25T00:00:00.000Z",
-          components: {
-            web: { component: "web", label: "Forgerie", available: true, capabilities: [] },
-            sessiond: { component: "sessiond", label: "Forgerie Session Daemon", available: true, capabilities: [] },
-          },
-          capabilities: [],
-        }),
-      }),
       sessionDaemon: fakeSessionDaemon(),
       agentProfileProvider: { getActiveAgentProfile: () => Promise.resolve(agentProfileResult) },
       config: fakeConfigService(),
       speech: createUnavailableSpeechService(),
       piPackages: fakePiPackageService(),
-      piWebPlugins: {
-        manifest: () => Promise.resolve({ plugins: [{ id: "fake", module: "/pi-web-plugins/fake/plugin.js?v=1", source: "test", scope: "local", machineSpecific: false }] }),
-        plugins: () => Promise.resolve({ plugins: [{ id: "fake", module: "/pi-web-plugins/fake/plugin.js?v=1", source: "test", scope: "local", machineSpecific: false, enabled: true }] }),
-        readAsset: fakePiWebPluginAsset,
-      },
-      clientDist: false,
+      clientDist,
       logger: false,
     });
   });
@@ -125,7 +96,6 @@ export function registerAppTestHooks(): void {
     app = undefined;
     tempDir = undefined;
     projectDir = undefined;
-    remoteClient = undefined;
     sessionDaemonRequests = [];
     piPackageRequests = [];
     piWebConfig = {};
@@ -134,13 +104,6 @@ export function registerAppTestHooks(): void {
     if (appToClose !== undefined) await appToClose.close();
     if (tempDirToRemove !== undefined) await rm(tempDirToRemove, { recursive: true, force: true });
   });
-}
-
-function fakePiWebPluginAsset(pluginId: string, assetPath: string): Promise<{ content: Buffer; contentType: string } | undefined> {
-  if (pluginId !== "fake") return Promise.resolve(undefined);
-  if (assetPath === "plugin.js") return Promise.resolve({ content: Buffer.from("export default {};"), contentType: "application/javascript; charset=utf-8" });
-  if (assetPath === "assets/icon.svg") return Promise.resolve({ content: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>'), contentType: "image/svg+xml" });
-  return Promise.resolve(undefined);
 }
 
 export interface CapturedSessionDaemonRequest {
@@ -175,60 +138,14 @@ function appTestAgentProfile(dir: string): ActiveAgentProfileDescriptor {
   };
 }
 
-export function fullPiWebConfig(): PiWebConfigValues {
-  return {
-    host: "127.0.0.1",
-    port: 8504,
-    allowedHosts: ["gateway.example.test"],
-    shortcuts: { "core:view.chat": "ctrl+1" },
-    plugins: { info: { enabled: true, settings: { note: "remote" } } },
-    pathAccess: { allowedPaths: ["/srv/repos"] },
-    uploads: { defaultFolder: "uploads" },
-    maxUploadBytes: 1024,
-    spawnSessions: false,
-    subsessions: false,
-    agent: { command: "agent-lab", dir: "/srv/agent-lab" },
-  };
-}
-
-export function selectedMachinePiWebConfig(): PiWebConfigValues {
-  return {
-    plugins: { info: { enabled: true, settings: { note: "remote" } } },
-    pathAccess: { allowedPaths: ["/srv/repos"] },
-    uploads: { defaultFolder: "uploads" },
-    maxUploadBytes: 1024,
-    spawnSessions: false,
-    subsessions: false,
-    agent: { command: "agent-lab", dir: "/srv/agent-lab" },
-  };
-}
-
 export function piWebConfigResponse(config: PiWebConfigValues): PiWebConfigResponse {
   return {
     path: join(appTestContext.tempDir, "config.json"),
     exists: false,
     config,
     effectiveConfig: config,
-    envOverrides: { host: false, port: false, allowedHosts: false, spawnSessions: false, subsessions: false, askUser: false, codemode: false, agentCommand: false, agentDir: false, agentSessionDir: false },
+    envOverrides: { host: false, port: false, spawnSessions: false, askUser: false, codemode: false, agentCommand: false, agentDir: false, agentSessionDir: false },
   };
-}
-
-interface MachineConfigWriteBody {
-  config: PiWebConfigValues;
-}
-
-export function configFromMachineConfigWriteBody(body: unknown): PiWebConfigValues {
-  if (!isMachineConfigWriteBody(body)) throw new Error("Expected machine config write body");
-  return body.config;
-}
-
-function isMachineConfigWriteBody(value: unknown): value is MachineConfigWriteBody {
-  if (!isRecord(value)) return false;
-  return isRecord(value["config"]);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function fakePiPackageService(): PiPackageService {
@@ -261,18 +178,13 @@ function fakeSessionDaemon(): SessionProxyDaemon {
       return Promise.resolve({
         statusCode: 200,
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(captured),
+        body: JSON.stringify(path === "/runtime" ? {
+          component: "sessiond", label: "Session daemon", runtimeVersion: "test-runtime", capabilities: [],
+          available: agentProfileResult.status === "available",
+          ...(agentProfileResult.status === "available" ? { activeAgentProfile: agentProfileResult.profile } : { error: "Agent profile unavailable" }),
+        } : captured),
       });
     },
     connectWebSocket: () => { throw new Error("WebSocket not configured for test"); },
-  };
-}
-
-export function fakeRemoteClient(overrides: Partial<MachineClient>): MachineClient {
-  return {
-    request: () => Promise.resolve({ statusCode: 200, headers: {}, body: Readable.from([]) }),
-    requestJson: () => Promise.resolve({ statusCode: 200, headers: {}, body: undefined }),
-    connectWebSocket: () => { throw new Error("WebSocket not configured for test"); },
-    ...overrides,
   };
 }

@@ -4,7 +4,7 @@
 
 New browser-created sessions in Git projects use a fresh worktree by default. The draft creates nothing until the browser sends its first message and calls the session creation API. The user can choose an existing workspace for that session.
 
-Agent-created sessions do not use this default. `spawn_session`, `spawn_subsession`, handoff, and pi-subagents keep their existing cwd inheritance. Their internal creation path does not call the browser coordinator.
+Agent-created sessions do not use this default. `spawn_session`, handoff, and pi-subagents keep their existing cwd inheritance. Their internal creation path does not call the browser coordinator.
 
 Land is a local rebase and fast-forward. It does not push commits or create pull requests.
 
@@ -147,4 +147,4 @@ The script creates a disposable Git repository, sends one short model prompt per
 
 The backend supplies the capabilities. The frontend session owns presentation and first-send draft state. Fix parking-lot item `01M1CS6D1HSETRY10K1541VNB7` first, so destination choice stays reachable at 475 × 638. Then add the default destination, setup card, branch chip and inbox counts, Land/Discard confirms, conflict prompt offer, and readable completed-session state.
 
-Use `ComposerContextChip` kind `branch` in `src/client/src/composerCapabilities.ts`. Add no toolbar or width breakpoint inside the 475–932 px posture range. Capture 704 × 783, 932 × 553, 475 × 638, and 711 × 374 in both light and dark with `scripts/capture-postures.mjs`, and read all PNGs. Captures do not prove physical-device acceptance.
+Use the current session-header worktree controls in `ui/`. The retired Lit composer is not an implementation target. Add no toolbar or width breakpoint inside the 475–932 px posture range. Capture 704 × 783, 932 × 553, 475 × 638, and 711 × 374 in both light and dark with `scripts/capture-postures.mjs`, and read all PNGs. Captures do not prove physical-device acceptance.

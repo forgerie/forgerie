@@ -19,7 +19,6 @@ const settingsSchema = z.looseObject({ packages: z.array(packageSchema).default(
   forgerieDisabledPackages: z.array(packageSchema).default([]),
 });
 const webConfigSchema = z.looseObject({ plugins: z.record(z.string(), z.looseObject({ enabled: z.boolean().optional(), settings: objectSchema.optional() })).default({}) });
-const webListSchema = z.object({ plugins: z.array(z.object({ id: z.string(), source: z.string(), scope: z.string(), enabled: z.boolean() })) });
 const pendingSchema = z.object({ stamp: z.array(z.string()), required: z.boolean() });
 const packageJsonSchema = z.object({ name: z.string().optional(), version: z.string().optional(), description: z.string().optional() });
 const builtins: readonly (readonly [string, string])[] = [
@@ -92,7 +91,7 @@ async function atomicWrite(path: string, value: unknown) {
 
 /** Owns profile-only edits, full-entry disable/restore, stale-write checks, and restart evidence.
  * Uses Pi's resolver without loading extension code or installing missing sources.
- * The running gateway owns installs and Forgerie plugin discovery.
+ * The running gateway owns installs and Pi package installs.
  */
 export class PluginService {
   private queue: Promise<unknown> = Promise.resolve();
@@ -136,7 +135,7 @@ export class PluginService {
     const { profile, settings, config } = data;
     const manager = new DefaultPackageManager({ cwd: profile.dir, agentDir: profile.dir,
       settingsManager: SettingsManager.create(profile.dir, profile.dir, { projectTrusted: false }) });
-    const [resolved, web, services] = await Promise.all([manager.resolve(() => Promise.resolve("skip")), this.gateway("/api/plugins"), this.services.read()]);
+    const [resolved, services] = await Promise.all([manager.resolve(() => Promise.resolve("skip")), this.services.read()]);
     // Reads package.json as data. Locating a package never loads its code or installs a missing one.
     const describePackage = async (entry: z.infer<typeof packageSchema>, enabled: boolean): Promise<ManagedPlugin> => {
       const source = packageSource(entry);
@@ -156,11 +155,6 @@ export class PluginService {
       ...packages,
       ...resolved.extensions.filter((entry) => entry.metadata.origin === "top-level" && entry.metadata.scope === "user" && !entry.path.startsWith("builtin:")).map((entry): ManagedPlugin => ({
         id: extensionId(entry.path), kind: "extension", name: extensionName(entry.path), source: entry.path, enabled: entry.enabled, description: "" })),
-      // A bundled plugin that replaces an original-client plugin owns its id and its config entry.
-      ...webListSchema.parse(web).plugins.filter((entry) => !this.appPlugins.some((manifest) => manifest.id === entry.id)).map((entry): ManagedPlugin => ({
-        id: `forgerie:${entry.id}`, kind: "forgerie", name: entry.id, source: entry.source, description: "",
-        enabled: config.plugins[entry.id]?.enabled !== false, settings: config.plugins[entry.id]?.settings ?? {},
-      })),
       ...this.appPlugins.map((manifest): ManagedPlugin => ({
         id: appId(manifest.id), kind: "app", name: manifest.name, source: "Forgerie", description: manifest.description,
         enabled: config.plugins[manifest.id]?.enabled !== false, settings: { ...resolveAppSettings(manifest, config.plugins[manifest.id]?.settings) },
@@ -189,8 +183,8 @@ export class PluginService {
       const plugin = change.type === "add" ? undefined : before.plugins.find((entry) => entry.id === change.id);
       if (change.type !== "add" && plugin === undefined) throw new PluginError(404, "This plugin is no longer listed. Reload.");
       if (plugin?.kind === "builtin") throw new PluginError(403, "Built-in add-ons are part of Forgerie and are read-only.");
-      if (change.type === "remove" && plugin?.kind !== "package") throw new PluginError(400, "Only Pi packages can be removed here. Turn extensions and browser plugins off instead.");
-      if (change.type === "settings" && plugin?.kind !== "forgerie" && plugin?.kind !== "app") throw new PluginError(400, "Only Forgerie browser plugins have settings here.");
+      if (change.type === "remove" && plugin?.kind !== "package") throw new PluginError(400, "Only Pi packages can be removed here. Turn extensions and app plugins off instead.");
+      if (change.type === "settings" && plugin?.kind !== "app") throw new PluginError(400, "Only Forgerie app plugins have settings here.");
       if (change.type === "add" && before.plugins.some((entry) => entry.kind === "package" && entry.source === change.source)) throw new PluginError(409, "This package is already listed. Turn it on to restore it.");
       if (plugin?.kind === "app") {
         // The browser app reads these on its next load and after each save. No service holds them, so nothing restarts.
@@ -212,11 +206,6 @@ export class PluginService {
         await this.gateway("/api/pi-packages/install", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source: change.source }) });
       } else if (plugin === undefined) {
         throw new PluginError(404, "This plugin is no longer listed. Reload.");
-      } else if (plugin.kind === "forgerie") {
-        const id = plugin.id.slice("forgerie:".length);
-        const old = data.config.plugins[id] ?? {};
-        const entry = change.type === "settings" ? { ...old, settings: change.settings } : change.type === "toggle" ? { ...old, enabled: change.enabled } : old;
-        await this.writeWebEntry(data, id, entry);
       } else {
         const next = { ...data.settings };
         if (plugin.kind === "package") {

@@ -49,7 +49,7 @@ review. A partial review does not move the cursor.
 ### Adoption priorities
 
 - **High**: `src/server/sessiond*`, session persistence, reconnect/replay,
-  ask/dialog stores, subsession machinery, security fixes, pi SDK version
+  ask/dialog stores, child-agent persistence, security fixes, pi SDK version
   bumps (`@earendil-works/pi-*`).
 - **Low / usually skip**: upstream client UI (`src/client/`), styling, bundled
   plugin UX — this is where we diverge.
@@ -73,10 +73,10 @@ tracks `main` without a NixOS rebuild.
 
 - Runs on the user's server (zao, NixOS), accessed over Tailscale only. No
   auth layer of its own; network exposure is Tailscale's job.
-- Chat is fully web-native; embedded terminals are the escape hatch, not the
-  primary surface.
-- Reuses the user's real pi profile at `~/.pi/agent` (credentials, sessions,
-  packages, extensions) via the session daemon.
+- Chat is fully web-native. Session shell commands and managed processes
+  provide command execution without embedded terminals.
+- Uses the configured Pi profile for credentials, sessions, packages, and
+  extensions. Read `AGENTS.local.md` for this host's active profile.
 - The daemon's `ask_user` custom tool shadows any extension-registered
   `ask_user` (pi merges tools by name, SDK customTools last). Forgerie bundles
   its own `ask-user` decision-gate skill (`skills/ask-user`), written for this

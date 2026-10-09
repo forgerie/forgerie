@@ -1,39 +1,26 @@
-import { describe, expect, it, vi } from "vitest";
-import type { PiWebStatusResponse } from "../shared/apiTypes.js";
-import { buildApp } from "./app.js";
+import { describe, expect, it } from "vitest";
+import type { PiWebRuntimeResponse, PiWebVersionResponse } from "../shared/apiTypes.js";
+import { appTestContext, registerAppTestHooks } from "./app.testSupport.js";
 
-describe("Forgerie status routes", () => {
-  it("forces a fresh status load when refresh is requested", async () => {
-    const get = vi.fn(() => Promise.resolve(status("cached")));
-    const refresh = vi.fn(() => Promise.resolve(status("forced")));
-    const invalidate = vi.fn();
-    const app = await buildApp({ piWebStatusCache: { get, refresh, invalidate }, clientDist: false, logger: false });
+registerAppTestHooks();
 
-    try {
-      const cachedResponse = await app.inject({ method: "GET", url: "/api/pi-web/status" });
-      const forcedResponse = await app.inject({ method: "GET", url: "/api/pi-web/status?refresh=1" });
+describe("local diagnostic routes", () => {
+  it.each(["/api/pi-web/status", "/api/pi-web/version"])("returns local versions through %s even when daemon runtime data is invalid", async (url) => {
+    appTestContext.agentProfileResult = { status: "invalid", error: "Unavailable daemon" };
+    const response = await appTestContext.app.inject({ method: "GET", url });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<PiWebVersionResponse>();
+    expect(body.packageName).toBe("forgerie");
+    expect(body.components.web).toMatchObject({ available: true, stale: false });
+    expect(body.components.sessiond).toMatchObject({ available: false, stale: false });
+    expect(body).not.toHaveProperty("latestVersion");
+    expect(appTestContext.sessionDaemonRequests).toEqual([{ method: "GET", path: "/runtime" }]);
+  });
 
-      expect(cachedResponse.json<PiWebStatusResponse>().generatedAt).toBe("cached");
-      expect(forcedResponse.json<PiWebStatusResponse>().generatedAt).toBe("forced");
-      expect(get).toHaveBeenCalledOnce();
-      expect(refresh).toHaveBeenCalledOnce();
-      expect(refresh).toHaveBeenCalledWith({ force: true });
-    } finally {
-      await app.close();
-    }
+  it("keeps runtime capability discovery available", async () => {
+    appTestContext.agentProfileResult = { status: "invalid", error: "Unavailable daemon" };
+    const response = await appTestContext.app.inject({ method: "GET", url: "/api/pi-web/runtime" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<PiWebRuntimeResponse>()).toMatchObject({ packageName: "forgerie", components: { web: { available: true }, sessiond: { available: false } } });
   });
 });
-
-function status(generatedAt: string): PiWebStatusResponse {
-  return {
-    packageName: "forgerie",
-    generatedAt,
-    components: {
-      web: { component: "web", label: "Web/UI", stale: false, available: true },
-      sessiond: { component: "sessiond", label: "Session daemon", stale: false, available: true },
-    },
-    release: { packageName: "forgerie", updateAvailable: false },
-    commands: {},
-    messages: [],
-  };
-}

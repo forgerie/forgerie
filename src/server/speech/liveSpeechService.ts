@@ -6,12 +6,10 @@ import { WhisperProcess } from "./whisperProcess.js";
 
 export interface LiveSpeechCommandEnvironment {
   readonly PATH?: string;
-  readonly FORGERIE_SMART_TURN_WORKER?: string;
   readonly FORGERIE_WHISPER_STT_WORKER?: string;
 }
 
 export interface LiveSpeechCommands {
-  readonly smartTurn: string | undefined;
   readonly whisper: string | undefined;
 }
 
@@ -19,17 +17,13 @@ const whisperCommandName = "forgerie-whisper-stt-worker";
 
 export async function createLiveSpeechService(env: LiveSpeechCommandEnvironment = process.env): Promise<SpeechService> {
   const commands = await resolveLiveSpeechCommands(env);
-  const smartTurn = speechServiceUnavailable("automatic_turn_detection_disabled");
   const whisper = backendForCommand(commands.whisper, whisperBackend, "whisper_runtime_missing", "whisper_runtime_unusable");
-  return createSpeechService({ smartTurn, whisper });
+  return createSpeechService({ whisper });
 }
 
 export async function resolveLiveSpeechCommands(env: LiveSpeechCommandEnvironment = process.env): Promise<LiveSpeechCommands> {
-  // Explicit completion is the product policy. Do not resolve or start the
-  // Smart Turn backend while automatic turn detection is disabled.
-  const smartTurn = undefined;
   const whisper = await resolveCommand(env.FORGERIE_WHISPER_STT_WORKER, whisperCommandName, env.PATH);
-  return { smartTurn, whisper };
+  return { whisper };
 }
 
 function whisperBackend(commandPath: string): SpeechBackend {

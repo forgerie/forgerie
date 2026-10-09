@@ -40,7 +40,6 @@ function tinyPolicy(overrides: Partial<SpeechRuntimePolicy> = {}): SpeechRuntime
       maxQueuedPcmBytes: 8,
       maxConcurrentParsingBytes: 4,
       globalWindowMs: 60_000,
-      globalEndpointChecksPerWindow: 1,
       globalTranscriptionsPerWindow: 1,
     },
     ...overrides,
@@ -50,17 +49,15 @@ function tinyPolicy(overrides: Partial<SpeechRuntimePolicy> = {}): SpeechRuntime
 
 interface ServiceOptions {
   status?: SpeechServiceStatus;
-  checkTurn?: SpeechService["checkTurn"];
   transcribe?: SpeechService["transcribe"];
   close?: SpeechService["close"];
 }
 
 function speechService(options: ServiceOptions = {}): SpeechService {
-  const status = options.status ?? { smartTurn: "ready", whisper: "ready", capability: "ready" };
+  const status = options.status ?? { smartTurn: "unavailable", whisper: "ready", capability: "manual-only" };
   return {
     status: () => status,
     warm: () => Promise.resolve(),
-    checkTurn: options.checkTurn ?? vi.fn(() => Promise.resolve({ complete: true, probability: 0.75, samples: SPEECH_POLICY.audio.minRequestSamples })),
     transcribe: options.transcribe ?? vi.fn(() => Promise.resolve({ text: "spoken words" })),
     close: options.close ?? vi.fn(() => Promise.resolve()),
   };
@@ -71,7 +68,6 @@ function speechBackend(options: Partial<SpeechBackend> = {}): SpeechBackend {
     status: options.status ?? (() => "ready"),
     start: options.start ?? (() => Promise.resolve()),
     close: options.close ?? (() => Promise.resolve()),
-    ...(options.checkTurn === undefined ? {} : { checkTurn: options.checkTurn }),
     ...(options.transcribe === undefined ? {} : { transcribe: options.transcribe }),
   };
 }
@@ -169,75 +165,21 @@ describe("speech routes", () => {
     }
   });
 
-  it("accepts same-origin browser endpoint checks and transcriptions through typed binary routes", async () => {
-    let checkSignal: AbortSignal | undefined;
-    let transcribeSignal: AbortSignal | undefined;
-    let checkCalls = 0;
-    let transcribeCalls = 0;
-    const checkTurn: SpeechService["checkTurn"] = (_pcm, options) => {
-      checkCalls += 1;
-      checkSignal = options?.signal;
-      return Promise.resolve({ complete: false, probability: 0.25, samples: SPEECH_POLICY.audio.minRequestSamples });
-    };
-    const transcribe: SpeechService["transcribe"] = (_pcm, options) => {
-      transcribeCalls += 1;
-      transcribeSignal = options?.signal;
-      return Promise.resolve({ text: "hello from speech" });
-    };
-    const app = await appWithSpeech(speechService({ checkTurn, transcribe }));
-    const payload = validPcm();
-    try {
-      const check = await app.inject({
-        method: "POST",
-        url: "/api/speech/check-turn",
-        headers: {
-          "content-type": "application/octet-stream",
-          "content-length": String(payload.byteLength),
-          origin: "https://forgerie.example.test",
-          host: "forgerie.example.test",
-          "sec-fetch-site": "same-origin",
-        },
-        payload,
-      });
-      expect(check.statusCode).toBe(200);
-      expect(check.headers["cache-control"]).toBe("no-store");
-      expect(check.json()).toEqual({ complete: false, probability: 0.25, samples: SPEECH_POLICY.audio.minRequestSamples });
-      expect(checkCalls).toBe(1);
-      expect(checkSignal).toBeInstanceOf(AbortSignal);
-      expect(checkSignal?.aborted).toBe(false);
-
-      const transcription = await app.inject({
-        method: "POST",
-        url: "/api/speech/transcribe",
-        headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) },
-        payload,
-      });
-      expect(transcription.statusCode).toBe(200);
-      expect(transcription.headers["cache-control"]).toBe("no-store");
-      expect(transcription.json()).toEqual({ text: "hello from speech" });
-      expect(transcribeCalls).toBe(1);
-      expect(transcribeSignal).toBeInstanceOf(AbortSignal);
-      expect(transcribeSignal?.aborted).toBe(false);
-    } finally {
-      await close(app);
-    }
-  });
-
   it("aborts the operation signal when a real client disconnects after a complete upload", async () => {
     let capturedSignal: AbortSignal | undefined;
-    let resolveService!: (value: { complete: boolean; probability: number; samples: number }) => void;
-    const pendingService = new Promise<{ complete: boolean; probability: number; samples: number }>((resolve) => { resolveService = resolve; });
-    const checkTurn: SpeechService["checkTurn"] = (_pcm, options) => {
+    let resolveService!: (value: { text: string }) => void;
+    const pendingService = new Promise<{ text: string }>((resolve) => { resolveService = resolve; });
+    const transcribe: SpeechService["transcribe"] = (_pcm, options) => {
       capturedSignal = options?.signal;
       return pendingService;
     };
-    const app = await appWithSpeech(speechService({ checkTurn }), SPEECH_POLICY, ["127.0.0.1:0"]);
+    const app = await appWithSpeech(speechService({ transcribe }), SPEECH_POLICY, ["127.0.0.1:0"]);
     const payload = validPcm();
     let socket: Socket | undefined;
     try {
       const port = await listenOnLoopback(app);
       socket = await connectSocket(port);
-      writeSpeechPost(socket, port, "/api/speech/check-turn", {
+      writeSpeechPost(socket, port, "/api/speech/transcribe", {
         "Content-Type": "application/octet-stream",
         "Content-Length": String(payload.byteLength),
       }, payload);
@@ -246,10 +188,10 @@ describe("speech routes", () => {
       socket.destroy();
 
       await vi.waitFor(() => { expect(capturedSignal?.aborted).toBe(true); });
-      resolveService({ complete: true, probability: 1, samples: SPEECH_POLICY.audio.minRequestSamples });
+      resolveService({ text: "spoken words" });
     } finally {
       socket?.destroy();
-      resolveService({ complete: true, probability: 1, samples: SPEECH_POLICY.audio.minRequestSamples });
+      resolveService({ text: "spoken words" });
       await close(app);
     }
   });
@@ -257,7 +199,7 @@ describe("speech routes", () => {
   it("destroys stalled partial-body sockets at the speech upload deadline and recovers admission", async () => {
     const policy = tinyPolicy({
       timing: { ...SPEECH_POLICY.timing, bodyUploadDeadlineMs: 50, operationDeadlineMs: 1_000, endpointDeadlineMs: 500 },
-      admission: { ...tinyPolicy().admission, globalEndpointChecksPerWindow: 2 },
+      admission: { ...tinyPolicy().admission, globalTranscriptionsPerWindow: 2 },
     });
     const app = await appWithSpeech(speechService(), policy, ["127.0.0.1:0"]);
     const payload = validPcm(policy);
@@ -265,13 +207,13 @@ describe("speech routes", () => {
     try {
       const port = await listenOnLoopback(app);
       socket = await connectSocket(port);
-      writeSpeechPost(socket, port, "/api/speech/check-turn", {
+      writeSpeechPost(socket, port, "/api/speech/transcribe", {
         "Content-Type": "application/octet-stream",
         "Content-Length": String(payload.byteLength),
       }, payload.subarray(0, 1));
       await once(socket, "close");
 
-      const recovered = await app.inject({ method: "POST", url: "/api/speech/check-turn", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
+      const recovered = await app.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
       expect(recovered.statusCode).toBe(200);
     } finally {
       socket?.destroy();
@@ -281,7 +223,7 @@ describe("speech routes", () => {
 
   it("closes raw slow-body sockets after representative speech guard rejections", async () => {
     const policy = tinyPolicy({
-      admission: { ...tinyPolicy().admission, maxConcurrentParsingBytes: 16, globalEndpointChecksPerWindow: 10 },
+      admission: { ...tinyPolicy().admission, maxConcurrentParsingBytes: 16, globalTranscriptionsPerWindow: 10 },
     });
     const app = await appWithSpeech(speechService(), policy, ["127.0.0.1:0"]);
     const payload = validPcm(policy);
@@ -333,7 +275,7 @@ describe("speech routes", () => {
       ] as const) {
         socket = await connectSocket(port);
         const closed = readClosedHttpResponse(socket);
-        writeSpeechPost(socket, port, "/api/speech/check-turn", scenario.headers, payload.subarray(0, 1));
+        writeSpeechPost(socket, port, "/api/speech/transcribe", scenario.headers, payload.subarray(0, 1));
         const response = await closed;
         expectClosedSpeechError(response, scenario.statusCode, scenario.kind);
         socket = undefined;
@@ -346,7 +288,7 @@ describe("speech routes", () => {
 
   it("closes raw slow-body sockets after speech admission and budget rejections", async () => {
     const policy = tinyPolicy({
-      admission: { ...tinyPolicy().admission, maxConcurrentParsingBytes: 0, globalEndpointChecksPerWindow: 2 },
+      admission: { ...tinyPolicy().admission, maxConcurrentParsingBytes: 0, globalTranscriptionsPerWindow: 2 },
     });
     const app = await appWithSpeech(speechService(), policy, ["127.0.0.1:0"]);
     const payload = validPcm(policy);
@@ -355,7 +297,7 @@ describe("speech routes", () => {
       const port = await listenOnLoopback(app);
       socket = await connectSocket(port);
       let closed = readClosedHttpResponse(socket);
-      writeSpeechPost(socket, port, "/api/speech/check-turn", {
+      writeSpeechPost(socket, port, "/api/speech/transcribe", {
         "Content-Type": "application/octet-stream",
         "Content-Length": String(payload.byteLength),
       }, payload.subarray(0, 1));
@@ -364,17 +306,17 @@ describe("speech routes", () => {
       await close(app);
 
       const budgetPolicy = tinyPolicy({
-        admission: { ...tinyPolicy().admission, maxConcurrentParsingBytes: 4, globalEndpointChecksPerWindow: 1 },
+        admission: { ...tinyPolicy().admission, maxConcurrentParsingBytes: 4, globalTranscriptionsPerWindow: 1 },
       });
       const budgetApp = await appWithSpeech(speechService(), budgetPolicy, ["127.0.0.1:0"]);
       try {
         const budgetPort = await listenOnLoopback(budgetApp);
-        const ok = await budgetApp.inject({ method: "POST", url: "/api/speech/check-turn", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
+        const ok = await budgetApp.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
         expect(ok.statusCode).toBe(200);
 
         socket = await connectSocket(budgetPort);
         closed = readClosedHttpResponse(socket);
-        writeSpeechPost(socket, budgetPort, "/api/speech/check-turn", {
+        writeSpeechPost(socket, budgetPort, "/api/speech/transcribe", {
           "Content-Type": "application/octet-stream",
           "Content-Length": String(payload.byteLength),
         }, payload.subarray(0, 1));
@@ -394,12 +336,12 @@ describe("speech routes", () => {
     const app = await appWithSpeech(undefined, SPEECH_POLICY, ["https://FORGERIE.example.test"]);
     const payload = validPcm();
     try {
-      const direct = await app.inject({ method: "POST", url: "/api/speech/check-turn", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
+      const direct = await app.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
       expect(direct.statusCode).toBe(200);
 
       const canonicalBrowser = await app.inject({
         method: "POST",
-        url: "/api/speech/check-turn",
+        url: "/api/speech/transcribe",
         headers: {
           "content-type": "application/octet-stream",
           "content-length": String(payload.byteLength),
@@ -413,7 +355,7 @@ describe("speech routes", () => {
 
       const crossOrigin = await app.inject({
         method: "POST",
-        url: "/api/speech/check-turn",
+        url: "/api/speech/transcribe",
         headers: {
           "content-type": "application/octet-stream",
           "content-length": String(payload.byteLength),
@@ -428,7 +370,7 @@ describe("speech routes", () => {
 
       const rebound = await app.inject({
         method: "POST",
-        url: "/api/speech/check-turn",
+        url: "/api/speech/transcribe",
         headers: {
           "content-type": "application/octet-stream",
           "content-length": String(payload.byteLength),
@@ -442,7 +384,7 @@ describe("speech routes", () => {
 
       const secFetchWithoutOrigin = await app.inject({
         method: "POST",
-        url: "/api/speech/check-turn",
+        url: "/api/speech/transcribe",
         headers: {
           "content-type": "application/octet-stream",
           "content-length": String(payload.byteLength),
@@ -459,13 +401,13 @@ describe("speech routes", () => {
 
   it("maps speech body parser failures to stable no-store errors", async () => {
     const policy = tinyPolicy({
-      admission: { ...tinyPolicy().admission, maxConcurrentParsingBytes: 32, globalEndpointChecksPerWindow: 10 },
+      admission: { ...tinyPolicy().admission, maxConcurrentParsingBytes: 32, globalTranscriptionsPerWindow: 10 },
     });
     const app = await appWithSpeech(speechService(), policy);
     try {
       const tooLarge = await app.inject({
         method: "POST",
-        url: "/api/speech/check-turn",
+        url: "/api/speech/transcribe",
         headers: { "content-type": "application/octet-stream", "content-length": String(policy.audio.endpointWindowBytes) },
         payload: Buffer.alloc(policy.audio.endpointWindowBytes + policy.audio.bytesPerSample),
       });
@@ -478,7 +420,7 @@ describe("speech routes", () => {
 
       const mismatchedLength = await app.inject({
         method: "POST",
-        url: "/api/speech/check-turn",
+        url: "/api/speech/transcribe",
         headers: { "content-type": "application/octet-stream", "content-length": String(policy.audio.endpointWindowBytes) },
         payload: Buffer.alloc(policy.audio.endpointWindowBytes - policy.audio.bytesPerSample),
       });
@@ -494,25 +436,25 @@ describe("speech routes", () => {
   });
 
   it("rejects unsupported media type, content encoding, declared length, and lets the service own exact PCM validation before backend calls", async () => {
-    const backendCheckTurn = vi.fn(() => Promise.resolve({ complete: true, probability: 1, samples: 1 }));
-    const validatingService = createSpeechService({ smartTurn: speechBackend({ checkTurn: backendCheckTurn }), whisper: speechBackend() });
+    const backendCheckTurn = vi.fn(() => Promise.resolve({ text: "spoken words" }));
+    const validatingService = createSpeechService({ whisper: speechBackend({ transcribe: backendCheckTurn }) });
     const app = await appWithSpeech(validatingService);
     const payload = validPcm();
     try {
-      const wrongType = await app.inject({ method: "POST", url: "/api/speech/check-turn", headers: { "content-type": "text/plain", "content-length": String(payload.byteLength) }, payload });
+      const wrongType = await app.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "text/plain", "content-length": String(payload.byteLength) }, payload });
       expect(wrongType.statusCode).toBe(415);
       expect(parseSpeechErrorResponse(wrongType.json()).error.kind).toBe("unsupported_media_type");
 
-      const encoded = await app.inject({ method: "POST", url: "/api/speech/check-turn", headers: { "content-type": "application/octet-stream", "content-encoding": "gzip", "content-length": String(payload.byteLength) }, payload });
+      const encoded = await app.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "application/octet-stream", "content-encoding": "gzip", "content-length": String(payload.byteLength) }, payload });
       expect(encoded.statusCode).toBe(415);
       expect(parseSpeechErrorResponse(encoded.json()).error.kind).toBe("unsupported_encoding");
 
-      const tooLargeDeclared = await app.inject({ method: "POST", url: "/api/speech/check-turn", headers: { "content-type": "application/octet-stream", "content-length": String(SPEECH_POLICY.audio.endpointWindowBytes + 4) }, payload });
+      const tooLargeDeclared = await app.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "application/octet-stream", "content-length": String(SPEECH_POLICY.audio.maxTurnBytes + 4) }, payload });
       expect(tooLargeDeclared.statusCode).toBe(413);
       expect(parseSpeechErrorResponse(tooLargeDeclared.json()).error.kind).toBe("too_large");
 
       const invalidPayload = pcmBytes([Number.NaN, ...Array.from({ length: SPEECH_POLICY.audio.minRequestSamples - 1 }, () => 0)]);
-      const invalidPcm = await app.inject({ method: "POST", url: "/api/speech/check-turn", headers: { "content-type": "application/octet-stream", "content-length": String(invalidPayload.byteLength) }, payload: invalidPayload });
+      const invalidPcm = await app.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "application/octet-stream", "content-length": String(invalidPayload.byteLength) }, payload: invalidPayload });
       expect(invalidPcm.statusCode).toBe(400);
       expect(parseSpeechErrorResponse(invalidPcm.json()).error.kind).toBe("invalid_pcm");
       expect(backendCheckTurn).not.toHaveBeenCalled();
@@ -523,28 +465,28 @@ describe("speech routes", () => {
 
   it("applies aggregate parsing admission and global route token budgets before service invocation", async () => {
     const policy = tinyPolicy();
-    let releaseActive!: (value: { complete: boolean; probability: number; samples: number }) => void;
-    const active = new Promise<{ complete: boolean; probability: number; samples: number }>((resolve) => { releaseActive = resolve; });
-    const checkTurn = vi.fn(() => active);
-    const app = await appWithSpeech(speechService({ checkTurn }), policy);
+    let releaseActive!: (value: { text: string }) => void;
+    const active = new Promise<{ text: string }>((resolve) => { releaseActive = resolve; });
+    const transcribe = vi.fn(() => active);
+    const app = await appWithSpeech(speechService({ transcribe }), policy);
     const payload = validPcm(policy);
     try {
-      const first = app.inject({ method: "POST", url: "/api/speech/check-turn", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
-      await vi.waitFor(() => { expect(checkTurn).toHaveBeenCalledOnce(); });
+      const first = app.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
+      await vi.waitFor(() => { expect(transcribe).toHaveBeenCalledOnce(); });
 
       const admittedTooMuch = await app.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
       expect(admittedTooMuch.statusCode).toBe(429);
       expect(parseSpeechErrorResponse(admittedTooMuch.json()).error.kind).toBe("overloaded");
 
-      releaseActive({ complete: true, probability: 1, samples: policy.audio.minRequestSamples });
+      releaseActive({ text: "spoken words" });
       await expect(first).resolves.toBeDefined();
       await close(app);
 
       const budgetApp = await appWithSpeech(speechService(), policy);
       try {
-        const ok = await budgetApp.inject({ method: "POST", url: "/api/speech/check-turn", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
+        const ok = await budgetApp.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
         expect(ok.statusCode).toBe(200);
-        const limited = await budgetApp.inject({ method: "POST", url: "/api/speech/check-turn", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
+        const limited = await budgetApp.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });
         expect(limited.statusCode).toBe(429);
         expect(parseSpeechErrorResponse(limited.json()).error.kind).toBe("overloaded");
       } finally {

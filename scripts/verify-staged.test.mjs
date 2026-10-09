@@ -92,7 +92,6 @@ describe("staged validation planning", () => {
         files: [
           "src/client/src/components/ChatView.test.ts",
           "src/client/src/components/ChatView.ts",
-          "src/docker/piWebDockerDocs.test.ts",
         ],
       },
     });
@@ -113,30 +112,8 @@ describe("staged validation planning", () => {
   });
 
   it("adds tests for repository assets that are read dynamically", () => {
-    const plan = createValidationPlan([
-      "docker/internal/image/install-opensuse-base",
-      "docs/site.js",
-      "install.sh",
-      "nix/smart-turn.nix",
-      "pi-web-plugins/updates/updatesLogic.ts",
-      "speech/whisper_worker.py",
-    ], { pathExists: () => true });
-
-    expect(plan.tests).toEqual({
-      mode: "related",
-      files: [
-        "pi-web-plugins/pluginPublicApi.test.ts",
-        "pi-web-plugins/updates/updatesLogic.ts",
-        "scripts/docs-site.test.mjs",
-        "src/docker/piWebDockerDocs.test.ts",
-        "src/docker/piWebDockerEntrypoint.test.ts",
-        "src/installScript.test.ts",
-        "src/server/dockerControlAssets.test.ts",
-        "src/server/dockerDevDependencySync.test.ts",
-        "src/server/speech/smartTurnProcess.test.ts",
-        "src/server/speech/whisperProcess.test.ts",
-      ],
-    });
+    const plan = createValidationPlan(["nix/whisper-stt.nix", "speech/whisper_worker.py"], { pathExists: () => true });
+    expect(plan.tests).toEqual({ mode: "related", files: ["src/server/speech/whisperProcess.test.ts"] });
   });
 
   it("runs only the affected full validator when its configuration changes", () => {
@@ -157,8 +134,6 @@ describe("staged validation planning", () => {
     "package.json",
     "package-lock.json",
     "tsconfig.build.json",
-    "tsconfig.plugin-api.json",
-    "tsconfig.plugins.json",
     "vendor/pi-processes/package.tgz",
   ])("runs the full suite for broad dependency %s", (path) => {
     expect(createValidationPlan([path], { pathExists: () => true }).tests).toEqual({

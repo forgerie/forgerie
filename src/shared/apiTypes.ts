@@ -5,49 +5,12 @@ import type { SessionWorktreeInfo, WorktreeSessionEvent } from "./sessionWorktre
 /** Public wire types; their runtime schemas live in backlog.ts. */
 export type { BacklogConfig, BacklogMetadata, BacklogProviderId, BacklogClaim, BacklogItem, BacklogWarning, BacklogListResponse, BacklogDetailResponse, BacklogLaunchRequest, BacklogLaunchResponse, BacklogReleaseRequest, BacklogReleaseResponse, BacklogErrorResponse } from "./backlog.js";
 
-export type MachineKind = "local" | "remote";
-export type MachineStatus = "unknown" | "online" | "offline" | "error";
-
 /** Registry of features that require rolling-version compatibility gates. */
 export const PI_WEB_CAPABILITIES = {
   queuedCompaction: "session.queue.compact",
 } as const;
 
 export type PiWebCapability = typeof PI_WEB_CAPABILITIES[keyof typeof PI_WEB_CAPABILITIES];
-
-export interface Machine {
-  id: string;
-  name: string;
-  kind: MachineKind;
-  baseUrl?: string;
-  createdAt: string;
-  updatedAt: string;
-  status?: MachineStatus;
-  statusMessage?: string;
-}
-
-export interface MachineHealth {
-  machineId: string;
-  ok: boolean;
-  checkedAt: string;
-  status?: MachineStatus;
-  web?: PiWebComponentStatus;
-  sessiond?: PiWebComponentStatus;
-  error?: string;
-}
-
-export interface MachineRuntime {
-  machineId: string;
-  ok: boolean;
-  checkedAt: string;
-  packageName?: string;
-  generatedAt?: string;
-  components?: PiWebRuntimeResponse["components"];
-  capabilities?: PiWebCapability[];
-  error?: string;
-}
-
-export type PiWebShortcutConfig = Record<string, string | null>;
 export type PiWebPluginSettings = Record<string, unknown>;
 export type PiWebPluginConfigMap = Record<string, PiWebPluginConfig>;
 
@@ -75,8 +38,6 @@ export interface PiWebAgentConfig {
 export interface PiWebConfigValues {
   host?: string;
   port?: number;
-  allowedHosts?: string[] | true;
-  shortcuts?: PiWebShortcutConfig;
   plugins?: PiWebPluginConfigMap;
   /** External filesystem roots Forgerie may expose outside a workspace. */
   pathAccess?: PiWebPathAccessConfig;
@@ -86,13 +47,6 @@ export interface PiWebConfigValues {
   maxUploadBytes?: number;
   /** When true, LLMs can start new sessions via the spawn_session tool. */
   spawnSessions?: boolean;
-  /**
-   * Beta: when true, LLMs can start tracked child sessions via the
-   * spawn_subsession / list_subsessions / check_subsession / read_subsession
-   * tools. Off by default
-   * while the capability stabilizes. Requires spawnSessions to be enabled.
-   */
-  subsessions?: boolean;
   /**
    * When true, LLMs can post a question set to the browser via the ask_user
    * tool. On by default; set to `false` to remove the tool from the runtime.
@@ -119,21 +73,6 @@ export interface PiWebConfigValues {
   extensionDialogsTimeoutMs?: number;
   /** Desired Pi-compatible agent profile and companion CLI (Pi by default). */
   agent?: PiWebAgentConfig;
-}
-
-export type PiWebPluginScope = "bundled" | "local" | "user" | "project";
-
-export interface PiWebPluginInfo {
-  id: string;
-  module: string;
-  source: string;
-  scope: PiWebPluginScope;
-  machineSpecific: boolean;
-  enabled: boolean;
-}
-
-export interface PiWebPluginsResponse {
-  plugins: PiWebPluginInfo[];
 }
 
 export type PiPackageScope = "user" | "project";
@@ -163,9 +102,7 @@ export type PiWebAgentDirEnvSource = "pi-web" | "pi-compatibility";
 export interface PiWebConfigEnvOverrides {
   host: boolean;
   port: boolean;
-  allowedHosts: boolean;
   spawnSessions: boolean;
-  subsessions: boolean;
   askUser: boolean;
   codemode: boolean;
   agentCommand: boolean;
@@ -824,51 +761,6 @@ export interface SessionModel {
 // from a newer pi runtime parses and renders gracefully instead of failing.
 export type { ThinkingLevel } from "./thinkingLevels.js";
 
-export type AuthType = "oauth" | "api_key";
-export type AuthStatusSource = "stored" | "runtime" | "environment" | "fallback" | "models_json_key" | "models_json_command";
-
-export interface AuthProviderStatus {
-  configured: boolean;
-  source?: AuthStatusSource;
-  label?: string;
-}
-
-export interface AuthProviderOption {
-  id: string;
-  name: string;
-  authType: AuthType;
-  status: AuthProviderStatus;
-  /** Present when the provider logs in through the generic AuthInteraction flow. */
-  loginFlow?: "interactive";
-}
-
-export interface AuthProvidersResponse {
-  providers: AuthProviderOption[];
-}
-
-export interface OAuthFlowState {
-  flowId: string;
-  providerId: string;
-  providerName: string;
-  status: "running" | "complete" | "error" | "cancelled";
-  auth?: {
-    url: string;
-    instructions?: string;
-    deviceCode?: { userCode: string; intervalSeconds?: number; expiresInSeconds?: number };
-  };
-  prompt?: {
-    requestId: string;
-    message: string;
-    placeholder?: string;
-    allowEmpty?: boolean;
-    promptType: "text" | "secret" | "manual_code";
-  };
-  select?: { requestId: string; message: string; options: CommandOption[] };
-  progress: string[];
-  info?: { message: string; links?: { url: string; label?: string }[] }[];
-  error?: string;
-}
-
 export interface ModelSelectionResponse {
   models: SessionModel[];
 }
@@ -1103,60 +995,7 @@ export interface GitDiffResponse {
   truncated: boolean;
 }
 
-export interface TerminalInfo {
-  id: string;
-  cwd: string;
-  name: string;
-  createdAt: string;
-  exited: boolean;
-  exitCode?: number;
-  commandRunId?: string;
-}
-
-export type TerminalCommandRunStatus = "queued" | "running" | "succeeded" | "failed";
-
-export interface TerminalCommandRun {
-  id: string;
-  origin: string;
-  projectId: string;
-  workspaceId: string;
-  terminalId: string;
-  title: string;
-  command: string;
-  status: TerminalCommandRunStatus;
-  exitCode?: number;
-  createdAt: string;
-  startedAt?: string;
-  completedAt?: string;
-  metadata: Record<string, string>;
-}
-
-export interface TerminalCommandRunHandle {
-  run: TerminalCommandRun;
-  completed: Promise<TerminalCommandRun>;
-}
-
-export interface TerminalCommandRunFilter {
-  projectId?: string;
-  workspaceId?: string;
-  terminalId?: string;
-  statuses?: TerminalCommandRunStatus[];
-  metadata?: Record<string, string>;
-}
-
 export type PiWebServiceComponent = "web" | "sessiond";
-export type PiWebStatusSeverity = "info" | "warning" | "error";
-export type PiWebInstallationKind = "pi-package" | "npm-global" | "local" | "docker" | "unknown";
-export type PiWebDockerMode = "runtime" | "dev";
-
-export interface PiWebInstallationInfo {
-  kind: PiWebInstallationKind;
-  path?: string;
-  source?: string;
-  scope?: "user" | "project";
-  npmRoot?: string;
-  dockerMode?: PiWebDockerMode;
-}
 
 export interface PiWebComponentStatus {
   component: PiWebServiceComponent;
@@ -1165,7 +1004,6 @@ export interface PiWebComponentStatus {
   installedVersion?: string;
   stale: boolean;
   available: boolean;
-  installation?: PiWebInstallationInfo;
   error?: string;
 }
 
@@ -1189,23 +1027,6 @@ export interface PiWebRuntimeComponent {
   error?: string;
 }
 
-export interface PiWebReleaseStatus {
-  packageName: string;
-  latestVersion?: string;
-  updateAvailable: boolean;
-  checkedAt?: string;
-  skipped?: boolean;
-  error?: string;
-}
-
-export interface PiWebStatusMessage {
-  id: string;
-  severity: PiWebStatusSeverity;
-  title: string;
-  body: string;
-  command?: string;
-}
-
 export interface PiWebVersionResponse {
   packageName: string;
   generatedAt: string;
@@ -1224,23 +1045,6 @@ export interface PiWebRuntimeResponse {
   };
   capabilities: PiWebCapability[];
 }
-
-export interface PiWebStatusResponse extends PiWebVersionResponse {
-  release: PiWebReleaseStatus;
-  commands: {
-    update?: string;
-    restart?: string;
-    restartWeb?: string;
-    restartSessiond?: string;
-    status?: string;
-  };
-  messages: PiWebStatusMessage[];
-}
-
-export type TerminalUiEvent =
-  | { type: "terminal.created"; terminal: TerminalInfo }
-  | { type: "terminal.exited"; terminal: TerminalInfo }
-  | { type: "terminal.closed"; terminalId: string; cwd: string };
 
 export interface WorkspaceActivityUiEvent {
   type: "workspace.activity";
@@ -1448,4 +1252,4 @@ export type GlobalSessionEvent =
   | SessionUnreadEvent
   | SessionStartupProgressEvent
   | WorktreeSessionEvent;
-export type RealtimeEvent = GlobalSessionEvent | TerminalUiEvent | WorkspaceActivityUiEvent;
+export type RealtimeEvent = GlobalSessionEvent | WorkspaceActivityUiEvent;

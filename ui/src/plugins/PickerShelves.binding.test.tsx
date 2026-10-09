@@ -19,7 +19,6 @@ async function render(plugins: readonly AppPlugin[], store: ReturnType<typeof st
 }
 const catalog = (enabled: boolean) => ({ profileDir: "", configPath: "", home: "", revision: "v", restartRequired: false, restartAvailable: true, plugins: [
   { id: "app:probe", kind: "app" as const, name: "Probe", source: "Forgerie", description: "", enabled, settings: { endpoint: "https://x.example/" } },
-  { id: "forgerie:probe", kind: "forgerie" as const, name: "probe", source: "local", description: "", enabled: true, settings: { five_hour: 1 } },
 ] });
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

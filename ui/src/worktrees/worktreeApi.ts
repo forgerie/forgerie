@@ -40,13 +40,11 @@ export const cleanupSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("done") }),
   z.object({ kind: z.literal("failed"), error: text }),
 ]);
-export type WorktreeCleanup = z.infer<typeof cleanupSchema>;
 
 export const archiveCleanupSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("removed"), cleanup: cleanupSchema }),
   z.object({ kind: z.literal("retained"), reason: text }),
 ]);
-export type ArchiveCleanup = z.infer<typeof archiveCleanupSchema>;
 
 /** A worktree as the server stores it. Live events carry this shape; it has no Git counts. */
 export const worktreeRecordSchema = z.object({

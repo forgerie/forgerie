@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/**/*.part.tsx",
+    "src/speech/speechCaptureWorklet.ts",
+    "scripts/*.mjs",
+    "gates/*.mjs"
+  ],
+  "project": ["src/**/*.{ts,tsx}", "gates/**/*.{ts,mjs}", "scripts/*.mjs"],
+  "ignoreExportsUsedInFile": true,
+  "ignoreDependencies": ["@tiptap/extension-bubble-menu", "@fontsource-variable/jetbrains-mono", "@fontsource-variable/public-sans"],
+  "ignoreBinaries": ["magick", "which"]
+}

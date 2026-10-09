@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS, DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_UPLOADS_FOLDER, agentDirEnvSource, agentSessionDirEnvKeys, askUserEnabled, codemodeEnabled, durableChildrenEnabled, effectiveAgentConfig, effectivePiWebConfig, hasAgentDirEnvOverride, hasAgentSessionDirEnvOverride, loadPiWebConfig, maxUploadBytes, offlineModeEnabled, savePiWebConfig, spawnSessionsEnabled, subsessionsEnabled } from "./config.js";
+import { DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS, DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_UPLOADS_FOLDER, agentDirEnvSource, agentSessionDirEnvKeys, askUserEnabled, codemodeEnabled, durableChildrenEnabled, effectiveAgentConfig, effectivePiWebConfig, hasAgentDirEnvOverride, hasAgentSessionDirEnvOverride, loadPiWebConfig, maxUploadBytes, offlineModeEnabled, savePiWebConfig, spawnSessionsEnabled } from "./config.js";
 
 let tempDir: string;
 let configPath: string;
@@ -21,8 +21,6 @@ describe("Forgerie config persistence", () => {
     const requestedConfig = {
       host: "0.0.0.0",
       port: 9000,
-      allowedHosts: ["example.local"],
-      shortcuts: { "core:view.chat": "ctrl+1", "core:session.stop": null },
       plugins: { info: { enabled: false, settings: { compact: true } } },
       pathAccess: { allowedPaths: ["/tmp", "~/SDKs"] },
       uploads: { defaultFolder: "manual\\incoming" },
@@ -36,36 +34,6 @@ describe("Forgerie config persistence", () => {
 
     expect(saved).toEqual({ path: configPath, exists: true, config: normalizedConfig });
     expect(loadPiWebConfig(testOptions())).toEqual(saved);
-  });
-
-  it("normalizes legacy Mod shortcuts to physical Ctrl", async () => {
-    await writeFile(configPath, `${JSON.stringify({ shortcuts: { "core:settings.shortcuts": "mod+k mod+s" } }, null, 2)}\n`, "utf8");
-
-    expect(loadPiWebConfig(testOptions()).config.shortcuts).toEqual({ "core:settings.shortcuts": "ctrl+k ctrl+s" });
-
-    savePiWebConfig({ shortcuts: { "core:settings.shortcuts": "mod+k mod+s" } }, testOptions());
-    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ shortcuts: { "core:settings.shortcuts": "ctrl+k ctrl+s" } });
-  });
-
-  it("drops stored overrides that only repeated the old built-in defaults", async () => {
-    await writeFile(configPath, `${JSON.stringify({ shortcuts: { "core:actions.show": " MOD + K ", "core:custom": "mod+k" } }, null, 2)}\n`, "utf8");
-
-    expect(loadPiWebConfig(testOptions()).config.shortcuts).toEqual({ "core:custom": "ctrl+k" });
-  });
-
-  it("rejects GUI modifiers in shortcut config", async () => {
-    for (const shortcut of ["meta+k", "cmd+k", "gui+k"]) {
-      await writeFile(configPath, `${JSON.stringify({ shortcuts: { "core:actions.show": shortcut } }, null, 2)}\n`, "utf8");
-      expect(() => loadPiWebConfig(testOptions())).toThrow("Only Ctrl, Alt, and Shift modifiers are supported");
-    }
-  });
-
-  it("preserves unrelated config keys while replacing managed keys", async () => {
-    await writeFile(configPath, `${JSON.stringify({ host: "old", port: 8504, allowedHosts: true, plugins: { info: { enabled: false } }, pathAccess: { allowedPaths: ["/old"] }, uploads: { defaultFolder: "old" }, future: { enabled: true } }, null, 2)}\n`, "utf8");
-
-    savePiWebConfig({ port: 9000, allowedHosts: [], pathAccess: { allowedPaths: ["/new"] }, uploads: { defaultFolder: "new" } }, testOptions());
-
-    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ future: { enabled: true }, port: 9000, allowedHosts: [], pathAccess: { allowedPaths: ["/new"] }, uploads: { defaultFolder: "new" } });
   });
 
   it("rejects invalid plugin config", async () => {
@@ -299,21 +267,6 @@ describe("spawnSessionsEnabled", () => {
   it("lets the env var override the config in both directions", () => {
     expect(spawnSessionsEnabled({ PI_WEB_SPAWN_SESSIONS: "0" }, { spawnSessions: true })).toBe(false);
     expect(spawnSessionsEnabled({ PI_WEB_SPAWN_SESSIONS: "1" }, { spawnSessions: false })).toBe(true);
-  });
-});
-
-describe("subsessionsEnabled", () => {
-  it("is off by default while the capability is in beta", () => {
-    expect(subsessionsEnabled({}, {})).toBe(false);
-  });
-
-  it("honors an explicit config opt-in", () => {
-    expect(subsessionsEnabled({}, { subsessions: true })).toBe(true);
-  });
-
-  it("lets the env var override the config in both directions", () => {
-    expect(subsessionsEnabled({ PI_WEB_SUBSESSIONS: "1" }, { subsessions: false })).toBe(true);
-    expect(subsessionsEnabled({ PI_WEB_SUBSESSIONS: "0" }, { subsessions: true })).toBe(false);
   });
 });
 

@@ -1,7 +1,7 @@
 import type { DictationAdapter } from "@assistant-ui/react";
 import { getSpeechStatus, transcribeSpeech } from "./speechApi";
 import { createSpeechCaptureSession, type SpeechCaptureOptions, type SpeechCaptureSession } from "./speechCapture";
-import { SPEECH_POLICY } from "./speechPolicy";
+import { SPEECH_POLICY } from "@shared/speechPolicy";
 
 export type DictationState =
   | { type: "idle" }

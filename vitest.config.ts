@@ -2,10 +2,13 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["src/**/*.test.ts", "pi-web-plugins/**/*.test.ts", "scripts/**/*.test.mjs"],
+    // SDK acceptance tests also boot workers. Match the coverage run's budget
+    // instead of starting one expensive compiler/runtime graph per host core.
+    maxWorkers: 4,
+    include: ["src/**/*.test.ts", "scripts/**/*.test.mjs"],
     coverage: {
       provider: "v8",
-      include: ["src/**/*.ts", "pi-web-plugins/**/*.ts", "scripts/**/*.mjs"],
+      include: ["src/**/*.ts", "scripts/**/*.mjs"],
       exclude: [
         "**/*.test.ts",
         "**/*.test.mjs",
@@ -39,18 +42,6 @@ export default defineConfig({
           branches: 76.1,
           functions: 90.1,
           lines: 91.2,
-        },
-        "src/nativeServices/**/*.ts": {
-          statements: 85.3,
-          branches: 72.2,
-          functions: 90.7,
-          lines: 88.8,
-        },
-        "pi-web-plugins/**/*.ts": {
-          statements: 91.4,
-          branches: 81.7,
-          functions: 97.2,
-          lines: 95.3,
         },
       },
     },

@@ -131,4 +131,3 @@ export function createRowActions(deps: {
     dispose: () => { timers.clear(toastTimer); listeners.clear(); },
   };
 }
-export type RowActions = ReturnType<typeof createRowActions>;
