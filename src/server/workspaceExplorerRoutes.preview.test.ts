@@ -61,6 +61,33 @@ describe("workspace document preview route", () => {
   });
 });
 
+describe("workspace file write route", () => {
+  it("writes against an expected version and answers a stale one with a 409 conflict", async () => {
+    const root = await createTempWorkspace();
+    await writeFile(join(root, "notes.md"), "first\n");
+    const app = appFor(root);
+    const url = (query: string) => `/api/projects/p1/workspaces/w1/file?path=notes.md${query}`;
+    const put = (payload: Buffer, query: string) => app.inject({ method: "PUT", url: url(query), payload, headers: { "content-type": "application/octet-stream" } });
+
+    try {
+      const read = await app.inject({ method: "GET", url: url("") });
+      const opened = read.json<{ version: string }>().version;
+      const saved = await put(Buffer.from("second\n"), `&expectedVersion=${opened}`);
+      const stale = await put(Buffer.from("third\n"), `&expectedVersion=${opened}`);
+      const emptied = await put(Buffer.alloc(0), `&expectedVersion=${saved.json<{ version: string }>().version}`);
+      const after = await app.inject({ method: "GET", url: url("") });
+
+      expect(saved.statusCode).toBe(200);
+      expect(stale.statusCode).toBe(409);
+      expect(stale.json()).toEqual({ error: "notes.md changed after it was read", code: "conflict", version: saved.json<{ version: string }>().version });
+      expect(emptied.statusCode).toBe(200);
+      expect(after.json()).toMatchObject({ content: "", size: 0, version: emptied.json<{ version: string }>().version });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 function appFor(root: string): FastifyInstance {
   const project: Project = { id: "p1", name: "Project", path: root, createdAt: "2026-01-01T00:00:00.000Z" };
   const workspace: WorkspaceListing = { id: "w1", projectId: "p1", path: root, label: "main", isMain: true, isGitRepo: false, isGitWorktree: false };

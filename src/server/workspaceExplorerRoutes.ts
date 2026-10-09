@@ -1,10 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import type { WriteWorkspaceFileOptions } from "../shared/apiTypes.js";
+import type { WorkspaceFileConflictResponse, WriteWorkspaceFileOptions } from "../shared/apiTypes.js";
 import type { PiWebConfigService } from "./configRoutes.js";
 import type { ProjectService } from "./projects/projectService.js";
 import { DOCUMENT_PREVIEW_SANDBOX } from "../shared/workspaceFiles.js";
 import { readWorkspaceDocumentPreview } from "./workspaces/documentPreviewService.js";
-import { deleteWorkspaceFile, moveWorkspaceFile, readWorkspaceFile, writeWorkspaceFile } from "./workspaces/fileContentService.js";
+import { deleteWorkspaceFile, moveWorkspaceFile, readWorkspaceFile, WorkspaceFileConflictError, writeWorkspaceFile } from "./workspaces/fileContentService.js";
 import { isAbsoluteishFileSuggestionQuery, listFileSuggestions, listPathSuggestions } from "./workspaces/fileSuggestions.js";
 import { listWorkspaceTree } from "./workspaces/fileTreeService.js";
 import { readWorkspaceImagePreview } from "./workspaces/imagePreviewService.js";
@@ -39,15 +39,20 @@ export function registerWorkspaceExplorerRoutes(app: FastifyInstance, projects: 
     }
   });
 
-  app.put<{ Params: { projectId: string; workspaceId: string }; Body: Buffer; Querystring: { path?: string; createDirs?: string; overwrite?: string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/file`, async (request, reply) => {
+  app.put<{ Params: { projectId: string; workspaceId: string }; Body: Buffer; Querystring: { path?: string; createDirs?: string; overwrite?: string; expectedVersion?: string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/file`, async (request, reply) => {
     try {
       const context = await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
       const writeOptions: WriteWorkspaceFileOptions = {
         createDirs: request.query.createDirs !== "false",
         overwrite: request.query.overwrite !== "false",
+        ...request.query.expectedVersion === undefined ? {} : { expectedVersion: request.query.expectedVersion },
       };
       return await writeWorkspaceFile(context.root, request.query.path, request.body, writeOptions);
     } catch (error) {
+      if (error instanceof WorkspaceFileConflictError) {
+        const conflict: WorkspaceFileConflictResponse = { error: error.message, code: "conflict", ...error.version === undefined ? {} : { version: error.version } };
+        return reply.code(409).send(conflict);
+      }
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
   });

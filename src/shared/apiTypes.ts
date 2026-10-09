@@ -1012,11 +1012,19 @@ export interface FileContentResponse {
   content: string;
   truncated: boolean;
   binary: boolean;
+  /**
+   * The file's bytes as a SHA-256 hex digest. Present only when `content` is
+   * the whole file as exact UTF-8 text, so a client can edit it and write it
+   * back with `expectedVersion`.
+   */
+  version?: string;
 }
 
 export interface WriteWorkspaceFileOptions {
   createDirs?: boolean;     // default: true — mkdir -p equivalent
   overwrite?: boolean;      // default: true — throw if false and file exists
+  /** Write only if the file on disk still has this `version`; otherwise the write fails with a conflict. */
+  expectedVersion?: string;
 }
 
 export interface WriteWorkspaceFileResponse {
@@ -1024,6 +1032,16 @@ export interface WriteWorkspaceFileResponse {
   size: number;
   modifiedAt: string;
   created: boolean;  // true if file was created, false if overwritten
+  /** The written bytes' `version`. */
+  version: string;
+}
+
+/** The body of a 409 from a file write whose `expectedVersion` no longer matches the disk. */
+export interface WorkspaceFileConflictResponse {
+  error: string;
+  code: "conflict";
+  /** The file's version on disk now, or absent when the file is gone. */
+  version?: string;
 }
 
 export interface DeleteWorkspaceFileResponse {

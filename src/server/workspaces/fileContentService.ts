@@ -1,11 +1,35 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { lstat, mkdir, open, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { DeleteWorkspaceFileResponse, FileContentResponse, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse, PiWebPathAccessConfig, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse } from "../../shared/apiTypes.js";
 import { imageMimeTypeForPath } from "./imagePreviewService.js";
 import { resolveWorkspacePathAccessTarget } from "./pathAccessPolicy.js";
-import { ensureInside, isNodeErrorWithCode, resolveInsideWorkspace, resolveParentInsideWorkspace } from "./pathSafety.js";
+import { ensureInside, isNodeErrorWithCode, normalizeRelativePath, resolveInsideWorkspace, resolveParentInsideWorkspace } from "./pathSafety.js";
 
 const MAX_BYTES = 512 * 1024;
+
+/** A file's bytes as one value, so a writer can tell whether the file changed since it was read. */
+export function contentVersion(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+// Streamed, so a file an agent made huge is not read into memory to be compared.
+async function fileVersion(target: string): Promise<string> {
+  const hash = createHash("sha256");
+  const stream = createReadStream(target);
+  stream.on("data", (chunk) => hash.update(chunk));
+  await new Promise<void>((resolve, reject) => { stream.on("end", resolve); stream.on("error", reject); });
+  return hash.digest("hex");
+}
+
+/** A write's `expectedVersion` no longer matches the file on disk. `version` is what the disk holds now, absent when the file is gone. */
+export class WorkspaceFileConflictError extends Error {
+  constructor(readonly path: string, readonly version: string | undefined) {
+    super(version === undefined ? `${path} was deleted after it was read` : `${path} changed after it was read`);
+    this.name = "WorkspaceFileConflictError";
+  }
+}
 
 export async function readWorkspaceFile(rootPath: string, path: string | undefined, pathAccess?: PiWebPathAccessConfig): Promise<FileContentResponse> {
   if (path === undefined || path === "") throw new Error("path query parameter is required");
@@ -16,6 +40,9 @@ export async function readWorkspaceFile(rootPath: string, path: string | undefin
   const buffer = await readFilePrefix(target, bytesToRead);
   const media = mediaForPath(displayPath);
   const binary = media.mediaType === "image" || isProbablyBinary(buffer);
+  const truncated = s.size > MAX_BYTES;
+  // Text that does not survive a UTF-8 round trip would be changed by an editor that saves it back.
+  const editable = !binary && !truncated && Buffer.from(buffer.toString("utf8"), "utf8").equals(buffer);
   return {
     path: displayPath,
     ...languageForPath(displayPath),
@@ -24,8 +51,9 @@ export async function readWorkspaceFile(rootPath: string, path: string | undefin
     size: s.size,
     modifiedAt: s.mtime.toISOString(),
     content: binary ? "" : buffer.toString("utf8"),
-    truncated: s.size > MAX_BYTES,
+    truncated,
     binary,
+    ...editable ? { version: contentVersion(buffer) } : {},
   };
 }
 
@@ -54,12 +82,19 @@ export async function writeWorkspaceFile(rootPath: string, path: string | undefi
     if (!s.isFile()) throw new Error("Path is not a file");
     if (!overwrite) throw new Error(`File already exists: ${relativePath}`);
     exists = true;
+    if (options.expectedVersion !== undefined) {
+      const current = await fileVersion(target);
+      if (current !== options.expectedVersion) throw new WorkspaceFileConflictError(relativePath, current);
+    }
   } catch (error: unknown) {
+    if (error instanceof WorkspaceFileConflictError) throw error;
     if (error instanceof Error && error.message.startsWith("File already exists")) throw error;
     if (isNodeErrorWithCode(error, "ENOENT")) { /* expected for creation — continue */ }
     else if (error instanceof Error && error.message === "Path does not exist") { /* expected for creation — continue */ }
     else throw error; // re-throw permission errors, "not a file", traversal errors, etc.
   }
+  // The reader saw a file that is gone now. Writing would bring it back unasked.
+  if (!exists && options.expectedVersion !== undefined) throw new WorkspaceFileConflictError(normalizeRelativePath(path), undefined);
 
   // Use resolveParentInsideWorkspace for the actual write since the target may not exist yet
   const { root, target, relativePath } = await resolveParentInsideWorkspace(rootPath, path);
@@ -78,6 +113,7 @@ export async function writeWorkspaceFile(rootPath: string, path: string | undefi
     size: s.size,
     modifiedAt: s.mtime.toISOString(),
     created: !exists,
+    version: contentVersion(content),
   };
 }
 
