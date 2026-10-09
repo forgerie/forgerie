@@ -3,7 +3,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginsView, plainName, tildify } from "./PluginsView";
-import type { PluginCatalog, PluginChange, PluginsApi } from "../../plugins/pluginsApi";
+import type { PluginsApi } from "../../plugins/pluginsApi";
+import type { PluginCatalog, PluginChange } from "@shared/pluginsContract";
 
 let root: Root;
 let catalog: PluginCatalog;

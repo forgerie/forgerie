@@ -143,21 +143,6 @@ export interface PiPackagesResponse {
   packages: PiPackageInfo[];
 }
 
-export interface PiPackageInstallRequest {
-  source: string;
-}
-
-export interface PiPackageRemoveRequest {
-  source: string;
-  /** Optional known scope from a listed package; not an install-location picker. */
-  scope?: PiPackageScope;
-}
-
-export interface PiPackageUpdateRequest {
-  /** Omit to update all configured Pi packages. */
-  source?: string;
-}
-
 export type PiPackageMutationAction = "install" | "remove" | "update";
 
 export interface PiPackageMutationResponse extends PiPackagesResponse {
@@ -531,49 +516,6 @@ export interface SessionAbortResult {
  */
 export const ASK_USER_ANSWERS_CUSTOM_TYPE = "pi-web.ask.answers";
 
-/**
- * `customType` of process lifecycle and log-match notifications emitted by
- * `@aliou/pi-processes` (v0.10.4). Its `details` are a
- * {@link ProcessNotificationDetails}. Pinned from
- * `extensions/processes/constants.ts` and
- * `src/protocol/notifications.ts::ProcessProtocolNotificationPayload` in the
- * installed extension.
- */
-export const AD_PROCESS_NOTIFICATION_CUSTOM_TYPE = "ad-process:notification";
-
-export const PROCESS_NOTIFICATION_KINDS = ["success", "failure", "crash", "killed", "log_match", "log_match_suppressed"] as const;
-export const PROCESS_NOTIFICATION_STATUSES = ["running", "terminating", "terminate_timeout", "exited", "killed"] as const;
-export type ProcessNotificationKind = (typeof PROCESS_NOTIFICATION_KINDS)[number];
-export type ProcessNotificationStatus = (typeof PROCESS_NOTIFICATION_STATUSES)[number];
-
-/**
- * Notification payload emitted by pi-processes, carrying process lifecycle
- * events (success, failure, crash, killed) and log-match triggers. All fields
- * beyond `kind`, `processId`, `processName`, `command`, `timestamp`, `summary`,
- * and `attention` are optional — log-match notifications typically lack status
- * and exit codes.
- */
-export interface ProcessNotificationDetails {
-  kind: ProcessNotificationKind;
-  processId: string;
-  processName: string;
-  command: string;
-  timestamp: number;
-  summary: string;
-  status?: ProcessNotificationStatus;
-  exitCode?: number | null;
-  endReason?: "exit" | "signal" | "spawn_error" | "missing_pid" | "kill_timeout" | "lost" | null;
-  signal?: { name: string; number: number | null; description: string } | null;
-  logMatch?: {
-    pattern: string;
-    mode: "literal" | "regex";
-    stream: "stdout" | "stderr";
-    line: string;
-    matcherIndex: number;
-  };
-  attention: "turn" | "context" | "ignore";
-}
-
 /** Largest question set one `ask_user` call may post. */
 export const ASK_USER_QUESTION_LIMIT = 20;
 /** Largest option list one question may offer. */
@@ -850,14 +792,6 @@ export interface PromptFileAttachment {
 
 export type PromptAttachment = PromptImageAttachment | PromptFileAttachment;
 
-/**
- * How prompt attachments should be delivered to the session.
- * - "inline": send the binary to pi as native image content (multimodal input).
- * - "folder": save the file into the workspace and reference it from the prompt
- *   text so the agent reads it with its own tools.
- */
-export type PromptAttachmentDelivery = "inline" | "folder";
-
 export interface SavedPromptAttachment {
   /** Workspace-relative path the attachment was written to. */
   path: string;
@@ -937,10 +871,6 @@ export interface ModelSelectionResponse {
 export interface NewSessionModelSelectionResponse extends ModelSelectionResponse {
   model?: SessionModel;
   thinkingLevel: string;
-}
-
-export interface ThinkingLevelsResponse {
-  levels: string[];
 }
 
 export type SessionWarningSeverity = "info" | "warning" | "error";
@@ -1041,12 +971,6 @@ export interface WorkspaceActivityResponse {
   generatedAt: string;
 }
 
-/** A prompt file written into the active agent profile's prompt library. */
-export interface SavedPrompt {
-  name: string;
-  path: string;
-}
-
 export interface SlashCommand {
   name: string;
   description?: string;
@@ -1054,11 +978,6 @@ export interface SlashCommand {
 }
 
 export type { PromptResourceCatalogResponse, PromptResourceCommandDescriptor, PromptResourceCommandIdentity } from "./promptResourceCommand.js";
-
-export interface PromptResourceCommandRunResponse {
-  accepted: true;
-  deliveryFingerprint: string;
-}
 
 export interface FileSuggestion {
   path: string;
@@ -1186,14 +1105,6 @@ export interface TerminalCommandRun {
   startedAt?: string;
   completedAt?: string;
   metadata: Record<string, string>;
-}
-
-export interface RunTerminalCommandInput {
-  workspace: Workspace;
-  title: string;
-  command: string;
-  metadata?: Record<string, string>;
-  open?: boolean;
 }
 
 export interface TerminalCommandRunHandle {
@@ -1514,14 +1425,3 @@ export type GlobalSessionEvent =
   | SessionStartupProgressEvent
   | WorktreeSessionEvent;
 export type RealtimeEvent = GlobalSessionEvent | TerminalUiEvent | WorkspaceActivityUiEvent;
-
-/**
- * Agent choices a composer makes before its session exists.
- *
- * Each is optional: an omitted choice leaves the server's own default in
- * place, so a caller states only what the author actually picked.
- */
-export interface NewSessionAgentChoices {
-  readonly modelSpec?: string;
-  readonly thinkingLevel?: string;
-}

@@ -4,7 +4,7 @@
 # The PNGs are generated files; edit favicon.svg and re-run this script.
 set -euo pipefail
 
-cd "$(dirname "$0")/../src/client/public"
+cd "$(dirname "$0")/../ui/public"
 
 # The paper background is baked into favicon.svg; no --background needed.
 resvg --width 512 --height 512 favicon.svg pwa-icon-512.png

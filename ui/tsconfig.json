@@ -12,7 +12,8 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": { "@shared/*": ["../src/shared/*"] }
   },
   "include": ["src", "verification/preview.tsx", "verification/worktree-preview.tsx", "verification/dictation-live.tsx", "verification/plugins.tsx", "verification/pull-request-preview.tsx", "vite.config.ts"]
 }

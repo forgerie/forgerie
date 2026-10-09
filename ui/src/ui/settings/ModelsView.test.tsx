@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ModelPrefs, ModelPrefsSave } from "../../models/modelPrefs";
+import type { ModelPrefs, ModelPrefsSave } from "@shared/modelPrefsContract";
 import { ModelPrefsContext, PrefsConflict, type ModelPrefsSource } from "../../models/modelPrefsApi";
 import { ModelsView, startModel } from "./ModelsView";
 

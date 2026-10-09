@@ -19,7 +19,6 @@ const FULL_LINT_TRIGGERS = new Set([
 ]);
 
 const LINTABLE_ROOT_FILES = new Set([
-  "vite.config.ts",
   "vitest.config.ts",
 ]);
 

@@ -3,7 +3,7 @@ import { act, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionModel } from "../contracts";
-import type { ModelPrefs } from "../models/modelPrefs";
+import type { ModelPrefs } from "@shared/modelPrefsContract";
 import { createModelPrefsSource, ModelPrefsContext, type ModelPrefsSource } from "../models/modelPrefsApi";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "./ModelPicker";
 

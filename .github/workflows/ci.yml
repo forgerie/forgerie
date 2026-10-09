@@ -44,12 +44,9 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run test:coverage
 
-      # happy-dom does no layout, so the unit suite cannot see a box that came
-      # out the wrong size. This measures the real transcript in a real engine
-      # at the Fold postures. Linux only: the runner image ships a browser.
-      - name: Check transcript layout
+      - name: Verify the browser app
         if: runner.os == 'Linux'
-        run: npm run test:layout -- --require-browser
+        run: npm run verify:ui
 
       - name: Upload test coverage report
         if: runner.os == 'Linux' && always()

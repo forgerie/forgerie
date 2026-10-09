@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChevronLeftIcon, EllipsisIcon, PlusIcon, RefreshCwIcon, RotateCwIcon, Trash2Icon, XIcon } from "lucide-react";
 import { z } from "zod";
-import { createPluginsApi, type ManagedPlugin, type PluginCatalog, type PluginChange, type PluginsApi } from "../../plugins/pluginsApi";
+import { createPluginsApi, type PluginsApi } from "../../plugins/pluginsApi";
+import type { ManagedPlugin, PluginCatalog, PluginChange } from "@shared/pluginsContract";
 import { SettingsFrame } from "./SettingsFrame";
 import { SettingsRow } from "./SettingsRow";
 import { SettingsField } from "./SettingsField";

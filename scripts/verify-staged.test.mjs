@@ -119,7 +119,6 @@ describe("staged validation planning", () => {
       "install.sh",
       "nix/smart-turn.nix",
       "pi-web-plugins/updates/updatesLogic.ts",
-      "src/client/public/manifest.webmanifest",
       "speech/whisper_worker.py",
     ], { pathExists: () => true });
 
@@ -129,7 +128,6 @@ describe("staged validation planning", () => {
         "pi-web-plugins/pluginPublicApi.test.ts",
         "pi-web-plugins/updates/updatesLogic.ts",
         "scripts/docs-site.test.mjs",
-        "src/clientBuildContents.test.ts",
         "src/docker/piWebDockerDocs.test.ts",
         "src/docker/piWebDockerEntrypoint.test.ts",
         "src/installScript.test.ts",
@@ -167,13 +165,6 @@ describe("staged validation planning", () => {
       mode: "full",
       files: [],
     });
-  });
-
-  it("runs the production client build test for Vite configuration changes", () => {
-    const plan = createValidationPlan(["vite.config.ts"], { pathExists: () => true });
-
-    expect(plan.lint).toEqual({ mode: "scoped", files: ["vite.config.ts"] });
-    expect(plan.tests).toEqual({ mode: "related", files: ["src/clientBuildContents.test.ts"] });
   });
 
   it("always includes cached typechecking and Knip before scoped checks", () => {

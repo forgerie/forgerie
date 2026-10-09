@@ -2,7 +2,8 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "r
 import { ChevronLeftIcon, SearchIcon, StarIcon, XIcon } from "lucide-react";
 import { modelsResponseSchema, type SessionModel } from "../../contracts";
 import { compactContextWindow, modelLabel, providerLabel } from "../../modelChoice";
-import { applyChange, keyOf, parseFavorite, resolveFavorites, splitKey, THINKING_LEVELS, type Lists, type ModelPrefs, type ModelPrefsSave, type PrefsChange } from "../../models/modelPrefs";
+import { applyChange, keyOf, parseFavorite, resolveFavorites, splitKey, type Lists, type PrefsChange } from "../../models/modelPrefs";
+import { THINKING_LEVELS, type ModelPrefs, type ModelPrefsSave } from "@shared/modelPrefsContract";
 import { thinkingLevelsFor } from "../../newSession";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "../ModelPicker";
 import { SettingsField } from "./SettingsField";

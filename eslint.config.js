@@ -5,10 +5,10 @@ import tseslint from "typescript-eslint";
 
 export default defineConfig([
   {
-    ignores: ["dist/**", "node_modules/**", "plugins/*/dist/**"],
+    ignores: ["dist/**", "node_modules/**", "plugins/*/dist/**", "ui/**"],
   },
   {
-    files: ["src/**/*.ts", "extensions/**/*.ts", "pi-web-plugins/**/*.ts", "plugins/**/*.ts", "scripts/layout/**/*.ts", "vite.config.ts", "vitest.config.ts"],
+    files: ["src/**/*.ts", "extensions/**/*.ts", "pi-web-plugins/**/*.ts", "plugins/**/*.ts", "vitest.config.ts"],
     extends: [
       js.configs.recommended,
       tseslint.configs.strictTypeChecked,

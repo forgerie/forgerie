@@ -15,7 +15,6 @@ export default defineConfig({
         "scripts/**",
         "src/cli.ts",
         "src/piWebVersionReport.ts",
-        "src/client/src/main.ts",
         "src/server/index.ts",
         "src/server/sessiond.ts",
       ],
@@ -38,12 +37,6 @@ export default defineConfig({
           branches: 76.2,
           functions: 91.1,
           lines: 91.2,
-        },
-        "src/client/src/components/**/*.ts": {
-          statements: 78.8,
-          branches: 72.5,
-          functions: 76.5,
-          lines: 82.1,
         },
         "src/nativeServices/**/*.ts": {
           statements: 85.3,

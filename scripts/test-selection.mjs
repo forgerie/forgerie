@@ -22,7 +22,6 @@ const DOCKER_TESTS = [
   "src/server/dockerDevDependencySync.test.ts",
 ];
 
-const CLIENT_BUILD_TEST = "src/clientBuildContents.test.ts";
 const DOCKER_DOCS_TEST = "src/docker/piWebDockerDocs.test.ts";
 const DOCS_SITE_TEST = "scripts/docs-site.test.mjs";
 const INSTALL_SCRIPT_TEST = "src/installScript.test.ts";
@@ -93,9 +92,6 @@ function relatedTestInputs(paths) {
 
     if (path === "docs/site.js" || path === "docs/styles.css") inputs.add(DOCS_SITE_TEST);
     if (path.startsWith("pi-web-plugins/")) inputs.add(PLUGIN_PUBLIC_API_TEST);
-    if (path === "vite.config.ts" || path.startsWith("src/client/public/") || path === "src/client/index.html") {
-      inputs.add(CLIENT_BUILD_TEST);
-    }
     if (path === "install.sh") inputs.add(INSTALL_SCRIPT_TEST);
     if (path === "nix/smart-turn.nix" || path === "speech/smart_turn_worker.py") {
       inputs.add(SMART_TURN_PROCESS_TEST);

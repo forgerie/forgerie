@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { z } from "zod";
-import { modelPrefsSchema, type ModelPrefs, type ModelPrefsSave } from "./modelPrefs";
+import { modelPrefsSchema, type ModelPrefs, type ModelPrefsSave } from "@shared/modelPrefsContract";
 
 /** A save the server refused because a list moved on. Reloading is the way out. */
 export class PrefsConflict extends Error {}

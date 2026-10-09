@@ -36,10 +36,12 @@ import {
 import { MachineService } from "./machines/machineService.js";
 import { registerMachineRoutes } from "./machines/machineRoutes.js";
 import { registerMachineProxyRoutes } from "./machines/machineProxyRoutes.js";
+import { registerUiSettingsRoutes, type UiSettingsOptions } from "./uiSettings/routes.js";
 import { proxyMachinePluginAsset, registerMachinePluginProxyRoutes } from "./machines/machinePluginProxyRoutes.js";
 import type { Project, Workspace, WorkspaceEffectiveConfig } from "./types.js";
 
 export interface AppDependencies {
+  uiSettings?: UiSettingsOptions;
   projects?: ProjectService;
   workspaces?: WorkspaceService;
   machines?: MachineService;
@@ -224,6 +226,7 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
   registerWorkspaceDeletionRoutes(app, projects, workspaces, sessionDaemon, "/api/machines/local", undefined, worktreeOwnership);
 
   registerMachineProxyRoutes(app, machines);
+  await registerUiSettingsRoutes(app, deps.uiSettings);
 
   const packagedClientDist = join(dirname(fileURLToPath(import.meta.url)), "..", "client");
   const clientDist = deps.clientDist ?? (existsSync(packagedClientDist) ? packagedClientDist : join(process.cwd(), "dist", "client"));

@@ -3,7 +3,8 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AppShell } from "../src/ui/AppShell";
 import { PluginsView } from "../src/ui/settings/PluginsView";
-import type { PluginCatalog, PluginsApi } from "../src/plugins/pluginsApi";
+import type { PluginsApi } from "../src/plugins/pluginsApi";
+import type { PluginCatalog } from "@shared/pluginsContract";
 import "../src/ui/theme.css";
 
 let catalog: PluginCatalog = { profileDir: "/home/simonwjackson/.local/share/forgerie/agent", configPath: "/home/simonwjackson/.config/forgerie/config.json",

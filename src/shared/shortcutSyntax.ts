@@ -23,20 +23,6 @@ export type StoredShortcutValueParseResult =
   | { ok: true; value: string | null }
   | { ok: false; message: string };
 
-export interface ShortcutKeyLikeEvent {
-  key: string;
-  metaKey: boolean;
-  ctrlKey: boolean;
-  altKey: boolean;
-  shiftKey: boolean;
-  isComposing: boolean;
-  getModifierState?: ((keyArg: string) => boolean) | undefined;
-}
-
-export function parseShortcutInput(shortcut: string): ShortcutParseResult {
-  return parseShortcut(shortcut, { allowLegacyMod: false, requireFirstChordActivator: true });
-}
-
 /** Read pre-Ctrl-only config written by older Forgerie versions. */
 function parseStoredShortcut(shortcut: string): ShortcutParseResult {
   return parseShortcut(shortcut, { allowLegacyMod: true, requireFirstChordActivator: true });
@@ -47,33 +33,6 @@ export function parseStoredShortcutValue(value: unknown): StoredShortcutValuePar
   if (typeof value !== "string" || value === "") return { ok: false, message: "Shortcut values must be non-empty strings or null." };
   const parsed = parseStoredShortcut(value);
   return parsed.ok ? { ok: true, value: parsed.shortcut } : parsed;
-}
-
-export function normalizeShortcut(shortcut: string): string[] {
-  const parsed = parseShortcut(shortcut, { allowLegacyMod: true, requireFirstChordActivator: false });
-  return parsed.ok ? parsed.tokens : [];
-}
-
-export function formatShortcut(shortcut: string): string {
-  return normalizeShortcut(shortcut)
-    .map((token) => token
-      .split("+")
-      .map(formatShortcutPart)
-      .join("+"))
-    .join(" ");
-}
-
-export function shortcutTokenFromEvent(event: ShortcutKeyLikeEvent): string | undefined {
-  if (event.isComposing || event.metaKey) return undefined;
-  if (event.ctrlKey && event.altKey && event.getModifierState?.("AltGraph") === true) return undefined;
-  const key = normalizeKey(event.key);
-  if (key === undefined) return undefined;
-  const modifiers: string[] = [];
-  if (event.ctrlKey) modifiers.push("ctrl");
-  if (event.altKey) modifiers.push("alt");
-  if (event.shiftKey) modifiers.push("shift");
-  modifiers.push(key);
-  return modifiers.join("+");
 }
 
 export function isShortcutSequenceStarter(token: string): boolean {
@@ -159,10 +118,6 @@ function normalizeShortcutKeyName(key: string): string | undefined {
   return undefined;
 }
 
-function normalizeKey(key: string): string | undefined {
-  if (key === " ") return "space";
-  return normalizeShortcutKeyName(key.toLowerCase());
-}
 
 function keyAlias(key: string): string | undefined {
   switch (key) {

@@ -1,5 +1,6 @@
 import type { SessionModel } from "./contracts";
-import { isShown, resolveFavorites, type ModelPrefs } from "./models/modelPrefs";
+import { isShown, resolveFavorites } from "./models/modelPrefs";
+import type { ModelPrefs } from "@shared/modelPrefsContract";
 
 export type { SessionModel };
 
