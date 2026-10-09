@@ -52,6 +52,10 @@ const route: FauxResponseFactory = (context) => {
   if (said.startsWith("[subagent")) return answer("Noted.");
   if (said.startsWith("[the user")) return answer("Understood.");
   if (said.startsWith("STEER")) return answer("Steered: finishing early.");
+  if (said === "Start three children in one reply") return fauxAssistantMessage(
+    ["alpha", "beta", "gamma"].map((name) => fauxToolCall("child_agent", { action: "spawn", name, message: "run work 5 times" })),
+    { stopReason: "toolUse" },
+  );
   const spawn = /^Start a child named (\w+)(?: as (\w+))?: ([\s\S]*)$/.exec(said);
   if (spawn !== null) return call("child_agent", { action: "spawn", name: spawn[1] ?? "", message: spawn[3] ?? "", ...(spawn[2] === undefined ? {} : { agent: spawn[2] }) });
   const steps = /run work (\d+) times/.exec(said);
@@ -218,6 +222,37 @@ describe("Durable-native child agents in a Forgerie session", () => {
     expect([...new Set(ended(runner.conversationId).map((a) => a.step))].sort()).toEqual([1, 2, 3, 4, 5]);
     expect(await service.durableChildren(ref)).toHaveLength(1);
     await until("index empties", async () => (await index.list()).length === 0);
+  }, 40_000);
+
+  it("runs three children in parallel and resumes each with one report after restart", async () => {
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start three children in one reply");
+    const initial = await until("three children", async () => {
+      const listed = await service.durableChildren(ref);
+      return listed.length === 3 ? listed : undefined;
+    });
+    const ids = initial.map((item) => item.conversationId);
+    await until("all children in step two", () => Promise.resolve(ids.every((id) => attempts.some((a) => a.conv === id && a.step === 2 && a.phase === "start"))));
+    // All three first tools start before any ends. This proves parallel work, not just three queued spawns.
+    const firstEnd = attempts.findIndex((attempt) => attempt.phase === "end");
+    expect(new Set(attempts.slice(0, firstEnd).map((attempt) => attempt.conv)).size).toBe(3);
+    await until("live index", async () => (await index.list()).length === 1);
+    await service.dispose();
+    index = new LiveChildSessionIndex(join(directory, "live-children.json"));
+    service = openService();
+    expect(await service.resumeDurableChildren(await index.list())).toEqual({ resumed: [ref.id], failed: [] });
+    await until("one report per child", async () => (await Promise.all(initial.map((item) => reports(ref, item.name)))).every((items) => items.length === 1), 20_000);
+    await until("all children idle", async () => (await service.durableChildren(ref)).every((item) => !item.busy));
+    expect((await service.durableChildren(ref)).map((item) => [item.name, item.conversationId])).toEqual(initial.map((item) => [item.name, item.conversationId]));
+    for (const item of initial) {
+      expect(await reports(ref, item.name)).toHaveLength(1);
+      expect([...new Set(ended(item.conversationId).map((attempt) => attempt.step))].sort()).toEqual([1, 2, 3, 4, 5]);
+    }
+    await until("index cleared", async () => (await index.list()).length === 0);
+    await service.dispose();
+    service = openService();
+    await service.status(ref);
+    for (const item of initial) expect(await reports(ref, item.name)).toHaveLength(1);
   }, 40_000);
 
   it("keeps one question across a restart, and an answer after it reaches the child", async () => {

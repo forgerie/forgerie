@@ -1,0 +1,333 @@
+{
+  "runAt": "2026-10-09",
+  "model": "child-acceptance/deepseek-v4.1-flash",
+  "results": [
+    {
+      "label": "agent file and coding write",
+      "pass": true,
+      "evidence": {
+        "file": "written.txt",
+        "content": "CHILD-WRITE-OK",
+        "transcript": "write.json",
+        "sessionId": "01a12204-55ca-76f1-9900-a84a1c013bf6",
+        "parentEntries": [
+          {
+            "kind": "user",
+            "text": "[subagent writer answered, no reply needed] WRITE-DONE"
+          }
+        ],
+        "children": [
+          {
+            "name": "writer",
+            "agent": "acceptance-writer",
+            "conversationId": 17,
+            "busy": false,
+            "entries": [
+              {
+                "role": "assistant",
+                "text": "",
+                "calls": [
+                  {
+                    "name": "write",
+                    "arguments": {
+                      "path": "written.txt",
+                      "content": "CHILD-WRITE-OK"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "toolResult",
+                "toolName": "write",
+                "text": "Successfully wrote to written.txt",
+                "calls": []
+              },
+              {
+                "role": "assistant",
+                "text": "WRITE-DONE",
+                "calls": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "label": "user steer",
+      "pass": true,
+      "evidence": {
+        "file": "steered.txt",
+        "transcript": "steer.json",
+        "sessionId": "01a12204-767b-76f1-9900-a85012c57453",
+        "parentEntries": [
+          {
+            "kind": "forgerie.child-note",
+            "text": "You told steerer: Change of task: do not write original.txt. Instead use write to create steered.txt with exactly \"STEER-OK\". Reply STEER-DONE."
+          },
+          {
+            "kind": "user",
+            "text": "[subagent steerer answered, no reply needed] STEER-DONE"
+          }
+        ],
+        "children": [
+          {
+            "name": "steerer",
+            "agent": "acceptance-writer",
+            "conversationId": 17,
+            "busy": false,
+            "entries": [
+              {
+                "role": "assistant",
+                "text": "\n\n",
+                "calls": [
+                  {
+                    "name": "bash",
+                    "arguments": {
+                      "command": "./work-window.mjs steer-ready.txt 5"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "toolResult",
+                "toolName": "bash",
+                "text": "",
+                "calls": []
+              },
+              {
+                "role": "assistant",
+                "text": "\n\n",
+                "calls": [
+                  {
+                    "name": "write",
+                    "arguments": {
+                      "path": "steered.txt",
+                      "content": "STEER-OK"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "toolResult",
+                "toolName": "write",
+                "text": "Successfully wrote to steered.txt",
+                "calls": []
+              },
+              {
+                "role": "assistant",
+                "text": "STEER-DONE",
+                "calls": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "label": "stop",
+      "pass": true,
+      "evidence": {
+        "forbiddenFileAbsent": true,
+        "transcript": "stop.json",
+        "sessionId": "01a12204-a039-76f1-9900-a857c9f7b0bd",
+        "parentEntries": [
+          {
+            "kind": "forgerie.child-note",
+            "text": "You stopped stopper."
+          }
+        ],
+        "children": [
+          {
+            "name": "stopper",
+            "agent": "acceptance-writer",
+            "conversationId": 17,
+            "busy": false,
+            "entries": [
+              {
+                "role": "assistant",
+                "text": "",
+                "calls": [
+                  {
+                    "name": "bash",
+                    "arguments": {
+                      "command": "ls -la; echo \"---\"; cat work-window.mjs 2>/dev/null | head -100; echo \"---\"; cat stop-ready.txt 2>/dev/null"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "toolResult",
+                "toolName": "bash",
+                "text": "total 16\ndrwxr-xr-x 1 simonwjackson users 104 Oct  9 12:54 .\ndrwx------ 1 simonwjackson users 150 Oct  9 12:54 ..\n-rw-r--r-- 1 simonwjackson users   8 Oct  9 12:54 steered.txt\n-rw-r--r-- 1 simonwjackson users   6 Oct  9 12:54 steer-ready.txt\n-rwxr-xr-x 1 simonwjackson users 499 Oct  9 12:54 work-window.mjs\n-rw-r--r-- 1 simonwjackson users  14 Oct  9 12:54 written.txt\n---\n#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 -c node\n// A controlled interruption window for the real-sessiond acceptance test.\nimport { appendFile } from \"node:fs/promises\";\nimport { setTimeout as sleep } from \"node:timers/promises\";\n\nconst [marker, seconds] = process.argv.slice(2);\nif (!marker || !Number.isFinite(Number(seconds)) || Number(seconds) < 0) throw new Error(\"Usage: work-window.mjs marker seconds\");\nawait appendFile(marker, \"ready\\n\", \"utf8\");\nawait sleep(Number(seconds) * 1000);\n---\n<harness>\n[error] Command exited with code 1\n</harness>",
+                "calls": []
+              },
+              {
+                "role": "assistant",
+                "text": "",
+                "calls": [
+                  {
+                    "name": "bash",
+                    "arguments": {
+                      "command": "./work-window.mjs stop-ready.txt 30; echo \"exit=$?\"; echo \"---\"; cat stop-ready.txt",
+                      "timeout": 60
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "toolResult",
+                "toolName": "bash",
+                "text": "<harness>\n[error] Tool bash was aborted\n</harness>",
+                "calls": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "label": "question and answer without a question-triggered parent turn",
+      "pass": true,
+      "evidence": {
+        "answersBefore": 2,
+        "transcript": "question.json",
+        "sessionId": "01a12204-b392-76f1-9900-a85ce356a922",
+        "parentEntries": [
+          {
+            "kind": "forgerie.child-question",
+            "text": "asker asks: Which acceptance colour?"
+          },
+          {
+            "kind": "forgerie.child-answer",
+            "text": "Answered: TEAL-OK"
+          },
+          {
+            "kind": "user",
+            "text": "[subagent asker answered, no reply needed] QUESTION-DONE"
+          }
+        ],
+        "children": [
+          {
+            "name": "asker",
+            "agent": "acceptance-writer",
+            "conversationId": 17,
+            "busy": false,
+            "entries": [
+              {
+                "role": "assistant",
+                "text": "",
+                "calls": [
+                  {
+                    "name": "ask_human",
+                    "arguments": {
+                      "question": "Which acceptance colour?"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "toolResult",
+                "toolName": "ask_human",
+                "text": "The user answered: TEAL-OK",
+                "calls": []
+              },
+              {
+                "role": "assistant",
+                "text": "",
+                "calls": [
+                  {
+                    "name": "write",
+                    "arguments": {
+                      "path": "answer.txt",
+                      "content": "TEAL-OK"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "toolResult",
+                "toolName": "write",
+                "text": "Successfully wrote to answer.txt",
+                "calls": []
+              },
+              {
+                "role": "assistant",
+                "text": "QUESTION-DONE",
+                "calls": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "label": "SIGKILL and automatic startup resume",
+      "pass": true,
+      "evidence": {
+        "conversationId": 17,
+        "transcript": "after-kill.json",
+        "file": "resumed.txt",
+        "sessionId": "01a12204-ceb2-76f1-9900-a863b7c64f63",
+        "parentEntries": [
+          {
+            "kind": "user",
+            "text": "[subagent runner answered, no reply needed] RESUME-DONE"
+          }
+        ],
+        "children": [
+          {
+            "name": "runner",
+            "agent": "acceptance-writer",
+            "conversationId": 17,
+            "busy": false,
+            "entries": [
+              {
+                "role": "assistant",
+                "text": "I'll execute the command with bash exactly once.",
+                "calls": [
+                  {
+                    "name": "bash",
+                    "arguments": {
+                      "command": "./work-window.mjs crash-started.txt 30",
+                      "timeout": 60
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "toolResult",
+                "toolName": "bash",
+                "text": "<harness>\n[error] Tool bash was interrupted and may have partially run\n</harness>",
+                "calls": []
+              },
+              {
+                "role": "assistant",
+                "text": "The bash tool was interrupted by a restart. Per instructions, I will not rerun it, and will proceed to create the file.",
+                "calls": [
+                  {
+                    "name": "write",
+                    "arguments": {
+                      "path": "resumed.txt",
+                      "content": "RESUME-OK"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "toolResult",
+                "toolName": "write",
+                "text": "Successfully wrote to resumed.txt",
+                "calls": []
+              },
+              {
+                "role": "assistant",
+                "text": "RESUME-DONE",
+                "calls": []
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

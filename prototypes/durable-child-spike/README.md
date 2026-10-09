@@ -43,7 +43,7 @@ Phase 2 ran 3 times in a row with no failures. The full `src/server/sessions` su
 - `src/server/sessions/piSessionService.ts`: `durableChildAgents` dependency and service methods `durableChildren`, `durableChildMessages`, `messageDurableChild`, `stopDurableChild`, and `answerDurableChildQuestion`.
 - `src/server/sessions/durableChildAgents.spike.test.ts`: phase 2, one test per check.
 
-Run phase 2: `nix shell nixpkgs#nodejs_24 -c npx vitest run src/server/sessions/durableChildAgents.spike.test.ts`.
+The product tests replaced the original spike test. Run them with `nix shell nixpkgs#nodejs_24 -c npx vitest run src/server/sessions/durableChildAgents.test.ts`.
 
 ## How it works
 
@@ -92,7 +92,41 @@ that file.
   reopens the Harness). The earlier crash spike (`prototypes/pi-durable-spike`) covered `SIGKILL` for parent runs.
 - Many children, long transcripts, compaction inside a child.
 
-## Recommended next steps, in order
+## Real-model run
+
+On 2026-10-09, the production `src/server/sessiond.ts` passed the back-end brief's first acceptance item through HTTP. It used an isolated config, agent profile, data directory, port, and non-Git workspace. The installed systemd units were not restarted.
+
+Model: `deepseek-v4.1-flash` through CLIProxyAPI, registered as `child-acceptance/deepseek-v4.1-flash`. Three complete runs passed, in 44 seconds, 38 seconds, and 55 seconds. The last two runs used `work-window.mjs` to append a marker before waiting. The marker proves the interrupted bash invocation did not repeat.
+
+| Case | Observed result |
+| --- | --- |
+| Agent file and coding tools | `acceptance-writer` spawned from the isolated profile. Durable `write` created `written.txt` with `CHILD-WRITE-OK`. |
+| User steer | During bash, a steer replaced the next write. `steered.txt` contained `STEER-OK`; `original.txt` was absent. The parent received a steer note. |
+| Stop | Stop ended the child. Its forbidden output file and completion report were absent. The parent received a stop note. |
+| Question and answer | The child used `ask_human`. Parent assistant count stayed at two while it waited. The answer reached the child and `answer.txt` contained `TEAL-OK`. |
+| SIGKILL and startup resume | Sessiond died during bash. Startup alone resumed the child before any per-session HTTP read. The interrupted unsafe tool returned an error rather than replaying. `resumed.txt` contained `RESUME-OK`. The child kept conversation ID 17 and delivered one report. |
+
+Durable evidence with transcript excerpts: `sessiond-real-results.json`. Full local transcripts, file effects, and daemon logs from the final run remain at `/tmp/forgerie-child-real-N6BmKA/`. Its copied provider credential was redacted after shutdown. The configured model prices were zero, so this run does not establish a monetary cost.
+
+Repeat from the repository root:
+
+```sh
+nix shell nixpkgs#nodejs_24 -c node prototypes/durable-child-spike/sessiond-real.mjs
+```
+
+The script reads the CLIProxyAPI config from the live profile without changing it. It creates its own temporary profile and starts only its own daemon. Override `CHILD_ACCEPTANCE_PROXY`, `CHILD_ACCEPTANCE_MODEL`, or `CHILD_ACCEPTANCE_PORT` if needed. It records redacted excerpts in `sessiond-real-results.json`. It does not test the browser or establish complete Durable migration acceptance.
+
+## Several children at once
+
+The service test `runs three children in parallel and resumes each with one report after restart` passes three consecutive runs. All three first work calls start before the first one ends. After service restart, the children keep their conversation IDs, finish all five steps, and report exactly once each. A second reopen does not duplicate reports. This uses the production `PiSessionService` and Durable factory with a configured scripted model. It is not a second daemon SIGKILL test.
+
+Repeat the case with:
+
+```sh
+nix shell nixpkgs#nodejs_24 -c npx vitest run src/server/sessions/durableChildAgents.test.ts -t 'runs three children in parallel'
+```
+
+## Original recommendations, before the product build
 
 1. A child tool loadout (finding 1). Without it a child cannot do real work.
 2. Sessiond reopens sessions with live Durable tasks at startup (finding 2).
