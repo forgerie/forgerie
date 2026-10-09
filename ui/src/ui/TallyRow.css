@@ -1,0 +1,97 @@
+/* Content with a tally in its margin. The margin column is --tally-gutter
+   wide. A container that already indents its content by that much sets
+   --tally-hang, and the row hangs its marks into the indent, so content
+   with and without a tally shares one left edge. */
+.tally {
+  /** Side of one mark. @label Tally mark size @min 0.25 @max 0.75 @step 0.0625 */
+  --tally-mark: 0.4375rem;
+  --tally-gap: 0.1875rem;
+  display: grid;
+  grid-template-columns: var(--tally-gutter) minmax(0, 1fr);
+  align-items: start;
+  margin-block: var(--space-3);
+  margin-inline-start: calc(-1 * var(--tally-hang, 0rem));
+}
+.tally-toggle {
+  grid-column: 1; position: relative;
+  display: flex; justify-content: flex-end;
+  margin: 0; padding: 0 var(--space-2) 0 0;
+  border: 0; border-radius: var(--radius-document);
+  background: none; color: var(--muted-foreground);
+  line-height: inherit; text-align: start;
+}
+/* Drawn small, pressed large. */
+.tally-toggle::before {
+  content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%;
+}
+/* Without content the line belongs to the toggle: the whole row opens. */
+.tally-toggle[data-wide] {
+  grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start;
+  padding: 0; min-inline-size: 0;
+}
+.tally-toggle[data-wide] .tally-marks { margin-inline-end: var(--space-2); }
+.tally-toggle:hover .tally-line, .tally-toggle:hover .tally-mark { color: var(--foreground); }
+.tally-toggle:hover .tally-mark[data-tone="plain"] { background: var(--foreground); }
+/* One line box tall, so the first row of marks centres on the first line of content. */
+.tally-marks {
+  display: flex; flex-wrap: wrap; justify-content: flex-end; align-content: flex-start; align-items: center;
+  gap: var(--tally-gap);
+  flex: none;
+  inline-size: calc(3 * var(--tally-mark) + 2 * var(--tally-gap));
+  justify-self: end;
+  padding-block-start: calc((1lh - var(--tally-mark)) / 2);
+}
+.tally-mark {
+  inline-size: var(--tally-mark); block-size: var(--tally-mark);
+  border-radius: calc(var(--tally-mark) / 4);
+  background: var(--meter-ink);
+}
+.tally-mark[data-tone="bad"] { background: var(--tone-bad); }
+.tally-mark[data-tone="warn"] { background: var(--tone-warn); }
+.tally-mark[data-tone="live"] { background: var(--tone-live); animation: tally-blink 1.2s ease-in-out infinite; }
+.tally-mark[data-tone="faint"] { background: none; box-shadow: inset 0 0 0 var(--hairline) var(--muted-foreground); }
+@keyframes tally-blink { 50% { opacity: 0.35; } }
+.tally-more {
+  font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; line-height: 1;
+  color: var(--muted-foreground);
+}
+.tally-more[data-tone="bad"] { color: var(--ink-bad); }
+.tally-more[data-tone="warn"] { color: var(--ink-warn); }
+.tally-more[data-tone="live"] { color: var(--ink-live); }
+.tally-body { grid-column: 2; min-inline-size: 0; }
+/* A quiet line keeps the content's line box, so marks align the same way. */
+.tally-line {
+  grid-column: 2; min-inline-size: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--code-font); font-size: var(--label-text); font-variant-ligatures: none;
+  line-height: calc(var(--text-size) * var(--line-height));
+  color: var(--muted-foreground);
+}
+.tally-line[data-live] {
+  background: linear-gradient(90deg, var(--muted-foreground) 40%, var(--foreground) 50%, var(--muted-foreground) 60%) 0 0 / 250% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: tally-shimmer 2s linear infinite;
+}
+@keyframes tally-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.tally-label {
+  position: absolute; inline-size: var(--hairline); block-size: var(--hairline);
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.tally-panel {
+  grid-column: 2; min-inline-size: 0;
+  margin-block-start: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-document);
+  background: var(--tint-surface);
+}
+.tally-title {
+  padding-block: var(--space-1);
+  font-family: var(--code-font); font-size: var(--label-text); font-variant-ligatures: none;
+  color: var(--muted-foreground); overflow-wrap: anywhere;
+}
+.tally-notes { color: var(--muted-foreground); font-size: var(--small-text); padding-block-end: var(--space-1); }
+@media (prefers-reduced-motion: reduce) {
+  .tally-mark[data-tone="live"], .tally-line[data-live] { animation: none; }
+  .tally-line[data-live] { background: none; color: var(--ink-live); }
+}

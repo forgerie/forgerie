@@ -7,7 +7,9 @@ import { SessionDoorCall } from "./SessionDoor";
 import { ShellRun } from "./ShellRun";
 import { MarkdownText } from "./MarkdownText";
 import { CopyButton } from "./CopyButton";
-import { ChainOfThoughtGroup, SkillLoad, SkillLoadGroup, ToolCall, TraceLine, WorkingLine } from "./Trace";
+import { ChainOfThoughtGroup, SkillLoad, SkillLoadGroup, ToolCall, TraceLine, useToolSteps, WorkingLine, type ToolStepView } from "./Trace";
+import { TallyRow } from "./TallyRow";
+import { STEP_PREFIX } from "./stepPart";
 import { UserMessageAttachments } from "./Attachments";
 import { ReplyGallery } from "./ImageGallery";
 import { SkillInvocationRecord } from "./SkillInvocation";
@@ -16,7 +18,8 @@ import { skillLoadOf } from "../skills";
 // Consecutive reasoning and tools share one fold. Text stays outside. Inside
 // the fold, reasoning reads as text and each tool is one line, so no fold
 // opens only to show another fold.
-type GroupKey = "group-chainOfThought" | "group-skills";
+type StepKey = `group-step:${string}`;
+type GroupKey = "group-chainOfThought" | "group-skills" | StepKey;
 const groupActivity = groupPartByType<GroupKey>({
   reasoning: ["group-chainOfThought"],
   "tool-call": ["group-chainOfThought"],
@@ -27,7 +30,15 @@ const skillGroup = ["group-skills"] as const;
 // Skill loads also stay visible beside the activity, and adjacent loads share
 // a line. The helper groups by tool name; this branches on a call's arguments
 // and result, so it is a stable module-level function instead.
+//
+// A step (one Pi message that calls tools) is its own group first: the
+// transcript marks its parts with a `parentId`, so the boundary between two
+// steps is the message boundary, not a guess from part types.
+const STEP_GROUP = "group-step:";
+const isStepKey = (key: string): key is StepKey => key.startsWith(STEP_GROUP);
 function groupAssistantParts(part: PartState, context: GroupByContext): readonly GroupKey[] {
+  const parentId = "parentId" in part ? part.parentId : undefined;
+  if (typeof parentId === "string" && parentId.startsWith(STEP_PREFIX)) return [`${STEP_GROUP}${parentId.slice(STEP_PREFIX.length)}`];
   if (part.type !== "tool-call") return groupActivity(part, context);
   if (artifactDoor(part.artifact)) return [];
   return skillLoadOf(part.toolName, part.args) ? skillGroup : groupActivity(part, context);
@@ -36,6 +47,21 @@ function groupAssistantParts(part: PartState, context: GroupByContext): readonly
 function ResponseCopy() {
   const aui = useAui();
   return <CopyButton label="Copy response" getText={() => aui.message.getCopyText()} />;
+}
+
+// A step renders its parts by index: narration as the row's text, thinking
+// and calls in its panel.
+const stepText = { Text: MarkdownText };
+const stepThought = { Reasoning: MarkdownText };
+const stepTools = { tools: { Fallback: ToolCall } };
+function stepRow(step: ToolStepView) {
+  const parts = (indices: readonly number[], components: Parameters<typeof MessagePrimitive.PartByIndex>[0]["components"]) =>
+    indices.map((index) => <MessagePrimitive.PartByIndex key={index} index={index} components={components} />);
+  return <TallyRow marks={step.marks} label={step.label} title={step.title} line={step.line} live={step.live}
+    {...(step.thoughts.length > 0 ? { notes: () => parts(step.thoughts, stepThought) } : {})}
+    panel={() => parts(step.tools, stepTools)}>
+    {step.narration.length > 0 ? parts(step.narration, stepText) : undefined}
+  </TallyRow>;
 }
 
 // The invocation renders apart from the bubble, which keeps only the typed argument.
@@ -52,10 +78,15 @@ export function UserMessage() {
 }
 
 export function AssistantMessage() {
+  const steps = useToolSteps();
   return <MessagePrimitive.Root className="message message-assistant" data-role="assistant" aria-label="Assistant reply">
     <div className="message-text">
       <MessagePrimitive.GroupedParts groupBy={groupAssistantParts}>
         {({ part, children }) => {
+          if (isStepKey(part.type)) {
+            const step = steps.get(part.type.slice(STEP_GROUP.length));
+            return step ? stepRow(step) : <>{children}</>;
+          }
           switch (part.type) {
             case "group-chainOfThought": return <ChainOfThoughtGroup indices={part.indices} running={part.status.type === "running"}>{children}</ChainOfThoughtGroup>;
             case "group-skills": return part.indices.length === 1 ? <>{children}</>

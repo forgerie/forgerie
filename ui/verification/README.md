@@ -1,5 +1,18 @@
 # Verification and limits
 
+## Steps in a reply
+
+A reply shows its tool work as steps. A step is one Pi assistant message that calls a tool: the sentence that introduced the calls stays in the reply, and one mark per call sits in the margin beside it (`TallyRow`). Marks are grey for a call that ran, red for a failure, amber for a failure that a later call of the same tool on the same target fixed, blue while running, and hollow when stopped. Tapping the marks opens the step's thinking and calls; each call still opens to its input and output. A step without a sentence shows one quiet line naming the running or first call, and the whole line opens it. Past nine calls, the tail becomes a count in the worst tone it hides.
+
+The transcript gives every part of a step a `parentId` of `step:<message id>` in `convertMessage`, so the boundary between two steps is the message boundary. Before this, joining a turn's messages lost that boundary: in 38.1% of tool steps in the 13,519 local session files, a message holding only calls follows another tool step and would merge into it. A step ends at text written after a call (2 of 3,807,359 tool-calling messages); later parts render as before. Skill loads and session doors move to just after their step's calls.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | `npm run verify` in `ui/` passed the build, lint, and 1189 tests. `gates/check-pending.mjs main` reports 656 -> 656. Root `verify:static` (typecheck, lint, knip) passed. |
+| Visual review. | `scripts/steps-shots.mjs` captured the `steps` and `steps-running` preview scenarios at all four Fold postures in both schemes, with no page overflow. The captures for folded portrait (dark), unfolded landscape (light), folded landscape (light) and unfolded portrait (light, running) were read. |
+
+Cost: every assistant reply now keeps a 2.25rem margin (`--tally-gutter`) for marks, whether or not it has steps, so text does not jump when the first call arrives. That is about 8% of the width at folded portrait. The amber rule matches the tool name and argument summary literally, so a fix by a different command stays red. Physical Fold touch acceptance is not done.
+
 ## One fold for agent activity
 
 Reasoning and tool calls before a reply share one fold. Inside it, reasoning reads as text and each tool is one line that opens to its input and output. Before this change, a fold could open only to show another fold: thinking alone sat in a `thinking` fold inside a `thinking` fold, and a run of tools took three levels to reach output. The closed line keeps the failure and stop counts, and now names the tools that ran, which the removed tool group used to show.

@@ -109,6 +109,8 @@
   --meter-hatch: repeating-linear-gradient(115deg, transparent 0 2px, var(--tone-warn) 2px var(--meter-cut));
   --lane-line: 1.125rem;
   --lane-marker: calc(var(--hairline) * 2);
+  /** Margin a reply keeps for the marks beside its steps. @label Tally gutter @min 1.75 @max 3 @step 0.125 */
+  --tally-gutter: 2.25rem;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -720,6 +722,9 @@ summary.trace-line:hover { color: var(--foreground); }
 .message-assistant .message-text > .trace-line + .markdown,
 .message-assistant .message-text > .markdown + .session-door,
 .message-assistant .message-text > .session-door + .markdown { margin-block-start: var(--space-3); }
+/* A reply keeps a margin for the marks beside its steps, whether or not it
+   has steps yet, so text does not move when the first tool call arrives. */
+.message-assistant { padding-inline-start: var(--tally-gutter); --tally-hang: var(--tally-gutter); }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal { color: var(--code-keyword); }
 .hljs-string, .hljs-regexp, .hljs-attribute { color: var(--code-string); }
 .hljs-number, .hljs-symbol { color: var(--code-number); }

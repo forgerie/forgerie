@@ -78,22 +78,21 @@ describe("Handoff doors", () => {
       .toEqual([JSON.stringify({ focus: "Next slice" }, null, 2), "Started detached handoff h1."]);
   });
 
-  it("opens no door on a failed or running handoff, which stays counted in the activity", async () => {
+  it("opens no door on a failed or running handoff, which stays a call in its step", async () => {
     await render(reply({ type: "thinking", text: "Hand it off." }, handoff({ type: "done", output: "No model.", isError: true })));
     expect(doorButtons()).toHaveLength(0);
-    expect(summaryOf(document.querySelector("details.chain-of-thought"))).toBe("reasoning, 1 failed 1 tool: handoff_session");
+    expect(document.querySelector(".message-assistant .tally .tally-line")?.textContent).toBe("1 tool call, 1 failed: handoff_session focus: Next slice");
     await render(reply(handoff({ type: "running", output: "" })));
     expect(doorButtons()).toHaveLength(0);
     expect(document.querySelector(".session-door")).toBeNull();
   });
 
-  it("splits the activity around a door instead of counting the door's call in either part", async () => {
+  it("puts a door after its step instead of counting the door's call in it", async () => {
     const ran = (id: string): TranscriptPart => tool(id, "bash", { command: `echo ${id}` }, { type: "done", output: "", isError: false });
     await render(reply(ran("before"), tool("s", "spawn_session", { prompt: "Audit" }, handedOff()), ran("after")));
-    const groups = [...document.querySelectorAll("details.chain-of-thought")];
-    expect(groups.map(summaryOf)).toEqual(["tool activity 1 tool: bash", "tool activity 1 tool: bash"]);
+    expect(document.querySelectorAll(".message-assistant .tally .tally-mark")).toHaveLength(2);
     const order = [...document.querySelectorAll(".message-assistant .message-text > *")].map((node) =>
-      node.matches("details.chain-of-thought") ? "group" : node.matches(".session-door") ? "door" : node.className);
-    expect(order).toEqual(["group", "door", "group"]);
+      node.matches(".tally") ? "step" : node.matches(".session-door") ? "door" : node.className);
+    expect(order).toEqual(["step", "door"]);
   });
 });

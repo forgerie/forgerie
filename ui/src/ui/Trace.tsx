@@ -1,9 +1,11 @@
 // Trace grammar adapted from assistant-ui's homepage demo (trace.tsx,
 // trace-line.tsx). See THIRD_PARTY_NOTICES.md. Native <details> replaces the
 // site's Collapsible so disclosures need no extra dependency.
-import { useAuiState, type ToolCallMessagePartProps } from "@assistant-ui/react";
-import { useState, type ReactNode } from "react";
+import { useAuiState, type PartState, type ToolCallMessagePartProps } from "@assistant-ui/react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { ToolArtifact, ToolState } from "../transcript";
+import { STEP_PREFIX } from "./stepPart";
+import type { TallyTone } from "./TallyRow";
 import { clipOutput, formatToolArgs, summarizeToolArgs } from "../toolSummary";
 import { skillLoadOf } from "../skills";
 import { ImageGallery, useReplyImages } from "./ImageGallery";
@@ -142,6 +144,91 @@ export function SkillLoadGroup({ indices, running, children }: { indices: readon
     {...(failed > 0 ? { tone: "error" as const } : {})}>
     {() => children}
   </Disclosure>;
+}
+
+/** One step of a reply: the text that introduced some tool calls, and the calls. Indices point into the message's parts. */
+export interface ToolStepView {
+  id: string;
+  /** Text parts the model wrote before the calls. Empty when it wrote none. */
+  narration: number[];
+  thoughts: number[];
+  tools: number[];
+  marks: TallyTone[];
+  /** Stands in for absent narration: the running call, else the first, and how many more. */
+  line: string;
+  /** Each tool name with its count, and the outcome. */
+  title: string;
+  /** The calls and their outcome, for the toggle's accessible name. */
+  label: string;
+  live: boolean;
+}
+
+type StepTool = Extract<PartState, { type: "tool-call" }>;
+const stepIdOf = (part: PartState): string | undefined => {
+  const parentId = "parentId" in part ? part.parentId : undefined;
+  return typeof parentId === "string" && parentId.startsWith(STEP_PREFIX) ? parentId.slice(STEP_PREFIX.length) : undefined;
+};
+const targetOf = (part: StepTool) => `${part.toolName} ${summarizeToolArgs(part.args)}`.trim();
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+/**
+ * A failed call counts as retried when a later call in the reply runs the
+ * same tool on the same target and succeeds. The match is literal, so a fix
+ * by another command stays a failure: the rule never hides an open failure.
+ */
+function toneOf(part: StepTool, later: readonly StepTool[]): TallyTone {
+  const view = toolView(part);
+  if (view === "pending" || view === "running") return "live";
+  if (view === "interrupted") return "faint";
+  if (view !== "failed") return "plain";
+  const target = targetOf(part);
+  return later.some((other) => targetOf(other) === target && toolView(other) === "done") ? "warn" : "bad";
+}
+
+/** The steps of one reply, in order. Parts belong to a step through the `parentId` the transcript gives them. */
+export function planToolSteps(parts: readonly PartState[]): ToolStepView[] {
+  const steps = new Map<string, { narration: number[]; thoughts: number[]; tools: number[] }>();
+  const calls: StepTool[] = [];
+  parts.forEach((part, index) => {
+    const id = stepIdOf(part);
+    if (id === undefined) return;
+    const step = steps.get(id) ?? { narration: [], thoughts: [], tools: [] };
+    steps.set(id, step);
+    if (part.type === "text") step.narration.push(index);
+    else if (part.type === "reasoning") step.thoughts.push(index);
+    else if (part.type === "tool-call") { step.tools.push(index); calls.push(part); }
+  });
+  return [...steps].flatMap(([id, step]) => {
+    const tools = step.tools.map((index) => parts[index] as StepTool);
+    if (tools.length === 0) return [];
+    const marks = tools.map((part) => toneOf(part, calls.slice(calls.indexOf(part) + 1)));
+    const count = (tone: TallyTone) => marks.filter((mark) => mark === tone).length;
+    const outcome = [
+      count("bad") > 0 ? `${count("bad")} failed` : "",
+      count("warn") > 0 ? `${count("warn")} failed, then retried` : "",
+      count("faint") > 0 ? `${count("faint")} stopped` : "",
+    ].filter(Boolean).join(", ");
+    const names = new Map<string, number>();
+    for (const part of tools) names.set(part.toolName, (names.get(part.toolName) ?? 0) + 1);
+    const counts = [...names].map(([name, n]) => n > 1 ? `${name} \u00d7${n}` : name).join(", ");
+    const current = tools.find((part) => toneOf(part, []) === "live") ?? tools[0]!;
+    return [{
+      id, ...step, marks,
+      line: `${targetOf(current)}${tools.length > 1 ? ` +${tools.length - 1}` : ""}`,
+      title: outcome ? `${counts} (${outcome})` : counts,
+      label: `${plural(tools.length, "tool call")}${outcome ? `, ${outcome}` : ""}`,
+      live: marks.includes("live"),
+    }];
+  });
+}
+
+/**
+ * The current reply's steps by id. The selector returns text, so a reply
+ * re-renders when a step changes, not on every streamed token.
+ */
+export function useToolSteps(): ReadonlyMap<string, ToolStepView> {
+  const plan = useAuiState((s) => JSON.stringify(planToolSteps(s.message.parts)));
+  return useMemo(() => new Map((JSON.parse(plan) as ToolStepView[]).map((step) => [step.id, step])), [plan]);
 }
 
 /**

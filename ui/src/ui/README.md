@@ -38,6 +38,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `BarChart` (molecule): draws a few numbers of one kind as bars from zero, with each value also stated as text.
 - `CorrectionPanel` (molecule): states a correction loudly: the earlier claim struck through, the correct one strong, and the cause.
 - `AsideList` (molecule): lists findings outside the question, each with a high, medium or low pill that reads without colour.
+- `TallyRow` (molecule): content with one toned mark per unit of work in its margin; the marks open a panel, and a long tally ends in a count that keeps the worst tone it hides.
 - `Timeline` (molecule): shows events in order with their times in one aligned column, joined by a rail.
 - `QuoteFigure` (molecule): shows a quotation with its source as a caption in the code face.
 - `Figure` (atom): one short figure (a share, a clock, an amount) in the code face with tabular digits, toned plain, muted, warn, bad or faint.

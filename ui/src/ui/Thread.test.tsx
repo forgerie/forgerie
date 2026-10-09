@@ -227,7 +227,14 @@ describe("Homepage-derived thread", () => {
 });
 
 describe("Tools and reasoning", () => {
-  const summaries = () => [...document.querySelectorAll(".message-assistant details:not(.chain-of-thought) > summary .trace-text")].map((node) => node.textContent);
+  const summaries = () => [...document.querySelectorAll(".message-assistant details.tool-call > summary .trace-text")].map((node) => node.textContent);
+  const rows = () => [...document.querySelectorAll<HTMLElement>(".message-assistant .tally")];
+  const toggleOf = (row: HTMLElement) => row.querySelector<HTMLButtonElement>(":scope > button.tally-toggle")!;
+  const marks = (row: HTMLElement) => [...row.querySelectorAll<HTMLElement>(".tally-mark")].map((mark) => mark.dataset["tone"]);
+  async function openRow(row: HTMLElement) {
+    await act(async () => toggleOf(row).click());
+    return row.querySelector<HTMLElement>(":scope > .tally-panel")!;
+  }
   async function open(summary: string) {
     const node = [...document.querySelectorAll<HTMLElement>(".message-assistant summary")].find((item) => item.querySelector(".trace-text")?.textContent === summary)!;
     const details = node.parentElement as HTMLDetailsElement;
@@ -235,172 +242,177 @@ describe("Tools and reasoning", () => {
     return details;
   }
 
-  it("joins a run's messages into one reply with collapsed reasoning, a tool line, and the answer", async () => {
+  it("joins a run's messages into one reply: a step row for the calls, then the answer", async () => {
     await render({ messages: [
       { id: "q", role: "user", parts: [{ type: "text", text: "List files" }] },
       { id: "a1", role: "assistant", parts: [{ type: "thinking", text: "Use **ls**." }, tool("t1", { type: "done", output: "a.txt\nb.txt", isError: false })] },
       answer("Two files.", "a2"),
     ] });
     expect(document.querySelectorAll(".message-assistant")).toHaveLength(1);
-    expect(summaries()).toEqual(["ran bash echo t1"]);
+    expect(rows()).toHaveLength(1);
+    expect(marks(rows()[0]!)).toEqual(["plain"]);
+    // No narration: a quiet line names the call, and the whole line opens the step.
+    expect(rows()[0]!.querySelector(".tally-line")?.textContent).toBe("1 tool call: bash echo t1");
+    expect(toggleOf(rows()[0]!).getAttribute("aria-expanded")).toBe("false");
+    expect(summaries()).toEqual([]);
+    expect(document.querySelector(".message-assistant .reasoning-text, .message-assistant details.chain-of-thought")).toBeNull();
     expect([...document.querySelectorAll(".message-assistant .message-text > .markdown")].at(-1)?.textContent).toBe("Two files.");
-    const activity = await open("reasoning 1 tool: bash");
-    expect(activity.querySelector(":scope > .trace-body > .reasoning-text strong")?.textContent).toBe("ls");
+    const panel = await openRow(rows()[0]!);
+    expect(toggleOf(rows()[0]!).getAttribute("aria-expanded")).toBe("true");
+    expect(panel.querySelector(".tally-title")?.textContent).toBe("bash");
+    expect(panel.querySelector(".tally-notes strong")?.textContent).toBe("ls");
+    expect(summaries()).toEqual(["ran bash echo t1"]);
     const card = await open("ran bash echo t1");
     expect([...card.querySelectorAll("pre")].map((node) => node.textContent)).toEqual(["echo t1", "a.txt\nb.txt"]);
     expect(button("Copy response")).not.toBeNull();
   });
 
-  it("renders output only when a tool is opened, and shows failures and stopped calls", async () => {
+  it("keeps the narration as the row's text, with its calls as marks beside it", async () => {
+    await render({ messages: [{ id: "a", role: "assistant", parts: [
+      { type: "text", text: "Let me check **the router**." },
+      tool("r1", { type: "done", output: "", isError: false }, "read", { path: "a.ts" }),
+      tool("r2", { type: "done", output: "", isError: false }, "read", { path: "b.ts" }),
+    ] }] });
+    const row = rows()[0]!;
+    expect(row.querySelector(".tally-body strong")?.textContent).toBe("the router");
+    expect(row.querySelector(".tally-line")).toBeNull();
+    expect(toggleOf(row).getAttribute("aria-label")).toBe("2 tool calls");
+    expect(marks(row)).toEqual(["plain", "plain"]);
+    const panel = await openRow(row);
+    expect(panel.querySelector(".tally-title")?.textContent).toBe("read \u00d72");
+    expect(summaries()).toEqual(["ran read a.ts", "ran read b.ts"]);
+  });
+
+  it("gives each message its own step, even when two steps hold only calls", async () => {
+    await render({ messages: [
+      { id: "a1", role: "assistant", parts: [tool("x", { type: "done", output: "", isError: false })] },
+      { id: "a2", role: "assistant", parts: [tool("y", { type: "done", output: "", isError: false }), tool("z", { type: "done", output: "", isError: false })] },
+      answer("Done.", "a3"),
+    ] });
+    expect(rows().map((row) => row.querySelector(".tally-line")?.textContent)).toEqual(["1 tool call: bash echo x", "2 tool calls: bash echo y +1"]);
+  });
+
+  it("marks failed and stopped calls, and opens a failure to its error", async () => {
     await render({ messages: [answer("x", "a0"), { id: "a1", role: "assistant", parts: [
       tool("bad", { type: "done", output: "permission denied", isError: true }, "read", { path: "/etc/shadow" }),
     ] }, { id: "a2", role: "user", parts: [{ type: "text", text: "next" }] },
     { id: "a3", role: "assistant", parts: [tool("stop", { type: "interrupted" })] }] });
-    expect(summaries()).toEqual(["failed read /etc/shadow", "stopped bash echo stop"]);
+    expect(rows().map(marks)).toEqual([["bad"], ["faint"]]);
+    expect(rows().map((row) => row.querySelector(".tally-line")?.textContent))
+      .toEqual(["1 tool call, 1 failed: read /etc/shadow", "1 tool call, 1 stopped: bash echo stop"]);
     expect(document.querySelector(".trace-pre")).toBeNull();
+    await openRow(rows()[0]!);
     const failed = await open("failed read /etc/shadow");
     expect(failed.dataset["tone"]).toBe("error");
     expect(failed.querySelector("pre[data-tone=error]")?.textContent).toBe("permission denied");
     expect([...failed.querySelectorAll("h4")].map((node) => node.textContent)).toEqual(["Input", "Error"]);
+    await openRow(rows()[1]!);
     const stopped = await open("stopped bash echo stop");
     expect(stopped.querySelector(".trace-empty")?.textContent).toBe("No result. The run ended before this tool finished.");
   });
 
-  it("shows thinking alone as one fold whose body is the text", async () => {
-    await render({ messages: [{ id: "a", role: "assistant", parts: [{ type: "thinking", text: "Report what **happened**." }] }], running: true });
-    const folds = [...document.querySelectorAll<HTMLDetailsElement>(".message-assistant details")];
-    expect(folds).toHaveLength(1);
-    expect(folds[0]?.querySelector(":scope > summary .trace-text")?.textContent).toBe("thinking");
-    await act(async () => { folds[0]!.open = true; folds[0]!.dispatchEvent(new Event("toggle")); });
-    expect(folds[0]?.querySelector(":scope > .trace-body > .reasoning-text strong")?.textContent).toBe("happened");
-  });
-
-  it("lists adjacent tools one level inside the activity fold and names the running one on its line", async () => {
-    const parts = [tool("r1", { type: "done", output: "", isError: false }, "read", { path: "a.ts" }),
-      tool("r2", { type: "done", output: "", isError: false }, "read", { path: "b.ts" }),
-      tool("b1", { type: "running", output: "compiling" }, "bash", { command: "npm test" })];
-    const line = () => document.querySelector("details.chain-of-thought > summary .trace-text");
-    await render({ messages: [{ id: "a", role: "assistant", parts }], running: true });
-    expect(line()?.textContent).toBe("running tools 3 tools: bash npm test");
-    expect(line()?.hasAttribute("data-live")).toBe(true);
-    expect(summaries()).toEqual(["ran read a.ts", "ran read b.ts", "running bash npm test"]);
-    expect(document.querySelectorAll("details.chain-of-thought > .trace-body > details.tool-call")).toHaveLength(3);
-    const live = await open("running bash npm test");
-    expect(live.querySelectorAll("pre")[1]?.textContent).toBe("compiling");
-    await render({ messages: [{ id: "a", role: "assistant", parts: [...parts.slice(0, 2), tool("b1", { type: "done", output: "ok", isError: false }, "bash", { command: "npm test" })] }] });
-    expect(line()?.textContent).toBe("tool activity 3 tools: read, bash");
-    await render({ messages: [{ id: "a", role: "assistant", parts: [...parts.slice(0, 2), tool("b1", { type: "done", output: "no", isError: true }, "bash", { command: "npm test" })] }] });
-    expect(line()?.textContent).toBe("tool activity, 1 failed 3 tools: read, bash");
-    expect(document.querySelector<HTMLElement>("details.chain-of-thought")?.dataset["tone"]).toBe("error");
-  });
-
-  it("groups alternating reasoning and tools together without swallowing text or another turn", async () => {
+  it("marks a failure retried only when the same call later succeeds", async () => {
+    const failed = (id: string, command: string) => tool(id, { type: "done", output: "no", isError: true }, "bash", { command });
+    const passed = (id: string, command: string) => tool(id, { type: "done", output: "ok", isError: false }, "bash", { command });
     await render({ messages: [
-      { id: "q", role: "user", parts: [{ type: "text", text: "Check the code" }] },
-      { id: "a", role: "assistant", parts: [
-        { type: "thinking", text: "First inspect the file." }, tool("read", { type: "done", output: "file", isError: false }),
-        { type: "thinking", text: "Then verify the change." }, tool("test", { type: "done", output: "ok", isError: false }),
-        { type: "text", text: "The check passed." },
-        { type: "thinking", text: "One more check." }, tool("extra", { type: "interrupted" }),
-      ] },
-      { id: "q2", role: "user", parts: [{ type: "text", text: "Another question" }] },
-      answer("A text-only answer.", "a2"),
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "Run it." }, failed("f1", "go run ./probe"), failed("f2", "npm test")] },
+      { id: "a2", role: "assistant", parts: [{ type: "text", text: "Again." }, passed("p1", "go run ./probe"), passed("p2", "npm run test")] },
     ] });
-    const groups = [...document.querySelectorAll<HTMLDetailsElement>("details.chain-of-thought")];
-    expect(groups).toHaveLength(2);
-    expect(groups.every((group) => !group.open)).toBe(true);
-    expect(groups[0]?.querySelectorAll(":scope > .trace-body > .reasoning-text")).toHaveLength(2);
-    // The tool lines are the only folds inside the activity fold.
-    expect(groups.flatMap((group) => [...group.querySelectorAll("details:not(.tool-call)")])).toEqual([]);
-    expect(groups[0]?.querySelectorAll("details.tool-call")).toHaveLength(2);
-    expect(groups[1]?.querySelectorAll("details.tool-call")).toHaveLength(1);
-    expect(groups.some((group) => group.textContent?.includes("The check passed."))).toBe(false);
-    expect(groups.some((group) => group.textContent?.includes("A text-only answer."))).toBe(false);
-    expect(groups[0]?.querySelector(":scope > summary .trace-text")?.textContent).toBe("reasoning 2 tools: bash");
-    expect(groups[1]?.querySelector(":scope > summary .trace-text")?.textContent).toBe("reasoning, 1 stopped 1 tool: bash");
+    expect(rows().map(marks)).toEqual([["warn", "bad"], ["plain", "plain"]]);
+    expect(toggleOf(rows()[0]!).getAttribute("aria-label")).toBe("2 tool calls, 1 failed, 1 failed, then retried");
   });
 
-  it("keeps failures visible on the collapsed outer group and leaves response copying text-only", async () => {
+  it("shows the running call on a live line and blinks its mark", async () => {
+    const parts = [tool("r1", { type: "done", output: "", isError: false }, "read", { path: "a.ts" }),
+      tool("b1", { type: "running", output: "compiling" }, "bash", { command: "npm test" }),
+      tool("r2", { type: "pending" }, "read", { path: "b.ts" })];
+    await render({ messages: [{ id: "a", role: "assistant", parts }], running: true });
+    const line = rows()[0]!.querySelector<HTMLElement>(".tally-line")!;
+    expect(line.textContent).toBe("3 tool calls: bash npm test +2");
+    expect(line.hasAttribute("data-live")).toBe(true);
+    expect(marks(rows()[0]!)).toEqual(["plain", "live", "live"]);
+    await render({ messages: [{ id: "a", role: "assistant", parts: parts.map((part) => ({ ...part, state: { type: "done" as const, output: "", isError: false } })) }] });
+    expect(rows()[0]!.querySelector(".tally-line")?.hasAttribute("data-live")).toBe(false);
+    expect(marks(rows()[0]!)).toEqual(["plain", "plain", "plain"]);
+  });
+
+  it("keeps an open step and an open call open through streaming and authoritative reload", async () => {
+    const parts = [{ type: "text" as const, text: "Run the tests." },
+      tool("test", { type: "running", output: "first chunk" }, "bash", { command: "npm test" })];
+    await render({ messages: [{ id: "a", role: "assistant", parts }], running: true });
+    const row = rows()[0]!;
+    await openRow(row);
+    const card = await open("running bash npm test");
+    await render({ messages: [{ id: "a", role: "assistant", parts: [parts[0]!,
+      tool("test", { type: "running", output: "second chunk" }, "bash", { command: "npm test" })] }], running: true });
+    expect(rows()[0]).toBe(row);
+    expect(toggleOf(row).getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector("details.tool-call")).toBe(card);
+    expect(card.querySelectorAll("pre")[1]?.textContent).toBe("second chunk");
+    const settled = { id: "a", role: "assistant" as const, parts: [parts[0]!, tool("test", { type: "done", output: "passed", isError: false }, "bash", { command: "npm test" })] };
+    await render({ messages: [settled, answer("Done.", "b")] });
+    expect(rows()[0]).toBe(row);
+    expect(card.open).toBe(true);
+    expect(card.querySelectorAll("pre")[1]?.textContent).toBe("passed");
+    await render({ messages: [settled, answer("Done.", "b")], disabled: true });
+    expect(rows()[0]).toBe(row);
+    expect(card.open).toBe(true);
+  });
+
+  it("keeps text written after a call outside the step and copies only text", async () => {
     await render({ messages: [{ id: "a", role: "assistant", parts: [
       { type: "thinking", text: "Inspect the request." },
       tool("bad", { type: "done", output: "denied", isError: true }),
       tool("stop", { type: "interrupted" }),
       { type: "text", text: "The command failed." },
     ] }] });
-    const group = document.querySelector<HTMLDetailsElement>("details.chain-of-thought")!;
-    expect(group.open).toBe(false);
-    expect(group.dataset["tone"]).toBe("error");
-    expect(group.querySelector(":scope > summary .trace-label")?.textContent).toBe("reasoning, 1 failed, 1 stopped");
-    expect(document.querySelector(".trace-pre")).toBeNull();
+    expect(rows()).toHaveLength(1);
+    expect(marks(rows()[0]!)).toEqual(["bad", "faint"]);
+    expect(rows()[0]!.textContent).not.toContain("The command failed.");
+    expect([...document.querySelectorAll(".message-assistant .message-text > .markdown")].at(-1)?.textContent).toBe("The command failed.");
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
     await act(async () => button("Copy response").click());
     expect(writeText).toHaveBeenCalledWith("The command failed.");
   });
 
-  it("keeps the outer and inner disclosures open through streaming and authoritative reload", async () => {
-    const parts = [{ type: "thinking" as const, text: "Run the tests." },
-      tool("test", { type: "running", output: "first chunk" }, "bash", { command: "npm test" })];
-    await render({ messages: [{ id: "a", role: "assistant", parts }], running: true });
-    const group = document.querySelector<HTMLDetailsElement>("details.chain-of-thought")!;
-    expect(group.querySelector(":scope > summary .trace-text")?.textContent).toBe("thinking 1 tool: bash npm test");
-    expect(group.querySelector(":scope > summary .trace-text")?.hasAttribute("data-live")).toBe(true);
-    await act(async () => { group.open = true; group.dispatchEvent(new Event("toggle")); });
-    const card = await open("running bash npm test");
-    await render({ messages: [{ id: "a", role: "assistant", parts: [parts[0]!,
-      tool("test", { type: "running", output: "second chunk" }, "bash", { command: "npm test" })] }], running: true });
-    expect(document.querySelector("details.chain-of-thought")).toBe(group);
-    expect(group.open).toBe(true);
-    expect(document.querySelector("details.tool-call")).toBe(card);
-    expect(card.open).toBe(true);
-    expect(card.querySelectorAll("pre")[1]?.textContent).toBe("second chunk");
-    await render({ messages: [{ id: "a", role: "assistant", parts: [parts[0]!,
-      tool("test", { type: "done", output: "passed", isError: false }, "bash", { command: "npm test" }),
-      { type: "text", text: "Done." }] }] });
-    expect(group.open).toBe(true);
-    expect(card.open).toBe(true);
-    expect(group.querySelector(":scope > summary .trace-text")?.textContent).toBe("reasoning 1 tool: bash");
-    expect(group.querySelector(":scope > summary .trace-text")?.hasAttribute("data-live")).toBe(false);
-    expect(card.querySelectorAll("pre")[1]?.textContent).toBe("passed");
-    // Reload from equivalent authoritative data without changing persisted IDs.
-    await render({ messages: [{ id: "a", role: "assistant", parts: [parts[0]!,
-      tool("test", { type: "done", output: "passed", isError: false }, "bash", { command: "npm test" }),
-      { type: "text", text: "Done." }] }], disabled: true });
-    expect(document.querySelector("details.chain-of-thought")).toBe(group);
-    expect(group.open).toBe(true);
-    expect(card.open).toBe(true);
-  });
-
-  it("labels tools without reasoning as tool activity and does not create a group for text alone", async () => {
-    await render({ messages: [{ id: "a", role: "assistant", parts: [tool("only", { type: "pending" })] }], running: true });
-    expect(document.querySelector(".chain-of-thought > summary .trace-label")?.textContent).toBe("running tools");
-    await render({ messages: [{ id: "a", role: "assistant", parts: [tool("only", { type: "done", output: "ok", isError: false })] }] });
-    expect(document.querySelector(".chain-of-thought > summary .trace-label")?.textContent).toBe("tool activity");
+  it("keeps thinking without calls in its own fold, and makes no row for text alone", async () => {
+    await render({ messages: [{ id: "a", role: "assistant", parts: [{ type: "thinking", text: "Weigh it." }, { type: "text", text: "Answer." }] }] });
+    expect(rows()).toHaveLength(0);
+    expect(document.querySelector(".chain-of-thought > summary .trace-label")?.textContent).toBe("reasoning");
     await render({ messages: [reply] });
+    expect(rows()).toHaveLength(0);
     expect(document.querySelector("details.chain-of-thought")).toBeNull();
   });
 
-  it("keeps a skill load out of the activity group and counts only the other tools there", async () => {
+  it("keeps a skill load beside the step instead of inside it", async () => {
     await render({ messages: [{ id: "a", role: "assistant", parts: [
       { type: "thinking", text: "Load guidance first." },
       tool("s1", { type: "done", output: "# Simple English", isError: false }, "read", { path: "/home/me/.agents/skills/simple-english/SKILL.md" }),
       tool("t1", { type: "done", output: "clean", isError: false }, "bash", { command: "git status" }),
       { type: "text", text: "Ready." },
     ] }] });
-    const groups = [...document.querySelectorAll<HTMLDetailsElement>("details.chain-of-thought")];
-    expect(groups.map((group) => group.querySelector(":scope > summary .trace-text")?.textContent)).toEqual(["reasoning", "tool activity 1 tool: bash"]);
-    expect(groups.some((group) => group.querySelector(".skill-load"))).toBe(false);
+    expect(rows()).toHaveLength(1);
+    expect(marks(rows()[0]!)).toEqual(["plain"]);
+    expect(rows()[0]!.querySelector(".tally-line")?.textContent).toBe("1 tool call: bash git status");
     expect(document.querySelector(".message-assistant .message-text > details.skill-load > summary .trace-text")?.textContent)
       .toBe("loaded skill simple-english");
   });
 
-  it("shows a working line while a run has no text yet", async () => {
+  it("shows a working line between steps but not while a call runs", async () => {
     await render({ messages: [{ id: "q", role: "user", parts: [{ type: "text", text: "go" }] }], running: true });
     expect(document.querySelector(".message-assistant .trace-line .trace-text")?.textContent).toBe("working");
     await render({ messages: [{ id: "a", role: "assistant", parts: [tool("b", { type: "running", output: "" })] }], running: true });
-    expect(document.querySelectorAll(".message-assistant details:not(.chain-of-thought) > summary .trace-text")).toHaveLength(1);
+    expect(document.querySelector(".message-assistant div.trace-line")).toBeNull();
     await render({ messages: [{ id: "a", role: "assistant", parts: [tool("b", { type: "done", output: "", isError: false })] }], running: true });
-    expect(summaries()).toEqual(["ran bash echo b"]);
     expect(document.querySelector(".message-assistant div.trace-line .trace-text")?.textContent).toBe("working");
+  });
+
+  it("thinks out loud as a fold while a message streams, then folds the thinking into its step", async () => {
+    await render({ messages: [{ id: "a", role: "assistant", parts: [{ type: "thinking", text: "Plan." }] }], running: true });
+    expect(document.querySelector(".chain-of-thought > summary .trace-label")?.textContent).toBe("thinking");
+    await render({ messages: [{ id: "a", role: "assistant", parts: [{ type: "thinking", text: "Plan." }, tool("b", { type: "pending" })] }], running: true });
+    expect(document.querySelector("details.chain-of-thought")).toBeNull();
+    expect(rows()).toHaveLength(1);
   });
 });
 
@@ -475,7 +487,7 @@ describe("Skill records", () => {
   it("keeps an ordinary read of another file as a tool", async () => {
     await render({ messages: [{ id: "a", role: "assistant", parts: [tool("r", { type: "done", output: "x", isError: false }, "read", { path: "docs/SKILL-notes.md" })] }] });
     expect(loads()).toEqual([]);
-    expect(document.querySelector("details.chain-of-thought details.tool-call > summary .trace-text")?.textContent).toBe("ran read docs/SKILL-notes.md");
+    expect(document.querySelector(".message-assistant .tally .tally-line")?.textContent).toBe("1 tool call: read docs/SKILL-notes.md");
   });
 });
 

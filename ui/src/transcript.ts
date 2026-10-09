@@ -2,7 +2,8 @@ import type { CompleteAttachment, ThreadMessageLike } from "@assistant-ui/react"
 import { outputOf, partsOf, textOf, type PiMessage, type SessionEvent } from "./contracts";
 import { imageSource } from "./images";
 import { handoffDoorOf, type HandoffDoor } from "./handoffDoor";
-import { parseSkillInvocation, type SkillInvocation } from "./skills";
+import { parseSkillInvocation, skillLoadOf, type SkillInvocation } from "./skills";
+import { STEP_PREFIX } from "./ui/stepPart";
 import { PULL_NOTICE_TYPE, pullNoticeOf, type PullNotice } from "./pullRequests/pullNotice";
 import { PROCESS_EVENT_TYPE, parseProcessEvent, type ProcessEvent } from "./processes/processEvent";
 import { childEntryOf, type ChildEntry } from "./childAgents/childAgentsModel";
@@ -479,18 +480,22 @@ export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
       ...(message.skill ? { metadata: { custom: { promptText: `<skill name="${message.skill.name}" location="${message.skill.location}">\n${message.skill.content}\n</skill>${messageText(message) ? `\n\n${messageText(message)}` : ""}` } } } : {}),
       ...(message.role === "user" && message.attachments ? { attachments: message.attachments } : {}) };
   }
+  const step = stepOf(message);
   return {
     id: message.id, role: "assistant",
-    content: message.parts.flatMap((part): Exclude<ThreadMessageLike["content"], string>[number][] => {
+    content: step.order.flatMap((index): Exclude<ThreadMessageLike["content"], string>[number][] => {
+      const part = message.parts[index]!;
+      const parent = step.members.has(index) ? { parentId: `${STEP_PREFIX}${message.id}` } : {};
       switch (part.type) {
-        case "text": return [{ type: "text", text: part.text }];
-        case "thinking": return [{ type: "reasoning", text: part.text }];
+        case "text": return [{ type: "text", text: part.text, ...parent }];
+        case "thinking": return [{ type: "reasoning", text: part.text, ...parent }];
         case "image": return [{ type: "image", image: part.src }];
         case "tool": return [{
           type: "tool-call", toolCallId: part.id, toolName: part.name,
           args: isArgs(part.args) ? part.args : {},
           artifact: toolArtifact(part.state),
           ...toolResult(part.state),
+          ...parent,
         }];
         // Shell runs are their own messages, never parts of a reply.
         case "shell": return [];
@@ -500,6 +505,32 @@ export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
     // from the run state, and its join keeps the first explicit status.
     ...(message.failure ? { status: { type: "incomplete", reason: message.failure } } : {}),
   };
+}
+/** A call that renders apart from a step: it loads a skill or opens a session. */
+function standsApart(part: ToolPart): boolean {
+  return skillLoadOf(part.name, part.args) !== undefined || (part.state.type === "done" && part.state.door !== undefined);
+}
+/**
+ * A step is one Pi assistant message that calls a tool: its thinking, the
+ * text that introduces the calls, and the calls. Pi writes them in that
+ * order, so the message boundary says which text introduced which calls.
+ * The step runs from the start to the first text after a call; anything
+ * later stays outside it. Calls that stand apart move to just after the
+ * step, so they never split it.
+ */
+function stepOf(message: TranscriptMessage): { members: ReadonlySet<number>; order: readonly number[] } {
+  const parts = message.parts;
+  const all = parts.map((_, index) => index);
+  const first = parts.findIndex((part) => part.type === "tool" && !standsApart(part));
+  if (first < 0) return { members: new Set(), order: all };
+  const textAfter = parts.findIndex((part, index) => index > first && part.type === "text");
+  const end = textAfter < 0 ? parts.length : textAfter;
+  const members = all.filter((index) => {
+    const part = parts[index]!;
+    return index < end && (part.type === "text" || part.type === "thinking" || part.type === "tool" && !standsApart(part));
+  });
+  const apart = all.filter((index) => index < end && !members.includes(index));
+  return { members: new Set(members), order: [...members, ...apart, ...all.slice(end)] };
 }
 function toolArtifact(state: ToolState): ToolArtifact {
   if (state.type !== "done") return { state: state.type };

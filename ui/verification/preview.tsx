@@ -131,6 +131,36 @@ const chainMessages = (running: boolean): TranscriptMessage[] => [
   ] },
 ];
 
+// The turn from the 2026-10-09 screenshot: one Pi message per step, some
+// narrated, some not, a failure, a retry, a long step, and the answer.
+const stepMessages = (running: boolean): TranscriptMessage[] => {
+  const step = (id: string, text: string, thought: string, ...tools: TranscriptPart[]): TranscriptMessage =>
+    ({ id, role: "assistant", parts: [...thought ? [{ type: "thinking" as const, text: thought }] : [], ...text ? [{ type: "text" as const, text }] : [], ...tools] });
+  const ok = (id: string, name: string, args: unknown) => tool(id, name, args, done("ok"));
+  return [
+    say("steps-q", "user", "Can the account meters show when each provider's quota resets?"),
+    step("s1", "I'll start by checking how the account meters get their data, then look for what the providers expose about resets.",
+      "Start from the meter plugin and follow its data source.",
+      ok("s1a", "bash", { command: "rg -n \"fetch|quota\" ui/src/plugins/accountMeters" }), ok("s1b", "bash", { command: "rg -n cliproxy src/server" })),
+    step("s2", "The meters read a CLIProxyAPI router, so reset data would have to come through it. Let me find the router's quota code and research what the providers expose.",
+      "The meters only proxy the router. Reset data has to come from it.",
+      ok("s2a", "bash", { command: "rg -n Quota ~/code/cliproxyapi/internal" }), ok("s2b", "web_search", { query: "OpenAI codex usage limits reset_at" }),
+      ok("s2c", "web_search", { query: "Anthropic oauth usage endpoint resets_at" }),
+      tool("s2d", "web_fetch", { url: "https://platform.openai.com/docs/api-reference/usage" }, done("HTTP 403", true)),
+      ok("s2e", "web_fetch", { url: "https://docs.anthropic.com/en/api/usage-cost-api" })),
+    step("s3", "", "", ...Array.from({ length: 11 }, (_, index) => ok(`s3-${index}`, "read", { path: `internal/runtime/usage_${index}.go` }))),
+    step("s4", "The router already calls both usage endpoints for every account. Let me check the live router payload.", "",
+      ok("s4a", "bash", { command: "curl -s localhost:8317/v0/management/usage | jq keys" })),
+    step("s5", "Credentials live in `~/.cli-proxy-api`. I'll write a read-only probe that reuses the router's own credential loader and prints only reset fields, never ids or tokens.",
+      "Reuse the loader. Print reset fields only.",
+      ok("s5a", "write", { path: "/tmp/probe-resets/main.go" }), tool("s5b", "bash", { command: "go run /tmp/probe-resets" }, done("go: cannot find main module", true))),
+    step("s6", "", "Missing module path. Run it from the router module.",
+      ok("s6a", "edit", { path: "/tmp/probe-resets/main.go" }),
+      tool("s6b", "bash", { command: "go run /tmp/probe-resets" }, running ? { type: "running", output: "building" } : done("codex reset_at=2026-10-09T14:00Z"))),
+    ...running ? [] : [say("s7", "assistant", "Yes. Both providers report a reset time, and the router already fetches it. It drops the field before the meters see it.\n\nCodex returns `reset_at` per window. Claude returns `resets_at` under `five_hour` and `seven_day`.")],
+  ];
+};
+
 // Skill records: a typed invocation, a batch of loads beside other tools, a load with no argument, and a failed load.
 const skillDoc = (name: string) => `---\nname: ${name}\ndescription: Guidance the agent loads before it writes or changes code.\n---\n\n# ${name}\n\n${"Use short sentences. Name the cost of each choice. ".repeat(8)}`;
 const skillMessages = (running: boolean): TranscriptMessage[] => [
@@ -347,6 +377,7 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   "shell-agent": [...shellMessages(false), ...toolMessages(true).slice(0, 2)], "shell-ask": shellMessages(false),
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
+  steps: stepMessages(false), "steps-running": stepMessages(true),
   skills: skillMessages(false), "skills-open": skillMessages(false), "skills-invocation": skillMessages(false), "skills-running": skillMessages(true),
   "streamdown-live": [], "streamdown-running": streamdownMessages(streamdownFrames[1]!),
   "rich-blocks": richBlocksMessages(richBlocksReply), "rich-blocks-running": richBlocksMessages(richBlocksRunning),
@@ -393,7 +424,7 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
   const [queue, setQueue] = useState<QueuedMessage[]>(queueScenarios[scenario] ?? []);
-  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running" || scenario === "rich-blocks-running" || scenario === "rich-blocks-live" || scenario === "rich-report-live" || scenario === "rich-answer-live" || scenario === "rich-followup-live");
+  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "steps-running" || scenario === "reconnecting-running" || scenario === "streamdown-running" || scenario === "rich-blocks-running" || scenario === "rich-blocks-live" || scenario === "rich-report-live" || scenario === "rich-answer-live" || scenario === "rich-followup-live");
   // Streams the rich-block reply in small chunks, like a model, then completes.
   useEffect(() => {
     const live: Record<string, [string, (text: string) => TranscriptMessage[]]> = {

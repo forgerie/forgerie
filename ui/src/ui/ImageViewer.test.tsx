@@ -128,10 +128,10 @@ describe("image viewer", () => {
   });
   it("opens a tool's own images inside the reply's set", async () => {
     await render(reply);
-    const summary = [...document.querySelectorAll<HTMLElement>(".message-assistant summary")]
-      .find((node) => node.textContent?.includes("2 tools"))!;
-    const group = summary.parentElement as HTMLDetailsElement;
-    await act(async () => { group.open = true; group.dispatchEvent(new Event("toggle")); });
+    const step = [...document.querySelectorAll<HTMLElement>(".message-assistant .tally")]
+      .find((node) => node.querySelector("button.tally-toggle")?.textContent?.startsWith("2 tool calls"))!;
+    await click(step.querySelector<HTMLButtonElement>("button.tally-toggle"));
+    const group = step.querySelector<HTMLElement>(".tally-panel")!;
     const tool = [...group.querySelectorAll<HTMLDetailsElement>("details.tool-call")].find((node) => node.textContent?.includes("list.png"))!;
     await act(async () => { tool.open = true; tool.dispatchEvent(new Event("toggle")); });
     const thumbnails = tool.querySelectorAll(".trace-section .image-gallery img");

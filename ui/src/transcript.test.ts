@@ -212,15 +212,45 @@ describe("assistant-ui conversion", () => {
       result("a", "ok"), result("b", "bad", true)], true);
     const running = reduceEvent(state, { type: "tool.update", toolCallId: "c", toolName: "bash", text: "so far" });
     const converted = convertMessage(running.messages[1]!);
+    const parentId = `step:${running.messages[1]!.id}`;
     expect(converted.content).toEqual([
-      { type: "reasoning", text: "why" },
-      { type: "tool-call", toolCallId: "a", toolName: "bash", args: { command: "ls" }, artifact: { state: "done" }, result: "ok", isError: false },
-      { type: "tool-call", toolCallId: "b", toolName: "bash", args: { command: "ls" }, artifact: { state: "done" }, result: "bad", isError: true },
-      { type: "tool-call", toolCallId: "c", toolName: "bash", args: { command: "ls" }, artifact: { state: "running" }, result: "so far", isPreliminary: true },
+      { type: "reasoning", text: "why", parentId },
+      { type: "tool-call", toolCallId: "a", toolName: "bash", args: { command: "ls" }, artifact: { state: "done" }, result: "ok", isError: false, parentId },
+      { type: "tool-call", toolCallId: "b", toolName: "bash", args: { command: "ls" }, artifact: { state: "done" }, result: "bad", isError: true, parentId },
+      { type: "tool-call", toolCallId: "c", toolName: "bash", args: { command: "ls" }, artifact: { state: "running" }, result: "so far", isPreliminary: true, parentId },
     ]);
     expect(converted.status).toBeUndefined();
     const stopped = convertMessage(reduceEvent(running, { type: "agent.end" }).messages[1]!);
     expect(stopped.content[3]).toMatchObject({ artifact: { state: "interrupted" }, result: "" });
+  });
+  describe("steps", () => {
+    const shape = (parts: TranscriptPart[]) => {
+      const content = convertMessage({ id: "m", role: "assistant", parts }).content as readonly { type: string; parentId?: string; toolCallId?: string; text?: string }[];
+      return content.map((part) => `${part.toolCallId ?? part.text ?? part.type}${part.parentId === "step:m" ? "*" : ""}`);
+    };
+    const done = { type: "done", output: "", isError: false } as const;
+    const bash = (id: string): TranscriptPart => ({ type: "tool", id, name: "bash", args: { command: id }, state: done });
+    const skill = (id: string): TranscriptPart => ({ type: "tool", id, name: "read", args: { path: "/s/simple-english/SKILL.md" }, state: done });
+
+    it("puts a message's thinking, its narration and its calls in one step", () => {
+      expect(shape([{ type: "thinking", text: "plan" }, { type: "text", text: "Let me look." }, bash("a"), bash("b")]))
+        .toEqual(["plan*", "Let me look.*", "a*", "b*"]);
+    });
+    it("leaves a message without calls outside any step", () => {
+      expect(shape([{ type: "thinking", text: "plan" }, { type: "text", text: "The answer." }])).toEqual(["plan", "The answer."]);
+    });
+    it("ends the step at text written after a call", () => {
+      expect(shape([bash("a"), { type: "text", text: "late" }, { type: "thinking", text: "more" }, bash("b")]))
+        .toEqual(["a*", "late", "more", "b"]);
+    });
+    it("moves a skill load after the step so it never splits it, and needs another call to form one", () => {
+      expect(shape([{ type: "text", text: "Loading." }, skill("s"), bash("a")])).toEqual(["Loading.*", "a*", "s"]);
+      expect(shape([{ type: "text", text: "Loading." }, skill("s")])).toEqual(["Loading.", "s"]);
+    });
+    it("keeps a call that opened a session out of the step", () => {
+      const door = { type: "tool", id: "d", name: "spawn_session", args: {}, state: { ...done, door: { sessionId: "s1", cwd: "/w" } } } as const;
+      expect(shape([{ type: "text", text: "Opening." }, door, bash("a")])).toEqual(["Opening.*", "a*", "d"]);
+    });
   });
   it("marks only failed replies with an explicit status and passes non-object arguments as empty", () => {
     const failed = fromHistory([{ ...asking(2, call("a", "odd", "raw")), stopReason: "error", errorMessage: "Oops" }]);
