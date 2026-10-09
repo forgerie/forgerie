@@ -28,7 +28,7 @@ export function meterBlock(account: MeterAccount, provider: string, index: numbe
   const who = account.email || provider;
   const reset = account.reset;
   return {
-    action: reset && onAskReset ? { label: `${reset.words}. Use a reset…`, icon: <RotateCcwIcon />, count: reset.count > 1 ? String(reset.count) : undefined,
+    action: reset && onAskReset ? { label: `${reset.words}. Use a reset…`, icon: <RotateCcwIcon />, count: String(reset.count),
       tone: reset.soon ? "warn" : "live", onPress: () => onAskReset(account.key) } : undefined,
     key: `${account.email}:${String(index)}`, caption: account.email || undefined, marked: account.routed, struck: account.out, note: account.empty,
     label: `${who}${account.routed ? ", routed" : ""}${account.out ? ", out of service" : ""}`,

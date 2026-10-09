@@ -23,7 +23,7 @@ export interface LaneAction {
   /** The action and its reason in words: the accessible name and the hover text. */
   label: string;
   icon: ReactNode;
-  /** A short figure beside the icon, such as a count. */
+  /** A short figure beside the icon, such as a count. Chips in one grid share a width, so icons and figures line up. */
   count?: string | undefined;
   /** `live` for an offer; `warn` when it lapses soon. */
   tone?: "live" | "warn";

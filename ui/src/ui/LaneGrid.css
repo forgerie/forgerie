@@ -38,15 +38,16 @@
 .lane-grid-value { grid-column: value; grid-row: var(--row); justify-self: end; }
 /* Centred on the rows it covers. */
 .lane-grid-trail { grid-column: trail; grid-row: var(--row) / var(--row-end); justify-self: end; align-self: center; }
-/* A block's action: a small chip centred on the block's rows. Its press area
+/* A block's action: a small chip centred on the block's rows. Every chip takes the
+   column's width, so icons and counts line up from block to block. Its press area
    is the block's full height, caption included, out to half the gap on each
    side, so neighbouring chips never share a press. */
-.lane-grid-act { --act-reach: 0.1875rem; position: relative; grid-column: act; grid-row: var(--row) / var(--row-end); justify-self: end; align-self: center;
+.lane-grid-act { --act-reach: 0.1875rem; position: relative; grid-column: act; grid-row: var(--row) / var(--row-end); justify-self: stretch; align-self: center;
   display: grid; padding: 0; border: 0; border-radius: var(--radius-pill); background: none; color: var(--ink-live); }
 .lane-grid[data-dense] .lane-grid-act { --act-reach: 0.0625rem; }
 .lane-grid-act::before { content: ""; position: absolute; inset-block: calc(-1 * var(--act-reach)); inset-inline: calc(-1 * var(--space-2)); }
 .lane-grid-block[data-captioned] .lane-grid-act::before { inset-block-start: calc(-1 * (var(--act-reach) + var(--lane-line) + 0.125rem)); }
-.lane-grid-chip { display: inline-flex; align-items: center; justify-content: center; gap: 0.125rem; min-inline-size: 1rem; block-size: 1rem;
+.lane-grid-chip { display: flex; align-items: center; justify-content: space-between; gap: 0.125rem; min-inline-size: 1rem; block-size: 1rem;
   padding-inline: 0.1875rem; border-radius: var(--radius-pill); background: var(--offer-wash); font-family: var(--code-font); font-size: var(--meta-text);
   font-variant-numeric: tabular-nums; line-height: 1; transition: background-color 150ms; }
 .lane-grid-chip svg { flex: none; inline-size: 0.6875rem; block-size: 0.6875rem; stroke-width: 2.5; }
