@@ -6,6 +6,11 @@ import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, 
 import { browserTransport, createSessionStore, isBashRunning, NotSentError, shellAvailabilityOf } from "./sessionStore";
 import type { Session } from "./contracts";
 import { useThreadMessages } from "./useThreadMessages";
+import { foldProcessEvents } from "./processes/processEvent";
+import { loadProcessOutput } from "./processes/processApi";
+import { ProcessEventView } from "./processes/ProcessEventView";
+import type { ProcessEventArtifact } from "./transcript";
+import type { SystemArtifactView } from "./ui/Messages";
 import { Thread } from "./ui/Thread";
 import { SessionFrame } from "./ui/SessionFrame";
 import type { AskBinding } from "./ui/useAskMode";
@@ -146,7 +151,14 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   };
   const [worktreeCommand, setWorktreeCommand] = useState<WorktreeCommand>();
   const setup = worktree?.owned ? visibleSetup(worktree.setup, state.transcript.messages.length > 0 || state.transcript.isRunning) : undefined;
-  const messages = useThreadMessages(state.transcript.messages, state.transcript.isRunning);
+  const folded = useMemo(() => foldProcessEvents(state.transcript.messages), [state.transcript.messages]);
+  const messages = useThreadMessages(folded, state.transcript.isRunning);
+  const systemArtifact = useCallback<SystemArtifactView>((custom) => {
+    const event = (custom as Partial<ProcessEventArtifact> | undefined)?.processEvent;
+    if (event === undefined) return undefined;
+    const onLoadOutput = sessionId && cwd ? () => loadProcessOutput(browserTransport.request, { id: sessionId, cwd }, event.id) : undefined;
+    return <ProcessEventView event={event} onLoadOutput={onLoadOutput} />;
+  }, [sessionId, cwd]);
   const runtime = useExternalStoreRuntime({
     messages, onNew, onCancel, adapters: { dictation, attachments },
     isRunning: state.transcript.isRunning,
@@ -210,7 +222,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         {worktree && worktrees && worktree.state.kind === "active" && <SessionMenu info={worktree} busy={busy} onCommand={setWorktreeCommand} />}
       </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
-      <Thread ask={ask} mentions={mentions} chatDraft={chatDraft}
+      <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
         head={setup && <WorktreeSetupCard setup={setup} hookSeen={setup.log !== ""} branch={worktree?.branch} />}
         inputContext={worktree && worktree.state.kind === "active" ? <WorktreeChip info={worktree} /> : undefined}
         readOnly={readOnly ? <WorktreeReceipt state={worktree?.state} defaultBranch={worktree?.defaultBranch}

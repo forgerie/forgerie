@@ -9,3 +9,5 @@ here at its first call site, with its part and one line below.
 One line per component: the name in backticks, its layer, and what it decides.
 
 - `CopyButton` (molecule): copies text on press and reports the result in a live region.
+- `EventLine` (molecule): one quiet line for something that happened, with a tone dot, a time, an always-visible quote, and details on request.
+- `AlertCard` (molecule): a failure that may need the reader: title, explanation, code, actions, and an output panel the actions fill.

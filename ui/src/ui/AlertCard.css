@@ -1,0 +1,25 @@
+/* The one loud thing an event can be. Its weight comes from a border in the
+   failure tone and a heading, not from a filled background. */
+.alert-card { position: relative; isolation: isolate; container-type: inline-size; min-inline-size: 0; margin-block: var(--space-2);
+  border: 0.0625rem solid var(--destructive); border-radius: var(--radius-surface); font-size: var(--small-text); }
+/* Softens the border to a hairline tint: the tone at partial opacity. */
+.alert-card::before { content: ""; position: absolute; inset: -0.0625rem; z-index: -1; border-radius: inherit;
+  border: 0.0625rem solid var(--background); opacity: 0.55; pointer-events: none; }
+.alert-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); padding: var(--space-3) var(--space-4) 0; }
+.alert-card-dot { flex: none; inline-size: 0.5rem; block-size: 0.5rem; border-radius: 50%; background: var(--destructive); }
+.alert-card-title { flex: 1 1 auto; min-inline-size: 0; margin: 0; overflow-wrap: anywhere;
+  font-family: var(--code-font); font-size: var(--text-size); font-weight: 600; }
+.alert-card-time { flex: none; color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
+.alert-card-text { margin: var(--space-1) var(--space-4) 0; line-height: var(--line-height); }
+.alert-card-text strong { color: var(--destructive); }
+.alert-card-code, .alert-card-output { margin: var(--space-3) var(--space-4) 0; padding: var(--space-2) var(--space-3); overflow-x: auto;
+  border: 0.0625rem solid var(--line); border-radius: var(--radius-document); background: var(--code-surface);
+  font-family: var(--code-font); font-size: var(--code-size); white-space: pre; }
+.alert-card-output { max-block-size: 16rem; overflow-y: auto; }
+.alert-card-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+.alert-card-action { min-block-size: var(--control-size); padding-inline: var(--space-4); border: 0.0625rem solid var(--line);
+  border-radius: var(--radius-control); background: var(--background); font-size: var(--small-text); }
+.alert-card-action[data-primary] { border-color: transparent; background: var(--primary); color: var(--primary-foreground); }
+.alert-card-action:not(:disabled):hover { border-color: var(--line-focus); }
+.alert-card:not(:has(.alert-card-actions)) { padding-block-end: var(--space-3); }
+.alert-card-text > p { margin: 0; }

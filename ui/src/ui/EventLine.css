@@ -1,0 +1,35 @@
+/* One line per event, in the trace's quiet grammar. Only the dot carries
+   colour; a quoted line takes the same hue as a rail and a faint wash. */
+.event-line { --event-tone: var(--muted-foreground); font-size: var(--small-text); min-inline-size: 0; }
+.event-line[data-tone="positive"] { --event-tone: var(--diff-add); }
+.event-line[data-tone="negative"] { --event-tone: var(--destructive); }
+.event-line[data-tone="active"] { --event-tone: var(--live); }
+
+.event-line-row { display: flex; align-items: center; gap: var(--space-2); min-block-size: 1.75rem; min-inline-size: 0;
+  color: var(--muted-foreground); list-style: none; }
+summary.event-line-row { cursor: pointer; border-radius: var(--radius-document); }
+summary.event-line-row::-webkit-details-marker { display: none; }
+summary.event-line-row:hover { color: var(--foreground); }
+.event-line-dot { flex: none; inline-size: 0.5rem; block-size: 0.5rem; border-radius: 50%; background: var(--event-tone); }
+.event-line[data-hollow] .event-line-dot { background: transparent; border: 0.09375rem solid var(--event-tone); }
+.event-line-subject { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--code-font); font-size: var(--label-text); color: var(--foreground); }
+/* The phrase yields before the subject, so the reader always knows which thing it was. */
+.event-line-phrase { flex: 0 100 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-line-time { flex: none; margin-inline-start: auto; font-size: var(--label-text); font-variant-numeric: tabular-nums; }
+
+/* Body and quote hang from the text, not the dot. */
+.event-line-body, .event-line-quote { margin-inline-start: calc(0.5rem + var(--space-2)); }
+.event-line-body { display: grid; gap: var(--space-2); margin-block: var(--space-1) var(--space-2); }
+.event-line-code { margin: 0; padding: var(--space-2) var(--space-3); overflow-x: auto; border: 0.0625rem solid var(--line);
+  border-radius: var(--radius-document); background: var(--code-surface); font-family: var(--code-font); font-size: var(--code-size); white-space: pre; }
+.event-line-facts { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: 0; color: var(--muted-foreground); font-size: var(--label-text); }
+.event-line-facts dt { display: inline; }
+.event-line-facts dd { display: inline; margin: 0 0 0 var(--space-1); color: var(--foreground); font-family: var(--code-font); }
+
+.event-line-quote { position: relative; isolation: isolate; margin-block: 0 var(--space-1); padding: 0.375rem var(--space-3);
+  border-inline-start: 0.125rem solid var(--event-tone); border-start-end-radius: var(--radius-document); border-end-end-radius: var(--radius-document);
+  font-family: var(--code-font); font-size: var(--code-size); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The wash is the tone itself at low opacity, so no derived colour is needed. */
+.event-line-quote::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--event-tone); opacity: 0.07; }
+.event-line-quote a { color: inherit; }

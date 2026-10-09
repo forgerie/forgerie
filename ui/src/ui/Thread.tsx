@@ -1,11 +1,11 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { AuiIf, ThreadPrimitive } from "@assistant-ui/react";
 import { ArrowDownIcon } from "lucide-react";
 import { Composer, type ShellBinding } from "./Composer";
 import type { AskBinding } from "./useAskMode";
 import type { MentionSource } from "../mentionSource";
-import { AssistantMessage, SystemMessage, UserMessage } from "./Messages";
+import { AssistantMessage, SystemMessage, UserMessage, type SystemArtifactView } from "./Messages";
 import type { CommandBinding } from "./SlashCommands";
 import { CommandResultPanel, type CommandResultBinding } from "./CommandResultPanel";
 import { ImageViewerProvider } from "./ImageViewer";
@@ -21,7 +21,9 @@ import type { ComposerSessionKeys } from "./useComposerKeyboard";
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode. `working` says what a draft can
 // do while the session works; `queue` is what already waits.
-export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext }: { ask?: AskBinding; dialog?: DialogBinding; attachments?: boolean; notes?: NotesBinding | undefined;
+export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact }: {
+  /** A feature view for a system message's custom metadata, such as a process event. */
+  systemArtifact?: SystemArtifactView | undefined; ask?: AskBinding; dialog?: DialogBinding; attachments?: boolean; notes?: NotesBinding | undefined;
   /** A line above the input bar that belongs to this thread, such as a new session's destination. */
   beforeComposer?: ReactNode;
   /** Drawn before the first message, such as a worktree still being set up. */
@@ -30,6 +32,9 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
   readOnly?: ReactNode;
   /** A readout on the input bar's action row, such as the session's branch. */
   inputContext?: ReactNode; mentions?: MentionSource | undefined; commands?: CommandBinding; commandResult?: CommandResultBinding; compaction?: CompactionBinding; shell?: ShellBinding; sessionKeys?: ComposerSessionKeys | undefined; queue?: QueueBinding; working?: WorkingSend; model?: ModelBinding; chatDraft?: ChatDraft }) {
+  // One component identity per view function, so messages do not remount on each render.
+  const components = useMemo(() => ({ UserMessage, AssistantMessage,
+    SystemMessage: systemArtifact ? () => <SystemMessage artifact={systemArtifact} /> : SystemMessage }), [systemArtifact]);
   return <ImageViewerProvider><ThreadPrimitive.Root className="thread">
     <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top">
       <div className="thread-column">
@@ -44,7 +49,7 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
           <div className="thread-welcome"><h2>How can I help you today?</h2></div>
         </AuiIf>
         <div className="message-group">
-          <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage, SystemMessage }} />
+          <ThreadPrimitive.Messages components={components} />
         </div>
         <ThreadPrimitive.ViewportFooter className="composer-region">
           <ThreadPrimitive.ScrollToBottom className="jump icon-button" aria-label="Scroll to bottom" title="Scroll to bottom">

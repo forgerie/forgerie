@@ -1,6 +1,6 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
 import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui, useAuiState, type GroupByContext, type PartState } from "@assistant-ui/react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { artifactDoor, type HistorySummaryKind, type PullNoticeArtifact, type ShellArtifact, type SummaryArtifact } from "../transcript";
 import { PullNoticeRow } from "./PullNoticeRow";
 import { SessionDoorCall } from "./SessionDoor";
@@ -131,9 +131,18 @@ function HistorySummary({ kind }: { kind: HistorySummaryKind }) {
   </MessagePrimitive.Root>;
 }
 
+/**
+ * Draws a system message's custom metadata as a feature's own view, or
+ * returns undefined to leave it to the defaults. Supplied by the binding, so
+ * this shared component names no feature.
+ */
+export type SystemArtifactView = (custom: Record<string, unknown> | undefined) => ReactNode | undefined;
+
 /** System messages carry Pi system text, a history summary, or a user's `!` command; each selects its own view. */
-export function SystemMessage() {
+export function SystemMessage({ artifact }: { artifact?: SystemArtifactView | undefined }) {
   const custom = useAuiState((s) => s.message.metadata.custom);
+  const view = artifact?.(custom);
+  if (view !== undefined) return <MessagePrimitive.Root className="message message-event" data-role="system">{view}</MessagePrimitive.Root>;
   if (isShellArtifact(custom)) return <MessagePrimitive.Root className="message message-shell" data-role="shell">
     <ShellRun run={custom.shell} />
   </MessagePrimitive.Root>;
