@@ -1,6 +1,6 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, FileDiffIcon, PanelLeftIcon, PencilIcon, RefreshCwIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, FileDiffIcon, FilePenIcon, LinkIcon, PanelLeftIcon, PencilIcon, RefreshCwIcon, Trash2Icon, XIcon } from "lucide-react";
 import type { ChangeEntry, Changes, ChangesSource, FileDiff } from "../changes/changesSource";
 import {
   commentProblem, linesOf, newNoteId, NOTE_LIMITS, noteRange, placeNotes, selectionBounds, selectionProblem, tapRow, trayProblem,
@@ -8,15 +8,26 @@ import {
 } from "../changes/diffNotes";
 import { diffDocument, type DiffDocument } from "../changes/diffDocument";
 import { fileOrder, fileTree, foldersAbove, treeRows, treeStep, type FileTreeNode } from "../changes/fileTree";
+import { dirtyPaths, isDirty, type LockReason } from "./textBuffers";
+import { fileKey, folderRows, folderStepRows, type FolderRow } from "./lazyTree";
+import { keyStep } from "./treeKeys";
+import { useTextFiles, type TextFileSource } from "./useTextFiles";
+import { TreeItem, type TreeItemTone } from "./TreeItem";
+import { ToggleGroup } from "./ToggleGroup";
+import { NoticeBar, type NoticeAction } from "./NoticeBar";
 import type { DiffBlock } from "./DiffEditor";
 import { shellLayout, type ShellLayout } from "./AppShell";
 import { useSheetDrag } from "./useSheetDrag";
 
 // CodeMirror and its language parsers are about 325 kB. They load when a review first shows a diff.
 const DiffEditor = lazy(() => import("./DiffEditor").then((module) => ({ default: module.DiffEditor })));
+// The editor loads with the first file opened to edit.
+const CodeEditor = lazy(() => import("./CodeEditor").then((module) => ({ default: module.CodeEditor })));
 
 export interface ChangesBinding {
   source: ChangesSource;
+  /** Every file in the workspace, for the All files list and the editor. */
+  files: TextFileSource;
   /** Notes waiting for the next message, from every file. */
   notes: readonly DiffNote[];
   /** Open with this note in view. */
@@ -38,8 +49,10 @@ export function ChangesOpener({ notes, onOpen }: { notes: number; onOpen: () => 
 
 /**
  * System organism: the session's git changes as a modal, where the reader
- * selects diff lines and writes notes for the agent. The tray owns the notes;
- * this view owns what is open, selected, and being written. Read-only on git.
+ * selects diff lines and writes notes for the agent, and the workspace's
+ * files, which the reader can open and edit. The tray owns the notes; this
+ * view owns what is open, selected, and being written. Read-only on git; it
+ * writes only files the reader saves.
  */
 export function ChangesReview(props: ChangesBinding) {
   return createPortal(<Review {...props} />, document.body);
@@ -48,15 +61,29 @@ export function ChangesReview(props: ChangesBinding) {
 type Load<T> = { type: "loading" } | { type: "ready"; value: T } | { type: "failed"; message: string };
 /** The note being written: a new one on the selection, or an edit of a placed one. */
 type Draft = { type: "new"; text: string; error?: string } | { type: "edit"; id: string; text: string; error?: string };
+/** What the file side shows: one change's diff, or one workspace file to edit. */
+type Pane = { type: "diff"; key: string } | { type: "file"; path: string };
+/** Which files the tree lists. */
+type Lens = "changes" | "files";
 
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 const STATE_LABEL: Record<ChangeEntry["state"], string> = {
   modified: "Modified", added: "Added", deleted: "Deleted", renamed: "Renamed", copied: "Copied", untracked: "New file", conflicted: "Conflicted",
 };
-/** The letter an editor's source control view puts beside a changed file. */
+/** The letter an editor's source control view puts beside a changed file, and its colour. */
 const STATE_MARK: Record<ChangeEntry["state"], string> = {
   modified: "M", added: "A", deleted: "D", renamed: "R", copied: "C", untracked: "U", conflicted: "!",
 };
+const STATE_TONE: Record<ChangeEntry["state"], TreeItemTone> = {
+  modified: "modify", added: "add", deleted: "remove", renamed: "modify", copied: "modify", untracked: "add", conflicted: "conflict",
+};
+const LOCKED: Record<LockReason, string> = {
+  binary: "A binary file. It cannot be edited here.",
+  large: "This file is larger than 512 KB, so it cannot be edited here.",
+  encoding: "This file is not UTF-8 text. Saving it here could change bytes you did not edit, so it cannot be edited here.",
+};
+const READING_FILE = "Reading the file…";
+const FOLDER_NOTES = { loading: "Reading the folder…", empty: "Empty folder", truncated: "The server lists the first 1,000 entries only." } as const;
 const entryKeyOf = (note: Pick<DiffNote, "path" | "staged">) => `${note.staged ? "staged" : "unstaged"}:${note.path}`;
 const without = (set: ReadonlySet<string>, keys: readonly string[]) => keys.some((key) => set.has(key)) ? new Set([...set].filter((key) => !keys.includes(key))) : set;
 const splitPath = (path: string) => {
@@ -72,7 +99,7 @@ const splitPath = (path: string) => {
  * right brings it in, and choosing a file puts it away. Either way the open
  * file, its scroll, and any note being written stay as they are.
  */
-function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }: ChangesBinding) {
+function Review({ source, files: filesSource, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }: ChangesBinding) {
   const titleId = useId();
   const filesId = useId();
   const barId = useId();
@@ -82,8 +109,14 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
   const bodyRef = useRef<HTMLDivElement>(null);
   const [changes, setChanges] = useState<Load<Changes>>({ type: "loading" });
   const [diffs, setDiffs] = useState<Record<string, Load<FileDiff>>>({});
-  const [current, setCurrent] = useState<string>();
+  const [pane, setPane] = useState<Pane>();
+  const paneRef = useRef(pane);
+  paneRef.current = pane;
+  const current = pane?.type === "diff" ? pane.key : undefined;
+  const [lens, setLens] = useState<Lens>("changes");
+  const [closing, setClosing] = useState(false);
   const [cursor, setCursor] = useState<string>();
+  const [fileCursor, setFileCursor] = useState<string>();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [layout, setLayout] = useState<ShellLayout>("overlay");
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -92,6 +125,7 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
   const [opener] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
   const loads = useRef(new Map<string, AbortController>());
   const lifetime = useRef<AbortController>(undefined);
+  const quiet = useRef<AbortController>(undefined);
   const pointer = useRef<string>("");
   const pressedBackdrop = useRef(false);
   const focused = useRef(false);
@@ -136,9 +170,12 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
       const nodes = fileTree(value.entries);
       const readable = fileOrder(nodes).filter((item) => item.diffable);
       const asked = focusKey.current && entryKeyOf(focusKey.current);
-      const pick = readable.find((item) => item.key === keep) ?? readable.find((item) => item.key === asked) ?? readable[0];
-      setCurrent(pick?.key);
-      if (pick) { readDiff(pick); setCollapsed((shut) => without(shut, foldersAbove(nodes, pick.key))); }
+      // A file being edited stays on screen; reading the changes again is no reason to leave it.
+      if (paneRef.current?.type !== "file") {
+        const pick = readable.find((item) => item.key === keep) ?? readable.find((item) => item.key === asked) ?? readable[0];
+        setPane(pick && { type: "diff", key: pick.key });
+        if (pick) { readDiff(pick); setCollapsed((shut) => without(shut, foldersAbove(nodes, pick.key))); }
+      }
       // Arriving with several files and nothing asked for, the reader picks one first. Docked, the tree is already there.
       if (keep === undefined) setSheetOpen(readable.length > 1 && !asked);
     }, (error: unknown) => { if (!controller.signal.aborted) setChanges({ type: "failed", message: messageOf(error) }); });
@@ -146,8 +183,24 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
   useEffect(() => {
     load();
     const reads = loads.current;
-    return () => { lifetime.current?.abort(); for (const controller of reads.values()) controller.abort(); };
+    return () => { lifetime.current?.abort(); quiet.current?.abort(); for (const controller of reads.values()) controller.abort(); };
   }, [load]);
+
+  // A save changes the file's diff and maybe the list. Read them again without a loading screen, and leave the file on screen.
+  const onSaved = useCallback((path: string) => {
+    quiet.current?.abort();
+    const controller = new AbortController();
+    quiet.current = controller;
+    source.changes(controller.signal).then((value) => {
+      if (controller.signal.aborted || lifetime.current?.signal.aborted) return;
+      setChanges({ type: "ready", value });
+      setDiffs((known) => Object.fromEntries(Object.entries(known).filter(([key]) => !key.endsWith(`:${path}`))));
+      setSelection((now) => now?.key.endsWith(`:${path}`) ? undefined : now);
+      // A failed read leaves the last list on screen; Read the changes again shows the error.
+    }, () => undefined);
+  }, [source]);
+  const files = useTextFiles(filesSource, onSaved);
+  const unsaved = dirtyPaths(files.buffers);
 
   // The tree docks from the review's own width. A ref callback, because the layout appears only once the changes have.
   const measure = useCallback((element: HTMLDivElement | null) => {
@@ -163,7 +216,7 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
   useEffect(() => { if (layout === "docked") setSheetOpen(false); }, [layout]);
   const overlay = layout === "overlay";
   const hidden = overlay && !sheetOpen;
-  useSheetDrag(layoutRef, filesRef, { enabled: overlay && changes.type === "ready" && entries.length > 0, open: sheetOpen, onOpenChange: setSheetOpen });
+  useSheetDrag(layoutRef, filesRef, { enabled: overlay && changes.type === "ready", open: sheetOpen, onOpenChange: setSheetOpen });
 
   // Bring the asked-for note into view once its file has drawn it.
   useEffect(() => {
@@ -180,12 +233,45 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
     if (!known || known.type === "failed") readDiff(item);
     setCollapsed((shut) => without(shut, foldersAbove(tree, item.key)));
     setCursor(item.key);
-    if (item.key !== current) { setCurrent(item.key); bodyRef.current?.scrollTo?.({ top: 0 }); }
-    if (overlay) {
-      setSheetOpen(false);
-      // The sheet took focus with it; the file's name is where the reader is now.
-      requestAnimationFrame(() => document.getElementById(barId)?.focus({ preventScroll: true }));
-    }
+    if (item.key !== current) { setPane({ type: "diff", key: item.key }); bodyRef.current?.scrollTo?.({ top: 0 }); }
+    leaveSheet();
+  };
+  // The sheet took focus with it; the file's name is where the reader is now.
+  const leaveSheet = () => {
+    if (!overlay) return;
+    setSheetOpen(false);
+    requestAnimationFrame(() => document.getElementById(barId)?.focus({ preventScroll: true }));
+  };
+  /** Open a workspace file in the editor. Its buffer, edits and all, is kept from any earlier visit. */
+  const editFile = (path: string) => {
+    files.openFile(path);
+    setFileCursor(fileKey(path));
+    if (pane?.type !== "file" || pane.path !== path) setPane({ type: "file", path });
+    leaveSheet();
+  };
+  const chooseLens = (next: Lens) => {
+    setLens(next);
+    if (next !== "files") return;
+    // All files opens at the file on screen, so the reader sees where it lives.
+    const shown = pane?.type === "file" ? pane.path : entry?.path;
+    if (shown) { files.reveal(shown); setFileCursor(fileKey(shown)); } else files.readFolder("");
+  };
+  const fileRows = useMemo(() => folderRows(files.folders, files.open), [files.folders, files.open]);
+  const onFileTreeKey = (event: KeyboardEvent, index: number) => {
+    const step = keyStep(folderStepRows(fileRows, files.open), index, event.key);
+    if (!step) return;
+    event.preventDefault();
+    const row = step.type === "focus" ? fileRows[step.index] : fileRows.find((item) => item.key === step.key);
+    if (!row) return;
+    if (step.type === "fold" && row.type === "folder") { files.toggleFolder(row.path, step.open); return; }
+    if (step.type === "open") { activateFileRow(row); return; }
+    setFileCursor(row.key);
+    filesRef.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(row.key)}"]`)?.focus();
+  };
+  const activateFileRow = (row: FolderRow) => {
+    if (row.type === "folder") files.toggleFolder(row.path, !files.open.has(row.path));
+    else if (row.type === "file") editFile(row.path);
+    else if (row.note === "failed") files.readFolder(row.folder);
   };
   const toggleFolder = (key: string, open = collapsed.has(key)) =>
     setCollapsed((shut) => open ? without(shut, [key]) : new Set([...shut, key]));
@@ -232,8 +318,11 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
     setDraft(undefined);
   };
 
-  // Escape or Back puts away the top thing first: the files sheet, then a note being written, then the review.
+  // Unsaved edits hold the review open until the reader chooses to keep editing or drop them.
+  const requestClose = () => { if (files.unsaved().length > 0) setClosing(true); else onClose(); };
+  // Escape or Back puts away the top thing first: the question about unsaved edits, the files sheet, a note being written, then the review.
   const putAway = () => {
+    if (closing) { setClosing(false); return true; }
     if (overlay && sheetOpen) { setSheetOpen(false); dialog.current?.querySelector<HTMLElement>(".change-files-opener")?.focus(); return true; }
     if (draft || selection) { clearSelection(); return true; }
     return false;
@@ -242,7 +331,7 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
   const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape" && putAway()) event.preventDefault(); };
   const onCancel = (event: Event) => {
     event.preventDefault();
-    if (!putAway()) onClose();
+    if (!putAway()) requestClose();
   };
   // When Chrome closes the dialog anyway, the review closes with it rather than stay open and unseen.
   const onNativeClose = () => onClose();
@@ -260,39 +349,123 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
   const previous = order[position - 1];
   const next = position >= 0 ? order[position + 1] : undefined;
   const rowFocus = cursor !== undefined && rows.some((row) => row.node.key === cursor) ? cursor : current ?? rows[0]?.node.key;
+  const editing = pane?.type === "file" ? pane.path : undefined;
+  const fileRowFocus = [fileCursor, editing && fileKey(editing)].find((key) => key !== undefined && fileRows.some((row) => row.key === key)) ?? fileRows[0]?.key;
   const fileNotes = entry ? notesOn(entry.key) : [];
+  // A file's working tree side comes after its staged side, so it wins: that is the side an edit changes.
+  const changeOf = new Map(entries.filter((item) => item.diffable).map((item) => [item.path, item]));
+  const isGit = changes.type === "ready" && changes.value.isGitRepo;
+  const sheetOpener = overlay && <button type="button" className="app-opener change-files-opener" aria-label="Show files" title="Files"
+    aria-expanded={sheetOpen} aria-controls={filesId} onClick={() => setSheetOpen(true)}><PanelLeftIcon aria-hidden size={16} /></button>;
+  const browse = () => {
+    chooseLens("files");
+    if (overlay) setSheetOpen(true);
+    else requestAnimationFrame(() => filesRef.current?.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]')?.focus());
+  };
+  /** One workspace file to edit: the bar with its name and save state, what stands between the edits and the disk, and the editor. */
+  const filePane = (path: string) => {
+    const buffer = files.buffers[path];
+    const open = buffer?.type === "open" ? buffer : undefined;
+    const dirty = isDirty(open);
+    const save = open?.save;
+    const change = changeOf.get(path);
+    const status = save?.type === "saving" ? "Saving…" : dirty ? "Unsaved edits" : save?.type === "saved" ? "Saved" : undefined;
+    const { folder, name } = splitPath(path);
+    let notice: { message: string; actions: NoticeAction[] } | undefined;
+    if (save?.type === "conflict") notice = save.version === undefined
+      ? { message: "This file was deleted on disk after you opened it. Save it again to bring it back with your edits.", actions: [
+        { label: "Discard my edits", onPress: () => { files.discard(path); setPane(undefined); } },
+        { label: "Save it again", onPress: () => files.save(path, true), primary: true }] }
+      : { message: "This file changed on disk after you opened it, perhaps by the agent. Reload it to see that change, which drops your edits, or overwrite it with yours.", actions: [
+        { label: "Reload", onPress: () => files.reload(path) },
+        { label: "Overwrite", onPress: () => files.save(path, true), primary: true }] };
+    if (save?.type === "failed") notice = { message: save.message, actions: [dirty
+      ? { label: "Try again", onPress: () => files.save(path), primary: true }
+      : { label: "Read the file again", onPress: () => files.reload(path) }] };
+    return <>
+      <div className="change-bar">
+        {sheetOpener}
+        <div className="change-bar-title">
+          <h3 id={barId} tabIndex={-1} className="change-path" title={path}>
+            {folder && <span className="change-folder">{folder}</span>}<span className="change-name">{name}</span>
+          </h3>
+          <p className="change-facts">
+            {change && <span>{STATE_LABEL[change.state]}{change.staged ? ", staged" : ""}</span>}
+            <span role="status" className={dirty ? "change-unsaved" : undefined}>{status}</span>
+          </p>
+        </div>
+        {change && <button type="button" className="icon-button quiet-button" aria-label="Show changes" title="Show this file's changes"
+          onClick={() => openFile(change)}><FileDiffIcon aria-hidden size={18} /></button>}
+        {open && <button type="button" className="primary change-save" disabled={!dirty || save?.type === "saving" || save?.type === "conflict"}
+          aria-keyshortcuts="Control+S Meta+S" title="Save (Ctrl+S)" onClick={() => files.save(path)}>Save</button>}
+      </div>
+      {notice && <NoticeBar tone="alert" message={notice.message} actions={notice.actions} />}
+      <div ref={bodyRef} className="changes-body">
+        {(!buffer || buffer.type === "loading") && <p className="change-message" role="status">{READING_FILE}</p>}
+        {buffer?.type === "failed" && <div className="change-message" role="alert"><p>{buffer.message}</p>
+          <button type="button" onClick={() => files.reload(path)}>Try again</button></div>}
+        {buffer?.type === "locked" && <p className="change-message">{LOCKED[buffer.reason]}</p>}
+        {open && <Suspense fallback={<p className="change-message" role="status">{READING_FILE}</p>}>
+          <CodeEditor key={`${path}#${String(open.opened)}`} label={`Edit ${path}`} fileName={name} text={open.text}
+            onChange={(text) => files.edit(path, text)} onSave={() => files.save(path)} />
+        </Suspense>}
+      </div>
+    </>;
+  };
   return <dialog ref={dialog} className="tree-dialog changes-dialog" aria-labelledby={titleId} onKeyDown={onKeyDown}
     onPointerDown={(event: PointerEvent) => { pointer.current = event.pointerType; pressedBackdrop.current = event.target === dialog.current; }}
-    onClick={(event) => { if (event.target === dialog.current && pressedBackdrop.current && !draft) onClose(); pressedBackdrop.current = false; }}>
+    onClick={(event) => { if (event.target === dialog.current && pressedBackdrop.current && !draft) requestClose(); pressedBackdrop.current = false; }}>
     <div className="tree-sheet">
       <header className="tree-head">
         <h2 id={titleId}>Changes</h2>
         <span className="tree-count">{count}</span>
         <button type="button" className="icon-button quiet-button" aria-label="Read the changes again" title="Read the changes again"
-          disabled={changes.type === "loading"} onClick={() => load(current)}><RefreshCwIcon aria-hidden size={18} /></button>
-        <button type="button" className="icon-button quiet-button" aria-label="Close changes" title="Close" onClick={onClose}>
+          disabled={changes.type === "loading"} onClick={() => { load(current); files.refresh(); }}><RefreshCwIcon aria-hidden size={18} /></button>
+        <button type="button" className="icon-button quiet-button" aria-label="Close changes" title="Close" onClick={requestClose}>
           <XIcon aria-hidden size={18} /></button>
       </header>
       {changes.type === "loading" && <p className="changes-message" role="status">Reading the changes…</p>}
       {changes.type === "failed" && <div className="changes-message" role="alert"><p>{changes.message}</p>
         <button type="button" onClick={() => load()}>Try again</button></div>}
-      {changes.type === "ready" && !changes.value.isGitRepo && <p className="changes-message">This folder is not a git repository, so it has no changes to review.</p>}
-      {changes.type === "ready" && changes.value.isGitRepo && entries.length === 0 && <p className="changes-message">No changes. The files match the last commit.</p>}
-      {entries.length > 0 && <div ref={measure} className="changes-layout" data-layout={layout} data-sheet={hidden ? "closed" : "open"}>
-        <nav ref={filesRef} id={filesId} className="changes-files" aria-label="Changed files" aria-hidden={hidden || undefined} inert={hidden}>
-          <ul role="tree" aria-label="Changed files" className="file-tree">
+      {changes.type === "ready" && <div ref={measure} className="changes-layout" data-layout={layout} data-sheet={hidden ? "closed" : "open"}>
+        <nav ref={filesRef} id={filesId} className="changes-files" aria-label="Files" aria-hidden={hidden || undefined} inert={hidden}>
+          <div className="changes-lens">
+            <ToggleGroup label="Files to list" value={lens} onChange={chooseLens}
+              options={[{ value: "changes", label: "Changes", count: entries.length }, { value: "files", label: "All files" }]} />
+          </div>
+          {lens === "files" ? <ul role="tree" aria-label="All files" className="file-tree">
+            {fileRows.map((row, index) => {
+              const shared = { rowKey: row.key, level: row.level, focusable: row.key === fileRowFocus,
+                onActivate: () => activateFileRow(row), onFocus: () => setFileCursor(row.key), onKeyDown: (event: KeyboardEvent) => onFileTreeKey(event, index) };
+              if (row.type === "folder") return <TreeItem key={row.key} {...shared} kind="branch" name={row.name} title={row.path} expanded={files.open.has(row.path)} />;
+              if (row.type === "note") {
+                const failed = row.note === "failed";
+                return <TreeItem key={row.key} {...shared} kind="note" disabled={!failed} title={failed ? "Read this folder again" : undefined}
+                  mark={failed ? <RefreshCwIcon size={14} /> : undefined}
+                  name={row.note === "failed" ? `Not read: ${row.message ?? "the folder could not be read"}. Try again.` : FOLDER_NOTES[row.note]} />;
+              }
+              const change = changeOf.get(row.path);
+              const unsavedHere = isDirty(files.buffers[row.path]);
+              return <TreeItem key={row.key} {...shared} kind="leaf" name={row.name} title={row.path} selected={row.path === editing} dot={unsavedHere}
+                mark={change ? STATE_MARK[change.state] : row.link ? <LinkIcon size={12} /> : undefined} tone={change && STATE_TONE[change.state]}
+                description={[change && STATE_LABEL[change.state], unsavedHere && "unsaved edits", row.link && "link"].filter(Boolean).join(", ") || undefined} />;
+            })}
+          </ul>
+          : entries.length === 0 ? <div className="changes-message">{isGit ? <p>No changes. The files match the last commit.</p>
+            : <p>This folder is not a git repository, so it has no changes to review.</p>}</div>
+          : <ul role="tree" aria-label="Changed files" className="file-tree">
             {rows.map((row, index) => <FileTreeRow key={row.node.key} node={row.node} level={row.level} current={current}
               open={!collapsed.has(row.node.key)} focusable={row.node.key === rowFocus}
               notes={row.node.type === "file" ? notesOn(row.node.key).length : 0}
               onActivate={() => { if (row.node.type === "folder") toggleFolder(row.node.key); else if (row.node.entry.diffable) openFile(row.node.entry); }}
               onFocus={() => setCursor(row.node.key)} onKeyDown={(event) => onTreeKey(event, index)} />)}
-          </ul>
+          </ul>}
         </nav>
         {overlay && <div className="changes-scrim" aria-hidden="true" onClick={() => setSheetOpen(false)} />}
-        <section className="changes-pane" aria-labelledby={entry ? barId : undefined} aria-label={entry ? undefined : "Diff"}>
+        <section className="changes-pane" aria-labelledby={editing || entry ? barId : undefined} aria-label={editing || entry ? undefined : "File"}>
+          {editing !== undefined ? filePane(editing) : <>
           {entry && <div className="change-bar">
-            {overlay && <button type="button" className="app-opener change-files-opener" aria-label="Show changed files" title="Files"
-              aria-expanded={sheetOpen} aria-controls={filesId} onClick={() => setSheetOpen(true)}><PanelLeftIcon aria-hidden size={16} /></button>}
+            {sheetOpener}
             <div className="change-bar-title">
               <h3 id={barId} tabIndex={-1} className="change-path" title={entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path}>
                 {splitPath(entry.path).folder && <span className="change-folder">{splitPath(entry.path).folder}</span>}<span className="change-name">{splitPath(entry.path).name}</span>
@@ -307,7 +480,10 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
               disabled={!previous} onClick={() => { if (previous) openFile(previous); }}><ChevronUpIcon aria-hidden size={18} /></button>
             <button type="button" className="icon-button quiet-button" aria-label="Next file" title={next ? `Next file: ${next.path}` : "This is the last file"}
               disabled={!next} onClick={() => { if (next) openFile(next); }}><ChevronDownIcon aria-hidden size={18} /></button>
+            {entry.state !== "deleted" && <button type="button" className="icon-button quiet-button" aria-label="Edit file" title="Edit this file"
+              onClick={() => editFile(entry.path)}><FilePenIcon aria-hidden size={18} /></button>}
           </div>}
+          {!entry && sheetOpener && <div className="change-bar">{sheetOpener}</div>}
           <div ref={bodyRef} className="changes-body">
             {entry ? <FileBody key={entry.key} path={entry.path} diff={diffs[entry.key]} notes={fileNotes}
               selection={selection?.key === entry.key ? selection.rows : undefined} draft={draft}
@@ -317,14 +493,21 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
               onAdd={(lines) => addNote(entry, lines)} onCancel={clearSelection}
               onEdit={(note) => { setSelection(undefined); setDraft({ type: "edit", id: note.id, text: note.comment }); }}
               onSave={saveEdit} onRemove={onRemove} />
-              : <p className="changes-message">Git lists only whole folders here, such as other repositories, so there is no diff to show.</p>}
+              : <div className="changes-message">
+                {entries.length > 0 ? <p>Git lists only whole folders here, such as other repositories, so there is no diff to show.</p>
+                  : isGit ? <p>No changes. The files match the last commit.</p> : <p>This folder is not a git repository, so it has no changes to review.</p>}
+                <button type="button" onClick={browse}>All files</button>
+              </div>}
           </div>
+          </>}
         </section>
       </div>}
-      {notes.length > 0 && <footer className="changes-foot">
+      {closing && unsaved.length > 0 ? <NoticeBar message={`${unsaved.length === 1 ? `${unsaved[0] ?? ""} has` : `${unsaved.length} files have`} unsaved edits. Closing drops them.`}
+        actions={[{ label: "Keep editing", onPress: () => setClosing(false) }, { label: "Discard and close", onPress: onClose, primary: true }]} />
+      : notes.length > 0 && <footer className="changes-foot">
         <p role="status">{notes.length === 1 ? "1 note goes" : `${notes.length} notes go`} with your next message.</p>
         <button type="button" className="primary changes-write" onClick={() => {
-          onClose();
+          requestClose();
           // The notes are written; the message is next.
           requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-composer-input]")?.focus());
         }}>Write message</button>
@@ -333,28 +516,19 @@ function Review({ source, notes, focusNoteId, onAdd, onEdit, onRemove, onClose }
   </dialog>;
 }
 
-/** One row of the files tree: a group, a folder, or a file with its change letter and note count. */
+/** One row of the changed-files tree: a group, a folder, or a file with its change letter and note count. */
 function FileTreeRow({ node, level, current, open, focusable, notes, onActivate, onFocus, onKeyDown }: {
   node: FileTreeNode; level: number; current: string | undefined; open: boolean; focusable: boolean; notes: number;
   onActivate: () => void; onFocus: () => void; onKeyDown: (event: KeyboardEvent) => void;
 }) {
-  const style = { "--level": level } as CSSProperties;
-  const shared = { role: "treeitem", "aria-level": level, tabIndex: focusable ? 0 : -1, "data-row": node.key, style, onClick: onActivate, onFocus, onKeyDown };
-  if (node.type === "folder") {
-    return <li {...shared} className="file-row" data-kind={node.group ? "group" : "folder"} aria-expanded={open}>
-      <ChevronRightIcon aria-hidden size={14} className="file-chevron" />
-      <span className="file-name">{node.name}</span>
-    </li>;
-  }
+  const shared = { rowKey: node.key, level, focusable, onActivate, onFocus, onKeyDown };
+  if (node.type === "folder") return <TreeItem {...shared} kind={node.group ? "group" : "branch"} name={node.name} expanded={open} />;
   const { entry } = node;
   const words = entry.diffable ? `${STATE_LABEL[entry.state]}${entry.staged ? ", staged" : ""}` : "Untracked folder, no diff";
-  return <li {...shared} className="file-row" data-kind="file" aria-selected={entry.key === current} aria-disabled={!entry.diffable || undefined}
-    title={entry.diffable ? `${entry.oldPath ? `${entry.oldPath} → ` : ""}${entry.path}` : `${entry.path}: git lists this folder as a whole, such as another repository, so it has no diff here.`}>
-    <span className="file-mark" data-state={entry.state} aria-hidden>{STATE_MARK[entry.state]}</span>
-    <span className="file-name">{node.name}</span>
-    {notes > 0 && <span className="file-noted" aria-hidden>{notes}</span>}
-    <span className="sr-only">, {words}{notes > 0 ? `, ${notes === 1 ? "1 note" : `${String(notes)} notes`}` : ""}</span>
-  </li>;
+  return <TreeItem {...shared} kind="leaf" name={node.name} selected={entry.key === current} disabled={!entry.diffable}
+    mark={STATE_MARK[entry.state]} tone={STATE_TONE[entry.state]} count={notes}
+    description={`${words}${notes > 0 ? `, ${notes === 1 ? "1 note" : `${String(notes)} notes`}` : ""}`}
+    title={entry.diffable ? `${entry.oldPath ? `${entry.oldPath} → ` : ""}${entry.path}` : `${entry.path}: git lists this folder as a whole, such as another repository, so it has no diff here.`} />;
 }
 
 interface FileBodyProps {

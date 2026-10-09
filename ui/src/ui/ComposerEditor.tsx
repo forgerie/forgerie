@@ -6,7 +6,7 @@ import { defaultKeymap, history, historyKeymap, indentLess, indentMore, insertNe
 import { indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { Annotation, Compartment, EditorSelection, EditorState, Prec, type ChangeSpec } from "@codemirror/state";
 import { EditorView, keymap, placeholder as placeholderText } from "@codemirror/view";
-import { codeHighlighter } from "../codeTokens";
+import { codeHighlighter } from "./codeTokens";
 import { completeComposerCodeFence, composerCodeBlock, leaveComposerCodeBlock, protectComposerCodeBlockBoundary } from "./composerCodeBlock";
 import { composerMarkdown, continueMarkup, deleteMarkup, loadMarkdownEditing } from "./composerCodeLanguage";
 

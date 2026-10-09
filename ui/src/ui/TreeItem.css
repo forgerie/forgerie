@@ -1,0 +1,29 @@
+/* A tree row as tall as a control, indented a step per level. The lead cell
+   is as wide as the chevron, so a leaf's mark and a branch's chevron line up. */
+.tree-item { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size);
+  padding-inline: calc(var(--tree-pad, var(--space-4)) + (var(--level, 1) - 1) * 0.875rem) var(--tree-pad, var(--space-4));
+  color: var(--muted-foreground); font-size: var(--small-text); cursor: pointer; user-select: none; }
+.tree-item:hover { background: var(--hover-surface); }
+.tree-item:focus-visible { outline: calc(var(--hairline) * 2) solid var(--foreground); outline-offset: calc(var(--hairline) * -2); }
+.tree-item[aria-selected="true"] { background: var(--active-surface); }
+.tree-item[aria-selected="true"] .tree-item-name { font-weight: 500; }
+.tree-item[aria-disabled] { cursor: default; }
+.tree-item[aria-disabled]:hover { background: transparent; }
+.tree-item[data-kind="group"] { font-size: var(--label-text); font-weight: 500; }
+.tree-item[data-kind="leaf"] .tree-item-name { color: var(--foreground); }
+.tree-item[aria-disabled] .tree-item-name { color: var(--muted-foreground); }
+.tree-item[data-kind="note"] .tree-item-name { white-space: normal; font-size: var(--label-text); }
+.tree-item[data-kind="note"]:not([aria-disabled]) .tree-item-name { color: var(--foreground); }
+.tree-item-lead { flex: none; display: inline-flex; justify-content: center; inline-size: 0.875rem;
+  font-family: var(--code-font); font-size: var(--label-text); font-weight: 600; color: var(--muted-foreground); }
+.tree-item-lead[data-tone="modify"] { color: var(--diff-modify); }
+.tree-item-lead[data-tone="add"] { color: var(--diff-add); }
+.tree-item-lead[data-tone="remove"] { color: var(--diff-remove); }
+.tree-item-lead[data-tone="conflict"] { color: var(--destructive); }
+.tree-item-chevron { flex: none; transition: rotate 150ms; }
+.tree-item[aria-expanded="true"] .tree-item-chevron { rotate: 90deg; }
+@media (prefers-reduced-motion: reduce) { .tree-item-chevron { transition: none; } }
+.tree-item-name { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-item-count { flex: none; min-inline-size: 1.125rem; padding-inline: 0.3125rem; border-radius: 0.5625rem; background: var(--live-wash);
+  color: var(--live); font-size: var(--meta-text); font-weight: 600; line-height: 1.125rem; text-align: center; font-variant-numeric: tabular-nums; }
+.tree-item-dot { flex: none; inline-size: 0.5rem; block-size: 0.5rem; border-radius: 50%; background: var(--live); }

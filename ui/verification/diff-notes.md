@@ -16,6 +16,25 @@ Notes wait in the message box as chips: the file name, the lines, and the start 
 
 Edit and Remove on a note in the review change it before it is sent. Escape puts away a note being written, then closes the review. A press on the backdrop closes the review only when no note is being written.
 
+## Editing files
+
+The switch at the top of the tree shows Changes or All files. All files lists every file in the session's workspace except git's own `.git` folder, one folder at a time as you open it, and opens at the folder of the file on screen. Changed files keep their letter there. Choose a file to open it in an editable code editor with the same colours as the diffs. On a changed file's diff, the pencil button in the bar opens the same file to edit; on the file, the diff button goes back to its changes.
+
+| Action | Result |
+| --- | --- |
+| Type in the file | The bar says Unsaved edits, and the tree shows a blue dot beside the file. |
+| Save, or Ctrl+S / Cmd+S | The file is written to disk. The bar says Saved, and the changes list and that file's diff are read again. |
+| Open another file | The edits stay in memory. Come back to the file to keep editing or to save. |
+| Close the review with edits unsaved | The footer names the files and offers Keep editing or Discard and close. |
+| Save after the file changed on disk, such as by the agent | Nothing is written. Reload drops your edits and shows the file on disk; Overwrite writes yours over it. |
+| Save after the file was deleted on disk | Nothing is written. Save it again creates the file with your edits; Discard my edits drops them. |
+
+A file opens read-only when saving it back could change bytes you did not touch: a binary file, a file over 512 KB, or text that is not exact UTF-8. A file with CRLF line endings is saved with CRLF on every line.
+
+The agent is not told about a saved edit. It sees the edit when it next reads the file or runs `git diff`. Undo history lasts while the file's editor is open; opening another file starts a new history. There is no search inside the editor yet.
+
+The server checks each save: the client sends the SHA-256 version of the file it read (`expectedVersion` on `PUT …/workspaces/:id/file`), and the server answers 409 with the version on disk now when they differ. The check and the write are two steps, so a write by another program in the moment between them is not caught.
+
 ## Layout
 
 The review uses the session tree's modal frame: a centered card up to 100rem by 64rem while the window has room, which meets each window edge as the room runs out. Long lines wrap, so the diff never scrolls sideways.

@@ -44,7 +44,7 @@ const pane = "document.querySelector('.changes-pane')";
 const barPath = "document.querySelector('.change-bar .change-path')?.title";
 const sheet = "document.querySelector('.changes-layout')?.dataset.sheet";
 const layout = "document.querySelector('.changes-layout')?.dataset.layout";
-const row = (key) => `document.querySelector('.file-row[data-row=${js(key)}]')`;
+const row = (key) => `document.querySelector('.tree-item[data-row=${js(key)}]')`;
 /** The gutter cell whose new-side number is `line`, scrolled into the middle of the review. */
 const cell = (line) => `(() => { const c = [...${pane}.querySelectorAll('.cm-diff-numbers .cm-gutterElement')].find(e => e.querySelector('.cm-diff-new')?.textContent === ${js(String(line))}); c?.scrollIntoView({ block: 'center' }); return c; })()`;
 /** The text line beside a gutter cell: the .cm-line whose top is nearest the cell's top. */
@@ -77,7 +77,7 @@ async function swipeRight(cdp, distance) {
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await sleep(400);
 }
-const KEY_CODES = { Enter: 13, ArrowDown: 40, ArrowUp: 38, Escape: 27 };
+const KEY_CODES = { Enter: 13, ArrowDown: 40, ArrowUp: 38, Escape: 27, s: 83 };
 async function key(cdp, key, code, modifiers = 0) {
   await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, modifiers, windowsVirtualKeyCode: KEY_CODES[key] ?? 0 });
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers });
@@ -104,9 +104,9 @@ try {
       assert.equal(await evaluate(cdp, layout), desktop ? "docked" : "overlay", `${label}: layout`);
       assert.equal(await evaluate(cdp, "!!document.querySelector('.change-files-opener')"), !desktop, `${label}: Files button only when the tree is a sheet`);
       if (!desktop) assert.equal(await evaluate(cdp, sheet), "open", `${label}: the sheet shows the files on arrival`);
-      assert.deepEqual(await evaluate(cdp, "[...document.querySelectorAll('.file-row')].map(r => r.querySelector('.file-name').textContent)"),
+      assert.deepEqual(await evaluate(cdp, "[...document.querySelectorAll('.tree-item')].map(r => r.querySelector('.tree-item-name').textContent)"),
         ["Staged changes", "src/auth", "LoginForm.test.tsx", "Changes", "src/auth", "LoginForm.tsx", "session.ts", "vendor", "sso-client/"]);
-      assert.equal(await evaluate(cdp, `${row(LOGIN)}.querySelector('.file-noted')?.textContent`), "1", `${label}: note count in the tree`);
+      assert.equal(await evaluate(cdp, `${row(LOGIN)}.querySelector('.tree-item-count')?.textContent`), "1", `${label}: note count in the tree`);
       await shot(cdp, `arrival-${scheme}-${posture.name}`);
 
       // Choosing a file shows it. A sheet puts itself away and hands focus to the file's name.
@@ -195,11 +195,42 @@ try {
       await key(cdp, "Enter", "Enter", 2);
       await ready(cdp, `${pane}.querySelectorAll('.diff-note[data-note-id]').length === ${before + 1}`, `${label}: Ctrl+Enter adds the note`);
       assert.equal(await evaluate(cdp, "document.querySelector('.changes-foot p')?.textContent"), "2 notes go with your next message.");
-      assert.equal(await evaluate(cdp, `${row(LOGIN)}.querySelector('.file-noted')?.textContent`), "2", `${label}: the tree counts the new note`);
+      assert.equal(await evaluate(cdp, `${row(LOGIN)}.querySelector('.tree-item-count')?.textContent`), "2", `${label}: the tree counts the new note`);
       assert.deepEqual(errors, [], `${label}: page errors`);
       await cdp.send("Page.close").catch(() => undefined);
       results.push(`${label}: ok (number drift ${drift.toFixed(2)}px)`);
     }
+  }
+
+  // All files: open a file nobody changed, type in it, save it with Ctrl+S, and meet the guard on closing with an edit unsaved.
+  for (const posture of [FOLD8_POSTURES[2], DESKTOP]) {
+    const desktop = posture === DESKTOP;
+    const cdp = await openPosturePage({ debugPort: port, posture, colorScheme: "dark" });
+    if (desktop) await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 1, mobile: false });
+    const label = `files ${posture.name}`;
+    await open(cdp, "changes");
+    await mouseClick(cdp, "document.querySelector('.toggle-group-option:last-child')");
+    await ready(cdp, `!!${row("file:src/auth/validate.ts")}`, `${label}: All files opens at the file on screen`);
+    assert.equal(await evaluate(cdp, `${row("file:src/auth/LoginForm.tsx")}.querySelector('.tree-item-lead')?.textContent`), "M", `${label}: change letters in All files`);
+    await mouseClick(cdp, row("file:src/auth/validate.ts"));
+    await ready(cdp, `${barPath} === 'src/auth/validate.ts' && !!${pane}.querySelector('.code-editor .cm-content .tok-keyword')`, `${label}: the file opens in the editor`);
+    if (!desktop) assert.equal(await evaluate(cdp, sheet), "closed", `${label}: choosing a file closes the sheet`);
+    await mouseClick(cdp, `${pane}.querySelectorAll('.code-editor .cm-line')[1]`);
+    await key(cdp, "End", "End");
+    await cdp.send("Input.insertText", { text: " && password.trim() === password" });
+    await ready(cdp, "document.querySelector('.change-unsaved')?.textContent === 'Unsaved edits'", `${label}: typing marks the file unsaved`);
+    // Escape in the editor asks to close the review; with an edit unsaved, the review asks first.
+    await key(cdp, "Escape", "Escape");
+    assert.match(await evaluate(cdp, "document.querySelector('.notice-bar-text')?.textContent ?? ''"), /validate\.ts has unsaved edits/u, `${label}: closing asks first`);
+    await mouseClick(cdp, "[...document.querySelectorAll('.notice-bar-action')].find((b) => b.textContent === 'Keep editing')");
+    await mouseClick(cdp, `${pane}.querySelector('.code-editor .cm-content')`);
+    await key(cdp, "s", "KeyS", 2);
+    await ready(cdp, "document.querySelector('.change-facts [role=status]')?.textContent === 'Saved'", `${label}: Ctrl+S saves`);
+    assert.equal(await evaluate(cdp, "!!document.querySelector('.tree-item-dot')"), false, `${label}: no unsaved dot after the save`);
+    assert.match(await evaluate(cdp, `${pane}.querySelector('.code-editor .cm-content').textContent`), /password\.trim\(\) === password/u);
+    await shot(cdp, `files-saved-dark-${posture.name}`);
+    await cdp.send("Page.close").catch(() => undefined);
+    results.push(`${label}: ok`);
   }
 
   // A chip opens the review at its note's file, with the sheet away and focus on the note.

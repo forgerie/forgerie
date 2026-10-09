@@ -34,6 +34,7 @@ import type { ArchiveAvailability } from "./picker/archiveNext";
 import { createNoteTray } from "./changes/noteTray";
 import { annotationsOf, carriesNotes } from "./changes/diffNotes";
 import { createChangesSource } from "./changes/changesSource";
+import { createFilesSource } from "./changes/filesSource";
 import { ChangesOpener, ChangesReview } from "./ui/ChangesReview";
 import type { NotesBinding } from "./ui/NoteTray";
 import type { WorktreeApi, WorktreeInfo } from "./worktrees/worktreeApi";
@@ -101,7 +102,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const [tray] = useState(() => createNoteTray(saved));
   const notes = useSyncExternalStore(tray.subscribe, tray.notes);
   const [review, setReview] = useState<{ focusNoteId?: string }>();
-  const changes = useMemo(() => cwd ? createChangesSource(cwd, browserTransport.request) : undefined, [cwd]);
+  const changes = useMemo(() => cwd ? { source: createChangesSource(cwd, browserTransport.request), files: createFilesSource(cwd, browserTransport.request) } : undefined, [cwd]);
   const pullRef = useMemo(() => sessionId && cwd ? { id: sessionId, cwd } : undefined, [sessionId, cwd]);
   const pull = useSessionPulls(pullRequests, pullRef, catalogPulls ?? NO_LINKS);
   const [pullOpen, setPullOpen] = useState(false);
@@ -252,7 +253,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onContinue={(targetId, summary) => { void store.continueTree(targetId, summary).then(applyTree); }}
         onFork={(entryId) => { void store.forkTree(entryId).then(applyTree); }}
         onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}
-      {review && changes && <ChangesReview source={changes} notes={notes} focusNoteId={review.focusNoteId}
+      {review && changes && <ChangesReview source={changes.source} files={changes.files} notes={notes} focusNoteId={review.focusNoteId}
         onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setReview(undefined)} />}
       {pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
         notice={pull.notice} writing={pull.writing} now={Date.now()}

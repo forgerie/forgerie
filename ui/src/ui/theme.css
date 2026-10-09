@@ -62,6 +62,14 @@
   --code-title: #2c609a;
   /* text-blue-500, the homepage's one live colour, in both themes. */
   --live: oklch(0.623 0.214 259.815);
+  /* A count or badge that waits on the reader: the live colour as a faint wash. */
+  --live-wash: color-mix(in oklab, var(--live) 16%, transparent);
+  /* Behind a bar that warns of a failure or a risk to the reader's work. */
+  --destructive-wash: color-mix(in oklab, var(--destructive) 8%, var(--background));
+  /* The caret's line in an editor, and a matched or unmatched bracket under the caret. */
+  --caret-line: color-mix(in oklab, var(--foreground) 4%, transparent);
+  --bracket-match: color-mix(in oklab, var(--live) 22%, transparent);
+  --bracket-miss: color-mix(in oklab, var(--destructive) 22%, transparent);
   --scrim: oklch(0 0 0 / 0.32);
   --scrim-shadow: oklch(0 0 0 / 0.16);
   /* Diff rows: drawn as faint washes, so the live blue of a note stays the loudest mark on a line. */
@@ -1003,29 +1011,11 @@ summary.trace-line:hover { color: var(--foreground); }
 @media (prefers-reduced-motion: reduce) { .changes-layout .changes-files, .changes-scrim { transition: none; } }
 .changes-pane { min-inline-size: 0; min-block-size: 0; display: flex; flex-direction: column; }
 
-/* The tree: 44px rows, as in the session picker, indented a step per level. */
+/* Changes or All files. The switch stays at the top as the tree scrolls, on the tree's own surface. */
+.changes-lens { position: sticky; inset-block-start: 0; z-index: 1; margin-block: calc(-1 * var(--space-2)) var(--space-1);
+  padding: var(--space-2) var(--tree-pad) var(--space-1); background: inherit; }
+/* The tree's list. Its rows are TreeItem. */
 .file-tree { margin: 0; padding: 0; list-style: none; font-size: var(--small-text); }
-.file-row { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size);
-  padding-inline: calc(var(--tree-pad) + (var(--level, 1) - 1) * 0.875rem) var(--tree-pad); color: var(--muted-foreground); cursor: pointer; user-select: none; }
-.file-row:hover { background: var(--hover-surface); }
-.file-row:focus-visible { outline: 2px solid var(--foreground); outline-offset: -2px; }
-.file-row[aria-selected="true"] { background: var(--active-surface); }
-.file-row[aria-selected="true"] .file-name { font-weight: 500; }
-.file-row[aria-disabled] { cursor: default; }
-.file-row[aria-disabled]:hover { background: transparent; }
-.file-row[data-kind="group"] { font-size: var(--label-text); font-weight: 500; }
-.file-row[data-kind="file"] .file-name { color: var(--foreground); }
-.file-row[aria-disabled] .file-name { color: var(--muted-foreground); }
-.file-chevron { flex: none; transition: rotate 150ms; }
-.file-row[aria-expanded="true"] .file-chevron { rotate: 90deg; }
-.file-name { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* One cell as wide as a folder's chevron, so names line up across a level. */
-.file-mark { flex: none; inline-size: 14px; font-family: var(--code-font); font-size: var(--label-text); font-weight: 600; text-align: center; color: var(--diff-modify); }
-.file-mark[data-state="added"], .file-mark[data-state="untracked"] { color: var(--diff-add); }
-.file-mark[data-state="deleted"] { color: var(--diff-remove); }
-.file-mark[data-state="conflicted"] { color: var(--destructive); }
-.file-noted { flex: none; min-inline-size: 1.125rem; padding-inline: 0.3125rem; border-radius: 0.5625rem; background: color-mix(in oklab, var(--live) 16%, transparent);
-  color: var(--live); font-size: var(--meta-text); font-weight: 600; line-height: 1.125rem; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* The open file's bar: its name and facts, then previous and next. Facts sit under the name, so the buttons keep their room. */
 .change-bar { flex: none; display: flex; align-items: center; gap: var(--space-1); min-block-size: var(--header-size); padding: var(--space-1) var(--space-2) var(--space-1) var(--tree-pad); border-block-end: 1px solid var(--line); }
@@ -1038,7 +1028,10 @@ summary.trace-line:hover { color: var(--foreground); }
 .change-folder { flex: 0 1 auto; min-inline-size: 1.5rem; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); }
 .change-name { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .change-facts { display: flex; flex-wrap: wrap; gap: 0 var(--space-3); margin: 0; color: var(--muted-foreground); font-size: var(--label-text); }
-.change-noted { color: var(--live); font-weight: 500; }
+.change-noted, .change-unsaved { color: var(--live); font-weight: 500; }
+.change-save { flex: none; min-block-size: 2.25rem; margin-inline-start: var(--space-1); padding-inline: var(--space-4); border: 0; border-radius: var(--radius-control);
+  font-size: var(--small-text); font-weight: 500; }
+
 
 /* Each file is a read-only CodeMirror editor. Its colours come from the same
    tokens as chat code blocks. CodeMirror injects its own theme after this file,

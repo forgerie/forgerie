@@ -1,4 +1,6 @@
 import type { ChangeEntry } from "./changesSource";
+import type { TreeStep } from "../ui/treeKeys";
+import { keyStep } from "../ui/treeKeys";
 
 /**
  * The changed files as a folder tree, the way an editor's source control
@@ -75,33 +77,10 @@ export function treeRows(nodes: readonly FileTreeNode[], collapsed: ReadonlySet<
   ]);
 }
 
-/** What a key does on a tree row, following the ARIA tree pattern. */
-export type TreeStep =
-  | { type: "focus"; index: number }
-  | { type: "fold"; key: string; open: boolean }
-  | { type: "open"; key: string };
+/** What a key does on a row of the changed-files tree, following the ARIA tree pattern. */
 export function treeStep(rows: readonly TreeRow[], index: number, key: string, collapsed: ReadonlySet<string>): TreeStep | undefined {
-  const row = rows[index];
-  if (!row) return undefined;
-  const folder = row.node.type === "folder";
-  const isOpen = folder && !collapsed.has(row.node.key);
-  switch (key) {
-    case "ArrowDown": return index + 1 < rows.length ? { type: "focus", index: index + 1 } : undefined;
-    case "ArrowUp": return index > 0 ? { type: "focus", index: index - 1 } : undefined;
-    case "Home": return { type: "focus", index: 0 };
-    case "End": return { type: "focus", index: rows.length - 1 };
-    case "ArrowRight":
-      if (!folder) return undefined;
-      return isOpen ? (rows[index + 1]?.parent === row.node.key ? { type: "focus", index: index + 1 } : undefined) : { type: "fold", key: row.node.key, open: true };
-    case "ArrowLeft": {
-      if (isOpen) return { type: "fold", key: row.node.key, open: false };
-      const parent = rows.findIndex((item) => item.node.key === row.parent);
-      return parent >= 0 ? { type: "focus", index: parent } : undefined;
-    }
-    case "Enter":
-    case " ":
-      if (folder) return { type: "fold", key: row.node.key, open: !isOpen };
-      return row.node.type === "file" && row.node.entry.diffable ? { type: "open", key: row.node.key } : undefined;
-    default: return undefined;
-  }
+  return keyStep(rows.map((row) => ({
+    key: row.node.key, parent: row.parent, folder: row.node.type === "folder",
+    open: row.node.type === "folder" && !collapsed.has(row.node.key), openable: row.node.type === "file" && row.node.entry.diffable,
+  })), index, key);
 }

@@ -1,0 +1,2 @@
+/* The editor fills the space it is given, so a short file still shows its gutter to the bottom. */
+.code-editor { display: flex; flex-direction: column; min-block-size: 100%; }

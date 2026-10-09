@@ -12,7 +12,7 @@ for (const scenario of scenarios) {
   for (const scheme of schemes) {
     const result = spawnSync(process.execPath, [join(repo, "scripts/capture-postures.mjs"),
       "--url", `${origin}/verification/changes-preview.html?scenario=${scenario}`,
-      "--out", out, "--label", `${scenario}-${scheme}`, "--color-scheme", scheme, "--chrome-bin", chromium, "--settle", "1200"], { stdio: "inherit" });
+      "--out", out, "--label", `${scenario}-${scheme}`, "--color-scheme", scheme, "--chrome-bin", chromium, "--settle", process.env.SETTLE ?? "1200"], { stdio: "inherit" });
     if (result.status !== 0) throw new Error(`Posture capture failed: ${scenario} ${scheme}`);
   }
 }

@@ -1,7 +1,7 @@
 import { LanguageDescription, type Language } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { highlightTree } from "@lezer/highlight";
-import { codeHighlighter as highlighter } from "../codeTokens";
+import { codeHighlighter as highlighter } from "../ui/codeTokens";
 import { sideOf, type DiffDocument, type DiffSide } from "./diffDocument";
 
 type Parser = Language["parser"];
