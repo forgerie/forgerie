@@ -506,9 +506,10 @@ export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
     ...(message.failure ? { status: { type: "incomplete", reason: message.failure } } : {}),
   };
 }
-/** A call that renders apart from a step: it loads a skill or opens a session. */
+/** Turn-ending controls do not make their response into work narration, even before their results arrive. */
 function standsApart(part: ToolPart): boolean {
-  return skillLoadOf(part.name, part.args) !== undefined || (part.state.type === "done" && part.state.door !== undefined);
+  return part.name === "ask_user" || part.name === "end_turn"
+    || skillLoadOf(part.name, part.args) !== undefined || (part.state.type === "done" && part.state.door !== undefined);
 }
 /**
  * A step is one Pi assistant message that calls a tool: its thinking, the

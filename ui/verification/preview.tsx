@@ -209,6 +209,25 @@ const planAsk: PendingAsk = { askId: "plan", askedAt: "2026-09-29T00:00:00Z", qu
     { value: "lint", label: "Lint" }, { value: "types", label: "Typecheck" }, { value: "tests", label: "Unit tests" }] },
   { id: "name", question: "What should the new module be called?", options: [] },
 ] };
+const terminalAsk: PendingAsk = { askId: "terminal", askedAt: "2026-10-09T17:00:00Z", questions: [
+  { id: "policy", question: "Which update policy should I use?", options: [
+    { value: "stable", label: "New stable releases", detail: "Run checks before each update." },
+    { value: "approved", label: "Approved versions only", detail: "Wait for your approval before updating." },
+  ] },
+] };
+// The response and the turn-ending call share one Pi message, after ordinary work.
+const terminalMessages = (name: "ask_user" | "end_turn"): TranscriptMessage[] => [
+  say("terminal-q", "user", "Can application updates run without rebuilding the operating system?"),
+  { id: "terminal-work", role: "assistant", parts: [
+    { type: "thinking", text: "Read the service definitions before making a recommendation." },
+    tool("terminal-read", "read", { path: "services.nix" }, done("Application services use a separate profile.")),
+  ] },
+  { id: "terminal-answer", role: "assistant", parts: [
+    { type: "thinking", text: "Keep the service definitions separate from application releases." },
+    { type: "text", text: "## Recommendation\n\nKeep the service definitions in NixOS. Update a separate application profile each night.\n\nThe job builds the application, runs checks, and restarts only the application services. **No system rebuild is needed.**\n\nA failed check keeps the previous version. A restart can still interrupt a request. Which update policy do you want?" },
+    tool("terminal-end", name, name === "ask_user" ? { questions: terminalAsk.questions } : { awaiting: "reply" }, done("Run ended.")),
+  ] },
+];
 const longAsk: PendingAsk = { askId: "long", askedAt: "2026-09-29T00:00:00Z", questions: [
   { id: "target", question: `Which deployment target should this change ship to first, given that ${"the staging cluster and the edge fleet both run the old build ".repeat(2)}?`,
     detail: "The edge fleet updates overnight. Staging updates on every merge. ".repeat(3),
@@ -223,7 +242,7 @@ const previewProblems: Problem[] = [
   { id: 2, title: "Pi reported an error", at: problemAt, message: "529 overloaded_error: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"},\"request_id\":\"req_011CTx9fQ2k7vZbE4m1nHqA8\"}" },
   { id: 1, title: "Command failed", at: problemAt - 60_000, message: "Unknown command: /bad" },
 ];
-const scenarioAsk: Record<string, PendingAsk> = { "dialog-ask": planAsk, "shell-ask": planAsk, ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk, "attachments-ask": planAsk, "compaction-ask": planAsk };
+const scenarioAsk: Record<string, PendingAsk> = { "terminal-ask": terminalAsk, "dialog-ask": planAsk, "shell-ask": planAsk, ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk, "attachments-ask": planAsk, "compaction-ask": planAsk };
 const mentionFiles = ["src/main.ts", "src/file with spaces.ts", "src/ui/Composer.tsx", "vendor/", "dir with space/",
   ...Array.from({ length: 9 }, (_, i) => `src/very-long-folder-name-${i}/nested-folder/mention-source-${i}.test.ts`)];
 const previewMentions: MentionSource = {
@@ -424,6 +443,7 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   empty: [], loading: [], stress: stressMessages, tools: toolMessages(false), "tools-running": toolMessages(true),
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
   steps: stepMessages(false), "steps-running": stepMessages(true),
+  "terminal-ask": terminalMessages("ask_user"), "terminal-reply": terminalMessages("end_turn"),
   skills: skillMessages(false), "skills-open": skillMessages(false), "skills-invocation": skillMessages(false), "skills-running": skillMessages(true),
   "streamdown-live": [], "streamdown-running": streamdownMessages(streamdownFrames[1]!),
   "rich-blocks": richBlocksMessages(richBlocksReply), "rich-blocks-running": richBlocksMessages(richBlocksRunning),

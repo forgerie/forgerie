@@ -324,6 +324,30 @@ describe("Tools and reasoning", () => {
     expect(button("Copy response")).not.toBeNull();
   });
 
+  it.each(["ask_user", "end_turn"])("keeps the response outside collapsed work before %s, live and settled", async (name) => {
+    const earlier: TranscriptMessage = { id: "work", role: "assistant", parts: [
+      { type: "thinking", text: "Read the policy first." },
+      tool("read", { type: "done", output: "Policy", isError: false }, "read", { path: "policy.md" }),
+    ] };
+    for (const state of [{ type: "pending" }, { type: "running", output: "" }, { type: "done", output: "Ended", isError: false }] satisfies ToolState[]) {
+      await render({ running: state.type !== "done", messages: [earlier, { id: "closing", role: "assistant", parts: [
+        { type: "thinking", text: "Compare the choices." },
+        { type: "text", text: "## Recommendation\n\nKeep **approved versions**. Which policy do you want?" },
+        tool("end", state, name, {}),
+      ] }] });
+      const heading = document.querySelector(".message-assistant h2")!;
+      expect(heading?.textContent).toBe("Recommendation");
+      expect(heading.closest(".rail-section, .tally, details")).toBeNull();
+      expect(document.querySelector(".message-assistant .message-text > .markdown strong")?.textContent).toBe("approved versions");
+      expect(rows()).toHaveLength(1);
+      expect(toggleOf(rows()[0]!).getAttribute("aria-expanded")).toBe("false");
+      expect(document.querySelector(".tally-panel")).toBeNull();
+      const thought = document.querySelector(".message-assistant .reasoning-text")!;
+      expect(thought.closest<HTMLDetailsElement>("details.chain-of-thought")?.open).toBe(false);
+      if (state.type === "done") expect(document.querySelector(".rail-section-end")?.getAttribute("aria-label")).toBe("1 tool call");
+    }
+  });
+
   it("keeps the narration as the row's text, with its calls as marks beside it", async () => {
     await render({ messages: [{ id: "a", role: "assistant", parts: [
       { type: "text", text: "Let me check **the router**." },

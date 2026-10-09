@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { historySchema, parseEvent, type PiMessage, type SessionEvent } from "./contracts";
-import { convertMessage, fromHistory, messageText, reduceEvent, seedTranscript, type Transcript, type TranscriptPart } from "./transcript";
+import { convertMessage, fromHistory, messageText, reduceEvent, seedTranscript, type ToolState, type Transcript, type TranscriptPart } from "./transcript";
 
 const user = (text: string, timestamp = 1): PiMessage => ({ role: "user", content: text, timestamp });
 const assistant = (text: string, timestamp = 2): PiMessage => ({ role: "assistant", content: [{ type: "text", text }], timestamp });
@@ -238,6 +238,28 @@ describe("assistant-ui conversion", () => {
     });
     it("leaves a message without calls outside any step", () => {
       expect(shape([{ type: "thinking", text: "plan" }, { type: "text", text: "The answer." }])).toEqual(["plan", "The answer."]);
+    });
+    describe.each(["ask_user", "end_turn"])("turn-ending %s", (name) => {
+      it.each([
+        { type: "pending" },
+        { type: "running", output: "" },
+        done,
+        { ...done, isError: true, output: "Could not end the run." },
+        { type: "interrupted" },
+      ] satisfies ToolState[])("keeps the response outside work when the call is $type", (state) => {
+        const terminal: TranscriptPart = { type: "tool", id: "end", name, args: {}, state };
+        expect(shape([{ type: "thinking", text: "plan" }, { type: "text", text: "My recommendation." }, terminal]))
+          .toEqual(["plan", "My recommendation.", "end"]);
+      });
+      it("keeps a saved response outside work after earlier tool activity", () => {
+        const state = fromHistory([user("Recommend a policy."), asking(2, call("read", "read", { path: "policy.md" })),
+          result("read", "Policy"), asking(3, { type: "text", text: "My recommendation." }, call("end", name, {})),
+          { role: "toolResult", toolCallId: "end", toolName: name, content: "Ended", timestamp: 4 }]);
+        expect(convertMessage(state.messages.at(-1)!).content).toEqual([
+          { type: "text", text: "My recommendation." },
+          { type: "tool-call", toolCallId: "end", toolName: name, args: {}, artifact: { state: "done" }, result: "Ended", isError: false },
+        ]);
+      });
     });
     it("ends the step at text written after a call", () => {
       expect(shape([bash("a"), { type: "text", text: "late" }, { type: "thinking", text: "more" }, bash("b")]))
