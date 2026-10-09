@@ -4,11 +4,11 @@ A group bundles normal projects for navigation. Each chat stays in its starting 
 
 ## Set up a group
 
-Open **Settings → Project groups**. **Manage** next to the group filter in the session list opens the same page. Register an existing project folder if it is not listed. Create a group, enter a name and select its member projects. A project can belong to more than one group.
+Open **Settings → Project groups**, or choose **Group projects…** in the session list's ⋯ menu. Press **New group**, type a name and check its projects. With many projects, type in **Find a project** to narrow the list. If a project is missing, enter its folder under **Add a project folder**; Forgerie adds it as a project and checks it in the group. Press **Create group** or **Save**. A project can belong to more than one group. To delete a group, open it and choose **Delete group** in its ⋯ menu, then confirm.
 
-Choose the group in the session list to filter sessions. The browser remembers the choice across reloads. **All projects** restores the complete list. The list's own **Group by state** and **Group by project** arrangement still applies inside the chosen group. Grouping does not move files, rewrite session history or change a session's default directory. Deleting a group does not delete its projects or worktrees. An unavailable member stays visible while editing the group.
+To show one group's sessions, choose the group in the session list's ⋯ menu. A strip with the group's name then stands above the list. Its × button, or **All projects** in the menu, shows every project again. The browser remembers the choice across reloads. With no groups, the session list shows nothing extra. The list's own **Group by state** and **Group by project** arrangement still applies inside the chosen group. Grouping does not move files, rewrite session history or change a session's default directory. Deleting a group does not delete its projects or worktrees. An unavailable member stays visible while editing the group.
 
-Group writes detect stale revisions. If another window changes a group, refresh before saving again. An unsaved editor draft stays on screen after a refused save. Group data lives in `project-groups.json` under Forgerie's data directory; sessiond is its sole writer.
+Group writes detect stale revisions. If another window changes a group, Save refuses and keeps your draft. Choose **Discard changes** to load the current group, then make the change again. A draft also stays when you go back to the list and open the group again. Group data lives in `project-groups.json` under Forgerie's data directory; sessiond is its sole writer.
 
 ## Work in another repository
 
@@ -42,4 +42,4 @@ PR links and watches remain scoped to the selected checkout. Equal PR numbers in
 
 There is no atomic Land-all operation, automatic dependency wiring, automatic remote-machine placement or automatic delegation. Cross-repo integration tests must use the intended local revisions explicitly. Existing shell and filesystem tools retain their normal host access; managed records cannot prevent an external process from editing files.
 
-Project lists refresh when the management view opens, after a local change, on window focus or on Refresh. Related work refreshes on open and after a run or lifecycle action. A failed catalog read never deletes stored group data.
+Project lists refresh when the management view opens, after a local change, on window focus or on **Read groups again** in the page's ⋯ menu. Related work refreshes on open and after a run or lifecycle action. A failed catalog read never deletes stored group data.

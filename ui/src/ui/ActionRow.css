@@ -1,0 +1,10 @@
+/* The settings list row, without the row being a button: commands trail it. */
+.action-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, max-content) auto;
+  grid-template-areas: "name status actions" "detail detail actions"; align-items: baseline; column-gap: var(--space-3);
+  min-block-size: var(--control-size); padding: var(--space-3); border-radius: var(--radius-control); }
+.action-row-name { grid-area: name; min-inline-size: 0; font-size: var(--small-text); font-weight: 500; overflow-wrap: anywhere; }
+.action-row-status { grid-area: status; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--meta-text); }
+.action-row-status[data-tone="danger"] { color: var(--destructive); }
+.action-row-detail { grid-area: detail; margin-block-start: var(--space-1); min-inline-size: 0; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.45; overflow-wrap: anywhere; }
+.action-row-detail code { font-family: var(--code-font); font-size: var(--meta-text); }
+.action-row-actions { grid-area: actions; align-self: center; display: flex; align-items: center; gap: var(--space-1); }

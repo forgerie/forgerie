@@ -12,8 +12,11 @@ import { ModelsView } from "./ModelsView";
 import type { PluginCatalog } from "@shared/pluginsContract";
 import "./settings.css";
 
-/** A settings page that another feature draws. Settings passes in its Back and Close controls. */
-export type SettingsPageRenderer = (chrome: { back: ReactNode; close: ReactNode }) => ReactNode;
+/**
+ * A settings page that another feature draws. Settings passes in its Back and
+ * Close controls, the item open on the page, and a way to open another one.
+ */
+export type SettingsPageRenderer = (page: { back: ReactNode; close: ReactNode; item: string | undefined; onOpen: (item: string | undefined) => void }) => ReactNode;
 
 type ListLoad = { type: "loading" } | { type: "failed"; message: string } | { type: "ready"; value: AgentList };
 
@@ -70,7 +73,11 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
   const close = onClose ? <button type="button" className="picker-icon" aria-label="Close settings" title="Close settings" onClick={onClose}><XIcon aria-hidden size={16} /></button> : null;
   const back = <button type="button" className="settings-back" onClick={() => onPlace({ section: "root" })}><ChevronLeftIcon aria-hidden size={16} />Settings</button>;
 
-  if (place.section === "projects" && projects) return <>{projects({ back, close })}</>;
+  if (place.section === "projects" && projects) {
+    const toList = <button type="button" className="settings-back" aria-label="Back to Project groups" onClick={() => onPlace({ section: "projects" })}>
+      <ChevronLeftIcon aria-hidden size={16} />Project groups</button>;
+    return <>{projects({ back: place.group ? toList : back, close, item: place.group, onOpen: (group) => onPlace({ section: "projects", group }) })}</>;
+  }
 
   if (place.section === "plugins") return <PluginsView selected={place.plugin}
     onOpen={(plugin) => onPlace({ section: "plugins", plugin })} onBack={() => onPlace({ section: "root" })} onClose={onClose} onCatalog={onPluginCatalog} />;
@@ -91,7 +98,7 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
           onOpen={() => onPlace({ section: "agents" })} />
         <SettingsRow name={<><PuzzleIcon aria-hidden size={16} />Plugins</>} description="Pi packages and extensions, and Forgerie's own plugins, such as account meters."
           onOpen={() => onPlace({ section: "plugins" })} />
-        {projects ? <SettingsRow name={<><FolderTreeIcon aria-hidden size={16} />Project groups</>} description="Named sets of projects. The session list can show one group at a time."
+        {projects ? <SettingsRow name={<><FolderTreeIcon aria-hidden size={16} />Project groups</>} description="Projects that belong together, such as the repos of one product. The session list can show one group at a time."
           onOpen={() => onPlace({ section: "projects" })} /> : null}
       </ul>
     </SettingsFrame>;

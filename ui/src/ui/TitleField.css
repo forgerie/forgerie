@@ -1,0 +1,9 @@
+/* The agent and plugin pages' title face, editable. */
+.title-field { margin-block-end: var(--space-6); }
+.title-field-input { display: block; inline-size: 100%; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--foreground); outline: none;
+  font-family: var(--display-font); font-size: clamp(1.375rem, 4.5cqi, 1.75rem); font-weight: 600; letter-spacing: -0.015em; line-height: 1.25;
+  transition: box-shadow 150ms; }
+.title-field-input::placeholder { color: var(--muted-foreground); opacity: 0.7; }
+.title-field-input:focus-visible { box-shadow: 0 calc(2 * var(--hairline)) 0 var(--line-focus); }
+.title-field-hint { margin: var(--space-2) 0 0; color: var(--muted-foreground); font-size: var(--text-size); line-height: 1.5; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .title-field-input { transition: none; } }

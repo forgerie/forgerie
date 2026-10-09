@@ -165,6 +165,56 @@ describe("picker", () => {
   });
 });
 
+describe("project filter", () => {
+  const menuButtons = () => [...host.querySelectorAll<HTMLButtonElement>('[role="menu"] button')];
+  const openMenu = () => act(() => host.querySelector<HTMLButtonElement>('[aria-label="More session commands"]')!.click());
+  const drawFiltered = (value: string, filter: { onChoose: (value: string) => void; onManage: () => void }, options = [{ value: "kori", label: "KORI", detail: "2 projects" }]) =>
+    act(() => root.render(<Picker view={view([S("a")])} prefs={defaults} onPrefs={() => {}} actions={{ onSelect: () => {}, onRetry: () => {} }}
+      filter={{ options, value, ...filter }} />));
+
+  it("draws nothing above the list until a group is chosen", () => {
+    drawFiltered("", { onChoose: vi.fn(), onManage: vi.fn() });
+    expect(host.querySelector("select")).toBeNull();
+    expect(host.querySelector('[role="status"]')).toBeNull();
+    expect(text()).not.toContain("KORI");
+  });
+
+  it("offers groups in the menu under the grouping, with a way to edit them", () => {
+    const onChoose = vi.fn();
+    const onManage = vi.fn();
+    drawFiltered("", { onChoose, onManage });
+    openMenu();
+    expect(menuButtons().map((node) => node.textContent)).toEqual(["Group by state", "Group by projectG", "Show archived 0 · A", "All projects", "KORI2 projects", "Edit project groups…"]);
+    act(() => menuButtons()[4]!.click());
+    expect(onChoose).toHaveBeenCalledWith("kori");
+    openMenu();
+    act(() => menuButtons().at(-1)!.click());
+    expect(onManage).toHaveBeenCalledOnce();
+  });
+
+  it("offers only the way to make a group when none exist", () => {
+    drawFiltered("", { onChoose: vi.fn(), onManage: vi.fn() }, []);
+    openMenu();
+    expect(menuButtons().map((node) => node.textContent).slice(3)).toEqual(["Group projects…"]);
+  });
+
+  it("names the chosen group above the list and clears it in one press", () => {
+    const onChoose = vi.fn();
+    drawFiltered("kori", { onChoose, onManage: vi.fn() });
+    expect(host.querySelector('[role="status"]')?.textContent).toBe("KORI2 projects");
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Show all projects"]')!.click());
+    expect(onChoose).toHaveBeenCalledWith("");
+  });
+
+  it("keeps G switching the grouping while a group is chosen", () => {
+    const onPrefs = vi.fn();
+    act(() => root.render(<Picker view={view([S("a")])} prefs={defaults} onPrefs={onPrefs} actions={{ onSelect: () => {}, onRetry: () => {} }}
+      filter={{ options: [{ value: "kori", label: "KORI", detail: "2 projects" }], value: "kori", onChoose: vi.fn(), onManage: vi.fn() }} />));
+    press("g");
+    expect(onPrefs).toHaveBeenCalledWith(expect.objectContaining({ grouping: "project" }));
+  });
+});
+
 describe("new session", () => {
   it("starts a new session from the button at the top of the list, or with N", () => {
     const onNew = vi.fn();

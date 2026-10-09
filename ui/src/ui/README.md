@@ -8,12 +8,18 @@ here at its first call site, with its part and one line below.
 
 One line per component: the name in backticks, its layer, and what it decides.
 
-- `TextSubmit` (molecule): keeps a text entry and its submit action together through reflow and retries.
+- `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, and a refused value stays.
 - `ActionButton` (molecule): exposes a labeled action with a full-size hit target.
 - `ActionCard` (molecule): keeps an item's identity, status and actions together as it reflows.
-- `ChoiceSelect` (molecule): combines a labeled choice with an optional management action.
 - `DialogPanel` (organism): opens window-level content with a reachable close action and a scroll region.
-- `CollectionEditor` (organism): edits named selections without losing an unsaved draft on a refused write.
+- `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
+- `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place.
+- `ChoiceList` (molecule): pick any number of rows; the legend counts the choice, a long list gets a search field, and a chosen id with no row stays visible.
+- `ListSection` (molecule): a titled list of `<li>` rows on a settings-style page, with an empty text and a note on where the items live.
+- `ActionRow` (molecule): a list item that is not a link: name and status on one line, a detail under them, its commands at the end.
+- `TitleField` (atom): a document title typed in place, in the title face, with its standfirst under it.
+- `Lede` (atom): the one quiet paragraph that opens a page.
+- `FilterChip` (atom): a filter that is on, above the list it narrows, with a clear button; not drawn when no filter is on.
 - `CopyButton` (molecule): copies text on press and reports the result in a live region.
 - `EventLine` (molecule): one quiet line for something that happened, with a tone dot, a time, an always-visible quote, and details on request.
 - `AlertCard` (molecule): a failure that may need the reader: title, explanation, code, actions, and an output panel the actions fill.

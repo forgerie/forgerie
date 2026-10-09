@@ -1,0 +1,10 @@
+/* The settings lists' measure: a small label, rows with no borders, and a
+   quiet note under them. Sections keep a clear gap between them. */
+.list-section + .list-section { margin-block-start: var(--space-8); }
+.list-section-title { margin: 0 0 var(--space-1); padding-inline: var(--space-3); color: var(--muted-foreground); font-family: var(--body-font);
+  font-size: var(--label-text); font-weight: 500; }
+.list-section-rows { display: flex; flex-direction: column; gap: calc(2 * var(--hairline)); margin: 0; padding: 0; list-style: none; }
+.list-section-empty { margin: var(--space-2) 0; padding-inline: var(--space-3); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
+.list-section-note { margin: var(--space-2) 0 0; padding-inline: var(--space-3); color: var(--muted-foreground);
+  font-size: var(--meta-text); overflow-wrap: anywhere; }
+.list-section-note code { font-family: var(--code-font); }

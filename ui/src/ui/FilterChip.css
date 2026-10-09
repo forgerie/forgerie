@@ -1,0 +1,11 @@
+/* An outlined strip, inset like the list's own rows, so it reads as part of the list's state. */
+.filter-chip { flex: none; display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; block-size: 2.25rem; margin: var(--space-2) var(--space-2) 0;
+  padding-inline: var(--space-2) 0; border: var(--hairline) solid var(--line); border-radius: var(--radius-control); font-size: var(--small-text); }
+.filter-chip > svg { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
+.filter-chip-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.filter-chip-detail { flex: none; color: var(--muted-foreground); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
+.filter-chip-clear { position: relative; flex: none; display: grid; place-items: center; inline-size: 2.25rem; block-size: 2.25rem; margin-inline-start: auto; padding: 0;
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); transition: color 150ms, background-color 150ms; }
+.filter-chip-clear::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: var(--control-size); block-size: var(--control-size); translate: -50% -50%; }
+.filter-chip-clear:hover { background: var(--hover-surface); color: var(--foreground); }
+@media (prefers-reduced-motion: reduce) { .filter-chip-clear { transition: none; } }

@@ -1,0 +1,10 @@
+/* The filled action in a page header: the one thing the page asks for. */
+.header-button { position: relative; flex: none; display: inline-flex; align-items: center; gap: var(--space-1); block-size: 2rem; padding-inline: var(--space-3);
+  border: 0; border-radius: var(--radius-control); background: var(--primary); color: var(--primary-foreground); font-size: var(--small-text); font-weight: 500;
+  white-space: nowrap; transition: background-color 150ms, opacity 150ms; }
+.header-button::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
+.header-button svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; }
+.header-button:not(:disabled):hover { opacity: 0.88; }
+.header-button:disabled { opacity: 0.4; }
+@media (prefers-reduced-motion: reduce) { .header-button { transition: none; } }

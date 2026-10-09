@@ -1,4 +1,15 @@
-.text-submit { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; min-inline-size: 0; }
-.text-submit-label { flex-basis: 100%; font-size: var(--small-text); }
-.text-submit-input { flex: 1 1 12rem; min-inline-size: 0; min-block-size: var(--control-size); padding-inline: var(--space-2); color: var(--foreground); background: var(--background); border: var(--hairline) solid var(--line); border-radius: var(--radius-control); }
-.text-submit-button { min-block-size: var(--control-size); padding-inline: var(--space-3); color: var(--foreground); background: var(--background); border: var(--hairline) solid var(--line); border-radius: var(--radius-control); }
+/* The plugin install field's look: a code-face field, a quiet outlined button. */
+/* It follows the content it adds to, so it keeps a clear gap above. */
+.text-submit { display: flex; flex-direction: column; gap: var(--space-2); min-inline-size: 0; margin-block-start: var(--space-6); padding-inline: var(--space-3); }
+.text-submit-label { font-size: var(--small-text); font-weight: 500; }
+.text-submit-hint { margin: 0; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
+.text-submit-row { display: flex; flex-wrap: wrap; gap: var(--space-2); min-inline-size: 0; }
+.text-submit-input { flex: 1 1 14rem; min-inline-size: 0; min-block-size: var(--control-size); padding: var(--space-2) var(--space-3); border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-control); background: var(--code-surface); color: var(--foreground); font-family: var(--code-font); font-size: var(--code-size);
+  transition: border-color 150ms; }
+.text-submit-input:focus-visible { outline: none; border-color: var(--line-focus); }
+.text-submit-button { flex: none; min-block-size: var(--control-size); padding-inline: var(--space-4); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
+  background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 500; transition: background-color 150ms, opacity 150ms; }
+.text-submit-button:not(:disabled):hover { background: var(--hover-surface); }
+.text-submit-button:disabled { opacity: 0.45; }
+@media (prefers-reduced-motion: reduce) { .text-submit-input, .text-submit-button { transition: none; } }

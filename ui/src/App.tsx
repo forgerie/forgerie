@@ -7,7 +7,7 @@ import type { Row } from "./picker/board";
 import type { Session } from "./contracts";
 import { AppShell } from "./ui/AppShell";
 import { useFullscreen } from "./ui/useFullscreen";
-import { Picker, PickerToast } from "./ui/Picker";
+import { Picker, PickerToast, type PickerFilter } from "./ui/Picker";
 import { SessionFrame } from "./ui/SessionFrame";
 import { browserStorage, createDraftStore } from "./draftStore";
 import { NewSession, type LaunchDraft, type LaunchMode, type Placement } from "./NewSession";
@@ -39,7 +39,8 @@ const readSettings = (): SettingsPlace | undefined => {
   const section = params.get("settings");
   if (section === null) return undefined;
   if (section === "agents") return { section, agent: readTarget(params.get("agent") ?? undefined) };
-  if (section === "models" || section === "projects") return { section };
+  if (section === "models") return { section };
+  if (section === "projects") return { section, group: params.get("group") ?? undefined };
   return section === "plugins" ? { section, plugin: params.get("plugin") ?? undefined } : { section: "root" };
 };
 /** `?backlog` keeps the backlog open across a reload; `?backlog=<projectId>/<itemId>` keeps one item open. */
@@ -47,7 +48,7 @@ const readBacklog = () => readBacklogPlace(new URLSearchParams(window.location.s
 /** `&item=<projectId>/<itemId>` keeps a backlog item riding with the new-session dialog across a reload. */
 const readItem = () => readItemParam(new URLSearchParams(window.location.search).get("item"));
 /** Settings and the backlog both take the thread's place, so opening one closes the other. */
-const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.searchParams.delete("agent"); url.searchParams.delete("plugin"); url.searchParams.delete("backlog"); };
+const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.searchParams.delete("agent"); url.searchParams.delete("plugin"); url.searchParams.delete("group"); url.searchParams.delete("backlog"); };
 const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
 const worktreeApi = createWorktreeApi((path, init) => fetch(path, init));
 const backlogApi = createBacklogApi((path, init) => fetch(path, init));
@@ -75,12 +76,12 @@ const DIALOG_ENTRY = { newSession: newStartupToken() };
 /** Composition root: owns the selected session (in the URL), the sheet, and sessions being started. */
 /**
  * `shelves`: plugin shelves for the foot of the session list. The entry passes their binding in.
- * `groupControls` draws the project-group filter over the list; `manage` opens its settings page.
- * `projectSettings` draws Settings → Projects.
+ * `projectFilter` offers project groups in the session list's ⋯ menu; the app adds the way to Settings → Project groups.
+ * `projectSettings` draws Settings → Project groups.
  */
-export function App({ shelves, projectScope, projectCatalog, groupControls, projectSettings, relatedWork }: {
+export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork }: {
   shelves?: ReactNode; projectCatalog?: readonly Project[] | undefined; projectScope?: readonly string[] | undefined;
-  groupControls?: ((manage: () => void) => ReactNode) | undefined; projectSettings?: SettingsPageRenderer | undefined; relatedWork?: RelatedWorkRenderer | undefined;
+  projectFilter?: Omit<PickerFilter, "onManage"> | undefined; projectSettings?: SettingsPageRenderer | undefined; relatedWork?: RelatedWorkRenderer | undefined;
 } = {}) {
   const [selectedId, setSelectedId] = useState(readSelected);
   const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string; error?: string }>();
@@ -263,6 +264,7 @@ export function App({ shelves, projectScope, projectCatalog, groupControls, proj
       url.searchParams.set("settings", place.section);
       if (place.section === "agents" && place.agent) url.searchParams.set("agent", targetParam(place.agent));
       if (place.section === "plugins" && place.plugin) url.searchParams.set("plugin", place.plugin);
+      if (place.section === "projects" && place.group) url.searchParams.set("group", place.group);
     }
     if (replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     setSettings(place);
@@ -342,7 +344,7 @@ export function App({ shelves, projectScope, projectCatalog, groupControls, proj
     : <SessionFrame name="No session open" status=""><div className="thread-empty" /></SessionFrame>;
   return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention} toast={toast}
     picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs} message={orphanNotice}
-      shelves={shelves} scope={groupControls?.(() => placeSettings({ section: "projects" }))}
+      shelves={shelves} filter={projectFilter ? { ...projectFilter, onManage: () => placeSettings({ section: "projects" }) } : undefined}
       actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
         onBacklog: () => placeBacklog(backlog ?? {}), backlogOpen: backlog !== undefined,

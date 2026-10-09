@@ -1,0 +1,25 @@
+/* Rows of the settings lists: no card, no border per row. The box sits on the
+   name's line; the second line hangs under the name, not under the box. */
+.choice-list { min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.choice-list-legend { display: flex; align-items: baseline; gap: var(--space-2); inline-size: 100%; margin-block-end: var(--space-2); padding: 0 var(--space-3);
+  color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+.choice-list-count { margin-inline-start: auto; font-weight: 400; font-variant-numeric: tabular-nums; }
+.choice-list-search { display: flex; align-items: center; gap: var(--space-2); margin-block-end: var(--space-2); padding-inline: var(--space-3);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-control); color: var(--muted-foreground); transition: border-color 150ms; }
+.choice-list-search:focus-within { border-color: var(--line-focus); }
+.choice-list-search svg { flex: none; }
+.choice-list-query { flex: 1; min-inline-size: 0; min-block-size: var(--control-size); padding: 0; border: 0; background: transparent; color: var(--foreground);
+  font-size: var(--small-text); outline: none; }
+.choice-list-rows { display: flex; flex-direction: column; gap: calc(2 * var(--hairline)); margin: 0; padding: 0; list-style: none; }
+.choice-list-row { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "box label" ". detail"; align-items: center; column-gap: var(--space-3);
+  min-block-size: var(--control-size); padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); cursor: pointer; transition: background-color 150ms; }
+.choice-list-row:hover { background: var(--hover-surface); }
+.choice-list-row:has(:focus-visible) { box-shadow: inset 0 0 0 calc(2 * var(--hairline)) var(--line-focus); }
+.choice-list-box { grid-area: box; inline-size: 1rem; block-size: 1rem; margin: 0; accent-color: var(--primary); }
+.choice-list-label { grid-area: label; min-inline-size: 0; font-size: var(--small-text); font-weight: 500; overflow-wrap: anywhere; }
+.choice-list-detail { grid-area: detail; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); }
+.choice-list-row[data-missing] .choice-list-label { color: var(--destructive); }
+.choice-list:disabled .choice-list-row { cursor: default; opacity: 0.6; }
+.choice-list-none { margin: var(--space-3) 0 0; padding-inline: var(--space-3); color: var(--muted-foreground); font-size: var(--small-text); }
+@media (prefers-reduced-motion: reduce) { .choice-list-row, .choice-list-search { transition: none; } }

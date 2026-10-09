@@ -1,0 +1,20 @@
+/* A quiet "more" mark that opens a short list of commands under itself. */
+.menu-button { position: relative; flex: none; display: flex; }
+.menu-button-trigger { position: relative; display: grid; place-items: center; inline-size: var(--icon-size); block-size: var(--icon-size); padding: 0; border: 0;
+  border-radius: var(--radius-document); background: transparent; color: var(--muted-foreground); transition: background-color 150ms, color 150ms; }
+.menu-button-trigger::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: var(--control-size); block-size: var(--control-size); translate: -50% -50%; }
+.menu-button-trigger:hover, .menu-button-trigger[aria-expanded="true"] { background: var(--hover-surface); color: var(--foreground); }
+.menu-button-menu { position: absolute; z-index: 20; inset-block-start: calc(100% + var(--space-2)); inset-inline-end: 0; min-inline-size: 13rem; max-inline-size: 20rem;
+  padding: var(--space-1); border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--popover); color: var(--foreground);
+  font-size: var(--small-text); box-shadow: 0 0.625rem 0.9375rem -0.1875rem var(--scrim-shadow), 0 0.25rem 0.375rem -0.25rem var(--scrim-shadow); transform-origin: top right; animation: menu-button-in 150ms ease-out; }
+.menu-button-menu[data-align="start"] { inset-inline: 0 auto; transform-origin: top left; }
+.menu-button-item { display: flex; align-items: center; gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size); padding-inline: var(--space-2);
+  border: 0; border-radius: var(--radius-document); background: transparent; color: inherit; text-align: start; }
+.menu-button-item svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; color: var(--muted-foreground); }
+.menu-button-item:not(:disabled):hover, .menu-button-item:focus-visible { background: var(--hover-surface); outline: none; }
+.menu-button-item:disabled { color: var(--muted-foreground); opacity: 0.6; }
+.menu-button-item[data-tone="danger"], .menu-button-item[data-tone="danger"] svg { color: var(--destructive); }
+.menu-button-item[data-tone="danger"]:not(:disabled):hover, .menu-button-item[data-tone="danger"]:focus-visible { background: var(--destructive-wash); }
+.menu-button-separator { block-size: var(--hairline); margin: var(--space-1) calc(-1 * var(--space-1)); background: var(--line); }
+@keyframes menu-button-in { from { opacity: 0; scale: 0.96; } }
+@media (prefers-reduced-motion: reduce) { .menu-button-menu { animation: none; } .menu-button-trigger { transition: none; } }

@@ -1,4 +1,4 @@
-import { AnvilIcon, ArchiveIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+import { AnvilIcon, ArchiveIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -9,6 +9,7 @@ import { readRowPress, ROW_PRESS } from "../picker/press";
 import type { Toast } from "../picker/rowActions";
 import { WorktreeRowMark } from "./WorktreeChip";
 import { PullRequestRowMark } from "./PullRequestReview";
+import { FilterChip } from "./FilterChip";
 
 /** What the picker draws. Built by the binding; the view does no I/O. */
 export interface PickerView {
@@ -46,6 +47,18 @@ export interface PickerActions {
   /** Toggles browser full screen. Absent when the browser cannot. */
   onFullscreen?: (() => void) | undefined;
   fullscreen?: boolean | undefined;
+}
+/**
+ * Which projects the list shows. The choices live in the list's ⋯ menu, under
+ * the grouping; a chosen one stands above the list until it is cleared.
+ */
+export interface PickerFilter {
+  options: readonly { value: string; label: string; detail: string }[];
+  /** The chosen option, or "" for all projects. */
+  value: string;
+  onChoose: (value: string) => void;
+  /** Opens the page where groups are made and changed. */
+  onManage: () => void;
 }
 
 const PIN = <PinIcon className="picker-pin" aria-hidden />;
@@ -168,14 +181,14 @@ export function PickerToast({ toast, onUndo, onDismiss }: { toast: Toast; onUndo
  * in; selections, commands, and arrangement changes go out. Only open menus
  * live here.
  */
-export function Picker({ view, prefs, onPrefs, actions, message, shelves, scope }: {
+export function Picker({ view, prefs, onPrefs, actions, message, shelves, filter }: {
   view: PickerView; prefs: PickerPrefs; onPrefs: (prefs: PickerPrefs) => void; actions: PickerActions;
   /** The app's message line, when it is not the list's own: a background start that went wrong. */
   message?: ReactNode;
   /** Plugin shelves, drawn between the list and Backlog and Settings. */
   shelves?: ReactNode;
-  /** A filter over which projects the list shows, drawn under the header. */
-  scope?: ReactNode;
+  /** Which projects the list shows. Without it, the list shows every project and the menu offers no filter. */
+  filter?: PickerFilter | undefined;
 }) {
   const [menu, setMenu] = useState<"board" | undefined>();
   const [rowMenu, setRowMenu] = useState<{ id: string; confirming: boolean } | undefined>();
@@ -244,12 +257,13 @@ export function Picker({ view, prefs, onPrefs, actions, message, shelves, scope 
   const { connection } = view;
   const empty = view.sections.length === 0;
   const rowWithMenu = rowMenu ? order.find((row) => row.session.id === rowMenu.id) : undefined;
+  const filterChosen = filter?.value ? filter.options.find((option) => option.value === filter.value) : undefined;
   return <section className="picker" aria-label="Sessions" onKeyDown={onKeyDown}>
     <header className="picker-header">
       {/* The homepage sidebar header: product mark and name. */}
       <h2 className="picker-brand"><AnvilIcon aria-hidden />Forgerie<span className="sr-only"> sessions</span></h2>
       <button className="picker-icon" aria-label="More session commands" aria-haspopup="menu" aria-expanded={menu === "board"}
-        title="Grouping and archived sessions"
+        title="Arrange the list"
         onClick={() => { setRowMenu(undefined); setMenu(menu === "board" ? undefined : "board"); }}><EllipsisIcon aria-hidden size={16} /></button>
       {actions.onClose ? <button className="picker-icon" aria-label="Close sessions" title="Close sessions" onClick={actions.onClose}><XIcon aria-hidden size={16} /></button> : null}
       {menu === "board" ? <div className="picker-menu" role="menu" aria-label="Session commands">
@@ -260,9 +274,19 @@ export function Picker({ view, prefs, onPrefs, actions, message, shelves, scope 
         <button role="menuitemcheckbox" aria-checked={prefs.showArchived} disabled={view.archivedCount === 0}
           onClick={() => { setMenu(undefined); change({ ...prefs, showArchived: !prefs.showArchived }); }}>
           <CheckIcon aria-hidden />Show archived <small>{view.archivedCount} · A</small></button>
+        {filter ? <>
+          <div className="picker-menu-separator" role="separator" />
+          {filter.options.length ? [{ value: "", label: "All projects", detail: "" }, ...filter.options].map((option) =>
+            <button key={`filter-${option.value}`} role="menuitemradio" aria-checked={filter.value === option.value}
+              onClick={() => { setMenu(undefined); filter.onChoose(option.value); }}>
+              <CheckIcon aria-hidden />{option.label}{option.detail ? <small>{option.detail}</small> : null}</button>) : null}
+          <button role="menuitem" onClick={() => { setMenu(undefined); filter.onManage(); }}>
+            <FolderTreeIcon aria-hidden />{filter.options.length ? "Edit project groups…" : "Group projects…"}</button>
+        </> : null}
       </div> : null}
     </header>
-    {scope}
+    {filterChosen ? <FilterChip icon={<FolderTreeIcon aria-hidden />} label={filterChosen.label} detail={filterChosen.detail}
+      clear="Show all projects" onClear={() => filter?.onChoose("")} /> : null}
     {/* The homepage thread list opens with "New Thread"; here it starts a session. */}
     {actions.onNew ? <button className="picker-new" onClick={actions.onNew} aria-keyshortcuts="N" title="New session (N)">
       <SquarePenIcon aria-hidden size={16} />New session</button> : null}

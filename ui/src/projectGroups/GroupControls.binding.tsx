@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChoiceSelect } from "../ui/ChoiceSelect";
+import { SettingsFrame } from "../ui/settings/SettingsFrame";
+import { Lede } from "../ui/Lede";
+import { WorktreeDialog, type WorktreeCommand } from "../ui/WorktreeActions";
+import type { PickerFilter } from "../ui/Picker";
+import type { WorktreeInfo } from "../worktrees/worktreeApi";
 import { ProjectGroups } from "./ProjectGroups";
-import { RetainedWorkspaces } from "./RetainedWorkspaces.binding";
+import { GroupEditor, type GroupDraft } from "./GroupEditor";
 import type { ProjectGroupApi, GroupCatalog } from "./projectGroupApi";
 
 /** The chosen group survives a reload, a fold and a rotation, as the list's other arrangement does. */
@@ -9,9 +13,10 @@ const SELECTED_KEY = "forgerie.projectGroup";
 const readSelected = () => { try { return window.localStorage.getItem(SELECTED_KEY) ?? ""; } catch { return ""; } };
 const writeSelected = (id: string) => { try { if (id) window.localStorage.setItem(SELECTED_KEY, id); else window.localStorage.removeItem(SELECTED_KEY); } catch { /* The choice stays for this page only. */ } };
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
+const plural = (count: number, word: string) => `${String(count)} ${word}${count === 1 ? "" : "s"}`;
 
 /**
- * The group catalog, shared by the filter over the session list and by
+ * The group catalog, shared by the session list's filter and by
  * Settings → Project groups. A group that no longer exists shows all projects.
  */
 export function useProjectGroups(api: ProjectGroupApi) {
@@ -29,39 +34,92 @@ export function useProjectGroups(api: ProjectGroupApi) {
   const group = catalog.groups.find((item) => item.id === selected);
   // Until the catalog loads, or when it cannot, the list shows every project.
   const scope = loaded && error === undefined ? group?.projectIds : undefined;
-  const mutate = useCallback(async (run: () => Promise<unknown>) => {
+  const mutate = useCallback(async <T,>(run: () => Promise<T>): Promise<T> => {
     setPending(true); setError(undefined);
-    try { await run(); await refresh(); }
+    try { const result = await run(); await refresh(); return result; }
     catch (cause) { setError(message(cause)); throw cause; }
     finally { setPending(false); }
   }, [refresh]);
-  return useMemo(() => ({ catalog, loaded, selected: group ? selected : "", setSelected, scope, pending, error, refresh, mutate }),
-    [catalog, loaded, group, selected, setSelected, scope, pending, error, refresh, mutate]);
+  // The session list's filter: the groups in its ⋯ menu, and the chosen one above the list.
+  const filter = useMemo<Omit<PickerFilter, "onManage">>(() => ({
+    value: scope ? selected : "", onChoose: setSelected,
+    options: catalog.groups.map((item) => ({ value: item.id, label: item.name, detail: plural(item.projectIds.length, "project") })),
+  }), [catalog.groups, scope, selected, setSelected]);
+  return useMemo(() => ({ catalog, loaded, selected: group ? selected : "", setSelected, scope, filter, pending, error, refresh, mutate }),
+    [catalog, loaded, group, selected, setSelected, scope, filter, pending, error, refresh, mutate]);
 }
 export type ProjectGroupState = ReturnType<typeof useProjectGroups>;
 
-/** The filter over the session list. Manage opens Settings → Project groups. */
-export function GroupFilter({ state, onManage }: { state: ProjectGroupState; onManage: () => void }) {
-  return <>
-    <ChoiceSelect label="Group" value={state.selected}
-      options={[{ value: "", label: "All projects" }, ...state.catalog.groups.map((group) => ({ value: group.id, label: group.name }))]}
-      onChoose={state.setSelected} action={{ label: "Manage", onPress: onManage }} />
-    {state.error && !state.pending && <p role="status">Project groups unavailable. All projects remain accessible.</p>}
-  </>;
+/** Worktrees that chats made in a second repo, including those of archived chats. */
+function useRelatedWorktrees(api: ProjectGroupApi) {
+  const [items, setItems] = useState<WorktreeInfo[]>([]);
+  const [error, setError] = useState<string>();
+  const read = useCallback(async () => {
+    try { setItems((await api.allWorkspaces()).related); setError(undefined); }
+    catch (cause) { setError(`Could not read related worktrees: ${message(cause)}`); }
+  }, [api]);
+  useEffect(() => { void read(); }, [read]);
+  return { items, error, read };
 }
 
-/** Settings → Project groups. */
-export function ProjectGroupSettings({ api, state, back, close }: { api: ProjectGroupApi; state: ProjectGroupState; back: ReactNode; close: ReactNode }) {
-  const { catalog, mutate, refresh } = state;
+type Draft = GroupDraft & { revision?: number | undefined; base: GroupDraft };
+// Drafts outlive this page, as agent drafts do, so Back and a fold keep them. They hold no secrets.
+const drafts = new Map<string, Draft>();
+const same = (left: GroupDraft, right: GroupDraft) => left.name === right.name
+  && left.projectIds.length === right.projectIds.length && left.projectIds.every((id) => right.projectIds.includes(id));
+
+/**
+ * Settings → Project groups. `group` is the open group's id, `"new"` for a
+ * group that is not saved yet, or undefined for the list.
+ */
+export function ProjectGroupSettings({ api, state, group, onOpen, back, close }: {
+  api: ProjectGroupApi; state: ProjectGroupState; group: string | undefined; onOpen: (group: string | undefined) => void;
+  back: ReactNode; close: ReactNode;
+}) {
+  const { catalog, loaded, pending, error, mutate, refresh } = state;
+  const worktrees = useRelatedWorktrees(api);
+  const [command, setCommand] = useState<{ info: WorktreeInfo; command: WorktreeCommand }>();
+  const [, redraw] = useState(0);
   useEffect(() => { void refresh(); }, [refresh]);
-  return <ProjectGroups back={back} actions={close} catalog={catalog} pending={state.pending} error={state.error}
-    onRegister={(path) => mutate(() => api.register(path))} onRefresh={() => { void refresh(); }}
-    onSave={(id, name, ids, revision) => mutate(() => {
-      const group = catalog.groups.find((item) => item.id === id);
-      if (id !== undefined && group === undefined) throw new Error("The group was removed. Reload before saving.");
-      return api.save(name, ids, group ? { ...group, revision: revision ?? group.revision } : undefined);
-    })}
-    onRemove={(id, revision) => mutate(() => { const group = catalog.groups.find((item) => item.id === id); if (!group) throw new Error("Group is no longer available."); return api.remove({ ...group, revision: revision ?? group.revision }); })}>
-    <RetainedWorkspaces api={api} />
-  </ProjectGroups>;
+
+  if (group === undefined) return <>
+    <ProjectGroups back={back} close={close} catalog={catalog} loaded={loaded} error={error}
+      worktrees={worktrees.items} worktreeError={worktrees.error}
+      onNew={() => onOpen("new")} onOpen={onOpen} onRefresh={() => { void refresh(); void worktrees.read(); }}
+      onWorktree={(info, next) => setCommand({ info, command: next })} />
+    {command ? <WorktreeDialog command={command.command} info={command.info} api={api.worktrees}
+      onDone={() => { void worktrees.read(); }} onClose={() => setCommand(undefined)} /> : null}
+  </>;
+
+  const fresh = group === "new";
+  const saved = catalog.groups.find((item) => item.id === group);
+  if (!fresh && !saved) return <SettingsFrame back={back} title="Project group" actions={close} error={error}>
+    <Lede>{loaded ? "This group no longer exists. Someone may have deleted it from another window. Go back to Project groups." : "Reading groups…"}</Lede>
+  </SettingsFrame>;
+
+  const base: GroupDraft = saved ? { name: saved.name, projectIds: [...saved.projectIds] } : { name: "", projectIds: [] };
+  const stored = drafts.get(group);
+  const draft: Draft = stored ?? { ...base, revision: saved?.revision, base };
+  const dirty = fresh ? draft.name.trim() !== "" || draft.projectIds.length > 0 : !same(draft, draft.base);
+  const change = (next: GroupDraft) => {
+    const value = { ...draft, ...next };
+    if (!fresh && same(value, value.base)) drafts.delete(group); else drafts.set(group, value);
+    redraw((count) => count + 1);
+  };
+  const forget = () => { drafts.delete(group); redraw((count) => count + 1); };
+  return <GroupEditor back={back} close={close} fresh={fresh} draft={draft} projects={catalog.projects} dirty={dirty} pending={pending} error={error}
+    onChange={change} onDiscard={forget}
+    onSave={() => {
+      // The draft keeps the revision it started from, so a save never overwrites a change made elsewhere.
+      void mutate(() => api.save(draft.name.trim(), draft.projectIds, saved ? { ...saved, revision: draft.revision ?? saved.revision } : undefined))
+        .then(() => { forget(); if (fresh) onOpen(undefined); }).catch(() => undefined);
+    }}
+    onDelete={saved ? () => {
+      void mutate(() => api.remove({ ...saved, revision: draft.revision ?? saved.revision }))
+        .then(() => { forget(); onOpen(undefined); }).catch(() => undefined);
+    } : undefined}
+    onRegister={(path) => mutate(() => api.register(path)).then((project) => {
+      const current = drafts.get(group) ?? draft;
+      if (!current.projectIds.includes(project.id)) change({ name: current.name, projectIds: [...current.projectIds, project.id] });
+    })} />;
 }
