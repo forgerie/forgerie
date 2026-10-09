@@ -29,3 +29,5 @@ listAll reports sessions by header cwd regardless of which cwd-encoded directory
 - `src/server/sessions/piSessionManagerGateway.ts`
 - `src/server/sessions/piSessionManagerGateway.test.ts`
 - `src/server/sessions/piSessionService.ts`
+
+Subsumes `01KZJMACABQFMXCJD5ETFWW7JB` (bulk archive failures across stale catalog entries in ROCKNIX, Korri, Amaze Next).
