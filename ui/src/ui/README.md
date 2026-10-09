@@ -9,9 +9,6 @@ here at its first call site, with its part and one line below.
 One line per component: the name in backticks, its layer, and what it decides.
 
 - `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, and a refused value stays.
-- `ActionButton` (molecule): exposes a labeled action with a full-size hit target.
-- `ActionCard` (molecule): keeps an item's identity, status and actions together as it reflows.
-- `DialogPanel` (organism): opens window-level content with a reachable close action and a scroll region.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place.
 - `ChoiceList` (molecule): pick any number of rows; the legend counts the choice, a long list gets a search field, and a chosen id with no row stays visible.

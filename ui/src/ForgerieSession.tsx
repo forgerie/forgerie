@@ -235,6 +235,11 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     onAnswer: (value) => void store.answerDialog(oldestDialog.dialogId, value),
     onCancel: () => void store.cancelDialog(oldestDialog.dialogId),
   };
+  /** Adds text after the draft, as a new paragraph. Related worktrees use it for review notes and failures. */
+  const appendToDraft = (text: string) => {
+    const composer = runtimeRef.current?.thread.composer;
+    if (composer) composer.setText([composer.getState().text, text].filter(Boolean).join("\n\n"));
+  };
   const ask: AskBinding | undefined = state.ask.type === "open" ? {
     ask: state.ask.ask, phase: state.ask.phase, offline: state.connection.type !== "ready",
     onSubmit: (answers) => void store.submitAsk(answers), onDismiss: () => void store.dismissAsk(),
@@ -258,16 +263,14 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           // The catalog's status can lag the live one; the server refuses an archive during any run.
           availability={isBashRunning(state) || state.status?.isStreaming === true || state.status?.isCompacting === true
             ? { type: "blocked", reason: "Stop the run first" } : archive.availability} />}
-        {worktree && worktrees && worktree.state.kind === "active" && <SessionMenu info={worktree} busy={busy} onCommand={setWorktreeCommand} />}
+        {sessionId && cwd && relatedWork ? relatedWork({ ref: { id: sessionId, cwd }, busy, links: catalogPulls ?? NO_LINKS, onAsk: appendToDraft,
+          own: worktree && worktrees && worktree.state.kind === "active" ? { info: worktree, onCommand: setWorktreeCommand } : undefined })
+          : worktree && worktrees && worktree.state.kind === "active" && <SessionMenu info={worktree} busy={busy} onCommand={setWorktreeCommand} />}
       </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
         head={setup && <WorktreeSetupCard setup={setup} hookSeen={setup.log !== ""} branch={worktree?.branch} />}
-        inputContext={<>{worktree && worktree.state.kind === "active" ? <WorktreeChip info={worktree} /> : null}
-          {sessionId && cwd && relatedWork?.({ id: sessionId, cwd }, busy, catalogPulls ?? NO_LINKS, (text) => {
-            const composer = runtimeRef.current?.thread.composer;
-            if (composer) composer.setText([composer.getState().text, text].filter(Boolean).join("\n\n"));
-          })}</>}
+        inputContext={worktree && worktree.state.kind === "active" ? <WorktreeChip info={worktree} /> : null}
         readOnly={readOnly ? <WorktreeReceipt state={worktree?.state} defaultBranch={worktree?.defaultBranch}
           branch={worktree?.branch} onNew={onNewSession} /> : undefined} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
         compaction={{ state: state.compaction, disabled: state.sending || state.connection.type !== "ready",

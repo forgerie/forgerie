@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { CircleAlertIcon, CircleCheckIcon, EllipsisIcon, GitBranchIcon, GitMergeIcon, LoaderIcon, MessageSquareIcon, Trash2Icon } from "lucide-react";
+import { CircleAlertIcon, CircleCheckIcon, EllipsisIcon, FolderGit2Icon, GitBranchIcon, GitMergeIcon, LoaderIcon, MessageSquareIcon, Trash2Icon } from "lucide-react";
 import type { DiscardPreview, WorktreeActionResult, WorktreeApi, WorktreeInfo } from "../worktrees/worktreeApi";
 import { discardSummary, outcomeOf, readouts, shortSha, type ActionOutcome } from "../worktrees/worktreeModel";
 
@@ -16,12 +16,28 @@ export function worktreeCommandBlock(info: WorktreeInfo, busy: boolean): string 
   return undefined;
 }
 
+/** One more group of commands in the session menu, under a head that names what they act on. */
+export interface SessionMenuSection {
+  key: string;
+  title: string;
+  /** What state it is in, in words. */
+  sentence: string;
+  tone?: "danger" | undefined;
+  commands: readonly { label: string; icon?: ReactNode; tone?: "danger" | undefined; disabled?: boolean | undefined; hint?: string | undefined; onSelect: () => void }[];
+}
+
 /**
  * System molecule: the session's overflow menu in the header. It holds the
  * commands too rare for the header row, and the readouts the input bar's
- * branch chip gives up when the bar is narrow.
+ * branch chip gives up when the bar is narrow. Sections after the session's
+ * own worktree hold other worktrees the session works in; their number shows
+ * quietly on the button, so the input bar never grows a control per worktree.
  */
-export function SessionMenu({ info, busy, onCommand }: { info: WorktreeInfo; busy: boolean; onCommand: (command: WorktreeCommand) => void }) {
+export function SessionMenu({ info, busy, onCommand, sections = [] }: {
+  /** The session's own worktree, when it has one. */
+  info?: WorktreeInfo | undefined; busy: boolean; onCommand?: ((command: WorktreeCommand) => void) | undefined;
+  sections?: readonly SessionMenuSection[];
+}) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -34,9 +50,12 @@ export function SessionMenu({ info, busy, onCommand }: { info: WorktreeInfo; bus
     return () => document.removeEventListener("pointerdown", outside, true);
   }, [open]);
   const close = () => { setOpen(false); button.current?.focus({ preventScroll: true }); };
-  const blocked = worktreeCommandBlock(info, busy);
-  const run = (command: WorktreeCommand) => { setOpen(false); onCommand(command); };
-  const { sentence } = readouts(info);
+  const own = info && onCommand ? info : undefined;
+  if (!own && sections.length === 0) return null;
+  const blocked = own ? worktreeCommandBlock(own, busy) : undefined;
+  const run = (command: WorktreeCommand) => { setOpen(false); onCommand?.(command); };
+  const sentence = own ? readouts(own).sentence : undefined;
+  const label = sections.length ? `Session menu, ${String(sections.length)} other ${sections.length === 1 ? "worktree" : "worktrees"}` : "Session menu";
   return <div ref={root} className="session-menu-root" onKeyDown={(event) => {
     if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); close(); return; }
     if (!open || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
@@ -45,20 +64,33 @@ export function SessionMenu({ info, busy, onCommand }: { info: WorktreeInfo; bus
     const index = items.findIndex((item) => item === document.activeElement);
     items[(index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
   }}>
-    <button ref={button} type="button" className="icon-button quiet-button" aria-label="Session menu" title="Session menu"
+    <button ref={button} type="button" className="icon-button quiet-button session-menu-trigger" aria-label={label} title={label}
       aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => setOpen(!open)}>
-      <EllipsisIcon aria-hidden size={18} /></button>
+      <EllipsisIcon aria-hidden size={18} />
+      {sections.length ? <span className="session-menu-count" aria-hidden>{sections.length}</span> : null}</button>
     {open && <div id={menuId} className="picker-menu session-menu" role="menu" aria-label="Session menu">
-      <div className="session-menu-head" role="presentation">
-        <GitBranchIcon aria-hidden size={14} />
-        <span className="session-menu-branch">{info.branch}</span>
-        <span className="session-menu-sentence">{info.state.kind === "active" ? sentence : null}</span>
-      </div>
-      <div className="picker-menu-separator" role="separator" />
-      <button type="button" role="menuitem" disabled={blocked !== undefined} onClick={() => run("land")}>
-        <GitMergeIcon aria-hidden />Land on {info.defaultBranch}…{blocked ? <small>{blocked}</small> : null}</button>
-      <button type="button" role="menuitem" data-tone="danger" disabled={blocked !== undefined} onClick={() => run("discard")}>
-        <Trash2Icon aria-hidden />Discard worktree…{blocked ? <small>{blocked}</small> : null}</button>
+      {own ? <>
+        <div className="session-menu-head" role="presentation">
+          <GitBranchIcon aria-hidden size={14} />
+          <span className="session-menu-branch">{own.branch}</span>
+          <span className="session-menu-sentence">{own.state.kind === "active" ? sentence : null}</span>
+        </div>
+        <div className="picker-menu-separator" role="separator" />
+        <button type="button" role="menuitem" disabled={blocked !== undefined} onClick={() => run("land")}>
+          <GitMergeIcon aria-hidden />Land on {own.defaultBranch}…{blocked ? <small>{blocked}</small> : null}</button>
+        <button type="button" role="menuitem" data-tone="danger" disabled={blocked !== undefined} onClick={() => run("discard")}>
+          <Trash2Icon aria-hidden />Discard worktree…{blocked ? <small>{blocked}</small> : null}</button>
+      </> : null}
+      {sections.map((section, index) => <div key={section.key} role="group" aria-label={section.title}>
+        {own || index > 0 ? <div className="picker-menu-separator" role="separator" /> : null}
+        <div className="session-menu-head" role="presentation">
+          <FolderGit2Icon aria-hidden size={14} />
+          <span className="session-menu-branch">{section.title}</span>
+          <span className="session-menu-sentence" data-tone={section.tone}>{section.sentence}</span>
+        </div>
+        {section.commands.map((command) => <button key={command.label} type="button" role="menuitem" data-tone={command.tone} disabled={command.disabled}
+          onClick={() => { setOpen(false); command.onSelect(); }}>{command.icon}{command.label}{command.hint ? <small>{command.hint}</small> : null}</button>)}
+      </div>)}
     </div>}
   </div>;
 }

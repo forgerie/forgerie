@@ -134,7 +134,7 @@
   "\"changes-message\" in ui/ChangesReview.tsx, ui/PullRequestReview.tsx",
   "\"command-option\" in ui/CommandResultPanel.tsx, ui/SlashCommands.tsx",
   "\"connection-status\" in ui/SessionFrame.tsx, ui/settings/SettingsFrame.tsx",
-  "\"icon-button quiet-button\" in ui/ArchiveNext.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ComposerDictation.tsx, ui/CopyButton.tsx, ui/ImageViewer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/WorktreeActions.tsx, ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
+  "\"icon-button quiet-button\" in ui/ArchiveNext.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ComposerDictation.tsx, ui/CopyButton.tsx, ui/ImageViewer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
   "\"markdown-content\" in ui/MarkdownText.tsx, ui/backlog/BacklogView.tsx",
   "\"notice\" in ui/SessionFrame.tsx, ui/settings/SettingsFrame.tsx",
   "\"picker-chevron\" in ui/Picker.tsx, ui/backlog/BacklogView.tsx",

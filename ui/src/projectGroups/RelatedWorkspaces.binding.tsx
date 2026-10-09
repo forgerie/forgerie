@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ActionButton } from "../ui/ActionButton";
-import { ActionCard } from "../ui/ActionCard";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ChangesReview } from "../ui/ChangesReview";
-import { WorktreeDialog, type WorktreeCommand } from "../ui/WorktreeActions";
+import { SessionMenu, WorktreeDialog, type WorktreeCommand } from "../ui/WorktreeActions";
 import { createWorktreeApi, type WorktreeInfo } from "../worktrees/worktreeApi";
 import { createChangesSource } from "../changes/changesSource";
 import { createFilesSource } from "../changes/filesSource";
@@ -11,56 +9,77 @@ import { browserStorage, createDraftStore } from "../draftStore";
 import { newStartupToken, type Fetch } from "../newSession";
 import type { PullLink } from "../pullRequests/pullRequestApi";
 import { RelatedPulls } from "./RelatedPulls.binding";
-import { RelatedRepos, type RelatedAction } from "./RelatedRepos";
-import type { ProjectContext, ProjectGroupApi } from "./projectGroupApi";
+import { relatedSections, type RelatedAction } from "./relatedSections";
+import type { OwnWorktree } from "./relatedWork";
+import type { ProjectGroupApi } from "./projectGroupApi";
 
 type Panel = { kind: "changes"; info: WorktreeInfo } | { kind: "pulls"; info: WorktreeInfo } | { kind: "command"; info: WorktreeInfo; command: WorktreeCommand };
-export function RelatedWorkspaces({ api, request, source, busy, links, onAsk }: {
+const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
+
+/**
+ * The chat's header menu: its own worktree, then the worktrees it made in
+ * other repos. The agent prepares those with its project tools; this reads
+ * them again after each run, so a new one appears when the run that made it
+ * ends. Nothing is added to the input bar.
+ */
+export function RelatedWorkspaces({ api, request, source, busy, links, onAsk, own }: {
   api: ProjectGroupApi; request: Fetch; source: { id: string; cwd: string }; busy: boolean; links: readonly PullLink[]; onAsk: (text: string) => void;
+  own?: OwnWorktree | undefined;
 }) {
-  const [open, setOpen] = useState(false);
-  const [context, setContext] = useState<ProjectContext>();
-  const [error, setError] = useState<string>();
-  const [preparing, setPreparing] = useState<string>();
+  const [related, setRelated] = useState<WorktreeInfo[]>([]);
   const [panel, setPanel] = useState<Panel>();
-  const ids = useRef(new Map<string, string>());
+  const [retrying, setRetrying] = useState(false);
+  const [failures, setFailures] = useState<Record<string, string>>({});
+  // Note counts are read from the trays on each draw; this redraws after notes leave a tray.
+  const [, redraw] = useState(0);
   const ref = useMemo(() => ({ id: source.id, cwd: source.cwd }), [source.id, source.cwd]);
   const worktrees = useMemo(() => createWorktreeApi(request), [request]);
   const refresh = useCallback(async () => {
-    try { setContext(await api.context(ref)); setError(undefined); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    // A failed read keeps the chips already drawn; the next run's end reads again.
+    try { setRelated((await api.context(ref)).related); } catch { /* Keep the last known chips. */ }
   }, [api, ref]);
-  useEffect(() => { if (!busy || open) void refresh(); }, [busy, open, refresh]);
-  const prepare = async (projectId: string) => {
-    setPreparing(projectId); setError(undefined);
-    const token = ids.current.get(projectId) ?? newStartupToken(); ids.current.set(projectId, token);
-    try { await api.prepare(ref, projectId, token); ids.current.delete(projectId); await refresh(); }
-    catch (cause) { await refresh(); setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setPreparing(undefined); }
-  };
+  useEffect(() => { if (!busy) void refresh(); }, [busy, refresh]);
+
+  // Review notes wait per worktree, saved with this chat's drafts, until they go into a message.
   const [drafts] = useState(() => createDraftStore(browserStorage()));
-  const [notesFor, setNotesFor] = useState<WorktreeInfo>();
-  const tray = useMemo(() => createNoteTray(notesFor ? drafts.session(`${ref.id}:related:${notesFor.id}`) : undefined), [drafts, ref.id, notesFor]);
-  const notes = useSyncExternalStore(tray.subscribe, tray.notes);
+  const [trays] = useState(() => new Map<string, ReturnType<typeof createNoteTray>>());
+  const trayOf = useCallback((info: WorktreeInfo) => {
+    let tray = trays.get(info.id);
+    if (!tray) { tray = createNoteTray(drafts.session(`${ref.id}:related:${info.id}`)); trays.set(info.id, tray); }
+    return tray;
+  }, [trays, drafts, ref.id]);
+  const reviewTray = panel?.kind === "changes" ? trayOf(panel.info) : undefined;
+  const noop = useMemo(() => createNoteTray(undefined), []);
+  const shown = reviewTray ?? noop;
+  const reviewNotes = useSyncExternalStore(shown.subscribe, shown.notes);
+  const counts = Object.fromEntries(related.map((info) => [info.id, trays.get(info.id)?.notes().length ?? 0]));
   const changes = useMemo(() => panel?.kind === "changes" ? { source: createChangesSource(panel.info.path, request), files: createFilesSource(panel.info.path, request) } : undefined, [panel, request]);
-  const active = context?.related.filter((item) => item.state.kind === "active") ?? [];
-  const action = (kind: RelatedAction, info: WorktreeInfo) => {
-    if (kind === "changes") { setNotesFor(info); setPanel({ kind, info }); }
-    else if (kind === "pulls") setPanel({ kind, info });
-    else if (kind === "land" || kind === "discard") setPanel({ kind: "command", info, command: kind });
-    else { onAsk(`Use the related worktree ${info.id} at ${info.path}. Read its repository instructions before changes. Keep this chat's starting directory unchanged.`); setOpen(false); }
+
+  const act = (action: RelatedAction, info: WorktreeInfo) => {
+    if (action === "changes" || action === "pulls") setPanel({ kind: action, info });
+    else if (action === "land" || action === "discard") setPanel({ kind: "command", info, command: action });
+    else if (action === "explain") onAsk(`Setting up the related worktree at ${info.path} failed${info.setup.error ? `: ${info.setup.error}` : "."}\nSetup log:\n${info.setup.log || "(empty)"}\nFind the cause, fix it if you can, then retry setup with project_worktree.`);
+    else if (action === "notes") {
+      const tray = trayOf(info);
+      const notes = tray.notes();
+      onAsk(`Review notes for related checkout ${info.path}:\n${notes.map((note) => `\nFile: ${info.path}/${note.path}\n${note.comment}\nSelected diff lines:\n${note.lines.map((line) => `${line.kind} ${"newLineNumber" in line ? line.newLineNumber : line.oldLineNumber}: ${line.text}`).join("\n")}`).join("\n")}`);
+      tray.drop(notes.map((note) => note.id));
+      redraw((count) => count + 1);
+    } else if (action === "retry" && info.relatedSession && !retrying) {
+      setRetrying(true);
+      setFailures((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== info.id)));
+      api.prepare(ref, info.relatedSession.projectId, newStartupToken())
+        .catch((cause: unknown) => setFailures((current) => ({ ...current, [info.id]: `Retry failed: ${message(cause)}` })))
+        .finally(() => { setRetrying(false); void refresh(); });
+    }
   };
   return <>
-    <ActionButton label={active.length ? `Related repos (${active.length})` : "Related repos"} onPress={() => setOpen(true)} />
-    {open && !panel && <RelatedRepos context={context} error={error} busy={busy} preparing={preparing} onPrepare={(id) => { void prepare(id); }} onAction={action} onRefresh={() => { void refresh(); }} onClose={() => setOpen(false)}>
-      {notesFor && notes.length > 0 && <ActionCard title={`${notes.length} review notes`} detail={notesFor.path} actions={[{ label: "Add notes to chat draft", onPress: () => {
-        onAsk(`Review notes for related checkout ${notesFor.path}:\n${notes.map((note) => `\nFile: ${notesFor.path}/${note.path}\n${note.comment}\nSelected diff lines:\n${note.lines.map((line) => `${line.kind} ${"newLineNumber" in line ? line.newLineNumber : line.oldLineNumber}: ${line.text}`).join("\n")}`).join("\n")}`);
-        tray.drop(notes.map((note) => note.id)); setOpen(false);
-      } }]} />}
-    </RelatedRepos>}
-    {panel?.kind === "changes" && changes && <ChangesReview source={changes.source} files={changes.files} notes={notes} onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setPanel(undefined)} />}
+    <SessionMenu info={own?.info} onCommand={own?.onCommand} busy={busy}
+      sections={relatedSections(related, { busy: busy || retrying, notes: counts, failures, onAction: act })} />
+    {panel?.kind === "changes" && changes && reviewTray && <ChangesReview source={changes.source} files={changes.files} notes={reviewNotes}
+      onAdd={reviewTray.add} onEdit={reviewTray.edit} onRemove={reviewTray.remove} onClose={() => setPanel(undefined)} />}
     {panel?.kind === "pulls" && <RelatedPulls request={request} target={{ id: ref.id, cwd: panel.info.path }} links={links} onClose={() => setPanel(undefined)} onAsk={onAsk} />}
     {panel?.kind === "command" && <WorktreeDialog command={panel.command} info={panel.info} api={worktrees} onClose={() => setPanel(undefined)}
-      onDone={() => { void refresh(); }} onAsk={async (text) => { onAsk(`In related checkout ${panel.info.path}:\n${text}`); setPanel(undefined); setOpen(false); }} />}
+      onDone={() => { void refresh(); }} onAsk={async (text) => { onAsk(`In related checkout ${panel.info.path}:\n${text}`); setPanel(undefined); }} />}
   </>;
 }

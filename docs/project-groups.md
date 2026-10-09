@@ -12,9 +12,9 @@ Group writes detect stale revisions. If another window changes a group, Save ref
 
 ## Work in another repository
 
-Open **Related repos** above the chat composer. Prepare a worktree for a member project. This creates a separate branch and checkout, not another conversation. A repeated prepare reuses an active checkout owned by this exact chat. It never takes another chat's checkout.
+Ask the agent to work in a member project, for example "also change korri-plugins". The agent prepares a worktree there with its `project_worktree` tool. This creates a separate branch and checkout, not another conversation. A repeated prepare reuses an active checkout owned by this exact chat. It never takes another chat's checkout.
 
-Each related worktree exposes Changes and files, pull requests, Land and Discard. These controls target that repository only. The ordinary chat controls still target its starting project. Review notes can be added to the same chat's draft with the full target path.
+When the run that made the worktree ends, the worktree appears in the chat's header ⋯ menu, under the chat's own branch. A small number on the ⋯ button counts these worktrees; the input bar does not change. Each worktree has its own section with **Changes and files**, **Pull requests**, **Land on main** and **Discard worktree** for that repository only. The ordinary chat controls still target its starting project. Review notes on a related worktree wait in its section; **Add N review notes to the message** puts them in the chat's draft with the full target path. A landed or discarded worktree leaves the menu once its cleanup is done.
 
 The agent has these native tools:
 
@@ -34,7 +34,7 @@ Land rebases and fast-forwards one repository. It does not push or merge the ent
 
 Finish secondary work and its cleanup before landing or discarding the chat's starting worktree. Lifecycle operations refuse an owning chat's active run, managed processes or delegated agents. A tool called by the owning agent can land its own target during its turn, but background processes and agents must first stop.
 
-Setup failures retain their path and log. Retry setup from Related repos. Failed cleanup remains retryable. **Settings → Project groups → Related worktrees** provides recovery controls even if a chat was archived or deleted. Source archive, group deletion and project regrouping do not automatically destroy secondary work.
+Setup failures retain their path and log. The worktree's section says **Setup failed** and offers **Retry setup** and **Ask the agent about the failure**, which puts the log in the draft. Failed cleanup remains retryable. **Settings → Project groups → Related worktrees** provides recovery controls even if a chat was archived or deleted. Source archive, group deletion and project regrouping do not automatically destroy secondary work.
 
 PR links and watches remain scoped to the selected checkout. Equal PR numbers in two repositories are distinct. Notifications and merge notes return to the original chat. A completed/removed checkout no longer accepts new PR watches; stop or unlink old links before reusing that PR from another checkout.
 

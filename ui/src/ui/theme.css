@@ -1193,7 +1193,14 @@ summary.trace-line:hover { color: var(--foreground); }
 .session-menu { position: absolute; z-index: 6; inset-block-start: calc(100% + var(--space-2)); inset-inline-end: calc(-1 * var(--space-1));
   inline-size: max-content; min-inline-size: 15rem; max-inline-size: min(22rem, calc(100cqi - 2 * var(--space-4)));
   box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); transform-origin: top right; }
+.session-menu { max-block-size: min(36rem, 80cqb); overflow-y: auto; }
 .session-menu button { white-space: nowrap; }
+/* How many other worktrees the menu holds: the pull request button's count, in the muted ink. */
+.session-menu-trigger { position: relative; }
+.session-menu-count { position: absolute; inset-block-end: 0; inset-inline-end: -0.125rem; min-inline-size: 0.875rem; padding-inline: 0.125rem;
+  border-radius: 999rem; background: var(--background); color: var(--muted-foreground); font-family: var(--code-font); font-size: 0.625rem;
+  line-height: 0.875rem; text-align: center; font-variant-numeric: tabular-nums; }
+.session-menu-sentence[data-tone="danger"] { color: var(--destructive); }
 .session-menu button small { font-family: var(--body-font); }
 .session-menu button[data-tone="danger"] { color: var(--destructive); }
 .session-menu button[data-tone="danger"]:disabled { color: var(--muted-foreground); }
