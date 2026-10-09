@@ -6,7 +6,8 @@ import type { CatalogConnection } from "../picker/catalogStore";
 import { commandForKey, rowCommands, type RowCommandKind } from "../picker/commands";
 import type { PickerPrefs } from "../picker/prefs";
 import { readRowPress, ROW_PRESS } from "../picker/press";
-import type { Toast } from "../picker/rowActions";
+import type { Toast as ActionMessage } from "../picker/rowActions";
+import { Toast } from "./Toast";
 import { WorktreeRowMark } from "./WorktreeChip";
 import { PullRequestRowMark } from "./PullRequestReview";
 import { FilterChip } from "./FilterChip";
@@ -19,8 +20,8 @@ export interface PickerView {
   machines: number;
   selectedId?: string | undefined;
   archivedCount: number;
-  /** The one message line under the list. */
-  toast?: Toast | undefined;
+  /** The latest command's message. The app shows it as a toast. */
+  toast?: ActionMessage | undefined;
   /** Rows with a write in flight. */
   pending?: ReadonlySet<string> | undefined;
   /** Sessions that hold a backlog item. */
@@ -167,15 +168,12 @@ function RowMenu({ row, confirming, onConfirm, onRun, onClose }: {
   </div>;
 }
 
-/** The picker's message line. The shell also shows it over the thread while the sheet is closed. */
-export function PickerToast({ toast, onUndo, onDismiss }: { toast: Toast; onUndo?: (() => void) | undefined; onDismiss?: (() => void) | undefined }) {
-  return <div className="picker-toast" data-tone={toast.type === "error" ? "error" : undefined} role={toast.type === "error" ? "alert" : "status"}>
-    <span>{toast.type === "undo" ? <>Archived <em>{toast.target.name ?? "Untitled session"}</em></> : toast.text}</span>
-    {toast.type === "undo" && onUndo ? <button className="picker-toast-undo" onClick={onUndo}>Undo</button> : null}
-    {onDismiss ? <button className="picker-toast-close" aria-label="Dismiss" onClick={onDismiss}><XIcon aria-hidden /></button> : null}
-    {/* The note takes its own full-width line, so the actions do not squeeze it into a narrow column. */}
-    {toast.type === "undo" && toast.note ? <p className="picker-toast-note">{toast.note}</p> : null}
-  </div>;
+/** The result of a session command, such as an archive with its undo. It shows in the page's toast region. */
+export function PickerToast({ toast, onUndo, onDismiss }: { toast: ActionMessage; onUndo?: (() => void) | undefined; onDismiss?: (() => void) | undefined }) {
+  return <Toast tone={toast.type === "error" ? "alert" : "plain"} onDismiss={onDismiss}
+    message={toast.type === "undo" ? <>Archived <strong>{toast.target.name ?? "Untitled session"}</strong></> : toast.text}
+    action={toast.type === "undo" && onUndo ? { label: "Undo", onPress: onUndo } : undefined}
+    detail={toast.type === "undo" ? toast.note : undefined} />;
 }
 
 /**
@@ -183,10 +181,8 @@ export function PickerToast({ toast, onUndo, onDismiss }: { toast: Toast; onUndo
  * in; selections, commands, and arrangement changes go out. Only open menus
  * live here.
  */
-export function Picker({ view, prefs, onPrefs, actions, message, shelves, filter }: {
+export function Picker({ view, prefs, onPrefs, actions, shelves, filter }: {
   view: PickerView; prefs: PickerPrefs; onPrefs: (prefs: PickerPrefs) => void; actions: PickerActions;
-  /** The app's message line, when it is not the list's own: a background start that went wrong. */
-  message?: ReactNode;
   /** Plugin shelves, drawn between the list and Backlog and Settings. */
   shelves?: ReactNode;
   /** Which projects the list shows. Without it, the list shows every project and the menu offers no filter. */
@@ -329,7 +325,6 @@ export function Picker({ view, prefs, onPrefs, actions, message, shelves, filter
     </div>}
     {shelves}
     </div>
-    {view.toast ? <PickerToast toast={view.toast} onUndo={actions.onUndo} onDismiss={actions.onDismissToast} /> : message}
     {actions.onSettings || actions.onBacklog ? <div className="picker-footer">
       {actions.onBacklog ? <button className="picker-new" onClick={actions.onBacklog} aria-current={actions.backlogOpen ? "page" : undefined}
         title={actions.backlogCount === undefined ? "Backlog" : `Backlog: ${String(actions.backlogCount)} open ${actions.backlogCount === 1 ? "item" : "items"}`}>

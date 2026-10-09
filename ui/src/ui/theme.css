@@ -69,6 +69,7 @@
   --live-wash: color-mix(in oklab, var(--live) 16%, transparent);
   /* Behind a bar that warns of a failure or a risk to the reader's work. */
   --destructive-wash: color-mix(in oklab, var(--destructive) 8%, var(--background));
+  --destructive-line: color-mix(in oklab, var(--destructive) 35%, transparent);
   /* The caret's line in an editor, and a matched or unmatched bracket under the caret. */
   --caret-line: color-mix(in oklab, var(--foreground) 4%, transparent);
   --bracket-match: color-mix(in oklab, var(--live) 22%, transparent);
@@ -161,8 +162,8 @@ button:disabled { cursor: default; opacity: 0.4; }
 /* Drawn small, pressed large. Every control listed here is drawn at the
    homepage size and keeps a --control-size hit area through an invisible
    ::before centred on it. */
-.icon-button, .app-opener, .picker-icon, .picker-row-more, .ask-skip, .ask-primary, .steer-send, .model-trigger, .dialog-no, .dialog-yes, .picker-toast button, .code-header .icon-button, .session-door-open { position: relative; }
-.icon-button::before, .app-opener::before, .picker-icon::before, .picker-row-more::before, .ask-skip::before, .ask-primary::before, .steer-send::before, .model-trigger::before, .dialog-no::before, .dialog-yes::before, .picker-toast button::before, .session-door-open::before {
+.icon-button, .app-opener, .picker-icon, .picker-row-more, .ask-skip, .ask-primary, .steer-send, .model-trigger, .dialog-no, .dialog-yes, .code-header .icon-button, .session-door-open { position: relative; }
+.icon-button::before, .app-opener::before, .picker-icon::before, .picker-row-more::before, .ask-skip::before, .ask-primary::before, .steer-send::before, .model-trigger::before, .dialog-no::before, .dialog-yes::before, .session-door-open::before {
   content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
   inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
 .sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -762,12 +763,6 @@ summary.trace-line:hover { color: var(--foreground); }
 .app-shell { --picker-width: clamp(15rem, 22%, 18rem); position: relative; block-size: 100%; display: grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
 .app-shell[data-layout="docked"] { grid-template-columns: var(--picker-width) minmax(0, 1fr); }
 .app-thread { position: relative; min-inline-size: 0; min-block-size: 0; block-size: 100%; }
-/* The undo offer over a closed sheet: under the header, across the reading column, never over the composer. */
-.app-toast { position: absolute; z-index: 20; inset-block-start: var(--header-size); inset-inline: 0; display: flex; justify-content: center; padding-inline: var(--gutter); pointer-events: none; }
-.app-toast > .picker-toast { pointer-events: auto; inline-size: min(100%, var(--thread-max-width)); margin-inline: 0; }
-/* A new deployed build: under the header, above the sheet and the thread, so it shows whichever is open. */
-.app-update { position: fixed; z-index: 50; inset-block-start: calc(env(safe-area-inset-top) + var(--header-size)); inset-inline: 0; display: flex; justify-content: center; padding-inline: var(--gutter); pointer-events: none; }
-.app-update > .picker-toast { pointer-events: auto; inline-size: min(100%, var(--thread-max-width)); margin-inline: 0; }
 .app-picker { min-inline-size: 0; min-block-size: 0; block-size: 100%; background: var(--background); }
 .app-shell[data-layout="docked"] .app-picker { background: var(--tint-surface); border-inline-end: 1px solid var(--line); }
 .app-shell[data-layout="overlay"] .app-picker { position: absolute; z-index: 3; inset-block: 0; inset-inline-start: 0; inline-size: min(18rem, calc(100% - 3rem)); border-inline-end: 1px solid var(--line); box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); transition: transform 300ms ease-in-out, visibility 300ms; }
@@ -918,17 +913,6 @@ summary.trace-line:hover { color: var(--foreground); }
 @media (hover: hover) { .picker-row:hover .picker-row-more { display: grid; } .picker-row:hover .picker-sub { padding-inline-end: 1.75rem; } }
 .picker-row[aria-selected="true"] .picker-sub, .picker-row:has(.picker-row-more[aria-expanded="true"]) .picker-sub { padding-inline-end: 1.75rem; }
 /* The one message line: undo after an archive, a copy result, or a refusal. */
-.picker-toast { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); margin: var(--space-3); padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover); font-size: var(--small-text); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); }
-.picker-toast > span { flex: 1; min-inline-size: 0; overflow-wrap: anywhere; color: var(--muted-foreground); }
-.picker-toast em { font-style: normal; color: var(--foreground); }
-.picker-toast-note { flex: 1 0 100%; margin: 0; padding: 0 var(--space-2) var(--space-1) 0; overflow-wrap: anywhere; color: var(--muted-foreground); text-wrap: pretty; }
-.picker-toast[data-tone="error"] { border-color: color-mix(in oklab, var(--destructive) 35%, transparent); }
-.picker-toast[data-tone="error"] > span { color: var(--destructive); }
-.picker-toast button { flex: none; display: grid; place-items: center; block-size: var(--icon-size); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); transition: color 150ms; }
-.picker-toast button:hover { color: var(--foreground); }
-.picker-toast-undo { padding-inline: var(--space-2); color: var(--foreground) !important; font-weight: 500; }
-.picker-toast-close { inline-size: var(--icon-size); }
-.picker-toast-close svg { inline-size: 0.875rem; block-size: 0.875rem; }
 @media (prefers-reduced-motion: reduce) {
   .picker-row .picker-mark i, .skeleton, .picker-skeleton { animation: none; }
   .app-picker { transition: none; }

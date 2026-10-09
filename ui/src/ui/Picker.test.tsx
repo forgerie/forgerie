@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLocationResolver, DEFAULT_COLLAPSED, rows, sections, type PickerSession, type PickerStatus, type Row } from "../picker/board";
 import type { CatalogConnection } from "../picker/catalogStore";
-import { Picker, type PickerView } from "./Picker";
+import { Picker, PickerToast, type PickerView } from "./Picker";
 import { readPrefs, writePrefs, PREFS_KEY, type PickerPrefs } from "../picker/prefs";
 import { shellLayout, DOCK_MIN_WIDTH } from "./AppShell";
 
@@ -323,15 +323,24 @@ describe("row commands", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("offers undo after an archive and reports a refusal as an alert", () => {
-    const { onUndo } = renderCommands({ ...view([S("a")]), toast: { type: "undo", target: { id: "z", cwd: "/c", name: "Zed" } } });
-    expect(host.querySelector('.picker-toast[role="status"]')?.textContent).toContain("Archived Zed");
-    act(() => host.querySelector<HTMLButtonElement>(".picker-toast-undo")?.click());
+  it("offers undo after an archive, with the kept worktree on its own line, and reports a refusal as an alert", () => {
+    const onUndo = vi.fn();
+    act(() => root.render(<PickerToast toast={{ type: "undo", target: { id: "z", cwd: "/c", name: "Zed" }, note: "Kept worktree fix: shared." }} onUndo={onUndo} />));
+    expect(host.querySelector('.toast[role="status"] .toast-message')?.textContent).toBe("Archived Zed");
+    expect(host.querySelector(".toast-detail")?.textContent).toBe("Kept worktree fix: shared.");
+    act(() => host.querySelector<HTMLButtonElement>(".toast-action")?.click());
     expect(onUndo).toHaveBeenCalled();
-    const refused = renderCommands({ ...view([S("a")]), toast: { type: "error", text: "Unpin session before archiving" } });
-    expect(host.querySelector('.picker-toast[role="alert"]')?.textContent).toContain("Unpin session before archiving");
-    act(() => host.querySelector<HTMLButtonElement>('.picker-toast [aria-label="Dismiss"]')?.click());
-    expect(refused.onDismissToast).toHaveBeenCalled();
+    const onDismiss = vi.fn();
+    act(() => root.render(<PickerToast toast={{ type: "error", text: "Unpin session before archiving" }} onDismiss={onDismiss} />));
+    expect(host.querySelector('.toast[role="alert"]')?.textContent).toContain("Unpin session before archiving");
+    expect(host.querySelector(".toast-action")).toBeNull();
+    act(() => host.querySelector<HTMLButtonElement>('.toast [aria-label="Dismiss"]')?.click());
+    expect(onDismiss).toHaveBeenCalled();
+  });
+
+  it("no longer draws a command's message inside the list", () => {
+    renderCommands({ ...view([S("a")]), toast: { type: "undo", target: { id: "z", cwd: "/c", name: "Zed" } } });
+    expect(host.querySelector(".toast")).toBeNull();
   });
 });
 

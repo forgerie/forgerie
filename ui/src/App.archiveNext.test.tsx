@@ -94,8 +94,8 @@ describe("archive and next", () => {
     await press(archiveButton());
     await until(() => openId() === "c");
     expect(posts).toEqual(["/api/sessions/a/archive"]);
-    // The sheet is closed, so the undo offer shows over the thread.
-    expect(document.querySelector(".app-toast")?.textContent).toContain("Archived Alpha");
+    // The sheet is closed, and the undo offer still shows.
+    expect(document.querySelector(".toast")?.textContent).toContain("Archived Alpha");
 
     await until(() => connected() && archiveButton()?.disabled === false);
     await press(archiveButton());
@@ -113,7 +113,7 @@ describe("archive and next", () => {
     await start();
     await press(archiveButton());
     await until(() => openId() === "c");
-    await press(document.querySelector<HTMLButtonElement>(".app-toast .picker-toast-undo"));
+    await press(document.querySelector<HTMLButtonElement>(".toast .toast-action"));
     await until(() => posts.includes("/api/sessions/a/restore"));
     expect(archived.has("a")).toBe(false);
   });
@@ -122,7 +122,7 @@ describe("archive and next", () => {
     refuse = () => "Stop current session activity before archiving";
     await start();
     await press(archiveButton());
-    await until(() => document.querySelector(".app-toast")?.textContent?.includes("Stop current session activity") === true);
+    await until(() => document.querySelector(".toast")?.textContent?.includes("Stop current session activity") === true);
     expect(openId()).toBe("a");
   });
 

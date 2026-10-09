@@ -13,7 +13,7 @@ import { browserStorage, createDraftStore } from "./draftStore";
 import { NewSession, type LaunchDraft, type LaunchMode, type Placement } from "./NewSession";
 import { createWorktreeApi, type WorktreeRecord } from "./worktrees/worktreeApi";
 import { createDeferredFiles, createNewSessionApi, defaultDestinationCwd, newStartupToken, type Project } from "./newSession";
-import { XIcon } from "lucide-react";
+import { Toast } from "./ui/Toast";
 import { createLaunchStore, type StartupListener, type WorktreeListener } from "./launches";
 import { newSessionShortcut } from "./shortcuts";
 import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
@@ -300,15 +300,12 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const known = !selectedId ? undefined : commandSelection?.session.id === selectedId
     ? { ...picker.find(selectedId), ...commandSelection.session } : picker.find(selectedId);
 
-  // The undo offer lives in the picker. While the sheet is closed, the thread shows it too.
   // A background start that failed after its window closed must still be seen. The window holds its draft.
   const orphan = composing === undefined ? launchList.find((launch) => launch.state.type === "failed" || launch.state.type === "unsent") : undefined;
-  const orphanNotice = orphan ? <div className="picker-toast" data-tone="error" role="alert">
-      <span>“{orphan.title}” {orphan.state.type === "unsent" ? "started, but its first message may not have reached Pi." : "did not start."}</span>
-      <button type="button" className="picker-toast-undo" onClick={() => { void startNew(); }}>Review</button>
-      <button type="button" className="picker-toast-close" aria-label="Dismiss" onClick={() => launches.dismiss(orphan.id)}><XIcon aria-hidden /></button>
-    </div> : undefined;
-  // One message line: the list shows it in place, the thread repeats it while the list is closed.
+  const orphanNotice = orphan ? <Toast tone="alert" onDismiss={() => launches.dismiss(orphan.id)}
+    message={`“${orphan.title}” ${orphan.state.type === "unsent" ? "started, but its first message may not have reached Pi." : "did not start."}`}
+    action={{ label: "Review", onPress: () => { void startNew(); } }} /> : undefined;
+  // One message at a time. It shows in the page's toast region, whether the list is open or not.
   const toast = picker.view.toast
     ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} /> : orphanNotice;
   const dialog = composing === undefined ? null : composing
@@ -342,8 +339,8 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     // The picker covers this area whenever nothing is selected, so it holds no
     // message of its own: the picker is the instruction.
     : <SessionFrame name="No session open" status=""><div className="thread-empty" /></SessionFrame>;
-  return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention} toast={toast}
-    picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs} message={orphanNotice}
+  return <><AppShell open={open} onOpenChange={setOpen} attention={picker.attention}
+    picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs}
       shelves={shelves} filter={projectFilter ? { ...projectFilter, onManage: () => placeSettings({ section: "projects" }) } : undefined}
       actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
@@ -353,5 +350,5 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
         onClose: layout === "overlay" && (selectedId || settings || backlog) ? () => setOpen(false) : undefined }} />}
     // `known` is read once, when the thread mounts for this id. A direct URL
     // load before the catalog arrives passes nothing and the store looks it up.
-    thread={<>{thread}{dialog}</>} />;
+    thread={<>{thread}{dialog}</>} />{toast}</>;
 }

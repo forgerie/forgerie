@@ -17,11 +17,9 @@ export function shellLayout(width: number): ShellLayout { return width >= DOCK_M
  * The picker is mounted once and moved between the dock and the sheet by CSS,
  * so its scroll position and preferences survive a fold, unfold, or rotate.
  */
-export function AppShell({ picker, thread, open, onOpenChange, attention, toast }: {
+export function AppShell({ picker, thread, open, onOpenChange, attention }: {
   picker: (layout: ShellLayout) => ReactNode;
   thread: ReactNode;
-  /** The picker's message line, repeated over the thread while the sheet is closed so an undo stays in reach. */
-  toast?: ReactNode;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   attention?: "blocked" | "unread" | undefined;
@@ -49,7 +47,6 @@ export function AppShell({ picker, thread, open, onOpenChange, attention, toast 
     <aside ref={sheet} id="app-picker" className="app-picker" aria-hidden={hidden} inert={hidden}>{picker(layout)}</aside>
     {/* Always present in overlay, so a drag can dim the thread as the sheet comes in. */}
     {layout === "overlay" ? <div className="app-scrim" aria-hidden="true" onClick={() => onOpenChange(false)} /> : null}
-    <div className="app-thread"><SessionFrameLeading.Provider value={opener}>{thread}</SessionFrameLeading.Provider>
-      {hidden && toast ? <div className="app-toast">{toast}</div> : null}</div>
+    <div className="app-thread"><SessionFrameLeading.Provider value={opener}>{thread}</SessionFrameLeading.Provider></div>
   </div>;
 }

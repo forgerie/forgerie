@@ -11,6 +11,7 @@ import { useThreadMessages } from "../src/useThreadMessages";
 import { Thread } from "../src/ui/Thread";
 import { SessionFrame } from "../src/ui/SessionFrame";
 import { AppShell } from "../src/ui/AppShell";
+import { ToastRegion } from "../src/ui/ToastRegion";
 import { Picker, PickerToast } from "../src/ui/Picker";
 import { NewSession, type LaunchDraft } from "../src/NewSession";
 import { createLaunchStore, type WorktreeListener } from "../src/launches";
@@ -150,8 +151,9 @@ function SessionPreview() {
   const toast = scenario === "archive-note" ? { type: "undo" as const, target: { id: "s1", cwd: worktree.path, name: "Fix the empty-password login" },
     note: `Kept worktree ${branch}: it has commits that are not on main. Land or discard it to remove it.` } : undefined;
   return <AssistantRuntimeProvider runtime={runtime}>
+    <ToastRegion />
+    {toast ? <PickerToast toast={toast} onUndo={() => {}} onDismiss={() => {}} /> : null}
     <AppShell open={open} onOpenChange={setOpen}
-      toast={toast ? <PickerToast toast={toast} onUndo={() => {}} onDismiss={() => {}} /> : undefined}
       picker={(layout) => <Picker view={{ connection: { type: "ready" }, machines: 1, selectedId: "s1", archivedCount: 0, toast,
         sections: boardSections(all, { grouping: "state", showArchived: false, now, selectedId: "s1" }) }}
         prefs={{ grouping: "state", showArchived: false, collapsed: DEFAULT_COLLAPSED, allPinned: false }} onPrefs={() => {}}

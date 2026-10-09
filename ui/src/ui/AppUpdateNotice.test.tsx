@@ -19,7 +19,7 @@ function deployment(first: UpdateCheck) {
   const asked: string[] = [];
   return { asked, set: (next: UpdateCheck) => { answer = next; }, check: (running: string) => { asked.push(running); return Promise.resolve(answer); } };
 }
-const notice = () => document.querySelector(".app-update");
+const notice = () => document.querySelector(".toast");
 const tick = () => act(async () => { await vi.advanceTimersByTimeAsync(UPDATE_POLL_MS); });
 
 describe("app update notice", () => {

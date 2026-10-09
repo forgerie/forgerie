@@ -4,6 +4,7 @@ import { PickerShelves } from "./plugins/PickerShelves.binding";
 import { entryName } from "./appUpdate";
 import { liveModelPrefs, ModelPrefsContext } from "./models/modelPrefsApi";
 import { AppUpdateNotice } from "./ui/AppUpdateNotice";
+import { ToastRegion } from "./ui/ToastRegion";
 import "./ui/theme.css";
 
 const root = document.getElementById("root");
@@ -13,4 +14,5 @@ const running = import.meta.env.DEV ? undefined : entryName(import.meta.url);
 createRoot(root).render(<ModelPrefsContext.Provider value={liveModelPrefs}>
   <AppBinding shelves={<PickerShelves />} />
   <AppUpdateNotice running={running} />
+  <ToastRegion />
 </ModelPrefsContext.Provider>);

@@ -48,9 +48,6 @@
   ".picker-menu-separator in ui/Picker.tsx, ui/WorktreeActions.tsx, ui/backlog/BacklogView.tsx, ui/settings/PluginsView.tsx",
   ".picker-more in ui/Picker.tsx, ui/backlog/BacklogView.tsx",
   ".picker-time in ui/Picker.tsx, ui/backlog/BacklogView.tsx",
-  ".picker-toast in App.tsx, ui/AppUpdateNotice.tsx, ui/Picker.tsx",
-  ".picker-toast-close in App.tsx, ui/AppUpdateNotice.tsx, ui/Picker.tsx",
-  ".picker-toast-undo in App.tsx, ui/AppUpdateNotice.tsx, ui/Picker.tsx",
   ".plugin-empty in ui/settings/ModelsView.tsx, ui/settings/PluginsView.tsx",
   ".primary in NewSession.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ConfirmDialog.tsx, ui/DialogLayer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/WorktreeActions.tsx",
   ".quiet-button in NewSession.tsx, ui/ArchiveNext.tsx, ui/Attachments.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ComposerDictation.tsx, ui/CopyButton.tsx, ui/ImageViewer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/WorktreeActions.tsx, ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
@@ -147,9 +144,6 @@
   "\"picker-menu-separator\" in ui/Picker.tsx, ui/WorktreeActions.tsx, ui/backlog/BacklogView.tsx, ui/settings/PluginsView.tsx",
   "\"picker-more\" in ui/Picker.tsx, ui/backlog/BacklogView.tsx",
   "\"picker-time\" in ui/Picker.tsx, ui/backlog/BacklogView.tsx",
-  "\"picker-toast\" in App.tsx, ui/AppUpdateNotice.tsx, ui/Picker.tsx",
-  "\"picker-toast-close\" in App.tsx, ui/AppUpdateNotice.tsx, ui/Picker.tsx",
-  "\"picker-toast-undo\" in App.tsx, ui/AppUpdateNotice.tsx, ui/Picker.tsx",
   "\"primary changes-write\" in ui/ChangesReview.tsx, ui/PullRequestReview.tsx",
   "\"primary wt-primary\" in NewSession.tsx, ui/ConfirmDialog.tsx, ui/WorktreeActions.tsx",
   "\"session-header\" in ui/SessionFrame.tsx, ui/settings/SettingsFrame.tsx",
@@ -355,7 +349,7 @@
   "ui/Composer.tsx:373",
   "ui/ImageGallery.tsx:47",
   "ui/ImageViewer.tsx:158",
-  "ui/Picker.tsx:300"
+  "ui/Picker.tsx:296"
  ],
  "layer without parts": [
   "template"
@@ -422,7 +416,6 @@
   "ui/theme.css: rgb("
  ],
  "shape with its own styling": [
-  "App.tsx: <button className>",
   "App.tsx: <div className>",
   "NewSession.tsx: <button className>",
   "NewSession.tsx: <p className>"

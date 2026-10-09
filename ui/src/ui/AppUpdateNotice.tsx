@@ -1,6 +1,6 @@
-import { XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { fetchBuild, type UpdateCheck } from "../appUpdate";
+import { Toast } from "./Toast";
 
 /** How often an open, visible app asks whether a new build was deployed. */
 export const UPDATE_POLL_MS = 60_000;
@@ -53,11 +53,6 @@ export function AppUpdateNotice({ running, check, reload = () => window.location
   const available = useAppUpdate(running, check);
   const [dismissed, setDismissed] = useState<string>();
   if (available === undefined || available === dismissed) return null;
-  return <div className="app-update">
-    <div className="picker-toast" role="status">
-      <span>A new version of Forgerie is ready.</span>
-      <button type="button" className="picker-toast-undo" onClick={reload}>Refresh</button>
-      <button type="button" className="picker-toast-close" aria-label="Not now" title="Not now" onClick={() => setDismissed(available)}><XIcon aria-hidden /></button>
-    </div>
-  </div>;
+  return <Toast message="A new version of Forgerie is ready." action={{ label: "Refresh", onPress: reload }}
+    onDismiss={() => setDismissed(available)} dismissLabel="Not now" />;
 }
