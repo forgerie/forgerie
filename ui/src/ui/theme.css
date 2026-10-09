@@ -276,6 +276,19 @@ button:disabled { cursor: default; opacity: 0.4; }
 [data-composer-input] .cm-code-block-body .tok-number { color: var(--code-number); }
 [data-composer-input] .cm-code-block-body .tok-comment { color: var(--code-comment); }
 [data-composer-input] .cm-code-block-body .tok-title { color: var(--code-title); }
+/* A list item or a quote reads as the transcript draws it (.markdown li, .markdown blockquote).
+   The editor hides the `-`, `1.` or `>`. Each quote level adds a bar and its gap; each list
+   level adds one marker column, and wrapped text hangs under the item's text, not its marker. */
+[data-composer-input] .cm-line:is(.cm-md-quote, .cm-md-item) { --md-bar: 2px; --md-quote-step: calc(var(--md-bar) + var(--space-4)); --md-list-step: var(--space-5);
+  padding-inline-start: calc(var(--md-quote, 0) * var(--md-quote-step) + var(--md-list, 0) * var(--md-list-step)); }
+[data-composer-input] .cm-line.cm-md-item { text-indent: calc(-1 * var(--md-list-step)); }
+[data-composer-input] .cm-line.cm-md-quote { color: var(--muted-foreground);
+  background-image: repeating-linear-gradient(to right, color-mix(in oklab, var(--muted-foreground) 30%, transparent) 0 var(--md-bar), transparent var(--md-bar) var(--md-quote-step));
+  /* The image ends half a step after the last bar, so the next stripe cannot bleed in at its edge. */
+  background-size: calc((var(--md-quote) - 0.5) * var(--md-quote-step)) 100%; background-repeat: no-repeat; }
+[data-composer-input] .cm-md-marker { display: inline-block; min-inline-size: var(--md-list-step); padding-inline-end: 0.4em; box-sizing: border-box;
+  text-indent: 0; text-align: end; color: var(--muted-foreground); user-select: none; }
+[data-composer-input] .cm-md-number { font-variant-numeric: tabular-nums; }
 .composer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: clamp(var(--space-2), 4cqi, var(--space-4)); padding: 0 var(--space-2) var(--space-2); }
 .compact-send { min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); font-size: var(--small-text); }
 /* While the agent works, Stop keeps Send's slot. Queue sits beside it, outlined

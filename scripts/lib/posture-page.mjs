@@ -139,6 +139,8 @@ const CDP_NAMED_KEYS = {
   arrowdown: { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
   arrowleft: { key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 },
   arrowright: { key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 },
+  home: { key: "Home", code: "Home", windowsVirtualKeyCode: 36 },
+  end: { key: "End", code: "End", windowsVirtualKeyCode: 35 },
 };
 
 /** Dispatches a combo such as "ctrl+k", "shift+meta+p", or "ctrl+alt+enter". */

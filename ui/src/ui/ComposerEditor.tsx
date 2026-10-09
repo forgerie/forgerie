@@ -8,6 +8,7 @@ import { Annotation, Compartment, EditorSelection, EditorState, Prec, type Chang
 import { EditorView, keymap, placeholder as placeholderText } from "@codemirror/view";
 import { codeHighlighter } from "./codeTokens";
 import { completeComposerCodeFence, composerCodeBlock, leaveComposerCodeBlock, protectComposerCodeBlockBoundary } from "./composerCodeBlock";
+import { composerMarkup, composerMarkupLineStart, deleteComposerMarkup } from "./composerMarkup";
 import { composerMarkdown, continueMarkup, deleteMarkup, loadMarkdownEditing } from "./composerCodeLanguage";
 
 /**
@@ -82,8 +83,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
   const view = useRef<EditorView>(undefined);
   const latest = useRef({ props, triggers });
   latest.current = { props, triggers };
-  const compartments = useRef<{ editable: Compartment; attributes: Compartment; placeholder: Compartment; language: Compartment }>(undefined);
-  compartments.current ??= { editable: new Compartment(), attributes: new Compartment(), placeholder: new Compartment(), language: new Compartment() };
+  const compartments = useRef<{ editable: Compartment; attributes: Compartment; placeholder: Compartment; language: Compartment; markup: Compartment }>(undefined);
+  compartments.current ??= { editable: new Compartment(), attributes: new Compartment(), placeholder: new Compartment(), language: new Compartment(), markup: new Compartment() };
   const { inputRef } = props;
 
   const prose = props.prose !== false;
@@ -119,6 +120,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
           history(),
           parts.language.of(composerMarkdown()),
           composerCodeBlock(),
+          // A shell command is not Markdown: its `-` and `>` stay as typed.
+          parts.markup.of(prose ? composerMarkup() : []),
           indentOnInput(),
           indentUnit.of("  "),
           syntaxHighlighting(codeHighlighter),
@@ -162,7 +165,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
             { key: "Enter", run: insertComposerNewline, shift: insertComposerNewline },
             { key: "ArrowDown", run: leaveComposerCodeBlock },
             { key: "Tab", run: indentMore, shift: indentLess },
-            { key: "Backspace", run: (editor) => protectComposerCodeBlockBoundary(editor, "backward") || deleteMarkup(editor) },
+            { key: "Home", run: composerMarkupLineStart },
+            { key: "Backspace", run: (editor) => protectComposerCodeBlockBoundary(editor, "backward") || deleteComposerMarkup(editor) || deleteMarkup(editor) },
             { key: "Delete", run: (editor) => protectComposerCodeBlockBoundary(editor, "forward") },
             ...historyKeymap,
             ...defaultKeymap,
@@ -202,8 +206,9 @@ export function ComposerEditor(props: ComposerEditorProps) {
       parts.editable.reconfigure(editability(disabled)),
       parts.attributes.reconfigure(EditorView.contentAttributes.of(JSON.parse(attributesKey) as Record<string, string>)),
       parts.placeholder.reconfigure(placeholderText(props.placeholder)),
+      parts.markup.reconfigure(prose ? composerMarkup() : []),
     ] });
-  }, [disabled, attributesKey, props.placeholder]);
+  }, [disabled, attributesKey, props.placeholder, prose]);
 
   // The composer can change the text itself: recall, a chosen suggestion,
   // dictation, a restored draft. The editor takes the change as an edit, so

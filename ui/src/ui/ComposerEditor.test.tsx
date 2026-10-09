@@ -193,3 +193,35 @@ describe("editor commands in the composer", () => {
     adapter.dispose();
   });
 });
+
+describe("lists and quotes in the composer", () => {
+  const markers = () => [...document.querySelectorAll<HTMLElement>(".cm-md-marker")].map((node) => node.textContent);
+  const lines = () => [...input().querySelectorAll<HTMLElement>(".cm-line")];
+  it("draws bullets, numbers, and quote levels in place of their Markdown, which stays the draft", async () => {
+    await render(); await type("Plan:\n- one\n  - two\n\n1. first\n> quoted\n> > deeper");
+    expect(markers()).toEqual(["•", "◦", "1."]);
+    expect(lines().map((line) => line.textContent)).toEqual(["Plan:", "•one", "◦two", "", "1.first", "quoted", "deeper"]);
+    expect(lines()[2]!.style.getPropertyValue("--md-list").trim()).toBe("2");
+    expect(lines()[6]!.classList.contains("cm-md-quote")).toBe(true);
+    expect(lines()[6]!.style.getPropertyValue("--md-quote").trim()).toBe("2");
+    expect(text()).toBe("Plan:\n- one\n  - two\n\n1. first\n> quoted\n> > deeper");
+  });
+  it("leaves a marker that is still being typed, list-shaped code, and a setext rule as text", async () => {
+    await render(); await type("-");
+    expect(markers()).toEqual([]);
+    await type("```\n- not a list\n```\n"); expect(markers()).toEqual([]);
+    await type("Title\n-"); expect(markers()).toEqual([]);
+  });
+  it("takes a bullet off with Backspace, and moves a nested item out one level first", async () => {
+    await render(); await type("- one\n  - two"); await cursor("- one\n  - ".length);
+    await press("Backspace"); expect(text()).toBe("- one\n- two");
+    await press("Backspace"); expect(text()).toBe("- one\ntwo");
+    await type("> quoted"); await cursor(2);
+    await press("Backspace"); expect(text()).toBe("quoted");
+  });
+  it("sends Home to where an item's text starts, never before its hidden marker", async () => {
+    await render(); await type("- hi"); await cursor(4);
+    await press("Home"); expect(input().selectionStart).toBe(2);
+    await press("Home"); expect(input().selectionStart).toBe(2);
+  });
+});
