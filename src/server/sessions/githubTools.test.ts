@@ -35,6 +35,21 @@ describe("GitHub tools", () => {
     expect(write.exposure).toBe(MODEL_ONLY_EXPOSURE);
   });
 
+  it("targets only a validated secondary checkout without changing the default repository", async () => {
+    const calls: unknown[] = [];
+    const [read, write] = createGitHubToolDefinitions("/repo-a", {
+      target: (ref, id) => { calls.push(["resolve", ref, id]); return id === "owned-b" ? Promise.resolve("/repo-b/work") : Promise.reject(new Error("Not owned")); },
+      read: (cwd, request) => { calls.push(["read", cwd, request]); return Promise.resolve("ok"); },
+      write: (cwd, id, request) => { calls.push(["write", cwd, id, request]); return Promise.resolve({ text: "ok" }); },
+    });
+    await read.execute("read-b", { action: "prs", worktreeId: "owned-b" }, undefined, undefined, ctxFor("source"));
+    await write.execute("write-b", { action: "comment", number: 7, body: "B only", worktreeId: "owned-b" }, undefined, undefined, ctxFor("source"));
+    await read.execute("read-a", { action: "prs" }, undefined, undefined, ctxFor("source"));
+    await expect(read.execute("refused", { action: "prs", worktreeId: "foreign" }, undefined, undefined, ctxFor("source"))).rejects.toThrow("Not owned");
+    expect(calls).toContainEqual(["read", "/repo-b/work", { action: "prs" }]);
+    expect(calls).toContainEqual(["write", "/repo-b/work", "source", { action: "comment", number: 7, body: "B only" }]);
+    expect(calls).toContainEqual(["read", "/repo-a", { action: "prs" }]);
+  });
   it("acts in the session's cwd and signs writes with the session id", async () => {
     const calls: unknown[] = [];
     const [read, write] = createGitHubToolDefinitions("/code/korri", {

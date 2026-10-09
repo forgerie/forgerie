@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import { RelatedSessionSchema, type RelatedSession } from "./projectGroups.js";
 
 const text = Type.String({ minLength: 1 });
 export const NewSessionDestinationSchema = Type.Union([
@@ -43,6 +44,8 @@ export const SessionWorktreeRecordSchema = Type.Object({
   branch: text,
   defaultBranch: text,
   sessionId: Type.Optional(text),
+  /** A secondary checkout used by the same chat, not a new session. */
+  relatedSession: Type.Optional(RelatedSessionSchema),
   ownerSession: Type.Optional(savedSession),
   startupToken: Type.Optional(text),
   renamed: Type.Boolean(),
@@ -64,6 +67,7 @@ export type WorktreeSetup = Static<typeof WorktreeSetupSchema>;
 export interface SessionWorktreeInfo {
   id: string;
   owned: boolean;
+  relatedSession?: RelatedSession;
   repo: string;
   path: string;
   branch: string;

@@ -1,0 +1,1 @@
+.action-button { display: inline-flex; align-items: center; justify-content: center; min-block-size: var(--control-size); max-inline-size: 100%; padding-inline: var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-control); font-size: var(--small-text); color: var(--foreground); background: var(--background); overflow-wrap: anywhere; }

@@ -60,6 +60,7 @@ export class SessionWorktreeStore {
   }
   async add(record: SessionWorktreeRecord): Promise<void> {
     await this.exclusive(async () => {
+      if (!Check(SessionWorktreeRecordSchema, record)) throw new Error("Invalid session worktree record");
       if (this.records.some((item) => item.id === record.id)) throw new Error("Worktree ownership already exists");
       await this.persist([...this.records, structuredClone(record)]);
     });
@@ -92,13 +93,13 @@ export class SessionWorktreeStore {
     const records = await this.list();
     const removed = await this.readOnly(ref);
     if (removed !== undefined) throw new Error(`This session's worktree was ${removed.state.kind}. Its transcript is read-only.`);
-    if (records.some((record) => record.operation !== undefined && pathInside(record.path, ref.cwd))) {
+    if (records.some((record) => record.operation !== undefined && (pathInside(record.path, ref.cwd) || (record.relatedSession?.id === ref.id && cwdPathsEqual(record.relatedSession.cwd, ref.cwd))))) {
       throw new Error("A worktree lifecycle action is running. Wait before changing this session.");
     }
   }
   async saveTranscripts(id: string, sessions: readonly (Pick<SessionInfo, "id" | "cwd" | "path"> & Partial<SessionInfo> & { transcriptSourcePath?: string })[]): Promise<void> {
     const record = await this.require(id);
-    const snapshots = [];
+    const snapshots: SessionWorktreeRecord["transcripts"] = [];
     for (const session of sessions.filter((session) => pathInside(record.path, session.cwd))) {
       const source = session.transcriptSourcePath ?? session.path;
       if (source === "") throw new Error("Cannot remove a worktree with an unpersisted session");
@@ -116,7 +117,10 @@ export class SessionWorktreeStore {
     if (record.sessionId !== undefined && !snapshots.some((item) => item.id === record.sessionId)) {
       throw new Error("Cannot remove a worktree without its owner's persisted transcript");
     }
-    await this.update(id, { transcripts: snapshots });
+    // Cleanup retries can discover additional sessions. Keep previously saved
+    // receipts rather than losing their history when a retry sees fewer runtimes.
+    const retained = record.transcripts.filter((saved) => !snapshots.some((next) => next.id === saved.id && cwdPathsEqual(next.cwd, saved.cwd)));
+    await this.update(id, { transcripts: [...retained, ...snapshots] });
   }
 
   async forgetTranscripts(sessionIds: readonly string[]): Promise<void> {
@@ -173,7 +177,7 @@ export function pathInside(root: string, path: string): boolean {
   return canonicalPath === canonicalRoot || canonicalPath.startsWith(`${canonicalRoot.replace(/\/$/, "")}/`);
 }
 export function worktreeInfo(record: SessionWorktreeRecord, sessionId: string): SessionWorktreeInfo {
-  return { id: record.id, owned: record.sessionId === sessionId, repo: record.repo, path: record.path, branch: record.branch, defaultBranch: record.defaultBranch, state: record.state, setup: record.setup, cleanup: record.cleanup, ...(record.archiveCleanup === undefined ? {} : { archiveCleanup: record.archiveCleanup }) };
+  return { id: record.id, owned: record.sessionId === sessionId || record.relatedSession?.id === sessionId, ...(record.relatedSession === undefined ? {} : { relatedSession: record.relatedSession }), repo: record.repo, path: record.path, branch: record.branch, defaultBranch: record.defaultBranch, state: record.state, setup: record.setup, cleanup: record.cleanup, ...(record.archiveCleanup === undefined ? {} : { archiveCleanup: record.archiveCleanup }) };
 }
 function isMissing(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";

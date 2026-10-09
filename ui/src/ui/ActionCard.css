@@ -1,0 +1,5 @@
+.action-card { border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); padding: var(--space-3); min-inline-size: 0; }
+.action-card-title { margin: 0; font-size: var(--text-size); overflow-wrap: anywhere; }
+.action-card-detail { margin-block: var(--space-2); color: var(--muted-foreground); font-size: var(--small-text); overflow-wrap: anywhere; }
+.action-card-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.action-card-button { min-block-size: var(--control-size); padding-inline: var(--space-3); color: var(--foreground); background: var(--background); border: var(--hairline) solid var(--line); border-radius: var(--radius-control); }

@@ -82,7 +82,7 @@ export function registerSessionWorktreeRoutes(app: FastifyInstance, userSessions
   app.get<{ Params: { worktreeId: string } }>(`${prefix}/sessions/worktrees/:worktreeId`, async (request, reply) => {
     try {
       const record = await worktrees.store.require(request.params.worktreeId);
-      return { worktree: record, info: await worktrees.info(record, record.sessionId ?? "") };
+      return { worktree: record, info: await worktrees.info(record, record.sessionId ?? record.relatedSession?.id ?? "") };
     } catch (error) { return reply.code(404).send({ error: errorMessage(error) }); }
   });
   app.post<{ Params: { worktreeId: string } }>(`${prefix}/sessions/worktrees/:worktreeId/land`, async (request, reply) => {

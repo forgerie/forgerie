@@ -96,6 +96,7 @@ export function receiptText(state: WorktreeLifecycleState, defaultBranch: string
 /** Land's blocked reasons in plain words. An unknown reason shows as the server wrote it. */
 export function blockedText(reason: string, defaultBranch: string): string {
   switch (reason) {
+    case "related-worktrees-active": return "This chat still owns related worktrees. Land or discard those first using Related repos.";
     case "worktree-dirty": return "This worktree has uncommitted changes. Ask the agent to commit or drop them, then land again.";
     case "main-dirty": return `The main checkout has uncommitted changes in files this land would touch. Commit or stash them on ${defaultBranch}, then land again.`;
     case "main-not-on-default-branch": return `The main checkout is not on ${defaultBranch}. Switch it back to ${defaultBranch}, then land again.`;
@@ -118,6 +119,7 @@ export function retainedText(reason: string, defaultBranch: string): string | un
     case "unlanded-commits": return `it has commits that are not on ${defaultBranch}. Land or discard it to remove it`;
     case "dirty": return "it has uncommitted changes. Land or discard it to remove it";
     case "shared": return "another session still works in it";
+    case "related-worktrees-active": return "the chat still owns related worktrees. Finish those using Related repos first";
     // Landed or discarded already: nothing is left to remove, so there is nothing to say.
     case "already-completed": return undefined;
     default: return reason;

@@ -103,6 +103,7 @@ import { siblingWorkspaceCwds, type ProjectWorkspaceCwds } from "../workspaces/p
 import type { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 import { createAskUserToolDefinition, type AskUserInvocation, type AskUserToolDeps } from "./askUserTool.js";
 import { createGitHubToolDefinitions, type GitHubToolDeps } from "./githubTools.js";
+import { createProjectTools, type ProjectToolDeps } from "./projectTools.js";
 import type { PullNote, PullSessionGateway, PullSessionState } from "../github/pullRequestService.js";
 import type { PullSessionRef } from "../../shared/pullRequests.js";
 import { undeliveredAskAnswers } from "./askAnswerDelivery.js";
@@ -811,9 +812,11 @@ export function createPiWebCustomToolDefinitions(
   handoff?: HandoffSessionFn,
   github?: GitHubToolDeps,
   endTurn?: EndTurnToolDeps,
+  projectTools?: ProjectToolDeps,
 ) {
   return [
     createPiWebEditToolDefinition(cwd),
+    ...(projectTools === undefined ? [] : createProjectTools(cwd, projectTools)),
     ...(endTurn === undefined ? [] : [createEndTurnToolDefinition(endTurn)]),
     ...(delegationEnabled && spawn !== undefined ? [createSpawnSessionToolDefinition(cwd, { spawn })] : []),
     ...(delegationEnabled && handoff !== undefined ? [createHandoffSessionToolDefinition(cwd, { handoff })] : []),
@@ -835,6 +838,7 @@ function createDefaultRuntimeFactory(
   askUser?: AskUserToolDeps,
   handoff?: HandoffSessionFn,
   github?: GitHubToolDeps,
+  projectTools?: ProjectToolDeps,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels }) => {
     const processBridgeSlot = createProcessBridgeSlot();
@@ -875,7 +879,7 @@ function createDefaultRuntimeFactory(
           (error) => { console.warn("Could not persist the derived response checkpoint.", error); },
         );
       },
-    });
+    }, projectTools);
     const session = await DurableAgentSession.open({
       services,
       sessionManager,
@@ -918,6 +922,7 @@ export interface PiSessionServiceDependencies {
   agentDir: string;
   sessionManager: PiSessionManagerGateway;
   sessionWorktrees?: SessionWorktrees;
+  projectTools?: ProjectToolDeps;
   archiveStore?: SessionArchiveRepository;
   /** Pinned-session catalog; defaults to an in-memory store in tests. Production wiring injects the durable store. */
   pinStore?: SessionPinRepository;
@@ -1159,6 +1164,7 @@ export class PiSessionService implements SessionRouteService {
       deps.askUserEnabled === true ? { open: (input) => this.openAsk(input) } : undefined,
       this.spawnTargets === undefined ? undefined : (input) => this.handoffSession(input),
       deps.github,
+      deps.projectTools,
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;

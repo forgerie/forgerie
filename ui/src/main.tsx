@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
+import { AppBinding } from "./app/App.binding";
 import { PickerShelves } from "./plugins/PickerShelves.binding";
 import { entryName } from "./appUpdate";
 import { liveModelPrefs, ModelPrefsContext } from "./models/modelPrefsApi";
@@ -11,6 +11,6 @@ if (!root) throw new Error("Missing app root.");
 // This module is the entry, so its URL names the running build. The dev server has no build to compare.
 const running = import.meta.env.DEV ? undefined : entryName(import.meta.url);
 createRoot(root).render(<ModelPrefsContext.Provider value={liveModelPrefs}>
-  <App shelves={<PickerShelves />} />
+  <AppBinding shelves={<PickerShelves />} />
   <AppUpdateNotice running={running} />
 </ModelPrefsContext.Provider>);

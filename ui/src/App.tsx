@@ -1,4 +1,6 @@
 import { lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { RelatedWorkRenderer } from "./projectGroups/relatedWork";
+import type { SettingsPageRenderer } from "./ui/settings/SettingsView";
 import { ForgerieSession } from "./ForgerieSession";
 import { usePicker, type StartingSession } from "./usePicker";
 import type { Row } from "./picker/board";
@@ -10,7 +12,7 @@ import { SessionFrame } from "./ui/SessionFrame";
 import { browserStorage, createDraftStore } from "./draftStore";
 import { NewSession, type LaunchDraft, type LaunchMode, type Placement } from "./NewSession";
 import { createWorktreeApi, type WorktreeRecord } from "./worktrees/worktreeApi";
-import { createDeferredFiles, createNewSessionApi, defaultDestinationCwd, newStartupToken } from "./newSession";
+import { createDeferredFiles, createNewSessionApi, defaultDestinationCwd, newStartupToken, type Project } from "./newSession";
 import { XIcon } from "lucide-react";
 import { createLaunchStore, type StartupListener, type WorktreeListener } from "./launches";
 import { newSessionShortcut } from "./shortcuts";
@@ -37,7 +39,7 @@ const readSettings = (): SettingsPlace | undefined => {
   const section = params.get("settings");
   if (section === null) return undefined;
   if (section === "agents") return { section, agent: readTarget(params.get("agent") ?? undefined) };
-  if (section === "models") return { section };
+  if (section === "models" || section === "projects") return { section };
   return section === "plugins" ? { section, plugin: params.get("plugin") ?? undefined } : { section: "root" };
 };
 /** `?backlog` keeps the backlog open across a reload; `?backlog=<projectId>/<itemId>` keeps one item open. */
@@ -71,8 +73,15 @@ const readBacklogOrSetup = () => readBacklog() ?? (readSetupReturn(window.locati
 const DIALOG_ENTRY = { newSession: newStartupToken() };
 
 /** Composition root: owns the selected session (in the URL), the sheet, and sessions being started. */
-/** `shelves`: plugin shelves for the foot of the session list. The entry passes their binding in. */
-export function App({ shelves }: { shelves?: ReactNode } = {}) {
+/**
+ * `shelves`: plugin shelves for the foot of the session list. The entry passes their binding in.
+ * `groupControls` draws the project-group filter over the list; `manage` opens its settings page.
+ * `projectSettings` draws Settings → Projects.
+ */
+export function App({ shelves, projectScope, projectCatalog, groupControls, projectSettings, relatedWork }: {
+  shelves?: ReactNode; projectCatalog?: readonly Project[] | undefined; projectScope?: readonly string[] | undefined;
+  groupControls?: ((manage: () => void) => ReactNode) | undefined; projectSettings?: SettingsPageRenderer | undefined; relatedWork?: RelatedWorkRenderer | undefined;
+} = {}) {
   const [selectedId, setSelectedId] = useState(readSelected);
   const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string; error?: string }>();
   // The new-session dialog: the folder it starts in, over the open session.
@@ -132,7 +141,7 @@ export function App({ shelves }: { shelves?: ReactNode } = {}) {
     drafts.forget(id);
     if (readSelected() === id) closeSession();
   }, [drafts, closeSession]);
-  const picker = usePicker(selectedId, { onDeleted, starting });
+  const picker = usePicker(selectedId, { onDeleted, starting, projectScope, projectCatalog });
   const { onStartup, onWorktree } = picker;
   useEffect(() => onStartup(startup.emit), [onStartup, startup]);
   useEffect(() => onWorktree(worktreeEvents.emit), [onWorktree, worktreeEvents]);
@@ -313,7 +322,7 @@ export function App({ shelves }: { shelves?: ReactNode } = {}) {
       onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} onClose={closeComposer} />
     : null;
   const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
-    <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} /></Suspense>
+    <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} projects={projectSettings} /></Suspense>
     : backlog ? <Suspense fallback={<SessionFrame name="Backlog" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
       <BacklogView place={backlog} binding={{ load: backlogList.load, onRefresh: refreshBacklog, api: backlogApi, look: picker.look,
         onPlace: placeBacklog, onClose: () => placeBacklog(undefined),
@@ -322,7 +331,7 @@ export function App({ shelves }: { shelves?: ReactNode } = {}) {
     : composing === "" && !selectedId
       ? <SessionFrame name="New session" status="" error="Forgerie knows no project yet, and this app cannot add one yet."><div className="thread-empty" /></SessionFrame>
     : selectedId ? <ForgerieSession key={selectedId} id={selectedId} onUnread={picker.onUnread}
-      known={known}
+      known={known} relatedWork={relatedWork}
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
       initialError={commandSelection?.session.id === selectedId ? commandSelection.error : undefined}
       drafts={drafts} onSwitchSession={switchSession}
@@ -333,7 +342,7 @@ export function App({ shelves }: { shelves?: ReactNode } = {}) {
     : <SessionFrame name="No session open" status=""><div className="thread-empty" /></SessionFrame>;
   return <AppShell open={open} onOpenChange={setOpen} attention={picker.attention} toast={toast}
     picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs} message={orphanNotice}
-      shelves={shelves}
+      shelves={shelves} scope={groupControls?.(() => placeSettings({ section: "projects" }))}
       actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
         onBacklog: () => placeBacklog(backlog ?? {}), backlogOpen: backlog !== undefined,

@@ -373,10 +373,9 @@
   "ui/Composer.tsx:358",
   "ui/ImageGallery.tsx:47",
   "ui/ImageViewer.tsx:158",
-  "ui/Picker.tsx:271"
+  "ui/Picker.tsx:274"
  ],
  "layer without parts": [
-  "page",
   "template"
  ],
  "owned selector with a universal child": [
@@ -655,8 +654,6 @@
   "ui/ShellRun.tsx: \"Started before this page connected.\"",
   "ui/SlashCommands.tsx: \"No matching commands. Pi checks commands when you send.\"",
   "ui/WorktreeActions.tsx: \"The agent can rebase and resolve these in its worktree. Land again when it is done.\"",
-  "ui/WorktreeActions.tsx: \"The worktree is removed afterward. This conversation stays readable, but it cannot continue.\"",
-  "ui/WorktreeActions.tsx: \"This conversation stays readable, but it cannot continue.\"",
   "ui/backlog/BacklogCarry.tsx: \"Start without the item\"",
   "ui/backlog/BacklogView.tsx: \"An item needs\"",
   "ui/backlog/BacklogView.tsx: \"Git ignores this project's backlog folder,\"",

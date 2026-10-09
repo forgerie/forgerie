@@ -168,12 +168,14 @@ export function PickerToast({ toast, onUndo, onDismiss }: { toast: Toast; onUndo
  * in; selections, commands, and arrangement changes go out. Only open menus
  * live here.
  */
-export function Picker({ view, prefs, onPrefs, actions, message, shelves }: {
+export function Picker({ view, prefs, onPrefs, actions, message, shelves, scope }: {
   view: PickerView; prefs: PickerPrefs; onPrefs: (prefs: PickerPrefs) => void; actions: PickerActions;
   /** The app's message line, when it is not the list's own: a background start that went wrong. */
   message?: ReactNode;
   /** Plugin shelves, drawn between the list and Backlog and Settings. */
   shelves?: ReactNode;
+  /** A filter over which projects the list shows, drawn under the header. */
+  scope?: ReactNode;
 }) {
   const [menu, setMenu] = useState<"board" | undefined>();
   const [rowMenu, setRowMenu] = useState<{ id: string; confirming: boolean } | undefined>();
@@ -260,6 +262,7 @@ export function Picker({ view, prefs, onPrefs, actions, message, shelves }: {
           <CheckIcon aria-hidden />Show archived <small>{view.archivedCount} · A</small></button>
       </div> : null}
     </header>
+    {scope}
     {/* The homepage thread list opens with "New Thread"; here it starts a session. */}
     {actions.onNew ? <button className="picker-new" onClick={actions.onNew} aria-keyshortcuts="N" title="New session (N)">
       <SquarePenIcon aria-hidden size={16} />New session</button> : null}

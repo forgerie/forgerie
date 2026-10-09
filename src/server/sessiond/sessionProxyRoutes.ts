@@ -47,6 +47,10 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
   // Prompt authoring targets the agent profile, not a session, so the prompt
   // dialog can save without one open.
   app.all(`${prefix}/prompts`, (request, reply) => proxy(request, reply));
+  app.all(`${prefix}/project-groups`, (request, reply) => proxy(request, reply));
+  app.all(`${prefix}/project-groups/*`, (request, reply) => proxy(request, reply));
+  app.all(`${prefix}/project-workspaces`, (request, reply) => proxy(request, reply));
+  app.all(`${prefix}/project-workspaces/*`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/backlog`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/backlog/*`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/github`, (request, reply) => proxy(request, reply));

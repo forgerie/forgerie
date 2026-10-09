@@ -131,7 +131,7 @@ export function WorktreeDialog({ command, info, api, onAsk, onDone, onClose }: {
     </> : <button type="button" className="primary wt-primary" onClick={onClose}>Done</button>;
   } else {
     body = <>
-      {command === "land" ? <LandSummary info={info} /> : currentPreview ? <DiscardList preview={currentPreview} />
+      {command === "land" ? <LandSummary info={info} /> : currentPreview ? <DiscardList preview={currentPreview} related={info.relatedSession !== undefined} />
         : step.type === "loading" ? <p className="wt-status" role="status"><LoaderIcon aria-hidden size={14} />Reading what is not on {info.defaultBranch}…</p> : null}
       {step.type === "confirm" && step.note && <p className="wt-warning" role="alert">{step.note}</p>}
       {step.type === "error" && <p className="wt-error" role="alert">{step.message}</p>}
@@ -167,11 +167,11 @@ function LandSummary({ info }: { info: WorktreeInfo }) {
       : `${String(ahead)} ${ahead === 1 ? "commit lands" : "commits land"} on ${info.defaultBranch}: Forgerie rebases ${info.branch} onto ${info.defaultBranch}, then fast-forwards it. Nothing is pushed.`}</p>
     {info.dirtyFiles !== undefined && info.dirtyFiles > 0 && <p className="wt-warning">
       {info.dirtyFiles === 1 ? "1 file is" : `${String(info.dirtyFiles)} files are`} not committed. Land refuses uncommitted work: ask the agent to commit it first.</p>}
-    <p className="wt-note">The worktree is removed afterward. This conversation stays readable, but it cannot continue.</p>
+    <p className="wt-note">{info.relatedSession ? "Only this related worktree is removed. Your chat continues in its starting project." : "The worktree is removed afterward. This conversation stays readable, but it cannot continue."}</p>
   </>;
 }
 
-function DiscardList({ preview }: { preview: DiscardPreview }) {
+function DiscardList({ preview, related }: { preview: DiscardPreview; related: boolean }) {
   return <>
     <p className="wt-lead" data-tone={preview.commits.length || preview.dirtyFiles.length ? "danger" : undefined}>{discardSummary(preview)}</p>
     {preview.commits.length > 0 && <ul className="wt-list" aria-label="Commits that will be lost">
@@ -180,7 +180,7 @@ function DiscardList({ preview }: { preview: DiscardPreview }) {
     {preview.dirtyFiles.length > 0 && <ul className="wt-list" aria-label="Uncommitted files that will be lost">
       {preview.dirtyFiles.map((file) => <li key={file}><span className="wt-path">{file}</span></li>)}
     </ul>}
-    <p className="wt-note">This conversation stays readable, but it cannot continue.</p>
+    <p className="wt-note">{related ? "Your chat continues. Only this related worktree is discarded." : "This conversation stays readable, but it cannot continue."}</p>
   </>;
 }
 

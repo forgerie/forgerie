@@ -27,6 +27,7 @@ export interface SessionServiceDependencyInput {
   spawnTargets?: NonNullable<PiSessionServiceDependencies["spawnTargets"]>;
   projectWorkspaces?: NonNullable<PiSessionServiceDependencies["projectWorkspaces"]>;
   sessionWorktrees?: NonNullable<PiSessionServiceDependencies["sessionWorktrees"]>;
+  projectTools?: PiSessionServiceDependencies["projectTools"];
   /** The operator's subsessions preference, which also requires spawning. */
   subsessionsEnabled: boolean;
   /** Whether agents may post structured question sets to the browser. */
@@ -62,6 +63,7 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
     ...(input.spawnTargets === undefined ? {} : { spawnTargets: input.spawnTargets }),
     ...(input.projectWorkspaces === undefined ? {} : { projectWorkspaces: input.projectWorkspaces }),
     ...(input.sessionWorktrees === undefined ? {} : { sessionWorktrees: input.sessionWorktrees }),
+    ...(input.projectTools === undefined ? {} : { projectTools: input.projectTools }),
     // Tracked subsessions share the spawn capability's project-scope resolver,
     // so they stay off unless spawning is configured too.
     subsessionsEnabled: input.spawnTargets !== undefined && input.subsessionsEnabled,

@@ -56,6 +56,7 @@ export const worktreeRecordSchema = z.object({
   branch: text,
   defaultBranch: text,
   sessionId: text.optional(),
+  relatedSession: z.object({ id: text, cwd: text, projectId: text }).optional(),
   ownerSession: z.object({ id: text, cwd: text, name: z.string().optional() }).passthrough().optional(),
   startupToken: text.optional(),
   setup: setupSchema,
@@ -70,6 +71,7 @@ export type WorktreeRecord = z.infer<typeof worktreeRecordSchema>;
 export const worktreeInfoSchema = z.object({
   id: text,
   owned: z.boolean(),
+  relatedSession: z.object({ id: text, cwd: text, projectId: text }).optional(),
   repo: text,
   path: text,
   branch: text,

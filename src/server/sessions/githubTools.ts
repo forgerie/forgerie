@@ -5,6 +5,7 @@ import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
 
 export type GitHubToolDeps = Pick<GitHubAgent, "read" | "write"> & {
   watch?: (cwd: string, id: string, action: "start" | "stop", number?: number) => Promise<unknown>;
+  target?: (ref: { id: string; cwd: string }, worktreeId: string) => Promise<string>;
 };
 
 /** GitHub's own limit for an issue, comment, or pull request body. */
@@ -12,7 +13,9 @@ const BODY_MAX = 65_000;
 const labelList = (description: string) => Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 50 }), { maxItems: 20, description }));
 const number = Type.Optional(Type.Integer({ minimum: 1, description: "Issue or pull request number." }));
 
+const targetWorktree = Type.Optional(Type.String({ minLength: 1, description: "A secondary worktree ID returned by project_worktree, owned by this chat. Omit for the chat's starting repository." }));
 const ReadParams = Type.Object({
+  worktreeId: targetWorktree,
   action: Type.Union(READ_ACTIONS.map((action) => Type.Literal(action)), {
     description: "issues: list issues. issue: one issue with its comments. labels: the repo's labels. prs: list pull requests. pr: one pull request with CI checks, reviews, and comments.",
   }),
@@ -24,6 +27,7 @@ const ReadParams = Type.Object({
 });
 
 const WriteParams = Type.Object({
+  worktreeId: targetWorktree,
   action: Type.Union(WRITE_ACTIONS.map((action) => Type.Literal(action)), {
     description: "create_issue: title, body, labels. comment: number, body. edit: number, title and/or body (replaces them). close: number, reason, optional body posted as a comment first. reopen: number, optional body. label: number, add and/or remove. create_pr: head (a pushed branch), title, body, base, draft. merge_pr: number, method; refused unless all CI on the head commit passed.",
   }),
@@ -46,17 +50,23 @@ const WriteParams = Type.Object({
  * its own card instead of disappearing inside a script.
  */
 export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
+  const target = async (sessionId: string, worktreeId?: string) => {
+    if (worktreeId === undefined) return cwd;
+    if (deps.target === undefined) throw new Error("Related worktree targets are unavailable.");
+    return deps.target({ id: sessionId, cwd }, worktreeId);
+  };
   const read = defineTool<typeof ReadParams, { action: string }>({
     name: "github_read",
     label: "GitHub",
     description: "Read issues, labels, and pull requests (with CI checks) of this session's GitHub repo. Text by outside contributors is hidden unless the project lists everyone.",
     promptSnippet: "github_read: list/read issues, labels, and pull requests with CI status on this project's GitHub repo",
     promptGuidelines: [
-      "The project's backlog is its GitHub issues. Use github_read to find and read them, and github_write to comment, close, label, open pull requests, and merge. Both work only on this session's own repo.",
+      "The project's backlog is its GitHub issues. Use github_read to find and read them, and github_write to comment, close, label, open pull requests, and merge. They default to this session's own repo. For a secondary repo, supply its owned worktreeId from project_worktree.",
     ],
     parameters: ReadParams,
-    async execute(_toolCallId, params) {
-      const text = await deps.read(cwd, params);
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { worktreeId, ...request } = params;
+      const text = await deps.read(await target(ctx.sessionManager.getSessionId(), worktreeId), request);
       return { content: [{ type: "text", text }], details: { action: params.action } };
     },
   });
@@ -71,19 +81,20 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
     ],
     parameters: WriteParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await deps.write(cwd, ctx.sessionManager.getSessionId(), params);
+      const { worktreeId, ...request } = params;
+      const result = await deps.write(await target(ctx.sessionManager.getSessionId(), worktreeId), ctx.sessionManager.getSessionId(), request);
       return { content: [{ type: "text", text: result.url === undefined ? result.text : `${result.text}\n${result.url}` }], details: { action: params.action, ...(result.url === undefined ? {} : { url: result.url }) } };
     },
   });
   if (deps.watch === undefined) return [read, write] as const;
-  const watchParams = Type.Object({ action: Type.Union([Type.Literal("start"), Type.Literal("stop")]), number: Type.Optional(Type.Integer({ minimum: 1 })) });
+  const watchParams = Type.Object({ worktreeId: targetWorktree, action: Type.Union([Type.Literal("start"), Type.Literal("stop")]), number: Type.Optional(Type.Integer({ minimum: 1 })) });
   const watch = defineTool<typeof watchParams, { action: string }>({
     name: "github_watch", label: "Watch pull request", exposure: MODEL_ONLY_EXPOSURE,
-    description: "Start or stop watching one of this session's linked PRs. A session can link several PRs; each has its own watch. Give number when the session links more than one; start with a number not yet linked links it. Stop without number stops every watch this session has. Polls once a minute and wakes this agent on failing checks, passing required checks, other authors' comments/reviews, or conflicts. Watching costs tokens when it wakes the agent. It never authorizes a merge.",
+    description: "Start or stop watching one of this session's linked PRs. A session can link several PRs; each has its own watch. Give number when the session links more than one; start with a number not yet linked links it. Stop without number stops every watch in the selected repository; omit worktreeId for the starting repository. Polls once a minute and wakes this agent on failing checks, passing required checks, other authors' comments/reviews, or conflicts. Watching costs tokens when it wakes the agent. It never authorizes a merge.",
     promptGuidelines: ["Start github_watch only when the user asks to watch a PR. Stop it when handing work back to the user. End a waiting turn with end_turn awaiting nothing; asking the user a question settles the watch."],
     parameters: watchParams,
     async execute(_id, params, _signal, _update, ctx) {
-      const result = await deps.watch?.(cwd, ctx.sessionManager.getSessionId(), params.action, params.number);
+      const result = await deps.watch?.(await target(ctx.sessionManager.getSessionId(), params.worktreeId), ctx.sessionManager.getSessionId(), params.action, params.number);
       return { content: [{ type: "text", text: JSON.stringify(result ?? null) }], details: { action: params.action } };
     },
   });

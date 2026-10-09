@@ -1,5 +1,5 @@
 /// <reference types="vitest/config" />
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
@@ -64,7 +64,9 @@ export default defineConfig({
     https,
     host: "::",
     allowedHosts,
-    fs: { allow: [".", "../src/shared"] },
+    // Worktree dev servers may reuse installed dependencies through a symlink.
+    // Font URLs need the real dependency root, not access to the whole parent checkout.
+    fs: { allow: [".", "../src/shared", realpathSync(fileURLToPath(new URL("./node_modules", import.meta.url)))] },
     proxy: {
       "/aui": { target: backend },
       "/api": {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { attention, createLocationResolver, rows as boardRows, sections as boardSections, type Row } from "./picker/board";
+import { attention, createLocationResolver, rows as boardRows, sections as boardSections, type Row, type PickerProject } from "./picker/board";
 import { archiveAvailability, nextWaiting, type ArchiveAvailability } from "./picker/archiveNext";
 import { createCatalogStore } from "./picker/catalogStore";
 import type { RowCommandKind } from "./picker/commands";
@@ -18,7 +18,7 @@ const storage = () => { try { return window.localStorage; } catch { return undef
 /** A session this browser is starting, before Pi has saved it. */
 export interface StartingSession { id: string; cwd: string; title: string; startedAt: string; sessionId?: string | undefined }
 
-export function usePicker(selectedId: string | undefined, options: { onDeleted?: (id: string) => void; starting?: readonly StartingSession[] } = {}) {
+export function usePicker(selectedId: string | undefined, options: { onDeleted?: (id: string) => void; starting?: readonly StartingSession[]; projectScope?: readonly string[] | undefined; projectCatalog?: readonly PickerProject[] | undefined } = {}) {
   const starting = options.starting ?? NONE;
   const [store] = useState(() => createCatalogStore(browserTransport));
   const onDeleted = useRef(options.onDeleted);
@@ -35,7 +35,7 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
   const [prefs, setPrefsState] = useState(() => readPrefs(storage()));
   const setPrefs = useCallback((next: PickerPrefs) => { setPrefsState(next); writePrefs(storage(), next); }, []);
 
-  const locate = useMemo(() => createLocationResolver(state.projects, []), [state.projects]);
+  const locate = useMemo(() => createLocationResolver(options.projectCatalog ?? state.projects, []), [state.projects, options.projectCatalog]);
   // A start shows at once, as a working row named by its first line, until Pi's own row replaces it.
   const rows = useMemo(() => {
     // Once Pi lists the session, its own row stands in for the placeholder.
@@ -46,15 +46,16 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
       activities: { ...state.activities, ...Object.fromEntries(pending.map((item) => [item.id, { phase: "active" as const, activeSince: item.startedAt }])) },
     });
   }, [state.sessions, state.statuses, state.activities, state.unread, starting, locate, now]);
+  const scopedRows = useMemo(() => options.projectScope === undefined ? rows : rows.filter((row) => options.projectScope?.includes(row.location.projectKey)), [rows, options.projectScope]);
   const view: PickerView = useMemo(() => ({
     connection: state.connection,
-    sections: boardSections(rows, { grouping: prefs.grouping, showArchived: prefs.showArchived, allPinned: prefs.allPinned, selectedId, now }),
+    sections: boardSections(scopedRows, { grouping: prefs.grouping, showArchived: prefs.showArchived, allPinned: prefs.allPinned, selectedId, now }),
     machines: 1,
     selectedId,
-    archivedCount: rows.filter((row) => row.state === "archived").length,
+    archivedCount: scopedRows.filter((row) => row.state === "archived").length,
     toast: actionState.toast,
     pending: actionState.pending,
-  }), [state.connection, rows, prefs.grouping, prefs.showArchived, prefs.allPinned, now, selectedId, actionState]);
+  }), [state.connection, scopedRows, prefs.grouping, prefs.showArchived, prefs.allPinned, now, selectedId, actionState]);
   /** Where the newest unarchived session lives, for a new session's default folder. */
   const recent = useMemo(() => state.sessions.filter((session) => !session.archived).map((session) => ({ cwd: session.cwd, modified: session.modified })), [state.sessions]);
   const find = useCallback((id: string) => {

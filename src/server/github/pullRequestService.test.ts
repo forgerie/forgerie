@@ -42,6 +42,30 @@ function fixture(store = new PullRequestStore(), publishUnlinked?: (link: PullLi
 }
 
 describe("PR backend public contracts", () => {
+  it("keeps equal-number PRs and watches separate for two repositories owned by one chat", async () => {
+    const store = new PullRequestStore();
+    const target = { id: ref.id, cwd: "/related-b" };
+    const repoFor = (cwd: string) => cwd === target.cwd ? "owner/b" : "owner/repo";
+    const merges: string[] = [];
+    const service = new PullRequestService({ store, now: () => Date.parse(PR_TIME), onError: (error) => { throw error; },
+      github: {
+        repo: (cwd) => Promise.resolve({ slug: repoFor(cwd), everyone: false }),
+        pull: (cwd, number) => Promise.resolve(pullSnapshot({ repo: repoFor(cwd), number })),
+        mergePull: (cwd) => { merges.push(cwd); return Promise.resolve({ text: "Merged" }); },
+      },
+      sessions: { inspect: (selected) => Promise.resolve({ ref: selected, available: true, settled: false, leaf: "start" }), wake: () => Promise.resolve("delivered") },
+    });
+    await service.link(ref, 9); await service.link(target, 9);
+    await service.watch(ref, 9); await service.watch(target, 9);
+    expect((await service.list(ref)).items.map((item) => item.link.repo)).toEqual(["owner/repo"]);
+    expect((await service.list(target)).items.map((item) => item.link.repo)).toEqual(["owner/b"]);
+    await service.stopRef(target);
+    expect(store.get(k9)?.watch.kind).toBe("watching");
+    expect(store.get({ id: ref.id, repo: "owner/b", number: 9 })?.watch.kind).toBe("stopped");
+    await service.merge(target, PR_SHA, "rebase", { repo: "owner/b", number: 9 });
+    expect(merges).toEqual([target.cwd]);
+    expect(store.get(k9)?.watch.kind).toBe("watching");
+  });
   it("links, starts idempotently, checkpoints news, and stops without merging", async () => {
     const f = fixture();
     await f.service.created({ ...ref, repo: "owner/repo", number: 9 });

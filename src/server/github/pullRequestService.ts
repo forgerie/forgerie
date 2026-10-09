@@ -131,7 +131,14 @@ export class PullRequestService {
   /** Stop one pull request's watch, or with no number every watch the session has. */
   async stopRef(ref: PullSessionRef, number?: number): Promise<PullLink | PullLink[] | undefined> {
     await this.requireSession(ref);
-    if (number === undefined) { this.records(ref); return this.stop(ref.id); }
+    if (number === undefined) {
+      const stopped: PullLink[] = [];
+      for (const record of this.records(ref)) {
+        const next = await this.stopKey(keyOf(record), "Stopped by request.");
+        if (next !== undefined) stopped.push(next);
+      }
+      return stopped;
+    }
     return this.stopKey(keyOf(this.resolve(ref, number)), "Stopped by request.");
   }
 
@@ -252,9 +259,9 @@ export class PullRequestService {
   }
   /** The session's links, checked against the workspace the caller named. */
   private records(ref: PullSessionRef): PullRecord[] {
-    const records = this.deps.store.forSession(ref.id);
-    if (records.some((record) => record.session.cwd !== ref.cwd)) throw new Error("The PR link belongs to another workspace.");
-    return records;
+    // A single chat can own secondary repository workspaces. The session gateway
+    // validates those aliases; reads select only the explicitly requested target.
+    return this.deps.store.forSession(ref.id).filter((record) => record.session.cwd === ref.cwd);
   }
   private resolve(ref: PullSessionRef, number: number): PullRecord {
     const matches = this.records(ref).filter((record) => record.number === number);

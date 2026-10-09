@@ -48,7 +48,9 @@ export class PullRequestStore {
   link(input: { id: string; cwd: string; repo: string; number: number }): Promise<PullRecord> {
     return this.exclusive(async () => {
       const cwd = canonicalizeStoredCwd(input.cwd);
-      const other = this.records.find((record) => record.session.id === input.id);
+      // A chat may link PRs from several owned workspaces. The workspace of an
+      // existing PR link stays immutable; a different PR is an independent key.
+      const other = this.records.find((record) => sameKey(record, input));
       if (other !== undefined && other.session.cwd !== cwd) throw new Error("Session link belongs to another workspace.");
       const current = this.get(input);
       if (current !== undefined) return current;

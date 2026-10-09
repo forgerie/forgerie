@@ -8,6 +8,12 @@ here at its first call site, with its part and one line below.
 
 One line per component: the name in backticks, its layer, and what it decides.
 
+- `TextSubmit` (molecule): keeps a text entry and its submit action together through reflow and retries.
+- `ActionButton` (molecule): exposes a labeled action with a full-size hit target.
+- `ActionCard` (molecule): keeps an item's identity, status and actions together as it reflows.
+- `ChoiceSelect` (molecule): combines a labeled choice with an optional management action.
+- `DialogPanel` (organism): opens window-level content with a reachable close action and a scroll region.
+- `CollectionEditor` (organism): edits named selections without losing an unsaved draft on a refused write.
 - `CopyButton` (molecule): copies text on press and reports the result in a live region.
 - `EventLine` (molecule): one quiet line for something that happened, with a tone dot, a time, an always-visible quote, and details on request.
 - `AlertCard` (molecule): a failure that may need the reader: title, explanation, code, actions, and an output panel the actions fill.

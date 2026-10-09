@@ -43,6 +43,10 @@ import { ProjectScopedSpawnTargetResolver } from "./sessions/spawnTargetResolver
 import { RegisteredProjectWorkspaceCwds } from "./workspaces/projectWorkspaceCwds.js";
 import { ProjectService } from "./projects/projectService.js";
 import { ProjectStore, projectStorePath } from "./storage/projectStore.js";
+import { ProjectGroups } from "./projects/projectGroups.js";
+import { ProjectWorkspaces } from "./projects/projectWorkspaces.js";
+import { relatedPullSessions } from "./projects/relatedPullSessions.js";
+import { registerProjectGroupRoutes } from "./projects/projectGroupRoutes.js";
 import { WorkspaceService } from "./workspaces/workspaceService.js";
 import { SessionWorktreeStore } from "./workspaces/sessionWorktreeStore.js";
 import { SessionWorktrees } from "./workspaces/sessionWorktrees.js";
@@ -152,9 +156,18 @@ async function createSessionDaemonRuntime() {
   await worktreeStore.initialize(await archiveStore.list());
   const sessionWorktrees: SessionWorktrees = new SessionWorktrees(worktreeStore, {
     publish(record) {
+      // A secondary checkout must never replace the chat's primary worktree in existing clients.
+      if (record.relatedSession !== undefined) return;
       const event = { type: "session.worktree", worktree: record } as const;
       eventHub.publishGlobal(event);
       for (const id of new Set([...(record.sessionId === undefined ? [] : [record.sessionId]), ...record.transcripts.map((item) => item.id)])) eventHub.publish(id, event);
+    },
+    async beforeRelatedAction(record, actorId) {
+      const ref = record.relatedSession;
+      if (ref === undefined || !(await sessions.inspectPullSession(ref)).available) return;
+      const status = await sessions.status(ref);
+      if ((actorId !== ref.id && (status.isStreaming || status.isCompacting || status.isBashRunning))
+        || (status.runningProcesses ?? 0) > 0 || (status.workingAgents ?? 0) > 0) throw new Error("Stop the owning session's run, processes and agents before removing this worktree.");
     },
     async beforeRemoval(record) {
       const affected = await sessions.prepareWorktreeRemoval(record.path);
@@ -163,6 +176,9 @@ async function createSessionDaemonRuntime() {
     },
   });
   await sessionWorktrees.initialize();
+  const groups = new ProjectGroups(join(piWebDataDir(daemonEnvironment), "project-groups.json"), projectWorkspaceDeps.projects);
+  const relatedWork = new ProjectWorkspaces({ ...projectWorkspaceDeps, groups, worktrees: sessionWorktrees, agentDir: activeAgentProfile.dir,
+    writable: async (ref) => { await sessionWorktrees.store.assertWritable(ref); return (await sessions.inspectPullSession(ref)).available; } });
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
     modelRuntime: auth.runtime,
     agentDir: activeAgentProfile.dir,
@@ -174,10 +190,12 @@ async function createSessionDaemonRuntime() {
     ...(spawnTargets === undefined ? {} : { spawnTargets }),
     projectWorkspaces,
     sessionWorktrees,
+    projectTools: { work: relatedWork, worktrees: sessionWorktrees },
     subsessionsEnabled: config.subsessions,
     askUserEnabled: config.askUser,
     codemodeEnabled: config.codemode,
     github: {
+      target: (ref, id) => relatedWork.toolCwd(ref, id),
       read: (cwd, request) => githubAgent.read(cwd, request),
       write: (cwd, id, request) => githubAgent.write(cwd, id, request),
       watch: (cwd, id, action, number) => action === "start" ? pulls.watch({ id, cwd }, number) : pulls.stopRef({ id, cwd }, number),
@@ -198,7 +216,11 @@ async function createSessionDaemonRuntime() {
     }),
   }));
   const pulls: PullRequestService = new PullRequestService({ github: githubAgent, store: pullStore,
-    sessions: { inspect: (ref) => sessions.inspectPullSession(ref), wake: (ref, notice, current) => sessions.wakePullSession(ref, notice, current), note: (ref, note) => sessions.notePullSession(ref, note) },
+    sessions: relatedPullSessions(relatedWork, {
+      inspect: (ref) => sessions.inspectPullSession(ref),
+      wake: (ref, notice, current) => sessions.wakePullSession(ref, notice, current),
+      note: (ref, note) => sessions.notePullSession(ref, note),
+    }),
     publish: (link) => {
       eventHub.publish(link.session.id, { type: "session.pull-request", link });
       eventHub.publishGlobal({ type: "session.pull-request", link });
@@ -224,16 +246,17 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
-  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github, pulls };
+  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions, backlog, github, pulls }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects }: SessionDaemonRuntime): void {
   registerBacklogRoutes(app, backlog);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerAuthRoutes(app, auth);
   registerSessionWorktreeRoutes(app, userSessions);
+  registerProjectGroupRoutes(app, groups, projects, relatedWork);
   registerSessionRoutes(app, sessions, eventHub, "", userSessions);
   registerProcessRoutes(app, sessions);
   registerTerminalRoutes(app, terminals);

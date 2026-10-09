@@ -1,3 +1,4 @@
+import type { RelatedWorkRenderer } from "./projectGroups/relatedWork";
 import { createReadTracker } from "./readReceipt";
 import { afterTranscriptPaint } from "./readPaint";
 import { contextUse } from "./contextUse";
@@ -52,7 +53,8 @@ const pullRequests = createPullRequestApi(browserTransport.request);
 const NO_LINKS: readonly PullLink[] = [];
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, worktrees, onNewSession }: {
+export function ForgerieSession({ id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, worktrees, onNewSession, relatedWork }: {
+  relatedWork?: RelatedWorkRenderer | undefined;
   /** The catalog's live view of this session's pull request link and watch. */
   pullRequests?: readonly PullLink[] | undefined;
   onUnread?: ((listener: (id: string) => void) => () => void) | undefined;
@@ -104,7 +106,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const [review, setReview] = useState<{ focusNoteId?: string }>();
   const changes = useMemo(() => cwd ? { source: createChangesSource(cwd, browserTransport.request), files: createFilesSource(cwd, browserTransport.request) } : undefined, [cwd]);
   const pullRef = useMemo(() => sessionId && cwd ? { id: sessionId, cwd } : undefined, [sessionId, cwd]);
-  const pull = useSessionPulls(pullRequests, pullRef, catalogPulls ?? NO_LINKS);
+  const ownPulls = useMemo(() => catalogPulls?.filter((link) => link.session.cwd === cwd) ?? NO_LINKS, [catalogPulls, cwd]);
+  const pull = useSessionPulls(pullRequests, pullRef, ownPulls);
   const [pullOpen, setPullOpen] = useState(false);
   const [pullSelected, setPullSelected] = useState<number>();
   const pullItems = pull.load.type === "ready" ? pull.load.items : [];
@@ -225,7 +228,11 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
         head={setup && <WorktreeSetupCard setup={setup} hookSeen={setup.log !== ""} branch={worktree?.branch} />}
-        inputContext={worktree && worktree.state.kind === "active" ? <WorktreeChip info={worktree} /> : undefined}
+        inputContext={<>{worktree && worktree.state.kind === "active" ? <WorktreeChip info={worktree} /> : null}
+          {sessionId && cwd && relatedWork?.({ id: sessionId, cwd }, busy, catalogPulls ?? NO_LINKS, (text) => {
+            const composer = runtimeRef.current?.thread.composer;
+            if (composer) composer.setText([composer.getState().text, text].filter(Boolean).join("\n\n"));
+          })}</>}
         readOnly={readOnly ? <WorktreeReceipt state={worktree?.state} defaultBranch={worktree?.defaultBranch}
           branch={worktree?.branch} onNew={onNewSession} /> : undefined} commands={{ catalog: state.commands, onRetry: () => void store.loadCommands() }}
         compaction={{ state: state.compaction, disabled: state.sending || state.connection.type !== "ready",
