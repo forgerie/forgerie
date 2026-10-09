@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i bash -p nodejs_22 chromium
+#!nix-shell -i bash -p nodejs_24 chromium
 set -euo pipefail
 export CHROME_BIN="$(command -v chromium)"
 root="${FORGERIE_ROOT:-$(realpath ../..)}"

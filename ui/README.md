@@ -11,8 +11,8 @@ The app is an installable PWA. Install it from the browser menu; it opens full s
 Keep Forgerie running on `http://127.0.0.1:8504`. From this directory:
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm ci
-nix shell nixpkgs#nodejs_22 -c npm run dev
+nix shell nixpkgs#nodejs_24 -c npm ci
+nix shell nixpkgs#nodejs_24 -c npm run dev
 ```
 
 Open `http://[::1]:8510/?session=<existing-session-id>` locally, or use the server's Tailscale address on port 8510. Voice dictation on a remote device needs [HTTPS setup](verification/dictation.md).
@@ -50,8 +50,8 @@ This app was built on the orphan branch `new-ui-mvp` (tag `new-ui-mvp-orphan` ke
 ## Verify
 
 ```sh
-nix shell nixpkgs#nodejs_22 -c npm run verify
-nix shell nixpkgs#nodejs_22 -c npm audit
+nix shell nixpkgs#nodejs_24 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm audit
 ```
 
 See [verification](verification/README.md) for the real-session acceptance command, posture captures, evidence, and limits. Sending through that command changes the selected session's real history and incurs normal model usage.

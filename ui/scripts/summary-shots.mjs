@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Captures the history summary rows (compaction and branch) at every posture in both color schemes.
 import { spawnSync } from "node:child_process";
 import { resolve, join } from "node:path";

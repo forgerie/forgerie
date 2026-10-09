@@ -190,4 +190,6 @@ All Forgerie UI work follows intrinsic design principles:
 - Dev commands (inherited, still valid until we change them):
   - `npm install` then `npm run dev` (sessiond + web + client watchers)
   - `npm run verify` (typecheck, lint, knip, tests) — run before commits
-  - Node >= 22.19.0; on this machine use `nix shell nixpkgs#nodejs_22`
+  - Develop, test, and deploy on Node 24: `nix shell nixpkgs#nodejs_24`.
+    Caliper needs Node 24 to run the `ui/` dev server. The published
+    package still declares `node >= 22.19.0`; nothing tests that floor.

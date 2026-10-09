@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#! nix-shell -i bash -p nodejs_22 chromium
+#! nix-shell -i bash -p nodejs_24 chromium
 # Captures handoff and spawn doors, closed and expanded, in every Fold posture and theme.
 set -euo pipefail
 export CHROME_BIN="$(command -v chromium)"

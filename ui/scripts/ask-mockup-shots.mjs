@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Capture the ask-mode mockup: the full state sheet in both themes, then chosen
 // states at the four Fold postures. Requires the dev server on 8510.
 import { spawnSync } from "node:child_process";

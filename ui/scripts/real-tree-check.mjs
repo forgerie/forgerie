@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Real-session check of the session tree. It never moves SESSION_ID: it forks
 // SESSION_ID from its second user message, moves only the fork back to the
 // first user message, then archives the fork. No prompt is sent and no model runs.

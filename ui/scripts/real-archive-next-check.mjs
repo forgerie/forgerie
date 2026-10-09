@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Real-session check of "Archive and next". It never archives SESSION_ID: it
 // forks SESSION_ID into a throwaway session, opens the fork, presses
 // "Archive and next", and checks that the fork is archived and the app moved

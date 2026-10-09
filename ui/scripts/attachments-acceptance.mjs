@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Creates and deletes only its own scratch session. Costs two short model replies.
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";

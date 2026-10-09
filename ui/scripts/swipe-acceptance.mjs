@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Real touch input on the session sheet at every Fold posture: a swipe right
 // opens it, a swipe left closes it, a short swipe falls back, a vertical
 // scroll and a drag in sideways-scrolling code do not move it. Read-only:

@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i bash -p nodejs_22 chromium
+#!nix-shell -i bash -p nodejs_24 chromium
 # Run the column measurement against a live Forgerie instance.
 # Usage: measure-column.sh <url> <width>x<height> [...]
 set -euo pipefail

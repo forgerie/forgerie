@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Fold posture captures of the shell fixtures, through the canonical posture script.
 import { spawnSync } from "node:child_process";
 import { resolve, join } from "node:path";

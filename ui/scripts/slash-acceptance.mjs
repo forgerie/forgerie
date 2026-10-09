@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Real composer interaction on deterministic fixtures; optional read-only Pi /session smoke.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -1,6 +1,6 @@
 // Read-only. Loads a real session's history from Forgerie and checks that the
 // transcript keeps every renderable tool image the API returns.
-// Run: nix shell nixpkgs#nodejs_22 -c ../../node_modules/.bin/tsx scripts/real-images-check.ts <sessionId> <cwd>
+// Run: nix shell nixpkgs#nodejs_24 -c ../../node_modules/.bin/tsx scripts/real-images-check.ts <sessionId> <cwd>
 import assert from "node:assert/strict";
 import { historySchema } from "../src/contracts";
 import { fromHistory } from "../src/transcript";

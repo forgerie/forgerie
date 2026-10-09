@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Uses one model prompt in a scratch Pi session. A controlled bash producer
 // keeps the run alive during reload and second-tab attachment. No existing
 // session is prompted, and the browser must send no mutating API requests.

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Rich code blocks and editor commands in the composer, with real Chromium key
 // input against the network-free fixture, at every Fold posture in both themes.
 import assert from "node:assert/strict";

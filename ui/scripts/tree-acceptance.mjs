@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Session tree navigator: geometry on the Fold matrix and two awkward shapes,
 // state kept across fold and rotation, and the keyboard flow. Network-free preview.
 import assert from "node:assert/strict";

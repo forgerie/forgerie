@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#espeak-ng -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#espeak-ng -c node
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

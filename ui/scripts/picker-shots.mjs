@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Read-only captures of the open session picker against the live catalog.
 // Opens the app at each Fold posture and scheme, plus a docked 1280 x 860
 // window, opens the sheet, and saves the picker's own box as a PNG. It never

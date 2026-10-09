@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // New sessions through the real app and API. In a scratch folder it starts one
 // session from the dialog, then a second in Rapidfire from Ctrl+Enter. Each sends
 // one short first message (normal model usage). Both are archived afterwards.

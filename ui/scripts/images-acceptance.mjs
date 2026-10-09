@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Fixture-only: drives the reply gallery and image viewer with real input in
 // every Fold posture and theme. Calls no API and costs no model replies.
 import assert from "node:assert/strict";

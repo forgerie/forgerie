@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Fold 8 posture captures of the changes review and the note tray, both color schemes. Network-free.
 import { spawnSync } from "node:child_process";
 import { resolve, join } from "node:path";

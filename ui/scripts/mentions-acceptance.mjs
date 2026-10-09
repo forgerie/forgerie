@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Real input on a configured, network-free source. Read-only live discovery is optional.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Deterministic model and thinking-level fixtures. No API mutations or model calls.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

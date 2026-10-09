@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // End-to-end `!` commands against the real Forgerie API. It creates its own
 // scratch session in a temp folder and archives it afterwards. One short
 // prompt makes Pi save the session so the catalog lists it; that prompt costs

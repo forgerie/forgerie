@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium nixpkgs#bash --command bash
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium nixpkgs#bash --command bash
 # Capture the ask-form fixture scenarios at the four Fold postures in both themes.
 # The fixture is network-free. Requires the dev server on 8510.
 set -euo pipefail

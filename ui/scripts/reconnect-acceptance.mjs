@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Read-only real-client recovery. CDP takes the browser offline; no API request
 // interception, prompts, daemon restarts, or production writes are involved.
 import assert from "node:assert/strict";

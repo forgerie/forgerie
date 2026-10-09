@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Capture the GitHub backlog states (the real components on fixtures): one sheet of every state per Fold posture and
 // colour scheme (each state is its own iframe viewport at that posture), then
 // chosen states full page. Requires the dev server (APP_URL, default port 8510).

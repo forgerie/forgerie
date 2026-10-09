@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium nixpkgs#git -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium nixpkgs#git -c node
 // Session worktrees through the real app and API, in a disposable Git repository:
 // create (with a post-create hook), counts, a Land conflict offered to the agent,
 // Land, Discard, an existing-workspace opt-out, and archive cleanup (removed and

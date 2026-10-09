@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Sending while working, against the real Forgerie API and Pi's real queue.
 // It creates its own scratch session in a temp folder and archives it
 // afterwards. Each run asks the agent to sleep in bash, so a queue can form;

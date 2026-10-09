@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Read-only check against a real session: every successful handoff_session and
 // spawn_session result in history renders one door, a door opens its session,
 // and browser Back returns. Sends no prompt and makes no API write.

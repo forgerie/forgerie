@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#git -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#git -c node
 // Research probe only. All mutable fixtures live in a new temporary directory.
 // Usage: ./probe.mjs /absolute/path/to/forgerie/node_modules/@earendil-works/pi-coding-agent
 import assert from "node:assert/strict";

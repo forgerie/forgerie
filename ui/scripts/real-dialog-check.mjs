@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Extension dialogs against the real Forgerie API and a real Pi extension.
 // It creates a scratch folder with a test-only project extension
 // (scripts/fixtures/dialog-probe-extension.ts), creates a session there, and

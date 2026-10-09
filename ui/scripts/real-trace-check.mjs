@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Read-only check against a real session: every tool call in history renders as
 // exactly one tool line, reasoning blocks match, and a screenshot is saved to
 // ignored local evidence. Sends nothing.

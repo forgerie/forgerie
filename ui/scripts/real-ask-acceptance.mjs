@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // End-to-end ask_user check against the real Forgerie API. It creates its own
 // scratch session, so no existing session is prompted. Each run sends two
 // prompts to the default model and costs normal model usage.

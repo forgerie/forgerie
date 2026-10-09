@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Read-only check against a real session: every `/skill:` invocation in history
 // renders as one command record, every SKILL.md read renders as one skill load
 // outside the tool activity, and no raw skill block reaches a bubble. Sends nothing.

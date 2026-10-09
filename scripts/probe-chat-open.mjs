@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium --command node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium --command node
 // Probe Forgerie's observable chat-opening timings with real row activation.
 //
 // Examples:

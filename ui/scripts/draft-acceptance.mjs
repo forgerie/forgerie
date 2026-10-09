@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Draft protection against the real Forgerie API, in a real browser.
 // It creates one scratch session with an open ask: one model prompt, plus the
 // model's reply after Skip. The second session is an existing one, opened

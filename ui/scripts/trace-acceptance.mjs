@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Opens reasoning, tool groups, and tool cards in the fixture entry point at
 // every Fold posture and color scheme, checks layout, and saves screenshots.
 import assert from "node:assert/strict";

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Read-only live check. Opens a session that is running tools, samples the
 // rendered trace while it works, then compares tool lines with the API history.
 // Sends nothing to the session.

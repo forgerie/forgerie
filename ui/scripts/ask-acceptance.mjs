@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Ask mode acceptance on the network-free fixture: one bar with one input, the
 // draft returns, and the bar fits every posture.
 import assert from "node:assert/strict";

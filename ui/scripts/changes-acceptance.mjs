@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Interaction checks for the changes review: the files tree, the CodeMirror diff, and notes.
 // Runs at every Fold posture and a 1440 × 900 desktop window, in both color schemes, against
 // the network-free preview. Saves a capture of each posture's arrival and open file to OUT.

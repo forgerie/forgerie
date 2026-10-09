@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nix shell nixpkgs#nodejs_22 nixpkgs#chromium -c node
+#!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Deterministic new-session fixtures. A local API in the preview; no network requests or model calls.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
