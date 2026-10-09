@@ -4,6 +4,7 @@ import { usePicker, type StartingSession } from "./usePicker";
 import type { Row } from "./picker/board";
 import type { Session } from "./contracts";
 import { AppShell } from "./ui/AppShell";
+import { useFullscreen } from "./ui/useFullscreen";
 import { Picker, PickerToast } from "./ui/Picker";
 import { SessionFrame } from "./ui/SessionFrame";
 import { browserStorage, createDraftStore } from "./draftStore";
@@ -85,6 +86,7 @@ export function App() {
   const [composeKey, setComposeKey] = useState(0);
   // Unsent drafts outlive a session switch and a reload, in this browser only.
   const [drafts] = useState(() => createDraftStore(browserStorage()));
+  const fullscreen = useFullscreen();
   // Starts outlive the dialog. Their progress arrives on the picker's event socket.
   const [startup] = useState(() => {
     const listeners = new Set<StartupListener>();
@@ -333,6 +335,7 @@ export function App() {
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
         onBacklog: () => placeBacklog(backlog ?? {}), backlogOpen: backlog !== undefined,
         backlogCount: backlogItems ? openCount(backlogItems) : undefined,
+        onFullscreen: fullscreen.state.type === "unsupported" ? undefined : fullscreen.toggle, fullscreen: fullscreen.state.type === "fullscreen",
         onClose: layout === "overlay" && (selectedId || settings || backlog) ? () => setOpen(false) : undefined }} />}
     // `known` is read once, when the thread mounts for this id. A direct URL
     // load before the catalog arrives passes nothing and the store looks it up.

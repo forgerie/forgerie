@@ -124,7 +124,8 @@ button:disabled { cursor: default; opacity: 0.4; }
   content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
   inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
 .sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-#root { block-size: 100dvh; }
+/* viewport-fit=cover: the installed app runs full screen, so keep the shell out of a camera cutout or system bar. The composer pads the bottom itself. */
+#root { block-size: 100dvh; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
 .session-shell { container-type: size; block-size: 100%; display: flex; flex-direction: column; min-inline-size: 0; }
 /* Thread header from shell.tsx: h-12, px-4 md:px-5, gap-2, title 13px medium. */
 .session-header { flex: none; block-size: var(--header-size); display: flex; align-items: center; gap: var(--space-2); padding-inline: clamp(1rem, 2.6cqi, 1.25rem); border-block-end: 1px solid var(--line); }
@@ -697,6 +698,9 @@ summary.trace-line:hover { color: var(--foreground); }
 /* The undo offer over a closed sheet: under the header, across the reading column, never over the composer. */
 .app-toast { position: absolute; z-index: 20; inset-block-start: var(--header-size); inset-inline: 0; display: flex; justify-content: center; padding-inline: var(--gutter); pointer-events: none; }
 .app-toast > .picker-toast { pointer-events: auto; inline-size: min(100%, var(--thread-max-width)); margin-inline: 0; }
+/* A new deployed build: under the header, above the sheet and the thread, so it shows whichever is open. */
+.app-update { position: fixed; z-index: 50; inset-block-start: calc(env(safe-area-inset-top) + var(--header-size)); inset-inline: 0; display: flex; justify-content: center; padding-inline: var(--gutter); pointer-events: none; }
+.app-update > .picker-toast { pointer-events: auto; inline-size: min(100%, var(--thread-max-width)); margin-inline: 0; }
 .app-picker { min-inline-size: 0; min-block-size: 0; block-size: 100%; background: var(--background); }
 .app-shell[data-layout="docked"] .app-picker { background: var(--tint-surface); border-inline-end: 1px solid var(--line); }
 .app-shell[data-layout="overlay"] .app-picker { position: absolute; z-index: 3; inset-block: 0; inset-inline-start: 0; inline-size: min(18rem, calc(100% - 3rem)); border-inline-end: 1px solid var(--line); box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); transition: transform 300ms ease-in-out, visibility 300ms; }
@@ -779,6 +783,8 @@ summary.trace-line:hover { color: var(--foreground); }
    They share one row, so the list loses no height to the second entry. */
 .picker-footer { flex: none; display: flex; gap: var(--space-1); padding: var(--space-1) var(--space-2) var(--space-2); border-block-start: 1px solid var(--line); }
 .picker-footer .picker-new { flex: 1 1 0; min-inline-size: 0; margin: 0; inline-size: auto; }
+/* Full screen is a toggle, not a place: an icon at the row's end, so Backlog and Settings keep their width. */
+.picker-footer .picker-footer-icon { flex: none; inline-size: var(--control-size); justify-content: center; padding-inline: 0; }
 /* The open-item count is a readout: it truncates before the entry's name does.
    It sits against its own name in a chip. Pushed to the button's far edge it
    landed beside Settings and read as Settings' number. */

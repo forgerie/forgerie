@@ -1,4 +1,4 @@
-import { AnvilIcon, ArchiveIcon, ListTodoIcon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+import { AnvilIcon, ArchiveIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -43,6 +43,9 @@ export interface PickerActions {
   backlogOpen?: boolean | undefined;
   /** Open items across every project. Absent until the backlog is read. */
   backlogCount?: number | undefined;
+  /** Toggles browser full screen. Absent when the browser cannot. */
+  onFullscreen?: (() => void) | undefined;
+  fullscreen?: boolean | undefined;
 }
 
 const PIN = <PinIcon className="picker-pin" aria-hidden />;
@@ -299,6 +302,9 @@ export function Picker({ view, prefs, onPrefs, actions, message }: {
           : <span className="picker-footer-count" aria-hidden="true">{actions.backlogCount}</span>}</button> : null}
       {actions.onSettings ? <button className="picker-new" onClick={actions.onSettings} aria-current={actions.settingsOpen ? "page" : undefined}>
         <SettingsIcon aria-hidden size={16} />Settings</button> : null}
+      {actions.onFullscreen ? <button className="picker-new picker-footer-icon" onClick={actions.onFullscreen}
+        aria-label={actions.fullscreen ? "Exit full screen" : "Full screen"} title={actions.fullscreen ? "Exit full screen" : "Full screen"}>
+        {actions.fullscreen ? <Minimize2Icon aria-hidden size={16} /> : <Maximize2Icon aria-hidden size={16} />}</button> : null}
     </div> : null}
   </section>;
 }

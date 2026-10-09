@@ -29,6 +29,10 @@ describe("production client build contents", () => {
       expect(references).toContainEqual(expect.stringMatching(/^\.\/assets\/index-[^/]+\.js$/u));
       expect(references.filter((reference) => reference.startsWith("/"))).toEqual([]);
 
+      // The open app compares its entry script with this file to offer a refresh.
+      const published = JSON.parse(await readFile(join(outDir, "build.json"), "utf8")) as { entry: string };
+      expect(references).toContain(`./assets/${published.entry}`);
+
       const manifest: unknown = JSON.parse(await readFile(join(outDir, "manifest.webmanifest"), "utf8"));
       expect(manifest).toMatchObject({
         name: "Forgerie",
