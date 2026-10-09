@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Status chip as the first indicator</title>
+<!--
+  Mockup: the header status chip replaces the red notice bar above the chat.
+  Pick a scene with ?scene=<name>. Scenes are listed in SCENES below.
+  Tokens and fonts match ui/src/ui/theme.css, so the mock is judged in the
+  shipped palette for both colour schemes.
+-->
+<style>
+@font-face { font-family: "Public Sans Variable"; font-weight: 100 900; font-display: block;
+  src: url(../session-picker-states/fonts/public-sans-latin-wght-normal.woff2) format("woff2"); }
+@font-face { font-family: "JetBrains Mono Variable"; font-weight: 100 800; font-display: block;
+  src: url(../session-picker-states/fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2"); }
+
+:root {
+  color-scheme: light dark;
+  --tint: 106;
+  --background: oklch(0.992 0.002 var(--tint));
+  --foreground: oklch(0.145 0.006 var(--tint));
+  --muted: oklch(0.97 0.004 var(--tint));
+  --muted-foreground: oklch(0.556 0.007 var(--tint));
+  --destructive: oklch(0.577 0.245 27.325);
+  --line: color-mix(in oklab, var(--foreground) 10%, transparent);
+  --line-focus: color-mix(in oklab, var(--foreground) 25%, transparent);
+  --code-surface: color-mix(in oklab, var(--foreground) 4%, var(--background));
+  --tint-surface: color-mix(in oklab, var(--foreground) 2.5%, var(--background));
+  --popover: var(--background);
+  --hover-surface: color-mix(in oklab, var(--foreground) 4%, transparent);
+  --active-surface: color-mix(in oklab, var(--foreground) 6%, transparent);
+  --quiet-foreground: color-mix(in oklab, var(--foreground) 70%, transparent);
+  --body-font: "Public Sans Variable", sans-serif;
+  --code-font: "JetBrains Mono Variable", monospace;
+  --text-size: 0.9375rem;
+  --small-text: 0.8125rem;
+  --label-text: 0.75rem;
+  --meta-text: 0.6875rem;
+  --code-size: 0.78125rem;
+  --line-height: 1.625;
+  --thread-max-width: 42rem;
+  --radius-control: 0.5rem;
+  --radius-document: 0.375rem;
+  --radius-surface: 0.625rem;
+  --gutter: clamp(1rem, 2.6cqi, 1.5rem);
+  --control-size: 2.75rem;
+  --icon-size: 1.75rem;
+  --header-size: 3rem;
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-6: 1.5rem; --space-8: 2rem;
+  --hairline: 1px;
+  --live: oklch(0.623 0.214 259.815);
+  --live-wash: color-mix(in oklab, var(--live) 16%, transparent);
+  --destructive-wash: color-mix(in oklab, var(--destructive) 8%, var(--background));
+  --scrim-shadow: oklch(0 0 0 / 0.16);
+  --diff-modify: oklch(0.6 0.13 70);
+  --tone-warn: var(--diff-modify);
+  --ink-warn: color-mix(in oklab, var(--diff-modify) 70%, var(--foreground));
+  --ink-live: color-mix(in oklab, var(--live) 75%, var(--foreground));
+  --warn-wash: color-mix(in oklab, var(--diff-modify) 8%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.17 0.003 var(--tint));
+    --foreground: oklch(0.985 0.002 var(--tint));
+    --muted: oklch(0.275 0.004 var(--tint));
+    --muted-foreground: oklch(0.708 0.004 var(--tint));
+    --destructive: oklch(0.704 0.191 22.216);
+    --popover: oklch(0.215 0.003 var(--tint));
+    --tint-surface: color-mix(in oklab, var(--foreground) 4%, var(--background));
+    --scrim-shadow: oklch(0 0 0 / 0.4);
+    --diff-modify: oklch(0.76 0.13 80);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { block-size: 100%; margin: 0; }
+body { background: var(--background); color: var(--foreground); font-family: var(--body-font); font-size: var(--text-size);
+  -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; }
+svg { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+:focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
+
+/* ---------- The session shell, as shipped ---------- */
+.session-shell { container-type: size; position: relative; block-size: 100dvh; display: flex; flex-direction: column; min-inline-size: 0; }
+.session-header { flex: none; block-size: var(--header-size); display: flex; align-items: center; gap: var(--space-2);
+  padding-inline: clamp(1rem, 2.6cqi, 1.25rem); border-block-end: 1px solid var(--line); }
+.session-title { flex: 1; min-inline-size: 0; margin: 0; font-size: var(--small-text); font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon-button { position: relative; display: grid; place-items: center; flex: none; inline-size: var(--icon-size); block-size: var(--icon-size);
+  padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
+.icon-button svg { inline-size: 1.125rem; block-size: 1.125rem; }
+.icon-button::before, .status-chip::after { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
+.icon-button + .icon-button { margin-inline-start: var(--space-2); }
+
+/* Today's red bar, kept for the "before" scene. */
+.notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) var(--gutter); color: var(--destructive);
+  background: color-mix(in oklab, var(--destructive) 5%, var(--background)); font-size: var(--text-size); }
+.notice p { flex: 1; margin: 0; }
+
+/* ---------- The chip ---------- */
+/* A chip with something more to say is a button: same pill, plus a chevron.
+   It keeps the control-size hit area through ::after, like every header icon. */
+.status-chip { --chip-ink: var(--muted-foreground); --chip-wash: color-mix(in oklab, var(--foreground) 6%, transparent);
+  position: relative; flex: none; display: inline-flex; align-items: center; gap: 0.375rem; block-size: 1.5rem;
+  margin-inline-end: var(--space-2); padding-inline: 0.625rem; border: 0; border-radius: 999px;
+  background: var(--chip-wash); color: var(--chip-ink); font-size: var(--label-text); font-weight: 500; line-height: 1; white-space: nowrap; }
+button.status-chip { padding-inline-end: 0.4375rem; }
+button.status-chip:hover, button.status-chip[aria-expanded="true"] { background: color-mix(in oklab, var(--chip-wash), var(--foreground) 8%); }
+.status-chip[data-tone="live"] { --chip-ink: var(--ink-live); --chip-wash: var(--live-wash); }
+.status-chip[data-tone="warn"] { --chip-ink: var(--ink-warn); --chip-wash: var(--warn-wash); }
+.status-chip[data-tone="bad"] { --chip-ink: var(--destructive); --chip-wash: color-mix(in oklab, var(--destructive) 12%, transparent); }
+.chip-dot { flex: none; inline-size: 6px; block-size: 6px; border-radius: 50%; }
+[data-tone="live"] > .chip-dot { border: 1.5px solid var(--live); animation: pulse 1.6s ease-in-out infinite; }
+[data-tone="warn"] > .chip-dot { border: 1.5px solid var(--tone-warn); animation: pulse 1.6s ease-in-out infinite; }
+[data-tone="bad"] > .chip-dot { background: var(--destructive); }
+.chip-chevron { inline-size: 0.75rem; block-size: 0.75rem; stroke-width: 2.5; opacity: 0.75; transition: rotate 160ms ease; }
+[aria-expanded="true"] > .chip-chevron { rotate: 180deg; }
+/* Problems that ride along with a different state: a count, in the failure tone. */
+.chip-count { display: grid; place-items: center; min-inline-size: 1rem; block-size: 1rem; padding-inline: 0.25rem; border-radius: 999px;
+  background: var(--destructive); color: var(--background); font-size: var(--meta-text); font-weight: 650; font-variant-numeric: tabular-nums; }
+/* A new problem rings the chip once. The bar is gone, so this is the one motion that asks for a look. */
+.status-chip[data-arrived]::before { content: ""; position: absolute; inset: -3px; border-radius: inherit;
+  border: 2px solid var(--destructive); opacity: 0; animation: ring 900ms ease-out 300ms 2; pointer-events: none; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@keyframes ring { 0% { opacity: 0.9; scale: 0.92; } 100% { opacity: 0; scale: 1.25; } }
+
+/* ---------- The panel ---------- */
+/* It opens from the chip, in the window's toast corner. Its width is a pure
+   function of the shell: 25rem while there is room, and edge to edge minus a
+   margin when there is not. Its height stops above the composer's edge and the
+   body scrolls inside it. */
+.status-panel { position: absolute; z-index: 10;
+  inset-block-start: calc(var(--header-size) + var(--space-1));
+  inset-inline-end: clamp(0.5rem, 2cqi, 1rem);
+  inline-size: min(25rem, 100cqi - 1rem);
+  max-block-size: calc(100cqb - var(--header-size) - var(--space-4));
+  display: flex; flex-direction: column; overflow: hidden;
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--popover);
+  box-shadow: 0 var(--space-2) var(--space-6) var(--scrim-shadow); font-size: var(--small-text);
+  transform-origin: top right; animation: panel-in 180ms cubic-bezier(.2,.8,.2,1); }
+@keyframes panel-in { from { opacity: 0; scale: 0.96; translate: 0 -4px; } }
+/* The chat dims under the panel, the header does not: the chip stays lit, so
+   the panel reads as the chip opened. A tap on the dimmed chat closes it. */
+.status-scrim { position: absolute; z-index: 9; inset: var(--header-size) 0 0; background: color-mix(in oklab, var(--background) 62%, transparent);
+  animation: scrim-in 180ms ease-out; }
+@keyframes scrim-in { from { opacity: 0; } }
+.panel-scroll { overflow-y: auto; overscroll-behavior: contain; }
+.panel-close { position: absolute; z-index: 1; inset-block-start: var(--space-1); inset-inline-end: var(--space-1);
+  display: grid; place-items: center; inline-size: 2.25rem; block-size: 2.25rem; padding: 0; border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--muted-foreground); }
+.panel-close:hover { background: var(--hover-surface); color: var(--foreground); }
+.panel-close svg { inline-size: 1rem; block-size: 1rem; }
+
+/* The state: a rail and a wash in the chip's tone, the AlertCard's grammar. */
+.state { --tone: var(--muted-foreground); --wash: transparent;
+  padding: var(--space-3) 2.75rem var(--space-4) calc(var(--space-4) - var(--hairline) * 3);
+  border-inline-start: calc(var(--hairline) * 3) solid var(--tone); background: var(--wash); }
+.state[data-tone="warn"] { --tone: var(--tone-warn); --wash: var(--warn-wash); }
+.state[data-tone="bad"] { --tone: var(--destructive); --wash: var(--destructive-wash); }
+.state[data-tone="live"] { --tone: var(--live); --wash: color-mix(in oklab, var(--live) 7%, transparent); }
+.state-title { display: flex; align-items: center; gap: var(--space-2); margin: 0; min-block-size: 1.75rem;
+  font-size: var(--text-size); font-weight: 600; }
+.state-lede { margin: var(--space-1) 0 0; color: var(--quiet-foreground); line-height: 1.55; text-wrap: pretty; }
+.state-lede strong { color: var(--foreground); font-weight: 600; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)); gap: var(--space-2) var(--space-4); margin: var(--space-3) 0 0; }
+.facts div { min-inline-size: 0; }
+.facts dt { color: var(--muted-foreground); font-size: var(--label-text); }
+.facts dd { margin: 0.125rem 0 0; font-weight: 550; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.state-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-block-start: var(--space-3); }
+.draft-safe { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--muted-foreground); font-size: var(--label-text); }
+.draft-safe svg { inline-size: 0.875rem; block-size: 0.875rem; }
+
+.button { min-block-size: 2rem; padding-inline: var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
+  background: transparent; font-size: var(--small-text); font-weight: 500; }
+.button:hover { border-color: var(--line-focus); }
+.button[data-primary] { border-color: transparent; background: var(--foreground); color: var(--background); }
+.text-button { min-block-size: 2rem; padding-inline: var(--space-2); margin-inline: calc(-1 * var(--space-2)) 0; border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+.text-button:hover { background: var(--hover-surface); color: var(--foreground); }
+
+/* Problems: a short list, newest first. Each one says what happened in plain
+   words, then shows Pi's own text, which can be long, in a capped code block. */
+.problems { padding: var(--space-2) var(--space-4) var(--space-3); }
+.state + .problems { border-block-start: var(--hairline) solid var(--line); }
+.problems-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-block-size: 2.25rem; padding-inline-end: 2rem; }
+.state + .problems .problems-head { padding-inline-end: 0; }
+.problems-head h2 { margin: 0; font-size: var(--small-text); font-weight: 600; }
+.problem { padding-block: var(--space-3); }
+.problem + .problem { border-block-start: var(--hairline) solid var(--line); }
+.problem-head { display: flex; align-items: baseline; gap: var(--space-2); }
+.problem-mark { flex: none; align-self: center; inline-size: 6px; block-size: 6px; border-radius: 1px; background: var(--destructive); }
+.problem-title { flex: 1; min-inline-size: 0; margin: 0; font-size: var(--small-text); font-weight: 600; }
+.problem-time { flex: none; color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
+.problem p { margin: var(--space-1) 0 0; padding-inline-start: calc(6px + var(--space-2)); color: var(--quiet-foreground); line-height: 1.55; text-wrap: pretty; }
+.raw { margin: var(--space-2) 0 0 calc(6px + var(--space-2)); padding: var(--space-2) var(--space-3); max-block-size: calc(4lh + var(--space-4)); overflow-y: auto;
+  border-radius: var(--radius-document); background: var(--code-surface); color: var(--quiet-foreground);
+  font-family: var(--code-font); font-size: var(--code-size); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.problem-actions { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin-block-start: var(--space-1); padding-inline-start: calc(6px + var(--space-2)); }
+
+/* ---------- Thread and composer, as shipped ---------- */
+.thread { flex: 1; min-block-size: 0; overflow-y: auto; padding: clamp(1rem, 3cqb, 1.5rem) var(--gutter) var(--space-4); }
+.thread-inner { max-inline-size: var(--thread-max-width); margin-inline: auto; display: flex; flex-direction: column; gap: clamp(1rem, 3.2cqb, 1.5rem); }
+.bubble { align-self: flex-end; max-inline-size: min(85%, 32rem); padding: 0.625rem 1.125rem; border-radius: 1.25rem; background: var(--muted); line-height: var(--line-height); }
+.reply { line-height: var(--line-height); }
+.reply p { margin: 0 0 0.75rem; }
+.reply code { font-family: var(--code-font); font-size: var(--code-size); padding: 0.0625rem 0.3125rem; border-radius: 0.25rem; background: var(--code-surface); }
+.tool { display: flex; align-items: center; gap: var(--space-2); margin-block: 0.25rem; color: var(--muted-foreground); font-size: var(--small-text); }
+.tool svg { inline-size: 0.875rem; block-size: 0.875rem; }
+.tool code { font-family: var(--code-font); font-size: var(--code-size); color: var(--quiet-foreground); background: none; padding: 0; }
+.composer { flex: none; margin: 0 var(--gutter) clamp(0.5rem, 2.5cqb, 1.25rem); max-inline-size: var(--thread-max-width); }
+@container (min-width: 46rem) { .composer { margin-inline: auto; inline-size: calc(100% - 2 * var(--gutter)); } }
+.composer-box { border: var(--hairline) solid var(--line); border-radius: 1rem; background: var(--tint-surface); padding: var(--space-3) var(--space-3) var(--space-2) var(--space-4); }
+.composer-text { min-block-size: 1.75rem; color: var(--foreground); line-height: var(--line-height); }
+.composer-text[data-empty] { color: var(--muted-foreground); }
+.composer-row { display: flex; align-items: center; gap: var(--space-3); margin-block-start: var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); }
+.composer-row svg { inline-size: 1.125rem; block-size: 1.125rem; }
+.model { display: inline-flex; align-items: center; gap: 0.375rem; }
+.model svg { inline-size: 0.875rem; block-size: 0.875rem; }
+.send { margin-inline-start: auto; display: grid; place-items: center; inline-size: 2rem; block-size: 2rem; border-radius: var(--radius-control);
+  background: var(--foreground); color: var(--background); }
+.send[data-disabled] { opacity: 0.4; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chip-dot, .status-chip::before, .status-panel, .status-scrim { animation: none !important; }
+}
+</style>
+</head>
+<body>
+<main class="session-shell" id="shell"></main>
+
+<script>
+const icon = {
+  panel: '<svg viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>',
+  tree: '<svg viewBox="0 0 24 24"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>',
+  archive: '<svg viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>',
+  chevron: '<svg class="chip-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+  x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+  check: '<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
+  file: '<svg viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>',
+  term: '<svg viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>',
+  plus: '<svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
+  mic: '<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
+  up: '<svg viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>',
+  down: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+};
+
+/** The chip: a plain status word, or a button when there is more to say. */
+function chip({ label, tone, count, button = true, open = false, arrived = false }) {
+  const inner = `<span class="chip-dot"></span>${label}${count ? `<span class="chip-count" aria-label="${count} problems">${count}</span>` : ""}`;
+  if (!button) return `<span class="status-chip" role="status" data-tone="${tone}">${inner}</span>`;
+  return `<button class="status-chip" data-tone="${tone}" aria-haspopup="dialog" aria-expanded="${open}"${arrived ? " data-arrived" : ""}>${inner}${icon.chevron}</button>`;
+}
+
+const reconnectState = `
+  <section class="state" data-tone="warn">
+    <h2 class="state-title">Reconnecting</h2>
+    <p class="state-lede">The live connection timed out. Forgerie tries again on its own. Messages from Pi will appear once it is back.</p>
+    <dl class="facts">
+      <div><dt>Next try</dt><dd>in 3 s</dd></div>
+      <div><dt>Attempt</dt><dd>4</dd></div>
+      <div><dt>Last live</dt><dd>14:02</dd></div>
+    </dl>
+    <div class="state-actions">
+      <button class="button" data-primary>Try now</button>
+      <span class="draft-safe">${icon.check}Your draft stays here</span>
+    </div>
+  </section>`;
+
+const piError = `
+  <article class="problem">
+    <div class="problem-head"><span class="problem-mark"></span><h3 class="problem-title">Run stopped</h3><span class="problem-time">14:06</span></div>
+    <p>The model provider refused the request. Send the message again, or switch models.</p>
+    <pre class="raw">529 overloaded_error: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_011CTx9fQ2k7vZbE4m1nHqA8"}</pre>
+    <div class="problem-actions"><button class="text-button">Copy</button><button class="text-button">Dismiss</button></div>
+  </article>`;
+const compactError = `
+  <article class="problem">
+    <div class="problem-head"><span class="problem-mark"></span><h3 class="problem-title">Compaction failed</h3><span class="problem-time">14:05</span></div>
+    <p>The conversation was not shortened. It keeps its full context.</p>
+    <pre class="raw">Compaction failed: Nothing to compact (session too small)</pre>
+    <div class="problem-actions"><button class="text-button">Copy</button><button class="text-button">Dismiss</button></div>
+  </article>`;
+const notSent = `
+  <article class="problem">
+    <div class="problem-head"><span class="problem-mark"></span><h3 class="problem-title">Message not sent</h3><span class="problem-time">14:07</span></div>
+    <p>Images attached to a message cannot be queued. Your message is back in the box. Send it after the run, or save the images to <code style="font-family:var(--code-font);font-size:var(--code-size)">.forgerie/attachments</code>.</p>
+    <div class="problem-actions"><button class="text-button">Dismiss</button></div>
+  </article>`;
+
+const SCENES = {
+  // Today: the chip says "Reconnecting" and a red bar repeats it above the chat.
+  before: { chip: { label: "Reconnecting", tone: "warn", button: false },
+    bar: "Reconnecting automatically. Your draft stays here." },
+  // Proposed: the chip alone. The chat keeps its full height.
+  reconnecting: { chip: { label: "Reconnecting", tone: "warn" } },
+  "reconnecting-open": { chip: { label: "Reconnecting", tone: "warn", open: true },
+    panel: reconnectState },
+  // A healthy, idle session with one problem: the problem is the chip's word.
+  error: { chip: { label: "Run stopped", tone: "bad", arrived: true } },
+  "error-open": { chip: { label: "Run stopped", tone: "bad", open: true },
+    panel: `<section class="problems"><div class="problems-head"><h2>1 problem</h2></div>${piError}</section>` },
+  // A run with problems from earlier: the state keeps its word, the count rides along.
+  "running-problems": { chip: { label: "Running", tone: "live", count: 2 } },
+  "running-problems-open": { chip: { label: "Running", tone: "live", count: 2, open: true },
+    panel: `<section class="state" data-tone="live"><h2 class="state-title">Running</h2>
+      <p class="state-lede">Pi is working on your message. Problems from earlier in this session are below.</p></section>
+      <section class="problems"><div class="problems-head"><h2>2 problems</h2><button class="text-button">Dismiss all</button></div>${notSent}${compactError}</section>` },
+  "disconnected-open": { chip: { label: "Disconnected", tone: "bad", open: true },
+    panel: `<section class="state" data-tone="bad"><h2 class="state-title">Disconnected</h2>
+      <p class="state-lede">Forgerie stopped trying. The server does not know this session, so trying again will not help.</p>
+      <pre class="raw" style="margin-inline-start:0">Session 01a1224a-5613-7499-95a3-98bb532b972e was not found. Check the session ID in the URL.</pre>
+      <div class="state-actions"><button class="button" data-primary>Reload</button><span class="draft-safe">${icon.check}Your draft is saved</span></div></section>` },
+};
+
+const name = new URLSearchParams(location.search).get("scene") ?? "reconnecting-open";
+const scene = SCENES[name] ?? SCENES["reconnecting-open"];
+document.title = `Status chip: ${name}`;
+
+document.getElementById("shell").innerHTML = `
+  <header class="session-header">
+    <button class="icon-button" aria-label="Sessions">${icon.panel}</button>
+    <h1 class="session-title">Picker flashes on resume</h1>
+    ${chip(scene.chip)}
+    <button class="icon-button" aria-label="Session tree">${icon.tree}</button>
+    <button class="icon-button" aria-label="Archive">${icon.archive}</button>
+  </header>
+  ${scene.bar ? `<div class="notice" role="alert"><p>${scene.bar}</p></div>` : ""}
+  ${scene.panel ? `<div class="status-scrim"></div><div class="status-panel" role="dialog" aria-label="Session status">
+      <button class="panel-close" aria-label="Close">${icon.x}</button>
+      <div class="panel-scroll">${scene.panel}</div></div>` : ""}
+  <div class="thread"><div class="thread-inner">
+    <div class="bubble">The session picker flashes empty for a moment when the app comes back from the background. Can you find why?</div>
+    <div class="reply">
+      <div class="tool">${icon.file}Read <code>ui/src/picker/catalogStore.ts</code></div>
+      <div class="tool">${icon.term}Ran <code>rg -n "watchRecovery" ui/src</code></div>
+      <p>The flash comes from <code>catalogStore.recover()</code>. On resume it clears the rows before the new read arrives, so the list is empty for one frame.</p>
+      <p>The fix is to keep the old rows until the read returns, and to mark them as stale while it runs. I will make that change and add a test for the resume path.</p>
+    </div>
+  </div></div>
+  <div class="composer"><div class="composer-box">
+    <div class="composer-text">Also check the session store, it might do the same th</div>
+    <div class="composer-row">${icon.plus}<span class="model">claude-opus-4 ${icon.down}</span>${icon.mic}
+      <span class="send"${scene.chip.tone === "live" ? "" : " data-disabled"}>${icon.up}</span></div>
+  </div></div>`;
+</script>
+</body>
+</html>
