@@ -46,6 +46,12 @@ The initial archive's SHA256 is `9775920650d920a278c8d5765493c032501f7cba611108b
 
 The manifests name the retired files. The archives preserve source, not an operational deployment or a data backup. Extract them into a separate directory for inspection. Do not overlay an active checkout. Git history also retains the original files.
 
+## Installed package
+
+The package includes the pinned Pi SDK `1.1.0` used by the checkout. The SDK packages are runtime dependencies, not consumer-provided peers. Bundling the SDK increases the tarball size, but prevents npm from marking omitted peer files as bundled dependencies during installation.
+
+`npm run smoke:package-install` installs the tarball with npm `12.0.1`, executes the installed CLI, and creates an offline model runtime with an isolated profile. It checks that stored test credentials remain unchanged. It also checks the patched process sources, pinned subagent version, and exclusion of retired files. It does not launch a delegated agent or prove configured agent execution.
+
 ## Deployment boundary
 
 The approved cleanup runs dependency installation, builds, and tests in an isolated worktree. Source can land on `main` without changing the deployed build. This operation must not restart web, sessiond, or the Tailscale proxy while agents are running.

@@ -54,13 +54,20 @@ try {
   await smokeInstalledManagedProcesses(packageRoot);
   await smokeInstalledSubagents(packageRoot);
   const cli = join(globalPrefix, "bin", "forgerie");
-  const cliOptions = { cwd: root, encoding: "utf8", timeout: 10_000 };
+  const agentDir = join(root, "profile");
+  const cliOptions = {
+    cwd: root, encoding: "utf8", timeout: 10_000,
+    env: { ...process.env, PI_OFFLINE: "1", PI_CODING_AGENT_DIR: agentDir },
+  };
   const version = await execFileAsync(process.execPath, [cli, "--version"], cliOptions);
   const expected = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")).version;
   if (version.stdout.trim() !== expected) throw new Error("Installed CLI reports the wrong package version");
   const help = await execFileAsync(process.execPath, [cli, "--help"], cliOptions);
   if (!help.stdout.includes("Services must already exist")) throw new Error("Installed CLI does not describe existing-unit controls");
-  console.log(`Installed-package checks passed with npm ${NPM_VERSION}: patched process sources, pinned subagent version, CLI, and retired-file exclusion. No delegated agent was launched.`);
+  await execFileAsync(process.execPath, [
+    join(repoRoot, "scripts", "smoke-installed-model-runtime.mjs"), packageRoot, agentDir,
+  ], cliOptions);
+  console.log(`Installed-package checks passed with npm ${NPM_VERSION}: patched process sources, pinned subagent version, CLI, offline model runtime, and retired-file exclusion. No delegated agent was launched.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }
