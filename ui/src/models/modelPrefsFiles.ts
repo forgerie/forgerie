@@ -48,8 +48,14 @@ const favoritesOf = (settings: Record<string, unknown>) => {
   const value = settings.enabledModels;
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 };
-const revisionOf = (favorites: readonly string[], visible: readonly string[] | null) =>
-  createHash("sha256").update(JSON.stringify({ favorites, visible })).digest("hex").slice(0, 16);
+const textOf = (value: unknown) => typeof value === "string" && value !== "" ? value : null;
+/** Pi's default model, as one `provider/id` key. Pi needs both halves to use it. */
+const defaultOf = (settings: Record<string, unknown>) => {
+  const provider = textOf(settings.defaultProvider);
+  const id = textOf(settings.defaultModel);
+  return provider && id ? `${provider}/${id}` : null;
+};
+const revisionOf = (state: unknown) => createHash("sha256").update(JSON.stringify(state)).digest("hex").slice(0, 16);
 
 async function readVisible(path: string): Promise<string[] | null> {
   const text = await readText(path);
@@ -60,8 +66,12 @@ async function readVisible(path: string): Promise<string[] | null> {
 
 export async function readPrefs(paths: ModelPrefsPaths): Promise<ModelPrefs> {
   const [settingsText, visible] = await Promise.all([readText(paths.settings), readVisible(paths.visible)]);
-  const favorites = favoritesOf(parseSettings(settingsText, paths.settings));
-  return { revision: revisionOf(favorites, visible), favorites, visible, favoritesPath: paths.settings, visiblePath: paths.visible, home: homedir() };
+  const settings = parseSettings(settingsText, paths.settings);
+  const favorites = favoritesOf(settings);
+  const defaultModel = defaultOf(settings);
+  const defaultThinkingLevel = textOf(settings.defaultThinkingLevel);
+  return { revision: revisionOf({ favorites, visible, defaultModel, defaultThinkingLevel }), favorites, visible, defaultModel, defaultThinkingLevel,
+    favoritesPath: paths.settings, visiblePath: paths.visible, home: homedir() };
 }
 
 /**
@@ -90,11 +100,21 @@ export async function savePrefs(paths: ModelPrefsPaths, save: ModelPrefsSave): P
     const current = await readPrefs(paths);
     if (current.revision !== save.revision) throw new PrefsError(409, "The model lists changed since this page read them. Reload to see the current lists.");
     const favorites = [...new Set(save.favorites)];
-    if (JSON.stringify(favorites) !== JSON.stringify(current.favorites)) {
+    const favoritesChanged = JSON.stringify(favorites) !== JSON.stringify(current.favorites);
+    const defaultChanged = save.defaultModel !== undefined && save.defaultModel !== current.defaultModel;
+    const levelChanged = save.defaultThinkingLevel !== undefined && save.defaultThinkingLevel !== current.defaultThinkingLevel;
+    if (favoritesChanged || defaultChanged || levelChanged) {
       const text = await readText(paths.settings);
       const settings = parseSettings(text, paths.settings);
       // Pi drops an empty list rather than store one; an empty list would hide every model in Pi.
-      if (favorites.length === 0) delete settings.enabledModels; else settings.enabledModels = favorites;
+      if (favoritesChanged) { if (favorites.length === 0) delete settings.enabledModels; else settings.enabledModels = favorites; }
+      if (defaultChanged && save.defaultModel) {
+        // The schema makes sure there is a slash. The provider ends at the first one; an ID may hold more.
+        const slash = save.defaultModel.indexOf("/");
+        settings.defaultProvider = save.defaultModel.slice(0, slash);
+        settings.defaultModel = save.defaultModel.slice(slash + 1);
+      }
+      if (levelChanged) settings.defaultThinkingLevel = save.defaultThinkingLevel;
       await mkdir(dirname(paths.settings), { recursive: true });
       // Pi writes the file in place, which keeps its owner and mode. So does this.
       await writeFile(paths.settings, JSON.stringify(settings, null, 2), "utf8");

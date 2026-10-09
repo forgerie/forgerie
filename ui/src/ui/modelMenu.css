@@ -6,4 +6,5 @@
 .model-hidden-toggle:hover, .model-hidden-toggle:focus-visible { color: var(--foreground); background: var(--hover-surface); }
 .model-hidden-toggle:focus-visible { outline-offset: -2px; }
 .model-hidden-toggle svg { flex: none; }
+.model-row-default { color: var(--foreground); }
 .model-row[data-hidden] .model-row-name { color: color-mix(in oklab, var(--foreground) 62%, transparent); }

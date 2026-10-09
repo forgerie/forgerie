@@ -241,6 +241,7 @@ function ModelPanel({ id, binding, anchor, trigger, initialQuery, onClose, chang
               aria-disabled={busy && !active || undefined} aria-busy={changing || undefined} onClick={() => void pickModel(row.provider, row.id)}>
               <span className="model-row-name">{row.label}{row.variant && <span className="model-row-variant">{row.variant}</span>}</span>
               <span className="model-row-meta">
+                {row.isDefault && <span className="model-row-default">default</span>}
                 {row.providerName && <span>{row.providerName}</span>}
                 {row.context && <span>{row.context} context</span>}
                 {row.plain && <span>no thinking</span>}

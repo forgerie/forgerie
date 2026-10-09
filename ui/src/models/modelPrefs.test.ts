@@ -60,6 +60,21 @@ describe("changes", () => {
     expect(applyChange(lists, { type: "favorite", key: "proxy/claude-opus-5-5", on: false }, models).favorites).toEqual(["proxy/*"]);
   });
 
+  it("makes the default a shown favorite, as Pi does when it saves a default", () => {
+    const next = applyChange({ favorites: ["proxy/claude-opus-5-5"], visible: [], defaultModel: null }, { type: "default", key: "local/llama3:8b" }, models);
+    expect(next).toEqual({ favorites: ["proxy/claude-opus-5-5", "local/llama3:8b"], visible: ["local/llama3:8b"], defaultModel: "local/llama3:8b", defaultThinkingLevel: undefined });
+    // Without favorites every model is in Pi's scope, so no star is added.
+    expect(applyChange({ favorites: [], visible: null }, { type: "default", key: "local/llama3:8b" }, models).favorites).toEqual([]);
+    expect(applyChange({ favorites: [], visible: null }, { type: "defaultLevel", level: "low" }, models).defaultThinkingLevel).toBe("low");
+  });
+
+  it("will not hide or unstar the default", () => {
+    const lists = { favorites: ["proxy/claude-opus-5-5", "proxy/gemini-3.8-flash"], visible: ["proxy/claude-opus-5-5", "proxy/gemini-3.8-flash"], defaultModel: "proxy/claude-opus-5-5" };
+    expect(applyChange(lists, { type: "favorite", key: "proxy/claude-opus-5-5", on: false }, models).favorites).toEqual(lists.favorites);
+    const hidden = applyChange(lists, { type: "show", keys: ["proxy/claude-opus-5-5", "proxy/gemini-3.8-flash"], on: false }, models);
+    expect(hidden).toMatchObject({ favorites: ["proxy/claude-opus-5-5"], visible: ["proxy/claude-opus-5-5"], defaultModel: "proxy/claude-opus-5-5" });
+  });
+
   it("shows models without listing one twice", () => {
     expect(applyChange({ favorites: [], visible: ["local/llama3:8b"] }, { type: "show", keys: ["local/llama3:8b", "proxy/gemini-3.8-flash"], on: true }, models).visible)
       .toEqual(["local/llama3:8b", "proxy/gemini-3.8-flash"]);

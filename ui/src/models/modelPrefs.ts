@@ -17,12 +17,16 @@ import { z } from "zod";
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export const modelPrefsSchema = z.object({
-  /** Changes when either list changes on disk. A save names the revision it read. */
+  /** Changes when any list changes on disk. A save names the revision it read. */
   revision: z.string(),
   /** Pi's `enabledModels`, exactly as stored, in Pi's order. */
   favorites: z.array(z.string()),
   /** Forgerie's allow-list of `provider/id` keys, or `null` for "show every model". */
   visible: z.array(z.string()).nullable(),
+  /** Pi's `defaultProvider` and `defaultModel` as one `provider/id` key: what a new session starts on. */
+  defaultModel: z.string().nullable(),
+  /** Pi's `defaultThinkingLevel`. */
+  defaultThinkingLevel: z.string().nullable(),
   /** Where the lists live, for the settings page to name. */
   favoritesPath: z.string(),
   visiblePath: z.string(),
@@ -33,6 +37,9 @@ export const modelPrefsSaveSchema = z.object({
   revision: z.string(),
   favorites: z.array(z.string().min(1).max(300)).max(500),
   visible: z.array(z.string().min(1).max(300)).max(5000).nullable(),
+  /** Absent: unchanged. There is no "no default": Pi keeps one once it is set. */
+  defaultModel: z.string().regex(/^[^/\s]+\/\S+$/u).max(300).optional(),
+  defaultThinkingLevel: z.enum(THINKING_LEVELS).optional(),
 });
 export type ModelPrefsSave = z.infer<typeof modelPrefsSaveSchema>;
 
@@ -103,39 +110,70 @@ export function cycleTarget(favorites: readonly ResolvedFavorite[], currentKey: 
 }
 
 /**
- * A change from the settings page, applied to both lists. Rules:
+ * The lists a save writes. The default model and level are Pi's
+ * `defaultProvider`/`defaultModel` and `defaultThinkingLevel`: what a new
+ * session starts on. Absent: this change leaves them alone.
+ */
+export interface Lists {
+  favorites: string[];
+  visible: string[] | null;
+  defaultModel?: string | null | undefined;
+  defaultThinkingLevel?: string | null | undefined;
+}
+
+/**
+ * A change from the settings page, applied to every list. Rules:
  * - Starring a model shows it.
  * - Hiding a model also removes its star.
  * - The first hide turns "show every model" into an allow-list of every
  *   model shown at that moment, less the one hidden.
  * - Unstarring keeps the model shown.
+ * - The default model is always shown, and is a favorite whenever there are
+ *   favorites. Pi does the same when it saves a default: with scoped models,
+ *   a default outside them is never used. So a change cannot hide or unstar
+ *   the default; choose another default first.
  * A favorite keeps its stored entry, so a thinking level on it survives.
  */
 export type PrefsChange =
   | { type: "favorite"; key: string; on: boolean }
-  | { type: "show"; keys: readonly string[]; on: boolean };
+  | { type: "show"; keys: readonly string[]; on: boolean }
+  | { type: "default"; key: string }
+  | { type: "defaultLevel"; level: string };
 
-export function applyChange(prefs: Pick<ModelPrefs, "favorites" | "visible">, change: PrefsChange, models: readonly ModelId[]): Pick<ModelPrefs, "favorites" | "visible"> {
+export function applyChange(prefs: Lists, change: PrefsChange, models: readonly ModelId[]): Lists {
   const favoriteKeysOf = (favorites: readonly string[]) => new Set(resolveFavorites(favorites, models).map((favorite) => favorite.key));
   const withoutKeys = (favorites: readonly string[], keys: ReadonlySet<string>) => favorites.filter((raw) => {
     const entry = parseFavorite(raw);
     return !models.some((model) => keys.has(keyOf(model)) && favoriteMatches(entry, model));
   });
+  const shownWith = (visible: string[] | null, key: string) => visible === null || visible.includes(key) ? visible : [...visible, key];
+  const kept = { defaultModel: prefs.defaultModel, defaultThinkingLevel: prefs.defaultThinkingLevel };
+  if (change.type === "defaultLevel") return { ...prefs, favorites: [...prefs.favorites], defaultThinkingLevel: change.level };
+  if (change.type === "default") {
+    const favorites = prefs.favorites.length === 0 || favoriteKeysOf(prefs.favorites).has(change.key) ? [...prefs.favorites] : [...prefs.favorites, change.key];
+    return { ...kept, favorites, visible: shownWith(prefs.visible, change.key), defaultModel: change.key };
+  }
+  const locked = (key: string) => key === prefs.defaultModel;
   if (change.type === "favorite") {
     if (!change.on) {
-      const visible = prefs.visible === null || prefs.visible.includes(change.key) ? prefs.visible : [...prefs.visible, change.key];
-      return { favorites: withoutKeys(prefs.favorites, new Set([change.key])), visible };
+      if (locked(change.key)) return { ...prefs };
+      return { ...kept, favorites: withoutKeys(prefs.favorites, new Set([change.key])), visible: shownWith(prefs.visible, change.key) };
     }
     const favorites = favoriteKeysOf(prefs.favorites).has(change.key) ? [...prefs.favorites] : [...prefs.favorites, change.key];
-    const visible = prefs.visible === null || prefs.visible.includes(change.key) ? prefs.visible : [...prefs.visible, change.key];
-    return { favorites, visible };
+    return { ...kept, favorites, visible: shownWith(prefs.visible, change.key) };
   }
-  const keys = new Set(change.keys);
   if (change.on) {
-    if (prefs.visible === null) return { favorites: [...prefs.favorites], visible: null };
-    return { favorites: [...prefs.favorites], visible: [...prefs.visible, ...change.keys.filter((key) => !prefs.visible?.includes(key))] };
+    if (prefs.visible === null) return { ...kept, favorites: [...prefs.favorites], visible: null };
+    return { ...kept, favorites: [...prefs.favorites], visible: [...prefs.visible, ...change.keys.filter((key) => !prefs.visible?.includes(key))] };
   }
+  const keys = new Set(change.keys.filter((key) => !locked(key)));
   const favorites = withoutKeys(prefs.favorites, keys);
   const base = prefs.visible ?? [...models.map(keyOf), ...favoriteKeysOf(prefs.favorites)];
-  return { favorites, visible: [...new Set(base)].filter((key) => !keys.has(key)) };
+  return { ...kept, favorites, visible: [...new Set(base)].filter((key) => !keys.has(key)) };
+}
+
+/** `provider/id` split at the first slash: a provider has none, an ID may. */
+export function splitKey(key: string): { provider: string; id: string } | undefined {
+  const slash = key.indexOf("/");
+  return slash > 0 && slash < key.length - 1 ? { provider: key.slice(0, slash), id: key.slice(slash + 1) } : undefined;
 }

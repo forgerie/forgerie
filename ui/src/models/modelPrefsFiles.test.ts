@@ -38,6 +38,18 @@ describe("model list files", () => {
     expect(after.revision).not.toBe(before.revision);
   });
 
+  it("reads and writes Pi's default model and level, splitting the provider at the first slash", async () => {
+    const files = await paths({ defaultProvider: "proxy", defaultModel: "a", defaultThinkingLevel: "xhigh", theme: "dark" });
+    const before = await readPrefs(files);
+    expect(before).toMatchObject({ defaultModel: "proxy/a", defaultThinkingLevel: "xhigh" });
+    const after = await savePrefs(files, { revision: before.revision, favorites: [], visible: null, defaultModel: "openrouter/openai/gpt-5", defaultThinkingLevel: "low" });
+    expect(after).toMatchObject({ defaultModel: "openrouter/openai/gpt-5", defaultThinkingLevel: "low" });
+    expect(JSON.parse(await readFile(files.settings, "utf8"))).toEqual({ defaultProvider: "openrouter", defaultModel: "openai/gpt-5", defaultThinkingLevel: "low", theme: "dark" });
+    // A save without the defaults leaves them alone.
+    await savePrefs(files, { revision: after.revision, favorites: ["proxy/a"], visible: null });
+    expect(JSON.parse(await readFile(files.settings, "utf8"))).toMatchObject({ defaultProvider: "openrouter", defaultThinkingLevel: "low" });
+  });
+
   it("drops enabledModels when no favorite is left, and the shown list when every model is shown again", async () => {
     const files = await paths({ enabledModels: ["proxy/a"] });
     await writeFile(files.visible, JSON.stringify({ visible: ["proxy/a"] }));

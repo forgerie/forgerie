@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelPrefs, ModelPrefsSave } from "../../models/modelPrefs";
 import { ModelPrefsContext, PrefsConflict, type ModelPrefsSource } from "../../models/modelPrefsApi";
-import { ModelsView } from "./ModelsView";
+import { ModelsView, startModel } from "./ModelsView";
 
 const models = [
   { provider: "proxy", id: "claude-opus-5-5", name: "Claude Opus 5.5", contextWindow: 1_000_000, reasoning: true },
@@ -17,6 +17,7 @@ let stored: ModelPrefs;
 let saves: ModelPrefsSave[];
 let refuse: boolean;
 let source: ModelPrefsSource;
+const listeners = new Set<(prefs: ModelPrefs) => void>();
 const settle = () => act(async () => { for (let index = 0; index < 8; index++) await new Promise((resolve) => setTimeout(resolve, 0)); });
 const byLabel = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
 const click = async (node: HTMLElement) => { await act(async () => node.click()); await settle(); };
@@ -26,24 +27,35 @@ const names = (section: Element | undefined) => [...(section?.querySelectorAll("
 beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  stored = { revision: "r0", favorites: ["proxy/claude-opus-5-5:high", "proxy/*"], visible: null, favoritesPath: "/home/me/agent/settings.json", visiblePath: "/home/me/.config/forgerie/visible-models.json", home: "/home/me" };
-  saves = []; refuse = false;
+  stored = { revision: "r0", favorites: ["proxy/claude-opus-5-5:high", "proxy/*"], visible: null, defaultModel: "proxy/claude-opus-5-5", defaultThinkingLevel: "xhigh", favoritesPath: "/home/me/agent/settings.json", visiblePath: "/home/me/.config/forgerie/visible-models.json", home: "/home/me" };
+  saves = []; refuse = false; listeners.clear();
   source = {
-    read: async () => stored,
+    read: async () => { for (const listener of listeners) listener(stored); return stored; },
     save: async (save) => {
       saves.push(save);
       if (refuse) throw new PrefsConflict("The model lists changed since this page read them.");
       if (save.revision !== stored.revision) throw new Error("stale revision");
       stored = { ...stored, ...save, revision: `r${String(saves.length)}` };
+      for (const listener of listeners) listener(stored);
       return stored;
     },
-    subscribe: () => () => {},
+    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
   };
   await act(async () => root.render(<ModelPrefsContext.Provider value={source}>
     <ModelsView onBack={() => {}} listModels={async () => models} /></ModelPrefsContext.Provider>));
   await settle();
 });
 afterEach(() => { act(() => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
+
+describe("where a new session starts", () => {
+  const lists = (defaultModel: string | null, favorites: string[] = []) => ({ favorites, visible: null, defaultModel });
+  it("follows the server: the default, unless it is missing or outside the favorites", () => {
+    expect(startModel(lists("local/llama3:8b"), models)).toMatchObject({ reason: "default", model: { id: "llama3:8b" } });
+    expect(startModel(lists(null, ["proxy/gemini-3.8-flash"]), models)).toMatchObject({ reason: "unset", model: { id: "gemini-3.8-flash" } });
+    expect(startModel(lists("gone/model"), models)).toMatchObject({ reason: "unavailable", model: { id: "claude-opus-5-5" } });
+    expect(startModel(lists("local/llama3:8b", ["proxy/gemini-3.8-flash"]), models)).toMatchObject({ reason: "notFavorite", model: { id: "gemini-3.8-flash" } });
+  });
+});
 
 describe("Models settings", () => {
   it("lists favorites, then each provider's models, and names the entries it leaves alone", () => {
@@ -63,6 +75,19 @@ describe("Models settings", () => {
     expect(saves[1]).toMatchObject({ revision: "r1", favorites: ["proxy/claude-opus-5-5:high", "proxy/*", "proxy/gemini-3.8-flash"] });
     expect(names(group("Favorites"))).toEqual(["Claude Opus 5.5", "Gemini 3.8 Flash"]);
     expect(document.querySelector(".connection-status")?.textContent).toBe("Saved");
+  });
+
+  it("shows the default, locks it as a favorite, and changes it through the model menu", async () => {
+    expect(document.querySelector(".models-default .model-trigger")?.textContent).toContain("Claude Opus 5.5");
+    expect(document.querySelector(".models-default")?.textContent).toContain("starts at that level instead");
+    expect(byLabel("Remove Claude Opus 5.5 from favorites").disabled).toBe(true);
+    await click(document.querySelector<HTMLButtonElement>(".models-default .model-trigger")!);
+    const row = [...document.querySelectorAll<HTMLButtonElement>(".model-panel .model-row")].find((node) => node.textContent?.includes("Llama 3 8B"))!;
+    expect(document.querySelector(".model-panel .model-row[aria-current='true']")?.textContent).toContain("default");
+    await click(row);
+    expect(saves.at(-1)).toMatchObject({ defaultModel: "local/llama3:8b", favorites: ["proxy/claude-opus-5-5:high", "proxy/*", "local/llama3:8b"] });
+    expect(saves.at(-1)?.defaultThinkingLevel).toBeUndefined();
+    expect(names(group("Favorites"))).toEqual(["Claude Opus 5.5", "Llama 3 8B"]);
   });
 
   it("hides a whole provider, and brings every model back", async () => {

@@ -19,6 +19,11 @@
 .models-group-head .agent-group-label { min-inline-size: 0; }
 .models-group-head .agent-text-button { flex: none; font-size: var(--label-text); }
 .models-where { margin-block-start: var(--space-8); }
+/* The default leads the page: one property row, the same as an agent's model. */
+.models-default { margin-block: 0 var(--space-6); }
+.models-default .agent-field-hint code { font-family: var(--code-font); overflow-wrap: anywhere; }
+.models-default .agent-field-hint .agent-text-button { font-size: inherit; }
+.model-pref-default { color: var(--foreground); font-weight: 500; }
 
 .model-pref { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "star name switch" "star meta switch";
   align-items: center; column-gap: var(--space-2); min-block-size: var(--control-size); padding: var(--space-2) var(--space-3) var(--space-2) var(--space-1);

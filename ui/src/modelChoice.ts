@@ -18,6 +18,8 @@ export interface ModelRow {
   plain: boolean;
   /** Off the shown list, and offered only because hidden models are on view. */
   hidden?: boolean;
+  /** Pi's default: what a new session starts on. */
+  isDefault?: boolean;
 }
 export interface ModelGroup { key: string; label: string; rows: ModelRow[] }
 
@@ -30,7 +32,7 @@ export const modelKey = (model: Pick<SessionModel, "provider" | "id">) => `${mod
 type Pickable = SessionModel & { provider: string; id: string };
 export interface MenuOptions {
   /** The app's lists. Absent: Pi's `scoped` flag marks favorites and every model is shown. */
-  prefs?: Pick<ModelPrefs, "favorites" | "visible"> | undefined;
+  prefs?: (Pick<ModelPrefs, "favorites" | "visible"> & { defaultModel?: string | null | undefined }) | undefined;
   /** Offer models off the shown list too. */
   showHidden?: boolean | undefined;
   /** The session's model. It is always offered, so the menu can show what is in use. */
@@ -59,11 +61,12 @@ export function modelMenu(models: readonly SessionModel[], query = "", options: 
   const hidden = rest.filter((model) => !shown(model)).length;
   const groups: ModelGroup[] = [];
   const favoriteRows = favorites.filter((model) => matches(model, needle));
-  if (favoriteRows.length > 0) groups.push({ key: "favorites", label: FAVORITES_LABEL, rows: favoriteRows.map((model) => rowOf(model, true)) });
+  const marked = (row: ModelRow): ModelRow => row.key === prefs?.defaultModel ? { ...row, isDefault: true } : row;
+  if (favoriteRows.length > 0) groups.push({ key: "favorites", label: FAVORITES_LABEL, rows: favoriteRows.map((model) => marked(rowOf(model, true))) });
   for (const model of rest) {
     const off = !shown(model);
     if (off && !options.showHidden) continue;
-    const row = { ...rowOf(model, false), ...(off ? { hidden: true } : {}) };
+    const row = marked({ ...rowOf(model, false), ...(off ? { hidden: true } : {}) });
     const previous = groups.at(-1);
     const key = `provider:${model.provider}`;
     if (previous && previous.key.startsWith(key)) previous.rows.push(row);
