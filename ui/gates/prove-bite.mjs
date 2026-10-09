@@ -59,7 +59,8 @@ try {
   } catch { /* failing gates are the point */ }
   const report = readFileSync(output, "utf8");
   rmSync(output);
-  const results = JSON.parse(report).testResults.flatMap((file) => file.assertionResults);
+  // Skipped tests are reports, such as css-owners.test.ts, not gates.
+  const results = JSON.parse(report).testResults.flatMap((file) => file.assertionResults).filter((test) => test.status !== "skipped" && test.status !== "pending");
   const passed = results.filter((test) => test.status === "passed").map((test) => test.title)
     .filter((title) => !["the app publishes parts", "each part sits in its component's folder"].includes(title));
   console.log(`${results.length - passed.length} of ${results.length} gate tests failed with the defects planted.`);

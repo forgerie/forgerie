@@ -15,9 +15,12 @@ import { evaluate, findChrome, getFreePort, launchChrome, sleep, waitForDebugger
 import { FOLD8_POSTURES } from "../../scripts/lib/fold8-postures.mjs";
 import { drivePage, openPosturePage } from "../../scripts/lib/posture-page.mjs";
 
-/** Sessions chosen for their content. Each is idle and older than this work. */
-const RICH_SESSION = "01a11e8d-2204-7362-aaba-9d6df04c93df"; // markdown, callouts, code, tool calls; cwd has a git diff
-const PR_SESSION = "01a11d81-59e3-704e-ae16-6293088bbf28"; // linked to korri-os/korri#72
+/**
+ * Sessions chosen for their content. Compare a before and an after run made at the same time,
+ * from two dev servers: a session that is still working changes between two runs made apart.
+ */
+const RICH_SESSION = "01a0ef0c-343b-70d6-902d-d26b3d5b1af9"; // idle since 2026-10-05; markdown, code, tool calls; cwd has a git diff
+const PR_SESSION = "01a11d81-59e3-704e-ae16-6293088bbf28"; // the one session with linked pull requests (korri-os/korri#71, #72); it is often working
 const FOLDER = "/home/simonwjackson/code/sandbox/forgerie";
 
 /**

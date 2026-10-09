@@ -7,7 +7,7 @@ import { basename } from "node:path";
 import { describe, test } from "vitest";
 import ts from "typescript";
 import {
-  allFiles, ast, cssFiles, css, expectOnlyPending, isFixture, isTest, partComponent, partFiles, read, rel, TOKENS_CSS, visit,
+  allFiles, ast, cssBlocks, cssFiles, css, expectOnlyPending, isFixture, isTest, partComponent, partFiles, read, rel, TOKENS_CSS, visit,
 } from "./source";
 
 describe("every part is authored for Caliper", () => {
@@ -75,10 +75,12 @@ describe("visual decisions live in tokens", () => {
 describe("design inputs are addressable knobs", () => {
   test("no selector declares the same custom property twice", () => {
     expectOnlyPending("custom property declared twice", cssFiles.flatMap((file) => {
+      // Caliper keys a knob by property and selector, so two declarations in one context share a key.
+      // The same selector inside another at-rule, such as the dark scheme, is a different context.
       const seen = new Map<string, number>();
-      for (const [, selector, body] of css(file).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        for (const [, property] of body!.matchAll(/(--[\w-]+)\s*:/g)) {
-          const key = `${selector!.trim()} ${property}`;
+      for (const { context, selector, body } of cssBlocks(file)) {
+        for (const [, property] of body.matchAll(/(--[\w-]+)\s*:/g)) {
+          const key = `${context ? `${context} ` : ""}${selector} ${property}`;
           seen.set(key, (seen.get(key) ?? 0) + 1);
         }
       }

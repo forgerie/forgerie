@@ -332,11 +332,6 @@
   "ui/settings/SettingsToggle.tsx",
   "ui/settings/SettingsView.tsx"
  ],
- "custom property declared twice": [
-  "ui/pullRequest.css: :root --pr-blocked",
-  "ui/pullRequest.css: :root --pr-merged",
-  "ui/pullRequest.css: :root --pr-ready"
- ],
  "entry stylesheet imports": [
   "extra ui/theme.css",
   "missing ui/base.css",

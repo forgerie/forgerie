@@ -65,8 +65,14 @@ function destination(selector) {
   return { kind: "shared", owners: union, unknown, classes };
 }
 
-// Load order today: main.tsx imports theme.css first; component stylesheets load after it.
-const sheets = Object.keys(owners).sort((a, b) => (a === "ui/theme.css" ? -1 : b === "ui/theme.css" ? 1 : a.localeCompare(b))).map((file) => join(src, file));
+// Load order before the split: main.tsx imported theme.css after `App`, so the stylesheets of eagerly
+// loaded components came first, then theme.css, then those of the lazy settings and backlog views.
+// Rules merged into one file keep that order.
+const LOAD_ORDER = ["ui/modelMenu.css", "ui/pullRequest.css", "ui/markdown/richBlocks.css", "ui/theme.css",
+  "ui/settings/settings.css", "ui/settings/models.css", "ui/settings/plugins.css", "ui/backlog/backlog.css"];
+const missing = Object.keys(owners).filter((file) => !LOAD_ORDER.includes(file));
+if (missing.length) throw new Error(`No load order for ${missing.join(", ")}`);
+const sheets = LOAD_ORDER.filter((file) => file in owners).map((file) => join(src, file));
 const plan = [];
 for (const sheet of sheets) {
   const root = postcss.parse(readFileSync(sheet, "utf8"), { from: sheet });

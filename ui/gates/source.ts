@@ -178,6 +178,39 @@ export function styledIntrinsics(file: string): string[] {
   return found;
 }
 
+/**
+ * The innermost blocks of a stylesheet: each selector with its declarations and the at-rules around
+ * it, outermost first. `@media (prefers-color-scheme: dark) { :root { … } }` yields the context
+ * `@media (prefers-color-scheme: dark)`, so a dark-scheme override is not a second declaration.
+ */
+export function cssBlocks(file: string): { context: string; selector: string; body: string }[] {
+  const text = css(file);
+  const blocks: { context: string; selector: string; body: string }[] = [];
+  const stack: string[] = [];
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "{") {
+      stack.push(text.slice(start, index).trim());
+      start = index + 1;
+    } else if (char === "}") {
+      const header = stack.pop() ?? "";
+      const body = text.slice(start, index);
+      if (!header.startsWith("@") && !body.includes("{")) blocks.push({ context: stack.join(" "), selector: header, body });
+      start = index + 1;
+    } else if (char === ";" && stack.length === 0) {
+      start = index + 1; // a top-level statement such as @import
+    }
+  }
+  return blocks;
+}
+
+/**
+ * Classes that a library renders into a component's DOM: highlight.js tokens and CodeMirror's
+ * own elements. No JSX names them, so the component that mounts the library owns their rules.
+ */
+export const LIBRARY_CLASS = /^(hljs-|cm-|tok-|is-editor-empty$)/;
+
 /** Selectors of a stylesheet, without at-rule headers. */
 export const selectors = (file: string) => [...css(file).matchAll(/([^{}]+)\{/g)]
   .map((match) => match[1]!.trim()).filter((selector) => !selector.startsWith("@"));

@@ -7,7 +7,7 @@
 import { existsSync } from "node:fs";
 import { describe, test } from "vitest";
 import {
-  BASE_CSS, classSelectors, classesRenderedBy, cssFiles, cssImports, css, ENTRY, expectOnlyPending, GLOBAL_CSS, rel,
+  BASE_CSS, LIBRARY_CLASS, classSelectors, classesRenderedBy, cssFiles, cssImports, css, ENTRY, expectOnlyPending, GLOBAL_CSS, rel,
   runtimeModules, selectors, TOKENS_CSS,
 } from "./source";
 
@@ -42,7 +42,7 @@ describe("a stylesheet does not reach into another component", () => {
       const owner = file.replace(/\.css$/, ".tsx");
       if (!existsSync(owner)) return [];
       const rendered = classesRenderedBy(owner);
-      return classSelectors(file).filter((name) => !rendered.has(name)).map((name) => `${rel(file)}: .${name}`);
+      return classSelectors(file).filter((name) => !rendered.has(name) && !LIBRARY_CLASS.test(name)).map((name) => `${rel(file)}: .${name}`);
     }));
   });
 
