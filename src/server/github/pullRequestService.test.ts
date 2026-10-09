@@ -23,17 +23,21 @@ function fixture(store = new PullRequestStore(), publishUnlinked?: (link: PullLi
   const notices: { id: string; text: string }[] = [];
   const errors: unknown[] = [];
   const merges: string[] = [];
+  const notes: { ref: { id: string; cwd: string }; text: string; details: unknown }[] = [];
+  let noteFailure: Error | undefined;
   const service = new PullRequestService({ store, now: () => now,
     github: {
       repo: () => Promise.resolve({ slug: repo, everyone: false }),
       pull: async (_cwd, number) => { await hold; if (failure !== undefined) throw failure; const value = structuredClone(byNumber.get(number) ?? snapshot); return { ...value, pull: { ...value.pull, number } }; },
       mergePull: (_cwd, _number, sha) => { merges.push(sha); return Promise.resolve({ text: "Merged" }); },
     },
-    sessions: { inspect: () => Promise.resolve(state), wake: (_ref, notice, current) => { if (busy || !current()) return Promise.resolve("busy"); if (!notices.some((item) => item.id === notice.id)) notices.push(notice); return Promise.resolve("delivered"); } },
+    sessions: { inspect: () => Promise.resolve(state),
+      note: (noteRef, note) => { if (noteFailure) return Promise.reject(noteFailure); notes.push({ ref: noteRef, ...note }); return Promise.resolve(); },
+      wake: (_ref, notice, current) => { if (busy || !current()) return Promise.resolve("busy"); if (!notices.some((item) => item.id === notice.id)) notices.push(notice); return Promise.resolve("delivered"); } },
     onError: (error) => { errors.push(error); },
     ...(publishUnlinked === undefined ? {} : { publishUnlinked }),
   });
-  return { service, store, notices, errors, merges,
+  return { service, store, notices, errors, merges, notes, failNote: (error: Error) => { noteFailure = error; },
     advance: (ms: number) => { now += ms; }, setPull: (number: number, value: typeof snapshot) => { byNumber.set(number, value); }, setSnapshot: (value: typeof snapshot) => { snapshot = value; }, setState: (value: Partial<PullSessionState>) => { state = { ...state, ...value }; }, busy: (value: boolean) => { busy = value; }, fail: (error: Error) => { failure = error; }, repo: (value: string) => { repo = value; }, hold: (value: Promise<void> | undefined) => { hold = value; } };
 }
 
@@ -155,6 +159,30 @@ describe("PR backend public contracts", () => {
       expect((await app.inject({ method: "PUT", url: base, payload: { cwd: ref.cwd, number: -1 } })).statusCode).toBe(400);
       expect((await app.inject({ method: "GET", url: `${base}/0?cwd=/workspace` })).statusCode).toBe(400);
     } finally { await app.close(); }
+  });
+});
+
+describe("panel merges in the transcript", () => {
+  it("records a merge in the session without starting a turn, and names what merged", async () => {
+    const f = fixture(); await f.service.link(ref, 9);
+    await f.service.merge(ref, PR_SHA, "rebase", { repo: "owner/repo", number: 9 });
+    expect(f.notes).toHaveLength(1);
+    expect(f.notes[0]?.ref).toEqual(ref);
+    expect(f.notes[0]?.details).toEqual({ kind: "merged", repo: "owner/repo", number: 9, headSha: PR_SHA, method: "rebase", base: "main" });
+    expect(f.notes[0]?.text).toContain("The user merged pull request #9 (owner/repo)");
+    expect(f.notes[0]?.text).toContain("Do not merge it again");
+    expect(f.notices).toEqual([]);
+  });
+
+  it("writes nothing when GitHub refuses, and reports a merge as done even when the note fails", async () => {
+    const f = fixture(); await f.service.link(ref, 9);
+    f.setSnapshot(pullSnapshot({ merge: { kind: "blocked", reason: "No CI ran" } }));
+    await expect(f.service.merge(ref, PR_SHA, "rebase", { repo: "owner/repo", number: 9 })).rejects.toThrow("No CI ran");
+    expect(f.notes).toEqual([]);
+    f.setSnapshot(pullSnapshot());
+    f.failNote(new Error("transcript busy"));
+    await expect(f.service.merge(ref, PR_SHA, "rebase", { repo: "owner/repo", number: 9 })).resolves.toMatchObject({ text: "Merged" });
+    expect(f.errors.map(String)).toContain("Error: transcript busy");
   });
 });
 

@@ -102,7 +102,7 @@ import { siblingWorkspaceCwds, type ProjectWorkspaceCwds } from "../workspaces/p
 import type { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 import { createAskUserToolDefinition, type AskUserInvocation, type AskUserToolDeps } from "./askUserTool.js";
 import { createGitHubToolDefinitions, type GitHubToolDeps } from "./githubTools.js";
-import type { PullSessionGateway, PullSessionState } from "../github/pullRequestService.js";
+import type { PullNote, PullSessionGateway, PullSessionState } from "../github/pullRequestService.js";
 import type { PullSessionRef } from "../../shared/pullRequests.js";
 import { undeliveredAskAnswers } from "./askAnswerDelivery.js";
 import { createEndTurnToolDefinition, type EndTurnToolDeps } from "./endTurnTool.js";
@@ -2734,6 +2734,21 @@ export class PiSessionService implements SessionRouteService {
     );
     this.publishStatus(session);
     return "busy";
+  }
+
+  /**
+   * A user's pull request action from outside the chat, written into the transcript.
+   * No turn starts. During a run Pi holds it until the turn ends, so it never lands
+   * between a tool call and its result.
+   */
+  async notePullSession(ref: PullSessionRef, note: PullNote): Promise<void> {
+    if (!(await this.inspectPullSession(ref)).available) return;
+    const session = await this.getOrOpen(ref);
+    await this.runSessionEntryMutation(session, "note PR action", () => session.sendCustomMessage(
+      { customType: "forgerie:pull-request", content: note.text, display: true, details: note.details },
+      { triggerTurn: false },
+    ));
+    this.publishStatus(session);
   }
 
   publishPullWatchStatus(id: string): void { this.publishStatusForSessionId(id); }

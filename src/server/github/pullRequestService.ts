@@ -8,7 +8,14 @@ export interface PullSessionState { ref: PullSessionRef; available: boolean; set
 export interface PullSessionGateway {
   inspect(ref: PullSessionRef): Promise<PullSessionState>;
   wake(ref: PullSessionRef, notice: { id: string; text: string }, stillCurrent: () => boolean): Promise<"delivered" | "busy">;
+  /**
+   * Record something the user did to a pull request outside the chat, such as a
+   * merge from the panel. It goes into the transcript the agent reads, and it
+   * does not start an agent turn.
+   */
+  note?(ref: PullSessionRef, notice: PullNote): Promise<void>;
 }
+export interface PullNote { text: string; details: { kind: "merged"; repo: string; number: number; headSha: string; method: "rebase" | "squash" | "merge"; base: string; url?: string } }
 export interface PullServiceDependencies {
   github: Pick<GitHubAgent, "repo" | "pull" | "mergePull">;
   sessions: PullSessionGateway;
@@ -140,6 +147,7 @@ export class PullRequestService {
     if (this.deps.store.get(keyOf(record)) === undefined) throw new Error("The linked PR changed during confirmation. Refresh and confirm again.");
     const result = await this.deps.github.mergePull(ref.cwd, record.number, headSha, method, record.repo);
     await this.stopKey(keyOf(record), "Pull request merged.");
+    await this.noteMerge(ref, snapshot.pull, method, result.url);
     return result;
   }
 
@@ -155,6 +163,17 @@ export class PullRequestService {
       catch (error) { this.deps.onError(error, record.session.id); }
       finally { this.polling.delete(key); }
     }
+  }
+
+  /** The merge already happened on GitHub. A failed note is logged, never reported as a failed merge. */
+  private async noteMerge(ref: PullSessionRef, pull: PullRequest, method: "rebase" | "squash" | "merge", url: string | undefined): Promise<void> {
+    const how = method === "rebase" ? "rebased onto" : method === "squash" ? "squashed into" : "merged into";
+    const text = [
+      `The user merged pull request #${String(pull.number)} (${pull.repo}) from the Forgerie panel: ${pull.head} at ${pull.headSha.slice(0, 7)}, ${how} ${pull.base}.`,
+      "It is merged on GitHub. Do not merge it again or push to its branch. Its watch has stopped.",
+    ].join("\n");
+    try { await this.deps.sessions.note?.(ref, { text, details: { kind: "merged", repo: pull.repo, number: pull.number, headSha: pull.headSha, method, base: pull.base, ...(url === undefined ? {} : { url }) } }); }
+    catch (error) { this.deps.onError(error, ref.id); }
   }
 
   private async stopKey(key: PullKey, reason: string): Promise<PullLink | undefined> {

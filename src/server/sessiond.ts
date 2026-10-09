@@ -198,7 +198,7 @@ async function createSessionDaemonRuntime() {
     }),
   }));
   const pulls: PullRequestService = new PullRequestService({ github: githubAgent, store: pullStore,
-    sessions: { inspect: (ref) => sessions.inspectPullSession(ref), wake: (ref, notice, current) => sessions.wakePullSession(ref, notice, current) },
+    sessions: { inspect: (ref) => sessions.inspectPullSession(ref), wake: (ref, notice, current) => sessions.wakePullSession(ref, notice, current), note: (ref, note) => sessions.notePullSession(ref, note) },
     publish: (link) => {
       eventHub.publish(link.session.id, { type: "session.pull-request", link });
       eventHub.publishGlobal({ type: "session.pull-request", link });

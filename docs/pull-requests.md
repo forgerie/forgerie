@@ -35,6 +35,8 @@ Routes live on sessiond and pass through the existing local and machine-scoped `
 
 The list route reads every linked PR from GitHub, several requests each. Clients read it on demand, not on a timer.
 
+A successful merge through this route also writes a `forgerie:pull-request` custom message into the session transcript, with `details.kind: "merged"`, the repository, number, head SHA, method, and base. It tells the agent the PR is merged and must not be merged or pushed again. It does not start an agent turn; during a run, Pi adds it when the turn ends. A failed note is logged and does not turn a completed merge into an error.
+
 Use full session IDs. `method` is `rebase`, `squash`, or `merge`. The merge endpoint binds confirmation to the repository, PR number, and head SHA. It checks current PR state, completeness, reviews, mergeability, and CI. It then uses the existing merge implementation, which rechecks CI and submits the exact head SHA to GitHub. GitHub can still refuse under branch protection. The existing `github_write merge_pr` keeps its original gate.
 
 `src/shared/pullRequests.ts` defines the wire schemas. Dates are absolute timestamps. Clients compute relative labels. `mergeability` is `clean`, `conflicting`, or `unknown`. `merge` gives `allowed` or `blocked` with a reason. Clients must not infer merge permission from zero checks or an unknown mergeability result.
