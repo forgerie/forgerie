@@ -91,6 +91,7 @@ import { codemodeDefaultTools, hostedCodemodeExtension, isNestedToolEvent } from
 import { createProcessBridgeExtension, createProcessBridgeSlot, type ProcessBridgeSlot } from "./processBridge.js";
 import { createSessionTitleBridgeExtension, createSessionTitleBridgeSlot, type SessionTitleBridgeEvent, type SessionTitleBridgeSlot } from "./sessionTitleBridge.js";
 import { bundledForgerieSkillsPackagePath, preferBundledForgerieSkills } from "./bundledForgerieSkills.js";
+import { withReplyFormatGuide } from "./replyFormatGuide.js";
 import { bundledManagedProcessesPackagePath } from "./bundledManagedProcesses.js";
 import { bundledSubagentsPackagePath, preferBundledSubagents } from "./bundledSubagents.js";
 
@@ -850,6 +851,8 @@ function createDefaultRuntimeFactory(
         ],
         extensionsOverride: preferBundledSubagents,
         skillsOverride: preferBundledForgerieSkills,
+        // Tells the agent which rich blocks the browser app renders.
+        appendSystemPromptOverride: withReplyFormatGuide,
         extensionFactories: [
           createProcessBridgeExtension(processBridgeSlot),
           createSessionTitleBridgeExtension(sessionTitleBridgeSlot),

@@ -46,6 +46,20 @@ const streamdownFrames = [
   "An **unfinished phrase**.\n\n```ts\nconst count = 1;\n```\n\n| Part | State |\n| --- | --- |\n| Code | Ready |\n\nRead [the guide](https://example.test/unfinished",
   "An **unfinished phrase**.\n\n```ts\nconst count = 1;\n```\n\n| Part | State |\n| --- | --- |\n| Code | Ready |\n\nRead [the guide](https://example.test/complete).\n\n![Diagram](https://example.test/diagram.png)",
 ];
+// A reply that uses every rich block, written the way the reply guide asks.
+const richBlocksReply = [
+  "The migration is safe to run now. It changes only the session index, and it keeps a backup.",
+  "> [!WARNING]\n> Restarting **sessiond** stops any run in progress. Check the picker for running sessions first.",
+  "```steps\n1. Stop both units\n   `systemctl --user stop forgerie-web forgerie-sessiond`\n2. Back up the index\n   Copy `~/.local/share/forgerie/sessions.db` to a dated file. The migration writes its own backup too.\n3. Run the migration\n   `npm run migrate -- --to 14` prints one line per table and ends with `done`.\n4. Start the units and open a session\n   If the picker lists every session, the migration worked.\n```",
+  "Old clients can keep working during the change in one of two ways.",
+  "```compare\n## Version the index (recommended)\nOld clients read the old file until they update.\n+ No client can corrupt the new index\n+ Rollback is a file rename\n- Uses about twice the disk until cleanup\n## Migrate in place\nEvery client reads the new format at once.\n+ No extra disk\n- A client older than 1.8 rewrites the file in the old format\n```",
+  "> [!TIP]\n> Run `git status` in the data directory after the restart. A clean tree means nothing else wrote to it.",
+].join("\n\n");
+const richBlocksMessages = (text: string): TranscriptMessage[] => [
+  say("rich-question", "user", "Is it safe to run the index migration now?"), say("rich-answer", "assistant", text),
+];
+// Cut inside the comparison, the way a reply looks mid-stream.
+const richBlocksRunning = richBlocksReply.slice(0, richBlocksReply.indexOf("+ Rollback"));
 const testOutput = Array.from({ length: 40 }, (_, index) => ` ✓ src/transcript.test.ts > case ${index + 1} (${index % 7 + 1} ms)`).join("\n");
 // A coding turn: reasoning, a group of reads, a failed command, an edit, and the answer.
 const toolMessages = (running: boolean): TranscriptMessage[] => [
@@ -300,6 +314,8 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   "chain-of-thought": chainMessages(false), "chain-of-thought-running": chainMessages(true),
   skills: skillMessages(false), "skills-open": skillMessages(false), "skills-invocation": skillMessages(false), "skills-running": skillMessages(true),
   "streamdown-live": [], "streamdown-running": streamdownMessages(streamdownFrames[1]!),
+  "rich-blocks": richBlocksMessages(richBlocksReply), "rich-blocks-running": richBlocksMessages(richBlocksRunning),
+  "rich-blocks-live": richBlocksMessages(""),
   ...scenario === "images" || scenario === "images-viewer" ? { images: imageMessages(), "images-viewer": imageMessages() } : {},
   handoff: handoffMessages, "handoff-open": handoffMessages,
 };
@@ -339,7 +355,18 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
   const [queue, setQueue] = useState<QueuedMessage[]>(queueScenarios[scenario] ?? []);
-  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running");
+  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running" || scenario === "rich-blocks-running" || scenario === "rich-blocks-live");
+  // Streams the rich-block reply in small chunks, like a model, then completes.
+  useEffect(() => {
+    if (scenario !== "rich-blocks-live") return;
+    let length = 0;
+    const timer = setInterval(() => {
+      length = Math.min(richBlocksReply.length, length + 6);
+      setMessages(richBlocksMessages(richBlocksReply.slice(0, length)));
+      if (length === richBlocksReply.length) { clearInterval(timer); setRunning(false); }
+    }, 30);
+    return () => clearInterval(timer);
+  }, []);
   useEffect(() => {
     if (scenario !== "streamdown-live" || !running) return;
     const timers = streamdownFrames.slice(1).map((text, index) => setTimeout(() => {

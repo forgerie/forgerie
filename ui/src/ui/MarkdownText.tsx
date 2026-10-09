@@ -5,6 +5,9 @@ import { useAuiState } from "@assistant-ui/react";
 import { memo, useMemo } from "react";
 import { CopyButton } from "./CopyButton";
 import { highlightCode } from "./highlightCode";
+import { ALLOWED_PROTOCOLS, markdownElements } from "./markdown/markdownPolicy";
+import { rehypeCallouts } from "./markdown/rehypeCallouts";
+import { CalloutQuote, richBlocksByLanguage } from "./markdown/RichBlocks";
 
 function CodeHeader({ language, code }: CodeHeaderProps) {
   return <div className="code-header">
@@ -22,15 +25,7 @@ function SyntaxHighlighter({ code, language }: SyntaxHighlighterProps) {
   </pre>;
 }
 
-const components: StreamdownTextComponents = {
-  // Streamdown's default strong is a Tailwind-styled span. Keep semantic HTML.
-  strong: "strong",
-  // Keep text-only scope and do not load third-party images from a reply.
-  img: ({ src, alt }) => <a href={typeof src === "string" ? src : undefined}>{alt || "Image"}</a>,
-  table: ({ children, ...props }) => <div className="table-scroll" tabIndex={0} role="region" aria-label="Table">
-    <table {...props}>{children}</table>
-  </div>,
-};
+const components: StreamdownTextComponents = { ...markdownElements, blockquote: CalloutQuote };
 // Assign through the declared compatibility properties. The SDK's HTML index
 // signature otherwise rejects its own narrower CodeHeader/SyntaxHighlighter types.
 components.CodeHeader = CodeHeader;
@@ -39,11 +34,14 @@ components.SyntaxHighlighter = SyntaxHighlighter;
 // CSS instead of its Tailwind controls, caret, or optional rendering plugins.
 const remend = { linkMode: "text-only" as const };
 const linkSafety = { enabled: false };
+// Runs after the security plugins, so only this plugin can mark a callout.
+const rehypePlugins = [rehypeCallouts];
 
 export const MarkdownText = memo(function MarkdownText() {
   // Bare workspace paths need a base URL or rehype-harden labels them blocked.
   const security = useMemo(() => ({ defaultOrigin: window.location.href,
-    allowedProtocols: ["http:", "https:", "mailto:"], allowDataImages: false }), []);
+    allowedProtocols: ALLOWED_PROTOCOLS, allowDataImages: false }), []);
   return <StreamdownTextPrimitive containerClassName="markdown" className="markdown-content" components={components} controls={false}
+    componentsByLanguage={richBlocksByLanguage} rehypePlugins={rehypePlugins}
     remend={remend} security={security} linkSafety={linkSafety} skipHtml smooth={false} defer />;
 });

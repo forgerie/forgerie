@@ -489,3 +489,61 @@ describe("History summaries", () => {
     expect(document.querySelector(".history-summary-label")?.textContent).toBe("summary of the branch left behind");
   });
 });
+
+describe("Rich blocks", () => {
+  it("turns a GitHub alert quote into a labelled callout and leaves plain quotes as quotes", async () => {
+    await render({ messages: [answer("> [!WARNING]\n> Restart **sessiond** after this.\n\n> Just a quote.")] });
+    const callout = document.querySelector('.markdown .callout')!;
+    expect(callout.getAttribute('data-callout')).toBe("warning");
+    expect(callout.getAttribute('role')).toBe("note");
+    expect(callout.querySelector('.callout-label')?.textContent).toBe("Warning");
+    expect(callout.textContent).not.toContain("[!WARNING]");
+    expect(callout.querySelector('strong')?.textContent).toBe("sessiond");
+    expect(document.querySelector('.markdown blockquote')?.textContent?.trim()).toBe("Just a quote.");
+  });
+
+  it("does not let a reply mark its own quote as a callout through raw attributes", async () => {
+    await render({ messages: [answer('<blockquote data-callout="caution">Fake</blockquote>\n\n> Real quote')] });
+    expect(document.querySelector('.markdown .callout')).toBeNull();
+  });
+
+  it("shows a pending callout while its marker streams, then labels it", async () => {
+    await render({ messages: [answer("> [!WAR")], running: true });
+    expect(document.querySelector('.markdown .callout')?.getAttribute('data-callout')).toBe("pending");
+    expect(document.querySelector('.markdown .callout-label')).toBeNull();
+    expect(document.querySelector('.markdown')?.textContent).not.toContain("[!WAR");
+    await render({ messages: [answer("> [!WARNING]\n> Back up first.")] });
+    expect(document.querySelector('.markdown .callout-label')?.textContent).toBe("Warning");
+  });
+
+  it("renders a steps fence as an ordered list that grows while it streams", async () => {
+    await render({ messages: [answer("```steps\n1. Stop the unit\n   Run `systemctl stop web`.\n2. Rebu")], running: true });
+    expect(document.querySelectorAll('.rich-steps > li')).toHaveLength(2);
+    expect(document.querySelector('.code-header')).toBeNull();
+    await render({ messages: [answer("```steps\n1. Stop the unit\n   Run `systemctl stop web`.\n2. Rebuild\n3. Start it\n```")] });
+    const steps = [...document.querySelectorAll('.rich-steps > li')];
+    expect(steps.map((step) => step.querySelector('.rich-step-title')?.textContent)).toEqual(["Stop the unit", "Rebuild", "Start it"]);
+    expect(steps[0]!.querySelector('.rich-step-detail code')?.textContent).toBe("systemctl stop web");
+    expect(document.querySelector('.code-body')).toBeNull();
+  });
+
+  it("renders a compare fence as options with the pick and its strengths and costs", async () => {
+    await render({ messages: [answer("```compare\n## Fences (recommended)\nOne block each.\n+ Streams well\n- Body needs a second parse\n## Directives\n+ Real Markdown\n```")] });
+    const options = [...document.querySelectorAll('.rich-option')];
+    expect(options).toHaveLength(2);
+    expect(options[0]!.getAttribute('data-recommended')).toBe("true");
+    expect(options[0]!.querySelector('[role="heading"]')?.textContent).toBe("Fences");
+    expect(options[0]!.querySelector('.rich-option-pick')?.textContent).toBe("Recommended");
+    expect(options[0]!.querySelector('[data-point="pro"]')?.textContent).toBe("Strength: Streams well");
+    expect(options[0]!.querySelector('[data-point="con"]')?.textContent).toBe("Cost: Body needs a second parse");
+    expect(options[1]!.hasAttribute('data-recommended')).toBe(false);
+    expect(document.querySelector<HTMLElement>('.rich-compare-options')?.style.getPropertyValue('--options')).toBe("2");
+  });
+
+  it("keeps the link policy inside rich blocks", async () => {
+    await render({ messages: [answer("```steps\n1. Open [docs](https://example.test/docs) not [bad](javascript:alert%281%29)\n   ![remote](https://example.test/x.png)\n```")] });
+    expect(document.querySelector('.rich-steps a[href="https://example.test/docs"]')).not.toBeNull();
+    expect(document.querySelector('.rich-steps a[href^="javascript:"]')).toBeNull();
+    expect(document.querySelector('.rich-steps img')).toBeNull();
+  });
+});
