@@ -11,7 +11,7 @@ export default function WithFooter() {
 }
 export function WithBack() {
   return <SheetDialog title="ui" subtitle="design-engineer, working" closeLabel="Close" onClose={() => {}}
-    back={{ label: "All child agents", onPress: () => {} }}>
+    back={{ label: "All child agents", onPress: () => {} }} actions={[{ label: "Stop", onPress: () => {} }]}>
     <p>One item, with a way back to the list.</p>
   </SheetDialog>;
 }

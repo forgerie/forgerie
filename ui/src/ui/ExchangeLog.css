@@ -1,29 +1,32 @@
-/* A two-track record: the speaker in a narrow margin, the content beside it.
-   The margin shrinks with the container and folds above the text when the
-   content would get too narrow, because flex-wrap decides, not a breakpoint. */
-.exchange-log { display: grid; gap: var(--space-2); min-inline-size: 0; font-size: var(--small-text); }
-.exchange-log-empty { margin: 0; padding-block: var(--space-6); color: var(--muted-foreground); font-size: var(--small-text); text-align: center; }
-.exchange-log-said { display: flex; flex-wrap: wrap; gap: 0 var(--space-3); padding-block: var(--space-1); }
-.exchange-log-said + .exchange-log-said, .exchange-log-output + .exchange-log-said, .exchange-log-call + .exchange-log-said { margin-block-start: var(--space-2); }
-.exchange-log-speaker { flex: 0 0 5.5rem; padding-block-start: 0.125rem; color: var(--muted-foreground); font-size: var(--label-text); }
-.exchange-log-said[data-side="in"] .exchange-log-speaker { color: var(--ink-live); }
-.exchange-log-text { flex: 1 1 16rem; min-inline-size: 0; line-height: var(--line-height); overflow-wrap: anywhere; }
-.exchange-log-said[data-side="in"] .exchange-log-text { padding-inline-start: var(--space-3); border-inline-start: 0.125rem solid var(--live); }
-/* Words still arriving: the speaker pulses in the live colour. */
-.exchange-log-said[data-streaming] .exchange-log-speaker { color: var(--live); animation: exchange-log-pulse 1.6s ease-in-out infinite; }
-@keyframes exchange-log-pulse { 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) { .exchange-log-said[data-streaming] .exchange-log-speaker { animation: none; } }
-/* Actions and their output hang from the content track, not the margin. */
-.exchange-log-call, .exchange-log-output { margin-inline-start: min(5.5rem + var(--space-3), 22cqi); min-inline-size: 0; }
-.exchange-log-call { display: flex; align-items: baseline; gap: var(--space-2); color: var(--muted-foreground); }
-.exchange-log-name { flex: none; font-family: var(--code-font); font-size: var(--label-text); color: var(--foreground); }
-.exchange-log-summary { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--code-font); font-size: var(--code-size); }
-.exchange-log-output-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
-  color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--code-size); list-style: none; }
+/* A worker's record in the thread's own grammar: bubbles for words to it,
+   prose for its words, and a rail for its work. One start edge for all three. */
+/* Block flow, so a rail's own bottom margin and the next item's top margin collapse into one gap. */
+.exchange-log { display: flow-root; min-inline-size: 0; font-size: var(--text-size); line-height: var(--line-height); }
+.exchange-log-in:not(:first-child), .exchange-log-out:not(:first-child), .exchange-log-block:not(:first-child) { margin-block-start: var(--space-5); }
+.exchange-log-empty { margin: 0; padding-block: var(--space-8); color: var(--muted-foreground); font-size: var(--small-text); text-align: center; }
+.exchange-log-in { margin-block-end: var(--space-4); display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-1); }
+.exchange-log-label { color: var(--muted-foreground); font-size: var(--label-text); }
+.exchange-log-bubble { max-inline-size: min(85%, 36rem); padding: var(--space-2) var(--space-4); border-radius: var(--radius-thread);
+  background: var(--muted); overflow-wrap: anywhere; }
+.exchange-log-out { min-inline-size: 0; margin-block-end: var(--space-4); overflow-wrap: anywhere; }
+/* Words still arriving end in a caret on their last line, inside the last paragraph. */
+.exchange-log-out[data-streaming] > div > :last-child::after { content: ""; display: inline-block; inline-size: 0.5em; block-size: 1em;
+  margin-inline-start: 0.125em; vertical-align: -0.125em; border-radius: var(--hairline); background: var(--live);
+  animation: exchange-log-caret 1.1s steps(2) infinite; }
+@keyframes exchange-log-caret { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .exchange-log-out[data-streaming] > div > :last-child::after { animation: none; } }
+/* Work lines: the tool in the code face, its target in the text face, one line each. */
+.exchange-log-call { display: flex; align-items: baseline; gap: var(--space-2); min-inline-size: 0; padding-block: 0.125rem; }
+.exchange-log-name { flex: none; font-family: var(--code-font); font-size: var(--code-size); color: var(--foreground); }
+.exchange-log-summary { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Output belongs to the action above it, so it sits in by one step. */
+.exchange-log-output { min-inline-size: 0; padding-block: 0.125rem; padding-inline-start: var(--space-4); }
+.exchange-log-block { min-inline-size: 0; margin-block-end: var(--space-4); }
+.exchange-log-output-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; list-style: none;
+  font-family: var(--code-font); font-size: var(--code-size); }
 .exchange-log-output-line::-webkit-details-marker { display: none; }
-.exchange-log-output-line::before { content: "↳ "; }
 .exchange-log-output-line:hover { color: var(--foreground); }
 .exchange-log-output[data-error] .exchange-log-output-line { color: var(--ink-bad); }
-.exchange-log-output-text { max-block-size: 16rem; margin: var(--space-1) 0 0; padding: var(--space-2) var(--space-3); overflow: auto;
-  border: var(--hairline) solid var(--line); border-radius: var(--radius-document); background: var(--code-surface);
+.exchange-log-output-text { max-block-size: 16rem; margin: var(--space-1) 0 var(--space-2); padding: var(--space-2) var(--space-3); overflow: auto;
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-document); background: var(--code-surface); color: var(--foreground);
   font-family: var(--code-font); font-size: var(--code-size); white-space: pre-wrap; overflow-wrap: anywhere; }

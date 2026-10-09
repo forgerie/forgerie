@@ -17,3 +17,7 @@ export function Ended() {
 export function LongSubject() {
   return <EventLine tone="positive" subject="a-very-long-background-job-name-that-keeps-going" phrase="succeeded in 1h 2m 3s" time="23:59" />;
 }
+export function Said() {
+  return <EventLine tone="positive" subject="api" phrase="finished" quoteFace="text" quote="Added GET /api/runs with an empty list for a new project."
+    detail={<p>Added GET /api/runs with an empty list for a new project. Tests: 14 passed.</p>} />;
+}

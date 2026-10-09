@@ -13,6 +13,7 @@ import { fileKey, folderRows, folderStepRows, type FolderRow } from "./lazyTree"
 import { keyStep } from "./treeKeys";
 import { useTextFiles, type TextFileSource } from "./useTextFiles";
 import { TreeItem, type TreeItemTone } from "./TreeItem";
+import { BadgeButton } from "./BadgeButton";
 import { ToggleGroup } from "./ToggleGroup";
 import { NoticeBar, type NoticeAction } from "./NoticeBar";
 import type { DiffBlock } from "./DiffEditor";
@@ -43,10 +44,7 @@ export interface ChangesBinding {
 /** Header control. The count says notes wait, so the reader knows the review holds something unsent. */
 export function ChangesOpener({ notes, onOpen }: { notes: number; onOpen: () => void }) {
   const label = notes > 0 ? `Review changes, ${notes} ${notes === 1 ? "note" : "notes"} waiting` : "Review changes";
-  return <button type="button" className="icon-button quiet-button changes-opener" aria-label={label} title={label} onClick={onOpen}>
-    <FileDiffIcon aria-hidden size={18} />
-    {notes > 0 && <span className="changes-badge" aria-hidden>{notes}</span>}
-  </button>;
+  return <BadgeButton icon={<FileDiffIcon aria-hidden />} label={label} count={notes} onPress={onOpen} />;
 }
 
 /**

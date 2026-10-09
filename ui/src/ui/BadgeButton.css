@@ -2,8 +2,10 @@
 .badge-button { position: relative; display: grid; place-items: center; flex: none; inline-size: var(--icon-size); block-size: var(--icon-size);
   padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); transition: color 150ms; }
 .badge-button::before { content: ""; position: absolute; inset: calc((var(--icon-size) - var(--control-size)) / 2); }
+/* Quiet like the header's other icon buttons; full ink on hover or while something waits on the reader. */
+.badge-button svg { inline-size: 1.125rem; block-size: 1.125rem; opacity: 0.7; transition: opacity 150ms; }
 .badge-button:hover, .badge-button[data-waiting] { color: var(--foreground); }
-.badge-button svg { inline-size: 1.125rem; block-size: 1.125rem; }
+.badge-button:hover svg, .badge-button[data-waiting] svg { opacity: 1; }
 .badge-button-count { position: absolute; inset-block-start: -0.1875rem; inset-inline-end: -0.375rem; min-inline-size: 1rem; block-size: 1rem;
   padding-inline: 0.25rem; border-radius: 0.5rem; background: var(--live); color: var(--primary-foreground);
   font-size: var(--meta-text); font-weight: 600; line-height: 1rem; font-variant-numeric: tabular-nums; text-align: center; pointer-events: none; }

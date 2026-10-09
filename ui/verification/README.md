@@ -1,5 +1,16 @@
 # Verification and limits
 
+## Child agents
+
+A session's child agents open from the robot button in the header. The child view reads like the main thread: the task is a bubble, the child's words are prose, its tool calls hang from the work rail with output set in under each call, and a question is a card where it was asked. There is one input. While a question is open it answers it; otherwise it steers a working child or gives an idle one a new task. Stop sits in the header while the child works. In the parent thread, a report shows its first line in the text face and opens to the whole answer; a steer and a stop are one line each. The sheet takes focus itself on open, so no control wears a focus ring until the reader moves. The changes button now uses the same `BadgeButton` as the child agents button.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | `npm run verify` in `ui/` passed: build, lint, and 1245 tests. New tests cover one input per state, Stop only while working, the question card in the record, and the report's text face. `gates/check-pending.mjs main` reports 634 -> 634. |
+| Visual review. | `scripts/children-shots.mjs children children-list children-child children-steer` captured the four `?scenario=` previews at all four Fold postures in both schemes: 32 captures, no page overflow, and focus on the sheet frame with no visible ring. The thread (folded portrait light, unfolded landscape dark), the list (folded portrait dark), the asking child (folded portrait light, unfolded portrait light, folded landscape dark), and the working child (unfolded portrait light, folded portrait dark, folded landscape light) were read. |
+
+Cost: the parent thread's question card keeps its own answer box, so a waiting question shows a second box above the message box, in a separate card. A child's question shows its answer only once the answer reaches the child's record. `SheetDialog` still duplicates the older `.tree-dialog` sheet in `theme.css`; moving the tree, changes, and pull request sheets onto it is not done. Physical Fold touch acceptance is not done.
+
 ## Work and answer
 
 In a reply with steps, the work hangs from a rail (`RailSection`): step rows, skill loads, session doors, and the last thinking before the answer, set in smaller muted text, with a hairline between the marks and the text. The answer is the text after the last step, the only text a step does not own, and it stays outside the rail at full size. Once the reply settles and an answer follows, a rule labelled with the totals ("20 tool calls, 1 failed, 1 stopped") closes the rail. A reply without steps is unchanged. The variants and the choice are on the branch `proto/turn-separation` (A + B + C).

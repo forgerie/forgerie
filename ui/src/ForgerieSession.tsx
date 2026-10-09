@@ -301,6 +301,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         transcript={children.open?.transcript} error={children.error ?? children.open?.error} actions={{
           onOpenChild: childAgents.open, onBack: childAgents.close,
           onClose: () => { childAgents.close(); childAgents.dismissError(); setChildrenOpen(false); },
+          onDismissError: childAgents.dismissError,
           onSend: childAgents.send, onAnswer: childAgents.answer,
           onStop: (conversationId) => { void childAgents.stop(conversationId).catch(() => { /* The panel shows the error. */ }); },
         }} />}

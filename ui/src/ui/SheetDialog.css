@@ -13,13 +13,16 @@
 }
 .sheet-dialog[open] { display: flex; }
 .sheet-dialog::backdrop { background: var(--scrim); }
+.sheet-dialog-frame:focus { outline: none; }
 .sheet-dialog-frame { --sheet-pad: clamp(0.75rem, 3cqi, 1.25rem); container-type: inline-size; flex: 1; display: flex; flex-direction: column;
   min-inline-size: 0; min-block-size: 0;
   padding: max(0rem, env(safe-area-inset-top) - var(--sheet-room-block)) max(0rem, env(safe-area-inset-right) - var(--sheet-room-inline))
     max(0rem, env(safe-area-inset-bottom) - var(--sheet-room-block)) max(0rem, env(safe-area-inset-left) - var(--sheet-room-inline)); }
 .sheet-dialog-head { flex: none; display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--header-size);
   padding-inline: var(--sheet-pad) var(--space-2); border-block-end: var(--hairline) solid var(--line); }
-.sheet-dialog-head:has(> .sheet-dialog-control:first-child) { padding-inline-start: var(--space-2); }
+/* A back control sits in the start padding, and its drawn arrow, not its hit area, sets the gap to the title. */
+.sheet-dialog-head:has(> .sheet-dialog-control:first-child) { padding-inline-start: var(--space-1); }
+.sheet-dialog-head > .sheet-dialog-control:first-child { margin-inline-end: calc(-1 * var(--space-2)); }
 .sheet-dialog-titles { flex: 1; display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 var(--space-2); min-inline-size: 0; }
 .sheet-dialog-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-size); font-weight: 500; }
 .sheet-dialog-subtitle { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -28,5 +31,9 @@
   padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
 .sheet-dialog-control:hover { color: var(--foreground); }
 .sheet-dialog-control svg { inline-size: 1.125rem; block-size: 1.125rem; }
-.sheet-dialog-body { flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-3) var(--sheet-pad); }
+/* A text action: drawn quiet, pressed at the control size. */
+.sheet-dialog-action { flex: none; min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--muted-foreground); font-size: var(--small-text); }
+.sheet-dialog-action:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
+.sheet-dialog-body { flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4) var(--sheet-pad) var(--space-6); }
 .sheet-dialog-foot { flex: none; padding: var(--space-2) var(--sheet-pad) var(--space-3); border-block-start: var(--hairline) solid var(--line); }

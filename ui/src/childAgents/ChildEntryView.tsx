@@ -1,15 +1,18 @@
 import { QuestionCard } from "../ui/QuestionCard";
 import { EventLine } from "../ui/EventLine";
+import { MarkdownFragment } from "../ui/MarkdownFragment";
 import type { ChildEntry } from "./childAgentsModel";
 
-const firstLine = (text: string) => {
-  const line = text.trim().split("\n", 1)[0] ?? "";
-  return line.length > 200 ? `${line.slice(0, 199)}…` : line;
-};
+/** The first sentence-sized piece of a reply, without Markdown marks, for a one-line quote. */
+function firstLine(text: string): string {
+  const line = text.trim().split("\n").find((candidate) => candidate.trim() !== "")?.replace(/[*_`#>]/g, "").trim() ?? "";
+  return line.length > 160 ? `${line.slice(0, 159)}…` : line;
+}
 
 /**
  * Shape: one thing a child agent did, in the parent's thread. A question is a
- * card the reader answers in place; a report, a steer, and a stop are one line.
+ * card the reader answers in place; a report, a steer, and a stop are one
+ * line. A report's first line shows; the whole answer opens under it.
  */
 export function ChildEntryView({ entry, onAnswer, onOpen }: {
   entry: ChildEntry;
@@ -23,11 +26,15 @@ export function ChildEntryView({ entry, onAnswer, onOpen }: {
       replyLabel={`Answer ${entry.childName}`} placeholder="Your answer" sendLabel="Send answer"
       onAnswer={onAnswer && ((answer) => onAnswer(entry.questionId, answer))}
       link={onOpen && { label: `Open ${entry.childName}`, onPress: () => onOpen(entry.childName) }} />;
-    case "report": return <EventLine tone={entry.outcome === "failed" ? "negative" : "positive"} subject={entry.childName}
-      phrase={entry.outcome === "failed" ? "failed" : "finished"} quote={firstLine(entry.text) || undefined}
-      code={entry.text.includes("\n") ? entry.text : undefined} codeLabel={`Full answer from ${entry.childName}`} />;
+    case "report": {
+      const first = firstLine(entry.text);
+      const more = entry.text.trim() !== first;
+      return <EventLine tone={entry.outcome === "failed" ? "negative" : "positive"} subject={entry.childName}
+        phrase={entry.outcome === "failed" ? "failed" : "finished"} quoteFace="text" quote={first === "" ? undefined : first}
+        detail={more ? <MarkdownFragment text={entry.text} /> : undefined} />;
+    }
     case "note": return <EventLine tone="neutral" hollow={entry.action === "stop"} subject={entry.childName}
-      phrase={entry.action === "stop" ? "stopped by you" : "steered by you"} quote={entry.action === "stop" ? undefined : entry.text} />;
-    case "answer": return <EventLine tone="neutral" subject="you" phrase="answered a child agent" quote={entry.answer} />;
+      phrase={entry.action === "stop" ? "stopped by you" : "steered by you"} quoteFace="text" quote={entry.action === "stop" ? undefined : entry.text} />;
+    case "answer": return <EventLine tone="neutral" subject="you" phrase="answered a child agent" quoteFace="text" quote={entry.answer} />;
   }
 }

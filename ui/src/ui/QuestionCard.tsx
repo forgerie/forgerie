@@ -12,9 +12,11 @@ export function QuestionCard({ asker, question, answer, replyLabel, placeholder,
   question: ReactNode;
   /** The given answer. Undefined while the question is open. */
   answer?: string | undefined;
-  replyLabel: string;
-  placeholder: string;
-  sendLabel: string;
+  /** The reply box's words. Needed only with `onAnswer`. */
+  replyLabel?: string;
+  placeholder?: string;
+  sendLabel?: string;
+  /** Absent: the card shows the open question without a box, because the answer is given elsewhere. */
   onAnswer?: ((text: string) => Promise<void>) | undefined;
   link?: { label: string; onPress: () => void } | undefined;
 }) {
@@ -26,7 +28,7 @@ export function QuestionCard({ asker, question, answer, replyLabel, placeholder,
       {link && <button type="button" className="question-card-link" onClick={link.onPress}>{link.label}</button>}
     </header>
     <div className="question-card-question">{question}</div>
-    {open ? onAnswer && <ReplyBox label={replyLabel} placeholder={placeholder} sendLabel={sendLabel} onSend={onAnswer} />
+    {open ? onAnswer && <ReplyBox label={replyLabel ?? `Answer ${asker}`} placeholder={placeholder ?? ""} sendLabel={sendLabel ?? "Send"} onSend={onAnswer} />
       : <p className="question-card-answer">{answer}</p>}
   </section>;
 }

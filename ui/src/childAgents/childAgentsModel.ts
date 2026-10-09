@@ -22,6 +22,9 @@ export type ChildQuestion = z.infer<typeof childQuestionSchema>;
 export type ChildSummary = z.infer<typeof childSummarySchema>;
 export type ChildTranscript = z.infer<typeof childTranscriptSchema>;
 
+/** The tool a child calls to ask the reader. Its call carries the question; its result, the answer. */
+export const QUESTION_TOOL = "ask_human";
+
 /** The server's event when any child starts, ends, asks, or is answered. */
 export const CHILDREN_CHANGED_EVENT = "durable_children_changed";
 

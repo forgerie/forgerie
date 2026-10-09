@@ -1033,9 +1033,6 @@ summary.trace-line:hover { color: var(--foreground); }
    app sheet's motion and swipe. Selected lines and the notes written on them
    share one blue spine down the left edge, so a note reads as attached to its code. */
 .changes-dialog { --tree-width: 100rem; --tree-height: 64rem; }
-.changes-opener .changes-badge { position: absolute; inset-block-start: -0.1875rem; inset-inline-end: -0.375rem; min-inline-size: 1rem; block-size: 1rem;
-  padding-inline: 0.25rem; border-radius: 0.5rem; background: var(--live); color: var(--primary-foreground); font-size: var(--meta-text); font-weight: 600;
-  line-height: 1rem; font-variant-numeric: tabular-nums; text-align: center; pointer-events: none; }
 .changes-body { flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; }
 .changes-message, .change-message { margin: 0; padding: var(--space-4) var(--tree-pad); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; overflow-wrap: anywhere; }
 .changes-message p, .change-message p { margin: 0 0 var(--space-2); }

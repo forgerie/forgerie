@@ -24,6 +24,12 @@ import { idleCompaction, isCompactCommand, type CompactionState } from "../src/c
 import { SessionDoorsProvider } from "../src/ui/SessionDoor";
 import type { HandoffDoor } from "../src/handoffDoor";
 import type { ShellResult, ShellRun } from "../src/shellRun";
+import { fromHistory } from "../src/transcript";
+import { CHILD_NOTE_TYPE, CHILD_QUESTION_TYPE, foldChildEntries, type ChildEntry } from "../src/childAgents/childAgentsModel";
+import { ChildAgentsOpener } from "../src/childAgents/ChildAgentsOpener";
+import { ChildAgentsPanel } from "../src/childAgents/ChildAgentsPanel";
+import { ChildEntryView } from "../src/childAgents/ChildEntryView";
+import { CHILDREN, STREAMING, TRANSCRIPT } from "../src/childAgents/fixtures/children";
 import type { ComposerInputElement } from "../src/ui/ComposerEditor";
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
@@ -390,7 +396,17 @@ const summaryMessages: TranscriptMessage[] = [
   { id: "branch", role: "system", summary: "branch", parts: [{ type: "text", text: "Tried a separate waiting list. It hid sessions the user had pinned." }] },
   say("last-a", "assistant", "Back on the main branch with the dot in the title row."),
 ];
+// Child agents: the parent thread with a report, a steer, and an open question; the sheet over it.
+const childrenPreview = scenario.startsWith("children");
+const childMessages = (): TranscriptMessage[] => [...foldChildEntries(fromHistory([
+  { role: "user", content: "Add an empty state to the run list. Split the API and the UI between two children." },
+  { role: "assistant", content: "I started **api** on the endpoint and **ui** on the view. Both work from `docs/runs.md`." },
+  { role: "user", content: "[subagent api answered, no reply needed] Added GET /api/runs with an empty list for a new project.\n\nTests: 14 passed. The contract in `docs/runs.md` is unchanged." },
+  { role: "custom", customType: CHILD_NOTE_TYPE, content: "", details: { child: 21, childName: "ui", action: "message", text: "[the user told child ui directly] Keep the old copy; only add the icon." } },
+  { role: "custom", customType: CHILD_QUESTION_TYPE, content: "", details: { questionId: "q:40", child: 21, childName: "ui", question: "Should the empty state show the last run, or stay blank?" } },
+]).messages)];
 const scenarios: Record<string, TranscriptMessage[]> = {
+  ...childrenPreview ? { [scenario]: childMessages() } : {},
   summary: summaryMessages, "summary-open": summaryMessages,
   shell: shellMessages(false), "shell-running": shellMessages(true), "shell-blocked": shellMessages(true),
   "shell-agent": [...shellMessages(false), ...toolMessages(true).slice(0, 2)], "shell-ask": shellMessages(false),
@@ -408,6 +424,8 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   handoff: handoffMessages, "handoff-open": handoffMessages,
 };
 function Preview() {
+  const [childView, setChildView] = useState<{ open: boolean; id?: number }>(() => ({
+    open: scenario !== "children", ...(scenario === "children-child" ? { id: 21 } : scenario === "children-steer" ? { id: 15 } : {}) }));
   const [dictation] = useState(() => new ForgerieDictationAdapter({
     ready: async () => {},
     capture: async () => {
@@ -617,9 +635,17 @@ function Preview() {
     <DictationProvider adapter={dictation}>
     <SessionFrame name="Session client" status={shellRunning && !running ? "Running shell command" : scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : compaction.type === "running" ? "Compacting" : compaction.type === "queued" ? "Compaction queued" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
       error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
-      recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}>
+      recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}
+      actions={childrenPreview ? <ChildAgentsOpener children={CHILDREN} onOpen={() => setChildView({ open: true })} /> : undefined}>
+      {childrenPreview && childView.open && <ChildAgentsPanel children={CHILDREN} openId={childView.id}
+        transcript={childView.id === undefined ? undefined : childView.id === 15 ? STREAMING : TRANSCRIPT}
+        actions={{ onOpenChild: (id) => setChildView({ open: true, id }), onBack: () => setChildView({ open: true }), onClose: () => setChildView({ open: false }),
+          onSend: async () => {}, onStop: () => {}, onAnswer: async () => {} }} />}
       <SessionDoorsProvider cwd={previewCwd} open={openPreviewDoor}>
-      <Thread compaction={compactionPreview || queuePreview ? { state: compaction, disabled: recovering,
+      <Thread systemArtifact={childrenPreview ? (custom) => {
+        const entry = (custom as { childEntry?: ChildEntry } | undefined)?.childEntry;
+        return entry && <ChildEntryView entry={entry} onAnswer={async () => {}} onOpen={() => setChildView({ open: true, id: 21 })} />;
+      } : undefined} compaction={compactionPreview || queuePreview ? { state: compaction, disabled: recovering,
         onSend: async (text) => { setCompaction({ type: "queued", text }); setQueue((current) => [...current, { kind: "followUp", text }]); },
         onDismiss: () => setCompaction(idleCompaction),
       } : undefined} shell={shellPreview ? {
