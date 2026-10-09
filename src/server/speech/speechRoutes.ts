@@ -1,7 +1,7 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { SPEECH_POLICY, SPEECH_SAMPLE_RATE_HZ, type SpeechRuntimePolicy } from "../../shared/speechPolicy.js";
 import { parseSpeechTranscriptionResponse, type SpeechErrorKind, type SpeechErrorResponse, type SpeechServiceStatusResponse } from "../../shared/speechContracts.js";
-import { SpeechAudioValidationError, type SpeechPcmOperation } from "./speechAudio.js";
+import { SpeechAudioValidationError } from "./speechAudio.js";
 import { SpeechProcessError } from "./speechProcess.js";
 import { createSpeechService, speechServiceUnavailable, type SpeechService } from "./speechService.js";
 
@@ -34,8 +34,8 @@ export function registerSpeechRoutes(app: FastifyInstance, service: SpeechServic
 
   app.post<{ Body: Buffer }>("/api/speech/transcribe", {
     bodyLimit: policy.audio.maxTurnBytes,
-    errorHandler: speechParserErrorHandler(policy, "transcription"),
-    onRequest: [speechRequestGuard(policy, admission, transcriptionBudget, "transcription", browserAllowedHosts)],
+    errorHandler: speechParserErrorHandler(policy),
+    onRequest: [speechRequestGuard(policy, admission, transcriptionBudget, browserAllowedHosts)],
   }, async (request, reply) => handlePcmOperation(request, reply, async (signal) => parseSpeechTranscriptionResponse(await service.transcribe(request.body, { signal }))));
 }
 
@@ -57,7 +57,7 @@ function statusResponse(service: SpeechService, policy: SpeechRuntimePolicy): Sp
   };
 }
 
-function speechRequestGuard(policy: SpeechRuntimePolicy, admission: SpeechBodyAdmission, budget: TokenBudget, operation: SpeechPcmOperation, browserAllowedHosts: ReadonlySet<string>) {
+function speechRequestGuard(policy: SpeechRuntimePolicy, admission: SpeechBodyAdmission, budget: TokenBudget, browserAllowedHosts: ReadonlySet<string>) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!isBrowserOriginAllowed(request, browserAllowedHosts)) {
       await sendPreParseSpeechError(request, reply, 403, "forbidden", "Speech request origin is not allowed.", false);
@@ -76,7 +76,7 @@ function speechRequestGuard(policy: SpeechRuntimePolicy, admission: SpeechBodyAd
       await sendPreParseSpeechError(request, reply, 411, "bad_request", "Speech audio requires a valid Content-Length header.", false);
       return;
     }
-    const limit = operation === "endpoint" ? policy.audio.endpointWindowBytes : policy.audio.maxTurnBytes;
+    const limit = policy.audio.maxTurnBytes;
     if (declaredLength > limit) {
       await sendPreParseSpeechError(request, reply, 413, "too_large", "Speech audio exceeds the operation byte limit.", false, limit);
       return;
@@ -118,10 +118,10 @@ function speechRequestGuard(policy: SpeechRuntimePolicy, admission: SpeechBodyAd
   };
 }
 
-function speechParserErrorHandler(policy: SpeechRuntimePolicy, operation: SpeechPcmOperation) {
+function speechParserErrorHandler(policy: SpeechRuntimePolicy) {
   return (error: FastifyError, request: FastifyRequest, reply: FastifyReply): void => {
     if (error.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
-      const limit = operation === "endpoint" ? policy.audio.endpointWindowBytes : policy.audio.maxTurnBytes;
+      const limit = policy.audio.maxTurnBytes;
       sendPreParseSpeechError(request, reply, 413, "too_large", "Speech audio exceeds the operation byte limit.", false, limit);
       return;
     }

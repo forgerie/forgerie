@@ -29,7 +29,7 @@ function pcm(seconds = 1) {
 }
 
 function pcmSamples(samples: number) {
-  return validateSpeechPcm(new Uint8Array(samples * 4), { operation: "transcription" });
+  return validateSpeechPcm(new Uint8Array(samples * 4));
 }
 
 function belowMinimumPcm(): ValidatedSpeechPcm {

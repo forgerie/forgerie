@@ -10,7 +10,7 @@ Land is a local rebase and fast-forward. It does not push commits or create pull
 
 ## API contract
 
-Schemas and wire types live in `src/shared/sessionWorktree.ts`. Session projections and event unions live in `src/shared/apiTypes.ts`. The HTTP paths below have the usual `/api` prefix, or `/api/machines/<machineId>` for machine-scoped requests. Sessiond registers the same paths without a prefix.
+Schemas and wire types live in `src/shared/sessionWorktree.ts`. Session projections and event unions live in `src/shared/apiTypes.ts`. The HTTP paths below use the `/api` prefix. The browser also retains the local-only `/api/machines/local` alias. Remote machine IDs are not supported. Sessiond registers the same paths without a prefix.
 
 | Request | Result |
 | --- | --- |
@@ -73,11 +73,11 @@ npm install
 
 Make the hook executable. Prefer installing dependencies into the new worktree. Shared mutable `node_modules` can bring file collisions back.
 
-The generic workspace Delete endpoint refuses a session-owned checkout. It directs the user to Land or Discard, so it cannot bypass transcript preservation and confirmation. Unowned worktrees retain the existing Delete workflow and pre-remove hook.
+Session-owned checkouts use Land or Discard, with transcript preservation, confirmation, and the pre-remove hook. There is no browser API to delete an arbitrary unowned worktree.
 
 ## Landing, discard, and archive safety
 
-Lifecycle mutations serialize per main checkout. Before removal, the server gates new session input, refuses busy agents or managed processes, closes idle Pi runtimes and workspace terminals, and saves transcripts outside the checkout. Land also refuses a dirty source worktree. The main checkout must be on the default branch. Dirty main files that overlap the merge's paths block Land; unrelated main edits remain intact.
+Lifecycle mutations serialize per main checkout. Before removal, the server gates new session input, refuses busy agents or managed processes, closes idle Pi runtimes, and saves transcripts outside the checkout. Land also refuses a dirty source worktree. The main checkout must be on the default branch. Dirty main files that overlap the merge's paths block Land; unrelated main edits remain intact.
 
 Discard previews fingerprint HEAD, the default branch, the tracked diff, dirty paths, and their file content. Discard removes unlanded commits and dirty work. It also removes ignored files, including dependency and build directories. These ignored files do not count as dirty paths in the preview.
 
@@ -95,7 +95,7 @@ The job visits only records in `session-worktrees.json` whose cleanup is not don
 
 A candidate must have completed setup, no live session use, no uncommitted or ignored files, and no commits outside the default branch. The job keeps a checkout switched or removed outside Forgerie. Git inspection failures keep the checkout.
 
-Live use includes an unarchived session at or below the checkout path, even when idle or hidden from the inbox. A live parent keeps its child's or related checkout. Startup sessions, open runtimes, workspace terminals, and the live-child recovery index also prevent cleanup. Archive the owning session before expecting cleanup. The job does not archive sessions itself.
+Live use includes an unarchived session at or below the checkout path, even when idle or hidden from the inbox. A live parent keeps its child's or related checkout. Startup sessions, open runtimes, and the live-child recovery index also prevent cleanup. Archive the owning session before expecting cleanup. The job does not archive sessions itself.
 
 The job gates new input, saves affected transcripts, and rechecks use, files, and branch ancestry before removal and after the pre-remove hook. After the hook and final checks pass, the job records the landed receipt before deletion. A failed hook keeps an active checkout writable and reports an error. A failure after the receipt leaves a read-only conversation and a cleanup error.
 

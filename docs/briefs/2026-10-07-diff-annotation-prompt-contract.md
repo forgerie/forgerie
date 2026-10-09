@@ -1,7 +1,8 @@
 # Structured diff annotations in prompts
 
 The backend accepts an optional `diffAnnotations` array on
-`POST /api/machines/:machineId/sessions/:sessionId/prompt`.
+`POST /api/sessions/:sessionId/prompt`. The browser also retains the local-only
+`/api/machines/local/sessions/:sessionId/prompt` alias.
 The daemon's corresponding route is `/sessions/:sessionId/prompt`.
 
 The user chose structured annotation input on 2026-10-07. The backend validates

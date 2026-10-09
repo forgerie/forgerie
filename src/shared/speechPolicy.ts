@@ -20,23 +20,18 @@ export interface SpeechAudioPolicy {
 
 export interface SpeechTimingPolicy {
   readonly warmupDeadlineMs: number;
-  readonly endpointDeadlineMs: number;
   readonly bodyUploadDeadlineMs: number;
-  /** Queue-inclusive deadline for one admitted endpoint or transcription operation. */
+  /** Queue-inclusive deadline for one admitted transcription operation. */
   readonly operationDeadlineMs: number;
   readonly captureStartupTimeoutMs: number;
-  readonly initialSpeechTimeoutMs: number;
   readonly pauseAfterSpeechMs: number;
-  readonly endpointCompletionGraceMs: number;
-  readonly finalRetryTtlMs: number;
   readonly holdThresholdMs: number;
 }
 
+/** Browser pause-candidate timing, not a backend endpoint-check budget. */
 export interface SpeechEndpointPolicy {
   readonly minIntervalMs: number;
   readonly minNewVoicedAudioMs: number;
-  readonly maxRequestsPerTurn: number;
-  readonly maxBytesPerTurn: number;
 }
 
 export interface SpeechAdmissionPolicy {
@@ -44,7 +39,6 @@ export interface SpeechAdmissionPolicy {
   readonly maxQueuedPcmBytes: number;
   readonly maxConcurrentParsingBytes: number;
   readonly globalWindowMs: number;
-  readonly globalEndpointChecksPerWindow: number;
   readonly globalTranscriptionsPerWindow: number;
 }
 
@@ -55,7 +49,6 @@ export interface SpeechRestartPolicy {
 }
 
 export interface SpeechProcessPolicy {
-  readonly smartTurnThreads: number;
   readonly whisperThreads: number;
   readonly persistentWarmthMaxMemoryFraction: number;
 }
@@ -84,9 +77,7 @@ const maxTurnSeconds = 10 * 60;
 const minRequestBytes = speechPcmBytesForSeconds(minRequestSeconds);
 const endpointWindowBytes = speechPcmBytesForSeconds(endpointWindowSeconds);
 const maxTurnBytes = speechPcmBytesForSeconds(maxTurnSeconds);
-const endpointMaxRequestsPerTurn = 16;
 const pauseAfterSpeechMs = 650;
-const endpointCompletionGraceMs = 60;
 const bodyUploadDeadlineMs = 60_000;
 const operationDeadlineMs = 120_000;
 const persistentWarmthMaxMemoryFraction = 0.75;
@@ -108,28 +99,21 @@ export const SPEECH_POLICY: SpeechRuntimePolicy = {
   },
   timing: {
     warmupDeadlineMs: 60_000,
-    endpointDeadlineMs: 2_500,
     bodyUploadDeadlineMs,
     operationDeadlineMs,
     captureStartupTimeoutMs: 1_000,
-    initialSpeechTimeoutMs: 10_000,
     pauseAfterSpeechMs,
-    endpointCompletionGraceMs,
-    finalRetryTtlMs: 30_000,
     holdThresholdMs: 450,
   },
   endpoint: {
     minIntervalMs: 900,
     minNewVoicedAudioMs: pauseAfterSpeechMs,
-    maxRequestsPerTurn: endpointMaxRequestsPerTurn,
-    maxBytesPerTurn: endpointMaxRequestsPerTurn * endpointWindowBytes,
   },
   admission: {
     queuedOperationsPerBackend: 1,
     maxQueuedPcmBytes: maxTurnBytes,
     maxConcurrentParsingBytes: maxTurnBytes,
     globalWindowMs: 60_000,
-    globalEndpointChecksPerWindow: 96,
     globalTranscriptionsPerWindow: 12,
   },
   restart: {
@@ -138,7 +122,6 @@ export const SPEECH_POLICY: SpeechRuntimePolicy = {
     restartBackoffMs: 1_500,
   },
   process: {
-    smartTurnThreads: 1,
     whisperThreads: 4,
     persistentWarmthMaxMemoryFraction,
   },

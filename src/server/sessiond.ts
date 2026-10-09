@@ -50,7 +50,7 @@ import { ProjectWorkspaces } from "./projects/projectWorkspaces.js";
 import { relatedPullSessions } from "./projects/relatedPullSessions.js";
 import { registerProjectGroupRoutes } from "./projects/projectGroupRoutes.js";
 import { WorkspaceService } from "./workspaces/workspaceService.js";
-import { SessionWorktreeStore, pathInside } from "./workspaces/sessionWorktreeStore.js";
+import { SessionWorktreeStore } from "./workspaces/sessionWorktreeStore.js";
 import { SessionWorktrees } from "./workspaces/sessionWorktrees.js";
 import { UserSessionWorktrees, registerSessionWorktreeRoutes } from "./workspaces/sessionWorktreeRoutes.js";
 import { WorktreeCleanupJob } from "./workspaces/worktreeCleanupJob.js";
@@ -251,7 +251,6 @@ async function createSessionDaemonRuntime() {
     worktrees: sessionWorktrees,
     async inUse(record) {
       const owner = record.relatedSession ?? record.childOwner;
-      if (workspaceActivity.snapshot().workspaces.some((item) => item.hasTerminalActivity && pathInside(record.path, item.cwd))) return true;
       if (owner !== undefined && (await liveChildren?.list())?.some((ref) => ref.id === owner.id) === true) return true;
       return sessions.worktreeHasLiveSession(record.path, owner?.id);
     },

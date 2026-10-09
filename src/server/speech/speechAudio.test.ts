@@ -16,8 +16,8 @@ function pcmBytesWithPrefix(prefix: readonly number[], samples = SPEECH_POLICY.a
 }
 
 describe("speech audio contract", () => {
-  it("accepts finite little-endian 16 kHz mono float32 PCM within the operation limit", () => {
-    const result = validateSpeechPcm(pcmBytesWithPrefix([-1, -0.25, 0, 0.5, 1]), { operation: "endpoint" });
+  it("accepts finite little-endian 16 kHz mono float32 PCM within the transcription limit", () => {
+    const result = validateSpeechPcm(pcmBytesWithPrefix([-1, -0.25, 0, 0.5, 1]));
 
     expect([...result.samples.slice(0, 5)]).toEqual([-1, -0.25, 0, 0.5, 1]);
     expect(result.sampleRateHz).toBe(16_000);
@@ -31,44 +31,46 @@ describe("speech audio contract", () => {
     ["Infinity", pcmBytesWithPrefix([Infinity]), "non_finite"],
     ["out-of-range", pcmBytesWithPrefix([1.01]), "out_of_range"],
   ])("rejects %s PCM", (_label, bytes, kind) => {
-    expect(() => validateSpeechPcm(bytes, { operation: "transcription" })).toThrow(SpeechAudioValidationError);
+    expect(() => validateSpeechPcm(bytes)).toThrow(SpeechAudioValidationError);
     try {
-      validateSpeechPcm(bytes, { operation: "transcription" });
+      validateSpeechPcm(bytes);
     } catch (error) {
       expect(error).toMatchObject({ kind });
     }
   });
 
-  it("enforces the exact 100 ms minimum PCM request boundary for endpoint and transcription", () => {
+  it("enforces the exact 100 ms minimum PCM request boundary", () => {
     const belowBoundary = new Uint8Array(SPEECH_POLICY.audio.minRequestBytes - SPEECH_POLICY.audio.bytesPerSample);
     const atBoundary = new Uint8Array(SPEECH_POLICY.audio.minRequestBytes);
 
-    expect(() => validateSpeechPcm(belowBoundary, { operation: "endpoint" })).toThrow(SpeechAudioValidationError);
-    expect(() => validateSpeechPcm(belowBoundary, { operation: "transcription" })).toThrow(SpeechAudioValidationError);
+    expect(() => validateSpeechPcm(belowBoundary)).toThrow(SpeechAudioValidationError);
     try {
-      validateSpeechPcm(belowBoundary, { operation: "endpoint" });
+      validateSpeechPcm(belowBoundary);
     } catch (error) {
       expect(error).toMatchObject({ kind: "too_short" });
     }
-    expect(validateSpeechPcm(atBoundary, { operation: "endpoint" }).samples.length).toBe(SPEECH_POLICY.audio.minRequestSamples);
-    expect(validateSpeechPcm(atBoundary, { operation: "transcription" }).samples.length).toBe(SPEECH_POLICY.audio.minRequestSamples);
+    expect(validateSpeechPcm(atBoundary).samples.length).toBe(SPEECH_POLICY.audio.minRequestSamples);
   });
 
-  it("uses different endpoint and full-turn duration bounds from SPEECH_POLICY", () => {
-    const endpointTooLarge = new Uint8Array(SPEECH_POLICY.audio.endpointWindowBytes + 4);
-    expect(() => validateSpeechPcm(endpointTooLarge, { operation: "endpoint" })).toThrow(/endpoint/iu);
-
+  it("accepts a full-turn recording beyond the retired endpoint window and rejects turns beyond ten minutes", () => {
     const validFullTurn = new Uint8Array(SPEECH_POLICY.audio.endpointWindowBytes + 4);
-    expect(validateSpeechPcm(validFullTurn, { operation: "transcription" }).samples.length).toBe(
-      SPEECH_POLICY.audio.endpointWindowSamples + 1,
-    );
+    expect(validateSpeechPcm(validFullTurn).samples.length).toBe(SPEECH_POLICY.audio.endpointWindowSamples + 1);
 
     const turnTooLarge = new Uint8Array(speechPcmBytesForSeconds(SPEECH_POLICY.audio.maxTurnSeconds) + 4);
-    expect(() => validateSpeechPcm(turnTooLarge, { operation: "transcription" })).toThrow(/transcription/iu);
+    expect(() => validateSpeechPcm(turnTooLarge)).toThrow(/transcription/iu);
+  });
+
+  it("uses the configured transcription limit at its exact boundary", () => {
+    const maxTurnSamples = SPEECH_POLICY.audio.minRequestSamples + 1;
+    const maxTurnBytes = maxTurnSamples * SPEECH_POLICY.audio.bytesPerSample;
+    const policy = { ...SPEECH_POLICY, audio: { ...SPEECH_POLICY.audio, maxTurnSamples, maxTurnBytes, maxTurnSeconds: maxTurnSamples / SPEECH_POLICY.audio.sampleRateHz } };
+
+    expect(validateSpeechPcm(new Uint8Array(maxTurnBytes), { policy }).samples.length).toBe(maxTurnSamples);
+    expect(() => validateSpeechPcm(new Uint8Array(maxTurnBytes + 4), { policy })).toThrow(SpeechAudioValidationError);
   });
 
   it("converts validated PCM to a readable 16 kHz mono signed-16 WAV in memory", () => {
-    const pcm = validateSpeechPcm(pcmBytesWithPrefix([-1, -0.5, 0, 0.5, 1]), { operation: "transcription" });
+    const pcm = validateSpeechPcm(pcmBytesWithPrefix([-1, -0.5, 0, 0.5, 1]));
     const wav = float32PcmToWav(pcm.samples);
 
     expect(wav.toString("ascii", 0, 4)).toBe("RIFF");

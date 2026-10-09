@@ -44,7 +44,7 @@ export function createSpeechService(options: SpeechServiceOptions): SpeechServic
       if (options.whisper.transcribe === undefined || options.whisper.status() === "unavailable") return Promise.reject(new SpeechProcessError("unavailable", "Whisper is unavailable."));
       let pcm: ValidatedSpeechPcm;
       try {
-        pcm = validateSpeechPcm(pcmBytes, { operation: "transcription", policy });
+        pcm = validateSpeechPcm(pcmBytes, { policy });
       } catch (error) {
         return Promise.reject(error instanceof Error ? error : new Error(String(error)));
       }

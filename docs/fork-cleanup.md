@@ -20,6 +20,8 @@ Retired routes return 404 instead of serving the SPA's HTML. In particular, orig
 
 Local diagnostics remain at `/api/pi-web/runtime`, `/api/pi-web/version`, and `/api/pi-web/status`. These inherited names are retained contracts, not a release-update service.
 
+The follow-up cleanup removes unused Smart Turn budgets, timers, thread settings, and endpoint-only PCM branches. Whisper keeps its existing upload, queue, transcription, and restart limits. Speech status keeps the inert `smartTurn` field and endpoint-window limits for wire compatibility. Browser pause-candidate timing and historical benchmark evidence remain. Workspace activity keeps `hasTerminalActivity: false` for compatibility, but automatic worktree cleanup no longer checks that always-false field.
+
 ## Data and active work
 
 The cleanup does not delete credentials, profiles, runtime databases, session journals, or `.pi-web/handoffs`. A historical tracked child remains a session. Verified historical children retain delegation restrictions and unread exclusion. The daemon no longer reopens a parent runtime to send a legacy completion notice.
@@ -49,6 +51,8 @@ The manifests name the retired files. The archives preserve source, not an opera
 ## Installed package
 
 The package includes the pinned Pi SDK `1.1.0` used by the checkout. The SDK packages are runtime dependencies, not consumer-provided peers. Bundling the SDK increases the tarball size, but prevents npm from marking omitted peer files as bundled dependencies during installation.
+
+Forgerie still uses the SDK for models and credentials, persisted session files, extension loading, and coding tools. Durable runs the parent agent loop; `pi-subagents` also uses the SDK's agent-session factory. Removing the SDK requires replacements for these contracts. Its CLI and terminal UI exports are part of the SDK package, not the retired PiWeb browser runtime. This cleanup does not strip SDK internals.
 
 `npm run smoke:package-install` installs the tarball with npm `12.0.1`, executes the installed CLI, and creates an offline model runtime with an isolated profile. It checks that stored test credentials remain unchanged. It also checks the patched process sources, pinned subagent version, and exclusion of retired files. It does not launch a delegated agent or prove configured agent execution.
 

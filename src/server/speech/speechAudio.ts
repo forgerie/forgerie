@@ -1,7 +1,5 @@
 import { SPEECH_PCM_BYTES_PER_SAMPLE, SPEECH_POLICY, SPEECH_SAMPLE_RATE_HZ, type SpeechRuntimePolicy } from "../../shared/speechPolicy.js";
 
-export type SpeechPcmOperation = "endpoint" | "transcription";
-
 export type SpeechAudioValidationErrorKind = "empty" | "misaligned" | "too_short" | "too_large" | "non_finite" | "out_of_range";
 
 export class SpeechAudioValidationError extends Error {
@@ -22,11 +20,10 @@ export interface ValidatedSpeechPcm {
 }
 
 export interface SpeechPcmValidationOptions {
-  readonly operation: SpeechPcmOperation;
   readonly policy?: SpeechRuntimePolicy;
 }
 
-export function validateSpeechPcm(bytes: Uint8Array, options: SpeechPcmValidationOptions): ValidatedSpeechPcm {
+export function validateSpeechPcm(bytes: Uint8Array, options: SpeechPcmValidationOptions = {}): ValidatedSpeechPcm {
   const policy = options.policy ?? SPEECH_POLICY;
   if (bytes.byteLength === 0) {
     throw new SpeechAudioValidationError("too_short", "Speech PCM is empty.");
@@ -38,9 +35,9 @@ export function validateSpeechPcm(bytes: Uint8Array, options: SpeechPcmValidatio
     throw new SpeechAudioValidationError("too_short", `Speech PCM is shorter than the ${String(policy.audio.minRequestMs)} ms minimum request.`);
   }
 
-  const maxBytes = options.operation === "endpoint" ? policy.audio.endpointWindowBytes : policy.audio.maxTurnBytes;
+  const maxBytes = policy.audio.maxTurnBytes;
   if (bytes.byteLength > maxBytes) {
-    throw new SpeechAudioValidationError("too_large", `${options.operation} PCM exceeds the ${String(maxBytes)} byte limit.`);
+    throw new SpeechAudioValidationError("too_large", `transcription PCM exceeds the ${String(maxBytes)} byte limit.`);
   }
 
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);

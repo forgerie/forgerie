@@ -34,7 +34,7 @@ function tinyPolicy(overrides: Partial<SpeechRuntimePolicy> = {}): SpeechRuntime
       maxTurnSamples: 2,
       maxTurnBytes: 8,
     },
-    timing: { ...SPEECH_POLICY.timing, operationDeadlineMs: 1_000, endpointDeadlineMs: 500 },
+    timing: { ...SPEECH_POLICY.timing, operationDeadlineMs: 1_000 },
     admission: {
       ...SPEECH_POLICY.admission,
       maxQueuedPcmBytes: 8,
@@ -198,7 +198,7 @@ describe("speech routes", () => {
 
   it("destroys stalled partial-body sockets at the speech upload deadline and recovers admission", async () => {
     const policy = tinyPolicy({
-      timing: { ...SPEECH_POLICY.timing, bodyUploadDeadlineMs: 50, operationDeadlineMs: 1_000, endpointDeadlineMs: 500 },
+      timing: { ...SPEECH_POLICY.timing, bodyUploadDeadlineMs: 50, operationDeadlineMs: 1_000 },
       admission: { ...tinyPolicy().admission, globalTranscriptionsPerWindow: 2 },
     });
     const app = await appWithSpeech(speechService(), policy, ["127.0.0.1:0"]);
@@ -399,8 +399,37 @@ describe("speech routes", () => {
     }
   });
 
-  it("maps speech body parser failures to stable no-store errors", async () => {
+  it("transcribes a recording beyond the compatibility endpoint window through the real service", async () => {
     const policy = tinyPolicy({
+      audio: { ...tinyPolicy().audio, maxTurnBytes: 32, maxTurnSamples: 8 },
+      admission: { ...tinyPolicy().admission, maxQueuedPcmBytes: 32, maxConcurrentParsingBytes: 32 },
+    });
+    const backendTranscribe = vi.fn<NonNullable<SpeechBackend["transcribe"]>>(() => Promise.resolve({ text: "spoken words" }));
+    const service = createSpeechService({ whisper: speechBackend({ transcribe: backendTranscribe }), policy });
+    const app = await appWithSpeech(service, policy);
+    const payload = Buffer.alloc(policy.audio.endpointWindowBytes + policy.audio.bytesPerSample);
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/speech/transcribe",
+        headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) },
+        payload,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ text: "spoken words" });
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(backendTranscribe).toHaveBeenCalledOnce();
+      expect(backendTranscribe.mock.calls[0]?.[0]).toMatchObject({ bytes: payload, samples: new Float32Array(3) });
+      expect(backendTranscribe.mock.calls[0]?.[1]?.timeoutMs).toBeGreaterThan(0);
+      expect(backendTranscribe.mock.calls[0]?.[1]?.timeoutMs).toBeLessThanOrEqual(policy.timing.operationDeadlineMs);
+    } finally {
+      await close(app);
+    }
+  });
+
+  it("maps transcription body parser failures to stable no-store errors using the full-turn limit", async () => {
+    const policy = tinyPolicy({
+      audio: { ...tinyPolicy().audio, maxTurnBytes: 32, maxTurnSamples: 8 },
       admission: { ...tinyPolicy().admission, maxConcurrentParsingBytes: 32, globalTranscriptionsPerWindow: 10 },
     });
     const app = await appWithSpeech(speechService(), policy);
@@ -408,12 +437,12 @@ describe("speech routes", () => {
       const tooLarge = await app.inject({
         method: "POST",
         url: "/api/speech/transcribe",
-        headers: { "content-type": "application/octet-stream", "content-length": String(policy.audio.endpointWindowBytes) },
-        payload: Buffer.alloc(policy.audio.endpointWindowBytes + policy.audio.bytesPerSample),
+        headers: { "content-type": "application/octet-stream", "content-length": String(policy.audio.maxTurnBytes) },
+        payload: Buffer.alloc(policy.audio.maxTurnBytes + policy.audio.bytesPerSample),
       });
       expect(tooLarge.statusCode).toBe(413);
       expect(tooLarge.headers["cache-control"]).toBe("no-store");
-      expect(parseSpeechErrorResponse(tooLarge.json())).toEqual({ error: { kind: "too_large", message: "Speech audio exceeds the operation byte limit.", retryable: false, limit: policy.audio.endpointWindowBytes } });
+      expect(parseSpeechErrorResponse(tooLarge.json())).toEqual({ error: { kind: "too_large", message: "Speech audio exceeds the operation byte limit.", retryable: false, limit: policy.audio.maxTurnBytes } });
       expect(tooLarge.body).not.toContain("FST_ERR_CTP_BODY_TOO_LARGE");
       expect(tooLarge.json()).not.toHaveProperty("statusCode");
       expect(tooLarge.json()).not.toHaveProperty("code");
@@ -421,8 +450,8 @@ describe("speech routes", () => {
       const mismatchedLength = await app.inject({
         method: "POST",
         url: "/api/speech/transcribe",
-        headers: { "content-type": "application/octet-stream", "content-length": String(policy.audio.endpointWindowBytes) },
-        payload: Buffer.alloc(policy.audio.endpointWindowBytes - policy.audio.bytesPerSample),
+        headers: { "content-type": "application/octet-stream", "content-length": String(policy.audio.maxTurnBytes) },
+        payload: Buffer.alloc(policy.audio.maxTurnBytes - policy.audio.bytesPerSample),
       });
       expect(mismatchedLength.statusCode).toBe(400);
       expect(mismatchedLength.headers["cache-control"]).toBe("no-store");
