@@ -34,7 +34,7 @@ decide the kind.
 - **A feature folder** is `src/<feature>/`: the feature's model (`.ts`), its
   shapes, its fixtures, and one binding per screen. Existing folders are
   `picker/`, `changes/`, `pullRequests/`, `backlog/`, `worktrees/`, `models/`,
-  `agents/`, `plugins/` and `speech/`. Create `session/`, `newSession/`,
+  `agents/`, `plugins/` and `speech/`. Create `chat/`, `session/`, `newSession/`,
   `settings/` and `app/` when a lane needs them.
 - **A shape is composition.** It arranges system components and passes domain
   words and data to them. It sets no `className` or `style` on an intrinsic
@@ -46,6 +46,28 @@ decide the kind.
   other bindings import a binding. React's local hooks (`useState`, `useRef`,
   `useEffect` and so on) are not state reads. A system component may keep local
   UI state, such as whether its menu is open.
+
+## Chat views and the assistant-ui runtime
+
+Decision A, made by the user on 2026-10-08. It holds until decision B lands.
+
+- The chat views live in the feature folder `src/chat/`. There, and only
+  there, a shape may read assistant-ui's runtime context: `useAui`,
+  `useAuiState`, `useAuiEvent`, `AuiIf` and the `*Primitive` components. Every
+  other state read is still a binding's job, and the shared space reads none.
+- The chat binding builds the runtime from plain data with
+  `useExternalStoreRuntime`, as `ForgerieSession.tsx` does today.
+- A chat part builds the same runtime from fixtures, with real handlers on
+  local state, through a provider in `src/chat/fixtures/`. The part never
+  fetches.
+- A primitive gives behaviour, not a look. Wrap a system component with
+  `asChild`: `<ComposerPrimitive.Root asChild><Frame>…</Frame></ComposerPrimitive.Root>`.
+  A shape never sets `className` or `style` on a primitive.
+
+Decision B is the agreed follow-up, after A is approved: chat views take
+plain props, the binding alone reads the runtime, and the exception above is
+deleted from `gates/layers.test.ts`. See
+`work/items/parking-lot/01M1DZ0000000000000000000B-chat-views-take-plain-props.md`.
 
 ## Tokens and CSS
 

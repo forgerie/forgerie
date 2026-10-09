@@ -161,13 +161,16 @@ export function classesRenderedBy(file: string): Set<string> {
   return classes;
 }
 
-/** Intrinsic (lower-case) JSX elements that carry their own styling decision. */
+/**
+ * Elements that carry their own styling decision: an intrinsic (lower-case) element, or an
+ * assistant-ui primitive (`XPrimitive.Part`), which renders a DOM element of its own.
+ */
 export function styledIntrinsics(file: string): string[] {
   const found: string[] = [];
   visit(ast(file), (node) => {
     if (!ts.isJsxOpeningElement(node) && !ts.isJsxSelfClosingElement(node)) return;
     const tag = node.tagName.getText();
-    if (!/^[a-z]/.test(tag)) return;
+    if (!/^[a-z]/.test(tag) && !/^[A-Z][A-Za-z]*Primitive\./.test(tag)) return;
     for (const property of node.attributes.properties) {
       if (ts.isJsxAttribute(property) && ["className", "style"].includes(property.name.getText())) found.push(`<${tag} ${property.name.getText()}>`);
     }

@@ -9,20 +9,36 @@ import { basename } from "node:path";
 import { describe, test } from "vitest";
 import ts from "typescript";
 import {
-  ast, bindingFiles, componentFiles, ENTRY, expectOnlyPending, importedNames, isBinding, isSystemFile, partFiles, read, rel,
+  ast, bindingFiles, componentFiles, ENTRY, SRC, expectOnlyPending, importedNames, isBinding, isSystemFile, partFiles, read, rel,
   resolveImport, runtimeImports, runtimeModules, shapeComponents, styledIntrinsics, SYSTEM, systemComponents, cssImports, visit,
 } from "./source";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** Identifiers that read shared state. React's own hooks for local state (useState, useRef, …) are not here. */
-const STATE_READ = /\b(useContext|useSyncExternalStore|fetch|localStorage|sessionStorage|EventSource|WebSocket|useAui|useAuiState|useAuiEvent|AuiIf|useExternalStoreRuntime|useExternalMessageConverter|unstable_use[A-Za-z]+|[A-Z][A-Za-z]*Primitive)\b/g;
+const STATE_READ = /^(useContext|useSyncExternalStore|fetch|localStorage|sessionStorage|EventSource|WebSocket|useExternalStoreRuntime|useExternalMessageConverter)$/;
+/**
+ * assistant-ui's runtime context: its hooks, its conditional and its primitives.
+ *
+ * Decision A (2026-10-08, ui/docs/decomposition.md): the chat views in src/chat/
+ * keep reading this one context. Their binding builds the runtime from plain
+ * data, and each chat part builds the same runtime from fixtures. Everywhere
+ * else, including the shared space, it is a state read like any other.
+ * Decision B, the follow-up, removes this exception: chat views take plain
+ * props (work/items/parking-lot/01M1DZ0000000000000000000B-*.md).
+ */
+const RUNTIME_READ = /^(useAui|useAuiState|useAuiEvent|AuiIf|unstable_use[A-Za-z]+|[A-Z][A-Za-z]*Primitive)$/;
+const CHAT = join(SRC, "chat");
+const readsRuntimeByDecision = (file: string) => file.startsWith(`${CHAT}/`) && !isBinding(file);
 
 function stateReads(file: string): string[] {
   const found = new Set<string>();
   visit(ast(file), (node) => {
-    if (ts.isIdentifier(node) && STATE_READ.test(node.text)) found.add(node.text);
-    STATE_READ.lastIndex = 0;
+    if (!ts.isIdentifier(node)) return;
+    if (STATE_READ.test(node.text)) found.add(node.text);
+    if (RUNTIME_READ.test(node.text) && !readsRuntimeByDecision(file)) found.add(node.text);
+  });
+  visit(ast(file), (node) => {
     // React 19's use(Context) reads a context too.
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "use") found.add("use()");
   });
@@ -58,6 +74,8 @@ describe("bindings are the only files that read state", () => {
 describe("shapes stay thin", () => {
   // A shape that styles its own elements holds a layout or look that a system
   // component should own. Plain semantic markup (<p>, <strong>, <code>) is content.
+  // Under decision A a chat shape composes assistant-ui primitives for behaviour.
+  // The look still comes from a system component: <XPrimitive.Root asChild><Frame/></XPrimitive.Root>.
   test("no shape styles an intrinsic element or imports a stylesheet", () => {
     expectOnlyPending("shape with its own styling", shapeComponents.flatMap((file) => [
       ...new Set(styledIntrinsics(file)), ...cssImports(file).map((sheet) => `imports ${basename(sheet)}`),

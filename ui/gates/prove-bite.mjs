@@ -27,6 +27,8 @@ const plants = {
   // a shape that styles its own element and imports a stylesheet
   "src/plantfeature/PlantShape.tsx": `import "./PlantShape.css";\nexport function PlantShape() { return <div className="plant-shape" />; }\n`,
   "src/plantfeature/PlantShape.css": `.plant-shape { color: var(--foreground); }\n`,
+  // a chat shape may read the assistant-ui runtime (decision A) but may not style a primitive
+  "src/chat/PlantChat.tsx": `import { ComposerPrimitive, useAuiState } from "@assistant-ui/react";\nexport function PlantChat() { useAuiState((s) => s); return <ComposerPrimitive.Root className="plant-chat" />; }\n`,
   // a binding imported below the top; a binding in the shared space
   "src/plantfeature/Thing.binding.tsx": `export function Thing() { return null; }\n`,
   "src/ui/Shared.binding.tsx": `export function Shared() { return null; }\n`,
@@ -35,6 +37,7 @@ const plants = {
 };
 
 const planted = [];
+const createdDirs = [];
 // The entry gate needs a stylesheet import in the entry itself. Restored in finally.
 const entry = join(ui, "src/main.tsx");
 const entryText = readFileSync(entry, "utf8");
@@ -43,7 +46,9 @@ try {
   for (const [file, text] of Object.entries(plants)) {
     const path = join(ui, file);
     if (existsSync(path)) throw new Error(`${file} exists; refusing to overwrite it.`);
-    mkdirSync(dirname(path), { recursive: true });
+    // Remember each folder this script creates, so cleanup removes only those and never a real feature folder.
+    const created = mkdirSync(dirname(path), { recursive: true });
+    if (created) createdDirs.push(created);
     writeFileSync(path, text);
     planted.push(path);
   }
@@ -61,5 +66,5 @@ try {
 } finally {
   writeFileSync(entry, entryText);
   for (const path of planted) rmSync(path);
-  rmSync(join(ui, "src/plantfeature"), { recursive: true, force: true });
+  for (const dir of createdDirs.reverse()) rmSync(dir, { recursive: true, force: true });
 }
