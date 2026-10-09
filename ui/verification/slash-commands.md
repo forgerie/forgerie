@@ -42,15 +42,17 @@ Build warnings remain for the large JS chunk and upstream Zod annotation comment
 
 ## Command confirmation fix, 2026-10-09
 
-Confirmations use the existing `.picker-toast` presentation, centred below the header at the reading-column width. They dismiss after the existing 2.5-second information interval. Hover or keyboard focus pauses the timer. A new confirmation starts a fresh timer, including repeated text. The toast does not move the composer or take focus. Long names scroll within a height budget, with the close action outside the scroll region. Detailed output is keyboard-scrollable.
+Confirmations use the existing `Toast` component in the page's top-end `ToastRegion`, with the same styling and placement as other notices. They dismiss after the existing 2.5-second information interval. Hover or keyboard focus pauses the timer. A new confirmation starts a fresh timer, including repeated text. The toast does not move the composer or take focus. Long names scroll within a height budget, with the close action outside the scroll region. Detailed output is keyboard-scrollable.
 
 From the repository root, run `APP_URL=http://127.0.0.1:5173 nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node ui/scripts/command-feedback-acceptance.mjs`.
 
-Verified with 48 browser layout cases: four Fold postures plus two constrained sizes, both themes, and four feedback states. Drafts survive four posture transitions. Manual dismissal, hover pause, expiry, choice confirmation, and an extreme name also pass. Nine Caliper states across four postures render without errors or spill; both image samples were reviewed. The two folded-landscape panel states retain incomplete contrast audits for scroll-clipped text. There are no reported axe violations or accepted exceptions. Baseline comparisons, Caliper-authored interactions, and physical-device checks were not run.
+Verified with 48 browser layout cases: four Fold postures plus two constrained sizes, both themes, and four feedback states. Drafts survive four posture transitions. Manual dismissal, hover pause, expiry, choice confirmation, and an extreme name also pass. Fourteen Caliper states across four postures render without errors or spill; both image samples were reviewed. Four `ToastRegion` OverThread cases have incomplete contrast audits because text overlaps the page behind the toast. Two folded-landscape panel states have incomplete contrast audits for scroll-clipped text. There are no reported axe violations or accepted exceptions. Baseline comparisons, Caliper-authored interactions, and physical-device checks were not run.
 
-Archive Undo retains its five-second window. Errors, notes, and update offers stay until dismissed. These callers share the extracted presentation, but keep their original lifetime owners. The gate inventory drops seven entries; it gains none.
+Archive Undo retains its five-second window. Errors, notes, and update offers stay until dismissed. These callers keep their original lifetime owners. The shared `Toast` timer is optional. The gate inventory drops one entry; it gains none.
 
-Evidence is under `/tmp/forgerie-existing-toasts/`: `acceptance.json`, posture captures, and the two `caliper-*/result.json` files. This fix remains on the session worktree until Land; the running app is unchanged.
+Full repository verification passed after rebasing onto `886b49b6`: typecheck, lint, knip, UI gates, build, 1,803 server tests, and 1,325 UI tests. Three server tests and one UI test were skipped. One UI test file was also skipped.
+
+Evidence is under `/tmp/forgerie-land-toasts/`: `acceptance.json`, posture captures, and three `caliper-*/result.json` files for `Toast`, `ToastRegion`, and `CommandResultPanel`. Landing uses a rebase and fast-forward onto `main`. Service restarts are excluded by the user's instruction; runtime deployment remains unverified.
 
 ## References
 
