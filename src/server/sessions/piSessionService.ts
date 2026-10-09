@@ -2770,6 +2770,9 @@ export class PiSessionService implements SessionRouteService {
 
   /** The server half of "open a child". Each call reaches the child through the parent's Durable storage. */
   async durableChildren(ref: PiSessionRef) { return (await this.durableSession(ref)).durableChildren(); }
+  async landDurableChildWorktree(ref: PiSessionRef, conversationId: number) { return (await this.durableSession(ref)).landDurableChildWorktree(conversationId); }
+  async previewDurableChildWorktreeDiscard(ref: PiSessionRef, conversationId: number) { return (await this.durableSession(ref)).previewDurableChildWorktreeDiscard(conversationId); }
+  async discardDurableChildWorktree(ref: PiSessionRef, conversationId: number, confirmationToken: string) { return (await this.durableSession(ref)).discardDurableChildWorktree(conversationId, confirmationToken); }
   async durableChildMessages(ref: PiSessionRef, conversationId: number) { return (await this.durableSession(ref)).durableChildMessages(conversationId); }
   async messageDurableChild(ref: PiSessionRef, conversationId: number, text: string) { await (await this.durableSession(ref)).messageDurableChild(conversationId, text); }
   async stopDurableChild(ref: PiSessionRef, conversationId: number) { await (await this.durableSession(ref)).stopDurableChild(conversationId); }
@@ -3756,7 +3759,8 @@ export class PiSessionService implements SessionRouteService {
    * fields and the inbox has nothing to render.
    */
   private liveWorkCounts(session: PiAgentSession): { workingAgents?: number; runningProcesses?: number; watchingPullRequest?: boolean } {
-    const workingAgents = this.workingAgentsBySession.get(session.sessionId) ?? 0;
+    const workingAgents = (this.workingAgentsBySession.get(session.sessionId) ?? 0)
+      + (session instanceof DurableAgentSession ? session.workingDurableChildren : 0);
     const bridge = this.active.get(session.sessionId)?.runtime.services?.processBridgeSlot;
     const runningProcesses = bridge?.snapshot().processes.filter((process) => process.status === "running").length ?? 0;
     return {
@@ -5089,6 +5093,7 @@ export class PiSessionService implements SessionRouteService {
   private publishActivityForEvent(session: PiAgentSession, event: unknown): void {
     const eventType = getString(event, "type");
     if (eventType === undefined) return;
+    if (eventType === "durable_children_changed") { this.publishStatus(session); return; }
     if (eventType === "agent_start") { this.publishActivity(session, "agent running", "active"); return; }
     if (eventType === "agent_end") {
       this.publishActivity(session, "idle", "idle");

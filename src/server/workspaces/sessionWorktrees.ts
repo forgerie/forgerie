@@ -53,21 +53,35 @@ export class SessionWorktrees {
     throw new Error("Cannot resolve a local default branch with a commit");
   }
 
-  async create(cwd: string, startupToken?: string, retryId?: string, relatedSession?: SessionWorktreeRecord["relatedSession"]): Promise<SessionWorktreeRecord> {
+  /** Stable ownership is saved before Git runs. Replay reuses the same checkout and original parent HEAD. */
+  async createForChild(parent: { id: string; cwd: string }, requestId: string): Promise<SessionWorktreeRecord> {
+    const id = `child-${createHash("sha256").update(JSON.stringify([parent.id, requestId])).digest("hex")}`;
+    const sourceCommit = (await git(parent.cwd, "rev-parse", "HEAD")).trim();
+    return this.create(parent.cwd, undefined, undefined, undefined, { id, sourceCommit, owner: parent });
+  }
+
+  async create(cwd: string, startupToken?: string, retryId?: string, relatedSession?: SessionWorktreeRecord["relatedSession"], allocation?: { id: string; sourceCommit: string; owner: { id: string; cwd: string } }): Promise<SessionWorktreeRecord> {
     const options = await this.options(cwd);
     if (options.kind !== "git") throw new Error("Fresh worktrees require a Git project");
     return this.exclusive(options.repo, async () => {
       let record: SessionWorktreeRecord;
-      if (retryId !== undefined) {
-        record = await this.store.require(retryId);
-        if (record.repo !== options.repo || record.sessionId !== undefined || record.state.kind !== "active" || JSON.stringify(record.relatedSession) !== JSON.stringify(relatedSession)) throw new Error("Only an unowned setup in this repository can be retried");
+      const allocated = allocation === undefined ? undefined : (await this.store.list()).find((item) => item.id === allocation.id);
+      const existingId = retryId ?? allocated?.id;
+      if (existingId !== undefined) {
+        record = await this.store.require(existingId);
+        if (record.repo !== options.repo || record.sessionId !== undefined || record.state.kind !== "active" || JSON.stringify(record.relatedSession) !== JSON.stringify(relatedSession) || JSON.stringify(record.childOwner) !== JSON.stringify(allocation?.owner)) throw new Error("Only an unowned setup in this repository can be retried");
+        if (allocated !== undefined && record.setup.phase === "done") {
+          await assertOwnedCheckout(record);
+          return record;
+        }
       } else {
-        const id = randomUUID();
-        const name = `s-${id.slice(0, 8)}`;
-        const branch = await availableBranch(options.repo, name);
+        const id = allocation?.id ?? randomUUID();
+        const name = allocation === undefined ? `s-${id.slice(0, 8)}` : `c-${id.slice("child-".length)}`;
+        const branch = allocation === undefined ? await availableBranch(options.repo, name) : name;
         const timestamp = new Date().toISOString();
         record = { id, repo: options.repo, path: join(options.repo, ".worktree", name), branch, defaultBranch: options.defaultBranch,
           renamed: false, setup: { phase: "creating", log: "" }, state: { kind: "active" }, cleanup: { kind: "pending" }, transcripts: [], createdAt: timestamp, updatedAt: timestamp,
+          ...(allocation === undefined ? {} : { sourceCommit: allocation.sourceCommit, childOwner: allocation.owner }),
           ...(startupToken === undefined ? {} : { startupToken }), ...(relatedSession === undefined ? {} : { relatedSession }) };
         await this.store.add(record);
       }
@@ -77,7 +91,7 @@ export class SessionWorktrees {
         const existing = (await discoverGitWorktrees(record.repo)).find((item) => item.path === record.path && item.prunable !== true);
         if (existing === undefined) {
           await mkdir(dirname(record.path), { recursive: true });
-          await git(record.repo, "worktree", "add", "-b", record.branch, record.path, record.defaultBranch);
+          await git(record.repo, "worktree", "add", "-b", record.branch, record.path, record.sourceCommit ?? record.defaultBranch);
         } else if (existing.branch !== record.branch) throw new Error("Setup checkout no longer has its owned branch");
         record = await this.change(record.id, { setup: { phase: "hook", log: "" } });
         let writes = Promise.resolve();
@@ -94,7 +108,7 @@ export class SessionWorktrees {
           await this.change(record.id, { setup: { phase: "failed", ...result, error: `Post-create hook exited with ${String(result.exitCode)}` } });
           throw new Error(`Post-create hook exited with ${String(result.exitCode)}`);
         }
-        return await this.change(record.id, { setup: { phase: relatedSession === undefined ? "starting" : "done", log: result.log } });
+        return await this.change(record.id, { setup: { phase: relatedSession === undefined && allocation === undefined ? "starting" : "done", log: result.log } });
       } catch (error) {
         const latest = await this.store.require(record.id);
         if (latest.setup.phase !== "failed") await this.change(record.id, { setup: { ...latest.setup, phase: "failed", error: message(error) } });
@@ -105,7 +119,7 @@ export class SessionWorktrees {
 
   async attach(id: string, session: SessionFile): Promise<void> {
     const record = await this.store.require(id);
-    if (record.relatedSession !== undefined || record.sessionId !== undefined || session.cwd !== record.path) throw new Error("Invalid worktree session ownership");
+    if (record.relatedSession !== undefined || record.childOwner !== undefined || record.sessionId !== undefined || session.cwd !== record.path) throw new Error("Invalid worktree session ownership");
     await this.change(id, { sessionId: session.id, ownerSession: worktreeSessionMetadata(record, session), setup: { ...record.setup, phase: "done" } });
   }
   async failedStart(id: string, error: unknown): Promise<void> {
@@ -118,10 +132,19 @@ export class SessionWorktrees {
     if (record.state.kind !== "active") return info;
     try {
       await assertOwnedCheckout(record);
-      const [counts, files] = await Promise.all([git(record.path, "rev-list", "--left-right", "--count", `${record.defaultBranch}...HEAD`), dirtyFiles(record.path)]);
+      const [counts, files] = await Promise.all([git(record.path, "rev-list", "--left-right", "--count", `${record.sourceCommit ?? record.defaultBranch}...HEAD`), dirtyFiles(record.path)]);
       const [behind, ahead] = counts.trim().split(/\s+/).map(Number);
       return { ...info, ahead: ahead ?? 0, behind: behind ?? 0, dirtyFiles: files.length };
     } catch (error) { return { ...info, statusError: message(error) }; }
+  }
+
+  /** Changed paths for a child report, including committed changes and uncommitted work. */
+  async changedFiles(id: string): Promise<string[]> {
+    const record = await this.store.require(id);
+    if (record.state.kind !== "active") return [];
+    await assertOwnedCheckout(record);
+    const committed = (await git(record.path, "diff", "--name-only", "-z", `${record.sourceCommit ?? record.defaultBranch}...HEAD`)).split("\0").filter(Boolean);
+    return [...new Set([...committed, ...await dirtyFiles(record.path)])].sort();
   }
 
   async renameFromTitle(sessionId: string, title: string): Promise<void> {
@@ -152,13 +175,13 @@ export class SessionWorktrees {
     const record = await this.store.require(id);
     return this.exclusive(record.repo, async () => {
       let current = await this.store.require(id);
-      if (current.relatedSession !== undefined) await this.events.beforeRelatedAction?.(current, actorId);
+      if (current.relatedSession !== undefined || current.childOwner !== undefined) await this.events.beforeRelatedAction?.(current, actorId);
       const related = await this.activeRelated(current);
       if (related.length > 0) return blocked("related-worktrees-active", related);
       if (current.state.kind === "discarded") throw new Error("Discarded worktrees cannot be landed");
       if (current.state.kind === "landed") {
         const sha = current.state.sha;
-        if (current.relatedSession === undefined) return { kind: "landed", sha, cleanup: await this.remove(current, false) };
+        if (current.relatedSession === undefined && current.childOwner === undefined) return { kind: "landed", sha, cleanup: await this.remove(current, false) };
         current = await this.change(id, { operation: "land" });
         try {
           await this.store.saveTranscripts(id, await this.removalSessions(current, sessions, actorId));
@@ -211,7 +234,7 @@ export class SessionWorktrees {
     const record = await this.store.require(id);
     return this.exclusive(record.repo, async () => {
       let current = await this.store.require(id);
-      if (current.relatedSession !== undefined) await this.events.beforeRelatedAction?.(current, actorId);
+      if (current.relatedSession !== undefined || current.childOwner !== undefined) await this.events.beforeRelatedAction?.(current, actorId);
       const related = await this.activeRelated(current);
       if (related.length > 0) return blocked("related-worktrees-active", related);
       if (current.state.kind === "landed") throw new Error("Landed worktrees cannot be discarded");
@@ -258,13 +281,13 @@ export class SessionWorktrees {
 
   private async activeRelated(record: SessionWorktreeRecord): Promise<string[]> {
     if (record.sessionId === undefined) return [];
-    return (await this.store.list()).filter((item) => item.relatedSession?.id === record.sessionId && (item.state.kind === "active" || item.cleanup.kind !== "done")).map((item) => item.path);
+    return (await this.store.list()).filter((item) => (item.relatedSession?.id ?? item.childOwner?.id) === record.sessionId && (item.state.kind === "active" || item.cleanup.kind !== "done")).map((item) => item.path);
   }
 
   private async removalSessions(record: SessionWorktreeRecord, fallback: readonly SessionFile[], actorId?: string): Promise<readonly SessionFile[]> {
     // Check again after the durable input gate is installed. A source run may
     // have started during the earlier Git reads.
-    if (record.relatedSession !== undefined) await this.events.beforeRelatedAction?.(record, actorId);
+    if (record.relatedSession !== undefined || record.childOwner !== undefined) await this.events.beforeRelatedAction?.(record, actorId);
     return this.events.beforeRemoval?.(record) ?? fallback;
   }
 

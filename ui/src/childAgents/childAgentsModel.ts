@@ -11,6 +11,10 @@ export const childSummarySchema = z.object({
   busy: z.boolean(),
   createdAt: z.number(),
   questions: z.array(childQuestionSchema),
+  worktree: z.object({
+    path: z.string(), branch: z.string(), state: z.enum(["active", "landed", "discarded"]),
+    ahead: z.number().int().nonnegative(), dirty: z.boolean(),
+  }).optional(),
 });
 export const childSummariesSchema = z.array(childSummarySchema);
 export const childTranscriptSchema = z.object({

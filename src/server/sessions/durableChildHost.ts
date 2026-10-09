@@ -3,12 +3,15 @@ import { dirname } from "node:path";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { durableChildExtensions, type DurableChildExtensions } from "./durableChildAgents.js";
 import { ChildAgentCatalog } from "./durableChildProfiles.js";
+import type { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
+import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
 
 export interface DurableChildSessionRef { id: string; cwd: string }
 
 /** What a Durable session needs from the daemon to host child agents. */
 export interface DurableChildHost {
-  extensions(input: { cwd: string; agentDir: string; projectContext: string }): Promise<DurableChildExtensions>;
+  extensions(input: { cwd: string; agentDir: string; projectContext: string; worktrees?: DurableChildWorktrees }): Promise<DurableChildExtensions>;
+  worktrees?: SessionWorktrees;
   /** Called when a session gains or loses live child work, so a restarted daemon can resume it. */
   liveChanged(ref: DurableChildSessionRef, live: boolean): void;
 }
@@ -68,16 +71,18 @@ export interface DurableChildHostOptions {
   /** Built-in agent files, after project and profile files. */
   builtinAgentsDir?: string;
   index?: LiveChildSessionIndex;
+  worktrees?: SessionWorktrees;
   extraTools?: readonly ToolRegistration[];
   onIndexError?: (error: unknown) => void;
 }
 
 export function createDurableChildHost(options: DurableChildHostOptions = {}): DurableChildHost {
   return {
-    async extensions({ cwd, agentDir, projectContext }) {
+    ...(options.worktrees === undefined ? {} : { worktrees: options.worktrees }),
+    async extensions({ cwd, agentDir, projectContext, worktrees }) {
       const catalog = ChildAgentCatalog.forSession(cwd, agentDir, options.builtinAgentsDir);
       const agents = await catalog.list();
-      return durableChildExtensions({ catalog, agents, projectContext, ...(options.extraTools === undefined ? {} : { extraTools: options.extraTools }) });
+      return durableChildExtensions({ catalog, agents, projectContext, ...(worktrees === undefined ? {} : { worktrees }), ...(options.extraTools === undefined ? {} : { extraTools: options.extraTools }) });
     },
     liveChanged(ref, live) {
       void options.index?.set(ref, live).catch((error: unknown) => { options.onIndexError?.(error); });

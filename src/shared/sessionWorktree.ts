@@ -43,6 +43,10 @@ export const SessionWorktreeRecordSchema = Type.Object({
   path: text,
   branch: text,
   defaultBranch: text,
+  /** Immutable parent HEAD for child allocations; ordinary sessions use the default branch. */
+  sourceCommit: Type.Optional(text),
+  /** A Durable conversation has no project/session catalog entry of its own. */
+  childOwner: Type.Optional(Type.Object({ id: text, cwd: text })),
   sessionId: Type.Optional(text),
   /** A secondary checkout used by the same chat, not a new session. */
   relatedSession: Type.Optional(RelatedSessionSchema),
@@ -106,6 +110,13 @@ export const WorktreeActionResultSchema = Type.Union([
   Type.Object({ kind: Type.Literal("stale-preview") }),
 ]);
 export type WorktreeActionResult = Static<typeof WorktreeActionResultSchema>;
+
+export const ChildWorktreeSummarySchema = Type.Object({
+  path: text, branch: text,
+  state: Type.Union([Type.Literal("active"), Type.Literal("landed"), Type.Literal("discarded")]),
+  ahead: Type.Integer({ minimum: 0 }), dirty: Type.Boolean(),
+});
+export type ChildWorktreeSummary = Static<typeof ChildWorktreeSummarySchema>;
 export type WorktreeArchiveCleanupResult =
   | { kind: "removed"; cleanup: SessionWorktreeRecord["cleanup"] }
   | { kind: "retained"; reason: string };

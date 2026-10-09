@@ -1,12 +1,19 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { Type } from "typebox";
+import { Check } from "typebox/value";
 import { normalizeRequestCwd } from "../workingDirectory.js";
 import type { SessionRouteRef } from "./sessionService.js";
 
 const MAX_TEXT_LENGTH = 64 * 1024;
+const worktreeBody = Type.Object({ cwd: Type.String({ minLength: 1 }) }, { additionalProperties: false });
+const discardBody = Type.Object({ cwd: Type.String({ minLength: 1 }), confirmationToken: Type.String({ minLength: 1, maxLength: 1024 }) }, { additionalProperties: false });
 
 export interface DurableChildRouteService {
   durableChildren(ref: SessionRouteRef): Promise<unknown>;
   durableChildMessages(ref: SessionRouteRef, conversationId: number): Promise<unknown>;
+  landDurableChildWorktree(ref: SessionRouteRef, conversationId: number): Promise<unknown>;
+  previewDurableChildWorktreeDiscard(ref: SessionRouteRef, conversationId: number): Promise<unknown>;
+  discardDurableChildWorktree(ref: SessionRouteRef, conversationId: number, confirmationToken: string): Promise<unknown>;
   messageDurableChild(ref: SessionRouteRef, conversationId: number, text: string): Promise<void>;
   stopDurableChild(ref: SessionRouteRef, conversationId: number): Promise<void>;
   answerDurableChildQuestion(ref: SessionRouteRef, questionId: string, answer: string): Promise<void>;
@@ -36,6 +43,19 @@ export function registerDurableChildRoutes(app: FastifyInstance, service: Durabl
       await service.stopDurableChild(bodyRef(request.params.sessionId, record(request.body)), childId(request.params.child));
       return { ok: true };
     }));
+  for (const action of ["land", "discard-preview", "discard"] as const) {
+    app.post<{ Params: { sessionId: string; child: string }; Body: unknown }>(`${base}/:child/worktree/${action}`, (request, reply) =>
+      run(reply, () => {
+        const schema = action === "discard" ? discardBody : worktreeBody;
+        if (!Check(schema, request.body)) throw new BadRequest("Invalid child worktree action body");
+        const body = record(request.body);
+        const ref = bodyRef(request.params.sessionId, body);
+        const id = childId(request.params.child);
+        if (action === "land") return service.landDurableChildWorktree(ref, id);
+        if (action === "discard-preview") return service.previewDurableChildWorktreeDiscard(ref, id);
+        return service.discardDurableChildWorktree(ref, id, text(body["confirmationToken"], "confirmationToken"));
+      }, 409));
+  }
   app.post<{ Params: { sessionId: string }; Body: unknown }>(`${base}/questions/answer`, (request, reply) =>
     run(reply, async () => {
       const body = record(request.body);
@@ -46,14 +66,14 @@ export function registerDurableChildRoutes(app: FastifyInstance, service: Durabl
 
 class BadRequest extends Error {}
 
-async function run(reply: FastifyReply, action: () => Promise<unknown>): Promise<unknown> {
+async function run(reply: FastifyReply, action: () => Promise<unknown>, errorStatus = 500): Promise<unknown> {
   try {
     return await action();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const status = error instanceof BadRequest ? 400
       : /session not found|not a child|does not host/i.test(message) ? 404
-        : message.includes("is not open") ? 409 : 500;
+        : message.includes("is not open") || message.includes("no longer writable") ? 409 : errorStatus;
     return reply.code(status).send({ error: message });
   }
 }

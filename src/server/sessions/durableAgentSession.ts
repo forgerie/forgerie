@@ -9,8 +9,9 @@ import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { answerChildQuestion, childEntryText, childMessages, childWorkIsLive, isChildEntryKind, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
+import { answerChildQuestion, childEntryText, childMessages, childWorkIsLive, childWorktreeAction, workingChildCount, isChildEntryKind, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
 import type { DurableChildHost } from "./durableChildHost.js";
+import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 
 export interface DurableAgentSessionOptions {
@@ -55,6 +56,8 @@ export class DurableAgentSession implements PiAgentSession {
   private bound = false;
   private childWatch: { stop(): Promise<unknown> } | undefined;
   private childrenLive: boolean | undefined;
+  private childWorktrees: DurableChildWorktrees | undefined;
+  private childCount = 0;
 
   private constructor(private readonly options: DurableAgentSessionOptions) {
     const { services, sessionManager } = options;
@@ -150,9 +153,13 @@ export class DurableAgentSession implements PiAgentSession {
 
   // ─── Host operations on Durable children. None of them starts a parent turn. ───
   get hostsDurableChildren(): boolean { return this.options.childAgents !== undefined; }
-  durableChildren() { return listChildren(this.journal.harness, this.journal.conversation.id, context); }
+  get workingDurableChildren(): number { return this.childCount; }
+  durableChildren() { return listChildren(this.journal.harness, this.journal.conversation.id, context, this.childWorktrees); }
+  landDurableChildWorktree(conversationId: number) { return childWorktreeAction(this.journal.harness, this.journal.conversation.id, conversationId, context, this.childWorktrees, "land"); }
+  previewDurableChildWorktreeDiscard(conversationId: number) { return childWorktreeAction(this.journal.harness, this.journal.conversation.id, conversationId, context, this.childWorktrees, "discard-preview"); }
+  discardDurableChildWorktree(conversationId: number, confirmationToken: string) { return childWorktreeAction(this.journal.harness, this.journal.conversation.id, conversationId, context, this.childWorktrees, "discard", confirmationToken); }
   durableChildMessages(conversationId: number) { return childMessages(this.journal.harness, this.journal.conversation.id, conversationId, context); }
-  messageDurableChild(conversationId: number, text: string) { return messageChild(this.journal.harness, this.journal.conversation, conversationId, text, context); }
+  messageDurableChild(conversationId: number, text: string) { return messageChild(this.journal.harness, this.journal.conversation, conversationId, text, context, this.childWorktrees); }
   stopDurableChild(conversationId: number) { return stopChild(this.journal.harness, this.journal.conversation, conversationId, context); }
   answerDurableChildQuestion(questionId: string, answer: string) { return answerChildQuestion(this.journal.conversation, questionId, answer, context); }
 
@@ -160,22 +167,26 @@ export class DurableAgentSession implements PiAgentSession {
     const host = this.options.childAgents;
     if (host === undefined) return;
     const projectContext = this.resourceLoader.getAgentsFiles().agentsFiles.map((file) => `## ${file.path}\n\n${file.content}`).join("\n\n");
-    const extensions = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext });
+    const ref = { id: this.sessionId, cwd: this.options.services.cwd };
+    this.childWorktrees = host.worktrees === undefined ? undefined : new DurableChildWorktrees(host.worktrees, ref);
+    const extensions = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext,
+      ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }) });
     for (const extension of [...extensions.parent, ...extensions.childOnly]) this.registry.install(extension);
     // Children select these explicitly. The parent must not, or ask_human and the coding tools join its loadout.
     await this.journal.conversation.configure({ extensions: { remove: [...extensions.childOnly] } }, context);
     const watch = await this.journal.harness.watchTaskGraph(context);
     this.childWatch = watch;
-    const ref = { id: this.sessionId, cwd: this.options.services.cwd };
-    const update = (live: boolean) => {
+    const update = (graph: typeof watch.value) => {
+      const live = childWorkIsLive(graph, this.journal.conversation.id);
+      this.childCount = workingChildCount(graph, this.journal.conversation.id);
       // Every graph change can move a child between working and idle; the browser refetches the list.
       this.emit({ type: "durable_children_changed" });
       if (live === this.childrenLive) return;
       this.childrenLive = live;
       host.liveChanged(ref, live);
     };
-    update(childWorkIsLive(watch.value, this.journal.conversation.id));
-    watch.start((graph) => { update(childWorkIsLive(graph, this.journal.conversation.id)); return Promise.resolve(); });
+    update(watch.value);
+    watch.start((graph) => { update(graph); return Promise.resolve(); });
   }
 
   subscribe(listener: (event: unknown) => void): () => void {

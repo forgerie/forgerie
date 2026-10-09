@@ -54,6 +54,33 @@ describe("session-owned worktrees with real git", () => {
     expect((await reloaded.require(f.record.id)).sessionId).toBe("owner");
   });
 
+  it("allocates a child at the parent's HEAD and reuses its receipt after interrupted setup", async () => {
+    const f = await fixture();
+    await commit(f, f.record.path, "parent branch\n");
+    const parentHead = await f.git(f.record.path, "rev-parse", "HEAD");
+    const first = await f.worktrees.createForChild(f.session, "task-42");
+    expect(first.sourceCommit).toBe(parentHead);
+    expect(await f.git(first.path, "rev-parse", "HEAD")).toBe(parentHead);
+    expect(await f.worktrees.info(first, f.session.id)).toMatchObject({ ahead: 0, dirtyFiles: 0 });
+    // Model a crash after Git created the checkout but before setup completion was saved.
+    await f.store.update(first.id, { setup: { phase: "creating", log: "interrupted" } });
+    await commit(f, f.record.path, "parent advanced\n");
+    const restored = new SessionWorktreeStore(join(f.root, "worktrees.json"));
+    await restored.initialize();
+    const resumed = new SessionWorktrees(restored);
+    const again = await resumed.createForChild(f.session, "task-42");
+    expect(again).toMatchObject({ id: first.id, path: first.path, branch: first.branch, sourceCommit: parentHead, setup: { phase: "done" } });
+    expect(await f.git(again.path, "rev-parse", "HEAD")).toBe(parentHead);
+    expect((await restored.list()).filter((item) => item.sourceCommit !== undefined)).toHaveLength(1);
+    const same = await Promise.all([resumed.createForChild(f.session, "task-42"), resumed.createForChild(f.session, "task-42")]);
+    expect(same.map((item) => item.path)).toEqual([first.path, first.path]);
+    const another = await resumed.createForChild(f.session, "task-43");
+    expect(another.path).not.toBe(first.path);
+    expect(await f.worktrees.land(f.record.id, [f.session])).toMatchObject({ kind: "blocked", reason: "related-worktrees-active" });
+    await expect(resumed.create(f.repo, undefined, first.id)).rejects.toThrow("Only an unowned setup");
+    await expect(resumed.attach(first.id, { ...f.session, cwd: first.path })).rejects.toThrow("ownership");
+  });
+
   it("rebases and lands, preserves a read-only transcript, removes the worktree and branch", async () => {
     const f = await fixture();
     await commit(f, f.record.path, "feature\n");

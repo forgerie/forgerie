@@ -160,13 +160,13 @@ async function createSessionDaemonRuntime() {
   const sessionWorktrees: SessionWorktrees = new SessionWorktrees(worktreeStore, {
     publish(record) {
       // A secondary checkout must never replace the chat's primary worktree in existing clients.
-      if (record.relatedSession !== undefined) return;
+      if (record.relatedSession !== undefined || record.childOwner !== undefined) return;
       const event = { type: "session.worktree", worktree: record } as const;
       eventHub.publishGlobal(event);
       for (const id of new Set([...(record.sessionId === undefined ? [] : [record.sessionId]), ...record.transcripts.map((item) => item.id)])) eventHub.publish(id, event);
     },
     async beforeRelatedAction(record, actorId) {
-      const ref = record.relatedSession;
+      const ref = record.relatedSession ?? record.childOwner;
       if (ref === undefined || !(await sessions.inspectPullSession(ref)).available) return;
       const status = await sessions.status(ref);
       if ((actorId !== ref.id && (status.isStreaming || status.isCompacting || status.isBashRunning))
@@ -202,6 +202,7 @@ async function createSessionDaemonRuntime() {
       // pi-subagents' built-in agents (worker, reviewer, scout) run as Durable children too.
       builtinAgentsDir: join(bundledSubagentsPackagePath(), "agents"),
       index: liveChildren,
+      worktrees: sessionWorktrees,
       onIndexError: (error) => { app.log.warn({ err: error }, "durable child index write failed"); },
     }) }),
     github: {

@@ -9,6 +9,9 @@ function setup() {
     durableChildMessages: (ref, id) => { calls.push(["messages", ref, id]); return Promise.resolve({ messages: [], busy: false }); },
     messageDurableChild: (ref, id, text) => { calls.push(["message", ref, id, text]); return Promise.resolve(); },
     stopDurableChild: (ref, id) => { calls.push(["stop", ref, id]); return Promise.resolve(); },
+    landDurableChildWorktree: (ref, id) => { calls.push(["land", ref, id]); return Promise.resolve({ kind: "landed", sha: "abc", cleanup: { kind: "done" } }); },
+    previewDurableChildWorktreeDiscard: (ref, id) => { calls.push(["preview", ref, id]); return Promise.resolve({ confirmationToken: "current" }); },
+    discardDurableChildWorktree: (ref, id, token) => { calls.push(["discard", ref, id, token]); return Promise.resolve({ kind: "stale-preview" }); },
     answerDurableChildQuestion: (ref, questionId, answer) => {
       calls.push(["answer", ref, questionId, answer]);
       return questionId === "closed" ? Promise.reject(new Error("Question closed is not open")) : Promise.resolve();
@@ -34,6 +37,19 @@ describe("durable child routes", () => {
       ["stop", { id: "s1", cwd: "/tmp" }, 7],
       ["answer", { id: "s1", cwd: "/tmp" }, "q:1", "Teal"],
     ]);
+  });
+
+  it("passes child worktree actions and confirmation tokens without treating a domain outcome as success", async () => {
+    const { app, calls } = setup();
+    const base = "/sessions/s1/children/7/worktree";
+    expect((await app.inject({ method: "POST", url: `${base}/land`, payload: { cwd: "/tmp" } })).json()).toMatchObject({ kind: "landed" });
+    expect((await app.inject({ method: "POST", url: `${base}/discard-preview`, payload: { cwd: "/tmp" } })).json()).toEqual({ confirmationToken: "current" });
+    expect((await app.inject({ method: "POST", url: `${base}/discard`, payload: { cwd: "/tmp", confirmationToken: "old" } })).json()).toEqual({ kind: "stale-preview" });
+    expect(calls).toEqual([["land", { id: "s1", cwd: "/tmp" }, 7], ["preview", { id: "s1", cwd: "/tmp" }, 7], ["discard", { id: "s1", cwd: "/tmp" }, 7, "old"]]);
+    expect((await app.inject({ method: "POST", url: `${base}/discard`, payload: { cwd: "/tmp" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url: `${base}/discard`, payload: { cwd: "/tmp", confirmationToken: "" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url: `${base}/land`, payload: { cwd: "/tmp", unexpected: true } })).statusCode).toBe(400);
+    expect(calls).toHaveLength(3);
   });
 
   it("rejects bad input and maps a closed question to 409", async () => {

@@ -17,6 +17,8 @@ import {
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
+import type { ChildWorktreeSummary, WorktreeActionResult, WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
+import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
 
 export const CHILD_TOOL_NAME = "child_agent";
 export const CHILD_QUESTION_KIND = "forgerie.child-question";
@@ -28,9 +30,9 @@ export const isChildEntryKind = (kind: string): boolean => CHILD_ENTRY_KINDS.has
 
 // defineDoc needs JSON-compatible type aliases; interfaces lack the index signature.
 /* eslint-disable @typescript-eslint/consistent-type-definitions */
-type ChildRecord = { conversationId: ConversationId; reported: EntryId[]; agent: string | null; createdAt: number };
+type ChildRecord = { conversationId: ConversationId; reported: EntryId[]; agent: string | null; createdAt: number; worktreeId?: string };
 type ChildQuestion = { child: ConversationId; childName: string; question: string; answer: string | null; askedAt: number };
-type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean };
+type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean; worktreeId?: string };
 type ReporterState = { phase: "deliver" } | { phase: "report"; report?: string };
 /* eslint-enable @typescript-eslint/consistent-type-definitions */
 
@@ -56,7 +58,8 @@ const Anchor = defineTask<null, { phase: "done" }, null>({
 });
 
 const REPORTER_KIND = "forgerie.child-reporter";
-const Reporter = defineTask<ReporterInput, ReporterState, null>({
+function childReporter(worktrees: DurableChildWorktrees | undefined) {
+  return defineTask<ReporterInput, ReporterState, null>({
   name: REPORTER_KIND, version: 1, initial: () => ({ phase: "deliver" }),
   phases: {
     deliver: async (reporter, runtime, context) => {
@@ -65,6 +68,8 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
       if (child === undefined) throw new Error(`Child conversation ${String(conversationId)} is missing`);
       const submission = await child.submit({ type: "input", content: message, whenBusy: followUp ? "followUp" : "steer", requestId: `child:${String(reporter.id)}` }, context);
       const settled = await submission.wait(context);
+      const worktreeReport = settled.status !== "unanswered" && reporter.input.worktreeId !== undefined
+        ? await requireWorktrees(worktrees).report(reporter.input.worktreeId) : undefined;
       await runtime.commit(async (tx) => {
         const next = (report?: string): { status: "running"; checkpoint: ReporterState } => ({ status: "running", checkpoint: report === undefined ? { phase: "report" } : { phase: "report", report } });
         if (settled.status === "unanswered") return next(settled.reason === "aborted" ? undefined : `[subagent ${name} failed: ${settled.reason}]`);
@@ -73,7 +78,7 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
         if (agent === undefined || agent.reported.includes(settled.answer)) return next();
         agent.reported.push(settled.answer);
         const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0];
-        return next(`[subagent ${name} answered, no reply needed] ${textOf(isAssistant(answer) ? answer : undefined)}`);
+        return next(`[subagent ${name} answered, no reply needed] ${textOf(isAssistant(answer) ? answer : undefined)}${worktreeReport === undefined ? "" : `\n\n${worktreeReport}`}`);
       }, context);
     },
     report: async (reporter, runtime, context) => {
@@ -87,7 +92,8 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
     },
   },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
-});
+  });
+}
 
 interface CommitApi { conversationId: ConversationId; commit<T>(change: (tx: Tx) => T | Promise<T>, context: Context): Promise<T> }
 
@@ -153,10 +159,12 @@ export interface DurableChildExtensionOptions {
   projectContext?: string;
   /** Extra tools every child may use. Tests pass a deterministic one. */
   extraTools?: readonly ToolRegistration[];
+  worktrees?: DurableChildWorktrees;
 }
 
 export function durableChildExtensions(options: DurableChildExtensionOptions = {}): DurableChildExtensions {
   const extraTools = options.extraTools ?? [];
+  const Reporter = childReporter(options.worktrees);
   const ChildTools = defineExtension({
     name: "forgerie.child-tools",
     tools: [askHumanTool, ...codingTools, ...extraTools],
@@ -166,7 +174,8 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
   const childTool = defineTool({
     name: CHILD_TOOL_NAME,
     description: [
-      "Run a background child agent in this session. Actions: spawn (name, message, optional agent) and send (name, message).",
+      "Run a background child agent in this session. Actions: spawn (name, message, optional agent and isolation) and send (name, message).",
+      "Use isolation: worktree for a child that edits code independently. Shared, the default, uses the parent's working directory.",
       "A child works on its own; its answer is reported back to you as a new message when it arrives. Do not wait or poll.",
       "The user can open a child, steer it, stop it, and answer its questions. Several spawns in one reply run in parallel.",
       ...(agentList === "" ? [] : [`Agents (pass one as \`agent\`; omit for a general helper):\n${agentList}`]),
@@ -176,14 +185,29 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       name: Type.String({ description: "Short unique name for this child, such as ui or api." }),
       message: Type.String({ description: "The full task. The child does not see this conversation." }),
       agent: Type.Optional(Type.String({ description: "Agent file name for spawn." })),
+      isolation: Type.Optional(Type.Union([Type.Literal("shared"), Type.Literal("worktree")], { description: "Working directory for spawn. Default shared." })),
     }),
-    replay: "unsafe",
-    execute: async (args, api, context) => {
+    // Tool calls serialize name allocation. Children themselves remain parallel background conversations.
+    executionMode: "sequential",
+    // The task ID identifies both the worktree receipt and reporter. Replay never starts a second run.
+    replay: "safe",
+    execute: (args, api, context) => withChildAdmission(options.worktrees, async () => {
       const { action, name, message } = args;
+      const before = await api.snapshot(Children, api.conversationId, context);
+      const existing = before !== undefined && Object.hasOwn(before.agents, name) ? before.agents[name] : undefined;
+      if (before?.reporters[String(api.taskId)] !== undefined) {
+        return { content: [{ type: "text" as const, text: action === "spawn" ? `Started ${name}.` : `Sent to ${name}.` }],
+          ...(existing === undefined ? {} : { details: { name, conversationId: Number(existing.conversationId) } }) };
+      }
+      if (action === "spawn" && existing !== undefined) return { content: [{ type: "text" as const, text: `${name} already exists; use send.` }] };
+      if (action === "send" && existing === undefined) return { content: [{ type: "text" as const, text: `No child named ${name}.` }] };
+      if (existing?.worktreeId !== undefined) await requireWorktrees(options.worktrees).assertWritable(existing.worktreeId);
       const profile = action === "spawn" && args.agent !== undefined ? await options.catalog?.find(args.agent) : undefined;
       if (action === "spawn" && args.agent !== undefined && profile === undefined) {
         return { content: [{ type: "text" as const, text: `No agent named ${args.agent}.${agentList === "" ? "" : ` Choose one of:\n${agentList}`}` }], isError: true };
       }
+      const checkout = action === "spawn" && args.isolation === "worktree"
+        ? await requireWorktrees(options.worktrees).prepare(String(api.taskId)) : undefined;
       const result = await api.commit(async (tx) => {
         const state = await tx.doc(Children, api.conversationId);
         const background = { ownership: { kind: "conversation" }, background: true } as const;
@@ -194,27 +218,42 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
           const project = profile?.inheritProjectContext !== false && options.projectContext !== undefined && options.projectContext !== ""
             ? `\n\n<project_context>\n${options.projectContext}\n</project_context>` : "";
           await configure(tx, child.id, {
+            ...(checkout === undefined ? {} : { cwd: checkout.path }),
             extensions: [ChildTools],
             tools: childToolsFor(profile, extraTools),
             ...(profile?.model === undefined ? {} : { model: profile.model }),
             ...(profile?.thinkingLevel === undefined ? {} : { thinkingLevel: profile.thinkingLevel }),
             instructions: `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked.${project}`,
           });
-          state.agents[name] = { conversationId: child.id, reported: [], agent: profile?.name ?? null, createdAt: Date.now() };
+          state.agents[name] = { conversationId: child.id, reported: [], agent: profile?.name ?? null, createdAt: Date.now(),
+            ...(checkout === undefined ? {} : { worktreeId: checkout.id }) };
         } else if (!Object.hasOwn(state.agents, name)) return `No child named ${name}.`;
         const agent = state.agents[name];
         if (agent === undefined) return `No child named ${name}.`;
-        state.reporters[String(api.taskId)] = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false }, background);
+        state.reporters[String(api.taskId)] = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
         return action === "send" ? `Sent to ${name}.` : `Started ${name}${profile === undefined ? "" : ` (${profile.name})`}.`;
       }, context);
       const current = (await api.snapshot(Children, api.conversationId, context))?.agents[name];
       return { content: [{ type: "text" as const, text: result }], ...(current === undefined ? {} : { details: { name, conversationId: Number(current.conversationId) } }) };
-    },
+    }),
   });
   return {
     parent: [defineExtension({ name: "forgerie.child-agents", tasks: [Anchor, Reporter], tools: [childTool] })],
     childOnly: [ChildTools],
   };
+}
+
+function withChildAdmission<T>(worktrees: DurableChildWorktrees | undefined, operation: () => Promise<T>): Promise<T> {
+  return worktrees === undefined ? operation() : worktrees.exclusive(operation);
+}
+
+function requireWorktrees(worktrees: DurableChildWorktrees | undefined): DurableChildWorktrees {
+  if (worktrees === undefined) throw new Error("Child worktree isolation is not available in this session");
+  return worktrees;
+}
+
+export function workingChildCount(graph: TaskGraph, parent: ConversationId): number {
+  return new Set(Object.values(graph.tasks).filter((task) => task.conversationId !== parent).map((task) => task.conversationId)).size;
 }
 
 /** Whether any child work is still live: a child's own task, or a reporter that has not delivered yet. */
@@ -230,16 +269,18 @@ export interface DurableChildSummary {
   agent: string | null;
   busy: boolean;
   createdAt: number;
+  worktree?: ChildWorktreeSummary;
   /** Open questions, oldest first. */
   questions: { questionId: string; question: string; askedAt: number }[];
 }
 
-export async function listChildren(harness: Harness, parent: ConversationId, context: Context): Promise<DurableChildSummary[]> {
+export async function listChildren(harness: Harness, parent: ConversationId, context: Context, worktrees?: DurableChildWorktrees): Promise<DurableChildSummary[]> {
   const agents = (await harness.snapshot(Children, parent, context))?.agents ?? {};
   const questions = Object.entries((await harness.snapshot(Questions, parent, context))?.items ?? {});
   const children = await Promise.all(Object.entries(agents).map(async ([name, agent]) => ({
     name, conversationId: Number(agent.conversationId), agent: agent.agent, createdAt: agent.createdAt,
     busy: (await harness.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined,
+    ...(agent.worktreeId === undefined ? {} : { worktree: await requireWorktrees(worktrees).summary(agent.worktreeId) }),
     questions: questions.filter(([, question]) => question.child === agent.conversationId && question.answer === null)
       .map(([questionId, question]) => ({ questionId, question: question.question, askedAt: question.askedAt }))
       .sort((a, b) => a.askedAt - b.askedAt),
@@ -253,7 +294,7 @@ async function ownedChild(harness: Harness, parent: ConversationId, conversation
   if (found === undefined) throw new Error(`Conversation ${String(conversationId)} is not a child of this session`);
   const child = await harness.conversation(found[1].conversationId, context);
   if (child === undefined) throw new Error(`Child conversation ${String(conversationId)} is missing`);
-  return { name: found[0], child };
+  return { name: found[0], child, worktreeId: found[1].worktreeId };
 }
 
 /** The child transcript as model messages, plus its in-flight answer, for a child view. */
@@ -274,10 +315,13 @@ async function noteInParent(parent: Conversation, text: string, data: Record<str
 }
 
 /** The user typing into an opened child: a steer while it works, a new input when it is idle. */
-export async function messageChild(harness: Harness, parent: Conversation, conversationId: number, text: string, context: Context): Promise<void> {
-  const { name, child } = await ownedChild(harness, parent.id, conversationId, context);
-  await child.submit({ type: "input", content: text, whenBusy: "steer" }, context);
-  await noteInParent(parent, `[the user told child ${name} directly] ${text}`, { child: conversationId, childName: name, action: "message" }, context);
+export async function messageChild(harness: Harness, parent: Conversation, conversationId: number, text: string, context: Context, worktrees?: DurableChildWorktrees): Promise<void> {
+  await withChildAdmission(worktrees, async () => {
+    const { name, child, worktreeId } = await ownedChild(harness, parent.id, conversationId, context);
+    if (worktreeId !== undefined) await requireWorktrees(worktrees).assertWritable(worktreeId);
+    await child.submit({ type: "input", content: text, whenBusy: "steer" }, context);
+    await noteInParent(parent, `[the user told child ${name} directly] ${text}`, { child: conversationId, childName: name, action: "message" }, context);
+  });
 }
 
 export async function stopChild(harness: Harness, parent: Conversation, conversationId: number, context: Context): Promise<void> {
@@ -295,6 +339,32 @@ export async function answerChildQuestion(parent: Conversation, questionId: stri
   }, context);
   if (!accepted) throw new Error(`Question ${questionId} is not open`);
   await parent.submit({ type: "write", requestId: `answer:${questionId}`, entry: { kind: CHILD_ANSWER_KIND, data: { questionId, answer } } }, context);
+}
+
+/** Lifecycle actions refuse a working child and use the existing durable Git receipts. */
+export function childWorktreeAction(harness: Harness, parent: ConversationId, conversationId: number, context: Context,
+  worktrees: DurableChildWorktrees | undefined, action: "discard-preview", confirmationToken?: string): Promise<WorktreeDiscardPreview>;
+export function childWorktreeAction(harness: Harness, parent: ConversationId, conversationId: number, context: Context,
+  worktrees: DurableChildWorktrees | undefined, action: "land" | "discard", confirmationToken?: string): Promise<WorktreeActionResult>;
+export async function childWorktreeAction(harness: Harness, parent: ConversationId, conversationId: number, context: Context,
+  worktrees: DurableChildWorktrees | undefined, action: "land" | "discard-preview" | "discard", confirmationToken?: string) {
+  const lifecycle = requireWorktrees(worktrees);
+  return lifecycle.exclusive(async () => {
+    const owned = await ownedChild(harness, parent, conversationId, context);
+    if (owned.worktreeId === undefined) throw new Error("This child has no worktree");
+    if ((await harness.snapshot(LiveDoc, owned.child.id, context))?.run !== undefined) throw new Error("Stop the child before changing its worktree");
+    const receipts = (await harness.snapshot(Children, parent, context))?.reporters ?? {};
+    for (const id of Object.values(receipts)) {
+      const reporter = await harness.getTask(id, context);
+      const input = reporter?.input;
+      if (reporter?.state.status !== "terminal" && typeof input === "object" && input !== null && !Array.isArray(input)
+        && input["conversationId"] === owned.child.id) throw new Error("Wait for the child's pending submission or report before changing its worktree");
+    }
+    if (action === "land") return lifecycle.land(owned.worktreeId);
+    if (action === "discard-preview") return lifecycle.discardPreview(owned.worktreeId);
+    if (confirmationToken === undefined || confirmationToken === "") throw new Error("A confirmationToken from discard-preview is required");
+    return lifecycle.discard(owned.worktreeId, confirmationToken);
+  });
 }
 
 /** One line for the transcript card of a child entry. */

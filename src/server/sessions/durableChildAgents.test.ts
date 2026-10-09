@@ -1,4 +1,6 @@
 // Durable-native child agents through Forgerie's real session service and Durable factory, with a scripted model.
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +15,11 @@ import { CapturingSessionEventHub, emptyArchiveStore } from "./piSessionService.
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import { CHILD_NOTE_KIND, CHILD_QUESTION_KIND } from "./durableChildAgents.js";
 import { LiveChildSessionIndex, createDurableChildHost } from "./durableChildHost.js";
+import { SessionWorktreeStore } from "../workspaces/sessionWorktreeStore.js";
+import { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
+
+const execute = promisify(execFile);
+const git = async (cwd: string, ...args: string[]) => (await execute("git", ["-C", cwd, ...args])).stdout.trim();
 
 interface Attempt { conv: number; step: number; phase: "start" | "end" }
 const attempts: Attempt[] = [];
@@ -56,8 +63,9 @@ const route: FauxResponseFactory = (context) => {
     ["alpha", "beta", "gamma"].map((name) => fauxToolCall("child_agent", { action: "spawn", name, message: "run work 5 times" })),
     { stopReason: "toolUse" },
   );
-  const spawn = /^Start a child named (\w+)(?: as (\w+))?: ([\s\S]*)$/.exec(said);
-  if (spawn !== null) return call("child_agent", { action: "spawn", name: spawn[1] ?? "", message: spawn[3] ?? "", ...(spawn[2] === undefined ? {} : { agent: spawn[2] }) });
+  const spawn = /^Start a child named (\w+)(?: as (\w+))?(?: (isolated))?: ([\s\S]*)$/.exec(said);
+  if (spawn !== null) return call("child_agent", { action: "spawn", name: spawn[1] ?? "", message: spawn[4] ?? "",
+    ...(spawn[2] === undefined ? {} : { agent: spawn[2] }), ...(spawn[3] === undefined ? {} : { isolation: "worktree" }) });
   const steps = /run work (\d+) times/.exec(said);
   if (steps !== null) return call("work", { step: 1, of: Number(steps[1]) });
   const write = /WRITE (\S+) (.*)$/.exec(said);
@@ -72,12 +80,28 @@ let models: ModelRuntime;
 let index: LiveChildSessionIndex;
 let hub: CapturingSessionEventHub;
 let service: PiSessionService;
+let worktrees: SessionWorktrees | undefined;
+
+async function gitWorkspace(beforeRemoval?: () => Promise<readonly []>): Promise<SessionWorktrees> {
+  await git(directory, "init", "-b", "main");
+  await git(directory, "config", "user.email", "test@example.invalid");
+  await git(directory, "config", "user.name", "Test");
+  await writeFile(join(directory, "base.txt"), "base\n");
+  await git(directory, "add", "base.txt");
+  await git(directory, "commit", "-m", "base");
+  const store = new SessionWorktreeStore(join(directory, "ownership.json"));
+  await store.initialize();
+  worktrees = new SessionWorktrees(store, { publish: () => undefined, ...(beforeRemoval === undefined ? {} : { beforeRemoval }) });
+  await service.dispose();
+  service = openService();
+  return worktrees;
+}
 
 function openService(): PiSessionService {
   hub = new CapturingSessionEventHub();
   const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: directory }, sessionDirEnvKeys: [] });
   return new PiSessionService(hub, { agentDir, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore(),
-    heartbeatIntervalMs: 60_000, durableChildAgents: createDurableChildHost({ extraTools: [work], index }) });
+    heartbeatIntervalMs: 60_000, durableChildAgents: createDurableChildHost({ extraTools: [work], index, ...(worktrees === undefined ? {} : { worktrees }) }) });
 }
 
 async function until<T>(what: string, check: () => Promise<T | undefined | false>, ms = 15_000): Promise<T> {
@@ -102,6 +126,7 @@ const ended = (conv: number) => attempts.filter((a) => a.conv === conv && a.phas
 beforeEach(async () => {
   attempts.length = 0;
   systemSeen.length = 0;
+  worktrees = undefined;
   directory = await mkdtemp(join(tmpdir(), "forgerie-durable-children-"));
   agentDir = join(directory, "agent");
   models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
@@ -253,6 +278,103 @@ describe("Durable-native child agents in a Forgerie session", () => {
     service = openService();
     await service.status(ref);
     for (const item of initial) expect(await reports(ref, item.name)).toHaveLength(1);
+  }, 40_000);
+
+  it("isolates writers, reports their branch and files, and preserves cwd across reopen", async () => {
+    const lifecycle = await gitWorkspace();
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    for (const name of ["one", "two"]) {
+      await service.prompt(ref, `Start a child named ${name} isolated: WRITE out.txt ${name}`);
+      await until(`${name} report`, async () => (await reports(ref, name)).length === 1);
+    }
+    const before = await service.durableChildren(ref);
+    expect(before).toHaveLength(2);
+    expect(new Set(before.map((item) => item.worktree?.path)).size).toBe(2);
+    for (const item of before) {
+      if (item.worktree === undefined) throw new Error("Expected isolated cwd");
+      expect(item.worktree).toMatchObject({ state: "active", ahead: 0, dirty: true });
+      expect(await readFile(join(item.worktree.path, "out.txt"), "utf8")).toBe(item.name);
+      expect(text((await reports(ref, item.name))[0]?.content)).toContain(`Worktree branch: ${item.worktree.branch}`);
+      expect(text((await reports(ref, item.name))[0]?.content)).toContain("Files changed: out.txt");
+    }
+    await expect(readFile(join(directory, "out.txt"))).rejects.toThrow();
+    await service.dispose();
+    service = openService();
+    expect(await service.durableChildren(ref)).toEqual(before);
+    expect(await lifecycle.store.list()).toHaveLength(2);
+    await service.messageDurableChild(ref, before[0]?.conversationId ?? 0, "WRITE after.txt reopened child");
+    const path = before[0]?.worktree?.path;
+    if (path === undefined) throw new Error("Expected isolated cwd");
+    await until("write in reopened child", async () => readFile(join(path, "after.txt"), "utf8").catch(() => false));
+    await expect(readFile(join(directory, "after.txt"))).rejects.toThrow();
+  }, 40_000);
+
+  it("lands a finished child's commit, keeps its history, and rejects new work in the removed cwd", async () => {
+    await gitWorkspace();
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start a child named builder isolated: WRITE result.txt landed child");
+    await until("builder report", async () => (await reports(ref, "builder")).length === 1);
+    const builder = await child(ref, "builder");
+    if (builder.worktree === undefined) throw new Error("Expected child worktree");
+    await git(builder.worktree.path, "add", "result.txt");
+    await git(builder.worktree.path, "commit", "-m", "child result");
+    expect((await child(ref, "builder")).worktree).toMatchObject({ ahead: 1, dirty: false });
+    expect(await service.landDurableChildWorktree(ref, builder.conversationId)).toMatchObject({ kind: "landed", cleanup: { kind: "done" } });
+    expect(await readFile(join(directory, "result.txt"), "utf8")).toBe("landed child");
+    await expect(readFile(join(builder.worktree.path, "result.txt"))).rejects.toThrow();
+    expect((await child(ref, "builder")).worktree).toMatchObject({ state: "landed", dirty: false });
+    expect((await service.durableChildMessages(ref, builder.conversationId)).messages.length).toBeGreaterThan(0);
+    await expect(service.messageDurableChild(ref, builder.conversationId, "WRITE forbidden.txt no")).rejects.toThrow("no longer writable");
+  }, 40_000);
+
+  it("serializes a user submission with removal and refuses writes in a landed checkout", async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const removing = new Promise<void>((resolve) => { entered = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    await gitWorkspace(async () => { entered(); await released; return []; });
+    const ref = await service.start(directory);
+    await service.prompt(ref, "Start a child named racer isolated: WRITE same.txt committed");
+    const writer = await child(ref, "racer");
+    await until("racer report", async () => (await reports(ref, "racer")).length === 1);
+    const path = writer.worktree?.path;
+    if (path === undefined) throw new Error("Missing child checkout");
+    await git(path, "add", "same.txt");
+    await git(path, "commit", "-m", "child change");
+    const landing = service.landDurableChildWorktree(ref, writer.conversationId);
+    await removing;
+    const submission = service.messageDurableChild(ref, writer.conversationId, "WRITE after.txt unsafe")
+      .then(() => "accepted", () => "refused");
+    release();
+    const [landed, sent] = await Promise.all([landing, submission]);
+    expect(landed.kind).toBe("landed");
+    expect(sent).toBe("refused");
+    await expect(readFile(join(path, "after.txt"))).rejects.toThrow();
+  });
+
+  it("refuses busy child removal, then requires a current discard token and keeps a receipt after restart", async () => {
+    await gitWorkspace();
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start a child named runner isolated: run work 10 times");
+    const runner = await child(ref, "runner");
+    if (runner.worktree === undefined) throw new Error("Expected child worktree");
+    await until("working count", async () => (await service.status(ref)).workingAgents === 1);
+    await expect(service.landDurableChildWorktree(ref, runner.conversationId)).rejects.toThrow("Stop the child");
+    await expect(service.previewDurableChildWorktreeDiscard(ref, runner.conversationId)).rejects.toThrow("Stop the child");
+    await service.stopDurableChild(ref, runner.conversationId);
+    await until("idle child", async () => !(await child(ref, "runner")).busy);
+    await writeFile(join(runner.worktree.path, "dirty.txt"), "first");
+    const preview = await service.previewDurableChildWorktreeDiscard(ref, runner.conversationId);
+    if (!("confirmationToken" in preview)) throw new Error("Expected discard preview");
+    await writeFile(join(runner.worktree.path, "dirty.txt"), "changed");
+    expect(await service.discardDurableChildWorktree(ref, runner.conversationId, preview.confirmationToken)).toMatchObject({ kind: "stale-preview" });
+    const next = await service.previewDurableChildWorktreeDiscard(ref, runner.conversationId);
+    if (!("confirmationToken" in next)) throw new Error("Expected discard preview");
+    expect(await service.discardDurableChildWorktree(ref, runner.conversationId, next.confirmationToken)).toMatchObject({ kind: "discarded", cleanup: { kind: "done" } });
+    await service.dispose();
+    service = openService();
+    expect((await child(ref, "runner")).worktree).toMatchObject({ state: "discarded", ahead: 0, dirty: false });
+    await expect(service.messageDurableChild(ref, runner.conversationId, "new work")).rejects.toThrow("no longer writable");
   }, 40_000);
 
   it("keeps one question across a restart, and an answer after it reaches the child", async () => {
