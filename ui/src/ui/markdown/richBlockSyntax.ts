@@ -297,3 +297,73 @@ export function parseBars(body: string): BarSet {
   }
   return { title: title.join(" "), bars };
 }
+
+export type Correction = { wrong: string; right: string; cause: string };
+
+const CORRECTION_LINE = /^\s*(was|now|cause)[ \t]*:[ \t]*(.*)$/i;
+const CORRECTION_FIELDS = { was: "wrong", now: "right", cause: "cause" } as const;
+
+/**
+ * Reads a `correction` block: `was:` what an earlier reply said, `now:` what
+ * is true, `cause:` why the mistake happened. Lines under a field continue it.
+ */
+export function parseCorrection(body: string): Correction {
+  const fields: Record<keyof Correction, string[]> = { wrong: [], right: [], cause: [] };
+  let current: keyof Correction | undefined;
+  for (const line of body.split(/\r?\n/)) {
+    const field = CORRECTION_LINE.exec(line);
+    if (field) { current = CORRECTION_FIELDS[field[1]!.toLowerCase() as keyof typeof CORRECTION_FIELDS]; fields[current].push(field[2]!); continue; }
+    if (current !== undefined) fields[current].push(line);
+  }
+  const join = (lines: string[]) => lines.map((line) => line.trim()).join("\n").trim();
+  return { wrong: join(fields.wrong), right: join(fields.right), cause: join(fields.cause) };
+}
+
+export const SEVERITIES = ["high", "medium", "low"] as const;
+export type Severity = typeof SEVERITIES[number];
+export type Aside = { severity: Severity; text: string; detail: string };
+
+const ASIDE_LINE = /^ ?(?:[-*][ \t]+)?(high|medium|low)[ \t]*:[ \t]*(.*)$/i;
+
+/** Reads an `asides` block: `high:`, `medium:` or `low:` starts an item; lines under it are its detail. */
+export function parseAsides(body: string): Aside[] {
+  const asides: { severity: Severity; text: string; detail: string[] }[] = [];
+  for (const line of body.split(/\r?\n/)) {
+    const aside = ASIDE_LINE.exec(line);
+    if (aside) { asides.push({ severity: aside[1]!.toLowerCase() as Severity, text: aside[2]!.trim(), detail: [] }); continue; }
+    asides.at(-1)?.detail.push(line);
+  }
+  return asides.map((aside) => ({ ...aside, detail: dedent(aside.detail).trim() }));
+}
+
+export type TimelineEvent = { when: string; text: string; detail: string };
+export type Timeline = { title: string; events: TimelineEvent[] };
+
+// "18:22 - sessiond started": a spaced hyphen, en dash or em dash ends the time.
+const EVENT_LINE = /^ ?(?:[-*][ \t]+)?(\S(?:.*?\S)?)[ \t]+[-–—][ \t]+(.*)$/;
+
+/**
+ * Reads a `timeline` block: `when - what` per line, in order. Lines indented
+ * under an event are its detail. Text before the first event is the title.
+ */
+export function parseTimeline(body: string): Timeline {
+  const title: string[] = [];
+  const events: { when: string; text: string; detail: string[] }[] = [];
+  for (const line of body.split(/\r?\n/)) {
+    const indented = /^[ \t]{2,}\S/.test(line);
+    const event = indented && events.length > 0 ? null : EVENT_LINE.exec(line);
+    if (event) { events.push({ when: event[1]!, text: event[2]!.trim(), detail: [] }); continue; }
+    const current = events.at(-1);
+    if (current === undefined) { title.push(line); continue; }
+    current.detail.push(line);
+  }
+  return { title: title.join(" ").trim(), events: events.map((event) => ({ ...event, detail: dedent(event.detail).trim() })) };
+}
+
+// A quote's last line naming its source: "— src/app.ts:12" or "-- docs".
+const SOURCE_LINE = /^(?:—|--)[ \t]+(\S.*)$/;
+
+/** The source named by a line such as `— src/app.ts:12`, or undefined. */
+export function readQuoteSource(line: string): string | undefined {
+  return SOURCE_LINE.exec(line.trim())?.[1]?.trim();
+}

@@ -1,0 +1,33 @@
+/* Events in order. Two shared columns through subgrid: the time, then the
+   event hanging from a rail with a dot at each event. */
+.timeline {
+  /** Widest share of the timeline the time column may take. @label Timeline time share @min 20 @max 50 @step 5 */
+  --timeline-when-share: 35%;
+  --timeline-dot: 0.5rem;
+  margin: var(--space-4) 0;
+}
+.timeline-title { margin-block-end: var(--space-2); font-weight: 600; overflow-wrap: anywhere; }
+.timeline .timeline-events {
+  display: grid; grid-template-columns: fit-content(var(--timeline-when-share)) minmax(0, 1fr);
+  column-gap: var(--space-3);
+  margin: 0; padding: 0; list-style: none;
+}
+.timeline .timeline-event { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline; margin: 0; }
+.timeline-when {
+  color: var(--muted-foreground);
+  font-size: var(--small-text); font-variant-numeric: tabular-nums; text-align: end; overflow-wrap: anywhere;
+}
+.timeline-what {
+  position: relative; min-inline-size: 0;
+  padding-block: var(--space-1) var(--space-2); padding-inline-start: var(--space-4);
+  border-inline-start: var(--hairline) solid var(--line-focus);
+}
+.timeline-what::before {
+  content: ""; position: absolute;
+  inset-block-start: calc(var(--space-1) + 0.5em);
+  inset-inline-start: calc(var(--timeline-dot) / -2 - var(--hairline) / 2);
+  inline-size: var(--timeline-dot); block-size: var(--timeline-dot);
+  border-radius: 50%; background: var(--foreground);
+}
+.timeline-event:last-child .timeline-what { border-inline-start-color: transparent; }
+.timeline-detail { margin-block-start: var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); }

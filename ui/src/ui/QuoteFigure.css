@@ -1,0 +1,10 @@
+/* A sourced quotation. Full text colour, unlike a plain quote, because the
+   words are evidence; the rail and the source line set it apart. */
+.quote-figure { margin: var(--space-4) 0; padding-inline-start: var(--space-4); border-inline-start: calc(var(--hairline) * 2) solid var(--line-focus); }
+.quote-figure .quote-figure-text { margin: 0; padding: 0; border: 0; color: var(--foreground); }
+.quote-figure-source {
+  margin-block-start: var(--space-1);
+  color: var(--muted-foreground);
+  font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; overflow-wrap: anywhere;
+}
+.quote-figure-source::before { content: "— "; font-family: var(--body-font); }

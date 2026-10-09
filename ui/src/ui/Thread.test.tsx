@@ -659,3 +659,42 @@ describe("Rich blocks, round three", () => {
     expect([...document.querySelectorAll('.bar-chart-value')].map((value) => value.textContent)).toEqual(["28 s", "7 s", "0 s"]);
   });
 });
+
+describe("Rich blocks, round four", () => {
+  it("renders a correction with the earlier claim struck through, the correct one, and the cause", async () => {
+    await render({ messages: [answer("```correction\nwas: 4,000 tokens per message\nnow: about 1,100 tokens per call\ncause: characters next to tokens\n```")] });
+    const note = document.querySelector('.correction-panel')!;
+    expect(note.getAttribute('role')).toBe("note");
+    expect(note.querySelector('.correction-panel-title')?.textContent).toBe("Correction");
+    expect(note.querySelector('del')?.textContent).toBe("4,000 tokens per message");
+    expect([...note.querySelectorAll('dt')].map((label) => label.textContent)).toEqual(["Earlier", "Correct", "Cause"]);
+  });
+
+  it("renders asides with a worded severity", async () => {
+    await render({ messages: [answer("```asides\nhigh: sessiond is stale\n  Started at 18:22.\nlow: a label\n```")] });
+    expect([...document.querySelectorAll('.aside-list-pill')].map((pill) => pill.textContent)).toEqual(["High", "Low"]);
+    expect(document.querySelector('.aside-list-detail')?.textContent).toBe("Started at 18:22.");
+  });
+
+  it("renders a timeline with each time beside its event", async () => {
+    await render({ messages: [answer("```timeline\nTonight\n18:22 - sessiond started\n21:20 - guide landed\n```")] });
+    expect(document.querySelector('.timeline-title')?.textContent).toBe("Tonight");
+    expect([...document.querySelectorAll('.timeline-event')].map((event) => [event.querySelector('.timeline-when')?.textContent, event.querySelector('.timeline-what')?.textContent]))
+      .toEqual([["18:22", "sessiond started"], ["21:20", "guide landed"]]);
+  });
+
+  it("moves a quote's source line into a caption and leaves other quotes alone", async () => {
+    await render({ messages: [answer("> Check the thing itself.\n> — AGENTS.md:58\n\n> Plain quote - not a source")] });
+    const figure = document.querySelector('.quote-figure')!;
+    expect(figure.querySelector('blockquote')?.textContent?.trim()).toBe("Check the thing itself.");
+    expect(figure.querySelector('figcaption')?.textContent).toBe("AGENTS.md:58");
+    expect(document.querySelectorAll('.quote-figure')).toHaveLength(1);
+    expect(document.querySelector('.markdown > div > blockquote, .markdown-content > blockquote')?.textContent?.trim()).toBe("Plain quote - not a source");
+  });
+
+  it("keeps a callout a callout even when its last line looks like a source", async () => {
+    await render({ messages: [answer("> [!NOTE]\n> Read the guide.\n> — AGENTS.md")] });
+    expect(document.querySelector('.callout')?.getAttribute('data-callout')).toBe("note");
+    expect(document.querySelector('.quote-figure')).toBeNull();
+  });
+});

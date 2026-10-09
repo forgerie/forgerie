@@ -8,9 +8,14 @@ describe("reply format guide", () => {
     expect(withReplyFormatGuide(once)).toEqual(once);
   });
 
+  it("stays within its budget, because every model call carries it", () => {
+    // About 750 tokens. Raise this only with the per-call cost in mind.
+    expect(REPLY_FORMAT_GUIDE.length).toBeLessThanOrEqual(3_000);
+  });
+
   it("shows an example of every block the browser app renders", () => {
-    expect(REPLY_FORMAT_GUIDE).toContain("> [!WARNING]\n> ");
-    for (const language of ["steps", "compare", "status", "files", "facts", "diagram", "claims", "commands", "details", "bars"]) {
+    expect(REPLY_FORMAT_GUIDE).toContain("> [!NOTE]");
+    for (const language of ["steps", "compare", "status", "files", "facts", "diagram", "claims", "commands", "details", "bars", "correction", "asides", "timeline"]) {
       expect(REPLY_FORMAT_GUIDE).toContain("```" + language + "\n");
     }
   });

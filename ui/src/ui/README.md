@@ -24,3 +24,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `Disclosure` (molecule): hides supporting material behind a one-line summary, closed by default and uncontrolled so it stays open while text streams.
 - `CommandList` (molecule): lists shell commands to run in order, each with a note and its own copy button, plus copy all.
 - `BarChart` (molecule): draws a few numbers of one kind as bars from zero, with each value also stated as text.
+- `CorrectionPanel` (molecule): states a correction loudly: the earlier claim struck through, the correct one strong, and the cause.
+- `AsideList` (molecule): lists findings outside the question, each with a high, medium or low pill that reads without colour.
+- `Timeline` (molecule): shows events in order with their times in one aligned column, joined by a rail.
+- `QuoteFigure` (molecule): shows a quotation with its source as a caption in the code face.

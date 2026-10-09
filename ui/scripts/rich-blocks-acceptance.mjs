@@ -19,7 +19,7 @@ assert.ok(chromeBin, "Chromium is required");
 const chrome = launchChrome(chromeBin, port, profile);
 const base = process.env.APP_URL ?? "http://127.0.0.1:8510/";
 const output = resolve("verification/local/rich-blocks");
-const result = { postures: [], report: [], answer: [], errors: [] };
+const result = { postures: [], report: [], answer: [], followUp: [], errors: [] };
 await mkdir(join(output, "shots"), { recursive: true });
 
 async function until(cdp, expression, timeout = 10_000) {
@@ -136,6 +136,42 @@ try {
         }
         await evaluate(cdp, `document.querySelector('.disclosure-summary').click(); document.querySelector('.disclosure').scrollIntoView({ block: 'start' })`);
         await shot(cdp, `${label}-details-open`);
+        // Round four: correction, sourced quote, timeline and asides.
+        await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-followup", base).href });
+        await until(cdp, `document.querySelectorAll('.timeline-event').length === 4`);
+        const followUp = await evaluate(cdp, `(() => {
+          const whens = [...document.querySelectorAll('.timeline-when')].map((when) => when.getBoundingClientRect());
+          const whats = [...document.querySelectorAll('.timeline-what')].map((what) => Math.round(what.getBoundingClientRect().left));
+          const pills = [...document.querySelectorAll('.aside-list-pill')].map((pill) => pill.getBoundingClientRect());
+          const bodies = [...document.querySelectorAll('.aside-list-body')].map((body) => Math.round(body.getBoundingClientRect().left));
+          return {
+            pageOverflow: document.documentElement.scrollWidth > innerWidth,
+            correctionFirst: document.querySelector('.markdown-content').firstElementChild.querySelector('.correction-panel') !== null
+              || document.querySelector('.markdown-content').firstElementChild.classList.contains('correction-panel'),
+            struck: document.querySelector('.correction-panel del') !== null,
+            whatsAligned: new Set(whats).size === 1,
+            whenRightEdges: new Set(whens.map((rect) => Math.round(rect.right))).size,
+            asideBodiesAligned: new Set(bodies).size === 1,
+            pillsFit: pills.every((rect) => rect.width > 0),
+            quoteSource: document.querySelector('.quote-figure-source').textContent,
+            quoteSourceOverflows: document.querySelector('.quote-figure').scrollWidth > document.querySelector('.quote-figure').clientWidth,
+          };
+        })()`);
+        assert.equal(followUp.pageOverflow, false, `${label}: follow-up page overflows`);
+        assert.equal(followUp.correctionFirst, true, `${label}: correction is not first`);
+        assert.equal(followUp.whatsAligned, true, `${label}: timeline events do not line up`);
+        assert.equal(followUp.whenRightEdges, 1, `${label}: timeline times are not right-aligned`);
+        assert.equal(followUp.asideBodiesAligned, true, `${label}: aside text does not line up`);
+        assert.equal(followUp.quoteSourceOverflows, false, `${label}: quote source overflows`);
+        result.followUp.push({ scheme, posture: posture.name, ...followUp });
+        for (const [name, selector] of [["correction", ".correction-panel"], ["quote", ".quote-figure"], ["timeline", ".timeline"], ["asides", ".aside-list"]]) {
+          await evaluate(cdp, `document.querySelector('${selector}').scrollIntoView({ block: 'start' })`);
+          await shot(cdp, `${label}-${name}`);
+        }
+        if (posture === FOLD8_POSTURES[0]) {
+          await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-followup-live", base).href });
+          await until(cdp, `document.querySelector('.markdown')?.dataset.status === 'complete' && document.querySelectorAll('.timeline-event').length === 4 && document.querySelector('.quote-figure') !== null`, 40_000);
+        }
         if (posture === FOLD8_POSTURES[0]) {
           await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-answer-live", base).href });
           await until(cdp, `document.querySelector('.markdown')?.dataset.status === 'complete' && document.querySelectorAll('.bar-chart-bar').length === 3`, 40_000);
@@ -157,7 +193,7 @@ try {
   assert.deepEqual(result.errors, []);
   await writeFile(join(output, "acceptance.json"), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result.postures.map(({ scheme, posture, column, optionsInOneRow }) => ({ scheme, posture, column, optionsInOneRow }))));
-  console.log(JSON.stringify(result.answer));
+  console.log(JSON.stringify(result.followUp));
 } finally {
   chrome.kill("SIGTERM"); await sleep(300);
   if (chrome.exitCode === null) chrome.kill("SIGKILL");

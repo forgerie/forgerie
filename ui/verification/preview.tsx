@@ -82,6 +82,17 @@ const richAnswerReply = [
 const richAnswerMessages = (text: string): TranscriptMessage[] => [
   say("answer-question", "user", "Why does my session ignore the reply guide?"), say("answer-answer", "assistant", text),
 ];
+// A follow-up that corrects an earlier answer: the round-four blocks.
+const richFollowUpReply = [
+  "```correction\nwas: the guide adds 4,000 tokens to every message\nnow: it adds about 1,100 tokens to each model call, and the provider caches most of it\ncause: I showed its size in characters next to a cost in tokens\n```",
+  "The system prompt carries one copy of the guide. Pi builds it in one place:",
+  "> `if (appendSystemPrompt) promptSections.addendum = appendSystemPrompt;`\n> — node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js:97",
+  "```timeline\nHow the guide reached sessions\n18:22 - sessiond started with the old prompt\n21:20 - round one landed on main\n  The running daemon kept the old prompt.\n23:42 - sessiond restarted\n23:43 - first turn with the guide\n```",
+  "```asides\nhigh: delegated agents still do not receive the guide\n  pi-subagents builds each child's loader itself.\nmedium: 17 block types give an agent more ways to pick the wrong one\nlow: the guide shrank to 2,600 characters this round\n```",
+].join("\n\n");
+const richFollowUpMessages = (text: string): TranscriptMessage[] => [
+  say("followup-question", "user", "Are you saying that you add 4k tokens to every message?"), say("followup-answer", "assistant", text),
+];
 // Cut inside the comparison, the way a reply looks mid-stream.
 const richBlocksRunning = richBlocksReply.slice(0, richBlocksReply.indexOf("+ Rollback"));
 const testOutput = Array.from({ length: 40 }, (_, index) => ` ✓ src/transcript.test.ts > case ${index + 1} (${index % 7 + 1} ms)`).join("\n");
@@ -342,6 +353,7 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   "rich-blocks-live": richBlocksMessages(""),
   "rich-report": richReportMessages(richReportReply), "rich-report-live": richReportMessages(""),
   "rich-answer": richAnswerMessages(richAnswerReply), "rich-answer-live": richAnswerMessages(""),
+  "rich-followup": richFollowUpMessages(richFollowUpReply), "rich-followup-live": richFollowUpMessages(""),
   ...scenario === "images" || scenario === "images-viewer" ? { images: imageMessages(), "images-viewer": imageMessages() } : {},
   handoff: handoffMessages, "handoff-open": handoffMessages,
 };
@@ -381,12 +393,12 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
   const [queue, setQueue] = useState<QueuedMessage[]>(queueScenarios[scenario] ?? []);
-  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running" || scenario === "rich-blocks-running" || scenario === "rich-blocks-live" || scenario === "rich-report-live" || scenario === "rich-answer-live");
+  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "reconnecting-running" || scenario === "streamdown-running" || scenario === "rich-blocks-running" || scenario === "rich-blocks-live" || scenario === "rich-report-live" || scenario === "rich-answer-live" || scenario === "rich-followup-live");
   // Streams the rich-block reply in small chunks, like a model, then completes.
   useEffect(() => {
     const live: Record<string, [string, (text: string) => TranscriptMessage[]]> = {
       "rich-blocks-live": [richBlocksReply, richBlocksMessages], "rich-report-live": [richReportReply, richReportMessages],
-      "rich-answer-live": [richAnswerReply, richAnswerMessages],
+      "rich-answer-live": [richAnswerReply, richAnswerMessages], "rich-followup-live": [richFollowUpReply, richFollowUpMessages],
     };
     if (!(scenario in live)) return;
     const [reply, messagesFor] = live[scenario]!;

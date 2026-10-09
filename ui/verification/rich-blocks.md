@@ -14,6 +14,10 @@ The agent writes plain Markdown. The browser app renders three structures from i
 | Commands | `commands` fence: one command per line, `# ` note above, `\` continues a line, `$ ` dropped. | `CommandList`: one row per command with its note and copy button, plus copy all. Long commands wrap under a hanging indent. |
 | Details | `details` fence: first line is the plain-text summary, the rest is Markdown. | `Disclosure`: closed by default, uncontrolled so it stays open while the reply streams. |
 | Bars | `bars` fence: a title, then `Label: value` lines with a number and optional unit. | `BarChart`: bars from zero on one scale, labels capped at 40% of the width, each value also as text. |
+| Correction | `correction` fence: `was:`, `now:`, `cause:`. | `CorrectionPanel`: warm rail, the earlier claim struck through, the correct one strong, the cause muted. |
+| Asides | `asides` fence: `high:`, `medium:`, `low:` items with indented detail. | `AsideList`: a tinted "Also noticed" panel; each item has a worded severity pill. |
+| Timeline | `timeline` fence: `when - what` lines; indented detail. | `Timeline`: times right-aligned in one column on the event's baseline, events on a rail. |
+| Sourced quote | A quote whose last line is `— source` (or `-- source`). | `QuoteFigure`: the quote in full text colour with the source as a code-face caption. Callouts are never treated as sourced quotes. |
 | Diagram | `diagram` (or `mermaid`) fence with Mermaid source. | `Diagram`: the source until it has been still for 250 ms, then the drawing. A wide drawing keeps 0.62 scale or more and scrolls. Invalid source stays visible with a note. |
 
 ## How it works
@@ -55,6 +59,16 @@ Round three, checked on 2026-10-09:
 | Gates | 36 pass with no new exceptions; `prove-bite.mjs` 36 of 36. |
 | `scripts/rich-blocks-acceptance.mjs` | All four postures, both schemes: no overflow, bars at 0.43 and 0.65 of the largest (exact ratios), bar tracks aligned, details summary 44 px tall, three copy buttons. The answer streams live to completion. |
 | Visual review | Read the claims, commands, bars and open-details PNGs. Long commands first scrolled out of view at folded portrait; they now wrap. |
+
+Round four, checked on 2026-10-09:
+
+| Check | Result |
+|---|---|
+| Guide | Rewritten as a compact reference: 17 blocks in 2,600 characters (round three: 13 blocks in 4,366). `replyFormatGuide.test.ts` caps it at 3,000 characters. |
+| `npm run verify` | Root 229 of 229 files, UI 116 files pass. |
+| Gates | 36 pass; ratchet 660 to 660; `prove-bite.mjs` 36 of 36. The domain-noun gate rejected the first name, `CorrectionNote` ("Note" is a Forgerie feature), so it is `CorrectionPanel`. |
+| `scripts/rich-blocks-acceptance.mjs` | All postures and schemes: no overflow, correction first, timeline events and times aligned, aside text aligned, long quote source wraps without overflow; the follow-up streams live to completion. |
+| Visual review | Timeline times first sat above their events' baseline; they now share it. |
 
 ## Repeat
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countMarks, parseBars, parseCheckList, parseClaims, parseCommands, parseComparison, parseDisclosure, parseFacts, parseFileTree, parseSteps, readCalloutMarker } from "./richBlockSyntax";
+import { countMarks, parseAsides, parseCorrection, parseTimeline, readQuoteSource, parseBars, parseCheckList, parseClaims, parseCommands, parseComparison, parseDisclosure, parseFacts, parseFileTree, parseSteps, readCalloutMarker } from "./richBlockSyntax";
 
 describe("callout markers", () => {
   it("reads GitHub alert markers in any case and reports how much to remove", () => {
@@ -163,5 +163,48 @@ describe("bars", () => {
         { label: "big", value: 1250, display: "1,250 ms" },
       ],
     });
+  });
+});
+
+describe("correction", () => {
+  it("reads was, now and cause in any order, with continued lines", () => {
+    expect(parseCorrection("now: about 1,100 tokens\ncause: I put characters and tokens\n  side by side.\nwas: 4,000 tokens per message")).toEqual({
+      wrong: "4,000 tokens per message", right: "about 1,100 tokens", cause: "I put characters and tokens\nside by side.",
+    });
+    expect(parseCorrection("was: half")).toEqual({ wrong: "half", right: "", cause: "" });
+  });
+});
+
+describe("asides", () => {
+  it("reads each severity and the detail under it", () => {
+    expect(parseAsides("High: sessiond is stale\n  It started at 18:22.\n- low: a label\nnot an aside")).toEqual([
+      { severity: "high", text: "sessiond is stale", detail: "It started at 18:22." },
+      { severity: "low", text: "a label", detail: "not an aside" },
+    ]);
+  });
+});
+
+describe("timeline", () => {
+  it("splits when from what on a spaced dash and keeps detail and title", () => {
+    expect(parseTimeline("Tonight\n18:22 - sessiond started\n21:20 – guide landed on main\n  Commit 84e7ff4f.\n2026-10-08 23:42 — sessiond restarted")).toEqual({
+      title: "Tonight",
+      events: [
+        { when: "18:22", text: "sessiond started", detail: "" },
+        { when: "21:20", text: "guide landed on main", detail: "Commit 84e7ff4f." },
+        { when: "2026-10-08 23:42", text: "sessiond restarted", detail: "" },
+      ],
+    });
+  });
+
+  it("does not split on a hyphen inside a word or an indented detail dash", () => {
+    expect(parseTimeline("18:22 - sessiond-start ran\n  - first note").events).toEqual([{ when: "18:22", text: "sessiond-start ran", detail: "- first note" }]);
+  });
+});
+
+describe("quote sources", () => {
+  it("reads an em dash or double hyphen source line", () => {
+    expect(readQuoteSource("— src/app.ts:12")).toBe("src/app.ts:12");
+    expect(readQuoteSource("-- AGENTS.md")).toBe("AGENTS.md");
+    expect(readQuoteSource("- a list item")).toBeUndefined();
   });
 });

@@ -1,0 +1,28 @@
+/* Side findings. A tinted panel set apart from the answer, so it reads as
+   "besides that". Each item leads with a severity pill of fixed width, so
+   the text column lines up. */
+.aside-list {
+  --aside-pill: 4.25rem;
+  margin-block: var(--space-4);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border-radius: var(--radius-document);
+  background: var(--tint-surface);
+}
+.aside-list-title { margin-block-end: var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); font-weight: 600; }
+.aside-list .aside-list-items { margin: 0; padding: 0; list-style: none; }
+.aside-list .aside-list-item {
+  display: grid; grid-template-columns: var(--aside-pill) minmax(0, 1fr); column-gap: var(--space-3); align-items: baseline;
+  margin: 0; padding-block: var(--space-1);
+}
+.aside-list-pill {
+  justify-self: start;
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--line-focus);
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  font-size: var(--label-text); font-weight: 600; line-height: 1.6;
+}
+.aside-list-item[data-severity="high"] .aside-list-pill { border-color: var(--tone-bad); color: var(--ink-bad); }
+.aside-list-item[data-severity="medium"] .aside-list-pill { border-color: var(--tone-warn); color: var(--ink-warn); }
+.aside-list-body { min-inline-size: 0; }
+.aside-list-detail { margin-block-start: var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); }

@@ -7,6 +7,7 @@ import type { ComponentsByLanguage, SyntaxHighlighterProps } from "@assistant-ui
 import { CheckIcon, InfoIcon, LightbulbIcon, MessageSquareWarningIcon, OctagonAlertIcon, TriangleAlertIcon, type LucideIcon } from "lucide-react";
 import { memo, useMemo, type ComponentProps } from "react";
 import { Streamdown } from "streamdown";
+import { QuoteFigure } from "../QuoteFigure";
 import { fragmentRehypePlugins, markdownElements, withoutNode } from "./markdownPolicy";
 import { calloutKind, parseComparison, parseSteps, type CalloutKind } from "./richBlockSyntax";
 import "./richBlocks.css";
@@ -25,6 +26,8 @@ type QuoteProps = ComponentProps<"blockquote"> & { node?: unknown };
 export function CalloutQuote(props: QuoteProps) {
   const { children, ...rest } = withoutNode(props);
   const marked = (rest as Record<string, unknown>)["data-callout"];
+  const source = (rest as Record<string, unknown>)["data-source"];
+  if (typeof source === "string") return <QuoteFigure source={source}>{children}</QuoteFigure>;
   if (typeof marked !== "string") return <blockquote {...rest}>{children}</blockquote>;
   const kind = calloutKind(marked);
   // "pending": the marker is still arriving. Draw a quiet callout without a

@@ -1,4 +1,4 @@
-import { readCalloutMarker } from "./richBlockSyntax";
+import { readCalloutMarker, readQuoteSource } from "./richBlockSyntax";
 
 // The few hast shapes this plugin touches. Kept local so the renderer does not
 // depend on unified's type packages directly.
@@ -12,6 +12,10 @@ const isText = (node: HastNode | undefined): node is HastText => node?.type === 
 const isBlank = (node: HastNode) => isText(node) && node.value.trim() === "";
 
 /**
+ * Also reads a quote's source: a last line `— src/app.ts:12` (or `-- …`) moves
+ * out of the quote into `data-source`, which the `blockquote` component shows
+ * as a caption.
+ *
  * Turns GitHub alert blockquotes (`> [!WARNING]`) into callouts. It removes
  * the marker and records the kind as `data-callout` on the blockquote, which
  * the `blockquote` component reads. Runs after sanitizing, so the attribute
@@ -22,7 +26,7 @@ export function rehypeCallouts() {
 }
 
 function visit(node: HastNode): void {
-  if (isElement(node, "blockquote")) markCallout(node);
+  if (isElement(node, "blockquote")) { markCallout(node); if (!("dataCallout" in node.properties)) markSource(node); }
   if ("children" in node) for (const child of node.children ?? []) visit(child);
 }
 
@@ -50,4 +54,22 @@ function markCallout(quote: HastElement): void {
   // A marker on its own line leaves a line break or nothing behind it.
   while (paragraph.children[0] !== undefined && (isBlank(paragraph.children[0]) || isElement(paragraph.children[0], "br"))) paragraph.children.shift();
   if (paragraph.children.length === 0) quote.children.splice(quote.children.indexOf(paragraph), 1);
+}
+
+function markSource(quote: HastElement): void {
+  const paragraphs = quote.children.filter((child): child is HastElement => isElement(child, "p"));
+  const last = paragraphs.at(-1);
+  const tail = last?.children.at(-1);
+  if (last === undefined || !isText(tail)) return;
+  const lines = tail.value.replace(/\s+$/, "").split("\n");
+  const source = readQuoteSource(lines.at(-1) ?? "");
+  if (source === undefined) return;
+  quote.properties["dataSource"] = source;
+  tail.value = lines.slice(0, -1).join("\n");
+  // Drop what the source line leaves behind: an empty text, a trailing break.
+  while (last.children.length > 0) {
+    const end = last.children.at(-1)!;
+    if (isBlank(end) || isElement(end, "br")) last.children.pop(); else break;
+  }
+  if (last.children.length === 0) quote.children.splice(quote.children.indexOf(last), 1);
 }

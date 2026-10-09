@@ -92,6 +92,7 @@
   --ink-voice: color-mix(in oklab, var(--code-keyword) 80%, var(--foreground));
   --bar-fill: color-mix(in oklab, var(--live) 70%, var(--background));
   --bar-min: 2px;
+  --warn-wash: color-mix(in oklab, var(--diff-modify) 8%, transparent);
 }
 @media (prefers-color-scheme: dark) {
   :root {
