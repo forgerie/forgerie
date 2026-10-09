@@ -8,6 +8,12 @@
 /* The row-label column exists only when some row has a label. */
 .lane-grid[data-labelled] {
   grid-template-columns: [name] minmax(0, max-content) [label] minmax(0, max-content) [lane] minmax(2.5rem, 1fr) [value] max-content [trail] max-content [end]; }
+/* The action column exists only when some block has an action. */
+.lane-grid[data-acting] {
+  grid-template-columns: [name] minmax(0, max-content) [label lane] minmax(2.5rem, 1fr) [value] max-content [trail] max-content [act] max-content [end]; }
+.lane-grid[data-labelled][data-acting] {
+  grid-template-columns: [name] minmax(0, max-content) [label] minmax(0, max-content) [lane] minmax(2.5rem, 1fr) [value] max-content [trail] max-content [act] max-content [end]; }
+.lane-grid[data-flush] { padding-inline: 0; }
 .lane-grid[data-dense] { row-gap: 0.125rem; }
 .lane-grid[data-faded] { opacity: 0.5; }
 
@@ -32,6 +38,23 @@
 .lane-grid-value { grid-column: value; grid-row: var(--row); justify-self: end; }
 /* Centred on the rows it covers. */
 .lane-grid-trail { grid-column: trail; grid-row: var(--row) / var(--row-end); justify-self: end; align-self: center; }
+/* A block's action: a small chip centred on the block's rows. Its press area
+   is the block's full height, caption included, out to half the gap on each
+   side, so neighbouring chips never share a press. */
+.lane-grid-act { --act-reach: 0.1875rem; position: relative; grid-column: act; grid-row: var(--row) / var(--row-end); justify-self: end; align-self: center;
+  display: grid; padding: 0; border: 0; border-radius: var(--radius-pill); background: none; color: var(--ink-live); }
+.lane-grid[data-dense] .lane-grid-act { --act-reach: 0.0625rem; }
+.lane-grid-act::before { content: ""; position: absolute; inset-block: calc(-1 * var(--act-reach)); inset-inline: calc(-1 * var(--space-2)); }
+.lane-grid-block[data-captioned] .lane-grid-act::before { inset-block-start: calc(-1 * (var(--act-reach) + var(--lane-line) + 0.125rem)); }
+.lane-grid-chip { display: inline-flex; align-items: center; justify-content: center; gap: 0.125rem; min-inline-size: 1rem; block-size: 1rem;
+  padding-inline: 0.1875rem; border-radius: var(--radius-pill); background: var(--offer-wash); font-family: var(--code-font); font-size: var(--meta-text);
+  font-variant-numeric: tabular-nums; line-height: 1; transition: background-color 150ms; }
+.lane-grid-chip svg { flex: none; inline-size: 0.6875rem; block-size: 0.6875rem; stroke-width: 2.5; }
+.lane-grid-chip > span { padding-inline-end: 0.0625rem; }
+.lane-grid-act:hover .lane-grid-chip { background: var(--offer-wash-hover); }
+.lane-grid-act[data-tone="warn"] { color: var(--ink-warn); }
+.lane-grid-act[data-tone="warn"] .lane-grid-chip { background: var(--lapsing-wash); }
+.lane-grid-act[data-tone="warn"]:hover .lane-grid-chip { background: var(--lapsing-wash-hover); }
 /* A value yields before a lane does; the row's words keep it. */
 @container lane-grid (inline-size < 14rem) { .lane-grid-value { display: none; } }
-@media (prefers-reduced-motion: reduce) { .lane-grid { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .lane-grid, .lane-grid-chip { transition: none; } }

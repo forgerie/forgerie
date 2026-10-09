@@ -30,8 +30,21 @@ export interface MeterLine {
 }
 /** A clock printed once for a run of consecutive lines that share it. Rows are 0-based line indexes, end exclusive. */
 export interface ClockRun { start: number; end: number; clock: Clock }
+/** Banked resets an account can spend: drawn as one marker per account, never per provider. */
+export interface ResetMarker {
+  count: number;
+  /** When the first one lapses, as a short date. */
+  soonest: string;
+  /** The first one lapses within RESET_SOON_MS: drawn in the warn tone, as unspent credit is. */
+  soon: boolean;
+  /** The marker in words, for hover and for a screen reader. */
+  words: string;
+}
 export interface MeterAccount {
+  /** Unique across providers: `provider/email`. */
+  key: string;
   email: string;
+  reset: ResetMarker | undefined;
   /**
    * The router pins its work here. Marked only where it answers a question:
    * a pinned provider with more than one account to choose between.
@@ -54,27 +67,45 @@ export interface MeterProvider { id: string; name: string; accounts: MeterAccoun
 const DOOM_RATE_CAP = 8;
 /** A balance at or under this many dollars is low. */
 const LOW_BALANCE = 2;
+/** A banked reset that lapses within this long is flagged, as credit about to expire unspent. */
+export const RESET_SOON_MS = 3 * 24 * 60 * 60 * 1000;
+
+/** A short date such as "Oct 22". `zone` is for tests; the reader's own zone otherwise. */
+export function shortDate(instant: string | Date, zone?: string): string {
+  return new Date(instant).toLocaleDateString("en-US", { month: "short", day: "numeric", ...(zone ? { timeZone: zone } : {}) });
+}
 
 /** The meters as rows, from one payload. Pure: the caller passes the clock. */
-export function meterModel(payload: QuotaPayload, settings: Readonly<Record<string, unknown>>, mode: MeterMode, now: Date): MeterProvider[] {
+export function meterModel(payload: QuotaPayload, settings: Readonly<Record<string, unknown>>, mode: MeterMode, now: Date, zone?: string): MeterProvider[] {
   return payload.providers.map((provider) => {
     const pinned = providerRouting(provider) === "pinned";
     if (mode === "every") {
       const choice = pinned && provider.accounts.length > 1;
       return { id: provider.id, name: provider.name, accounts: provider.accounts.map((account) =>
-        meterAccount(account, visibleWindows(orderedWindows(account), settings), choice, now)) };
+        meterAccount(provider.id, account, visibleWindows(orderedWindows(account), settings), choice, now, zone)) };
     }
     const account = routedAccount(provider);
     if (account === undefined) {
       return { id: provider.id, name: provider.name, accounts: provider.accounts.length === 0 ? []
-        : [{ email: "", routed: false, out: true, lines: [], clocks: [], empty: "No account in service" }] };
+        : [{ key: `${provider.id}/`, email: "", reset: undefined, routed: false, out: true, lines: [], clocks: [], empty: "No account in service" }] };
     }
     const longest = longestWindow(visibleWindows(orderedWindows(account), settings), now);
-    return { id: provider.id, name: provider.name, accounts: [meterAccount(account, longest ? [longest] : [], false, now)] };
+    return { id: provider.id, name: provider.name, accounts: [meterAccount(provider.id, account, longest ? [longest] : [], false, now, zone)] };
   });
 }
 
-function meterAccount(account: QuotaAccount, windows: QuotaWindow[], marksRouted: boolean, now: Date): MeterAccount {
+function resetMarker(account: QuotaAccount, now: Date, zone: string | undefined): ResetMarker | undefined {
+  const expiries = account.resets?.expiresAt.filter((instant) => new Date(instant).getTime() > now.getTime()) ?? [];
+  const first = expiries[0];
+  if (first === undefined) return undefined;
+  const count = expiries.length;
+  const soonest = shortDate(first, zone);
+  return { count, soonest, soon: new Date(first).getTime() - now.getTime() <= RESET_SOON_MS,
+    words: `${count === 1 ? "1 reset" : `${String(count)} resets`} available${count === 1 ? ", expires" : ", the first expires"} ${soonest}` };
+}
+
+/** One account's rows over the given windows. Exported for the reset preview, which draws refilled copies with the same rules. */
+export function meterAccount(providerId: string, account: QuotaAccount, windows: QuotaWindow[], marksRouted: boolean, now: Date, zone?: string): MeterAccount {
   const out = !account.available || accountDrained(account);
   // The pool is a boolean, so it goes last, under the measurements it is not one of.
   const ordered = [...windows].sort((left, right) => Number(isUnmeteredWindow(left)) - Number(isUnmeteredWindow(right)));
@@ -82,7 +113,8 @@ function meterAccount(account: QuotaAccount, windows: QuotaWindow[], marksRouted
   const lines = ordered.map((quotaWindow) => meterLine(quotaWindow, account.available, labelled, now));
   const empty = lines.length > 0 ? undefined
     : account.windows.length === 0 ? "No windows reported" : "Every bar is turned off";
-  return { email: account.email, routed: marksRouted && account.selected, out, lines, clocks: clockRuns(lines), empty };
+  return { key: `${providerId}/${account.email}`, email: account.email, reset: resetMarker(account, now, zone),
+    routed: marksRouted && account.selected, out, lines, clocks: clockRuns(lines), empty };
 }
 
 function meterLine(quotaWindow: QuotaWindow, available: boolean, labelled: boolean, now: Date): MeterLine {

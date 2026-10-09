@@ -1,6 +1,7 @@
 import { LaneGrid, type LaneGroup } from "./LaneGrid";
 import { PaceBar } from "./PaceBar";
 import { SignalDot } from "./SignalDot";
+import { RotateCcwIcon } from "lucide-react";
 import { Figure } from "./Figure";
 
 export const name = "Lane grid";
@@ -46,4 +47,10 @@ export function Faded() {
 }
 export function EmptyGroup() {
   return <LaneGrid groups={[{ key: "x", name: "Northwind", note: "No accounts", blocks: [] }]} />;
+}
+export function WithActions() {
+  const withActions = groups.map((group) => group.key !== "b" ? group : { ...group, blocks: group.blocks.map((block, index) => index === 2 ? block
+    : { ...block, action: { label: index === 0 ? "3 credits, the first lapses soon" : "1 credit", icon: <RotateCcwIcon />,
+      count: index === 0 ? "3" : undefined, tone: index === 0 ? "warn" as const : "live" as const, onPress: () => {} } }) });
+  return <LaneGrid groups={withActions} />;
 }

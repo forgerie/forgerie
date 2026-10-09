@@ -14,6 +14,21 @@ export interface LaneRow {
 }
 /** A trailing cell that covers rows `start` to `end` (exclusive) of its block, such as one clock for rows that agree. */
 export interface LaneSpan { start: number; end: number; content: ReactNode }
+/**
+ * Something the reader can do with a whole block, drawn as a small chip in a
+ * last column so chips line up across groups. It covers all of the block's
+ * rows, so it reads as the block's and not one row's.
+ */
+export interface LaneAction {
+  /** The action and its reason in words: the accessible name and the hover text. */
+  label: string;
+  icon: ReactNode;
+  /** A short figure beside the icon, such as a count. */
+  count?: string | undefined;
+  /** `live` for an offer; `warn` when it lapses soon. */
+  tone?: "live" | "warn";
+  onPress: () => void;
+}
 export interface LaneBlock {
   key: string;
   /** A line above the rows, such as an address. Drawn only when the grid has room for captions. */
@@ -28,6 +43,7 @@ export interface LaneBlock {
   note?: string | undefined;
   rows: readonly LaneRow[];
   spans: readonly LaneSpan[];
+  action?: LaneAction | undefined;
 }
 export interface LaneGroup { key: string; name: string; note?: string | undefined; blocks: readonly LaneBlock[] }
 
@@ -35,15 +51,19 @@ export interface LaneGroup { key: string; name: string; note?: string | undefine
  * System molecule: named groups of measurement lanes on one set of columns,
  * so lanes start and end together and read against each other across groups.
  * Columns: group name, row label (only when some row has one), mark, value,
- * and a trailing cell that may span rows. `dense` sets groups at line
- * spacing; `faded` takes confidence away without adding alarm.
+ * a trailing cell that may span rows, and a block action (only when some
+ * block has one). `dense` sets groups at line spacing; `faded` takes
+ * confidence away without adding alarm; `flush` drops the list inset, for a
+ * grid that does not sit under a group header.
  */
-export function LaneGrid({ groups, captions = true, dense = false, faded = false }: {
-  groups: readonly LaneGroup[]; captions?: boolean; dense?: boolean; faded?: boolean;
+export function LaneGrid({ groups, captions = true, dense = false, faded = false, flush = false }: {
+  groups: readonly LaneGroup[]; captions?: boolean; dense?: boolean; faded?: boolean; flush?: boolean;
 }) {
   const labelled = groups.some((group) => group.blocks.some((block) => block.rows.some((row) => row.label !== undefined)));
+  const acting = groups.some((group) => group.blocks.some((block) => block.action !== undefined));
   return <div className="lane-grid-frame">
-    <div className="lane-grid" data-labelled={labelled || undefined} data-dense={dense || undefined} data-faded={faded || undefined}>
+    <div className="lane-grid" data-labelled={labelled || undefined} data-acting={acting || undefined} data-dense={dense || undefined}
+      data-faded={faded || undefined} data-flush={flush || undefined}>
       {groups.map((group) => <div key={group.key} className="lane-grid-group" role="group" aria-label={group.name}>
         <span className="lane-grid-name" aria-hidden="true">{group.name}</span>
         {group.blocks.length === 0 ? <span className="lane-grid-note" style={{ "--row": 1 }}>{group.note}</span>
@@ -62,6 +82,11 @@ export function LaneGrid({ groups, captions = true, dense = false, faded = false
               </Fragment>)}
               {block.spans.map((span) => <span key={span.start} className="lane-grid-trail" aria-hidden="true"
                 style={{ "--row": first + span.start, "--row-end": first + span.end }}>{span.content}</span>)}
+              {block.action ? <button type="button" className="lane-grid-act" data-tone={block.action.tone ?? "live"}
+                aria-label={block.action.label} title={block.action.label} onClick={block.action.onPress}
+                style={{ "--row": first, "--row-end": first + Math.max(1, block.rows.length) }}>
+                <span className="lane-grid-chip" aria-hidden="true">{block.action.icon}{block.action.count ? <span>{block.action.count}</span> : null}</span>
+              </button> : null}
             </div>;
           })}
       </div>)}

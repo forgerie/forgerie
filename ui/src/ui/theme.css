@@ -93,6 +93,15 @@
   --bar-fill: color-mix(in oklab, var(--live) 70%, var(--background));
   --bar-min: 2px;
   --warn-wash: color-mix(in oklab, var(--diff-modify) 8%, transparent);
+  /* An offer the reader can take, and one that lapses soon: chips and their pressed state. */
+  --offer-wash: var(--live-wash);
+  --offer-wash-hover: color-mix(in oklab, var(--live) 28%, transparent);
+  --lapsing-wash: color-mix(in oklab, var(--diff-modify) 18%, transparent);
+  --lapsing-wash-hover: color-mix(in oklab, var(--diff-modify) 30%, transparent);
+  /* A consequence set apart before an action: plain, and one that costs the reader something. */
+  --consequence-surface: var(--tint-surface);
+  --consequence-warn-surface: color-mix(in oklab, var(--diff-modify) 12%, var(--background));
+  --radius-pill: 999px;
   /* Pace meters (PaceBar, LaneGrid): neutral ink, a gap at the even-spend
      point, and a hatch for a shortfall. The tones carry every warning. */
   --meter-ink: color-mix(in oklab, var(--foreground) 52%, transparent);

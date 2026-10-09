@@ -38,7 +38,8 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `SignalDot` (atom): a yes-or-no signal with no level, neutral when on and danger when off.
 - `PaceBar` (atom): a budget's share left against an even spend: a cut at pace, a hatch for a shortfall, a warn-to-danger bar for a surplus.
 - `ErrorBoundary` (atom): replaces children that throw while drawing with a fallback, so everything around them keeps working.
-- `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, with optional captions, a marked block, and trailing cells that span rows.
+- `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, with optional captions, a marked block, trailing cells that span rows, and a small action chip per block.
+- `Consequence` (molecule): one consequence the reader must see before acting, set apart by a wash and an icon, plain or warn.
 - `Shelf` (organism): a section at the foot of a list that switches between two forms from a group header, scrolls on its own, and reports the room it sits in.
 - `BadgeButton` (atom): an icon button drawn small with a control-sized hit area, a live-colour count of what waits on the reader, and a working dot.
 - `SheetDialog` (organism): a modal sheet that is a card while the window has room and meets each edge as the room runs out, with back, title, actions, close, a scrolling body, and a footer.

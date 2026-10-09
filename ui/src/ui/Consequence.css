@@ -1,0 +1,11 @@
+/* One consequence, set apart by a wash and an icon in the first line's height. */
+.consequence { display: grid; grid-template-columns: 1rem minmax(0, 1fr); align-items: start; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-document); background: var(--consequence-surface); color: var(--foreground);
+  font-size: var(--small-text); line-height: 1.45; }
+.consequence[data-tone="warn"] { background: var(--consequence-warn-surface); }
+.consequence-icon { display: grid; place-items: center; block-size: 1.45em; color: var(--muted-foreground); }
+.consequence[data-tone="warn"] .consequence-icon { color: var(--ink-warn); }
+.consequence-icon svg { inline-size: 1rem; block-size: 1rem; }
+.consequence-text { min-inline-size: 0; overflow-wrap: anywhere; }
+.consequence-text p { margin: 0; }
+.consequence-text strong { font-weight: 600; }

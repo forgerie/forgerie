@@ -73,7 +73,7 @@ describe("the meters at a glance", () => {
   it("says so when no account is in service", () => {
     const down = structuredClone(payload);
     down.providers[0]!.accounts[0]!.available = false;
-    expect(meterModel(down, {}, "glance", now)[0]!.accounts).toEqual([{ email: "", routed: false, out: true, lines: [], clocks: [], empty: "No account in service" }]);
+    expect(meterModel(down, {}, "glance", now)[0]!.accounts).toEqual([{ key: "claude/", email: "", reset: undefined, routed: false, out: true, lines: [], clocks: [], empty: "No account in service" }]);
   });
 });
 

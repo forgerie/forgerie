@@ -5,9 +5,10 @@ import { createPortal } from "react-dom";
  * System organism: a destructive decision at window level. It is the Land and
  * Discard window's card, so every confirmation in Forgerie looks the same.
  * Cancel holds focus first; Escape and a press outside the card cancel.
+ * `plain` is for a decision that cannot be undone but loses nothing.
  */
-export function ConfirmDialog({ title, icon, children, confirmLabel, onConfirm, onCancel }: {
-  title: string; icon?: ReactNode; children: ReactNode; confirmLabel: string; onConfirm: () => void; onCancel: () => void;
+export function ConfirmDialog({ title, icon, children, confirmLabel, tone = "danger", onConfirm, onCancel }: {
+  title: string; icon?: ReactNode; children: ReactNode; confirmLabel: string; tone?: "danger" | "plain"; onConfirm: () => void; onCancel: () => void;
 }) {
   const titleId = useId();
   const bodyId = useId();
@@ -26,7 +27,7 @@ export function ConfirmDialog({ title, icon, children, confirmLabel, onConfirm, 
       <div className="wt-body" id={bodyId}>{children}</div>
       <footer className="wt-foot">
         <button type="button" className="wt-secondary" autoFocus onClick={onCancel}>Cancel</button>
-        <button type="button" className="primary wt-primary" data-tone="danger" onClick={onConfirm}>{confirmLabel}</button>
+        <button type="button" className="primary wt-primary" data-tone={tone === "danger" ? "danger" : undefined} onClick={onConfirm}>{confirmLabel}</button>
       </footer>
     </div>
   </dialog>, document.body);

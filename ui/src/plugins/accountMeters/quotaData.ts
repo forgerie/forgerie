@@ -65,12 +65,30 @@ const windowSchema = z.object({
   // becomes exact the day the router sends it.
   lengthSeconds: z.number().positive().optional().catch(undefined),
 });
+/**
+ * Banked usage-limit resets the provider granted this account. Proposed
+ * contract: no router build sends it yet, so absent is the normal case, and a
+ * malformed value is dropped rather than failing the whole reading.
+ */
+const resetsSchema = z.object({
+  /** One instant per unused reset, soonest first. */
+  expiresAt: z.array(instant("resets.expiresAt")).min(1),
+  /** Window ids a reset refills. Absent: every metered window. */
+  clears: z.array(z.string()).optional(),
+  /**
+   * Whether a reset also starts the refilled windows over. Codex does; Claude
+   * refills usage and keeps each window's reset date. The router says which,
+   * because only the provider knows.
+   */
+  restartsWindows: z.boolean(),
+});
 const accountSchema = z.object({
   email: z.string(),
   available: z.boolean(),
   selected: z.boolean(),
   priority: z.number().int(),
   windows: z.array(windowSchema),
+  resets: resetsSchema.optional().catch(undefined),
 });
 const providerSchema = z.object({
   id: z.string(),
@@ -84,6 +102,7 @@ const payloadSchema = z.object({ version: z.literal(1), updatedAt: instant("upda
 
 export type QuotaWindow = z.infer<typeof windowSchema>;
 export type QuotaAccount = z.infer<typeof accountSchema>;
+export type QuotaResets = z.infer<typeof resetsSchema>;
 export type QuotaProvider = z.infer<typeof providerSchema>;
 export type QuotaPayload = z.infer<typeof payloadSchema>;
 /** The fields the judgements below read. Tests and callers may pass less than a full window. */

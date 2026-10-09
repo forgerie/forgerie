@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { RotateCcwIcon } from "lucide-react";
 import { Shelf, type ShelfMessage } from "../../ui/Shelf";
 import { LaneGrid, type LaneBlock, type LaneGroup } from "../../ui/LaneGrid";
 import { PaceBar, type PaceState } from "../../ui/PaceBar";
@@ -22,9 +23,13 @@ function markOf(mark: Mark): ReactNode {
   return <PaceBar value={mark.remaining} pace={mark.standing.pace} state={PACE[mark.standing.kind]} heat={mark.doom} />;
 }
 
-function blockOf(account: MeterAccount, provider: string, index: number): LaneBlock {
+/** One account as a lane block. `onAskReset`, when given, turns a banked reset into the block's action. */
+export function meterBlock(account: MeterAccount, provider: string, index: number, onAskReset?: (key: string) => void): LaneBlock {
   const who = account.email || provider;
+  const reset = account.reset;
   return {
+    action: reset && onAskReset ? { label: `${reset.words}. Use a reset…`, icon: <RotateCcwIcon />, count: reset.count > 1 ? String(reset.count) : undefined,
+      tone: reset.soon ? "warn" : "live", onPress: () => onAskReset(account.key) } : undefined,
     key: `${account.email}:${String(index)}`, caption: account.email || undefined, marked: account.routed, struck: account.out, note: account.empty,
     label: `${who}${account.routed ? ", routed" : ""}${account.out ? ", out of service" : ""}`,
     rows: account.lines.map((line) => ({ key: line.id, label: line.label, mark: markOf(line.mark), words: line.words,
@@ -38,7 +43,7 @@ function blockOf(account: MeterAccount, provider: string, index: number): LaneBl
  * switches between every account and one line per provider; the reading's
  * age, when it is old, sits at its end.
  */
-export function AccountMeters({ view, mode, status, statusHint, onToggle, onRetry, onRoom }: {
+export function AccountMeters({ view, mode, status, statusHint, onToggle, onRetry, onRoom, onAskReset }: {
   view: MetersView;
   mode: MeterMode;
   status?: string | undefined;
@@ -46,12 +51,14 @@ export function AccountMeters({ view, mode, status, statusHint, onToggle, onRetr
   onToggle: () => void;
   onRetry: () => void;
   onRoom?: ((height: number) => void) | undefined;
+  /** Asks to spend one of an account's banked resets. Without it, no account offers one. */
+  onAskReset?: ((key: string) => void) | undefined;
 }) {
   const message: ShelfMessage | undefined = view.type === "loading" ? { text: "Reading quotas…" }
     : view.type === "failed" ? { text: view.message, alert: true, action: { label: "Retry", onPress: onRetry } }
     : view.providers.length === 0 ? { text: "The router reports no providers." } : undefined;
   const groups: LaneGroup[] = view.type === "ready" ? view.providers.map((provider) => ({ key: provider.id, name: provider.name, note: "No accounts",
-    blocks: provider.accounts.map((account, index) => blockOf(account, provider.name, index)) })) : [];
+    blocks: provider.accounts.map((account, index) => meterBlock(account, provider.name, index, onAskReset)) })) : [];
   return <Shelf title="Quota" label="Account meters" open={mode === "every"} onToggle={onToggle}
     toggleHint={mode === "every" ? "Show one line per provider" : "Show every account"} status={status} statusHint={statusHint} message={message} onRoom={onRoom}>
     {view.type === "ready" ? <LaneGrid groups={groups} captions={view.names} dense={mode === "glance"} faded={view.doubtful} /> : null}
