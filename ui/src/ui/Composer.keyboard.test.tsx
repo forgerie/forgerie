@@ -9,6 +9,7 @@ import { Composer } from "./Composer";
 import type { AskBinding } from "./useAskMode";
 import type { DialogBinding } from "./DialogLayer";
 import type { ComposerInputElement } from "./ComposerEditor";
+import { loadMarkdownEditing } from "./composerCodeLanguage";
 
 let root: Root;
 let runtime: AssistantRuntime;
@@ -161,6 +162,30 @@ describe("composer keyboard affordances", () => {
     expect(onNew.mock.calls[0]?.[0].steer).toBeFalsy();
     await type("steer me"); await press("Shift"); await press("Enter", { ctrlKey: true });
     expect(onNew.mock.calls[1]?.[0].steer).toBe(true);
+  });
+  it("continues a list or quote on Enter, ends it on the empty item, and then sends", async () => {
+    const onNew = vi.fn(async () => {}); await render({ onNew });
+    await act(async () => { await loadMarkdownEditing(); });
+    await type("- hi"); await press("Enter");
+    expect(onNew).not.toHaveBeenCalled(); expect(input().value).toBe("- hi\n- ");
+    await press("Enter"); expect(onNew).not.toHaveBeenCalled(); expect(input().value).toBe("- hi\n");
+    await press("Enter"); expect(onNew).toHaveBeenCalledOnce();
+    await type("1. first"); await press("Enter"); expect(input().value).toBe("1. first\n2. ");
+    await type("> quoted"); await press("Enter"); expect(input().value).toBe("> quoted\n> ");
+    expect(onNew).toHaveBeenCalledOnce();
+  });
+  it("sends a list draft with Ctrl+Enter, and sends list-shaped lines inside code", async () => {
+    const onNew = vi.fn(async () => {}); await render({ onNew });
+    await type("- hi"); await press("Enter", { ctrlKey: true }); expect(onNew).toHaveBeenCalledOnce();
+    await type("```yaml\n- item\n```"); input().setSelectionRange(14, 14);
+    await press("Enter"); expect(onNew).toHaveBeenCalledTimes(2);
+    await type("-5 degrees"); await press("Enter"); expect(onNew).toHaveBeenCalledTimes(3);
+  });
+  it("continues a list in an ask answer and while the agent works", async () => {
+    const submit = vi.fn(); const onNew = vi.fn(async () => {});
+    const ask: AskBinding = { ask: { askId: "a", askedAt: "now", questions: [{ id: "q", question: "Which?", options: [] }] }, phase: { type: "answering" }, offline: false, onSubmit: submit, onDismiss: () => {}, onChat: async () => {} };
+    await render({ ask }); await type("- one"); await press("Enter"); expect(submit).not.toHaveBeenCalled();
+    await render({ onNew, running: true }); await type("- queued"); await press("Enter"); expect(onNew).not.toHaveBeenCalled();
   });
   it("uses normalized Enter for ask advancement and input dialogs", async () => {
     touch(); const submit = vi.fn(); const answer = vi.fn();

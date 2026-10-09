@@ -169,6 +169,11 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
     for (const trigger of triggers.getTriggers().values()) {
       if (trigger.resource.handleKeyDown({ key: event.key, shiftKey, preventDefault: () => event.preventDefault() })) { keyboard.resetEscape(); return; }
     }
+    // On a list item or quote line, Enter writes the next item, as a Markdown
+    // editor does. Enter on the empty item ends the list. Ctrl+Enter still sends.
+    if (event.key === "Enter" && !shiftKey && !event.ctrlKey && !shellMode && !compactDraft && input.current?.onMarkupLine()) {
+      keyboard.insertNewline(event); return;
+    }
     if (keyboard.escape(event, literal ? "answer" : count > 0 ? "attachments" : shellMode ? "shell" : "chat", sessionKeys)) return;
     if (keyboard.recall(event, !literal)) return;
     if (shellMode && event.key === "Enter" && !shiftKey) { event.preventDefault(); void runShell(); return; }

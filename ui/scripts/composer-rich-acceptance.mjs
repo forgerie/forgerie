@@ -90,6 +90,12 @@ try {
       await writeFile(join(output, `${scheme}-${posture.name}.png`), Buffer.from(data, "base64"));
       // Lists continue, and Tab indents.
       await clear(); await insert("- first"); await shiftEnter(); assert.equal(await draft(), "- first\n- ");
+      // Plain Enter on a list line writes the next item; on the empty item it ends the list.
+      const sentBefore = await evaluate(cdp, "document.querySelectorAll('.message-user').length");
+      await clear(); await insert("- hi"); await pressCombo(cdp, "enter"); assert.equal(await draft(), "- hi\n- ");
+      await insert("there"); await pressCombo(cdp, "enter"); assert.equal(await draft(), "- hi\n- there\n- ");
+      await pressCombo(cdp, "enter"); assert.equal(await draft(), "- hi\n- there\n");
+      assert.equal(await evaluate(cdp, "document.querySelectorAll('.message-user').length"), sentBefore);
       await clear(); await insert("item"); await pressCombo(cdp, "arrowleft"); await pressCombo(cdp, "arrowleft");
       await pressCombo(cdp, "arrowleft"); await pressCombo(cdp, "arrowleft"); await pressCombo(cdp, "tab");
       assert.equal(await draft(), "  item");
@@ -97,7 +103,7 @@ try {
       await pressCombo(cdp, "escape"); await pressCombo(cdp, "tab");
       assert.equal(await evaluate(cdp, "document.activeElement?.matches('[data-composer-input]') ?? false"), false);
       assert.equal(await draft(), "  item");
-      result.combinations.push({ scheme, posture: posture.name, fence: true, undo: true, highlight: true, leave: true, protect: true, list: true, tab: true, tabEscape: true, geometry });
+      result.combinations.push({ scheme, posture: posture.name, fence: true, undo: true, highlight: true, leave: true, protect: true, list: true, enterList: true, tab: true, tabEscape: true, geometry });
     }
     // Enter sends the canonical Markdown, and the transcript draws it as code.
     await clear(); await insert("```sql"); await shiftEnter(); await insert("SELECT 1");

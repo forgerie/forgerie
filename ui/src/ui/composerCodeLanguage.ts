@@ -44,8 +44,12 @@ export async function loadMarkdownEditing(): Promise<LanguageSupport> {
   return composerMarkdown();
 }
 
-/** Continues a list item or quote on a new line. False until the commands load. */
-export const continueMarkup = (view: EditorView): boolean => editing?.insertNewlineContinueMarkup(view) ?? false;
+/**
+ * Continues a list item or quote on a new line. On an empty item it removes
+ * the marker, so a second Enter ends the list instead of loosening it with a
+ * blank line. False until the commands load.
+ */
+export const continueMarkup = (view: EditorView): boolean => editing?.insertNewlineContinueMarkupCommand({ nonTightLists: false })(view) ?? false;
 /** Backspace removes list or quote markup as a unit. False until the commands load. */
 export const deleteMarkup = (view: EditorView): boolean => editing?.deleteMarkupBackward(view) ?? false;
 

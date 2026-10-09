@@ -3,7 +3,7 @@ import { flushSync } from "react-dom";
 import { useAui, useAuiState, unstable_useTriggerPopoverAriaProps, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
 import { flushTapSync } from "@assistant-ui/tap";
 import { defaultKeymap, history, historyKeymap, indentLess, indentMore, insertNewlineAndIndent } from "@codemirror/commands";
-import { indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import { indentOnInput, indentUnit, syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import { Annotation, Compartment, EditorSelection, EditorState, Prec, type ChangeSpec } from "@codemirror/state";
 import { EditorView, keymap, placeholder as placeholderText } from "@codemirror/view";
 import { codeHighlighter } from "./codeTokens";
@@ -31,6 +31,8 @@ export interface ComposerInputElement extends HTMLElement {
   insertNewline(): void;
   /** Whether an empty selection sits on the draft's first or last drawn line. */
   atEdgeLine(edge: "top" | "bottom"): boolean;
+  /** Whether the caret sits on a list item or quote line, outside code. Enter continues that line instead of sending. */
+  onMarkupLine(): boolean;
 }
 
 export interface ComposerEditorProps {
@@ -273,8 +275,26 @@ function bindInput(view: EditorView, placeholder: () => string): ComposerInputEl
     },
     insertNewline: { configurable: true, value: () => { insertComposerNewline(view); } },
     atEdgeLine: { configurable: true, value: (edge: "top" | "bottom") => atEdgeLine(view, edge) },
+    onMarkupLine: { configurable: true, value: () => onMarkupLine(view) },
   });
   return element as ComposerInputElement;
+}
+
+/** A bullet (`-`, `*`, `+`), a numbered item (`1.`, `1)`), or a quote (`>`), with or without text after it. */
+const MARKUP_LINE = /^\s*(?:>|(?:[-*+]|\d{1,9}[.)])(?:\s|$))/u;
+
+/**
+ * Reads the line, not the Markdown commands: those load lazily, and Enter on a
+ * list line must not send while they load. The syntax tree is there from the
+ * start, so a list-shaped line inside a code block still sends.
+ */
+function onMarkupLine(view: EditorView): boolean {
+  const { main } = view.state.selection;
+  if (!main.empty || !MARKUP_LINE.test(view.state.doc.lineAt(main.head).text)) return false;
+  for (let node: ReturnType<typeof syntaxTree>["topNode"] | null = syntaxTree(view.state).resolveInner(main.head, -1); node; node = node.parent) {
+    if (node.name === "FencedCode" || node.name === "CodeBlock") return false;
+  }
+  return true;
 }
 
 /** Ported from the legacy client's isOnPromptBoundaryLine: the caret's drawn line, not only the text line. */
