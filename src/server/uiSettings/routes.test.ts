@@ -53,6 +53,30 @@ describe("settings HTTP routes", () => {
     expect((await post("/aui/plugins", "a".repeat(100_001))).statusCode).toBe(413);
   });
 
+  it("reads, writes, and deletes one agent file only from the version the reader saw", async () => {
+    const { app, dir } = await settingsServer();
+    await writeFile(join(dir, "agents", "scout.md"), "---\nname: scout\ndescription: |\n  Finds things\n  fast\nfallbackModels: a, b\n---\nLook.");
+    const put = (url: string, body: unknown) => app.inject({ method: "PUT", url, headers: { "content-type": "application/json" }, payload: JSON.stringify(body) });
+    const list: { agents: { scope: string; file: string; description: string; broken?: string }[] } = (await app.inject("/aui/agents")).json();
+    expect(list.agents.find((agent) => agent.scope === "user" && agent.file === "scout")).toMatchObject({ description: "Finds things\nfast", broken: "Lists fallbacks, so sessions cannot use it" });
+    const read: { text: string; mtimeMs: number } = (await app.inject("/aui/agents/user/scout")).json();
+    expect(read.text).toContain("Look.");
+    expect((await app.inject("/aui/agents/user/missing")).statusCode).toBe(404);
+    expect((await app.inject("/aui/agents/elsewhere/scout")).statusCode).toBe(404);
+    expect((await app.inject("/aui/agents/user/..%2Fescape")).statusCode).toBe(400);
+    expect((await put("/aui/agents/user/scout", { text: "new", baseMtimeMs: read.mtimeMs - 1 })).statusCode).toBe(409);
+    expect((await put("/aui/agents/user/scout", { text: "new", baseMtimeMs: null })).statusCode).toBe(409);
+    expect((await put("/aui/agents/user/scout", { baseMtimeMs: read.mtimeMs })).statusCode).toBe(400);
+    expect((await put("/aui/agents/builtin/scout", { text: "new", baseMtimeMs: null })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/aui/agents" })).statusCode).toBe(405);
+    const saved = await put("/aui/agents/user/scout", { text: "saved", baseMtimeMs: read.mtimeMs });
+    expect(saved.statusCode).toBe(200);
+    const { mtimeMs } = saved.json<{ mtimeMs: number }>();
+    expect((await app.inject({ method: "DELETE", url: `/aui/agents/user/scout?baseMtimeMs=${String(read.mtimeMs)}` })).statusCode).toBe(409);
+    expect((await app.inject({ method: "DELETE", url: `/aui/agents/user/scout?baseMtimeMs=${String(mtimeMs)}` })).statusCode).toBe(200);
+    expect((await app.inject({ method: "DELETE", url: `/aui/agents/user/scout?baseMtimeMs=${String(mtimeMs)}` })).statusCode).toBe(404);
+  });
+
   it("serves the model lists from the daemon profile", async () => {
     const { app, dir } = await settingsServer();
     const prefs = await app.inject("/aui/model-prefs");
