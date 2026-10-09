@@ -36,6 +36,8 @@ import { createNoteTray } from "./changes/noteTray";
 import { annotationsOf, carriesNotes } from "./changes/diffNotes";
 import { createChangesSource } from "./changes/changesSource";
 import { workspacePath } from "./changes/workspacePath";
+import { existingFiles } from "./changes/existingFiles";
+import type { FileLinks } from "./ui/FileTree";
 import { createFilesSource } from "./changes/filesSource";
 import { ChangesOpener, ChangesReview } from "./ui/ChangesReview";
 import type { NotesBinding } from "./ui/NoteTray";
@@ -121,8 +123,6 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const [tray] = useState(() => createNoteTray(saved));
   const notes = useSyncExternalStore(tray.subscribe, tray.notes);
   const [review, setReview] = useState<{ focusNoteId?: string; path?: string }>();
-  // A file a reply names opens in the review's editor. Stable, so the thread's messages do not remount.
-  const openFile = useCallback((path: string) => { if (cwd) setReview({ path: workspacePath(cwd, path) }); }, [cwd]);
   const changes = useMemo(() => cwd ? { source: createChangesSource(cwd, browserTransport.request), files: createFilesSource(cwd, browserTransport.request) } : undefined, [cwd]);
   const pullRef = useMemo(() => sessionId && cwd ? { id: sessionId, cwd } : undefined, [sessionId, cwd]);
   const ownPulls = useMemo(() => catalogPulls?.filter((link) => link.session.cwd === cwd) ?? NO_LINKS, [catalogPulls, cwd]);
@@ -168,6 +168,11 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   // Landed or discarded: the transcript is saved, the folder is gone, Pi does not run here again.
   const readOnly = state.status?.readOnly === true || (worktree !== undefined && worktree.state.kind !== "active");
   const treeAvailable = state.connection.type === "ready" && !state.sending && !busy && !readOnly;
+  // Only a file that exists now becomes a link. Stable, so the thread's messages do not remount.
+  const fileLinks = useMemo<FileLinks | undefined>(() => cwd && changes && !readOnly ? {
+    existing: existingFiles(changes.files, (path) => workspacePath(cwd, path)),
+    open: (path) => setReview({ path: workspacePath(cwd, path) }),
+  } : undefined, [cwd, changes, readOnly]);
   const onIdleAction = (action: "tree" | "fork") => {
     if (!treeAvailable) return;
     void send(`/${action}`).catch(() => { /* The store exposes the error. */ });
@@ -276,7 +281,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         queue={{ items: state.status?.queuedMessages ?? [], disabled: state.sending || state.connection.type !== "ready",
           onClear: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); } }}
         working={workingSend(state.status, state.compaction, state.transcript.isRunning)}
-        dialog={dialog} notes={notesBinding} onOpenFile={changes && !readOnly ? openFile : undefined}
+        dialog={dialog} notes={notesBinding} fileLinks={fileLinks}
         model={{ model: state.status?.model, thinkingLevel: state.status?.thinkingLevel, disabled: state.connection.type !== "ready",
           listModels: store.listModels, listThinkingLevels: store.listThinkingLevels, onModel: store.setModel, onThinkingLevel: store.setThinkingLevel,
           context: contextUse(state.status), cycle: true }}

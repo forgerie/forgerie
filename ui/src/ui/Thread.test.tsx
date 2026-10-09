@@ -9,6 +9,7 @@ import { Thread } from "./Thread";
 import { SessionFrame } from "./SessionFrame";
 import type { ComposerInputElement } from "./ComposerEditor";
 import { DIAGRAM_QUIET_MS } from "./Diagram";
+import { FILE_CHECK_DELAY_MS, type FileLinks } from "./FileTree";
 
 // Mermaid needs a real layout engine. The thread tests check our side: when
 // we draw, what we pass, and what we show when Mermaid refuses.
@@ -24,9 +25,9 @@ const answer = (text: string, id = "reply"): TranscriptMessage => ({ id, role: "
 const reply = answer("Hello");
 const tool = (id: string, state: ToolState, name = "bash", args: unknown = { command: `echo ${id}` }) =>
   ({ type: "tool" as const, id, name, args, state });
-function Fixture({ messages = [], running = false, loading = false, disabled = false, onNew = async () => {}, onCancel = async () => {}, onOpenFile }: {
+function Fixture({ messages = [], running = false, loading = false, disabled = false, onNew = async () => {}, onCancel = async () => {}, fileLinks }: {
   messages?: TranscriptMessage[];
-  onOpenFile?: (path: string) => void;
+  fileLinks?: FileLinks;
   running?: boolean;
   loading?: boolean;
   disabled?: boolean;
@@ -37,7 +38,7 @@ function Fixture({ messages = [], running = false, loading = false, disabled = f
   const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel,
     isRunning: running, isLoading: loading, isDisabled: disabled });
   return <AssistantRuntimeProvider runtime={runtime}>
-    <SessionFrame name="A long session title" status={running ? "Running" : "Connected"}><Thread onOpenFile={onOpenFile} /></SessionFrame>
+    <SessionFrame name="A long session title" status={running ? "Running" : "Connected"}><Thread fileLinks={fileLinks} /></SessionFrame>
   </AssistantRuntimeProvider>;
 }
 async function render(props: Parameters<typeof Fixture>[0] = {}) {
@@ -593,13 +594,15 @@ describe("Rich blocks, round two", () => {
     expect(document.querySelector('.path-tree-open')).toBeNull();
   });
 
-  it("opens a file named in a files fence by its full path", async () => {
-    const onOpenFile = vi.fn();
-    await render({ onOpenFile, messages: [answer("```files\nsrc/server/\n  ~ app.ts # wires it\n- old.md\n```")] });
+  it("links the files a files fence names that exist, and opens one by its full path", async () => {
+    const open = vi.fn();
+    const existing = vi.fn(async (paths: readonly string[]) => new Set(paths.filter((path) => path !== "src/server/gone.ts")));
+    await render({ fileLinks: { existing, open }, messages: [answer("```files\nsrc/server/\n  ~ app.ts # wires it\n  ~ gone.ts\n- old.md\n```")] });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, FILE_CHECK_DELAY_MS + 50)); });
     const opens = [...document.querySelectorAll<HTMLButtonElement>('.path-tree-open')];
-    expect(opens.map((open) => open.title)).toEqual(["src/server/app.ts"]);
+    expect(opens.map((link) => link.title)).toEqual(["src/server/app.ts"]);
     await act(async () => opens[0]!.click());
-    expect(onOpenFile).toHaveBeenCalledWith("src/server/app.ts");
+    expect(open).toHaveBeenCalledWith("src/server/app.ts");
   });
 
   it("renders a facts fence as a definition list with Markdown values", async () => {

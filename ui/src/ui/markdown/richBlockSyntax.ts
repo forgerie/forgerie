@@ -161,6 +161,15 @@ function compactDirectories(node: FileNode): FileNode {
   return { ...current, children: current.children.map(compactDirectories) };
 }
 
+/** The full path of every file a tree names that could still be on disk: not a directory, not marked deleted. */
+export function filePaths(nodes: readonly FileNode[], base = ""): string[] {
+  return nodes.flatMap((node) => {
+    const path = `${base}${node.name}${node.directory ? "/" : ""}`;
+    const own = node.directory || node.mark === "deleted" ? [] : [path];
+    return [...own, ...filePaths(node.children, path)];
+  });
+}
+
 export function countMarks(nodes: FileNode[]): Record<FileMark, number> {
   const counts: Record<FileMark, number> = { added: 0, changed: 0, deleted: 0 };
   const walk = (list: FileNode[]) => { for (const node of list) { if (node.mark) counts[node.mark] += 1; walk(node.children); } };

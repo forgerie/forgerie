@@ -1,11 +1,12 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
 import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui, useAuiState, type GroupByContext, type PartState } from "@assistant-ui/react";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { artifactDoor, type HistorySummaryKind, type PullNoticeArtifact, type ShellArtifact, type SummaryArtifact } from "../transcript";
 import { PullNoticeRow } from "./PullNoticeRow";
 import { SessionDoorCall } from "./SessionDoor";
 import { ShellRun } from "./ShellRun";
 import { MarkdownText } from "./MarkdownText";
+import type { FileLinks } from "./FileTree";
 import { CopyButton } from "./CopyButton";
 import { ChainOfThoughtGroup, SkillLoad, SkillLoadGroup, ToolCall, TraceLine, useToolSteps, WorkingLine, type ToolStepView } from "./Trace";
 import { TallyRow } from "./TallyRow";
@@ -51,10 +52,9 @@ function ResponseCopy() {
 
 // A step renders its parts by index: narration as the row's text, thinking
 // and calls in its panel.
-const stepText = { Text: () => <MarkdownText /> };
-const stepThought = { Reasoning: () => <MarkdownText /> };
+type StepParts = { text: { Text: () => ReactNode }; thought: { Reasoning: () => ReactNode } };
 const stepTools = { tools: { Fallback: ToolCall } };
-function stepRow(step: ToolStepView) {
+function stepRow(step: ToolStepView, { text: stepText, thought: stepThought }: StepParts) {
   const parts = (indices: readonly number[], components: Parameters<typeof MessagePrimitive.PartByIndex>[0]["components"]) =>
     indices.map((index) => <MessagePrimitive.PartByIndex key={index} index={index} components={components} />);
   return <TallyRow marks={step.marks} label={step.label} title={step.title} line={step.line} live={step.live}
@@ -77,24 +77,28 @@ export function UserMessage() {
   </MessagePrimitive.Root>;
 }
 
-/** `onOpenFile` opens a file a reply names in a `files` block. */
-export function AssistantMessage({ onOpenFile }: { onOpenFile?: ((path: string) => void) | undefined }) {
+/** `fileLinks` opens the files a reply names in a `files` block. */
+export function AssistantMessage({ fileLinks }: { fileLinks?: FileLinks | undefined }) {
   const steps = useToolSteps();
+  const stepParts = useMemo<StepParts>(() => ({
+    text: { Text: () => <MarkdownText fileLinks={fileLinks} /> },
+    thought: { Reasoning: () => <MarkdownText fileLinks={fileLinks} /> },
+  }), [fileLinks]);
   return <MessagePrimitive.Root className="message message-assistant" data-role="assistant" aria-label="Assistant reply">
     <div className="message-text">
       <MessagePrimitive.GroupedParts groupBy={groupAssistantParts}>
         {({ part, children }) => {
           if (isStepKey(part.type)) {
             const step = steps.get(part.type.slice(STEP_GROUP.length));
-            return step ? stepRow(step) : <>{children}</>;
+            return step ? stepRow(step, stepParts) : <>{children}</>;
           }
           switch (part.type) {
             case "group-chainOfThought": return <ChainOfThoughtGroup indices={part.indices} running={part.status.type === "running"}>{children}</ChainOfThoughtGroup>;
             case "group-skills": return part.indices.length === 1 ? <>{children}</>
               : <SkillLoadGroup indices={part.indices} running={part.status.type === "running"}>{children}</SkillLoadGroup>;
             case "text": return part.text === "" && part.status.type === "running"
-              ? <TraceLine live label="working" /> : <MarkdownText onOpenFile={onOpenFile} />;
-            case "reasoning": return <div className="reasoning-text"><MarkdownText onOpenFile={onOpenFile} /></div>;
+              ? <TraceLine live label="working" /> : <MarkdownText fileLinks={fileLinks} />;
+            case "reasoning": return <div className="reasoning-text"><MarkdownText fileLinks={fileLinks} /></div>;
             case "tool-call": {
               const door = artifactDoor(part.artifact);
               return door ? <SessionDoorCall {...part} door={door} />

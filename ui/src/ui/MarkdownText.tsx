@@ -9,7 +9,7 @@ import { ALLOWED_PROTOCOLS, markdownElements } from "./markdown/markdownPolicy";
 import { rehypeCallouts } from "./markdown/rehypeCallouts";
 import { CalloutQuote, richBlocksByLanguage } from "./markdown/RichBlocks";
 import { blockFences, noHeader } from "./markdown/blockFences";
-import { FileTree } from "./FileTree";
+import { FileTree, type FileLinks } from "./FileTree";
 
 function CodeHeader({ language, code }: CodeHeaderProps) {
   return <div className="code-header">
@@ -40,14 +40,14 @@ const linkSafety = { enabled: false };
 const rehypePlugins = [rehypeCallouts];
 const componentsByLanguage = { ...richBlocksByLanguage, ...blockFences };
 
-/** `onOpenFile` makes each file in a `files` block open on a tap. Keep it stable: a new function re-renders every block. */
-export const MarkdownText = memo(function MarkdownText({ onOpenFile }: { onOpenFile?: ((path: string) => void) | undefined }) {
+/** `fileLinks` makes each file in a `files` block that exists open on a tap. Keep it stable: a new object re-renders every block. */
+export const MarkdownText = memo(function MarkdownText({ fileLinks }: { fileLinks?: FileLinks | undefined }) {
   // Bare workspace paths need a base URL or rehype-harden labels them blocked.
   const security = useMemo(() => ({ defaultOrigin: window.location.href,
     allowedProtocols: ALLOWED_PROTOCOLS, allowDataImages: false }), []);
-  const byLanguage = useMemo(() => onOpenFile ? { ...componentsByLanguage,
-    files: { SyntaxHighlighter: ({ code }: SyntaxHighlighterProps) => <FileTree code={code} onOpen={onOpenFile} />, CodeHeader: noHeader } }
-    : componentsByLanguage, [onOpenFile]);
+  const byLanguage = useMemo(() => fileLinks ? { ...componentsByLanguage,
+    files: { SyntaxHighlighter: ({ code }: SyntaxHighlighterProps) => <FileTree code={code} links={fileLinks} />, CodeHeader: noHeader } }
+    : componentsByLanguage, [fileLinks]);
   return <StreamdownTextPrimitive containerClassName="markdown" className="markdown-content" components={components} controls={false}
     componentsByLanguage={byLanguage} rehypePlugins={rehypePlugins}
     remend={remend} security={security} linkSafety={linkSafety} skipHtml smooth={false} defer />;

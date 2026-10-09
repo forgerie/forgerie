@@ -4,7 +4,7 @@
 // files-closing (closing with unsaved edits), reply-files (a reply's files block, review closed),
 // reply-file-open (a file in that block tapped, so the review opens at it in the editor).
 // Notes and files live in local state only. Nothing reaches Pi, git, or the disk.
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, useExternalStoreRuntime } from "@assistant-ui/react";
 import type { TranscriptMessage } from "../src/transcript";
@@ -16,6 +16,7 @@ import { TreeOpener } from "../src/ui/SessionTreeNavigator";
 import { createNoteTray } from "../src/changes/noteTray";
 import { entriesOf, type ChangesSource } from "../src/changes/changesSource";
 import type { FilesSource, Folder } from "../src/changes/filesSource";
+import { existingFiles } from "../src/changes/existingFiles";
 import { linesOf, type DiffNote } from "../src/changes/diffNotes";
 import { parseUnifiedDiff, type CodeRow } from "../src/changes/unifiedDiff";
 import { diffDocument } from "../src/changes/diffDocument";
@@ -118,7 +119,7 @@ const say = (id: string, role: TranscriptMessage["role"], text: string): Transcr
 const messages: TranscriptMessage[] = [
   say("q", "user", "Fix it at the form layer, so SSO keeps calling the validator directly."),
   say("a", "assistant", "Done. The form now refuses an empty password before it calls `onSubmit`, and a new test covers it. The SSO path is unchanged."),
-  ...scenario.startsWith("reply-") ? [say("b", "assistant", "The files:\n\n```files\nsrc/auth/\n  ~ LoginForm.tsx # refuses an empty password\n  + LoginForm.test.tsx\n  - legacyValidate.ts\n~ README.md # documents the rule\n```")] : [],
+  ...scenario.startsWith("reply-") ? [say("b", "assistant", "The files:\n\n```files\nsrc/auth/\n  ~ LoginForm.tsx # refuses an empty password\n  + LoginForm.test.tsx\n  + oauth.ts # not written yet\n  - legacyValidate.ts\n~ README.md # documents the rule\n```")] : [],
 ];
 
 function Preview() {
@@ -127,7 +128,7 @@ function Preview() {
   const [open, setOpen] = useState<{ focusNoteId?: string; path?: string } | undefined>(scenario === "changes-tray" || scenario.startsWith("reply-") ? undefined : {});
   useEffect(() => {
     if (scenario !== "reply-file-open") return;
-    const timer = setTimeout(() => document.querySelector<HTMLElement>(".path-tree-open")?.click(), 300);
+    const timer = setTimeout(() => document.querySelector<HTMLElement>(".path-tree-open")?.click(), 800);
     return () => clearTimeout(timer);
   }, []);
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages(messages, false), onNew: async () => {} });
@@ -194,13 +195,14 @@ function Preview() {
     }, 300);
     return () => clearTimeout(timer);
   }, []);
-  const openFile = useCallback((path: string) => setOpen({ path }), []);
+  // The workspace's own lookup, against the preview's disk: src/auth/oauth.ts is named but was never written.
+  const fileLinks = useMemo(() => ({ existing: existingFiles(files, (path) => path), open: (path: string) => setOpen({ path }) }), []);
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name="Reject empty passwords" status="Connected" actions={<>
       <ChangesOpener notes={notes.length} onOpen={() => setOpen({})} />
       <TreeOpener idle onOpen={() => {}} />
     </>}>
-      <Thread onOpenFile={openFile} notes={{ notes, onRemove: tray.remove, onOpen: (focusNoteId) => setOpen({ focusNoteId }), onSendAlone: async () => {} }} />
+      <Thread fileLinks={fileLinks} notes={{ notes, onRemove: tray.remove, onOpen: (focusNoteId) => setOpen({ focusNoteId }), onSendAlone: async () => {} }} />
       {open && <ChangesReview source={source} files={files} notes={notes} focusNoteId={open.focusNoteId} openPath={open.path}
         onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setOpen(undefined)} />}
     </SessionFrame>
