@@ -7,8 +7,8 @@ export const note = "An action and the one setting that changes what it does, in
 
 type Mode = "inline" | "folder";
 const options = [
-  { value: "inline", label: "Inline", details: ["The model sees each image in the message", "Cannot wait in the queue"] },
-  { value: "folder", label: "As files", details: ["Saved in the workspace; the agent gets the path", "Can wait in the queue"] },
+  { value: "inline", label: "Inline", details: ["The model sees the image"] },
+  { value: "folder", label: "As files", details: ["Saved in the workspace"] },
 ] as const;
 
 export default function WithSetting() {

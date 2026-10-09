@@ -180,7 +180,6 @@ describe("queueing attachments while the agent works", () => {
   const choose = async (name: string) => {
     await click(choice() ?? undefined);
     const row = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((node) => node.querySelector(".option-row-name")?.textContent === name);
-    expect(row?.textContent).toContain("queue");
     await click(row);
   };
   const note = () => document.querySelector(".file-tile-note")?.textContent;

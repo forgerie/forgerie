@@ -13,8 +13,8 @@ export const ATTACHMENT_FOLDER = ".forgerie/attachments";
 export const DELIVERY_WORDS = {
   setting: "Send images",
   options: [
-    { value: "inline", label: "Inline", details: ["The model sees each image", "Cannot wait in the queue"] },
-    { value: "folder", label: "As files", details: [`Saved to ${ATTACHMENT_FOLDER}`, "Can wait in the queue"] },
+    { value: "inline", label: "Inline", details: ["The model sees the image"] },
+    { value: "folder", label: "As files", details: [`Saved to ${ATTACHMENT_FOLDER}`] },
   ],
   queueBlocked: "Inline images cannot be queued.",
   toFiles: "Send images as files",
