@@ -14,6 +14,12 @@ describe("Pi command contracts", () => {
     expect(commandCatalogSchema.parse(["builtin", "extension", "prompt", "skill"].map((source) => ({ name: source, source })))).toHaveLength(4);
     expect(commandCatalogSchema.safeParse([{ name: "bad", source: "remote" }]).success).toBe(false);
   });
+  it("preserves the explicit toast presentation and keeps detailed results compatible", () => {
+    const confirmation = { type: "done", message: "Session named: skill editing", presentation: "toast" };
+    expect(commandResultSchema.parse(confirmation)).toEqual(confirmation);
+    expect(commandResultSchema.parse({ type: "done", message: "Stats\nTokens: 12" })).toEqual({ type: "done", message: "Stats\nTokens: 12" });
+    expect(commandResultSchema.safeParse({ ...confirmation, presentation: "unknown" }).success).toBe(false);
+  });
   it("validates follow-up and tree results instead of treating every response as accepted", () => {
     expect(commandResultSchema.parse({ type: "tree", tree: { nodes: [], activeLeafId: null, activePathIds: [] } }).type).toBe("tree");
     expect(commandResultSchema.safeParse({ type: "select", title: "Missing request" }).success).toBe(false);

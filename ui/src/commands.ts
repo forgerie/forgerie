@@ -11,7 +11,7 @@ export const commandCatalogSchema = z.array(slashCommandSchema);
 export type CommandCatalog = { type: "loading" } | { type: "ready"; commands: SlashCommand[] }
   | { type: "failed"; message: string };
 export const commandResultSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("done"), message: z.string().optional(), session: sessionSchema.optional(), promptDraft: z.string().optional() }),
+  z.object({ type: z.literal("done"), message: z.string().optional(), presentation: z.literal("toast").optional(), session: sessionSchema.optional(), promptDraft: z.string().optional() }),
   z.object({ type: z.literal("unsupported"), message: z.string() }),
   z.object({ type: z.literal("select"), requestId: z.string().min(1), title: z.string(),
     options: z.array(z.object({ value: z.string(), label: z.string(), description: z.string().optional() })) }),

@@ -105,12 +105,13 @@ describe("SessionCommandService", () => {
     await expect(service.run("s1", "/name Useful name")).resolves.toMatchObject({
       type: "done",
       message: "Session named: Useful name",
+      presentation: "toast",
       session: { id: "s1", cwd: "/work", name: "Useful name", messageCount: 2 },
     });
     expect(active.runtime.session.setSessionName).toHaveBeenCalledWith("Useful name");
   });
 
-  it("formats session stats", async () => {
+  it("keeps session stats as detailed output rather than a toast", async () => {
     const active = activeSession();
     const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher());
 
@@ -486,7 +487,7 @@ describe("SessionCommandService", () => {
     vi.mocked(active.runtime.fork).mockResolvedValueOnce({ cancelled: true });
     const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher());
 
-    await expect(service.forkEntry("s1", "m1")).resolves.toEqual({ type: "done", message: "Fork cancelled" });
+    await expect(service.forkEntry("s1", "m1")).resolves.toEqual({ type: "done", presentation: "toast", message: "Fork cancelled" });
     expect(active.runtime.session.setSessionName).not.toHaveBeenCalled();
   });
 

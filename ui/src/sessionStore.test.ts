@@ -103,7 +103,7 @@ describe("Pi command transport", () => {
   });
   it("responds to the exact selection and returns the new session with its draft", async () => {
     const selection = { type: "select", requestId: "fork-1", title: "Fork from", options: [{ value: "entry-1", label: "First message" }] };
-    const done = { type: "done", message: "Session forked", session: { id: "child", cwd: "/workspace with spaces", name: "Child" }, promptDraft: "original question" };
+    const done = { type: "done", presentation: "toast", message: "Session forked", session: { id: "child", cwd: "/workspace with spaces", name: "Child" }, promptDraft: "original question" };
     const api = await server({ commandResults: [selection, done] });
     const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
     await store.start();
@@ -116,12 +116,17 @@ describe("Pi command transport", () => {
     expect(store.getSnapshot().commandResult).toBeUndefined();
   });
   it("updates the current session name and refreshes discovery after reload", async () => {
-    const api = await server({ commandResults: [{ type: "done", session: { id: "known", cwd: "/workspace with spaces", name: "Renamed" } }] });
+    const confirmation = { type: "done", presentation: "toast", message: "Session named: Renamed", session: { id: "known", cwd: "/workspace with spaces", name: "Renamed" } };
+    const api = await server({ commandResults: [confirmation] });
     const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
     await store.start();
     await waitFor(store, () => store.getSnapshot().commands.type === "ready");
     await store.send("/name Renamed");
     expect(store.getSnapshot().session?.name).toBe("Renamed");
+    expect(store.getSnapshot().commandResult).toEqual(confirmation);
+    expect(store.getSnapshot().transcript.messages).toHaveLength(2);
+    store.dismissCommand();
+    expect(store.getSnapshot().commandResult).toBeUndefined();
     await store.send("/reload");
     await waitFor(store, () => store.getSnapshot().commands.type === "ready");
     expect(api.requests.filter((request) => request.path.endsWith("/commands"))).toHaveLength(2);

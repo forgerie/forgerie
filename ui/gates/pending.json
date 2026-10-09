@@ -255,7 +255,6 @@
   "ui/ArchiveNext.tsx",
   "ui/Attachments.tsx",
   "ui/ChangesReview.tsx",
-  "ui/CommandResultPanel.tsx",
   "ui/CompactionNotice.tsx",
   "ui/Composer.tsx",
   "ui/ComposerDictation.tsx",

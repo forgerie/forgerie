@@ -17,6 +17,7 @@ import { DictationProvider } from "../src/DictationProvider";
 import type { PendingAsk, PendingDialog, SessionModel } from "../src/contracts";
 import type { DialogPhase } from "../src/dialog";
 import type { CommandBinding } from "../src/ui/SlashCommands";
+import type { CommandResult } from "../src/commands";
 import { createMentionSource, type MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
 import { NewSession, type LaunchDraft } from "../src/NewSession";
@@ -468,6 +469,7 @@ function Preview() {
     transcribe: async () => ({ text: "This is a local dictation preview." }),
   }));
   const [messages, setMessages] = useState<TranscriptMessage[]>(scenarios[scenario] ?? initialMessages);
+  const [commandResult, setCommandResult] = useState<CommandResult | undefined>(commandFeedback[scenario]);
   const [compaction, setCompaction] = useState<CompactionState>(compactionScenarios[scenario] ?? idleCompaction);
   // `skills-open` opens every skill record for screenshots. `skills-invocation`
   // opens the first command and scrolls it to the top of the transcript.
@@ -592,7 +594,10 @@ function Preview() {
   }, []);
   async function onNew(message: AppendMessage) {
     const text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
-    if (queuePreview && running) {
+    if (scenario.startsWith("command-") && text.startsWith("/")) {
+      setCommandResult(text.startsWith("/name ") ? { type: "done", presentation: "toast", message: `Session named: ${text.slice(6)}` }
+        : text === "/fork" ? commandFeedback["command-choices"] : commandFeedback["command-details"]);
+    } else if (queuePreview && running) {
       // Pi delivers steers before follow-ups.
       setQueue((current) => message.steer ? [...current.filter((item) => item.kind === "steer"), { kind: "steer", text },
         ...current.filter((item) => item.kind !== "steer")] : [...current, { kind: "followUp", text }]);
@@ -689,7 +694,8 @@ function Preview() {
         actions={{ onOpenChild: (id) => setChildView({ open: true, id }), onBack: () => setChildView({ open: true }), onClose: () => setChildView({ open: false }),
           onSend: async () => {}, onStop: () => {}, onAnswer: async () => {} }} />}
       <SessionDoorsProvider cwd={previewCwd} open={openPreviewDoor}>
-      <Thread systemArtifact={childrenPreview ? (custom) => {
+      <Thread commandResult={commandResult && { result: commandResult, disabled: false, onClose: () => setCommandResult(undefined),
+        onChoose: (_requestId, value) => setCommandResult({ type: "done", presentation: "toast", message: `Forked from ${value}` }) }} systemArtifact={childrenPreview ? (custom) => {
         const entry = (custom as { childEntry?: ChildEntry } | undefined)?.childEntry;
         return entry && <ChildEntryView entry={entry} onAnswer={async () => {}} onOpen={() => setChildView({ open: true, id: 21 })} />;
       } : undefined} compaction={compactionPreview || queuePreview ? { state: compaction, disabled: recovering,
@@ -717,7 +723,7 @@ function Preview() {
           setRuntimeChoice((current) => ({ model, level: model.reasoning ? (current.level === "off" ? "medium" : current.level) : "off" }));
         },
         onThinkingLevel: async (level) => { setRuntimeChoice((current) => ({ ...current, level })); },
-      }} commands={scenario.startsWith("slash") || scenario.startsWith("mentions") || compactionPreview ? previewCommands : undefined} mentions={scenario === "mentions-prefs" ? prefsPreviewMentions : scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
+      }} commands={scenario.startsWith("command-") || scenario.startsWith("slash") || scenario.startsWith("mentions") || compactionPreview ? previewCommands : undefined} mentions={scenario === "mentions-prefs" ? prefsPreviewMentions : scenario.startsWith("mentions") ? previewMentions : undefined} ask={ask && { ask, phase: { type: "answering" }, offline: recovering,
         onSubmit: () => setAsk(undefined), onDismiss: () => setAsk(undefined),
         onChat: async (text) => { setAsk(undefined); exchange(text); } }} />
       </SessionDoorsProvider>
@@ -725,6 +731,12 @@ function Preview() {
     </DictationProvider>
   </AssistantRuntimeProvider>;
 }
+const commandFeedback: Record<string, CommandResult> = {
+  "command-confirmation": { type: "done", presentation: "toast", message: "Session named: skill editing" },
+  "command-long-confirmation": { type: "done", presentation: "toast", message: `Session named: ${"very-long-session-name-".repeat(8)}` },
+  "command-details": { type: "done", message: "Session: s1\nMessages: 2\nTool calls: 3\nTokens: ↑10 ↓5 total 15\nCost: $0.1235" },
+  "command-choices": { type: "select", requestId: "fork-1", title: "Fork from message", options: [{ value: "first", label: "First question" }, { value: "latest", label: "Latest question" }] },
+};
 const previewCommands: CommandBinding = { catalog: { type: "ready", commands: [
   { name: "name", source: "builtin", description: "Set session display name" },
   { name: "session", source: "builtin", description: "Show session info and stats" },

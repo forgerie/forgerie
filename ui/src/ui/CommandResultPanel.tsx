@@ -1,4 +1,6 @@
+import { useMemo } from "react";
 import type { CommandResult } from "../commands";
+import { Toast } from "./Toast";
 
 export interface CommandResultBinding {
   result: CommandResult;
@@ -9,13 +11,17 @@ export interface CommandResultBinding {
 
 /** Shape: feedback and follow-up choices from Pi, separate from transcript history. `/tree` opens its own navigator. */
 export function CommandResultPanel({ result, disabled, onChoose, onClose }: CommandResultBinding) {
+  const notice = useMemo(() => result.type === "done" && result.presentation === "toast" && result.message
+    ? { message: result.message } : undefined, [result]);
   if (result.type === "done" && !result.message || result.type === "unsupported" || result.type === "tree") return null;
+  if (notice) return <Toast notice={notice} onDismiss={onClose} />;
   return <section className="command-result" aria-label="Command result">
     <div className="command-result-head">
       {result.type === "select" ? <h2>{result.title}</h2> : <span>Pi command</span>}
       <button type="button" onClick={onClose} disabled={disabled}>Close</button>
     </div>
-    <div className="command-result-body">
+    <div className="command-result-body" tabIndex={result.type === "done" ? 0 : undefined}
+      role={result.type === "done" ? "region" : undefined} aria-label={result.type === "done" ? "Command output" : undefined}>
       {result.type === "done" && <p role="status">{result.message}</p>}
       {result.type === "select" && result.options.map((option) => <button type="button" key={option.value}
         className="command-option" disabled={disabled} onClick={() => onChoose(result.requestId, option.value)}>

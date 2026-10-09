@@ -174,14 +174,14 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
       }
       return forkResult;
     });
-    if (result.cancelled) return { type: "done", message: "Fork cancelled" };
-    return { type: "done", message: "Session forked", session: clientSessionFromRuntime(active.runtime), ...promptDraft(result.selectedText) };
+    if (result.cancelled) return { type: "done", presentation: "toast", message: "Fork cancelled" };
+    return { type: "done", presentation: "toast", message: "Session forked", session: clientSessionFromRuntime(active.runtime), ...promptDraft(result.selectedText) };
   }
 
   private nameSession(active: CommandActiveSession<TSession>, name: string): ClientCommandResult {
     if (name === "") return { type: "unsupported", message: "Usage: /name <session name>" };
     active.runtime.session.setSessionName(name);
-    return { type: "done", message: `Session named: ${name}`, session: clientSessionFromRuntime(active.runtime) };
+    return { type: "done", presentation: "toast", message: `Session named: ${name}`, session: clientSessionFromRuntime(active.runtime) };
   }
 
   private compact(session: TSession, instructions: string): ClientCommandResult {
@@ -265,8 +265,8 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
       }
       return cloneResult;
     });
-    if (result.cancelled) return { type: "done", message: "Clone cancelled" };
-    return { type: "done", message: "Session cloned", session: clientSessionFromRuntime(active.runtime) };
+    if (result.cancelled) return { type: "done", presentation: "toast", message: "Clone cancelled" };
+    return { type: "done", presentation: "toast", message: "Session cloned", session: clientSessionFromRuntime(active.runtime) };
   }
 
   private fork(active: CommandActiveSession<TSession>): ClientCommandResult {

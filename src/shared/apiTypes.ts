@@ -1151,7 +1151,7 @@ export interface SessionStreamSnapshot {
 }
 
 export type CommandResult =
-  | { type: "done"; message?: string; session?: SessionInfo; promptDraft?: string }
+  | { type: "done"; message?: string; presentation?: "toast"; session?: SessionInfo; promptDraft?: string }
   | { type: "select"; requestId: string; title: string; options: CommandOption[] }
   | { type: "tree"; tree: SessionTreeSnapshot }
   | { type: "unsupported"; message: string };
