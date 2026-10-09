@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { caliper } from "@simonwjackson/caliper";
 import { DEFAULT_AUI_ALLOWED_HOSTS, speechProxyRequestHeaders } from "./src/speech/speechProxy";
 
 const allowedHosts = [...DEFAULT_AUI_ALLOWED_HOSTS, ...(process.env.FORGERIE_AUI_ALLOWED_HOSTS ?? "").split(",").map((host) => host.trim().toLowerCase()).filter(Boolean)];
@@ -26,8 +27,29 @@ function buildManifest(): Plugin {
   };
 }
 
+/**
+ * The acceptance device, the Samsung Galaxy Z Fold 8, in its four postures (AGENTS.md).
+ * The CSS viewports were measured on the device in Chrome, so they exclude the browser's bars.
+ * The millimetres are an estimate: the viewport at DPR 2.625, divided by the panel's pixel
+ * density from its published size (main 7.6" 2448 x 1848, cover 5.5" 1972 x 1248).
+ */
+const MAIN_MM_PER_CSS_PX = (2.625 / (Math.hypot(2448, 1848) / 7.6)) * 25.4;
+const COVER_MM_PER_CSS_PX = (2.625 / (Math.hypot(1972, 1248) / 5.5)) * 25.4;
+function fold(id: string, name: string, cssWidth: number, cssHeight: number, mmPerPx: number) {
+  const mm = (px: number) => Math.round(px * mmPerPx * 10) / 10;
+  return { id, name, cssWidth, cssHeight, widthMm: mm(cssWidth), heightMm: mm(cssHeight),
+    viewportNote: "Viewport measured on the device. Size in mm is an estimate from the panel's published size." };
+}
+const foldPostures = [
+  fold("fold8-unfolded-portrait", "Fold 8 unfolded, portrait", 704, 783, MAIN_MM_PER_CSS_PX),
+  fold("fold8-unfolded-landscape", "Fold 8 unfolded, landscape", 932, 553, MAIN_MM_PER_CSS_PX),
+  fold("fold8-folded-portrait", "Fold 8 folded, portrait", 475, 638, COVER_MM_PER_CSS_PX),
+  fold("fold8-folded-landscape", "Fold 8 folded, landscape", 711, 374, COVER_MM_PER_CSS_PX),
+];
+
 export default defineConfig({
-  plugins: [react(), buildManifest()],
+  // Caliper is a dev-server tool. Vitest also starts a serve-mode server, which must not announce itself to the Caliper app.
+  plugins: [react(), buildManifest(), ...(process.env.VITEST ? [] : [caliper({ devices: foldPostures })])],
   // Relative asset URLs: Forgerie can be served below a path prefix.
   base: "./",
   resolve: {

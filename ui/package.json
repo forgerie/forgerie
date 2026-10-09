@@ -10,8 +10,10 @@
     "dev": "vite --port 8510 --strictPort",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
-    "lint": "eslint src",
-    "verify": "npm run build && npm run lint && npm test"
+    "lint": "eslint src gates",
+    "verify": "npm run build && npm run lint && npm test",
+    "gates": "vitest run gates",
+    "gates:record": "GATES_RECORD=1 vitest run gates --no-file-parallelism"
   },
   "dependencies": {
     "@assistant-ui/react": "0.15.22",
@@ -46,6 +48,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.4",
     "@eslint/js": "^10.0.1",
+    "@simonwjackson/caliper": "0.1.1",
     "@types/node": "^22.20.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

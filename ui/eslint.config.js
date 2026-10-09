@@ -5,4 +5,6 @@ export default tseslint.config(
   { ignores: ["dist/**", "node_modules/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  // The gate scripts run under Node.
+  { files: ["gates/**/*.mjs"], languageOptions: { globals: { process: "readonly", console: "readonly", URL: "readonly" } } },
 );

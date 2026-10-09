@@ -164,6 +164,12 @@ Rotating the unfolded device swaps the entire UI paradigm. Removing this
 cliff is a standing UX goal; do not add new width breakpoints that fall
 inside or near the 475–932px posture range.
 
+### Decomposition of the browser app
+
+Before you add or change a component in `ui/`, read `ui/docs/decomposition.md`.
+It says where system components, shapes, bindings and parts live, and how the
+gates in `ui/gates/` enforce it.
+
 ### Intrinsic design rules
 
 All Forgerie UI work follows intrinsic design principles:
