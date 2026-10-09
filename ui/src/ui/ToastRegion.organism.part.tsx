@@ -12,6 +12,23 @@ export default function Stacked() {
       detail="Its folder or branch changed outside Forgerie. Remove account-meters-plugin-backport yourself if you no longer need it." />
   </>;
 }
+/** Toasts float over the thread, so this state draws text behind them to show how they stand off it. */
+export function OverThread() {
+  return <>
+    <main>
+      {["The parser reads each block into a node, then the printer walks the nodes in order.",
+        "A list item that holds a quote keeps its marker, so the printer must not join the two lines.",
+        "I changed the printer to keep the marker, and added a test for a quote inside a list.",
+        "All 214 tests pass. The build is clean, and the bundle grew by 0.4 kB.",
+        "Next, the same rule applies to a code block inside a list, which the printer still joins."]
+        .map((text) => <p key={text}>{text}</p>)}
+    </main>
+    <ToastRegion />
+    <Toast message={<>Archived <strong>Account meters plugin backport</strong>. Worktree kept.</>} action={{ label: "Undo", onPress: () => {} }} onDismiss={() => {}}
+      detail="Its folder or branch changed outside Forgerie. Remove account-meters-plugin-backport yourself if you no longer need it." />
+    <Toast tone="alert" message="“Fix the parser” did not start." action={{ label: "Review", onPress: () => {} }} onDismiss={() => {}} />
+  </>;
+}
 export function One() {
   return <>
     <ToastRegion />

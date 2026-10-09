@@ -1,10 +1,18 @@
 /* The window's toast corner: the top end, under the header, clear of the
    composer and the keyboard at the bottom. It is the page frame, so it
-   measures the window. Clicks pass through the gaps to the page below. */
-.toast-region { position: fixed; z-index: 50;
-  inset-block-start: calc(env(safe-area-inset-top) + var(--header-size) + var(--space-2));
-  inset-inline-end: calc(env(safe-area-inset-right) + var(--space-2));
-  inline-size: min(22rem, calc(100% - var(--space-4) - env(safe-area-inset-left) - env(safe-area-inset-right)));
-  max-block-size: calc(100% - var(--header-size) - var(--space-4) - env(safe-area-inset-top));
+   measures the window. Clicks pass through the gaps to the page below.
+   It scrolls when toasts fill it, and a scroller clips what is outside its
+   padding, so its padding holds each toast's shadow: a narrow edge at the
+   window's side, and up to --toast-bleed where the page has room. The
+   percentages in the padding read the window's width. */
+.toast-region { --toast-width: 22rem; --toast-edge: var(--space-2); --toast-bleed: var(--space-6);
+  --toast-safe-inline: calc(env(safe-area-inset-left) + env(safe-area-inset-right));
+  position: fixed; z-index: 50;
+  inset-block-start: calc(env(safe-area-inset-top) + var(--header-size));
+  inset-inline-end: env(safe-area-inset-right);
+  inline-size: min(var(--toast-width) + var(--toast-edge) + var(--toast-bleed), 100% - var(--toast-safe-inline));
+  max-block-size: calc(100% - var(--header-size) - env(safe-area-inset-top));
+  padding: var(--toast-edge) var(--toast-edge) var(--toast-bleed)
+    clamp(var(--toast-edge), 100% - var(--toast-width) - var(--toast-edge) - var(--toast-safe-inline), var(--toast-bleed));
   display: flex; flex-direction: column; gap: var(--space-2); overflow-y: auto; overscroll-behavior: contain; pointer-events: none; }
 .toast-region:empty { display: none; }
