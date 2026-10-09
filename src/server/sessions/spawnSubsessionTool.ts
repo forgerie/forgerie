@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { defineTool, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
+import { modelParameterDescription, requestedModel } from "./requestedModel.js";
 import type { TranscriptContentKind, TranscriptEntry, TranscriptRole, TranscriptView } from "./subsessionTranscript.js";
 
 /** Lifecycle phase of a tracked subsession as seen by its parent. */
@@ -81,7 +82,7 @@ const SpawnSubsessionParams = Type.Object({
     description: "Child workspace in the same project (worktree or root); defaults to the parent's directory.",
   })),
   model: Type.Optional(Type.String({
-    description: 'Model for the child session, as an exact "provider/model-id" such as "anthropic/claude-sonnet-4-5". When the user references a model as #provider/model-id in their request, forward it here. An unknown value is rejected. Omit to inherit this session\'s model.',
+    description: modelParameterDescription("the child session"),
   })),
 });
 
@@ -209,8 +210,7 @@ export function createSubsessionToolDefinitions(spawningCwd: string, deps: Subse
         prompt: params.prompt,
         cwd: params.cwd,
         ...(ctx.model === undefined ? {} : { model: ctx.model }),
-        ...(params.model === undefined ? {} : { modelSpec: params.model }),
-        ...(ctx.thinkingLevel === undefined ? {} : { thinkingLevel: ctx.thinkingLevel }),
+        ...requestedModel(params.model, ctx.thinkingLevel),
       });
       const modelNote = result.model === undefined ? "" : ` using model ${result.model}`;
       return {

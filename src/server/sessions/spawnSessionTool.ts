@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { defineTool, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
+import { modelParameterDescription, requestedModel } from "./requestedModel.js";
 
 export interface SpawnSessionResult {
   sessionId: string;
@@ -40,7 +41,7 @@ const SpawnSessionParams = Type.Object({
     description: "Working directory for the new session. Must be a workspace (worktree, or root) of the same project as this session. Defaults to this session's working directory.",
   })),
   model: Type.Optional(Type.String({
-    description: 'Model for the new session, as an exact "provider/model-id" such as "anthropic/claude-sonnet-4-5". When the user references a model as #provider/model-id in their request, forward it here. An unknown value is rejected. Omit to inherit this session\'s model.',
+    description: modelParameterDescription("the new session"),
   })),
 });
 
@@ -68,8 +69,7 @@ export function createSpawnSessionToolDefinition(spawningCwd: string, deps: Spaw
         prompt: params.prompt,
         cwd: params.cwd,
         ...(ctx.model === undefined ? {} : { model: ctx.model }),
-        ...(params.model === undefined ? {} : { modelSpec: params.model }),
-        ...(ctx.thinkingLevel === undefined ? {} : { thinkingLevel: ctx.thinkingLevel }),
+        ...requestedModel(params.model, ctx.thinkingLevel),
       });
       const modelNote = result.model === undefined ? "" : ` using model ${result.model}`;
       return {

@@ -90,4 +90,12 @@ describe("createHandoffSessionToolDefinition", () => {
       modelSpec: "openai/gpt-5",
     });
   });
+
+  it("applies a thinking level written on the destination model", async () => {
+    const handoff = vi.fn(() => Promise.resolve({ handoffId: "h-4", sourceSessionId: "source-1", destinationSessionId: "dest-4", cwd: "/repos/a", state: "preparing" as const }));
+    const tool = createHandoffSessionToolDefinition("/repos/a", { handoff });
+
+    await tool.execute("call-4", { model: "openai/gpt-5:xhigh" }, undefined, undefined, ctxFor("source-1", "/sessions/source-1.jsonl", dispatchModel, "medium"));
+    expect(handoff).toHaveBeenCalledWith(expect.objectContaining({ modelSpec: "openai/gpt-5", thinkingLevel: "xhigh" }));
+  });
 });

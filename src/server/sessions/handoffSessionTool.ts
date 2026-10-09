@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { defineTool, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
+import { modelParameterDescription, requestedModel } from "./requestedModel.js";
 
 export type HandoffSessionModel = NonNullable<ExtensionContext["model"]>;
 export type HandoffSessionThinkingLevel = NonNullable<ExtensionContext["thinkingLevel"]>;
@@ -39,7 +40,7 @@ const HandoffSessionParams = Type.Object({
     description: "Working directory for the destination. Must be a workspace of the same project. Defaults to this session's workspace.",
   })),
   model: Type.Optional(Type.String({
-    description: 'Destination model as an exact "provider/model-id". Omit to inherit this session\'s model.',
+    description: modelParameterDescription("the destination session"),
   })),
 });
 
@@ -68,8 +69,7 @@ export function createHandoffSessionToolDefinition(spawningCwd: string, deps: Ha
         focus: params.focus,
         cwd: params.cwd,
         ...(ctx.model === undefined ? {} : { model: ctx.model }),
-        ...(params.model === undefined ? {} : { modelSpec: params.model }),
-        ...(ctx.thinkingLevel === undefined ? {} : { thinkingLevel: ctx.thinkingLevel }),
+        ...requestedModel(params.model, ctx.thinkingLevel),
       });
       const modelNote = result.model === undefined ? "" : ` using model ${result.model}`;
       return {

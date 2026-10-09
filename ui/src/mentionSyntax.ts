@@ -26,9 +26,10 @@ export function fileReference(path: string, prefix: string = "@") {
   return `${prefix}${/\s/.test(path) ? `"${path}"` : path}`;
 }
 
-export function mentionFormatter(trigger: MentionTrigger): Unstable_DirectiveFormatter {
+/** `levelOf` adds a thinking level to a model reference (`:high`), or nothing. */
+export function mentionFormatter(trigger: MentionTrigger, levelOf: (id: string) => string = () => ""): Unstable_DirectiveFormatter {
   return {
-    serialize: (item) => trigger === "#" ? `#${item.id}`
+    serialize: (item) => trigger === "#" ? `#${item.id}${levelOf(item.id)}`
       : fileReference(item.id, item.id.endsWith("/") ? trigger : "@"),
     // The textarea and transcript keep the existing editable reference syntax.
     parse: (text) => [{ kind: "text", text }],

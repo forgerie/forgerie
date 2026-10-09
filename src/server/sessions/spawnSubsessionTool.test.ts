@@ -132,6 +132,14 @@ describe("createSubsessionToolDefinitions", () => {
     expect(firstText(result.content)).toBe("Started tracked subsession child-3 in /repos/a using model openai/gpt-5. Continue other work, then join with yield_to_subsessions; do not poll.");
   });
 
+  it("spawn_subsession applies a thinking level written on the model instead of the parent's", async () => {
+    const spawn = vi.fn(() => Promise.resolve({ sessionId: "child-4", cwd: "/repos/a", model: "openai/gpt-5" }));
+    const { spawn: spawnTool } = tools({ spawn });
+
+    await spawnTool.execute("call-level", { prompt: "do it", model: "openai/gpt-5:high" }, undefined, undefined, ctxFor("parent-1", "/sessions/parent-1.jsonl", dispatchModel, "minimal"));
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ modelSpec: "openai/gpt-5", thinkingLevel: "high" }));
+  });
+
   it("spawn_subsession teaches the model parameter format and the #provider/model-id reference convention", () => {
     const { spawn: spawnTool } = tools({});
 

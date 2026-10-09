@@ -19,6 +19,20 @@ export function isKnownThinkingLevel(value: string): value is ThinkingLevel {
   return KNOWN_THINKING_LEVELS.some((level) => level === value);
 }
 
+/** A model reference with an optional thinking level, as Pi's favorites write it: `provider/id:high`. */
+export interface ModelReference { model: string; thinkingLevel?: ThinkingLevel }
+
+/**
+ * Split `provider/id:level` into the model and its level. A suffix that is not a
+ * known level stays part of the model ID, because some IDs contain a colon
+ * (`llama3:8b`).
+ */
+export function parseModelReference(reference: string): ModelReference {
+  const colon = reference.lastIndexOf(":");
+  const suffix = colon === -1 ? "" : reference.slice(colon + 1);
+  return isKnownThinkingLevel(suffix) ? { model: reference.slice(0, colon), thinkingLevel: suffix } : { model: reference };
+}
+
 export function thinkingLevelLabel(level: string | undefined): string {
   return level === undefined || level === "" ? "off" : level;
 }

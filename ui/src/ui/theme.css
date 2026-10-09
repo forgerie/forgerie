@@ -149,6 +149,12 @@ button, textarea { font: inherit; }
 .mention-close { display: grid; place-items: center; flex: none; inline-size: var(--control-size); block-size: var(--control-size);
   background: transparent; border: 0; border-radius: var(--radius-control); }
 .mention-close:hover { background: var(--hover-surface); }
+/* The level for the model a # reference inserts. It stays under the list while the rows scroll. */
+.mention-thinking { flex: none; display: flex; align-items: center; gap: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4); border-block-start: var(--hairline) solid var(--line); }
+.mention-thinking-label { flex: none; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+/* The levels share the label's line and wrap beside it, so the row costs as few lines as the width allows. */
+.mention-thinking-levels { flex: 1 1 0; min-inline-size: 0; }
 button { color: inherit; cursor: pointer; }
 button:disabled { cursor: default; opacity: 0.4; }
 :focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }

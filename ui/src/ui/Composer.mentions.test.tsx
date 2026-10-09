@@ -14,7 +14,8 @@ const files: Unstable_TriggerItem[] = [
   { id: "src/main.ts", type: "file", label: "src/main.ts", description: "tracked" },
   { id: "src/file with spaces.ts", type: "file", label: "src/file with spaces.ts", description: "tracked" },
 ];
-const models: ModelSuggestions = { hidden: 0, groups: [{ key: "favorites", label: "Favorites", options: [{ id: "p/model", name: "Friendly name", details: ["P"] }] }] };
+const models: ModelSuggestions = { hidden: 0, groups: [{ key: "favorites", label: "Favorites", options: [{ id: "p/model", name: "Friendly name", details: ["P"] }] }],
+  thinking: { "p/model": { levels: [{ value: "off", label: "Off" }, { value: "low", label: "Low" }, { value: "high", label: "High" }] } } };
 function source(config: Partial<MentionSource> = {}): MentionSource {
   return { key: "session-a", files: async () => files, models: async () => models, ...config };
 }
@@ -77,6 +78,40 @@ describe("assistant-ui mention composer", () => {
     await press("Tab");
     expect(input().value).toBe("use #p/model ");
     expect(suggestions()).toBeNull();
+  });
+  it("adds the level pressed in the Thinking row to the model it inserts, and Inherit removes it", async () => {
+    await render({ mentions: source() });
+    await type("use #friendly"); await settle();
+    const thinking = () => document.querySelector<HTMLElement>('[role="group"][aria-label="Thinking level"]');
+    const level = (name: string) => [...thinking()!.querySelectorAll("button")].find((button) => button.textContent === name)!;
+    expect([...thinking()!.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Inherit", "Off", "Low", "High"]);
+    expect(level("Inherit").getAttribute("aria-pressed")).toBe("true");
+    // Pressing a level keeps focus in the message box, so the list stays open.
+    const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    await act(async () => { level("High").dispatchEvent(down); level("High").click(); });
+    expect(down.defaultPrevented).toBe(true);
+    expect(level("High").getAttribute("aria-pressed")).toBe("true");
+    await press("Tab");
+    expect(input().value).toBe("use #p/model:high ");
+    await type("then #friendly"); await settle();
+    expect(level("Inherit").getAttribute("aria-pressed")).toBe("true");
+    await act(async () => level("Low").click()); await act(async () => level("Inherit").click());
+    await press("Tab");
+    expect(input().value).toBe("then #p/model ");
+  });
+  it("starts a favorite at the level saved with it, and inserts a level row as written", async () => {
+    const lookup = vi.fn<MentionSource["models"]>(async (query): Promise<ModelSuggestions> => query.includes(":")
+      ? { hidden: 0, thinking: {}, groups: [{ key: "thinking", label: "Thinking for Friendly name", options: [{ id: "p/model:low", name: "Low" }] }] }
+      : { ...models, thinking: { "p/model": { ...models.thinking["p/model"]!, preset: "high" } } });
+    await render({ mentions: source({ models: lookup }) });
+    await type("#friendly"); await settle();
+    await press("Tab");
+    expect(input().value).toBe("#p/model:high ");
+    await type("#friendly:lo"); await settle();
+    expect(lookup).toHaveBeenLastCalledWith("friendly:lo", { showHidden: false, prefer: "p/model" }, expect.any(AbortSignal));
+    expect(options()[0]?.textContent).toBe("Low");
+    await press("Tab");
+    expect(input().value).toBe("#p/model:low ");
   });
   it("clicks an item without replacing the remainder of the draft", async () => {
     await render({ mentions: source() });

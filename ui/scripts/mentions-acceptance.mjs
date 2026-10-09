@@ -114,8 +114,21 @@ try {
       await until(`document.querySelectorAll('.option-row').length === 3`);
       const labels = await evaluate(cdp, `[...document.querySelectorAll('.option-row-name')].map(node => node.textContent)`);
       assert.deepEqual(labels, ["Careful model", "Fast model", "Balanced model"], "Only shown models, with favorites in Settings order");
+      // The Thinking row stays on screen and inside the panel at every posture.
+      const row = await evaluate(cdp, `(() => { const r = document.querySelector('.mention-thinking')?.getBoundingClientRect(); const p = document.querySelector('.floating-panel').getBoundingClientRect();
+        return r && { inside: r.top >= p.top - 1 && r.bottom <= p.bottom + 1, pressed: document.querySelector('.mention-thinking [aria-pressed=true]').textContent }; })()`);
+      assert.deepEqual(row, { inside: true, pressed: "High" }, "The favorite's saved level is pressed in a visible Thinking row");
+      // A favorite saved with a level inserts it.
       await pressCombo(cdp, "tab");
-      assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), "#provider/careful ");
+      assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), "#provider/careful:high ");
+      // Typing a colon lists the highlighted model's levels; the label a person reads filters them too.
+      await draft("#fa");
+      await until(`document.querySelector('.option-row-name')?.textContent === 'Fast model'`);
+      await cdp.send("Input.insertText", { text: ":ext" });
+      await until(`document.querySelector('.option-list-heading')?.textContent === 'Thinking for Fast model'`);
+      assert.deepEqual(await evaluate(cdp, `[...document.querySelectorAll('.option-row-name')].map(node => node.textContent)`), ["Extra high"]);
+      await pressCombo(cdp, "enter");
+      assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), "#provider/fast:xhigh ");
       await draft("#hidden");
       await until(`document.body.textContent.includes('No matching models.')`);
       assert.equal(await evaluate(cdp, `document.querySelectorAll('.option-row').length`), 0);

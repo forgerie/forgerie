@@ -64,6 +64,34 @@ describe("mention discovery against Forgerie HTTP contracts", () => {
     expect(ids(await source.models("hidden", { showHidden: false }, signal))).toEqual([]);
     expect(ids(await source.models("FAVORITE", { showHidden: false }, signal))).toEqual(["p/favorite-b", "p/favorite-a"]);
   });
+  it("states each model's levels, and the level a favorite saved with it", async () => {
+    const { source } = await service({ [prefsPath]: { ...prefs, favorites: ["p/deep:high"] },
+      [modelPath]: { models: [{ provider: "p", id: "deep" }, { provider: "p", id: "plain", reasoning: false }] } });
+    const { thinking } = await source.models("", { showHidden: false }, new AbortController().signal);
+    expect(thinking["p/deep"]).toEqual({ preset: "high", levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+      .map((value) => ({ value, label: expect.any(String) as unknown as string })) });
+    expect(thinking["p/deep"]!.levels[5]).toEqual({ value: "xhigh", label: "Extra high" });
+    expect(thinking["p/plain"]).toEqual({ levels: [{ value: "off", label: "Off" }], preset: undefined });
+  });
+  it("lists one model's levels after a colon, filtered by what follows it", async () => {
+    const { source } = await service({ [prefsPath]: { ...prefs, favorites: ["p/deep:high"] }, [modelPath]: { models: [
+      { provider: "p", id: "deep", name: "Deep" }, { provider: "p", id: "deeper", name: "Deeper" }, { provider: "local", id: "llama3:8b" },
+    ] } });
+    const signal = new AbortController().signal;
+    const exact = await source.models("p/deep:", { showHidden: false }, signal);
+    expect(exact.groups).toHaveLength(1);
+    expect(exact.groups[0]!.label).toBe("Thinking for Deep");
+    expect(ids(exact)).toEqual(["p/deep:off", "p/deep:minimal", "p/deep:low", "p/deep:medium", "p/deep:high", "p/deep:xhigh", "p/deep:max"]);
+    expect(exact.groups[0]!.options.find((option) => option.current)?.id).toBe("p/deep:high");
+    // A partial level filters by Pi's word or the label a person reads.
+    expect(ids(await source.models("p/deep:hi", { showHidden: false }, signal))).toEqual(["p/deep:high"]);
+    expect(ids(await source.models("p/deep:extra", { showHidden: false }, signal))).toEqual(["p/deep:xhigh"]);
+    // Search text resolves to the model the highlight was on, else the first match.
+    expect(ids(await source.models("dee:max", { showHidden: false, prefer: "p/deeper" }, signal))).toEqual(["p/deeper:max"]);
+    expect(ids(await source.models("dee:max", { showHidden: false }, signal))).toEqual(["p/deep:max"]);
+    // A colon that belongs to the model ID is a search, not a level.
+    expect(ids(await source.models("llama3:8b", { showHidden: false }, signal))).toEqual(["local/llama3:8b"]);
+  });
   it("offers hidden models on request, marked as hidden", async () => {
     const { source } = await service({ [prefsPath]: { ...prefs, visible: ["p/shown"] },
       [modelPath]: { models: [{ provider: "p", id: "shown" }, { provider: "p", id: "off" }] } });

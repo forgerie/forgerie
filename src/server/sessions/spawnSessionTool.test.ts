@@ -40,6 +40,22 @@ describe("createSpawnSessionToolDefinition", () => {
     expect(spawn).toHaveBeenCalledWith({ spawningCwd: "/repos/a", spawningSessionId: "spawner-1", prompt: "continue", cwd: undefined });
   });
 
+  it("applies a thinking level written on the model instead of the inherited one", async () => {
+    const spawn = vi.fn(() => Promise.resolve({ sessionId: "new-4", cwd: "/repos/a", model: "openai/gpt-5" }));
+    const tool = createSpawnSessionToolDefinition("/repos/a", { spawn });
+
+    await tool.execute("call-4", { prompt: "go", model: "openai/gpt-5:max" }, undefined, undefined, ctxFor("spawner-1", dispatchModel, "low"));
+    expect(spawn).toHaveBeenLastCalledWith(expect.objectContaining({ modelSpec: "openai/gpt-5", thinkingLevel: "max" }));
+    // A colon that belongs to the model ID stays in it, and the session's level carries over.
+    await tool.execute("call-5", { prompt: "go", model: "local/llama3:8b" }, undefined, undefined, ctxFor("spawner-1", dispatchModel, "low"));
+    expect(spawn).toHaveBeenLastCalledWith(expect.objectContaining({ modelSpec: "local/llama3:8b", thinkingLevel: "low" }));
+  });
+
+  it("teaches the agent to forward a level written on a #reference", () => {
+    const tool = createSpawnSessionToolDefinition("/repos/a", { spawn: vi.fn() });
+    expect(JSON.stringify(tool.parameters)).toMatch(/#provider\/model-id:level.*level included/);
+  });
+
   it("forwards an explicit model as a model spec alongside the inherited model", async () => {
     const spawn = vi.fn(() => Promise.resolve({ sessionId: "new-3", cwd: "/repos/a", model: "openai/gpt-5" }));
     const tool = createSpawnSessionToolDefinition("/repos/a", { spawn });
