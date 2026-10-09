@@ -20,7 +20,7 @@ export interface GitHubAuthorTrustDependencies { fetch: Fetch; now?: () => numbe
 /**
  * Decides whether text an author wrote on a repo may reach an agent. Owners, members, and collaborators
  * are trusted. GitHub hides private organization membership from an app, so a member can arrive marked
- * `CONTRIBUTOR`; for those, GitHub is asked what the author may do in the repo, and write access or more
+ * `CONTRIBUTOR` or `NONE`; for those, GitHub is asked what the author may do in the repo, and write access or more
  * counts. A failed check leaves the author untrusted: hiding trusted text is recoverable, showing
  * untrusted text is not.
  */
@@ -29,9 +29,9 @@ export class GitHubAuthorTrust {
   private readonly now: () => number;
   constructor(private readonly deps: GitHubAuthorTrustDependencies) { this.now = deps.now ?? Date.now; }
 
-  /** A predicate that answers for each of `authors`, after at most one lookup per unknown contributor. */
+  /** A predicate that answers for each of `authors`, after at most one lookup per unknown author. */
   async judge(slug: string, token: string, authors: readonly GitHubAuthor[]): Promise<(author: GitHubAuthor) => boolean> {
-    const unknown = [...new Set(authors.filter((author) => author.association === "CONTRIBUTOR" && author.login !== undefined)
+    const unknown = [...new Set(authors.filter((author) => (author.association === "CONTRIBUTOR" || author.association === "NONE") && author.login !== undefined)
       .map((author) => author.login ?? ""))];
     let checks = 0;
     for (const login of unknown) {

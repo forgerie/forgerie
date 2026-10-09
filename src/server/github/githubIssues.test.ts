@@ -112,14 +112,65 @@ describe("GitHub issue client", () => {
       issue(4, { author_association: "MEMBER", user: { login: "teammate" } }), issue(5, { author_association: "NONE", user: { login: "drive-by" } })]));
     f.github.on("GET https://api.github.com/repos/korri-os/korri/collaborators/simonwjackson/permission", json({ permission: "admin" }));
     f.github.on("GET https://api.github.com/repos/korri-os/korri/collaborators/stranger/permission", json({ permission: "read" }));
+    f.github.on("GET https://api.github.com/repos/korri-os/korri/collaborators/drive-by/permission", json({ permission: "read" }));
     const result = await f.client.openIssues("korri-os/korri");
     expect(result.ok && result.issues.map((value) => [value.number, value.trusted])).toEqual([[1, true], [2, false], [3, true], [4, true], [5, false]]);
-    // One lookup per contributor, none for MEMBER or NONE, and the answer is reused for an hour.
-    expect(f.github.requests.filter((request) => request.url.includes("/permission"))).toHaveLength(2);
+    // One lookup per unknown author, none for MEMBER, and the answer is reused for an hour.
+    expect(f.github.requests.filter((request) => request.url.includes("/permission"))).toHaveLength(3);
     f.advance(61_000);
     f.github.on(LIST, new Response(null, { status: 304 }));
     await f.client.openIssues("korri-os/korri");
-    expect(f.github.requests.filter((request) => request.url.includes("/permission"))).toHaveLength(2);
+    expect(f.github.requests.filter((request) => request.url.includes("/permission"))).toHaveLength(3);
+  });
+
+  it.each(["admin", "maintain", "write"])("trusts a NONE author only after GitHub confirms %s access", async (permission) => {
+    const f = fixture();
+    f.github.on(LIST, json([issue(1, { author_association: "NONE", user: { login: "private-member" } })]));
+    f.github.on("GET https://api.github.com/repos/korri-os/korri/collaborators/private-member/permission", json({ permission }));
+    const result = await f.client.openIssues("korri-os/korri");
+    expect(result.ok && result.issues[0]?.trusted).toBe(true);
+  });
+
+  it.each(["read", "triage", "none"])("keeps a NONE author with %s access untrusted", async (permission) => {
+    const f = fixture();
+    f.github.on(LIST, json([issue(1, { author_association: "NONE", user: { login: "outsider" } })]));
+    f.github.on("GET https://api.github.com/repos/korri-os/korri/collaborators/outsider/permission", json({ permission }));
+    const result = await f.client.openIssues("korri-os/korri");
+    expect(result.ok && result.issues[0]?.trusted).toBe(false);
+    expect(f.github.requests.filter((request) => request.url.includes("/permission"))).toHaveLength(1);
+  });
+
+  it.each([401, 403, 404, 500])("keeps a NONE author untrusted when permission lookup returns HTTP %s", async (status) => {
+    const f = fixture();
+    f.github.on(LIST, json([issue(1, { author_association: "NONE", user: { login: "unknown" } })]));
+    f.github.on("GET https://api.github.com/repos/korri-os/korri/collaborators/unknown/permission", json({ permission: "admin" }, { status }));
+    const result = await f.client.openIssues("korri-os/korri");
+    expect(result.ok && result.issues[0]?.trusted).toBe(false);
+    expect(f.github.requests.filter((request) => request.url.includes("/permission"))).toHaveLength(1);
+  });
+
+  it("deduplicates and caches permission checks for NONE authors without checking anonymous authors", async () => {
+    const f = fixture();
+    f.github.on(LIST, json([issue(1, { author_association: "NONE", user: { login: "private-member" } }),
+      issue(2, { author_association: "NONE", user: { login: "private-member" } }), issue(3, { author_association: "NONE", user: null })], { headers: { etag: '"v1"' } }));
+    f.github.on("GET https://api.github.com/repos/korri-os/korri/collaborators/private-member/permission", json({ permission: "admin" }));
+    const result = await f.client.openIssues("korri-os/korri");
+    expect(result.ok && result.issues.map((value) => value.trusted)).toEqual([true, true, false]);
+    f.advance(61_000);
+    f.github.on(LIST, new Response(null, { status: 304 }));
+    await f.client.openIssues("korri-os/korri");
+    expect(f.github.requests.filter((request) => request.url.includes("/permission"))).toHaveLength(1);
+  });
+
+  it("bounds permission checks for NONE authors on a busy public repo", async () => {
+    const f = fixture();
+    const authors = Array.from({ length: 21 }, (_, index) => `author-${String(index)}`);
+    f.github.on(LIST, json(authors.map((login, index) => issue(index + 1, { author_association: "NONE", user: { login } }))));
+    for (const login of authors) f.github.on(`GET https://api.github.com/repos/korri-os/korri/collaborators/${login}/permission`, json({ permission: "admin" }));
+    const result = await f.client.openIssues("korri-os/korri");
+    expect(result.ok && result.issues.filter((value) => value.trusted)).toHaveLength(20);
+    expect(result.ok && result.issues[20]?.trusted).toBe(false);
+    expect(f.github.requests.filter((request) => request.url.includes("/permission"))).toHaveLength(20);
   });
 
   it("leaves a contributor untrusted when GitHub cannot say", async () => {
