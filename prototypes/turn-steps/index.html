@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Turn steps (prototype)</title>
+<!--
+  PROTOTYPE, throwaway. Question: how can one assistant turn show its steps
+  without a wall of narration and "> reasoning N tools" lines?
+
+  Every variant renders from the same fixture through the same derivation
+  (stepsOf). A step is one Pi assistant message: [thinking] [narration] [tool
+  calls]. That boundary is on the wire, so it is deterministic. The narration
+  words are the model's.
+
+  URL: ?v=now|rail|margin|status  &mode=settled|live  &talk=chatty|sparse  &bar=0
+-->
+<style>
+@font-face { font-family: "Public Sans Variable"; font-weight: 100 900; font-display: block; src: url(../session-picker-states/fonts/public-sans-latin-wght-normal.woff2) format("woff2"); }
+@font-face { font-family: "JetBrains Mono Variable"; font-weight: 100 800; font-display: block; src: url(../session-picker-states/fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2"); }
+/* Tokens copied from ui/src/ui/theme.css. Nothing new except --step-node. */
+:root {
+  color-scheme: light dark;
+  --tint: 106;
+  --background: oklch(0.992 0.002 var(--tint));
+  --foreground: oklch(0.145 0.006 var(--tint));
+  --muted: oklch(0.97 0.004 var(--tint));
+  --muted-foreground: oklch(0.556 0.007 var(--tint));
+  --destructive: oklch(0.577 0.245 27.325);
+  --line: color-mix(in oklab, var(--foreground) 10%, transparent);
+  --line-focus: color-mix(in oklab, var(--foreground) 25%, transparent);
+  --tint-surface: color-mix(in oklab, var(--foreground) 2.5%, var(--background));
+  --hover-surface: color-mix(in oklab, var(--foreground) 4%, transparent);
+  --body-font: "Public Sans Variable", sans-serif;
+  --code-font: "JetBrains Mono Variable", monospace;
+  --text-size: 0.9375rem;
+  --small-text: 0.8125rem;
+  --label-text: 0.75rem;
+  --code-size: 0.78125rem;
+  --line-height: 1.625;
+  --thread-max-width: 42rem;
+  --radius-thread: 1rem;
+  --radius-document: 0.375rem;
+  --gutter: clamp(1rem, 2.6vw, 1.5rem);
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-5: 1.25rem; --space-6: 1.5rem;
+  --live: oklch(0.623 0.214 259.815);
+  --diff-add: oklch(0.6 0.15 150);
+  --diff-remove: oklch(0.6 0.2 25);
+  --diff-modify: oklch(0.6 0.13 70);
+  --hairline: 1px;
+  --meter-height: 4px;
+  --tone-good: var(--diff-add);
+  --tone-bad: var(--diff-remove);
+  --tone-warn: var(--diff-modify);
+  --tone-live: var(--live);
+  --ink-good: color-mix(in oklab, var(--diff-add) 78%, var(--foreground));
+  --ink-bad: color-mix(in oklab, var(--diff-remove) 78%, var(--foreground));
+  --ink-warn: color-mix(in oklab, var(--diff-modify) 70%, var(--foreground));
+  --ink-live: color-mix(in oklab, var(--live) 75%, var(--foreground));
+  --meter-rest: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.17 0.003 var(--tint));
+    --foreground: oklch(0.985 0.002 var(--tint));
+    --muted: oklch(0.275 0.004 var(--tint));
+    --muted-foreground: oklch(0.708 0.004 var(--tint));
+    --destructive: oklch(0.704 0.191 22.216);
+    --tint-surface: color-mix(in oklab, var(--foreground) 4%, var(--background));
+    --diff-add: oklch(0.72 0.16 150);
+    --diff-remove: oklch(0.7 0.19 25);
+    --diff-modify: oklch(0.76 0.13 80);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--body-font); font-size: var(--text-size); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; }
+code { font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; padding: 0.0625rem 0.3125rem; border-radius: 0.3125rem; background: var(--tint-surface); border: 1px solid var(--line); }
+.transcript { padding: var(--space-6) var(--gutter) 6rem; }
+.column { container-type: inline-size; max-inline-size: var(--thread-max-width); margin-inline: auto; display: flex; flex-direction: column; gap: var(--space-5); }
+.user { align-self: flex-end; max-inline-size: 80%; border-radius: var(--radius-thread); background: var(--muted); padding: var(--space-2) var(--space-4); line-height: var(--line-height); }
+.prose { margin: 0; line-height: var(--line-height); overflow-wrap: anywhere; }
+.answer p { margin: 0 0 var(--space-3); line-height: var(--line-height); }
+.answer p:last-child { margin: 0; }
+
+/* Shared: the expanded body of a step. Same grammar as today's trace lines. */
+.tool-lines { margin: var(--space-1) 0 0; padding: 0; list-style: none; }
+.tool-line { display: flex; gap: var(--space-2); min-block-size: 1.5rem; align-items: baseline; font-family: var(--code-font); font-size: 0.75rem; font-variant-ligatures: none; color: var(--muted-foreground); }
+.tool-line > .verb { flex: none; }
+.tool-line > .what { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-line[data-state="failed"] > .verb { color: var(--destructive); }
+.tool-line[data-state="running"] > .verb { color: var(--ink-live); }
+.thought { margin: var(--space-1) 0 var(--space-2); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.55; }
+.thought::before { content: "thought: "; font-family: var(--code-font); font-size: 0.75rem; }
+.live-text { background: linear-gradient(90deg, var(--muted-foreground) 40%, var(--foreground) 50%, var(--muted-foreground) 60%) 0 0 / 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2s linear infinite; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .live-text, .node, .mark { animation: none !important; } }
+summary { list-style: none; cursor: pointer; }
+summary::-webkit-details-marker { display: none; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ---------------- Variant: now (today's rendering, for comparison) ---------------- */
+.now-line { display: flex; gap: var(--space-2); align-items: center; min-block-size: 1.75rem; font-family: var(--code-font); font-size: 0.75rem; color: var(--muted-foreground); }
+.now-line > .m { color: color-mix(in oklab, var(--muted-foreground) 55%, transparent); }
+.now-line .bad { color: var(--destructive); }
+.v-now .column { gap: var(--space-3); }
+
+/* ---------------- Variant A: rail ----------------
+   A step ladder. One node per step on a hairline rail; the narration sits
+   beside its node at body size. Under it, one quiet meta line names the tools
+   and the time, and opens the step. A step with no narration is that meta
+   line alone, with a smaller node. */
+.rail { list-style: none; margin: 0; padding: 0; display: grid; }
+.rail > li { position: relative; display: grid; grid-template-columns: 1.25rem minmax(0, 1fr); column-gap: var(--space-2); }
+.rail > li::before { content: ""; grid-column: 1; grid-row: 1 / span 9; justify-self: center; inline-size: var(--hairline); background: var(--line-focus); }
+.rail > li:first-child::before { margin-block-start: 0.7rem; }
+.rail > li:last-child::before { block-size: 0.7rem; }
+.rail .node { grid-column: 1; grid-row: 1; justify-self: center; align-self: start; position: relative; inline-size: 0.5rem; block-size: 0.5rem; margin-block-start: 0.5rem; border-radius: 50%; background: var(--foreground); box-shadow: 0 0 0 3px var(--background); }
+.rail li[data-quiet] .node { inline-size: 0.3125rem; block-size: 0.3125rem; margin-block-start: 0.6rem; background: var(--muted-foreground); }
+.rail li[data-state="failed"] .node { background: var(--background); box-shadow: 0 0 0 3px var(--background), inset 0 0 0 1.5px var(--tone-bad); }
+.rail li[data-state="live"] .node { background: var(--live); animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 3px var(--background), 0 0 0 6px color-mix(in oklab, var(--live) 25%, transparent); } }
+.rail .body { grid-column: 2; min-inline-size: 0; padding-block-end: var(--space-4); }
+.rail li[data-quiet] .body { padding-block-end: var(--space-2); }
+.rail .prose { padding-block-start: 0.0625rem; }
+.meta { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: baseline; gap: 0 var(--space-2); min-block-size: 1.75rem; padding-block-start: var(--space-1); font-family: var(--code-font); font-size: 0.75rem; color: var(--muted-foreground); }
+.meta:hover { color: var(--foreground); }
+.bad { color: var(--ink-bad); }
+.fixed { color: var(--ink-warn); }
+.meta .what { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta .outcome:empty { display: none; }
+.meta .time:empty { display: none; }
+.meta .chev { transition: rotate 150ms; }
+details[open] > summary .chev { rotate: 90deg; }
+.rail .open-body { padding: var(--space-1) 0 var(--space-2) var(--space-3); border-inline-start: var(--hairline) solid var(--line); margin-block-start: var(--space-1); }
+.rail .answer-row .node { border-radius: 2px; }
+
+/* ---------------- Variant B: margin ----------------
+   Prose stays one unbroken column. Each step's tool calls become marks in a
+   narrow left margin, one square per call, toned by outcome. Narrated steps
+   add no lines at all. The marks are a button that opens the step. */
+.margin { display: grid; grid-template-columns: clamp(2rem, 7cqi, 3rem) minmax(0, 1fr); column-gap: var(--space-2); row-gap: var(--space-3); }
+.margin > .row { display: contents; }
+.marks { grid-column: 1; justify-self: end; align-self: start; display: flex; flex-wrap: wrap; justify-content: flex-end; align-content: flex-start; gap: 3px; inline-size: 100%; max-inline-size: 2.25rem; min-block-size: 1.5rem; margin-block-start: 0.3rem; padding: 0.25rem 0.25rem 0.25rem 0; border: 0; background: none; border-radius: var(--radius-document); position: relative; }
+.marks::after { content: ""; position: absolute; inset: -0.6rem -0.4rem; }
+.marks:hover .mark { opacity: 0.7; }
+.mark { inline-size: 0.4375rem; block-size: 0.4375rem; border-radius: 1.5px; background: var(--meter-rest); background: color-mix(in oklab, var(--foreground) 32%, transparent); }
+.mark[data-state="failed"] { background: var(--tone-bad); }
+.mark[data-state="fixed"] { background: var(--tone-warn); }
+.mark[data-state="running"] { background: var(--live); animation: blink 1.2s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: 0.35; } }
+.margin .content { grid-column: 2; min-inline-size: 0; }
+.margin .quiet-line { display: flex; gap: var(--space-2); align-items: baseline; min-block-size: 1.75rem; padding-block-start: 0.2rem; font-family: var(--code-font); font-size: 0.75rem; color: var(--muted-foreground); }
+.margin .quiet-line .what { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.margin .panel { margin-block-start: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-document); background: var(--tint-surface); border: var(--hairline) solid var(--line); }
+.margin .panel-head { display: flex; justify-content: space-between; gap: var(--space-2); font-family: var(--code-font); font-size: 0.75rem; color: var(--muted-foreground); }
+.margin .answer { grid-column: 2; }
+.margin .answer-rule { grid-column: 2; border: 0; border-block-start: var(--hairline) solid var(--line); margin: var(--space-2) 0; }
+
+/* ---------------- Variant C: status ----------------
+   The turn as our `status` block (Checklist molecule), built from data, not
+   written by the model. Header counts, an in-order meter with one segment per
+   step, one item per step. The answer stays outside the card. */
+.checklist { border: var(--hairline) solid var(--line); border-radius: var(--radius-document); overflow: hidden; }
+.checklist-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: var(--space-3); row-gap: var(--space-1); padding: var(--space-2) var(--space-3); background: var(--tint-surface); }
+.checklist-title { font-weight: 600; }
+.checklist-summary { color: var(--muted-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums; }
+.checklist-meter { display: flex; gap: var(--hairline); block-size: var(--meter-height); background: var(--tint-surface); }
+.checklist-segment { flex: 1 1 0; background: var(--tone-good); }
+.checklist-segment[data-state="failed"] { background: var(--tone-bad); }
+.checklist-segment[data-state="fixed"] { background: var(--tone-warn); }
+.checklist-segment[data-state="live"] { background: var(--tone-live); }
+.checklist-items { margin: 0; padding: var(--space-1) var(--space-3) var(--space-3); list-style: none; }
+.checklist-item { display: grid; grid-template-columns: 1.125rem minmax(0, 1fr); column-gap: var(--space-2); margin-block-start: var(--space-2); }
+.checklist-icon { grid-row: 1; inline-size: 1.125rem; block-size: 1.125rem; margin-block-start: 0.1875rem; color: var(--ink-good); }
+.checklist-item[data-state="failed"] .checklist-icon { color: var(--ink-bad); }
+.checklist-item[data-state="fixed"] .checklist-icon { color: var(--ink-warn); }
+.checklist-item[data-state="live"] .checklist-icon { color: var(--ink-live); }
+.checklist-text { grid-column: 2; line-height: 1.5; }
+.checklist-text.mono { font-family: var(--code-font); font-size: 0.75rem; color: var(--muted-foreground); padding-block-start: 0.2rem; }
+.checklist-item details { grid-column: 2; grid-row: auto; }
+.checklist-item > details:first-of-type:nth-child(2) { grid-row: 1; }
+.checklist-item .meta { padding-block-start: 0; min-block-size: 1.5rem; }
+
+/* ---------------- Prototype switcher (not part of the design) ---------------- */
+.bar { position: fixed; inset-block-end: 0.75rem; inset-inline: 0; margin-inline: auto; inline-size: fit-content; max-inline-size: calc(100% - 1rem); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.25rem; padding: 0.25rem; border-radius: 999px; background: #111; color: #fff; font: 600 0.75rem/1 system-ui, sans-serif; box-shadow: 0 6px 20px rgb(0 0 0 / 0.35); z-index: 10; }
+.bar button { min-block-size: 2.25rem; min-inline-size: 2.25rem; padding-inline: 0.75rem; border: 0; border-radius: 999px; background: transparent; color: inherit; }
+.bar button[aria-pressed="true"] { background: #fff; color: #111; }
+.bar .label { padding-inline: 0.5rem; }
+.bar .sep { inline-size: 1px; align-self: stretch; background: #444; margin-block: 0.4rem; }
+</style>
+</head>
+<body>
+<main class="transcript"><div class="column" id="turn"></div></main>
+<nav class="bar" id="bar" aria-label="Prototype controls"></nav>
+<script>
+// ---------- Fixture: Pi assistant messages of one turn (illustrative) ----------
+// Narration, tools and order follow the screenshot of 2026-10-09. Commands,
+// thoughts, outputs and times are invented for the prototype.
+const USER = "Can the account meters show when each provider's quota resets?";
+const MESSAGES = [
+  { ms: 4200, thinking: "Start from the meter plugin and follow its data source.",
+    text: "I'll start by checking how the account meters get their data, then look for what the providers expose about resets.",
+    tools: [["bash", "rg -n \"fetch|quota\" ui/src/plugins/accountMeters"], ["bash", "rg -n \"cliproxy\" src/server"]] },
+  { ms: 38100, thinking: "The meters only proxy the router. Reset data has to come from it.",
+    text: "The meters read a CLIProxyAPI router, so reset data would have to come through it. Let me find the router's quota code and research what the providers expose.",
+    tools: [["bash", "rg -n \"Quota\" ~/code/cliproxyapi/internal"], ["web_search", "OpenAI codex usage limits reset_at"], ["web_search", "Anthropic oauth usage endpoint resets_at"],
+      ["web_fetch", "platform.openai.com/docs/api-reference/usage", "failed"], ["web_fetch", "docs.anthropic.com/en/api/usage-cost-api"]] },
+  { ms: 51400, thinking: "Both document a reset time. Check what the router reads today.",
+    text: "Both providers have banked resets now. Let me check how the router reads quota today, and what Claude exposes.",
+    tools: [["bash", "rg -n \"usage\" ~/code/cliproxyapi/internal/runtime"], ["bash", "sed -n 1,120p internal/runtime/usage.go"], ["web_fetch", "github.com/anthropics/claude-code/issues/4512"],
+      ["bash", "rg -n \"five_hour|seven_day\" internal"], ["web_fetch", "help.openai.com/en/articles/codex-usage"], ["web_search", "claude oauth usage five_hour resets_at"]] },
+  { ms: 6300, thinking: "",
+    text: "Both providers expose reset data on the same usage endpoints the router may already call. Let me check what the router fetches.",
+    tools: [["bash", "rg -n \"api/oauth/usage|wham/usage\" internal"]] },
+  { ms: 2900, thinking: "",
+    text: "The router already calls both usage endpoints for every account. Let me check the live router payload.",
+    tools: [["bash", "curl -s localhost:8317/v0/management/usage | jq 'keys'"]] },
+  { ms: 9100, thinking: "The payload drops the reset fields. A direct probe would confirm they exist.",
+    text: "Let me see whether I can make a read-only probe with the router's real credentials, to confirm the fields exist on these accounts.",
+    tools: [["bash", "ls ~/.cli-proxy-api"], ["bash", "rg -n \"func Load\" internal/auth"], ["bash", "sed -n 1,80p internal/auth/loader.go"]] },
+  { ms: 12400, thinking: "Reuse the loader. Print reset fields only.",
+    text: "Credentials live in `~/.cli-proxy-api`. I'll write a read-only probe that reuses the router's own credential loader and prints only reset fields, never ids or tokens.",
+    tools: [["write", "/tmp/probe-resets/main.go"], ["bash", "go run /tmp/probe-resets", "failed"]] },
+  { ms: 7700, thinking: "Missing module path. Run it from the router module.",
+    text: "",
+    tools: [["edit", "/tmp/probe-resets/main.go"], ["bash", "go run /tmp/probe-resets", "running-on-live"]] },
+];
+const ANSWER = [
+  "Yes. Both providers report a reset time, and the router already fetches it. It drops the field before the meters see it.",
+  "Codex returns `reset_at` per window. Claude returns `resets_at` under `five_hour` and `seven_day`. The probe read both for all four accounts.",
+];
+
+// ---------- Derivation: the deterministic part ----------
+const params = new URLSearchParams(location.search);
+const VARIANTS = [["now", "Today"], ["rail", "A · Rail"], ["margin", "B · Margin"], ["status", "C · Status"]];
+const variant = VARIANTS.some(([k]) => k === params.get("v")) ? params.get("v") : "rail";
+const live = params.get("mode") === "live";
+const sparse = params.get("talk") === "sparse";
+
+const VERBS = { bash: "ran", read: "read", write: "wrote", edit: "edited", web_search: "searched", web_fetch: "fetched" };
+const key = (t) => `${t.name} ${t.what}`;
+
+/** One step per Pi assistant message. Text never follows a call inside one message (0 of 13,707 measured). */
+function stepsOf(messages) {
+  const steps = messages.map((m, index) => ({
+    index, ms: m.ms, thinking: m.thinking,
+    // Sparse mode imitates a model that rarely narrates: only the first step keeps its words.
+    narration: sparse && index > 0 ? "" : m.text,
+    tools: m.tools.map(([name, what, state = "done"]) => ({ name, what,
+      state: state === "running-on-live" ? (live ? "running" : "done") : state })),
+  }));
+  // A failure is "fixed" when a later call repeats the same tool on the same target and succeeds.
+  // Literal match only, as in the legacy turnRail: no guessing.
+  steps.forEach((s, i) => s.tools.forEach((t) => {
+    if (t.state !== "failed") return;
+    const later = steps.slice(i).flatMap((x) => x.tools).filter((x) => x !== t && key(x) === key(t));
+    if (later.some((x) => x.state === "done")) t.state = "fixed";
+  }));
+  for (const s of steps) {
+    s.state = s.tools.some((t) => t.state === "running") ? "live"
+      : s.tools.some((t) => t.state === "failed") ? "failed"
+      : s.tools.some((t) => t.state === "fixed") ? "fixed" : "done";
+  }
+  return steps;
+}
+const steps = stepsOf(MESSAGES);
+const allTools = steps.flatMap((s) => s.tools);
+const failed = allTools.filter((t) => t.state === "failed").length;
+const fixed = allTools.filter((t) => t.state === "fixed").length;
+const totalMs = steps.reduce((sum, s) => sum + s.ms, 0);
+
+// ---------- Small renderers ----------
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const md = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+const secs = (ms) => ms >= 60000 ? `${Math.floor(ms / 60000)} m ${Math.round((ms % 60000) / 1000)} s` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
+function counts(tools) {
+  const by = new Map();
+  for (const t of tools) by.set(t.name, (by.get(t.name) ?? 0) + 1);
+  return [...by].map(([n, c]) => c > 1 ? `${n} ×${c}` : n).join(", ");
+}
+function outcome(tools) {
+  const f = tools.filter((t) => t.state === "failed").length;
+  const x = tools.filter((t) => t.state === "fixed").length;
+  return `${f ? ` <span class="bad">${f} failed</span>` : ""}${x ? ` <span class="fixed">${x} failed, retried</span>` : ""}`;
+}
+/** Words for a step the model did not narrate: verb and target of its first call. */
+function label(step) {
+  const t = step.tools.find((x) => x.state === "running") ?? step.tools[0];
+  const verb = t.state === "running" ? "running" : VERBS[t.name] ?? t.name;
+  return `${verb} ${t.name === "bash" ? "" : ""}${t.what}${step.tools.length > 1 ? ` +${step.tools.length - 1}` : ""}`;
+}
+/** chevron | what (truncates first) | outcome | time. Readouts keep their width; the label yields. */
+function metaLine(s) {
+  const what = s.narration ? counts(s.tools) : `<span class="${s.state === "live" ? "live-text" : ""}">${esc(label(s))}</span>`;
+  return `<summary class="meta"><span class="chev">›</span><span class="what">${what}</span><span class="outcome">${outcome(s.tools)}</span><span class="time num">${s.state === "live" ? "" : secs(s.ms)}</span></summary>`;
+}
+function toolLines(step) {
+  return `${step.thinking ? `<p class="thought">${esc(step.thinking)}</p>` : ""}<ul class="tool-lines">${step.tools.map((t) =>
+    `<li class="tool-line" data-state="${t.state === "fixed" ? "failed" : t.state}"><span class="verb ${t.state === "running" ? "live-text" : ""}">${
+      t.state === "running" ? "running" : t.state === "done" ? VERBS[t.name] ?? "ran" : "failed"}</span><span class="what">${VERBS[t.name] ? "" : `${t.name} `}${esc(t.what)}</span></li>`).join("")}</ul>`;
+}
+const userBubble = `<div class="user">${esc(USER)}</div>`;
+const answer = live ? "" : `<div class="answer">${ANSWER.map((p) => `<p>${md(p)}</p>`).join("")}</div>`;
+const OPEN = 1; // step shown expanded in captures
+
+// ---------- Variant: now ----------
+function renderNow() {
+  // Today: adjacent thinking and tool calls share one fold; text splits them.
+  const parts = steps.flatMap((s) => [
+    ...(s.thinking || true ? [{ k: "R" }] : []),
+    ...(s.narration ? [{ k: "T", s }] : []),
+    ...s.tools.map((t) => ({ k: "C", t })),
+  ]);
+  const out = []; let group = [];
+  const flush = () => {
+    if (!group.length) return;
+    const tools = group.filter((p) => p.k === "C").map((p) => p.t);
+    const f = tools.filter((t) => t.state === "failed" || t.state === "fixed").length;
+    const runningTool = tools.find((t) => t.state === "running");
+    const head = runningTool ? "thinking" : group.some((p) => p.k === "R") ? "reasoning" : "tool activity";
+    const detail = tools.length ? ` ${tools.length} ${tools.length === 1 ? "tool" : "tools"}: ${[...new Set(tools.map((t) => t.name))].join(", ")}` : "";
+    out.push(`<div class="now-line"><span class="m">&gt;</span><span><span class="${f ? "bad" : ""} ${runningTool ? "live-text" : ""}">${head}${f ? `, ${f} failed` : ""}</span>${detail}</span></div>`);
+    group = [];
+  };
+  for (const p of parts) { if (p.k === "T") { flush(); out.push(`<p class="prose">${md(p.s.narration)}</p>`); } else group.push(p); }
+  flush();
+  return userBubble + out.join("") + answer;
+}
+
+// ---------- Variant A: rail ----------
+function renderRail() {
+  const items = steps.map((s, i) => {
+    const quiet = !s.narration;
+    const meta = metaLine(s);
+    return `<li data-state="${s.state}" ${quiet ? "data-quiet" : ""}><span class="node"></span><div class="body">
+      ${quiet ? "" : `<p class="prose">${md(s.narration)}</p>`}
+      <details ${i === OPEN ? "open" : ""}>${meta}<div class="open-body">${toolLines(s)}</div></details></div></li>`;
+  });
+  return userBubble + `<ol class="rail">${items.join("")}</ol>` + answer;
+}
+
+// ---------- Variant B: margin ----------
+function renderMargin() {
+  const rows = steps.map((s, i) => {
+    const marks = `<button class="marks" aria-expanded="${i === OPEN}" aria-label="Step ${i + 1}: ${s.tools.length} tool calls${outcome(s.tools).replace(/<[^>]+>/g, "")}. Show steps" data-toggle="${i}">${s.tools.map((t) => `<span class="mark" data-state="${t.state}"></span>`).join("")}</button>`;
+    const body = s.narration ? `<p class="prose">${md(s.narration)}</p>`
+      : `<div class="quiet-line"><span class="what ${s.state === "live" ? "live-text" : ""}">${esc(label(s))}</span></div>`;
+    const panel = `<div class="panel" ${i === OPEN ? "" : "hidden"} id="panel-${i}"><div class="panel-head"><span>${counts(s.tools)}${outcome(s.tools)}</span><span class="num">${secs(s.ms)}</span></div>${toolLines(s)}</div>`;
+    return `<div class="row">${marks}<div class="content">${body}${panel}</div></div>`;
+  });
+  return userBubble + `<div class="margin">${rows.join("")}${live ? "" : `<hr class="answer-rule">${answer}`}</div>`;
+}
+
+// ---------- Variant C: status ----------
+const ICON = {
+  done: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>',
+  failed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>',
+  live: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.1 2.18a9.93 9.93 0 0 1 3.8 0M17.6 3.71a9.95 9.95 0 0 1 2.69 2.7M21.82 10.1a9.93 9.93 0 0 1 0 3.8M20.29 17.6a9.95 9.95 0 0 1-2.7 2.69M13.9 21.82a9.94 9.94 0 0 1-3.8 0M6.4 20.29a9.95 9.95 0 0 1-2.69-2.7M2.18 13.9a9.93 9.93 0 0 1 0-3.8M3.71 6.4a9.95 9.95 0 0 1 2.7-2.69"/></svg>',
+};
+ICON.fixed = ICON.done;
+function renderStatus() {
+  const title = live ? "Working" : "Work";
+  const summary = `${steps.length} steps, ${allTools.length} tool calls${failed ? `, ${failed} failed` : ""}${fixed ? `, ${fixed} retried` : ""}${live ? "" : `, ${secs(totalMs)}`}`;
+  const items = steps.map((s, i) => `<li class="checklist-item" data-state="${s.state}">
+    <span class="checklist-icon" role="img" aria-label="${s.state}">${ICON[s.state]}</span>
+    ${s.narration ? `<div class="checklist-text">${md(s.narration)}</div>` : ""}
+    <details ${i === OPEN ? "open" : ""}>${metaLine(s)}${toolLines(s)}</details>
+  </li>`);
+  return userBubble + `<section class="checklist" aria-label="${title}">
+    <header class="checklist-header"><div class="checklist-title">${title}</div><div class="checklist-summary">${summary}</div></header>
+    <div class="checklist-meter" aria-hidden="true">${steps.map((s) => `<span class="checklist-segment" data-state="${s.state}"></span>`).join("")}</div>
+    <ul class="checklist-items" role="list">${items.join("")}</ul></section>` + answer;
+}
+
+const RENDER = { now: renderNow, rail: renderRail, margin: renderMargin, status: renderStatus };
+document.body.className = `v-${variant}`;
+document.getElementById("turn").innerHTML = RENDER[variant]();
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-toggle]");
+  if (!button) return;
+  const panel = document.getElementById(`panel-${button.dataset.toggle}`);
+  panel.hidden = !panel.hidden;
+  button.setAttribute("aria-expanded", String(!panel.hidden));
+});
+
+// ---------- Switcher ----------
+function go(changes) {
+  const next = new URLSearchParams(location.search);
+  for (const [k, v] of Object.entries(changes)) next.set(k, v);
+  location.search = next.toString();
+}
+const bar = document.getElementById("bar");
+if (params.get("bar") === "0") bar.remove();
+else {
+  const idx = VARIANTS.findIndex(([k]) => k === variant);
+  const step = (d) => go({ v: VARIANTS[(idx + d + VARIANTS.length) % VARIANTS.length][0] });
+  bar.innerHTML = `<button data-d="-1" aria-label="Previous variant">←</button><span class="label">${VARIANTS[idx][1]}</span><button data-d="1" aria-label="Next variant">→</button>
+    <span class="sep"></span><button data-mode aria-pressed="${live}">live</button><button data-talk aria-pressed="${sparse}">sparse narration</button>`;
+  bar.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.d) step(Number(b.dataset.d));
+    if (b.hasAttribute("data-mode")) go({ mode: live ? "settled" : "live" });
+    if (b.hasAttribute("data-talk")) go({ talk: sparse ? "chatty" : "sparse" });
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest("input, textarea, [contenteditable]")) return;
+    if (e.key === "ArrowLeft") step(-1);
+    if (e.key === "ArrowRight") step(1);
+  });
+}
+</script>
+</body>
+</html>
