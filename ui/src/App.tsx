@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { RelatedWorkRenderer } from "./projectGroups/relatedWork";
+import type { ResourceLensRenderer } from "./resources/resourceLens";
 import type { SettingsPageRenderer } from "./ui/settings/SettingsView";
 import { ForgerieSession } from "./ForgerieSession";
 import { usePicker, type StartingSession } from "./usePicker";
@@ -41,6 +42,7 @@ const readSettings = (): SettingsPlace | undefined => {
   if (section === "agents") return { section, agent: readTarget(params.get("agent") ?? undefined) };
   if (section === "models") return { section };
   if (section === "projects") return { section, group: params.get("group") ?? undefined };
+  if (section === "resources") return { section, resource: params.get("resource") ?? undefined };
   return section === "plugins" ? { section, plugin: params.get("plugin") ?? undefined } : { section: "root" };
 };
 /** `?backlog` keeps the backlog open across a reload; `?backlog=<projectId>/<itemId>` keeps one item open. */
@@ -78,10 +80,12 @@ const DIALOG_ENTRY = { newSession: newStartupToken() };
  * `shelves`: plugin shelves for the foot of the session list. The entry passes their binding in.
  * `projectFilter` offers project groups in the session list's ⋯ menu; the app adds the way to Settings → Project groups.
  * `projectSettings` draws Settings → Project groups.
+ * `resourceSettings` draws Settings → Skills and prompts; `resourceLens` draws a session's own.
  */
-export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork }: {
+export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens }: {
   shelves?: ReactNode; projectCatalog?: readonly Project[] | undefined; projectScope?: readonly string[] | undefined;
   projectFilter?: Omit<PickerFilter, "onManage"> | undefined; projectSettings?: SettingsPageRenderer | undefined; relatedWork?: RelatedWorkRenderer | undefined;
+  resourceSettings?: SettingsPageRenderer | undefined; resourceLens?: ResourceLensRenderer | undefined;
 } = {}) {
   const [selectedId, setSelectedId] = useState(readSelected);
   const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string; error?: string }>();
@@ -265,6 +269,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       if (place.section === "agents" && place.agent) url.searchParams.set("agent", targetParam(place.agent));
       if (place.section === "plugins" && place.plugin) url.searchParams.set("plugin", place.plugin);
       if (place.section === "projects" && place.group) url.searchParams.set("group", place.group);
+      if (place.section === "resources" && place.resource) url.searchParams.set("resource", place.resource);
     }
     if (replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     setSettings(place);
@@ -321,7 +326,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} onClose={closeComposer} />
     : null;
   const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
-    <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} projects={projectSettings} /></Suspense>
+    <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} projects={projectSettings} resources={resourceSettings} /></Suspense>
     : backlog ? <Suspense fallback={<SessionFrame name="Backlog" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
       <BacklogView place={backlog} binding={{ load: backlogList.load, onRefresh: refreshBacklog, api: backlogApi, look: picker.look,
         onPlace: placeBacklog, onClose: () => placeBacklog(undefined),
@@ -330,7 +335,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     : composing === "" && !selectedId
       ? <SessionFrame name="New session" status="" error="Forgerie knows no project yet, and this app cannot add one yet."><div className="thread-empty" /></SessionFrame>
     : selectedId ? <ForgerieSession key={selectedId} id={selectedId} onUnread={picker.onUnread}
-      known={known} relatedWork={relatedWork}
+      known={known} relatedWork={relatedWork} resourceLens={resourceLens}
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
       initialError={commandSelection?.session.id === selectedId ? commandSelection.error : undefined}
       drafts={drafts} onSwitchSession={switchSession}

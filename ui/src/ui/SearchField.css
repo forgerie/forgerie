@@ -1,0 +1,8 @@
+/* The models page's search measure: a hairline box a finger can hit, which darkens its edge while in use. */
+.search-field { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); padding-inline: var(--space-3);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-control); color: var(--muted-foreground); transition: border-color 150ms; }
+.search-field:focus-within { border-color: var(--line-focus); }
+.search-field-input { flex: 1; min-inline-size: 0; min-block-size: calc(var(--control-size) - 2 * var(--hairline)); padding: 0; border: 0;
+  background: transparent; color: var(--foreground); font: inherit; font-size: var(--small-text); outline: none; }
+.search-field-input::placeholder { color: var(--muted-foreground); }
+@media (prefers-reduced-motion: reduce) { .search-field { transition: none; } }

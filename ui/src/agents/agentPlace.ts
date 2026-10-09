@@ -1,12 +1,14 @@
 /** Which agent file a settings page shows. `customize` starts a user copy of a built-in agent. */
 export type AgentTarget = { type: "new" } | { type: "user" | "builtin" | "customize"; file: string };
 
-/** Where settings is open, as the URL holds it: `?settings=<section>&agent=<target>`, `&plugin=<id>` or `&group=<id>`. */
+/** Where settings is open, as the URL holds it: `?settings=<section>&agent=<target>`, `&plugin=<id>`, `&group=<id>` or `&resource=<id>`. */
 export interface SettingsPlace {
-  section: "root" | "agents" | "plugins" | "models" | "projects";
+  section: "root" | "agents" | "plugins" | "models" | "projects" | "resources";
   agent?: AgentTarget | undefined; plugin?: string | undefined;
   /** A project group's id, or `new`. */
   group?: string | undefined;
+  /** The open skill, prompt or context file's id. */
+  resource?: string | undefined;
 }
 
 export const targetParam = (target: AgentTarget) => target.type === "new" ? "new" : `${target.type}/${target.file}`;

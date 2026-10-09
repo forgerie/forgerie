@@ -33,10 +33,12 @@ export interface SessionMenuSection {
  * own worktree hold other worktrees the session works in; their number shows
  * quietly on the button, so the input bar never grows a control per worktree.
  */
-export function SessionMenu({ info, busy, onCommand, sections = [] }: {
+export function SessionMenu({ info, busy, onCommand, sections = [], commands = [] }: {
   /** The session's own worktree, when it has one. */
   info?: WorktreeInfo | undefined; busy: boolean; onCommand?: ((command: WorktreeCommand) => void) | undefined;
   sections?: readonly SessionMenuSection[];
+  /** Commands on the session itself, first in the menu, with or without a worktree. */
+  commands?: readonly SessionMenuSection["commands"][number][];
 }) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
@@ -51,7 +53,7 @@ export function SessionMenu({ info, busy, onCommand, sections = [] }: {
   }, [open]);
   const close = () => { setOpen(false); button.current?.focus({ preventScroll: true }); };
   const own = info && onCommand ? info : undefined;
-  if (!own && sections.length === 0) return null;
+  if (!own && sections.length === 0 && commands.length === 0) return null;
   const blocked = own ? worktreeCommandBlock(own, busy) : undefined;
   const run = (command: WorktreeCommand) => { setOpen(false); onCommand?.(command); };
   const sentence = own ? readouts(own).sentence : undefined;
@@ -69,6 +71,9 @@ export function SessionMenu({ info, busy, onCommand, sections = [] }: {
       <EllipsisIcon aria-hidden size={18} />
       {sections.length ? <span className="session-menu-count" aria-hidden>{sections.length}</span> : null}</button>
     {open && <div id={menuId} className="picker-menu session-menu" role="menu" aria-label="Session menu">
+      {commands.map((command) => <button key={command.label} type="button" role="menuitem" data-tone={command.tone} disabled={command.disabled}
+        onClick={() => { setOpen(false); command.onSelect(); }}>{command.icon}{command.label}{command.hint ? <small>{command.hint}</small> : null}</button>)}
+      {commands.length && (own || sections.length) ? <div className="picker-menu-separator" role="separator" /> : null}
       {own ? <>
         <div className="session-menu-head" role="presentation">
           <GitBranchIcon aria-hidden size={14} />

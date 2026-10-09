@@ -1,0 +1,6 @@
+/* The facts keep their own margins; notices stack tight and stand clear of the text.
+   A hairline frame sets the file apart from the page copy around it. */
+.file-frame { display: flex; flex-direction: column; min-inline-size: 0; }
+.file-frame-notices { display: flex; flex-direction: column; gap: var(--space-2); margin-block-end: var(--space-4); }
+.file-frame-text { display: flex; flex-direction: column; min-block-size: 12rem; padding-block: var(--space-2);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-document); background: var(--background); overflow: hidden; }

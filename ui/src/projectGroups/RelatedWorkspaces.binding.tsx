@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ChangesReview } from "../ui/ChangesReview";
-import { SessionMenu, WorktreeDialog, type WorktreeCommand } from "../ui/WorktreeActions";
+import { SessionMenu, WorktreeDialog, type SessionMenuSection, type WorktreeCommand } from "../ui/WorktreeActions";
 import { createWorktreeApi, type WorktreeInfo } from "../worktrees/worktreeApi";
 import { createChangesSource } from "../changes/changesSource";
 import { createFilesSource } from "../changes/filesSource";
@@ -22,9 +22,10 @@ const message = (cause: unknown) => cause instanceof Error ? cause.message : Str
  * them again after each run, so a new one appears when the run that made it
  * ends. Nothing is added to the input bar.
  */
-export function RelatedWorkspaces({ api, request, source, busy, links, onAsk, own }: {
+export function RelatedWorkspaces({ api, request, source, busy, links, onAsk, own, commands }: {
   api: ProjectGroupApi; request: Fetch; source: { id: string; cwd: string }; busy: boolean; links: readonly PullLink[]; onAsk: (text: string) => void;
   own?: OwnWorktree | undefined;
+  commands?: SessionMenuSection["commands"] | undefined;
 }) {
   const [related, setRelated] = useState<WorktreeInfo[]>([]);
   const [panel, setPanel] = useState<Panel>();
@@ -74,7 +75,7 @@ export function RelatedWorkspaces({ api, request, source, busy, links, onAsk, ow
     }
   };
   return <>
-    <SessionMenu info={own?.info} onCommand={own?.onCommand} busy={busy}
+    <SessionMenu info={own?.info} onCommand={own?.onCommand} busy={busy} commands={commands}
       sections={relatedSections(related, { busy: busy || retrying, notes: counts, failures, onAction: act })} />
     {panel?.kind === "changes" && changes && reviewTray && <ChangesReview source={changes.source} files={changes.files} notes={reviewNotes}
       onAdd={reviewTray.add} onEdit={reviewTray.edit} onRemove={reviewTray.remove} onClose={() => setPanel(undefined)} />}

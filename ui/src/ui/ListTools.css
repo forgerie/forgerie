@@ -1,0 +1,2 @@
+/* The controls sit closer to each other than to the list they choose for. */
+.list-tools { display: flex; flex-direction: column; gap: var(--space-3); margin-block-end: var(--space-6); }

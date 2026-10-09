@@ -1,4 +1,6 @@
 import type { RelatedWorkRenderer } from "./projectGroups/relatedWork";
+import { FileTextIcon } from "lucide-react";
+import type { ResourceLensRenderer } from "./resources/resourceLens";
 import { createReadTracker } from "./readReceipt";
 import { afterTranscriptPaint } from "./readPaint";
 import { contextUse } from "./contextUse";
@@ -62,8 +64,10 @@ const pullRequests = createPullRequestApi(browserTransport.request);
 const NO_LINKS: readonly PullLink[] = [];
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, worktrees, onNewSession, relatedWork }: {
+export function ForgerieSession({ id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, worktrees, onNewSession, relatedWork, resourceLens }: {
   relatedWork?: RelatedWorkRenderer | undefined;
+  /** The session's Skills and prompts sheet, opened from its header menu. */
+  resourceLens?: ResourceLensRenderer | undefined;
   /** The catalog's live view of this session's pull request link and watch. */
   pullRequests?: readonly PullLink[] | undefined;
   onUnread?: ((listener: (id: string) => void) => () => void) | undefined;
@@ -89,6 +93,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     (eventType) => { if (eventType === CHILDREN_CHANGED_EVENT) childAgents.refresh(); }));
   const children = useSyncExternalStore(childAgents.subscribe, childAgents.getSnapshot);
   const [childrenOpen, setChildrenOpen] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
   const [dictation] = useState(() => new ForgerieDictationAdapter());
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const runtimeRef = useRef<AssistantRuntime | null>(null);
@@ -257,6 +262,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     onAnswer: (value) => void store.answerDialog(oldestDialog.dialogId, value),
     onCancel: () => void store.cancelDialog(oldestDialog.dialogId),
   };
+  /** Commands on the session itself, first in its header menu. */
+  const sessionCommands = resourceLens && sessionId && cwd
+    ? [{ label: "Skills and prompts", icon: <FileTextIcon aria-hidden />, onSelect: () => setResourcesOpen(true) }] : [];
   /** Adds text after the draft, as a new paragraph. Related worktrees use it for review notes and failures. */
   const appendToDraft = (text: string) => {
     const composer = runtimeRef.current?.thread.composer;
@@ -285,9 +293,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           // The catalog's status can lag the live one; the server refuses an archive during any run.
           availability={isBashRunning(state) || state.status?.isStreaming === true || state.status?.isCompacting === true
             ? { type: "blocked", reason: "Stop the run first" } : archive.availability} />}
-        {sessionId && cwd && relatedWork ? relatedWork({ ref: { id: sessionId, cwd }, busy, links: catalogPulls ?? NO_LINKS, onAsk: appendToDraft,
+        {sessionId && cwd && relatedWork ? relatedWork({ ref: { id: sessionId, cwd }, busy, links: catalogPulls ?? NO_LINKS, onAsk: appendToDraft, commands: sessionCommands,
           own: worktree && worktrees && worktree.state.kind === "active" ? { info: worktree, onCommand: setWorktreeCommand } : undefined })
-          : worktree && worktrees && worktree.state.kind === "active" && <SessionMenu info={worktree} busy={busy} onCommand={setWorktreeCommand} />}
+          : <SessionMenu info={worktree && worktrees && worktree.state.kind === "active" ? worktree : undefined} busy={busy} onCommand={setWorktreeCommand} commands={sessionCommands} />}
       </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
@@ -324,6 +332,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}
       {review && changes && <ChangesReview source={changes.source} files={changes.files} notes={notes} focusNoteId={review.focusNoteId} openPath={review.path}
         onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setReview(undefined)} />}
+      {resourcesOpen && sessionId && cwd && resourceLens?.({ id: sessionId, cwd, onClose: () => setResourcesOpen(false) })}
       {childrenOpen && <ChildAgentsPanel children={children.children} openId={children.open?.conversationId}
         transcript={children.open?.transcript} error={children.error ?? children.open?.error} actions={{
           onOpenChild: childAgents.open, onBack: childAgents.close,

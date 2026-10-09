@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { BotIcon, ChevronLeftIcon, CpuIcon, FolderTreeIcon, PlusIcon, PuzzleIcon, XIcon } from "lucide-react";
+import { BotIcon, ChevronLeftIcon, CpuIcon, FileTextIcon, FolderTreeIcon, PlusIcon, PuzzleIcon, XIcon } from "lucide-react";
 import { agentsApi, type AgentList, type AgentSummary } from "../../agents/agentsApi";
 import { agentDrafts } from "../../agents/agentDrafts";
 import { parseModelSpec, modelSpecText } from "../../agents/agentFile";
@@ -17,6 +17,9 @@ import "./settings.css";
  * Close controls, the item open on the page, and a way to open another one.
  */
 export type SettingsPageRenderer = (page: { back: ReactNode; close: ReactNode; item: string | undefined; onOpen: (item: string | undefined) => void }) => ReactNode;
+
+/** The page's name, in its Back control and in the list of pages. */
+const RESOURCES_TITLE = "Skills and prompts";
 
 type ListLoad = { type: "loading" } | { type: "failed"; message: string } | { type: "ready"; value: AgentList };
 
@@ -59,7 +62,7 @@ function AgentRow({ agent, replaced, onOpen }: { agent: AgentSummary; replaced: 
  * from the session list; each page keeps its place in the URL, so Back, a
  * reload, a fold, and a rotation return to the same page.
  */
-export function SettingsView({ place, onPlace, onClose, onPluginCatalog, projects }: {
+export function SettingsView({ place, onPlace, onClose, onPluginCatalog, projects, resources }: {
   place: SettingsPlace;
   /** Go to another settings page. `replace` swaps this history entry instead of adding one. */
   onPlace: (place: SettingsPlace, replace?: boolean) => void;
@@ -68,6 +71,8 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
   onPluginCatalog?: ((catalog: PluginCatalog) => void) | undefined;
   /** Settings → Project groups. Without it, the page is not offered. */
   projects?: SettingsPageRenderer | undefined;
+  /** Settings → Skills and prompts. Without it, the page is not offered. */
+  resources?: SettingsPageRenderer | undefined;
 }) {
   const { load, refresh } = useAgentList();
   const close = onClose ? <button type="button" className="picker-icon" aria-label="Close settings" title="Close settings" onClick={onClose}><XIcon aria-hidden size={16} /></button> : null;
@@ -77,6 +82,12 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
     const toList = <button type="button" className="settings-back" aria-label="Back to Project groups" onClick={() => onPlace({ section: "projects" })}>
       <ChevronLeftIcon aria-hidden size={16} />Project groups</button>;
     return <>{projects({ back: place.group ? toList : back, close, item: place.group, onOpen: (group) => onPlace({ section: "projects", group }) })}</>;
+  }
+
+  if (place.section === "resources" && resources) {
+    const toList = <button type="button" className="settings-back" aria-label={`Back to ${RESOURCES_TITLE}`} onClick={() => onPlace({ section: "resources" })}>
+      <ChevronLeftIcon aria-hidden size={16} />{RESOURCES_TITLE}</button>;
+    return <>{resources({ back: place.resource ? toList : back, close, item: place.resource, onOpen: (resource) => onPlace({ section: "resources", resource }) })}</>;
   }
 
   if (place.section === "plugins") return <PluginsView selected={place.plugin}
@@ -89,13 +100,15 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
       onBack={() => onPlace({ section: "agents" })} onClose={onClose}
       onOpen={(agent) => onPlace({ section: "agents", agent }, true)} onSaved={() => void refresh()} />;
   }
-  if (place.section === "root" || place.section === "projects") {
+  if (place.section === "root" || place.section === "projects" || place.section === "resources") {
     return <SettingsFrame title="Settings" actions={close}>
       <ul className="settings-sections">
         <SettingsRow name={<><CpuIcon aria-hidden size={16} />Models</>} description="The models the model menu offers, and the favorites Ctrl+P switches between."
           onOpen={() => onPlace({ section: "models" })} />
         <SettingsRow name={<><BotIcon aria-hidden size={16} />Agents</>} description="Roles a session can hand work to, each with its own model and instructions."
           onOpen={() => onPlace({ section: "agents" })} />
+        {resources ? <SettingsRow name={<><FileTextIcon aria-hidden size={16} />{RESOURCES_TITLE}</>} description="The skills, prompt templates and context files Pi reads, in one place to read and edit."
+          onOpen={() => onPlace({ section: "resources" })} /> : null}
         <SettingsRow name={<><PuzzleIcon aria-hidden size={16} />Plugins</>} description="Pi packages and extensions, and Forgerie's own plugins, such as account meters."
           onOpen={() => onPlace({ section: "plugins" })} />
         {projects ? <SettingsRow name={<><FolderTreeIcon aria-hidden size={16} />Project groups</>} description="Projects that belong together, such as the repos of one product. The session list can show one group at a time."

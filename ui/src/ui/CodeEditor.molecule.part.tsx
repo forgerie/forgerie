@@ -18,6 +18,9 @@ export default function TypeScript() {
 export function Markdown() {
   return <CodeEditor label="Edit README.md" fileName="README.md" text={README} onChange={() => {}} onSave={() => {}} />;
 }
+export function ReadOnly() {
+  return <CodeEditor label="Read README.md" fileName="README.md" text={README} readOnly onChange={() => {}} onSave={() => {}} />;
+}
 export function PlainText() {
   return <CodeEditor label="Edit notes.unknown" fileName="notes.unknown" text={"A file type with no known language stays plain.\n"} onChange={() => {}} onSave={() => {}} />;
 }

@@ -43,13 +43,15 @@ const look = EditorView.theme({
  * text shows. The caller keys it by document, so a new document is a new
  * editor and undo never crosses into another one.
  */
-export function CodeEditor({ label, fileName, text, onChange, onSave }: {
+export function CodeEditor({ label, fileName, text, readOnly = false, onChange, onSave }: {
   /** The editor's accessible name. */
   label: string;
   /** Picks the language, such as `index.ts`. */
   fileName: string;
   /** The text the editor starts from. Later changes are ignored: the editor owns the document from then on. */
   text: string;
+  /** Shows the text with its colour and line numbers, and refuses edits; selecting and copying still work. */
+  readOnly?: boolean;
   onChange: (text: string) => void;
   /** Control or Command with S. */
   onSave: () => void;
@@ -70,6 +72,7 @@ export function CodeEditor({ label, fileName, text, onChange, onSave }: {
           lineNumbers(), highlightActiveLineGutter(), highlightActiveLine(), history(), drawSelection(), indentOnInput(), bracketMatching(),
           EditorView.lineWrapping, syntaxHighlighting(codeHighlighter), look, language.of([]),
           EditorView.contentAttributes.of({ "aria-label": label }),
+          EditorState.readOnly.of(readOnly),
           keymap.of([
             { key: "Mod-s", preventDefault: true, run: () => { latest.current.onSave(); return true; } },
             // Tab indents. Escape, then Tab, moves focus out, as CodeMirror documents for indentWithTab.
@@ -84,7 +87,7 @@ export function CodeEditor({ label, fileName, text, onChange, onSave }: {
     void description?.load().then((support) => { if (alive) view.dispatch({ effects: language.reconfigure(support) }); }, () => undefined);
     return () => { alive = false; view.destroy(); };
     // The text is only where the editor starts; a new document remounts it through its key.
-  }, [fileName, label]);
+  }, [fileName, label, readOnly]);
 
   return <div className="code-editor" ref={host} />;
 }

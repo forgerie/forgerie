@@ -30,7 +30,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `TileStrip` (molecule): one row of tiles that keeps its height and scrolls sideways, with each failure in full below.
 - `SplitButton` (molecule): an action and the one setting that changes what it does, in one chip; the second half shows the setting in effect and opens its choices, each explained, at window level.
 - `NoticeBar` (molecule): a full-width bar that stops the reader until they choose: a message and its actions, in a plain or alert tone.
-- `CodeEditor` (molecule): an editable CodeMirror editor with line numbers, undo, Tab to indent, Ctrl/Cmd+S, and syntax colour from the file name.
+- `CodeEditor` (molecule): an editable CodeMirror editor with line numbers, undo, Tab to indent, Ctrl/Cmd+S, and syntax colour from the file name; read-only, it still selects and copies.
 - `Diagram` (molecule): draws Mermaid source once it stops changing, keeps a readable scale by scrolling, and shows the source when it cannot draw.
 - `ClaimList` (molecule): shows findings tagged verified, inferred, opinion or unknown, with a text label and evidence under each.
 - `Disclosure` (molecule): hides supporting material behind a one-line summary, closed by default and uncontrolled so it stays open while text streams.
@@ -61,3 +61,6 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `Glyph` (atom): a one-colour mark from an SVG path on a 24-unit grid, at the size and colour of the text beside it.
 - `Toast` (molecule): a short message that does not stop the reader: the message at full width with dismiss in its corner, and a foot row with the detail's first words (cut, they open the whole text) and one action; it always shows in the page's `ToastRegion`.
 - `ToastRegion` (organism): the one place toasts appear, at the window's top end under the header, above the sheet and the thread; mounted once at the entry.
+- `SearchField` (atom): one search box over a list, with a magnifier, in a control-sized row; its label is also its placeholder.
+- `ListTools` (molecule): the controls that choose what a list shows, such as a switch and a search box, stacked and set apart from the list.
+- `FileFrame` (organism): one file to read or edit: facts and notices above it, then the file on a framed surface that grows with its text.
