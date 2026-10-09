@@ -19,7 +19,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `FilterChip` (atom): a filter that is on, above the list it narrows, with a clear button; not drawn when no filter is on.
 - `CopyButton` (molecule): copies text on press and reports the result in a live region.
 - `EventLine` (molecule): one quiet line for something that happened, with a tone dot, a time, an always-visible quote, and details on request.
-- `AlertCard` (molecule): a failure that may need the reader, drawn as a rail and wash in the failure tone: subject and phrase, explanation, wrapped code, quiet actions or a disclosure, and an output panel the actions fill.
+- `AlertCard` (molecule): a failure that may need the reader (or, in the warn tone, trouble that may clear on its own), drawn as a rail and wash in its tone: subject and phrase, explanation, wrapped code, quiet actions or a disclosure, and an output panel the actions fill.
 - `MarkdownFragment` (atom): renders a short piece of Markdown inside a block, under the reply's link and image policy, with no outer margin.
 - `Checklist` (molecule): shows progress on a list of tasks from `[x]`/`[~]`/`[ ]`/`[!]`/`[-]` lines, with an in-order meter and a count.
 - `FileTree` (molecule): shows the files a change touched as a tree, marked added, changed or deleted, with single-child directories folded.
@@ -64,3 +64,4 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `SearchField` (atom): one search box over a list, with a magnifier, in a control-sized row; its label is also its placeholder.
 - `ListTools` (molecule): the controls that choose what a list shows, such as a switch and a search box, stacked and set apart from the list.
 - `FileFrame` (organism): one file to read or edit: facts and notices above it, then the file on a framed surface that grows with its text.
+- `StatusChip` (molecule): a header's one status word as a toned pill, announced while it is quiet and hidden; with a panel it is a button that opens the long story under the header at the window's end, with a count that rides along and a ring for each new arrival.

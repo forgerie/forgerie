@@ -39,8 +39,8 @@ const emit = (event: UiEvent) => act(async () => {
 async function open(id: string, drafts: DraftStore, initialDraft?: string) {
   await act(async () => root.render(<ForgerieSession key={`${id}:${Math.random()}`} id={id} known={{ id, cwd: "/work" }}
     drafts={drafts} initialDraft={initialDraft} onSwitchSession={() => {}} />));
-  await until(() => document.querySelector(".connection-status")?.textContent === "Connected"
-    || document.querySelector(".connection-status")?.textContent === "Waiting for you");
+  await until(() => document.querySelector(".status-chip-live")?.textContent === "Connected"
+    || document.querySelector(".status-chip-live")?.textContent === "Waiting for you");
 }
 const reload = () => createDraftStore(window.localStorage);
 
@@ -99,7 +99,9 @@ describe("draft protection across session switches and reloads", () => {
     promptReply = () => Response.json({ error: "Model unavailable" }, { status: 503 });
     await type("retry later");
     await send();
-    await until(() => document.querySelector('[role="alert"]')?.textContent?.includes("Model unavailable") === true);
+    await until(() => document.querySelector(".status-chip-live")?.textContent === "Problem");
+    await click(document.querySelector("button.status-chip-face"));
+    await until(() => document.querySelector(".status-chip-panel")?.textContent?.includes("Model unavailable") === true);
     expect(input().value).toBe("retry later");
     await open("a", reload());
     expect(input().value).toBe("retry later");

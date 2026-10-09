@@ -13,9 +13,17 @@ import type { PromptDiffAnnotation } from "./changes/diffNotes";
 import { afterFork, afterNavigate, closedTree, openTree, treeForkResultSchema, treeNavigateResultSchema, withOperation as withTreeOperation, type SessionTreeSummaryChoice, type TreeNavigator, type TreeOutcome } from "./sessionTree";
 
 export type Connection = { type: "loading" } | { type: "ready" }
-  | { type: "reconnecting"; message: string } | { type: "failed"; message: string };
+  /** `attempt` counts tries since the last join; `retryAt` is when the next one starts (now or earlier: it runs already). */
+  | { type: "reconnecting"; message: string; attempt: number; retryAt: number } | { type: "failed"; message: string };
+/** Something that went wrong and that the reader may want to read in full. It stays until they dismiss it. */
+export interface Problem { id: number; title: string; message: string; at: number }
+const MAX_PROBLEMS = 20;
 export interface SessionState {
   connection: Connection;
+  /** When the live connection last finished a join. */
+  lastReadyAt?: number;
+  /** Newest first. */
+  problems: readonly Problem[];
   session?: Session;
   transcript: Transcript;
   ask: AskState;
@@ -62,6 +70,7 @@ interface RecoveryTiming {
   requestTimeoutMs?: number;
   /** Tree actions. A summary uses the model, so Forgerie's own proxy waits 5 minutes for them. */
   treeActionTimeoutMs?: number;
+  now?: () => number;
 }
 interface Join {
   controller: AbortController;
@@ -112,7 +121,19 @@ export function shellAvailabilityOf(state: SessionState): ShellAvailability {
 export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session, reads?: ReadTracker,
   /** Server events the transcript does not use, by Pi event type, such as a child agent's change. */
   onPiEvent?: (eventType: string) => void) {
-  let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree, dialogPhase: noDialogPhase };
+  let state: SessionState = { connection: { type: "loading" }, problems: [], ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree, dialogPhase: noDialogPhase };
+  const now = timing.now ?? Date.now;
+  let problemId = 0;
+  /** The same words twice add nothing: a reconnect can replay the event that reported them. */
+  function withProblem(next: SessionState, title: string, message: string): SessionState {
+    if (next.problems.some((problem) => problem.title === title && problem.message === message)) return next;
+    return { ...next, problems: [{ id: ++problemId, title, message, at: now() }, ...next.problems].slice(0, MAX_PROBLEMS) };
+  }
+  /** A failed action: the latest failure for callers that check it, and a problem the reader can open. */
+  function fail(title: string, message: string, detail = message) {
+    update(withProblem({ ...state, commandError: message }, title, detail));
+  }
+  let attempts = 0;
   let statusVersion = 0;
   const listeners = new Set<() => void>();
   const lifetime = new AbortController();
@@ -126,7 +147,9 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   let started = false;
   const update = (next: SessionState) => {
     if (lifetime.signal.aborted) return;
-    state = next;
+    // Pi reports a failed run on the transcript. Each new report becomes a problem.
+    const error = next.transcript.error;
+    state = error !== undefined && error !== state.transcript.error ? withProblem(next, "Pi reported an error", error) : next;
     for (const listener of listeners) listener();
   };
   const current = (attempt: Join) => join === attempt && !lifetime.signal.aborted;
@@ -147,7 +170,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   function retry(attempt: Join, error: unknown) {
     if (!current(attempt)) return;
     closeJoin();
-    update({ ...state, connection: { type: "reconnecting", message: messageOf(error) } });
+    attempts++;
+    update({ ...state, connection: { type: "reconnecting", message: messageOf(error), attempt: attempts, retryAt: now() + retryDelay } });
     clearTimeout(retryTimer);
     retryTimer = setTimeout(() => { void connect(); }, retryDelay);
     retryDelay = Math.min(retryDelay * 1.6, timing.maxRetryDelayMs ?? 5000);
@@ -194,8 +218,9 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   function withOperation(next: SessionState, event: OperationEvent): SessionState {
     if (event.type === "status.update") return withStatus(next, event.status);
     const compaction = compactionFromOutput(event);
-    return compaction ? { ...next, compaction } : { ...next, commandResult: { type: "done", message: event.message },
-      ...(event.level === "error" ? { commandError: event.message } : {}) };
+    if (compaction) return { ...next, compaction };
+    const done: SessionState = { ...next, commandResult: { type: "done", message: event.message } };
+    return event.level === "error" ? withProblem({ ...done, commandError: event.message }, "Command reported an error", event.message) : done;
   }
   async function refreshStatus() {
     const session = state.session;
@@ -295,7 +320,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       attempt.askBuffered.length = 0;
       // Outputs are not persisted in the transcript, so even outputs below its
       // watermark must survive. Pre-read statuses yield to the authoritative GET.
-      let joined: SessionState = { ...state, connection: { type: "ready" }, transcript, ask };
+      let joined: SessionState = { ...state, connection: { type: "ready" }, lastReadyAt: now(), transcript, ask };
       for (const event of attempt.operationBuffered.slice(0, beforeStatusRead)) {
         if (event.type === "command.output") joined = withOperation(joined, event);
       }
@@ -304,6 +329,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       attempt.operationBuffered.length = 0;
       statusVersion++;
       retryDelay = initialDelay; // A socket open alone is not a successful join.
+      attempts = 0;
       update(joined);
       if (receipt && reads) void reads.acknowledge(receipt, attempt.controller.signal).catch((error: unknown) => { if (!attempt.controller.signal.aborted) console.warn("Could not mark the visible session read.", error); });
       void loadCommands(); // Discovery failure must not break history or the live connection.
@@ -314,11 +340,11 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       else retry(attempt, error);
     }
   }
-  function recover() {
+  function recover(message = "Refreshing the live connection.") {
     if (!started || lifetime.signal.aborted || state.connection.type === "failed") return;
     clearTimeout(retryTimer);
     closeJoin();
-    update({ ...state, connection: { type: "reconnecting", message: "Refreshing the live connection." } });
+    update({ ...state, connection: { type: "reconnecting", message, attempt: attempts + 1, retryAt: now() } });
     void connect();
   }
   /** Re-read history after the branch moved. The join stays "ready": nothing was lost, only replaced. */
@@ -331,7 +357,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   async function start() {
     if (started || lifetime.signal.aborted) return;
     started = true;
-    unwatch = transport.watchRecovery?.(recover);
+    unwatch = transport.watchRecovery?.(() => recover());
     unwatchUnread = reads?.observe((sessionId) => {
       if (sessionId !== id || !reads?.isVisible()) return;
       if (state.connection.type === "ready") reload();
@@ -341,8 +367,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   }
   async function runSlash(endpoint: "commands/run" | "commands/respond", body: { text: string } | { requestId: string; value: string }): Promise<CommandResult> {
     const session = state.session;
-    if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");
-    if (state.sending) throw new Error("Wait for the current command to finish.");
+    if (!session || state.connection.type !== "ready") throw new NotSentError("The session is not connected.");
+    if (state.sending) throw new NotSentError("Wait for the current command to finish.");
     const previousCompaction = state.compaction;
     update({ ...state, sending: true, commandError: undefined });
     const wait = new AbortController();
@@ -367,7 +393,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (endpoint === "commands/run" && "text" in body && /^\/reload(?:\s|$)/u.test(body.text)) void loadCommands();
       return result;
     } catch (error) {
-      update({ ...state, commandError: messageOf(error) });
+      fail("Command failed", messageOf(error));
       throw error;
     } finally { slashWaits.delete(wait); update({ ...state, sending: false }); }
   }
@@ -377,8 +403,9 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     const availability = shellAvailabilityOf(state);
     if (!session || availability.type === "blocked") {
       const message = availability.type === "blocked" ? availability.reason : "The session is not connected.";
+      // Refused before any request, so it is the composer's note, not a problem.
       update({ ...state, commandError: message });
-      throw new Error(message);
+      throw new NotSentError(message);
     }
     update({ ...state, sending: true, commandError: undefined });
     try {
@@ -388,7 +415,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     } catch (error) {
       const message = refused(error) ? error.message
         : `${messageOf(error)} The command may have started. Check the conversation before running it again.`;
-      update({ ...state, commandError: message });
+      fail("Shell command not confirmed", message);
       throw new Error(message, { cause: error });
     } finally { update({ ...state, sending: false }); }
   }
@@ -428,7 +455,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (endpoint === "abort") void refreshStatus();
       return "restoredMessages" in result ? result.restoredMessages : [];
     } catch (error) {
-      update({ ...state, commandError: messageOf(error) });
+      if (endpoint === "abort") fail("Stop failed", messageOf(error));
+      else fail("Message may not have sent", messageOf(error), refused(error)
+        ? `${messageOf(error)} Pi did not take the message. It is back in the message box.`
+        : `${messageOf(error)} It may have reached Pi. Check the conversation before you send it again; the text is back in the message box.`);
       throw error;
     } finally { update({ ...state, sending: false }); }
   }
@@ -558,7 +588,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       };
       update(next);
     } catch (error) {
-      update({ ...state, commandError: messageOf(error) });
+      fail("Queue not cleared", messageOf(error));
       throw error;
     } finally { update({ ...state, sending: false }); }
   }
@@ -597,18 +627,22 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     send: async (text: string, attachments?: PromptAttachment[], options: { steer?: boolean; diffAnnotations?: PromptDiffAnnotation[] | undefined } = {}) => {
       const shell = shellDraftOf(text);
       if (shell.type !== "chat") {
-        if (attachments?.length) throw new Error("Remove attachments before running a shell command.");
-        if (shell.type === "empty") throw new Error("Type a command after !.");
+        if (attachments?.length) throw new NotSentError("Remove attachments before running a shell command.");
+        if (shell.type === "empty") throw new NotSentError("Type a command after !.");
         return runShell(shell.text);
       }
       if (isCommand(text)) {
-        if (attachments?.length) throw new Error("Remove attachments before running a slash command.");
+        if (attachments?.length) throw new NotSentError("Remove attachments before running a slash command.");
         return runSlash("commands/run", { text });
       }
       await command("prompt", text, attachments, options.steer === true, options.diffAnnotations);
     },
     respondToCommand: (requestId: string, value: string) => runSlash("commands/respond", { requestId, value }),
     dismissCommand: () => update({ ...state, commandResult: undefined }),
+    dismissProblem: (problemId: number) => update({ ...state, problems: state.problems.filter((problem) => problem.id !== problemId) }),
+    dismissProblems: () => update({ ...state, problems: [] }),
+    /** Skip the wait before the next try. Only while reconnecting. */
+    retryNow: () => { if (state.connection.type === "reconnecting") recover("Trying again now."); },
     openTree: () => runSlash("commands/run", { text: "/tree" }),
     continueTree: (targetId: string, summary: SessionTreeSummaryChoice) => treeAction("continuing", summary.mode !== "none",
       "tree/navigate", treeNavigateResultSchema, { targetId, summary }, afterNavigate),

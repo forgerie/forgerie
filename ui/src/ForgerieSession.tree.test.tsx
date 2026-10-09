@@ -33,7 +33,7 @@ const navigator = () => document.querySelector("dialog.tree-dialog");
 
 async function open(onSwitchSession: (session: Session, draft?: string) => void = () => {}) {
   await act(async () => root.render(<ForgerieSession id="a" known={{ id: "a", cwd: "/work" }} onSwitchSession={onSwitchSession} />));
-  await until(() => document.querySelector(".connection-status")?.textContent === "Connected");
+  await until(() => document.querySelector(".status-chip-live")?.textContent === "Connected");
 }
 
 beforeEach(async () => {
@@ -95,7 +95,7 @@ describe("session tree in a session", () => {
   it("cannot open the tree while the agent works, because Pi refuses it then", async () => {
     status = { ...idle, isStreaming: true };
     await act(async () => root.render(<ForgerieSession id="a" known={{ id: "a", cwd: "/work" }} onSwitchSession={() => {}} />));
-    await until(() => document.querySelector(".connection-status")?.textContent === "Running");
+    await until(() => document.querySelector(".status-chip-live")?.textContent === "Running");
     expect(button("Session tree")?.disabled).toBe(true);
   });
 });

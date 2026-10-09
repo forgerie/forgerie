@@ -126,7 +126,11 @@ it.each([
 it("shows a failed tree read without opening it and permits a later double Escape retry", async () => {
   const api = await session(); api.state.fail = true;
   await press("Escape"); await press("Escape");
-  await until(() => document.body.textContent?.includes("Tree read failed") === true);
+  // The failure is a problem in the status chip; its panel holds the words.
+  await until(() => document.querySelector(".status-chip-live")?.textContent === "Problem");
+  await act(async () => document.querySelector<HTMLElement>("button.status-chip-face")?.click());
+  await until(() => document.querySelector(".status-chip-panel")?.textContent?.includes("Tree read failed") === true);
+  await act(async () => document.querySelector<HTMLElement>(".status-chip-close")?.click());
   expect(document.querySelector('[role="tree"]')).toBeNull();
   api.state.fail = false;
   await press("Escape"); await press("Escape");

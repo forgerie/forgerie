@@ -16,7 +16,7 @@ export interface AlertAction {
  * what happened, a plain explanation, the code that ran, quiet actions, and
  * an output panel the actions can fill.
  */
-export function AlertCard({ subject, title, time, children, code, codeLabel, actions = [], output, outputLabel, label }: {
+export function AlertCard({ subject, title, time, children, code, codeLabel, actions = [], output, outputLabel, label, tone = "bad" }: {
   /** The thing that failed, in the code face, such as a process name. */
   subject?: string | undefined;
   /** What happened. With a subject, a few words after it, such as "failed". */
@@ -32,9 +32,11 @@ export function AlertCard({ subject, title, time, children, code, codeLabel, act
   outputLabel?: string | undefined;
   /** Accessible name of the card. */
   label: string;
+  /** `warn` is trouble that may still clear on its own, such as a lost connection that is being retried. */
+  tone?: "bad" | "warn";
 }) {
   const outputId = useId();
-  return <section className="alert-card" aria-label={label}>
+  return <section className="alert-card" data-tone={tone} aria-label={label}>
     <header className="alert-card-head">
       <h3 className="alert-card-title" data-phrase={subject !== undefined || undefined}>
         {subject !== undefined && <span className="alert-card-subject">{subject}</span>}

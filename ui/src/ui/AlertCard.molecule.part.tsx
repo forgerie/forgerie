@@ -29,3 +29,9 @@ export function NoActions() {
 export function TitleOnly() {
   return <AlertCard label="Meters stopped" title="Meters stopped">The meters hit an error and stopped drawing.</AlertCard>;
 }
+export function Warn() {
+  return <AlertCard label="Connection lost" tone="warn" title="The live connection dropped"
+    actions={[{ label: "Try now", onPress: () => undefined }]}>
+    Live connection timed out. Try <strong>4</strong> starts in 3 s. Your draft stays here.
+  </AlertCard>;
+}

@@ -15,7 +15,12 @@ import { ProcessEventView } from "./processes/ProcessEventView";
 import type { ChildEntryArtifact, ProcessEventArtifact } from "./transcript";
 import type { SystemArtifactView } from "./ui/Messages";
 import { Thread } from "./ui/Thread";
-import { SessionFrame, type StatusTone } from "./ui/SessionFrame";
+import { SessionFrame } from "./ui/SessionFrame";
+import { StatusChip } from "./ui/StatusChip";
+import { Consequence } from "./ui/Consequence";
+import { CircleAlertIcon } from "lucide-react";
+import { problemsLabel, sessionStatus } from "./session/sessionStatus";
+import { StatusDetail, type ConnectionTrouble } from "./session/StatusDetail";
 import type { AskBinding } from "./ui/useAskMode";
 import type { CommandResult } from "./commands";
 import { createMentionSource } from "./mentionSource";
@@ -167,8 +172,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const onNew = useCallback(async (message: AppendMessage) => {
     setSendError(undefined);
     // assistant-ui marks a steer on the message itself (composer.send({ steer: true })).
+    // A failure that may have reached Pi is a problem in the status chip; only a refusal is a note here.
     await sendMessage(message, (text, images) => sendWithNotes(text, images, message.steer === true),
-      () => runtimeRef.current?.thread.composer, setSendError);
+      () => runtimeRef.current?.thread.composer, (error, { mayHaveSent }) => setSendError(mayHaveSent ? undefined : error));
   }, [sendWithNotes]);
   const notesBinding: NotesBinding = {
     notes, onRemove: tray.remove, onOpen: (noteId) => setReview({ focusNoteId: noteId }),
@@ -176,9 +182,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
       setSendError(undefined);
       try { await sendWithNotes("", undefined, steer); }
       catch (error) {
-        // Notes never leave the tray on failure, so there is nothing to restore.
-        setSendError(error instanceof NotSentError ? error.message
-          : `${error instanceof Error ? error.message : String(error)} Check the transcript before sending again.`);
+        // Notes never leave the tray on failure, so there is nothing to restore. The store reports a sent failure.
+        if (error instanceof NotSentError) setSendError(error.message);
         throw error;
       }
     },
@@ -241,20 +246,26 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const openAskId = state.ask.type === "open" ? state.ask.ask.askId : undefined;
   const joined = state.connection.type === "ready";
   useEffect(() => { if (joined) saved?.keepAnswers(openAskId); }, [saved, joined, openAskId]);
-  const error = state.connection.type === "reconnecting" ? "Reconnecting automatically. Your draft stays here."
-    : state.connection.type === "failed" ? state.connection.message
-    : sendError ?? state.commandError ?? state.transcript.error;
   const dialogs = state.status?.pendingDialogs ?? [];
-  const [status, statusTone]: [string, StatusTone] = readOnly
-    ? [worktree?.state.kind === "landed" ? "Landed" : worktree?.state.kind === "discarded" ? "Discarded" : "Read-only", "neutral"]
-    : state.connection.type === "loading" ? ["Connecting", "neutral"]
-    : state.connection.type === "reconnecting" ? ["Reconnecting", "warn"]
-    : state.connection.type === "failed" ? ["Disconnected", "bad"]
-    : dialogs.length > 0 ? ["Waiting for you", "attention"]
-    : state.sending ? ["Sending", "live"] : state.compaction.type === "running" ? ["Compacting", "live"]
-    : state.compaction.type === "queued" ? ["Compaction queued", "neutral"] : state.transcript.isRunning ? ["Running", "live"]
-    : isBashRunning(state) ? ["Running shell command", "live"]
-    : state.ask.type === "open" ? ["Waiting for you", "attention"] : ["Connected", "quiet"];
+  const connection = state.connection;
+  const problems = state.problems;
+  const status = sessionStatus({
+    readOnly: readOnly ? worktree?.state.kind === "landed" ? "Landed" : worktree?.state.kind === "discarded" ? "Discarded" : "Read-only" : undefined,
+    connection: connection.type, dialogOpen: dialogs.length > 0, askOpen: state.ask.type === "open", sending: state.sending,
+    compaction: state.compaction.type === "running" ? "running" : state.compaction.type === "queued" ? "queued" : "idle",
+    running: state.transcript.isRunning, shellRunning: isBashRunning(state), problems: problems.length,
+  });
+  const trouble: ConnectionTrouble | undefined = connection.type === "reconnecting"
+    ? { type: "reconnecting", reason: connection.message, attempt: connection.attempt, retryAt: connection.retryAt, lastReadyAt: state.lastReadyAt }
+    : connection.type === "failed" ? { type: "failed", reason: connection.message } : undefined;
+  const statusChip = <StatusChip label={status.label} tone={status.tone} count={status.count} countLabel={status.countLabel}
+    ring={problems[0]?.id} panel={status.hasDetail ? {
+      title: trouble ? status.label : problemsLabel(problems.length),
+      actions: problems.length > 1 ? [{ label: "Dismiss all", onPress: store.dismissProblems }] : [],
+      children: <StatusDetail connection={trouble} problems={problems} draftSaved={saved !== undefined}
+        onTryNow={store.retryNow} onReload={() => window.location.reload()} onDismiss={store.dismissProblem}
+        onCopy={typeof navigator.clipboard?.writeText === "function" ? (text) => { void navigator.clipboard.writeText(text).catch(() => undefined); } : undefined} />,
+    } : undefined} />;
   const oldestDialog = dialogs[0];
   const dialog: DialogBinding | undefined = oldestDialog && {
     dialog: oldestDialog, count: dialogs.length, phase: phaseFor(state.dialogPhase, oldestDialog.dialogId),
@@ -278,8 +289,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
 
   return <AssistantRuntimeProvider runtime={runtime}>
     <DictationProvider adapter={dictation}>
-    <SessionFrame name={state.session?.name ?? "Session"} status={status} statusTone={statusTone} error={error}
-      recovery={state.connection.type === "failed" ? <button onClick={() => window.location.reload()}>Reload</button> : undefined}
+    <SessionFrame name={state.session?.name ?? "Session"} status={statusChip}
       actions={<>
         {/* A landed or discarded worktree has no folder left to diff. */}
         {/* Linked: always, even read-only, so a landed session still shows its pull request. Unlinked: only where the agent could still open one. */}
@@ -299,6 +309,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
       </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
+        beforeComposer={sendError && !readOnly ? <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{sendError}</p></Consequence> : undefined}
         head={setup && <WorktreeSetupCard setup={setup} hookSeen={setup.log !== ""} branch={worktree?.branch} />}
         inputContext={worktree && worktree.state.kind === "active" ? <WorktreeChip info={worktree} /> : null}
         readOnly={readOnly ? <WorktreeReceipt state={worktree?.state} defaultBranch={worktree?.defaultBranch}

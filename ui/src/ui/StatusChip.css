@@ -1,0 +1,72 @@
+/* A header's status word as a filled pill with the picker row's own marks,
+   so "Running" here and a working row in the picker read as one signal. A
+   quiet status draws nothing but its live region. */
+.status-chip { position: relative; flex: none; display: flex; align-items: center; }
+.status-chip[data-drawn] { margin-inline-end: var(--space-2); }
+.status-chip-live { position: absolute; inline-size: var(--hairline); block-size: var(--hairline); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.status-chip-face { --chip-ink: var(--muted-foreground); --chip-wash: var(--active-surface);
+  position: relative; display: inline-flex; align-items: center; gap: 0.375rem; block-size: 1.5rem; padding-inline: 0.625rem; margin: 0;
+  border: 0; border-radius: var(--radius-pill); background: var(--chip-wash); color: var(--chip-ink);
+  font: inherit; font-size: var(--label-text); font-weight: 500; line-height: 1; white-space: nowrap; }
+button.status-chip-face { padding-inline-end: 0.4375rem; cursor: pointer; }
+/* Drawn small, pressed large. */
+button.status-chip-face::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
+button.status-chip-face:hover, button.status-chip-face[aria-expanded="true"] { background: var(--chip-wash-strong, var(--hover-surface)); }
+.status-chip[data-tone="live"] .status-chip-face { --chip-ink: var(--ink-live); --chip-wash: var(--live-wash); --chip-wash-strong: var(--offer-wash-hover); }
+.status-chip[data-tone="attention"] .status-chip-face { --chip-ink: var(--foreground); }
+.status-chip[data-tone="warn"] .status-chip-face { --chip-ink: var(--ink-warn); --chip-wash: var(--warn-wash); --chip-wash-strong: var(--lapsing-wash); }
+.status-chip[data-tone="bad"] .status-chip-face { --chip-ink: var(--destructive); --chip-wash: var(--destructive-wash); --chip-wash-strong: var(--bracket-miss); }
+
+.status-chip-dot { flex: none; inline-size: 0.375rem; block-size: 0.375rem; border-radius: 50%; }
+.status-chip[data-tone="neutral"] .status-chip-dot { display: none; }
+.status-chip[data-tone="live"] .status-chip-dot { border: calc(var(--hairline) * 1.5) solid var(--live); animation: status-chip-pulse 1.6s ease-in-out infinite; }
+.status-chip[data-tone="attention"] .status-chip-dot { border-radius: var(--hairline); background: var(--foreground); }
+.status-chip[data-tone="warn"] .status-chip-dot { border: calc(var(--hairline) * 1.5) solid var(--tone-warn); animation: status-chip-pulse 1.6s ease-in-out infinite; }
+.status-chip[data-tone="bad"] .status-chip-dot { background: var(--destructive); }
+.status-chip[data-tone="quiet"] .status-chip-dot { background: var(--muted-foreground); }
+.status-chip-chevron { flex: none; inline-size: 0.75rem; block-size: 0.75rem; opacity: 0.75; transition: rotate 160ms ease; }
+.status-chip-face[aria-expanded="true"] .status-chip-chevron { rotate: 180deg; }
+/* Things that wait in the panel, counted in the failure tone. */
+.status-chip-count { display: grid; place-items: center; min-inline-size: 1rem; block-size: 1rem; padding-inline: 0.25rem; border-radius: var(--radius-pill);
+  background: var(--destructive); color: var(--background); font-size: var(--meta-text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.status-chip-ring { position: absolute; inset: calc(var(--hairline) * -3); border: calc(var(--hairline) * 2) solid var(--destructive); border-radius: inherit;
+  opacity: 0; pointer-events: none; animation: status-chip-ring 900ms ease-out 300ms 2; }
+@keyframes status-chip-pulse { 50% { opacity: 0.35; } }
+@keyframes status-chip-ring { 0% { opacity: 0.9; scale: 0.92; } 100% { opacity: 0; scale: 1.25; } }
+
+/* The panel is window level: it opens under the header at the window's end,
+   where toasts appear, and covers them while open. Its width is a share of
+   the window that leaves a margin, and its body scrolls inside the height
+   left under the header. The page dims under it; the header does not, so the
+   chip stays lit and the panel reads as the chip opened. */
+.status-chip-scrim { position: fixed; z-index: 59; inset: calc(env(safe-area-inset-top) + var(--header-size)) 0 0; background: var(--fade-scrim);
+  animation: status-chip-fade 180ms ease-out; }
+.status-chip-panel { position: fixed; z-index: 60;
+  inset-block-start: calc(env(safe-area-inset-top) + var(--header-size) + var(--space-1));
+  inset-inline-end: calc(env(safe-area-inset-right) + var(--space-2));
+  inline-size: min(25rem, 100% - var(--space-4) - env(safe-area-inset-left) - env(safe-area-inset-right));
+  max-block-size: calc(100% - var(--header-size) - var(--space-6) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; overflow: hidden;
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--popover); color: var(--foreground);
+  box-shadow: 0 var(--space-2) var(--space-6) var(--scrim-shadow); font-size: var(--small-text);
+  transform-origin: top right; animation: status-chip-in 180ms cubic-bezier(.2, .8, .2, 1); }
+.status-chip-panel:focus { outline: none; }
+.status-chip-head { flex: none; display: flex; align-items: center; gap: var(--space-1); min-block-size: var(--header-size);
+  padding-inline: var(--space-4) var(--space-1); border-block-end: var(--hairline) solid var(--line); }
+.status-chip-title { flex: 1; min-inline-size: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--text-size); font-weight: 600; }
+.status-chip-action { flex: none; min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--muted-foreground); font-size: var(--small-text); }
+.status-chip-action:hover { background: var(--hover-surface); color: var(--foreground); }
+.status-chip-close { display: grid; place-items: center; flex: none; inline-size: var(--control-size); block-size: var(--control-size);
+  padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
+.status-chip-close:hover { color: var(--foreground); }
+.status-chip-body { flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1) var(--space-4) var(--space-3); }
+@keyframes status-chip-in { from { opacity: 0; scale: 0.96; translate: 0 calc(var(--space-1) * -1); } }
+@keyframes status-chip-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .status-chip-dot, .status-chip-ring, .status-chip-panel, .status-chip-scrim { animation: none; }
+  .status-chip-chevron { transition: none; }
+}

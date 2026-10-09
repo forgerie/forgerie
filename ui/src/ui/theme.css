@@ -87,6 +87,8 @@
   /* A plain button on a floating card, where the live colour would compete with a failure's mark. */
   --float-action: color-mix(in oklab, var(--foreground) 8%, transparent);
   --float-action-hover: color-mix(in oklab, var(--foreground) 13%, transparent);
+  /* Under a panel that opens from the header: the page fades back without going dark. */
+  --fade-scrim: color-mix(in oklab, var(--background) 62%, transparent);
   /* Diff rows: drawn as faint washes, so the live blue of a note stays the loudest mark on a line. */
   --diff-add: oklch(0.6 0.15 150);
   --diff-remove: oklch(0.6 0.2 25);
@@ -190,23 +192,6 @@ button:disabled { cursor: default; opacity: 0.4; }
 .session-heading { display: flex; align-items: center; flex: 1; min-inline-size: 0; gap: var(--space-2); }
 .session-title { margin: 0; font-family: var(--body-font); font-size: var(--small-text); font-weight: 500; letter-spacing: normal; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connection-status { flex: none; color: var(--muted-foreground); font-size: var(--small-text); }
-/* The session header's status is a chip, not a word beside the icons: a filled
-   pill with the picker row's own marks, so "Running" here and a working row in
-   the picker read as one signal. A healthy, idle session shows nothing. */
-.connection-status[data-tone] { display: inline-flex; align-items: center; gap: 0.375rem; block-size: 1.5rem; margin-inline-end: var(--space-2); padding-inline: 0.625rem;
-  border-radius: 999px; background: color-mix(in oklab, var(--foreground) 6%, transparent); font-size: var(--label-text); font-weight: 500; line-height: 1; white-space: nowrap; }
-.connection-status[data-tone="quiet"] { position: absolute; inline-size: 1px; block-size: 1px; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); }
-.connection-status[data-tone]::before { content: ""; flex: none; inline-size: 6px; block-size: 6px; border-radius: 50%; }
-.connection-status[data-tone="neutral"]::before { content: none; }
-.connection-status[data-tone="live"] { color: var(--ink-live); background: var(--live-wash); }
-.connection-status[data-tone="live"]::before { border: 1.5px solid var(--live); animation: picker-pulse 1.6s ease-in-out infinite; }
-.connection-status[data-tone="attention"] { color: var(--foreground); }
-.connection-status[data-tone="attention"]::before { border-radius: 1px; background: var(--foreground); }
-.connection-status[data-tone="warn"] { color: var(--ink-warn); background: var(--warn-wash); }
-.connection-status[data-tone="warn"]::before { border: 1.5px solid var(--tone-warn); animation: picker-pulse 1.6s ease-in-out infinite; }
-.connection-status[data-tone="bad"] { color: var(--destructive); background: color-mix(in oklab, var(--destructive) 10%, transparent); }
-.connection-status[data-tone="bad"]::before { background: var(--destructive); }
-@media (prefers-reduced-motion: reduce) { .connection-status[data-tone]::before { animation: none; } }
 .notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) var(--gutter); color: var(--destructive); background: color-mix(in oklab, var(--destructive) 5%, var(--background)); max-block-size: 30cqb; overflow: auto; }
 .notice p { flex: 1; margin: 0; min-inline-size: min(15rem, 100%); overflow-wrap: anywhere; }
 .notice button { background: transparent; border: 1px solid var(--line); border-radius: var(--radius-control); block-size: 2rem; padding-inline: var(--space-3); font-size: var(--small-text); }

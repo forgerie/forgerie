@@ -7,6 +7,10 @@ import type { ToolState, TranscriptMessage, TranscriptPart } from "../src/transc
 import { useThreadMessages } from "../src/useThreadMessages";
 import { Thread } from "../src/ui/Thread";
 import { SessionFrame } from "../src/ui/SessionFrame";
+import { StatusChip } from "../src/ui/StatusChip";
+import { StatusDetail, type ConnectionTrouble } from "../src/session/StatusDetail";
+import { problemsLabel, sessionStatus } from "../src/session/sessionStatus";
+import type { Problem } from "../src/sessionStore";
 import { ForgerieDictationAdapter } from "../src/speech/ForgerieDictationAdapter";
 import { DictationProvider } from "../src/DictationProvider";
 
@@ -212,6 +216,13 @@ const longAsk: PendingAsk = { askId: "long", askedAt: "2026-09-29T00:00:00Z", qu
       ...(index % 4 === 0 ? { detail: "Canary traffic only for the first hour." } : {}) })) },
 ] };
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "history";
+// `?status=open` opens the header chip's panel, so a capture can show it.
+const statusOpen = new URLSearchParams(location.search).get("status") === "open";
+const problemAt = Date.UTC(2026, 9, 9, 20, 6);
+const previewProblems: Problem[] = [
+  { id: 2, title: "Pi reported an error", at: problemAt, message: "529 overloaded_error: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"},\"request_id\":\"req_011CTx9fQ2k7vZbE4m1nHqA8\"}" },
+  { id: 1, title: "Command failed", at: problemAt - 60_000, message: "Unknown command: /bad" },
+];
 const scenarioAsk: Record<string, PendingAsk> = { "dialog-ask": planAsk, "shell-ask": planAsk, ask: planAsk, "ask-long": longAsk, "ask-reconnecting": planAsk, "mentions-ask": planAsk, "slash-ask": planAsk, "attachments-ask": planAsk, "compaction-ask": planAsk };
 const mentionFiles = ["src/main.ts", "src/file with spaces.ts", "src/ui/Composer.tsx", "vendor/", "dir with space/",
   ...Array.from({ length: 9 }, (_, i) => `src/very-long-folder-name-${i}/nested-folder/mention-source-${i}.test.ts`)];
@@ -513,6 +524,12 @@ function Preview() {
   const shellRunning = messages.some((message) => message.parts[0]?.type === "shell" && message.parts[0].run.result.type === "running");
   const recovering = scenario === "compaction-reconnecting" || scenario === "reconnecting" || scenario === "reconnecting-running" || scenario === "ask-reconnecting";
   const [ask, setAsk] = useState<PendingAsk | undefined>(scenarioAsk[scenario]);
+  const [problems, setProblems] = useState<Problem[]>(scenario === "problems" ? previewProblems.slice(0, 1) : scenario === "problems-running" ? previewProblems : []);
+  useEffect(() => {
+    if (!statusOpen) return;
+    const timer = setTimeout(() => document.querySelector<HTMLButtonElement>("button.status-chip-face")?.click(), 150);
+    return () => clearTimeout(timer);
+  }, []);
   const [dialogs, setDialogs] = useState<PendingDialog[]>(dialogScenarios[scenario] ?? []);
   const [dialogPhase, setDialogPhase] = useState<DialogPhase>({ type: "answering" });
   // The daemon's side, locally: a close takes a moment, then status drops the dialog.
@@ -633,9 +650,19 @@ function Preview() {
   }, []);
   return <AssistantRuntimeProvider runtime={runtime}>
     <DictationProvider adapter={dictation}>
-    <SessionFrame name="Session client" status={shellRunning && !running ? "Running shell command" : scenario === "loading" ? "Connecting" : recovering ? "Reconnecting" : scenario === "disconnected" ? "Disconnected" : compaction.type === "running" ? "Compacting" : compaction.type === "queued" ? "Compaction queued" : running ? "Running" : ask ? "Waiting for you" : "Connected"}
-      error={recovering ? "Reconnecting automatically. Your draft stays here." : scenario === "disconnected" ? "Session unavailable. Reload to try again." : undefined}
-      recovery={scenario === "disconnected" ? <button onClick={() => location.reload()}>Reload</button> : undefined}
+    <SessionFrame name="Session client" status={(() => {
+      const status = sessionStatus({ connection: scenario === "loading" ? "loading" : recovering ? "reconnecting" : scenario === "disconnected" ? "failed" : "ready",
+        dialogOpen: dialogs.length > 0, askOpen: ask !== undefined, sending: false,
+        compaction: compaction.type === "running" ? "running" : compaction.type === "queued" ? "queued" : "idle",
+        running: running || scenario === "problems-running", shellRunning, problems: problems.length });
+      const trouble: ConnectionTrouble | undefined = recovering ? { type: "reconnecting", reason: "Live connection timed out.", attempt: 4, retryAt: Date.now() + 3000, lastReadyAt: problemAt }
+        : scenario === "disconnected" ? { type: "failed", reason: "Session 01a1224a-5613-7499-95a3-98bb532b972e was not found. Check the session ID in the URL." } : undefined;
+      return <StatusChip label={status.label} tone={status.tone} count={status.count} countLabel={status.countLabel} ring={problems[0]?.id}
+        panel={status.hasDetail ? { title: trouble ? status.label : problemsLabel(problems.length),
+          actions: problems.length > 1 ? [{ label: "Dismiss all", onPress: () => setProblems([]) }] : [],
+          children: <StatusDetail connection={trouble} problems={problems} draftSaved onTryNow={() => undefined} onReload={() => location.reload()}
+            onCopy={() => undefined} onDismiss={(id) => setProblems((list) => list.filter((problem) => problem.id !== id))} /> } : undefined} />;
+    })()}
       actions={childrenPreview ? <ChildAgentsOpener children={CHILDREN} onOpen={() => setChildView({ open: true })} /> : undefined}>
       {childrenPreview && childView.open && <ChildAgentsPanel children={CHILDREN} openId={childView.id}
         transcript={childView.id === undefined ? undefined : childView.id === 15 ? STREAMING : TRANSCRIPT}
@@ -768,7 +795,7 @@ function NewSessionPreview() {
     return () => timers.forEach(clearTimeout);
   }, []);
   return <AssistantRuntimeProvider runtime={runtime}>
-    <SessionFrame name={started ?? "Session client"} status="Connected"><Thread /></SessionFrame>
+    <SessionFrame name={started ?? "Session client"} status={<StatusChip label="Connected" tone="quiet" />}><Thread /></SessionFrame>
     {open && <NewSession cwd="/home/simon/code/sandbox/forgerie/.worktree/new-ui-mvp" api={previewNewApi} launches={previewLaunches} deferred={previewDeferred}
       initialMode={scenario === "new-session-rapidfire" ? "rapidfire" : "switch"}
       onStarted={(session) => { setStarted(`Opened ${session.id} in ${session.cwd}`); setOpen(false); }} onClose={() => setOpen(false)} />}

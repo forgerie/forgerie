@@ -24,7 +24,7 @@ const until = async (condition: () => boolean) => {
 };
 const openId = () => new URLSearchParams(window.location.search).get("session");
 const archiveButton = () => document.querySelector<HTMLButtonElement>('button[aria-label="Archive and next"]');
-const connected = () => document.querySelector(".connection-status")?.textContent === "Connected";
+const connected = () => document.querySelector(".status-chip-live")?.textContent === "Connected";
 const press = (node: HTMLElement | null) => act(async () => { node!.click(); });
 
 /** a is open. c is blocked on you, b is unread, d is just open, w works. */
@@ -155,7 +155,7 @@ describe("archive and next", () => {
   it("waits while the open session runs, even before the list hears about it", async () => {
     running.add("a");
     await act(async () => root.render(<App />));
-    await until(() => document.querySelector(".connection-status")?.textContent === "Running");
+    await until(() => document.querySelector(".status-chip-live")?.textContent === "Running");
     expect(archiveButton()?.disabled).toBe(true);
     expect(archiveButton()?.title).toBe("Archive and next: Stop the run first");
   });

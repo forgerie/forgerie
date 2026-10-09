@@ -7,6 +7,7 @@ import type { ToolState, TranscriptMessage } from "../transcript";
 import { useThreadMessages } from "../useThreadMessages";
 import { Thread } from "./Thread";
 import { SessionFrame } from "./SessionFrame";
+import { StatusChip } from "./StatusChip";
 import type { ComposerInputElement } from "./ComposerEditor";
 import { DIAGRAM_QUIET_MS } from "./Diagram";
 import { FILE_CHECK_DELAY_MS, type FileLinks } from "./FileTree";
@@ -39,7 +40,7 @@ function Fixture({ messages = [], running = false, loading = false, disabled = f
   const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel,
     isRunning: running, isLoading: loading, isDisabled: disabled });
   return <AssistantRuntimeProvider runtime={runtime}>
-    <SessionFrame name="A long session title" status={running ? "Running" : "Connected"}><Thread fileLinks={fileLinks} linkBase={linkBase} onOpenFile={fileLinks ? (path) => { fileLinks.open(path); return true; } : undefined} /></SessionFrame>
+    <SessionFrame name="A long session title" status={<StatusChip label={running ? "Running" : "Connected"} tone={running ? "live" : "quiet"} />}><Thread fileLinks={fileLinks} linkBase={linkBase} onOpenFile={fileLinks ? (path) => { fileLinks.open(path); return true; } : undefined} /></SessionFrame>
   </AssistantRuntimeProvider>;
 }
 async function render(props: Parameters<typeof Fixture>[0] = {}) {

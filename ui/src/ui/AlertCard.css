@@ -7,6 +7,7 @@
   border-inline-start: calc(var(--hairline) * 2) solid var(--destructive);
   border-start-end-radius: var(--radius-document); border-end-end-radius: var(--radius-document);
   background: var(--destructive-wash); font-size: var(--small-text); }
+.alert-card[data-tone="warn"] { border-inline-start-color: var(--tone-warn); background: var(--warn-wash); }
 
 .alert-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); min-block-size: 1.75rem; align-content: center; }
 .alert-card-title { flex: 1 1 auto; min-inline-size: 0; margin: 0; overflow-wrap: anywhere;
@@ -16,7 +17,7 @@
 .alert-card-subject { font-family: var(--code-font); font-weight: 600; color: var(--foreground); }
 .alert-card-time { flex: none; margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
 
-.alert-card-text { color: var(--quiet-foreground); line-height: var(--line-height); }
+.alert-card-text { color: var(--quiet-foreground); line-height: var(--line-height); overflow-wrap: anywhere; }
 .alert-card-text > p { margin: 0; }
 .alert-card-text strong { color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; }
 

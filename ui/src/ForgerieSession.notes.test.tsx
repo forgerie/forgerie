@@ -81,7 +81,7 @@ async function sessionWithChanges(options: { status?: SessionStatus; storage?: S
   });
   const drafts = options.storage ? createDraftStore(options.storage) : undefined;
   await act(async () => root.render(<ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} drafts={drafts} onSwitchSession={() => {}} />));
-  await until(() => document.querySelector(".connection-status")?.textContent === (status.isStreaming ? "Running" : "Connected"));
+  await until(() => document.querySelector(".status-chip-live")?.textContent === (status.isStreaming ? "Running" : "Connected"));
   return { requests, control, prompts: () => requests.filter((item) => item.path.endsWith("/prompt")).map((item) => item.body) };
 }
 
@@ -105,11 +105,11 @@ const retryNote = (comment = "Keep the retry limit.") => ({ path: "src/retry.ts"
 describe("session header status", () => {
   it("keeps a healthy idle session's status for screen readers only, and shows a live chip while the agent runs", async () => {
     await sessionWithChanges();
-    expect(document.querySelector<HTMLElement>(".connection-status")?.dataset.tone).toBe("quiet");
+    expect(document.querySelector<HTMLElement>(".status-chip")?.dataset.tone).toBe("quiet");
     await act(async () => root.unmount());
     root = createRoot(document.body.appendChild(document.createElement("div")));
     await sessionWithChanges({ status: { ...idle, isStreaming: true } });
-    expect(document.querySelector<HTMLElement>(".connection-status")?.dataset.tone).toBe("live");
+    expect(document.querySelector<HTMLElement>(".status-chip")?.dataset.tone).toBe("live");
   });
 });
 
@@ -146,7 +146,10 @@ describe("notes on changes", () => {
     await click(button("Close changes"));
     api.control.refusePrompt = true;
     await click(button("Send notes"));
-    await until(() => document.querySelector(".notice")?.textContent?.includes("test refusal") === true);
+    // A refusal from Pi may follow a delivered request, so it is a problem in the status chip.
+    await until(() => document.querySelector(".status-chip-live")?.textContent === "Problem");
+    await click(document.querySelector<HTMLElement>("button.status-chip-face") ?? undefined);
+    await until(() => document.querySelector(".status-chip-panel")?.textContent?.includes("test refusal") === true);
     expect(chips()).toEqual(["retry.ts:8"]);
     api.control.refusePrompt = false;
     await click(button("Send notes"));

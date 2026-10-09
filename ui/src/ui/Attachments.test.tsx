@@ -105,7 +105,7 @@ describe("assistant-ui attachment composer", () => {
     await click(label("Send message")!);
     await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
     expect(save).toHaveBeenCalledOnce();
-    expect(report).toHaveBeenCalledWith(expect.stringContaining("Check the transcript"));
+    expect(report).toHaveBeenCalledWith(expect.stringContaining("Check the transcript"), { mayHaveSent: true });
   });
   it("keeps new text typed before a failed prompt returns", async () => {
     let refuse!: (error: Error) => void;

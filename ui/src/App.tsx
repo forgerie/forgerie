@@ -10,6 +10,7 @@ import { AppShell } from "./ui/AppShell";
 import { useFullscreen } from "./ui/useFullscreen";
 import { Picker, PickerToast, type PickerFilter } from "./ui/Picker";
 import { SessionFrame } from "./ui/SessionFrame";
+import { StatusChip } from "./ui/StatusChip";
 import { browserStorage, createDraftStore } from "./draftStore";
 import { NewSession, type LaunchDraft, type LaunchMode, type Placement } from "./NewSession";
 import { createWorktreeApi, type WorktreeRecord } from "./worktrees/worktreeApi";
@@ -325,15 +326,15 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       }}
       onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} onClose={closeComposer} />
     : null;
-  const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
+  const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
     <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} projects={projectSettings} resources={resourceSettings} /></Suspense>
-    : backlog ? <Suspense fallback={<SessionFrame name="Backlog" status="Opening…"><div className="thread-empty" /></SessionFrame>}>
+    : backlog ? <Suspense fallback={<SessionFrame name="Backlog" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
       <BacklogView place={backlog} binding={{ load: backlogList.load, onRefresh: refreshBacklog, api: backlogApi, look: picker.look,
         onPlace: placeBacklog, onClose: () => placeBacklog(undefined),
         onLaunch: (item) => { void startNew("switch", item); },
         onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }), github: githubApi, githubPage }} /></Suspense>
     : composing === "" && !selectedId
-      ? <SessionFrame name="New session" status="" error="Forgerie knows no project yet, and this app cannot add one yet."><div className="thread-empty" /></SessionFrame>
+      ? <SessionFrame name="New session" status={<StatusChip label="No project" tone="bad" panel={{ title: "No project", children: <p>Forgerie knows no project yet, and this app cannot add one yet.</p> }} />}><div className="thread-empty" /></SessionFrame>
     : selectedId ? <ForgerieSession key={selectedId} id={selectedId} onUnread={picker.onUnread}
       known={known} relatedWork={relatedWork} resourceLens={resourceLens}
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
@@ -343,7 +344,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       archive={{ availability: picker.archiveState(selectedId), onArchive: () => { void archiveNext(selectedId); } }} />
     // The picker covers this area whenever nothing is selected, so it holds no
     // message of its own: the picker is the instruction.
-    : <SessionFrame name="No session open" status=""><div className="thread-empty" /></SessionFrame>;
+    : <SessionFrame name="No session open"><div className="thread-empty" /></SessionFrame>;
   return <><AppShell open={open} onOpenChange={setOpen} attention={picker.attention}
     picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs}
       shelves={shelves} filter={projectFilter ? { ...projectFilter, onManage: () => placeSettings({ section: "projects" }) } : undefined}

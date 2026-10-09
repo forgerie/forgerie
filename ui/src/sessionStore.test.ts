@@ -184,3 +184,54 @@ describe("session transport", () => {
     expect(store.getSnapshot().connection).toMatchObject({ type: "failed", message: expect.stringContaining("not found") });
   });
 });
+
+describe("problems and retry details", () => {
+  it("records a failed send as a problem the reader can dismiss", async () => {
+    const api = await server({ promptFailure: true });
+    const store = createSessionStore("known", api.transport, { now: () => 1000 }); cleanup.push(store.dispose);
+    await store.start();
+    await expect(store.send("hello")).rejects.toThrow("Model unavailable");
+    expect(store.getSnapshot().problems).toEqual([{ id: 1, title: "Message may not have sent", at: 1000,
+      message: "Model unavailable Pi did not take the message. It is back in the message box." }]);
+    store.dismissProblem(1);
+    expect(store.getSnapshot().problems).toEqual([]);
+  });
+  it("makes no problem of a refusal before any request", async () => {
+    const api = await server();
+    const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
+    await store.start();
+    await expect(store.send("!", [])).rejects.toThrow("Type a command after !.");
+    await expect(store.send("/name x", [{ type: "image", data: "", mimeType: "image/png" }] as never)).rejects.toThrow("Remove attachments");
+    expect(store.getSnapshot().problems).toEqual([]);
+  });
+  it("records each new error Pi reports once, newest first", async () => {
+    const api = await server();
+    const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
+    await store.start();
+    api.emit({ type: "session.error", message: "529 overloaded", seq: 1 });
+    await waitFor(store, () => store.getSnapshot().problems.length === 1);
+    api.emit({ type: "agent.start", seq: 2 });
+    api.emit({ type: "session.error", message: "529 overloaded", seq: 3 });
+    api.emit({ type: "session.error", message: "Compaction failed", seq: 4 });
+    await waitFor(store, () => store.getSnapshot().problems.length === 2);
+    expect(store.getSnapshot().problems.map((problem) => [problem.title, problem.message]))
+      .toEqual([["Pi reported an error", "Compaction failed"], ["Pi reported an error", "529 overloaded"]]);
+    store.dismissProblems();
+    expect(store.getSnapshot().problems).toEqual([]);
+  });
+  it("counts tries, says when the next starts, and can try now", async () => {
+    const api = await server();
+    let clock = 5000;
+    const store = createSessionStore("known", api.transport, { now: () => clock, retryDelayMs: 60_000 }); cleanup.push(store.dispose);
+    await store.start();
+    expect(store.getSnapshot().lastReadyAt).toBe(5000);
+    clock = 9000;
+    api.close();
+    await waitFor(store, () => store.getSnapshot().connection.type === "reconnecting");
+    expect(store.getSnapshot().connection).toEqual({ type: "reconnecting", message: "Live connection closed.", attempt: 1, retryAt: 69_000 });
+    store.retryNow();
+    expect(store.getSnapshot().connection).toEqual({ type: "reconnecting", message: "Trying again now.", attempt: 2, retryAt: 9000 });
+    await waitFor(store, () => store.getSnapshot().connection.type === "ready");
+    expect(store.getSnapshot().lastReadyAt).toBe(9000);
+  });
+});

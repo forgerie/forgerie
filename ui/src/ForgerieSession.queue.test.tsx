@@ -104,8 +104,10 @@ it("says a duplicate is already queued, keeps the draft, and sends nothing", asy
   await until(() => rows().length === 1);
   await type("add tests");
   await act(async () => button("Queue message")!.click());
-  await until(() => document.querySelector(".notice")?.textContent?.includes("This message is already queued.") === true);
-  expect(document.querySelector(".notice")?.textContent).not.toContain("Check the transcript");
+  await until(() => document.querySelector(".consequence")?.textContent?.includes("This message is already queued.") === true);
+  expect(document.querySelector(".consequence")?.textContent).not.toContain("Check the transcript");
+  // A refusal is the composer's note, not a problem in the status chip.
+  expect(document.querySelector(".status-chip-live")?.textContent).not.toContain("roblem");
   expect(input().value).toBe("add tests");
   expect(api.prompts).toHaveLength(1);
 });

@@ -8,19 +8,14 @@ import { createContext, useContext, type ReactNode } from "react";
 export const SessionFrameLeading = createContext<ReactNode>(null);
 
 /**
- * How loud the status reads. `quiet` is the healthy resting state: screen
- * readers still hear it, but the header shows nothing. Every other tone draws
- * a chip with a dot, so the status never reads as one more icon.
+ * System template: a thread's page. The header names it, then shows its status
+ * (a `StatusChip`) and its controls. Nothing is drawn between the header and
+ * the thread: a status with more to say opens from the chip, so the
+ * conversation keeps its full height.
  */
-export type StatusTone = "quiet" | "neutral" | "live" | "attention" | "warn" | "bad";
-
-// System template: the binding supplies labels and actions, never transport objects.
-export function SessionFrame({ name, status, statusTone = "neutral", error, recovery, actions, children }: {
+export function SessionFrame({ name, status, actions, children }: {
   name: string;
-  status: string;
-  statusTone?: StatusTone;
-  error?: string;
-  recovery?: ReactNode;
+  status?: ReactNode;
   /** Session-level controls, drawn at the trailing end of the header. */
   actions?: ReactNode;
   children: ReactNode;
@@ -32,11 +27,9 @@ export function SessionFrame({ name, status, statusTone = "neutral", error, reco
       {/* The homepage thread header names the thread only; the product name
           lives in the picker header, as it does in the homepage sidebar. */}
       <div className="session-heading"><h1 className="session-title" title={name}>{name}</h1></div>
-      {/* The live region stays mounted while quiet, so the next change is announced. */}
-      <span className="connection-status" role="status" data-tone={status ? statusTone : "quiet"}>{status}</span>
+      {status}
       {actions}
     </header>
-    {error && <div className="notice" role="alert"><p>{error}</p>{recovery}</div>}
     {children}
   </main>;
 }
