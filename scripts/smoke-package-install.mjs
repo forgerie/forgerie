@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const NPM_VERSION = "12.0.1";
@@ -53,6 +53,7 @@ try {
   const packageRoot = join(globalPrefix, "lib", "node_modules", "forgerie");
   await smokeInstalledManagedProcesses(packageRoot);
   await smokeInstalledSubagents(packageRoot);
+  await smokeInstalledCliproxyProvider(packageRoot);
   const cli = join(globalPrefix, "bin", "forgerie");
   const agentDir = join(root, "profile");
   const cliOptions = {
@@ -67,7 +68,7 @@ try {
   await execFileAsync(process.execPath, [
     join(repoRoot, "scripts", "smoke-installed-model-runtime.mjs"), packageRoot, agentDir,
   ], cliOptions);
-  console.log(`Installed-package checks passed with npm ${NPM_VERSION}: patched process sources, pinned subagent version, CLI, offline model runtime, and retired-file exclusion. No delegated agent was launched.`);
+  console.log(`Installed-package checks passed with npm ${NPM_VERSION}: patched process sources, pinned subagent and CLIProxyAPI provider versions, CLI, offline model runtime, and retired-file exclusion. No delegated agent was launched.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }
@@ -124,5 +125,52 @@ async function smokeInstalledSubagents(packageRoot) {
   const expected = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")).dependencies["pi-subagents"];
   if (manifest.version !== expected) {
     throw new Error(`Installed package bundles pi-subagents ${String(manifest.version)}, expected ${expected}`);
+  }
+}
+
+async function smokeInstalledCliproxyProvider(packageRoot) {
+  const name = "@router-for-me/pi-cliproxyapi-provider";
+  const manifest = JSON.parse(await readFile(join(packageRoot, "node_modules", name, "package.json"), "utf8"));
+  const expected = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")).dependencies[name];
+  if (manifest.version !== expected) {
+    throw new Error(`Installed package bundles CLIProxyAPI provider ${String(manifest.version)}, expected ${expected}`);
+  }
+  const moduleUrl = pathToFileURL(join(packageRoot, "dist", "server", "sessions", "bundledCliproxyProvider.js")).href;
+  const { bundledCliproxyProviderPackagePath, bundledCliproxyProviderResources } = await import(moduleUrl);
+  const bundle = bundledCliproxyProviderPackagePath();
+  if (bundle !== join(packageRoot, "node_modules", name)) {
+    throw new Error("Installed provider resolver escaped the installed package");
+  }
+  const sdkRoot = join(packageRoot, "node_modules", "@earendil-works", "pi-coding-agent");
+  const sdkManifest = JSON.parse(await readFile(join(sdkRoot, "package.json"), "utf8"));
+  const sdkEntry = sdkManifest.exports?.["."]?.import;
+  if (typeof sdkEntry !== "string") throw new Error("Installed Pi SDK does not expose an ESM entry point");
+  const { DefaultResourceLoader } = await import(pathToFileURL(join(sdkRoot, sdkEntry)).href);
+  const agentDir = await mkdtemp(join(root, "provider-profile-"));
+  const previous = new Map(["PI_CODING_AGENT_DIR", "CLIPROXYAPI_API_KEY", "CLIPROXYAPI_BASE_URL"].map((key) => [key, process.env[key]]));
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  process.env.CLIPROXYAPI_API_KEY = "";
+  process.env.CLIPROXYAPI_BASE_URL = "";
+  try {
+    const resources = bundledCliproxyProviderResources(agentDir, agentDir);
+    const loader = new DefaultResourceLoader({
+      cwd: agentDir,
+      agentDir,
+      settingsManager: resources.settingsManager,
+      additionalExtensionPaths: [bundle],
+      extensionsOverride: resources.extensionsOverride,
+      noContextFiles: true,
+    });
+    await loader.reload();
+    const result = loader.getExtensions();
+    if (result.errors.length > 0 || !result.runtime.pendingProviderRegistrations.some((item) => item.name === "cliproxyapi")) {
+      throw new Error("Installed CLIProxyAPI provider did not load and register on a clean profile");
+    }
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(agentDir, { recursive: true, force: true });
   }
 }

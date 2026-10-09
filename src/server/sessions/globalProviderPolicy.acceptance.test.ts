@@ -161,7 +161,8 @@ function expectIgnoredMutations(
   entries: readonly LogEntry[],
   expected: readonly { operation: string; providerId: string }[],
 ): void {
-  const ignored = ignoredMutationEntries(entries);
+  // The bundle also replays on session creation. Count only this fixture's providers.
+  const ignored = ignoredMutationEntries(entries).filter((entry) => entry.details["providerId"] !== "cliproxyapi");
   expect(ignored).toHaveLength(expected.length);
   expect(ignored.map((entry) => entry.details)).toEqual(expect.arrayContaining(
     expected.map(({ operation, providerId }) => ({
@@ -258,7 +259,7 @@ describe("immutable global provider bootstrap acceptance", () => {
     });
     expect(logEntries).toContainEqual({
       level: "info",
-      details: { context: "global-provider-bootstrap", providerIds: ["global-config", "global-native"] },
+      details: { context: "global-provider-bootstrap", providerIds: ["cliproxyapi", "global-config", "global-native"] },
       message: "global extension provider baseline bootstrapped and frozen",
     });
 
@@ -266,7 +267,7 @@ describe("immutable global provider bootstrap acceptance", () => {
     const session = await service.start(cwd);
     const ref = { id: session.id, cwd };
 
-    expect(runtime.getRegisteredProviderIds()).toEqual(["global-config", "global-native"]);
+    expect(runtime.getRegisteredProviderIds()).toEqual(["cliproxyapi", "global-config", "global-native"]);
     expect(runtime.getRegisteredProviderConfig("global-config")).toBe(baselineConfig);
     expect(runtime.getRegisteredNativeProvider("global-native")).toBe(baselineNative);
     expect(runtime.getModel("global-config", modelId("global-config", "baseline"))).toMatchObject({
@@ -330,7 +331,7 @@ describe("immutable global provider bootstrap acceptance", () => {
     const session = await service.start(cwd);
     const ref = { id: session.id, cwd };
 
-    expect(runtime.getRegisteredProviderIds()).toEqual(["global-config", "global-native"]);
+    expect(runtime.getRegisteredProviderIds()).toEqual(["cliproxyapi", "global-config", "global-native"]);
     expect(runtime.getRegisteredProviderConfig("global-config")).toBe(baselineConfig);
     expect(runtime.getRegisteredNativeProvider("global-native")).toBe(baselineNative);
     expect(runtime.getRegisteredProviderConfig("project-config")).toBeUndefined();
@@ -508,7 +509,7 @@ describe("immutable global provider bootstrap acceptance", () => {
 
     expect(runtime.getModel("global-acme", modelId("global-acme", "baseline"))).toBeDefined();
     expect(runtime.getModel("project-acme", modelId("project-acme", "baseline"))).toBeUndefined();
-    expect(runtime.getRegisteredProviderIds()).toEqual([]);
+    expect(runtime.getRegisteredProviderIds()).toEqual(["cliproxyapi"]);
     await expectNoProviderMutationFeedback(service, ref);
   });
 });

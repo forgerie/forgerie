@@ -8,6 +8,7 @@ import {
   type AgentSessionServices,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
+import { bundledCliproxyProviderPackagePath, bundledCliproxyProviderResources } from "./bundledCliproxyProvider.js";
 
 /** Structured logging boundary supplied by the session daemon. */
 export interface GlobalProviderBootstrapLogger {
@@ -65,7 +66,17 @@ function isModelsOnlyProviderUpdate(baseline: RegisteredProviderConfig, incoming
 async function loadGlobalExtensionServices(runtime: ModelRuntime, agentDir: string): Promise<AgentSessionServices> {
   const scratchCwd = await mkdtemp(join(tmpdir(), "pi-web-global-ext-"));
   try {
-    return await createAgentSessionServices({ cwd: scratchCwd, agentDir, modelRuntime: runtime });
+    const resources = bundledCliproxyProviderResources(scratchCwd, agentDir);
+    return await createAgentSessionServices({
+      cwd: scratchCwd,
+      agentDir,
+      modelRuntime: runtime,
+      settingsManager: resources.settingsManager,
+      resourceLoaderOptions: {
+        additionalExtensionPaths: [bundledCliproxyProviderPackagePath()],
+        extensionsOverride: resources.extensionsOverride,
+      },
+    });
   } finally {
     await rm(scratchCwd, { recursive: true, force: true });
   }
@@ -194,6 +205,9 @@ export async function bootstrapAndFreezeGlobalExtensionProviders(
       { context: LOG_CONTEXT, error: extensionError.error },
       "global extension failed during provider bootstrap",
     );
+  }
+  for (const warning of services.resourceLoader.getExtensions().warnings ?? []) {
+    logger.warn({ context: LOG_CONTEXT, ...warning }, "global extension provider bootstrap warning");
   }
   logger.info(
     { context: LOG_CONTEXT, providerIds },

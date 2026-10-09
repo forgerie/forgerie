@@ -76,6 +76,17 @@ Restart sessiond only in an approved idle window. Provider registrations freeze 
 
 Configure credentials in the actual Pi profile, using Pi's own login flow or profile tools. The browser OAuth and API-key login routes are retired. Credentials already stored in `auth.json` remain usable.
 
+## Bundled CLIProxyAPI provider
+
+
+Forgerie ships `@router-for-me/pi-cliproxyapi-provider` 1.4.21 and loads it by default. A separate Pi package install is not required. The provider joins the daemon's startup baseline and its commands load in every hosted session.
+
+Keep connection settings in the active agent profile's `cliproxyapi.json`, or set `CLIPROXYAPI_BASE_URL` and `CLIPROXYAPI_API_KEY`. The default proxy address is `http://127.0.0.1:8317`. Forgerie does not install the proxy, create credentials, refresh account tokens, or spend banked resets.
+
+Forgerie excludes other copies from Pi package settings, explicit extension paths, and auto-discovered extension folders before their factories run. It reports a warning for a different copy. Existing settings files and the terminal Pi profile stay unchanged. To share the bundled version with terminal Pi, use the package path named in the warning.
+
+Restart the session daemon after a Forgerie upgrade changes the bundled provider. Changing connection settings also needs a restart because the shared provider baseline is fixed at daemon startup.
+
 ## Project settings and worktree hooks
 
 The project file `.pi-web/config.json` remains supported for workspace configuration. It is not a second global agent profile. See [session worktrees](session-worktrees.md) for workspace creation, hooks, ownership, Land, and Discard. Those operations remain separate from the retired terminal-based workspace-deletion API.

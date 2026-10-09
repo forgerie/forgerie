@@ -169,7 +169,7 @@ describe("bootstrapAndFreezeGlobalExtensionProviders", () => {
     expect(runtime.getModel("global-config", "global-model")).toBeDefined();
     expect(entries).toContainEqual({
       level: "info",
-      details: { context: "global-provider-bootstrap", providerIds: ["global-config"] },
+      details: { context: "global-provider-bootstrap", providerIds: ["cliproxyapi", "global-config"] },
       message: "global extension provider baseline bootstrapped and frozen",
     });
 
@@ -185,7 +185,7 @@ describe("bootstrapAndFreezeGlobalExtensionProviders", () => {
       runtime.unregisterProvider("project-only");
     }
 
-    expect(runtime.getRegisteredProviderIds()).toEqual(["global-config"]);
+    expect(runtime.getRegisteredProviderIds()).toEqual(["cliproxyapi", "global-config"]);
     expect(runtime.getRegisteredProviderConfig("global-config")).toBe(baselineConfig);
     expect(runtime.getRegisteredNativeProvider("global-config")).toBeUndefined();
     expect(runtime.getRegisteredProviderConfig("project-config")).toBeUndefined();
@@ -238,7 +238,7 @@ describe("bootstrapAndFreezeGlobalExtensionProviders", () => {
     const baselineProviderIds = runtime.getProviders().map((provider) => provider.id).sort();
     const baselineConfig = runtime.getRegisteredProviderConfig("global-config");
     const baselineNative = runtime.getRegisteredNativeProvider("global-native");
-    expect(baselineRegisteredIds).toEqual(["global-config", "global-native"]);
+    expect(baselineRegisteredIds).toEqual(["cliproxyapi", "global-config", "global-native"]);
     expect(baselineProviderIds).toEqual(expect.arrayContaining(["global-config", "global-native", TEST_MODEL_PROVIDER]));
 
     // Pi 0.82 rebuilds every provider inside refresh(), and Forgerie's background
@@ -278,7 +278,7 @@ describe("bootstrapAndFreezeGlobalExtensionProviders", () => {
     expect(() => { registerProjectConfigProvider(runtime); }).not.toThrow();
     expect(() => { runtime.registerNativeProvider(nativeProvider("project-native")); }).not.toThrow();
     expect(() => { runtime.unregisterProvider("project-only"); }).not.toThrow();
-    expect(runtime.getRegisteredProviderIds()).toEqual([]);
+    expect(runtime.getRegisteredProviderIds()).toEqual(["cliproxyapi"]);
   });
 
   it("applies a models-only refresh from a known provider and rebases the baseline", async () => {
@@ -449,7 +449,7 @@ describe("bootstrapAndFreezeGlobalExtensionProviders", () => {
 
     expect(runtime.getRegisteredProviderConfig("global-config")).toBe(baselineConfig);
     expect(runtime.getModel("global-config", "changed-model")).toBeUndefined();
-    expect(runtime.getRegisteredProviderIds()).toEqual(["global-config"]);
+    expect(runtime.getRegisteredProviderIds()).toEqual(["cliproxyapi", "global-config"]);
     expect(entries.filter((entry) => entry.message === "applied models-only provider update after global bootstrap"))
       .toEqual([]);
     // Repeated ignored registrations stay de-duplicated per (operation, provider).
@@ -505,7 +505,7 @@ describe("bootstrapAndFreezeGlobalExtensionProviders", () => {
       .toEqual(expect.stringContaining('"api" is required when registering streamSimple'));
 
     runtime.registerProvider("after-diagnostic", {});
-    expect(runtime.getRegisteredProviderIds()).toEqual([]);
+    expect(runtime.getRegisteredProviderIds()).toEqual(["cliproxyapi"]);
     expect(entries).toContainEqual({
       level: "info",
       details: {

@@ -6,6 +6,7 @@ export default defineConfig({
     // instead of starting one expensive compiler/runtime graph per host core.
     maxWorkers: 4,
     include: ["src/**/*.test.ts", "scripts/**/*.test.mjs"],
+    setupFiles: ["scripts/test-agent-profile.mjs"],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts", "scripts/**/*.mjs"],

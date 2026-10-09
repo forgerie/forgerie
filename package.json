@@ -34,7 +34,8 @@
   "bundleDependencies": [
     "@aliou/pi-processes",
     "pi-subagents",
-    "@earendil-works/pi-coding-agent"
+    "@earendil-works/pi-coding-agent",
+    "@router-for-me/pi-cliproxyapi-provider"
   ],
   "scripts": {
     "dev": "bash -c 'trap \"kill 0\" EXIT; npm run dev:sessiond & npm run dev:web & npm run dev:client & wait'",
@@ -81,6 +82,7 @@
     "@fastify/compress": "^9.0.0",
     "@fastify/static": "^10.1.2",
     "@fastify/websocket": "^11.3.0",
+    "@router-for-me/pi-cliproxyapi-provider": "1.4.21",
     "diff": "^9.0.0",
     "fastify": "^5.10.0",
     "html-to-text": "9.0.5",

@@ -94,6 +94,7 @@ import { createSessionTitleBridgeExtension, createSessionTitleBridgeSlot, type S
 import { bundledForgerieSkillsPackagePath, preferBundledForgerieSkills } from "./bundledForgerieSkills.js";
 import { withReplyFormatGuide } from "../../shared/replyFormatGuide.js";
 import { bundledManagedProcessesPackagePath } from "./bundledManagedProcesses.js";
+import { bundledCliproxyProviderPackagePath, bundledCliproxyProviderResources } from "./bundledCliproxyProvider.js";
 import { bundledSubagentsPackagePath, preferBundledSubagents } from "./bundledSubagents.js";
 import { canonicalizeStoredCwd, cwdPathsEqual } from "../workingDirectory.js";
 import { readSessionHeaderSummary, type SessionHeaderSummary } from "./sessionFileHeader.js";
@@ -828,17 +829,20 @@ function createDefaultRuntimeFactory(
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels }) => {
     const processBridgeSlot = createProcessBridgeSlot();
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
+    const providerResources = bundledCliproxyProviderResources(cwd, agentDir);
     const baseServices = await createAgentSessionServices({
       cwd,
       agentDir,
       modelRuntime,
+      settingsManager: providerResources.settingsManager,
       resourceLoaderOptions: {
         additionalExtensionPaths: [
           bundledManagedProcessesPackagePath(),
           bundledSubagentsPackagePath(),
           bundledForgerieSkillsPackagePath(),
+          bundledCliproxyProviderPackagePath(),
         ],
-        extensionsOverride: preferBundledSubagents,
+        extensionsOverride: (result) => providerResources.extensionsOverride(preferBundledSubagents(result)),
         skillsOverride: preferBundledForgerieSkills,
         // Tells the agent which rich blocks the browser app renders.
         appendSystemPromptOverride: withReplyFormatGuide,
