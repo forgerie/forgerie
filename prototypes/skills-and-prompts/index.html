@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skills and prompts — prototype</title>
+<!-- Throwaway mockup. Tokens copied from ui/src/ui/theme.css so it reads as Forgerie. -->
+<link rel="stylesheet" href="../../ui/node_modules/@fontsource-variable/public-sans/wght.css">
+<link rel="stylesheet" href="../../ui/node_modules/@fontsource-variable/jetbrains-mono/wght.css">
+<style>
+:root {
+  color-scheme: light dark;
+  --tint: 106;
+  --background: oklch(0.992 0.002 var(--tint));
+  --foreground: oklch(0.145 0.006 var(--tint));
+  --primary: oklch(0.205 0.006 var(--tint));
+  --primary-foreground: oklch(0.985 0.003 var(--tint));
+  --muted-foreground: oklch(0.556 0.007 var(--tint));
+  --line: color-mix(in oklab, var(--foreground) 10%, transparent);
+  --code-surface: color-mix(in oklab, var(--foreground) 4%, var(--background));
+  --tint-surface: color-mix(in oklab, var(--foreground) 2.5%, var(--background));
+  --hover-surface: color-mix(in oklab, var(--foreground) 4%, transparent);
+  --active-surface: color-mix(in oklab, var(--foreground) 7%, transparent);
+  --quiet-foreground: color-mix(in oklab, var(--foreground) 70%, transparent);
+  --faint-foreground: color-mix(in oklab, var(--foreground) 55%, transparent);
+  --body-font: "Public Sans Variable", sans-serif;
+  --code-font: "JetBrains Mono Variable", monospace;
+  --text-size: 0.9375rem; --small-text: 0.8125rem; --label-text: 0.75rem; --meta-text: 0.6875rem; --code-size: 0.78125rem;
+  --radius-control: 0.5rem; --radius-document: 0.375rem; --radius-surface: 0.625rem; --radius-pill: 999px;
+  --gutter: clamp(0.75rem, 2.6cqi, 1.5rem);
+  --control-size: 2.75rem; --icon-size: 1.75rem; --header-size: 3rem;
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-6: 1.5rem; --space-8: 2rem;
+  --live: oklch(0.623 0.214 259.815);
+  --live-wash: color-mix(in oklab, var(--live) 16%, transparent);
+  --diff-modify: oklch(0.6 0.13 70);
+  --warn-wash: color-mix(in oklab, var(--diff-modify) 10%, transparent);
+  --code-keyword: #9653a8; --code-string: #296746; --code-comment: #686a63; --code-title: #2c609a;
+  --caret-line: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.17 0.003 var(--tint));
+    --foreground: oklch(0.985 0.002 var(--tint));
+    --primary: oklch(0.922 0.002 var(--tint));
+    --primary-foreground: oklch(0.215 0.003 var(--tint));
+    --muted-foreground: oklch(0.708 0.004 var(--tint));
+    --tint-surface: color-mix(in oklab, var(--foreground) 4%, var(--background));
+    --code-keyword: #cda2e2; --code-string: #a5cda6; --code-comment: #969990; --code-title: #a3c3e6;
+    --diff-modify: oklch(0.76 0.13 80);
+  }
+}
+* { box-sizing: border-box; scrollbar-width: thin; }
+html, body { margin: 0; block-size: 100%; }
+body { background: var(--background); color: var(--foreground); font-family: var(--body-font); font-size: var(--text-size); -webkit-font-smoothing: antialiased; overflow: hidden; }
+button { font: inherit; color: inherit; }
+svg { flex: none; }
+code { font-family: var(--code-font); font-size: 0.92em; font-variant-ligatures: none; }
+
+/* Page frame: the same header every Forgerie surface uses. */
+.shell { block-size: 100dvh; display: flex; flex-direction: column; container: shell / size; }
+.header { flex: none; display: flex; align-items: center; gap: var(--space-2); block-size: var(--header-size); padding-inline: var(--gutter);
+  border-block-end: 1px solid var(--line); min-inline-size: 0; }
+.header .grow { flex: 1; min-inline-size: 0; display: flex; align-items: baseline; gap: var(--space-2); overflow: hidden; }
+.title { font-size: var(--text-size); font-weight: 500; white-space: nowrap; }
+.subtitle { color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-inline-size: 0; }
+.icon-btn { flex: none; display: inline-grid; place-items: center; inline-size: var(--icon-size); block-size: var(--icon-size); border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--muted-foreground); padding: 0; }
+.icon-btn:hover { background: var(--hover-surface); color: var(--foreground); }
+.back { display: inline-flex; align-items: center; gap: var(--space-1); border: 0; background: none; color: var(--muted-foreground); font-size: var(--small-text);
+  padding: 0 var(--space-2) 0 0; white-space: nowrap; }
+.back + .title { border-inline-start: 1px solid var(--line); padding-inline-start: var(--space-2); }
+.panel-icon { color: var(--muted-foreground); position: relative; }
+.panel-icon::after { content: ""; position: absolute; inset-block-start: 1px; inset-inline-end: 0; inline-size: 6px; block-size: 6px; border-radius: 1px; background: var(--foreground); }
+
+/* Two panes while both fit; one pane, with the list one tap away, when they do not. */
+.body { flex: 1; min-block-size: 0; display: grid; grid-template-columns: minmax(15rem, 21rem) minmax(0, 1fr); container: lens / inline-size; }
+.list-pane { min-block-size: 0; display: flex; flex-direction: column; border-inline-end: 1px solid var(--line); background: var(--tint-surface); }
+.doc-pane { min-block-size: 0; min-inline-size: 0; display: flex; flex-direction: column; }
+.files-opener { display: none; }
+@container (max-width: 40rem) {
+  .body { grid-template-columns: minmax(0, 1fr); }
+  .list-pane { display: none; }
+  .files-opener { display: inline-grid; }
+}
+
+/* List: a kind switch, a filter, then one section per origin, in the order Pi lets them win. */
+.list-top { flex: none; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-3) var(--space-2); }
+.kinds { display: flex; gap: 2px; padding: 2px; border-radius: var(--radius-control); background: var(--hover-surface); }
+.kinds button { flex: 1 1 0; min-inline-size: 0; display: inline-flex; align-items: baseline; justify-content: center; gap: 0.3em; border: 0; border-radius: calc(var(--radius-control) - 2px);
+  background: transparent; color: var(--muted-foreground); font-size: var(--small-text); padding: 0.3rem 0.25rem; white-space: nowrap; }
+.kinds button[aria-pressed="true"] { background: var(--background); color: var(--foreground); font-weight: 500; box-shadow: 0 0 0 1px var(--line); }
+.kinds .n { font-family: var(--code-font); font-size: var(--meta-text); color: var(--faint-foreground); }
+.filter { display: flex; align-items: center; gap: var(--space-2); block-size: 2rem; padding-inline: var(--space-2); border-radius: var(--radius-control);
+  border: 1px solid var(--line); color: var(--faint-foreground); font-size: var(--small-text); background: var(--background); }
+.bridge { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-document); background: var(--live-wash);
+  font-size: var(--label-text); line-height: 1.5; color: color-mix(in oklab, var(--foreground) 85%, transparent); }
+.bridge b { font-weight: 600; }
+.list { flex: 1; min-block-size: 0; overflow-y: auto; padding: 0 var(--space-2) var(--space-6); }
+.origin { margin-block-start: var(--space-3); }
+.origin-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); }
+.origin-head .name { color: var(--quiet-foreground); font-weight: 500; }
+.origin-head .n { font-family: var(--code-font); font-size: var(--meta-text); color: var(--faint-foreground); }
+.origin-head .where { margin-inline-start: auto; font-family: var(--code-font); font-size: var(--meta-text); color: var(--faint-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-inline-size: 0; }
+.origin-head .lock { color: var(--faint-foreground); }
+.rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--space-2); padding: 0.4rem var(--space-2); border-radius: var(--radius-document); cursor: default; }
+.row:hover { background: var(--hover-surface); }
+.row[aria-current="true"] { background: var(--active-surface); }
+.row .nm { font-size: var(--small-text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .ds { grid-column: 1 / -1; color: var(--muted-foreground); font-size: var(--label-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .tag { align-self: center; font-size: var(--meta-text); color: var(--muted-foreground); white-space: nowrap; display: inline-flex; align-items: center; gap: 0.25rem; }
+.row .tag.edited { color: var(--diff-modify); }
+.row[data-hidden] .nm { color: var(--faint-foreground); text-decoration: line-through; text-decoration-color: color-mix(in oklab, var(--foreground) 30%, transparent); }
+.row[data-hidden] .ds { color: var(--faint-foreground); }
+.more { padding: 0.35rem var(--space-2); font-size: var(--label-text); color: var(--muted-foreground); }
+
+/* Document: what it is, where it lives, then the file itself. */
+.doc-head { flex: none; padding: var(--space-4) var(--gutter) var(--space-3); border-block-end: 1px solid var(--line); display: flex; flex-direction: column; gap: 0.35rem; }
+.doc-title { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.doc-title h1 { margin: 0; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; }
+.chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.5rem; border-radius: var(--radius-pill); font-size: var(--label-text);
+  background: var(--hover-surface); color: var(--quiet-foreground); white-space: nowrap; }
+.chip.project { background: var(--live-wash); color: color-mix(in oklab, var(--live) 70%, var(--foreground)); }
+.where-line { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; color: var(--muted-foreground); font-size: var(--label-text); min-inline-size: 0; }
+.where-line code { color: var(--quiet-foreground); overflow-wrap: anywhere; }
+.where-line { column-gap: var(--space-4); row-gap: 0.15rem; }
+.where-line .sep { display: none; }
+.editor { flex: 1; min-block-size: 0; overflow: auto; background: var(--code-surface); font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; line-height: 1.7; padding-block: var(--space-3); }
+.ln { display: grid; grid-template-columns: 3px 2.75rem minmax(0, 1fr); padding-inline-end: var(--gutter); }
+.ln .mark { background: transparent; }
+.ln[data-edited] .mark { background: var(--diff-modify); }
+.ln .no { text-align: end; padding-inline-end: var(--space-3); color: var(--faint-foreground); opacity: 0.7; user-select: none; }
+.ln .tx { white-space: pre-wrap; overflow-wrap: anywhere; color: color-mix(in oklab, var(--foreground) 88%, transparent); }
+.ln[data-caret] { background: var(--caret-line); }
+.caret { display: inline-block; inline-size: 2px; block-size: 1.15em; vertical-align: text-bottom; background: var(--live); margin-inline-start: 1px; }
+.k { color: var(--code-title); } .s { color: var(--code-string); } .fm { color: var(--code-comment); }
+.h { color: var(--foreground); font-weight: 700; } .b { color: var(--code-keyword); } .st { color: var(--foreground); font-weight: 650; } .ic { color: var(--code-string); }
+.readonly .tx { color: color-mix(in oklab, var(--foreground) 72%, transparent); }
+
+/* The consequence of saving, set apart before the action. */
+.savebar { flex: none; display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; padding: var(--space-3) var(--gutter); border-block-start: 1px solid var(--line); background: var(--background); }
+.savebar p { flex: 1 1 18rem; margin: 0; font-size: var(--label-text); line-height: 1.5; color: var(--muted-foreground); min-inline-size: 0; }
+.savebar p strong { color: var(--foreground); font-weight: 500; }
+.savebar p code { color: var(--quiet-foreground); }
+.savebar .actions { display: flex; gap: var(--space-2); margin-inline-start: auto; }
+.btn { display: inline-flex; align-items: center; gap: var(--space-1); block-size: 2rem; padding-inline: var(--space-3); border-radius: var(--radius-control); font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
+.btn.primary { border: 0; background: var(--primary); color: var(--primary-foreground); }
+.btn.quiet { border: 1px solid var(--line); background: transparent; color: var(--quiet-foreground); }
+.lockbar { background: var(--tint-surface); }
+
+/* A short frame spends its height on the file: the heading and the save line
+   each fold to one row. The save line's words truncate; the buttons never do. */
+@container shell (max-height: 28rem) {
+  .doc-head { flex-direction: row; align-items: center; gap: var(--space-3); padding-block: var(--space-2); min-inline-size: 0; }
+  .doc-title { flex: none; flex-wrap: nowrap; }
+  .doc-title h1 { font-size: 1rem; }
+  .where-line { flex: 1; flex-wrap: nowrap; overflow: hidden; min-inline-size: 0; }
+  .where-line > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-inline-size: 0; }
+  .savebar { flex-wrap: nowrap; padding-block: var(--space-2); }
+  .savebar p { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lockbar p span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .list-top { padding-block: var(--space-2) var(--space-1); }
+  .bridge { padding-block: var(--space-1); }
+}
+.lockbar p { display: flex; gap: var(--space-2); align-items: flex-start; }
+.lockbar p svg { margin-block-start: 0.15rem; color: var(--faint-foreground); }
+</style>
+</head>
+<body>
+<div class="shell" id="app"></div>
+<script>
+const I = {
+  panel: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>',
+  x: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  back: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
+  refresh: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg>',
+  lock: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+  search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  branch: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M6 8.5v7M18 8.5a6 6 0 0 1-6 6H8.5"/></svg>',
+  slash: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M17 3 7 21"/></svg>',
+  files: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg>',
+};
+
+// Real resources from this machine on 2026-10-09 (profile ~/.local/share/forgerie/agent, cwd = the s-abd7d960 worktree).
+const PROJECT = [
+  ["changeset-changelog", "Changelogs, Changesets, release notes, conventional commits."],
+  ["code-quality-architecture", "Code quality and architecture expectations for this repo."],
+  ["documentation-guide", "Where documentation goes and how to write it."],
+  ["npm-release-via-github-actions", "Publish through GitHub Actions and GitHub Releases."],
+  ["testing-guide", "Repository-specific testing guide.", "edited"],
+];
+const YOURS = [
+  ["amaze-db-handoff", "Prepare an Amaze Insights database change set for Daniela."],
+  ["ask-matt", "Ask which skill or flow fits your situation.", "manual"],
+  ["atomic-decomp", "Decompose a UI end to end with atomic design."],
+  ["caliper-parts", "Decompose a screen into Caliper parts, gate-first."],
+  ["caliper-render", "See a UI part the way a target device shows it."],
+  ["code-review", "Review changes since a fixed point, on two axes."],
+  ["codebase-design", "Shared vocabulary for designing deep modules."],
+  ["diagnosing-bugs", "Diagnosis loop for hard bugs and regressions."],
+  ["domain-modeling", "Build and sharpen a project's domain model."],
+  ["handoff", "Compact the conversation into a handoff document.", "hidden"],
+  ["frontend-design", "Required for front-end UI and visual presentation."],
+  ["grilling", "Grill the user about a plan, decision, or idea."],
+];
+const FORGERIE = [
+  ["ask-user", "Decision handshake with the ask_user tool."],
+  ["handoff", "Detach the conversation into a continuation session.", "wins"],
+  ["relay", "Run a plan as a chain of independent sessions."],
+  ["pi-processes", "Long-running commands with the process tool."],
+  ["pi-subagents", "Delegation to builtin or custom subagents."],
+  ["council-mode", "A bounded, supervisor-mediated advisor council."],
+];
+const PACKAGES = [
+  ["bedrock-principles", "Cross-project engineering principles.", "pi-bedrock-principals"],
+  ["mobbin-reference", "How shipped apps solve a screen, flow, or section.", "pi-mobbin"],
+  ["youtube-transcript", "Download and clean a YouTube transcript.", "pi-youtube-transcript"],
+];
+
+const TESTING = [
+  '---',
+  'name: testing-guide',
+  'description: "Repository-specific testing guide. Use for any test work: planning coverage, writing/fixing/reviewing Vitest tests, test helpers/fakes, failure triage, choosing test layers, and Lit UI tests."',
+  '---',
+  '',
+  '# Testing guide',
+  '',
+  'Use this skill for test-specific decisions in this repository. The goal is useful regression coverage without letting test helpers or mocks become a second application to maintain.',
+  '',
+  'For production-code design and testability seams, also use the `code-quality-architecture` skill.',
+  '',
+  '## Core principles',
+  '',
+  '- Test behavior and contracts that matter, not branches for their own sake.',
+  '- Prefer the smallest layer that proves the behavior: pure helper, service, route, then component.',
+  '- Keep tests deterministic. Fake clocks, browser globals, and network boundaries when needed.',
+  '- Never sleep to wait for a render. Await the harness\'s `settle()` instead.',
+  '- Assert observable outcomes: return values, state transitions, HTTP responses, rendered state.',
+  '- Keep setup readable. A small explicit fixture is better than a magical factory.',
+  '',
+  '## Choosing the test layer',
+  '',
+  'Prefer this order unless the behavior requires a higher layer:',
+  '',
+  '1. **Pure helper/service tests** for data shaping, validation, and conversion logic.',
+  '2. **Controller/runtime adapter tests** for state orchestration and timers.',
+  '3. **Route/API contract tests** for HTTP status mapping and parsing.',
+];
+const MOBBIN = [
+  '---',
+  'name: mobbin-reference',
+  'description: |',
+  '  Search Mobbin for how shipped apps solve a screen, flow, or page section.',
+  '  Use only for open design questions: the user asks for references, examples,',
+  '  or "what do other apps do", or asks you to design, mock up, or redesign a',
+  '  screen or flow whose pattern is not yet decided.',
+  '---',
+  '',
+  '# Mobbin reference',
+  '',
+  'Before you draw, decide, or critique, look at how shipped products solved',
+  'the same screen. Mobbin holds 600,000+ real screens. Guessing when you could',
+  'look is the failure this skill prevents.',
+  '',
+  '## When to search',
+  '',
+  'Search only when the design itself is the open question:',
+  '',
+  '- the user asks for references, examples, or "what do other apps do for X"',
+  '- a first design pass for a new screen, flow, or page section',
+  '- a mockup, wireframe, or variant study where the pattern is not yet chosen',
+  '- a redesign that changes what a screen does, not how it is coded',
+  '',
+  'When the design is already decided, build from it. Implementation, bug',
+  'fixes, refactors, code review, tests, and small styling changes go ahead',
+  'without references.',
+];
+
+const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+function highlight(line, inFront) {
+  if (line === "---") return `<span class="fm">---</span>`;
+  if (inFront) {
+    const m = /^(\s*)([a-z-]+)(:)(.*)$/.exec(line);
+    if (m) return `${m[1]}<span class="k">${m[2]}</span>${m[3]}<span class="s">${esc(m[4])}</span>`;
+    return `<span class="s">${esc(line)}</span>`;
+  }
+  if (/^#{1,6} /.test(line)) return `<span class="h">${esc(line)}</span>`;
+  let out = esc(line)
+    .replace(/^(\s*)(-|\d+\.)( )/, '$1<span class="b">$2</span>$3')
+    .replace(/\*\*([^*]+)\*\*/g, '<span class="st">**$1**</span>')
+    .replace(/`([^`]+)`/g, '<span class="ic">`$1`</span>');
+  return out;
+}
+function editorLines(lines, { edited = [], caret } = {}) {
+  let front = false, seen = 0;
+  return lines.map((line, i) => {
+    if (line === "---") { seen++; front = seen === 1; }
+    const html = highlight(line, front && line !== "---");
+    const n = i + 1;
+    const caretHtml = caret && caret.line === n ? '<span class="caret"></span>' : "";
+    return `<div class="ln"${edited.includes(n) ? " data-edited" : ""}${caret && caret.line === n ? " data-caret" : ""}><span class="mark"></span><span class="no">${n}</span><span class="tx">${html}${caretHtml}</span></div>`;
+  }).join("");
+}
+
+function rows(items, { current } = {}) {
+  return items.map(([nm, ds, state]) => {
+    const isCurrent = current === nm;
+    const fromPackage = PACKAGES.some((p) => p[0] === nm);
+    let tag = "";
+    if (state === "edited") tag = '<span class="tag edited">● Edited</span>';
+    if (state === "manual") tag = `<span class="tag" title="Runs only when you type /skill:${nm}">${I.slash}manual</span>`;
+    if (state === "hidden") tag = '<span class="tag">hidden by Forgerie</span>';
+    if (state === "wins") tag = '<span class="tag">hides yours</span>';
+    if (fromPackage) tag = `<span class="tag">${state}</span>`;
+    return `<li class="row"${isCurrent ? ' aria-current="true"' : ""}${state === "hidden" ? " data-hidden" : ""}><span class="nm">${nm}</span>${tag}<span class="ds">${ds}</span></li>`;
+  }).join("");
+}
+function origin(name, n, where, items, opts = {}) {
+  return `<section class="origin"><div class="origin-head">${opts.locked ? `<span class="lock">${I.lock}</span>` : ""}<span class="name">${name}</span><span class="n">${n}</span><span class="where">${where}</span></div>
+    <ul class="rows">${rows(items, opts)}</ul>${opts.more ? `<div class="more">${opts.more}</div>` : ""}</section>`;
+}
+
+function sessionView() {
+  return `
+  <header class="header">
+    <button class="icon-btn files-opener" aria-label="Show files">${I.files}</button>
+    <div class="grow"><span class="title">Skills and prompts</span><span class="subtitle">on pi-extension-loading-points</span></div>
+    <button class="icon-btn" aria-label="Read the files again">${I.refresh}</button>
+    <button class="icon-btn" aria-label="Close">${I.x}</button>
+  </header>
+  <div class="body">
+    <aside class="list-pane">
+      <div class="list-top">
+        <div class="kinds" role="group" aria-label="Kind">
+          <button aria-pressed="true">Skills <span class="n">52</span></button>
+          <button aria-pressed="false">Prompts <span class="n">8</span></button>
+          <button aria-pressed="false">Context <span class="n">3</span></button>
+        </div>
+        <div class="filter">${I.search}Filter skills</div>
+      </div>
+      <div class="list">
+        ${origin("This project", 5, ".agents/skills", PROJECT, { current: "testing-guide", cur: true })}
+        ${origin("Yours", 38, "~/.agents/skills", YOURS, { more: "Show 26 more" })}
+        ${origin("Built into Forgerie", 6, "read-only", FORGERIE, { locked: true })}
+        ${origin("From packages", 3, "read-only", PACKAGES, { locked: true })}
+      </div>
+    </aside>
+    <main class="doc-pane">
+      <div class="doc-head">
+        <div class="doc-title"><h1>testing-guide</h1><span class="chip project">This project</span></div>
+        <div class="where-line"><code>.agents/skills/testing-guide/SKILL.md</code><span class="sep"></span><span style="display:inline-flex;gap:.3rem;align-items:center">${I.branch}pi-extension-loading-points worktree</span></div>
+      </div>
+      <div class="editor">${editorLines(TESTING, { edited: [8], caret: { line: 8 } })}</div>
+      <div class="savebar">
+        <p><strong>1 line changed.</strong> Saving leaves an uncommitted change in this worktree. This session reads it after <code>/reload</code>.</p>
+        <div class="actions"><button class="btn quiet">Discard</button><button class="btn primary">Save</button></div>
+      </div>
+    </main>
+  </div>`;
+}
+
+function settingsView() {
+  return `
+  <header class="header">
+    <button class="icon-btn files-opener" aria-label="Show files">${I.files}</button>
+    <span class="panel-icon">${I.panel}</span>
+    <div class="grow"><button class="back">${I.back}Settings</button><span class="title">Skills and prompts</span></div>
+    <button class="icon-btn" aria-label="Close">${I.x}</button>
+  </header>
+  <div class="body">
+    <aside class="list-pane">
+      <div class="list-top">
+        <div class="kinds" role="group" aria-label="Kind">
+          <button aria-pressed="true">Skills <span class="n">47</span></button>
+          <button aria-pressed="false">Prompts <span class="n">6</span></button>
+          <button aria-pressed="false">Context <span class="n">2</span></button>
+        </div>
+        <div class="filter">${I.search}Filter skills</div>
+        <p class="bridge">A project's own skills and prompts are in each session: <b>Session menu → Skills and prompts</b>.</p>
+      </div>
+      <div class="list">
+        ${origin("Yours", 38, "~/.agents/skills", YOURS.slice(0, 7), { more: "Show 31 more" })}
+        ${origin("Built into Forgerie", 6, "read-only", FORGERIE.slice(0, 3), { locked: true, more: "Show 3 more" })}
+        ${origin("From packages", 3, "read-only", PACKAGES, { locked: true, current: "mobbin-reference", cur: true })}
+      </div>
+    </aside>
+    <main class="doc-pane">
+      <div class="doc-head">
+        <div class="doc-title"><h1>mobbin-reference</h1><span class="chip">${I.lock}Read-only</span></div>
+        <div class="where-line"><span>From the <b style="font-weight:500;color:var(--quiet-foreground)">pi-mobbin</b> package</span><span class="sep"></span><code>skills/mobbin-reference/SKILL.md</code></div>
+      </div>
+      <div class="editor readonly">${editorLines(MOBBIN)}</div>
+      <div class="savebar lockbar">
+        <p>${I.lock}<span>A package update replaces this file, so Forgerie shows it read-only. To change it, edit the package, or turn the package off and copy the skill into yours.</span></p>
+        <div class="actions"><button class="btn quiet">Open in Plugins</button></div>
+      </div>
+    </main>
+  </div>`;
+}
+
+const view = new URLSearchParams(location.search).get("view") ?? "session";
+document.getElementById("app").innerHTML = view === "settings" ? settingsView() : sessionView();
+// The open file's row stays in view, as the real list would keep it.
+document.querySelector(".row[aria-current]")?.scrollIntoView({ block: "center" });
+</script>
+</body>
+</html>
