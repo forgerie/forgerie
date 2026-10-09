@@ -1,5 +1,18 @@
 # Verification and limits
 
+## Colour in a code fence
+
+A code fence now takes colour for every label highlight.js has a grammar for. The renderer asked highlight.js's `common` build what a label meant, and that build carries 36 languages: `nix`, `dockerfile`, `cmake`, `powershell`, `elixir`, `matlab`, `nim`, `http`, and about 150 more drew as plain text. The transcript and the composer now share one instance of the full build (`ui/src/ui/codeGrammars.ts`), so a `nix` fence colours in a reply, and the composer still calls a tag a code block by the same test. A label highlight.js has no grammar for stays plain text: nothing is guessed for it.
+
+The theme also grew to the token kinds these grammars emit. That closes two older gaps as well: a compound scope such as `hljs-title function_` never matched `.hljs-title`, so every function name was plain, and `.hljs-attr` was unstyled, so the keys of a yaml or json fence were plain. A diff fence now colours its added and removed lines.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | `npm run verify` in `ui/` passed: build, lint, and 1350 tests. Two new tests in `src/ui/highlightCode.test.ts` highlight a `nix`, a `dockerfile`, and a `cmake` fence, and assert that ten labels the `common` subset drops are known. `npm run verify:static` at the root passed (typecheck, ESLint, Knip for the root and for `ui/`). `gates/check-pending.mjs main` reports 619 -> 619. |
+| Visual review. | `scripts/children-shots.mjs code-languages` captured a new fixture reply (`?scenario=code-languages`) with a nix, a yaml, a diff, and a dockerfile fence at all four Fold postures in both schemes: eight captures, no page overflow. A CDP probe read the computed colour of every token class in each block in both schemes and matched each one to a theme token, for example `hljs-attr` at #2c609a light and #a3c3e6 dark, `hljs-deletion` at the alert colour, `hljs-addition` at the string colour. |
+
+Cost: the full build replaces the subset, so the main chunk grows from 2,279,519 to 3,094,668 bytes, and from 711,139 to 970,903 bytes gzipped, on every page load. The editor carries 143 grammars against highlight.js's 193, so a `nix`, `elixir`, `matlab`, or `nim` draft draws labelled plain code where the transcript colours it. Operators (`=`), punctuation, and a bare variable (`$NAME` in a shell fence) stay uncoloured, which is what `codeTokens.ts` leaves plain in the editor.
+
 ## Child agents
 
 A session's child agents open from the robot button in the header. The child view reads like the main thread: the task is a bubble, the child's words are prose, its tool calls hang from the work rail with output set in under each call, and a question is a card where it was asked. There is one input. While a question is open it answers it; otherwise it steers a working child or gives an idle one a new task. Stop sits in the header while the child works. In the parent thread, a report shows its first line in the text face and opens to the whole answer; a steer and a stop are one line each. The sheet takes focus itself on open, so no control wears a focus ring until the reader moves. The changes button now uses the same `BadgeButton` as the child agents button.

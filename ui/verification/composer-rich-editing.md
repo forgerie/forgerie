@@ -10,7 +10,7 @@ This applies to the chat composer, ask and extension-input answers, and the new-
 | --- | --- |
 | Type ` ```sql `, then Shift+Enter (Enter in a new session) | The fence closes. The caret moves to the first code line. One undo restores ` ```sql `. |
 | A complete fence, typed, pasted, recalled, or set by the composer | The fence lines hide behind a label and a closing edge. The label is the tag as written, such as `sql` or `ts`. |
-| A tag that the transcript highlights | The block uses the same five code colours as transcript code and diffs. Grammars load on first use. Unknown tags, such as `diagram`, stay plain but keep their label. |
+| A tag that names a language | The block uses the same five code colours as transcript code and diffs, for every tag the editor carries a grammar for. Grammars load on first use. A tag with no editor grammar, such as `nix`, or one no grammar knows, such as `diagram`, stays plain but keeps its label. |
 | An incomplete fence | Stays visible as source. |
 | Shift+Enter inside a block | Adds a code line. |
 | Arrow Down on a block's last line | Moves past the hidden closing fence into prose, or into the next block. |
@@ -32,7 +32,7 @@ Every key the bar claims still runs first: Enter routing, queue and steer, sugge
 - `ComposerEditor.tsx` binds CodeMirror to the assistant-ui composer. Edits go to the composer. Changes from the composer, such as recall, suggestions, dictation, and restored drafts, come back as editor changes, so the caret and undo history follow them.
 - The editor's content element is the `ComposerInputElement`. It has `value`, a selection, `setSelectionRange`, `select`, and the editor commands that a textarea does not have. The bar, the tests, and the browser checks use it through `[data-composer-input]`.
 - `composerCodeBlock.ts` is ported from the legacy `components/composerCodeBlock.ts`. Two changes: the body wraps only the code lines, and the hidden fences are inclusive at their start, so no empty line shows above the label or the closing edge.
-- `composerCodeLanguage.ts` picks a grammar only for tags that highlight.js knows, which is what the transcript colours. `@codemirror/language-data` supplies the grammars.
+- `composerCodeLanguage.ts` calls a tag a code block only when the same highlight.js instance the transcript highlights with knows it (`codeGrammars.ts`, the full build). `@codemirror/language-data` supplies the editor's grammars, and it carries fewer languages than highlight.js does, so a `nix` draft is plain where the transcript colours it.
 - `codeTokens.ts` maps syntax tags to the theme's code colours. The diff editor uses the same map.
 
 ## Costs and limits
@@ -40,6 +40,8 @@ Every key the bar claims still runs first: Enter routing, queue and steer, sugge
 | Cost or limit | Detail |
 | --- | --- |
 | Bundle size | The main chunk grew from 1,718,880 to 2,090,695 bytes, and from 528,340 to 648,517 bytes gzipped. CodeMirror's core now loads with every page. The diff editor used to load it on demand. |
+| Bundle size, second cost | The transcript moved to the full highlight.js build (193 languages, against 36 in the `common` subset) so that a fence label colours whenever a grammar exists for it. The main chunk grew again: from 2,279,519 to 3,094,668 bytes, and from 711,139 to 970,903 bytes gzipped. |
+| Editor grammar coverage | The editor carries 143 grammars. A tag highlight.js knows and the editor does not, such as `nix`, `elixir`, `matlab`, or `nim`, colours in the transcript and draws as labelled plain code in a draft. |
 | Late list commands | lang-markdown brings HTML, CSS, and JavaScript grammars. It loads after the bar draws. Until it loads, Shift+Enter on a list item adds a plain newline. |
 | A fence at the very end | With the closing fence as the last line, a caret placed after it by pointer sits on the fence line. Typing there turns the block back into source. Arrow Down adds a line first, as in the legacy editor. |
 | Undo after a composer change | Composer-side changes are in the undo history. Ctrl+Z after sending can bring the sent text back into the draft. The legacy editor behaved the same way. |
