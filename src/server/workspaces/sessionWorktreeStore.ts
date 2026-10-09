@@ -93,7 +93,10 @@ export class SessionWorktreeStore {
     const records = await this.list();
     const removed = await this.readOnly(ref);
     if (removed !== undefined) throw new Error(`This session's worktree was ${removed.state.kind}. Its transcript is read-only.`);
-    if (records.some((record) => record.operation !== undefined && (pathInside(record.path, ref.cwd) || (record.relatedSession?.id === ref.id && cwdPathsEqual(record.relatedSession.cwd, ref.cwd))))) {
+    if (records.some((record) => {
+      const owner = record.relatedSession ?? record.childOwner;
+      return record.operation !== undefined && (pathInside(record.path, ref.cwd) || (owner?.id === ref.id && cwdPathsEqual(owner.cwd, ref.cwd)));
+    })) {
       throw new Error("A worktree lifecycle action is running. Wait before changing this session.");
     }
   }

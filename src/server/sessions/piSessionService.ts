@@ -1022,6 +1022,7 @@ export class PiSessionService implements SessionRouteService {
    * on full readiness.
    */
   private readonly startupSessions = new Map<string, PiAgentSession>();
+  private readonly constructingSessions = new Set<PiSessionRef>();
   /** Handoff destinations whose extension binding must auto-cancel startup dialogs instead of parking creation. */
   private readonly detachedHandoffStartupSessions = new WeakSet<PiAgentSession>();
   private readonly activities = new Map<string, {
@@ -1484,6 +1485,19 @@ export class PiSessionService implements SessionRouteService {
       .filter(isDefined);
     const ownedSessions = (await this.withSessionWorktrees(await this.withRelatedSessionsElsewhere(withSessionTabs([...unarchivedSessions, ...archivedSessions], tabsBySessionId(tabsRecords)), cwd), cwd)).map((session) => this.pullRequestWatches?.isWatching(session.id) === true ? { ...session, watchingPullRequest: true } : session);
     return withSessionTabs(withPinnedFlags(ownedSessions, pinnedSessionIdSet(pinnedRecords)), tabsBySessionId(tabsRecords));
+  }
+
+  /** Cleanup keeps even idle, unarchived sessions. Hidden delegated sessions are part of the catalog. */
+  async worktreeHasLiveSession(cwd: string, ownerId?: string): Promise<boolean> {
+    await Promise.all(this.pendingSessionOpenPromises());
+    const matches = (id: string, directory: string) => pathInside(cwd, directory) || (ownerId !== undefined && id.startsWith(ownerId));
+    const hasRuntime = () => [...this.constructingSessions].some((ref) => matches(ref.id, ref.cwd))
+      || [...this.startupSessions.values()].some((item) => matches(item.sessionManager.getSessionId(), item.sessionManager.getCwd()))
+      || [...this.active.values()].some((item) => matches(item.runtime.session.sessionId, item.runtime.cwd));
+    if (hasRuntime()) return true;
+    const [catalog, archived] = await Promise.all([this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll(), this.archiveStore.list()]);
+    const archives = new Set(archived.map((item) => item.sessionId));
+    return hasRuntime() || catalog.some((item) => !archives.has(item.id) && matches(item.id, item.cwd));
   }
 
   /** Close only idle sessions. The worktree service has already persisted its input gate. */
@@ -4290,9 +4304,13 @@ export class PiSessionService implements SessionRouteService {
     options: CreateSessionRuntimeOptions = {},
   ): Promise<ActiveSession<PiSessionRuntime>> {
     const startup = this.startupProgress(sessionManager, options.startupIntent ?? "open", options.startupToken);
+    // A new start has no catalog entry or pending-open receipt until runtime construction finishes.
+    const constructing = { id: sessionManager.getSessionId(), cwd };
+    this.constructingSessions.add(constructing);
     try {
       return await this.createSessionRuntime(sessionManager, cwd, options, startup);
     } finally {
+      this.constructingSessions.delete(constructing);
       startup.end();
     }
   }

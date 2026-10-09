@@ -40,7 +40,7 @@ Do not reopen these without new evidence. Ask the user if you have that evidence
 
 ## Rules
 
-- Work in `.worktree/<name>` on a branch from `main`. Land by rebase and fast-forward, then remove the worktree.
+- Work in `.worktrees/<name>` on a branch from `main`. Land by rebase and fast-forward, then remove the worktree.
 - Use Node 24: `nix shell nixpkgs#nodejs_24`. Run `npm run verify` before each commit.
 - Do not restart the production `forgerie-sessiond.service` while any session is running. A restart kills in-flight runs. For tests, run a separate sessiond with its own `PI_WEB_DATA_DIR`, `PI_WEB_CONFIG`, and `PI_WEB_SESSIOND_PORT`.
 - Do not edit `ui/` components or CSS. You may add fields to the zod schemas in `ui/src/childAgents/childAgentsModel.ts`, so the browser keeps parsing your responses. Change nothing else under `ui/`.
@@ -83,7 +83,7 @@ Done when tests cover create, restart without a duplicate, land, discard, and th
 
 ### 4. Worktree cleanup
 
-- Use one folder name. Today the repo has both `.worktree/` and `.worktrees/`. Propose which one to keep, and ask the user before you move anything.
+- Use `.worktrees/` for new allocations. The user chose this folder on 2026-10-09. Existing `.worktree/` checkouts stay at their recorded paths. Ask before moving any checkout.
 - Add a cleanup job that applies the rule in "Decisions already made".
 - Add an API that lists every worktree the job kept, with the reason: dirty, unmerged, or in use by a session.
 

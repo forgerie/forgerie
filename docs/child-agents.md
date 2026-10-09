@@ -59,7 +59,7 @@ Browser requests use `/api` before the paths below. Sessiond uses the paths with
 }
 ```
 
-`worktree` allocates under `<main-checkout>/.worktree/` at the parent's `HEAD`. The allocation receipt, path, and branch are deterministic for the Durable tool task. Restart replay reuses that receipt and original starting commit. Each child conversation saves its own `cwd`.
+`worktree` allocates under `<main-checkout>/.worktrees/` at the parent's `HEAD`. The allocation receipt, path, and branch are deterministic for the Durable tool task. Restart replay reuses that receipt and original starting commit. Each child conversation saves its own `cwd`.
 
 A successful tool result contains `content: [{type: "text", text: string}]` and `details: {name: string, conversationId: number}`. A worktree child adds its branch, commits ahead, and at most 20 changed paths to its completion report. Changed paths include committed changes, staged changes, unstaged changes, and untracked files. Reports still start a parent turn.
 
@@ -103,7 +103,7 @@ Shared children omit `worktree`. Removed worktrees report `ahead: 0` and `dirty:
 
 Extra body fields are invalid. Worktree actions refuse a working child, a pending child submission, or an undelivered completion report. New child submissions and worktree actions share an admission lock. The existing ownership, rebase, dirty-file, hook, and removal checks also apply. All Git lifecycle mutations serialize per repository. In production, the owning parent's managed processes and other working agents must also stop before removal.
 
-Land rebases onto the default branch and fast-forwards that branch. It refuses uncommitted child files. Discard preview lists the commits and dirty files it would delete. Discard requires the exact preview token. If those files or branch tips change, discard returns `stale-preview` and deletes nothing. Confirmed discard can delete uncommitted work. There is no automatic cleanup in this API.
+Land rebases onto the default branch and fast-forwards that branch. It refuses uncommitted child files. Discard preview lists the commits and dirty files it would delete. Discard requires the exact preview token. If those files or branch tips change, discard returns `stale-preview` and deletes nothing. Confirmed discard can delete uncommitted work. These child actions are explicit. The separate cleanup job described below removes only unused, clean, merged owned checkouts.
 
 ```ts
 type Cleanup = {kind: "pending"} | {kind: "done"} | {kind: "failed"; error: string};
@@ -124,6 +124,37 @@ interface WorktreeDiscardPreview {
 ```
 
 Domain results return HTTP 200, including `blocked`, `conflict`, and `stale-preview`. Callers must check `kind` and `cleanup.kind`. Invalid input returns 400; an unknown session, a foreign child, or a session without child support returns 404. Worktree ownership, busy, and lifecycle errors return 409. Errors have shape `{error: string}`. The existing non-worktree routes retain their error mapping; unexpected failures return 500.
+
+### Cleanup API
+
+New worktrees use `.worktrees/`. Existing `.worktree/` checkouts stay at their recorded paths. These endpoints report only the job's owned-worktree inventory. Unowned worktrees are untouched.
+
+| Method and path | Request | Response |
+| --- | --- | --- |
+| `GET /sessions/worktrees/cleanup` | No body or query is required. This read starts no cleanup. | `CleanupState`, below. |
+| `POST /sessions/worktrees/cleanup` | No body, or `{}`. Extra fields and non-object bodies are invalid. | `CleanupReport`. Concurrent calls share one job run. |
+
+```ts
+type KeptReason = "dirty" | "unmerged" | "in-use" | "setup-incomplete" | "checkout-changed" | "error";
+interface CheckoutIdentity { id: string; repo: string; path: string; branch: string }
+interface CleanupReport {
+  startedAt: string; // ISO UTC timestamp.
+  finishedAt: string; // ISO UTC timestamp.
+  kept: (CheckoutIdentity & {reason: KeptReason; detail?: string})[];
+  removed: CheckoutIdentity[];
+}
+type CleanupState =
+  | {phase: "never-run"}
+  | {phase: "running"; previous?: CleanupReport}
+  | {phase: "done"; report: CleanupReport}
+  | {phase: "failed"; error: string; previous?: CleanupReport};
+```
+
+The snapshot is the last report, not a new filesystem scan. Reports live in sessiond memory; restart runs the job again. Records whose cleanup is already done do not appear in a later run.
+
+A job run returns HTTP 200 even when it keeps every checkout. Each kept entry states the reason. Per-checkout failures use `reason: "error"` and `detail`; they do not stop inspection of other records. Invalid input returns 400. An inventory-wide or shutdown failure returns 500. Errors have shape `{error: string}`. There is no force or discard setting.
+
+Sessiond also runs the job at startup after child recovery and every five minutes. It keeps idle unarchived sessions and their child worktrees. Automatic cleanup counts ignored files as dirty, so dependency folders can prevent removal. See [Automatic cleanup](session-worktrees.md#automatic-cleanup) for the safety rules and costs.
 
 ## Code
 

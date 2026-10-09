@@ -300,6 +300,11 @@ describe("Durable-native child agents in a Forgerie session", () => {
     await expect(readFile(join(directory, "out.txt"))).rejects.toThrow();
     await service.dispose();
     service = openService();
+    const ownedPath = before[0]?.worktree?.path;
+    if (ownedPath === undefined) throw new Error("Expected isolated cwd");
+    // An unopened parent still owns its child's folder while its session stays unarchived.
+    expect(await service.worktreeHasLiveSession(ownedPath, ref.id)).toBe(true);
+    expect(await service.worktreeHasLiveSession(ownedPath)).toBe(false);
     expect(await service.durableChildren(ref)).toEqual(before);
     expect(await lifecycle.store.list()).toHaveLength(2);
     await service.messageDurableChild(ref, before[0]?.conversationId ?? 0, "WRITE after.txt reopened child");

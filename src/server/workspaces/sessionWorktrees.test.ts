@@ -43,11 +43,12 @@ async function commit(f: Awaited<ReturnType<typeof fixture>>, cwd: string, conte
 }
 
 describe("session-owned worktrees with real git", () => {
-  it("creates from the default branch tip, excludes .worktree, and persists ownership", async () => {
+  it("creates from the default branch tip, excludes .worktrees, and persists ownership", async () => {
     const f = await fixture();
     expect(f.record.defaultBranch).toBe("trunk");
     expect(await f.git(f.repo, "status", "--porcelain")).toBe("");
-    expect(await readFile(join(f.repo, ".git/info/exclude"), "utf8")).toContain("/.worktree/");
+    expect(await readFile(join(f.repo, ".git/info/exclude"), "utf8")).toContain("/.worktrees/");
+    expect(f.record.path).toContain("/.worktrees/");
     expect(await f.git(f.record.path, "rev-parse", "HEAD")).toBe(await f.git(f.repo, "rev-parse", "trunk"));
     const reloaded = new SessionWorktreeStore(join(f.root, "worktrees.json"));
     await reloaded.initialize();
@@ -79,6 +80,18 @@ describe("session-owned worktrees with real git", () => {
     expect(await f.worktrees.land(f.record.id, [f.session])).toMatchObject({ kind: "blocked", reason: "related-worktrees-active" });
     await expect(resumed.create(f.repo, undefined, first.id)).rejects.toThrow("Only an unowned setup");
     await expect(resumed.attach(first.id, { ...f.session, cwd: first.path })).rejects.toThrow("ownership");
+  });
+
+  it("keeps a legacy child allocation at its persisted path while new allocations use .worktrees", async () => {
+    const f = await fixture();
+    const record = await f.worktrees.createForChild(f.session, "legacy-task");
+    const legacy = join(f.repo, ".worktree", "legacy-child");
+    await mkdir(join(f.repo, ".worktree"));
+    await f.git(f.repo, "worktree", "move", record.path, legacy);
+    await f.store.update(record.id, { path: legacy });
+    expect((await f.worktrees.createForChild(f.session, "legacy-task")).path).toBe(legacy);
+    expect((await f.worktrees.createForChild(f.session, "new-task")).path).toContain("/.worktrees/");
+    await access(legacy);
   });
 
   it("rebases and lands, preserves a read-only transcript, removes the worktree and branch", async () => {

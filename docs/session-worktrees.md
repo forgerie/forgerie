@@ -40,9 +40,9 @@ Malformed creation requests return HTTP 400 with `{error:string}`. An unknown wo
 
 ## Setup and live status
 
-Creation allocates `<main repo>/.worktree/s-<8 characters>` and a short temporary branch. It uses the current local default-branch tip. The default branch comes from `origin/HEAD` when a corresponding local branch exists, then `init.defaultBranch`, then `main`, `master`, or the main checkout's branch. No network fetch occurs. An unborn repository without a commit cannot allocate a worktree.
+Creation allocates `<main repo>/.worktrees/s-<8 characters>` and a short temporary branch. It uses the current local default-branch tip. The default branch comes from `origin/HEAD` when a corresponding local branch exists, then `init.defaultBranch`, then `main`, `master`, or the main checkout's branch. No network fetch occurs. An unborn repository without a commit cannot allocate a worktree.
 
-The first allocation adds `/.worktree/` to the common Git directory's `info/exclude`. It leaves `.gitignore` unchanged.
+The first allocation adds `/.worktrees/` to the common Git directory's `info/exclude`. It leaves `.gitignore` and existing exclusions unchanged. Legacy `.worktree/` checkouts keep their persisted paths. No folder or checkout moves automatically.
 
 The server publishes `{type:"session.worktree",worktree:SessionWorktreeRecord}` on the global session event stream. After ownership exists, it also publishes on the owning session stream. After completion, all saved sessions in that worktree receive the event. Global first-send events carry the request's `startupToken` in the record. No setup log is appended to the Pi transcript.
 
@@ -86,6 +86,33 @@ At daemon startup, a missing owner transcript in Pi's active directory does not 
 Archive cleanup removes only a clean worktree whose commits are all contained in the default branch. It retains a worktree when any other session has a cwd at or below that path. This inventory includes archived sessions and delegated children hidden by inbox policy. The retained reason is exposed as `worktree.archiveCleanup`. Archive remains an archive operation even when cleanup is retained.
 
 External Git commands are outside Forgerie's mutation queue. Do not switch branches, push, or edit the same checkout during Land or Discard. Git's own locks and precondition checks catch many races, but they do not provide a transaction across external commands and the ownership file.
+
+## Automatic cleanup
+
+Sessiond runs the cleanup job after child recovery at startup, then every five minutes. Concurrent requests share the current run. Shutdown cancels the timer and waits for that run.
+
+The job visits only records in `session-worktrees.json` whose cleanup is not done. It never adopts or removes an unowned Git worktree. It uses persisted paths, including legacy `.worktree/` paths, without moving them.
+
+A candidate must have completed setup, no live session use, no uncommitted or ignored files, and no commits outside the default branch. The job keeps a checkout switched or removed outside Forgerie. Git inspection failures keep the checkout.
+
+Live use includes an unarchived session at or below the checkout path, even when idle or hidden from the inbox. A live parent keeps its child's or related checkout. Startup sessions, open runtimes, workspace terminals, and the live-child recovery index also prevent cleanup. Archive the owning session before expecting cleanup. The job does not archive sessions itself.
+
+The job gates new input, saves affected transcripts, and rechecks use, files, and branch ancestry before removal and after the pre-remove hook. After the hook and final checks pass, the job records the landed receipt before deletion. A failed hook keeps an active checkout writable and reports an error. A failure after the receipt leaves a read-only conversation and a cleanup error.
+
+Ignored files count as `dirty` for automatic cleanup and archive cleanup. This includes dependency folders, build output, and private files. These files still do not count in ordinary `info.dirtyFiles`. This policy costs disk space. Explicit Land or confirmed Discard can remove ignored files as before.
+
+These checks cover Forgerie's sessions and terminals. External programs do not share its input gate. The existing restriction on external edits during lifecycle actions also applies to cleanup.
+
+| Reason | Why the job kept the checkout |
+| --- | --- |
+| `dirty` | Uncommitted or ignored files exist. |
+| `unmerged` | The default branch does not contain every commit. |
+| `in-use` | A session, parent, terminal, child recovery entry, or related checkout still uses it. |
+| `setup-incomplete` | Setup or a recorded branch rename is unfinished. |
+| `checkout-changed` | The persisted path or branch no longer matches Git. |
+| `error` | Inspection, transcript preservation, or removal failed. `detail` gives the error. |
+
+The read and run contracts are in [Child agents: cleanup API](child-agents.md#cleanup-api).
 
 ## Removed-workspace transcript decision
 

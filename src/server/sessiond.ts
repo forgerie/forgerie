@@ -51,9 +51,11 @@ import { ProjectWorkspaces } from "./projects/projectWorkspaces.js";
 import { relatedPullSessions } from "./projects/relatedPullSessions.js";
 import { registerProjectGroupRoutes } from "./projects/projectGroupRoutes.js";
 import { WorkspaceService } from "./workspaces/workspaceService.js";
-import { SessionWorktreeStore } from "./workspaces/sessionWorktreeStore.js";
+import { SessionWorktreeStore, pathInside } from "./workspaces/sessionWorktreeStore.js";
 import { SessionWorktrees } from "./workspaces/sessionWorktrees.js";
 import { UserSessionWorktrees, registerSessionWorktreeRoutes } from "./workspaces/sessionWorktreeRoutes.js";
+import { WorktreeCleanupJob } from "./workspaces/worktreeCleanupJob.js";
+import { registerWorktreeCleanupRoutes } from "./workspaces/worktreeCleanupRoutes.js";
 import { sessiondSocketPath } from "../sessiond/config.js";
 import { TerminalService } from "./terminals/terminalService.js";
 import { registerTerminalRoutes } from "./terminals/terminalRoutes.js";
@@ -253,19 +255,30 @@ async function createSessionDaemonRuntime() {
     activeAgentProfile,
   });
   const userSessions = new UserSessionWorktrees(sessionWorktrees, sessions);
+  const worktreeCleanup = new WorktreeCleanupJob({
+    worktrees: sessionWorktrees,
+    async inUse(record) {
+      const owner = record.relatedSession ?? record.childOwner;
+      if (workspaceActivity.snapshot().workspaces.some((item) => item.hasTerminalActivity && pathInside(record.path, item.cwd))) return true;
+      if (owner !== undefined && (await liveChildren?.list())?.some((ref) => ref.id === owner.id) === true) return true;
+      return sessions.worktreeHasLiveSession(record.path, owner?.id);
+    },
+    onError: (error) => { app.log.warn({ err: error }, "worktree cleanup failed"); },
+  });
   const azureCredentials = new AzureDevopsPatStore(join(piWebDataDir(daemonEnvironment), "azure-devops"));
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
-  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren };
+  return { eventHub, workspaceActivity, auth, sessions, terminals, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessions, terminals, runtimeComponent, promptResources, promptLibrary, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup }: SessionDaemonRuntime): void {
   registerBacklogRoutes(app, backlog);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerAuthRoutes(app, auth);
+  registerWorktreeCleanupRoutes(app, worktreeCleanup);
   registerSessionWorktreeRoutes(app, userSessions);
   registerProjectGroupRoutes(app, groups, projects, relatedWork);
   registerSessionRoutes(app, sessions, eventHub, "", userSessions);
@@ -291,8 +304,10 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, auth, sessio
   app.get("/runtime", () => runtimeComponent);
 }
 
-async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, catalogRefresher, pulls, liveChildren }: SessionDaemonRuntime): Promise<void> {
+async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup }: SessionDaemonRuntime): Promise<void> {
   pulls.start();
+  let shuttingDown = false;
+  const startCleanup = () => { if (!shuttingDown) worktreeCleanup.start(); };
   // Children run only while their parent session is open. Reopen the sessions that had live children at shutdown.
   if (liveChildren !== undefined) {
     void liveChildren.list().then((refs) => sessions.resumeDurableChildren(refs)).then(async (report) => {
@@ -304,9 +319,9 @@ async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, cat
         }
       }
       if (report.resumed.length > 0) app.log.info({ resumed: report.resumed }, "resumed sessions with durable children");
-    }, (error: unknown) => { app.log.warn({ err: error }, "durable child resume failed"); });
-  }
-  let shuttingDown = false;
+      startCleanup();
+    }).catch((error: unknown) => { app.log.warn({ err: error }, "durable child resume failed"); startCleanup(); });
+  } else startCleanup();
   async function shutdown(signal: NodeJS.Signals): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -319,6 +334,7 @@ async function listenSessionDaemon({ auth, sessions, terminals, unreadStore, cat
         app.log.error({ err: error, operation }, "session daemon shutdown operation failed");
       }
     };
+    await attempt("stop worktree cleanup", () => worktreeCleanup.stop());
     await attempt("dispose PR watches", () => { pulls.dispose(); });
     await attempt("dispose terminals", () => { terminals.dispose(); });
     await attempt("dispose catalog refresher", () => { catalogRefresher.dispose(); });

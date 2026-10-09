@@ -54,6 +54,13 @@ review. A partial review does not move the cursor.
 - **Low / usually skip**: upstream client UI (`src/client/`), styling, bundled
   plugin UX — this is where we diverge.
 
+## Git workspace
+
+New Forgerie worktrees use `.worktrees/<name>`. This overrides the `.worktree/`
+folder in the global Git workspace rule. Keep the same branch, rebase,
+fast-forward, and removal procedure. Existing `.worktree/` checkouts stay at
+their recorded paths; moving them requires explicit user approval.
+
 ## Machine-local instructions
 
 If `AGENTS.local.md` exists in the repo root (gitignored, per-machine), read

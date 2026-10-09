@@ -1,6 +1,9 @@
 import { Type, type Static } from "typebox";
 import { RelatedSessionSchema, type RelatedSession } from "./projectGroups.js";
 
+/** New allocations only. Persisted legacy paths are never renamed automatically. */
+export const SESSION_WORKTREE_DIRECTORY = ".worktrees";
+
 const text = Type.String({ minLength: 1 });
 export const NewSessionDestinationSchema = Type.Union([
   Type.Object({ kind: Type.Literal("fresh-worktree") }, { additionalProperties: false }),

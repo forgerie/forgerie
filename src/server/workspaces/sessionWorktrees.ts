@@ -3,7 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import type { SessionWorktreeRecord, SessionWorktreeInfo, WorktreeActionResult, WorktreeArchiveCleanupResult, WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
+import { SESSION_WORKTREE_DIRECTORY, type SessionWorktreeRecord, type SessionWorktreeInfo, type WorktreeActionResult, type WorktreeArchiveCleanupResult, type WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
+import type { WorktreeCleanupOutcome } from "../../shared/worktreeCleanup.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
 import { discoverGitWorktrees, isGitRepository } from "./gitWorktreeDiscovery.js";
 import { SessionWorktreeStore, pathInside, worktreeInfo, type SessionWorktreeChanges, worktreeSessionMetadata } from "./sessionWorktreeStore.js";
@@ -79,7 +80,7 @@ export class SessionWorktrees {
         const name = allocation === undefined ? `s-${id.slice(0, 8)}` : `c-${id.slice("child-".length)}`;
         const branch = allocation === undefined ? await availableBranch(options.repo, name) : name;
         const timestamp = new Date().toISOString();
-        record = { id, repo: options.repo, path: join(options.repo, ".worktree", name), branch, defaultBranch: options.defaultBranch,
+        record = { id, repo: options.repo, path: join(options.repo, SESSION_WORKTREE_DIRECTORY, name), branch, defaultBranch: options.defaultBranch,
           renamed: false, setup: { phase: "creating", log: "" }, state: { kind: "active" }, cleanup: { kind: "pending" }, transcripts: [], createdAt: timestamp, updatedAt: timestamp,
           ...(allocation === undefined ? {} : { sourceCommit: allocation.sourceCommit, childOwner: allocation.owner }),
           ...(startupToken === undefined ? {} : { startupToken }), ...(relatedSession === undefined ? {} : { relatedSession }) };
@@ -256,6 +257,47 @@ export class SessionWorktrees {
     });
   }
 
+  /** Automatic cleanup admits only owned, clean, merged checkouts with no live session. */
+  async cleanupUnused(id: string, inUse: (record: SessionWorktreeRecord) => Promise<boolean>): Promise<WorktreeCleanupOutcome> {
+    const record = await this.store.require(id);
+    return this.exclusive(record.repo, async () => {
+      const current = await this.store.require(id);
+      if (current.cleanup.kind === "done") return { kind: "removed" };
+      if (current.operation !== undefined) return { kind: "kept", reason: "in-use" };
+      if (current.setup.phase !== "done" || current.pendingRename !== undefined) return { kind: "kept", reason: "setup-incomplete" };
+      const keep = async (): Promise<Extract<WorktreeCleanupOutcome, { kind: "kept" }> | undefined> => {
+        if (await inUse(current) || (await this.activeRelated(current)).length > 0) return { kind: "kept", reason: "in-use" };
+        try { await assertOwnedCheckout(current); } catch (error) { return { kind: "kept", reason: "checkout-changed", detail: message(error) }; }
+        if ((await dirtyFiles(current.path, true)).length > 0) return { kind: "kept", reason: "dirty" };
+        if ((await git(current.path, "rev-list", "--count", `${current.defaultBranch}..HEAD`)).trim() !== "0") return { kind: "kept", reason: "unmerged" };
+        return undefined;
+      };
+      try {
+        const retained = await keep();
+        if (retained !== undefined) return retained;
+        await this.change(id, { operation: "archive" });
+        let stopped: Extract<WorktreeCleanupOutcome, { kind: "kept" }> | undefined;
+        const recheck = async () => {
+          stopped = await keep();
+          if (stopped !== undefined) throw new Error(`Automatic cleanup kept the checkout: ${stopped.reason}`);
+        };
+        await recheck();
+        if (current.state.kind === "active") await this.store.saveTranscripts(id, await this.removalSessions(current, []));
+        const cleanup = await this.remove(current, false, async (phase) => {
+          await recheck();
+          // A retained active checkout stays writable. Persist its receipt only after hooks and final checks.
+          if (phase === "before-remove" && current.state.kind === "active") {
+            const sha = (await git(current.repo, "rev-parse", current.defaultBranch)).trim();
+            await this.change(id, { state: { kind: "landed", sha, at: new Date().toISOString() } });
+          }
+        });
+        if (cleanup.kind === "done") return { kind: "removed" };
+        return stopped ?? { kind: "kept", reason: "error", ...(cleanup.kind === "failed" ? { detail: cleanup.error } : {}) };
+      } catch (error) { return { kind: "kept", reason: "error", detail: message(error) }; }
+      finally { if ((await this.store.require(id)).operation === "archive") await this.change(id, { operation: undefined }); }
+    });
+  }
+
   async archiveCleanup(id: string, sessions: readonly SessionFile[]): Promise<WorktreeArchiveCleanupResult> {
     const record = await this.store.require(id);
     const result = await this.exclusive<WorktreeArchiveCleanupResult>(record.repo, async () => {
@@ -266,13 +308,16 @@ export class SessionWorktrees {
       try {
         // A checkout moved, removed, or switched outside Forgerie is not Forgerie's to remove. Say so with a code, not git's words.
         try { await assertOwnedCheckout(current); } catch { return { kind: "retained", reason: "checkout-changed" }; }
-        if ((await dirtyFiles(current.path)).length !== 0) return { kind: "retained", reason: "dirty" };
+        if ((await dirtyFiles(current.path, true)).length !== 0) return { kind: "retained", reason: "dirty" };
         if ((await git(current.path, "rev-list", "--count", `${current.defaultBranch}..HEAD`)).trim() !== "0") return { kind: "retained", reason: "unlanded-commits" };
         await this.change(id, { operation: "archive" });
         await this.store.saveTranscripts(id, await this.removalSessions(current, sessions));
         const sha = (await git(current.repo, "rev-parse", current.defaultBranch)).trim();
         const landed = await this.change(id, { state: { kind: "landed", sha, at: new Date().toISOString() } });
-        return { kind: "removed", cleanup: await this.remove(landed, false) };
+        return { kind: "removed", cleanup: await this.remove(landed, false, async () => {
+          await assertOwnedCheckout(landed);
+          if ((await dirtyFiles(landed.path, true)).length > 0) throw new Error("Archive cleanup kept uncommitted or ignored files");
+        }) };
       } catch (error) { return { kind: "retained", reason: message(error) }; }
       finally { await this.change(id, { operation: undefined }); }
     });
@@ -292,10 +337,11 @@ export class SessionWorktrees {
     return this.events.beforeRemoval?.(record) ?? fallback;
   }
 
-  private async remove(record: SessionWorktreeRecord, force: boolean): Promise<SessionWorktreeRecord["cleanup"]> {
+  private async remove(record: SessionWorktreeRecord, force: boolean, beforeDestruction?: (phase: "before-hook" | "before-remove") => Promise<void>): Promise<SessionWorktreeRecord["cleanup"]> {
     if (record.cleanup.kind === "done") return record.cleanup;
     try {
       const registered = (await discoverGitWorktrees(record.repo)).find((item) => item.path === record.path);
+      await beforeDestruction?.("before-hook");
       if (registered !== undefined && registered.prunable !== true) {
         await assertOwnedCheckout(record);
         if (!force) await git(record.repo, "merge-base", "--is-ancestor", record.branch, record.defaultBranch);
@@ -303,6 +349,7 @@ export class SessionWorktrees {
         if (result.exitCode !== 0) throw new Error(`Pre-remove hook exited with ${String(result.exitCode)}: ${result.log}`);
         if (!force) await git(record.repo, "merge-base", "--is-ancestor", record.branch, record.defaultBranch);
         else if (record.discardedBranchTip !== (await git(record.repo, "rev-parse", record.branch)).trim()) throw new Error("Branch changed during discard cleanup. Request a new discard preview.");
+        await beforeDestruction?.("before-remove");
         await git(record.repo, "worktree", "remove", ...(force ? ["--force"] : []), record.path);
       } else if (registered !== undefined) {
         throw new Error("Checkout disappeared outside Forgerie; inspect and prune its git registration before retrying cleanup");
@@ -358,10 +405,11 @@ async function excludeWorktreeDirectory(repo: string): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
   let source = "";
   try { source = await readFile(file, "utf8"); } catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
-  if (!source.split("\n").some((line) => line === "/.worktree/" || line === ".worktree/")) await appendFile(file, `${source.endsWith("\n") || source === "" ? "" : "\n"}/.worktree/\n`);
+  const directory = `/${SESSION_WORKTREE_DIRECTORY}/`;
+  if (!source.split("\n").some((line) => line === directory || line === `${SESSION_WORKTREE_DIRECTORY}/`)) await appendFile(file, `${source.endsWith("\n") || source === "" ? "" : "\n"}${directory}\n`);
 }
-async function dirtyFiles(cwd: string): Promise<string[]> {
-  const parts = (await git(cwd, "status", "--porcelain=v1", "-z", "--untracked-files=all")).split("\0");
+async function dirtyFiles(cwd: string, includeIgnored = false): Promise<string[]> {
+  const parts = (await git(cwd, "status", "--porcelain=v1", "-z", "--untracked-files=all", ...(includeIgnored ? ["--ignored=matching"] : []))).split("\0");
   const files: string[] = [];
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
