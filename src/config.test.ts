@@ -69,6 +69,22 @@ describe("Forgerie config persistence", () => {
     }
   });
 
+  it("keeps a hand-edited sessionTitleModel across settings saves", async () => {
+    await writeFile(configPath, `${JSON.stringify({ sessionTitleModel: "cliproxyapi/claude-haiku-5-5" }, null, 2)}\n`, "utf8");
+
+    savePiWebConfig({ port: 9000 }, testOptions());
+
+    expect(effectivePiWebConfig(testOptions()).config.sessionTitleModel).toBe("cliproxyapi/claude-haiku-5-5");
+  });
+
+  it("rejects a sessionTitleModel that is not provider/model-id", async () => {
+    for (const value of ["claude-haiku-5-5", "/claude-haiku-5-5", "cliproxyapi/", 5, null]) {
+      await writeFile(configPath, `${JSON.stringify({ sessionTitleModel: value }, null, 2)}\n`, "utf8");
+
+      expect(() => loadPiWebConfig(testOptions())).toThrow("Forgerie config sessionTitleModel must be \"provider/model-id\"");
+    }
+  });
+
   it("persists and reads custom agent runtime settings", () => {
     savePiWebConfig({ agent: { command: "acme-agent", dir: "/opt/acme-agent/state" } }, testOptions());
 

@@ -974,6 +974,12 @@ export interface PiSessionServiceDependencies {
    * agent can run a script that calls the other tools. Off when omitted.
    */
   codemodeEnabled?: boolean;
+  /**
+   * `provider/model-id` of the model that writes session titles. A title is a
+   * one-shot label, so a small fast model does it as well as the session's own
+   * model for a fraction of the cost. Omit to use the session's model.
+   */
+  sessionTitleModel?: string;
   /** Optional transcript-backed question adapter for deterministic test fixtures. */
   sessionAsks?: SessionAsks;
   /** Daemon-lifetime open-dialog state; defaults to an in-memory store in tests. */
@@ -1085,6 +1091,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly spawnTargets: SpawnTargetResolver | undefined;
   private readonly projectWorkspaces: ProjectWorkspaceCwds | undefined;
   private readonly logger: PiSessionLogger;
+  private readonly sessionTitleModel: string | undefined;
   private readonly now: () => Date;
   private readonly notificationStore: SessionNotificationStore;
   private readonly notificationGenerationBySession = new WeakMap<PiAgentSession, SessionNotificationGeneration>();
@@ -1124,6 +1131,7 @@ export class PiSessionService implements SessionRouteService {
     this.sessionSearch = deps.sessionSearch;
     this.projectWorkspaces = deps.projectWorkspaces;
     this.logger = deps.logger ?? noopLogger;
+    this.sessionTitleModel = deps.sessionTitleModel;
     this.now = deps.now ?? (() => new Date());
     this.notificationStore = deps.notificationStore ?? new SessionNotificationStore();
     this.unreadStore = deps.unreadStore ?? new SessionUnreadStore();
@@ -4558,6 +4566,23 @@ export class PiSessionService implements SessionRouteService {
     clearSessionTimer(this.queuedCompactionTimers, sessionId);
   }
 
+  /**
+   * The configured title model when the runtime offers it with credentials,
+   * else the session's own model. A missing title model is logged, not fatal:
+   * the title then costs what it did before.
+   */
+  private titleModelFor(session: PiAgentSession): PiAgentSession["model"] {
+    const spec = this.sessionTitleModel;
+    if (spec === undefined) return session.model;
+    const parsed = parseModelSpec(spec);
+    const configured = parsed === undefined
+      ? undefined
+      : this.modelRuntime.getAvailableSnapshot().find((candidate) => candidate.provider === parsed.provider && candidate.id === parsed.modelId);
+    if (configured !== undefined) return configured;
+    this.logger.info({ sessionId: session.sessionId, sessionTitleModel: spec, outcome: "title_model_unavailable" }, "session title model is unavailable; using the session's model");
+    return session.model;
+  }
+
   private acceptSessionTitleIntent(session: PiAgentSession, titleInput: string): void {
     if (session.sessionName !== undefined || hasUserMessage(session.messages) || this.claimedSessionTitleIntents.has(session)) return;
     this.claimedSessionTitleIntents.add(session);
@@ -4567,7 +4592,7 @@ export class PiSessionService implements SessionRouteService {
       return;
     }
 
-    const model = session.model;
+    const model = this.titleModelFor(session);
     if (model === undefined) {
       this.applyGeneratedSessionName(session, fallbackSessionName(titleInput));
       return;

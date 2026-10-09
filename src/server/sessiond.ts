@@ -245,6 +245,7 @@ async function createSessionDaemonRuntime() {
     },
     pullRequestWatches: { isWatching: (id) => pullStore.isWatching(id), stop: (id, reason) => pulls.stop(id, reason) },
     extensionDialogsTimeoutMs: config.extensionDialogsTimeoutMs,
+    ...(config.sessionTitleModel === undefined ? {} : { sessionTitleModel: config.sessionTitleModel }),
     notificationStore,
     unreadStore,
     catalogRefreshStatus: catalogRefresher,

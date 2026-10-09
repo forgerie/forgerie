@@ -41,6 +41,8 @@ export interface SessionServiceDependencyInput {
   pullRequestWatches?: PiSessionServiceDependencies["pullRequestWatches"];
   /** Auto-cancel delay for extension dialogs whose extension set no timeout; `0` waits forever. */
   extensionDialogsTimeoutMs: number;
+  /** `provider/model-id` that writes session titles; omitted to use each session's model. */
+  sessionTitleModel?: string;
 }
 
 /**
@@ -74,6 +76,7 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
     github: input.github,
     ...(input.pullRequestWatches === undefined ? {} : { pullRequestWatches: input.pullRequestWatches }),
     extensionDialogsTimeoutMs: input.extensionDialogsTimeoutMs,
+    ...(input.sessionTitleModel === undefined ? {} : { sessionTitleModel: input.sessionTitleModel }),
     notificationStore: input.notificationStore,
     unreadStore: input.unreadStore,
     // Read-only, so session startup can tell a waiting user that provider

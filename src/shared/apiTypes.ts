@@ -72,6 +72,12 @@ export interface PiWebConfigValues {
    * Tuning knob only — extension dialogs are always enabled.
    */
   extensionDialogsTimeoutMs?: number;
+  /**
+   * `provider/model-id` of the model that writes session titles, for example a
+   * small fast model. Omit to use each session's own model. If the model is
+   * not available with credentials, the session's own model is used.
+   */
+  sessionTitleModel?: string;
   /** Desired Pi-compatible agent profile and companion CLI (Pi by default). */
   agent?: PiWebAgentConfig;
 }

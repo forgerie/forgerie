@@ -10,7 +10,7 @@ import { fingerprintPromptResourceCommand, fingerprintPromptResourceDeliveryText
 import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
 import { PiSessionService } from "./piSessionService.js";
 import { buildActiveCommandCatalog, buildPromptResourceCatalogFromResources } from "./commandCatalog.js";
-import { CapturingSessionEventHub, fakeRuntime, runtimeCreator, sessionGateway, sessionRecord, sessionRef, testModel, testModelRuntime, type RuntimeCreator } from "./piSessionService.testSupport.js";
+import { CapturingSessionEventHub, createTestModelRuntime, fakeRuntime, runtimeCreator, seedCredential, sessionGateway, sessionRecord, sessionRef, TEST_MODEL_ID, TEST_MODEL_PROVIDER, testModel, testModelRuntime, type RuntimeCreator } from "./piSessionService.testSupport.js";
 
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
   ...(await importOriginal<typeof PiCodingAgent>()),
@@ -466,6 +466,77 @@ target`, options: { expandPromptTemplates: false } },
     expect(streamCalls).toHaveLength(1);
     expect(hub.sessionEvents.some(({ event }) => event.type === "session.name" && event.name === "Fix login bug")).toBe(true);
     await service.dispose();
+  });
+
+  describe("with a configured session title model", () => {
+    const TITLE_MODEL_ID = "claude-haiku-4-5-20251001";
+
+    function titleStreamFn(seen: string[]): StreamFn {
+      return (streamModel) => {
+        seen.push(`${streamModel.provider}/${streamModel.id}`);
+        const stream = createAssistantMessageEventStream();
+        const message: AssistantMessage = {
+          role: "assistant",
+          content: [{ type: "text", text: "Login bug" }],
+          api: "anthropic-messages",
+          provider: streamModel.provider,
+          model: streamModel.id,
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: "stop",
+          timestamp: Date.now(),
+        };
+        stream.push({ type: "done", reason: "stop", message });
+        stream.end(message);
+        return stream;
+      };
+    }
+
+    it("writes the title with the configured model, not the session's model", async () => {
+      const credentials = new InMemoryCredentialStore();
+      await seedCredential(credentials, TEST_MODEL_PROVIDER, { type: "api_key", key: "sk-test" });
+      const modelRuntime = await createTestModelRuntime(credentials);
+      const seen: string[] = [];
+      const fake = fakeRuntime("title-model-session", { model: testModel(), agent: { streamFunction: titleStreamFn(seen) } });
+      const service = new PiSessionService(new CapturingSessionEventHub(), {
+        agentDir: TEST_AGENT_DIR,
+        modelRuntime,
+        sessionTitleModel: `${TEST_MODEL_PROVIDER}/${TITLE_MODEL_ID}`,
+        createAgentRuntime: runtimeCreator(fake.runtime),
+        sessionManager: sessionGateway([sessionRecord("title-model-session")]),
+        heartbeatIntervalMs: 60_000,
+      });
+
+      await service.prompt(sessionRef("title-model-session"), "Please fix the login bug");
+      await vi.waitFor(() => { expect(fake.session.sessionName).toBe("Login bug"); });
+
+      expect(seen).toEqual([`${TEST_MODEL_PROVIDER}/${TITLE_MODEL_ID}`]);
+      await service.dispose();
+    });
+
+    it("logs and uses the session's model when the configured model has no credentials", async () => {
+      const logger = { info: vi.fn() };
+      const seen: string[] = [];
+      const fake = fakeRuntime("title-model-missing-session", { model: testModel(), agent: { streamFunction: titleStreamFn(seen) } });
+      const service = new PiSessionService(new CapturingSessionEventHub(), {
+        agentDir: TEST_AGENT_DIR,
+        modelRuntime: testModelRuntime,
+        sessionTitleModel: `${TEST_MODEL_PROVIDER}/${TITLE_MODEL_ID}`,
+        logger,
+        createAgentRuntime: runtimeCreator(fake.runtime),
+        sessionManager: sessionGateway([sessionRecord("title-model-missing-session")]),
+        heartbeatIntervalMs: 60_000,
+      });
+
+      await service.prompt(sessionRef("title-model-missing-session"), "Please fix the login bug");
+      await vi.waitFor(() => { expect(fake.session.sessionName).toBe("Login bug"); });
+
+      expect(seen).toEqual([`${TEST_MODEL_PROVIDER}/${TEST_MODEL_ID}`]);
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "title-model-missing-session", outcome: "title_model_unavailable" }),
+        "session title model is unavailable; using the session's model",
+      );
+      await service.dispose();
+    });
   });
 
   it("generates a session name when startup extensions already injected custom context", async () => {

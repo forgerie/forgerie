@@ -239,6 +239,7 @@ function parsePiWebConfig(value: Record<string, unknown>, path: string): PiWebCo
     ...(value["codemode"] !== undefined ? { codemode: parseCodemode(value["codemode"], path) } : {}),
     ...(value["durableChildren"] !== undefined ? { durableChildren: parseDurableChildren(value["durableChildren"], path) } : {}),
     ...(value["extensionDialogsTimeoutMs"] !== undefined ? { extensionDialogsTimeoutMs: parseExtensionDialogsTimeoutMs(value["extensionDialogsTimeoutMs"], path) } : {}),
+    ...(value["sessionTitleModel"] !== undefined ? { sessionTitleModel: parseSessionTitleModel(value["sessionTitleModel"], path) } : {}),
     ...(value["agent"] !== undefined ? { agent: parseAgentConfig(value["agent"], path) } : {}),
   };
 }
@@ -268,6 +269,14 @@ export function spawnSessionsEnabled(env: NodeJS.ProcessEnv = process.env, confi
 
 function parseAskUser(value: unknown, path: string): boolean {
   if (typeof value !== "boolean") throw new Error(`Forgerie config askUser must be a boolean: ${path}`);
+  return value;
+}
+
+function parseSessionTitleModel(value: unknown, path: string): string {
+  const slash = typeof value === "string" ? value.indexOf("/") : -1;
+  if (typeof value !== "string" || slash <= 0 || slash === value.length - 1) {
+    throw new Error(`Forgerie config sessionTitleModel must be "provider/model-id": ${path}`);
+  }
   return value;
 }
 
