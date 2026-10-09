@@ -8,6 +8,7 @@ import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
+import { CHILD_ANSWER_KIND, CHILD_QUESTION_KIND, answerChildQuestion, childEntryText, childMessages, listChildren, messageChild, stopChild, type DurableChildExtensions } from "./durableChildAgents.js";
 
 export interface DurableAgentSessionOptions {
   services: AgentSessionServices;
@@ -17,6 +18,8 @@ export interface DurableAgentSessionOptions {
   initialThinkingLevel?: PiAgentSession["thinkingLevel"];
   scopedModels?: PiAgentSession["scopedModels"];
   sessionStartEvent?: SessionStartEvent;
+  /** SPIKE: Durable-native child agents. */
+  childAgents?: DurableChildExtensions;
 }
 
 /** SDK resources and extension hooks around a Durable execution engine. No AgentSession is constructed. */
@@ -126,10 +129,23 @@ export class DurableAgentSession implements PiAgentSession {
         compaction: { enabled: this.settingsManager.getCompactionEnabled(), reserveTokens: this.settingsManager.getCompactionReserveTokens(this.model), keepRecentTokens: this.settingsManager.getCompactionKeepRecentTokens(this.model) } },
       onReport: (error) => { this.extensionRunner.emitError({ extensionPath: "<durable>", event: "runtime", error: String(error) }); },
     });
+    const childAgents = this.options.childAgents;
+    if (childAgents !== undefined) {
+      for (const extension of [...childAgents.parent, ...childAgents.childOnly]) this.registry.install(extension);
+      // Children select these explicitly. The parent must not, or ask_human and test tools join its loadout.
+      await this.journal.conversation.configure({ extensions: { remove: [...childAgents.childOnly] } }, context);
+    }
     this.stream = await watchEvents(this.journal.harness, this.journal.conversation.id, context);
     await this.applyEvent(this.stream.snapshot);
     this.stream.start(async (events) => { for (const event of events) await this.applyEvent(event); });
   }
+
+  // ─── SPIKE: host operations on Durable children. None of them starts a parent turn. ───
+  durableChildren() { return listChildren(this.journal.harness, this.journal.conversation.id, context); }
+  durableChildMessages(conversationId: number) { return childMessages(this.journal.harness, this.journal.conversation.id, conversationId, context); }
+  messageDurableChild(conversationId: number, text: string) { return messageChild(this.journal.harness, this.journal.conversation.id, conversationId, text, context); }
+  stopDurableChild(conversationId: number) { return stopChild(this.journal.harness, this.journal.conversation.id, conversationId, context); }
+  answerDurableChildQuestion(questionId: string, answer: string) { return answerChildQuestion(this.journal.harness, this.journal.conversation, questionId, answer, context); }
 
   subscribe(listener: (event: unknown) => void): () => void {
     this.listeners.add(listener);
@@ -431,13 +447,19 @@ export class DurableAgentSession implements PiAgentSession {
       case "compaction_start": this.compacting = true; this.emit({ type: "compaction_start", reason: event.reason }); break;
       case "compaction_end": this.compacting = false; this.emit({ type: "compaction_end", reason: event.reason, result: undefined, aborted: false, willRetry: false }); break;
       case "task_failed": this.report(event.message); break;
+      case "entry_appended":
+        // SPIKE: a child's question or the user's answer is a write entry. Show it live as a display-only message.
+        if (event.entry.kind === CHILD_QUESTION_KIND || event.entry.kind === CHILD_ANSWER_KIND) {
+          this.emit({ type: "message_end", message: { role: "custom", customType: event.entry.kind, content: childEntryText(event.entry.kind, event.entry.data), display: true, details: event.entry.data, timestamp: Date.now() } });
+        }
+        this.emit(event);
+        break;
       case "submission":
       case "turn_start":
       case "turn_end":
       case "auto_retry_start":
       case "auto_retry_end":
       case "deferred_poll":
-      case "entry_appended":
       case "agent_changed":
       case "usage_changed": this.emit(event); break;
     }

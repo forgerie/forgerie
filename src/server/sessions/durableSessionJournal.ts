@@ -9,6 +9,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { MemoryStorage } from "@earendil-works/pi-durable/storage/memory";
 import { acquireDurableOwnership, type DurableOwnership } from "./durableOwnership.js";
 import { durableJson } from "./durableJson.js";
+import { CHILD_ANSWER_KIND, CHILD_QUESTION_KIND, childEntryText } from "./durableChildAgents.js";
 
 const Imported = defineDoc({ kind: "forgerie.import", version: 1, scope: "session", initial: (): { complete: boolean } => ({ complete: false }) });
 const DURABLE_ENTRY_PROPERTY = "forgerieDurableEntryId";
@@ -49,6 +50,11 @@ export class DurableSessionJournal {
     this.conversation = conversation;
     this.ownerSessionId = manager.getSessionId();
     for (const entry of manager.getEntries()) {
+      // SPIKE: projected child questions carry their stamp in details.
+      if (entry.type === "custom_message" && typeof entry.details === "object" && entry.details !== null && DURABLE_ENTRY_PROPERTY in entry.details
+        && typeof entry.details[DURABLE_ENTRY_PROPERTY] === "number" && DURABLE_SESSION_PROPERTY in entry.details && entry.details[DURABLE_SESSION_PROPERTY] === this.ownerSessionId) {
+        this.projected.add(entry.details[DURABLE_ENTRY_PROPERTY]);
+      }
       if (entry.type !== "message") continue;
       const message = entry.message;
       if (DURABLE_ENTRY_PROPERTY in message && typeof message[DURABLE_ENTRY_PROPERTY] === "number"
@@ -135,6 +141,13 @@ export class DurableSessionJournal {
   }
 
   private projectEntry(entry: EntryRecord): void {
+    if (!this.projected.has(entry.id) && (entry.kind === CHILD_QUESTION_KIND || entry.kind === CHILD_ANSWER_KIND)) {
+      const data = typeof entry.data === "object" && entry.data !== null && !Array.isArray(entry.data) ? entry.data : {};
+      this.manager.appendCustomMessageEntry(entry.kind, childEntryText(entry.kind, entry.data), true,
+        { ...data, [DURABLE_SESSION_PROPERTY]: this.ownerSessionId, [DURABLE_ENTRY_PROPERTY]: entry.id });
+      this.projected.add(entry.id);
+      return;
+    }
     if (this.projected.has(entry.id) || entry.kind.startsWith("forgerie.") || entry.kind === "pi.system" || entry.kind === "pi.compaction" || entry.kind === "pi.reset") return;
     for (const message of entry.model ?? []) {
       if (message.role === "system") continue;
