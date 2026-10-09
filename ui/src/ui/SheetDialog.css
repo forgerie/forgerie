@@ -1,0 +1,32 @@
+/* The dialog is the page frame while open, so it sizes from the viewport. Each
+   axis keeps up to its own margin, and gives it up before the content shrinks. */
+.sheet-dialog {
+  --sheet-width: 44rem; --sheet-height: 46rem;
+  --sheet-room-inline: clamp(0rem, (100dvw - var(--sheet-width)) / 2, 1.5rem);
+  --sheet-room-block: clamp(0rem, (100dvh - var(--sheet-height)) / 2, 1.5rem);
+  position: fixed; inset: 0; margin: auto; padding: 0;
+  inline-size: min(var(--sheet-width), 100dvw - 2 * var(--sheet-room-inline));
+  block-size: min(var(--sheet-height), 100dvh - 2 * var(--sheet-room-block));
+  max-inline-size: none; max-block-size: none; overflow: hidden;
+  border: var(--hairline) solid var(--line); border-radius: min(var(--radius-thread), var(--sheet-room-inline), var(--sheet-room-block));
+  background: var(--background); color: var(--foreground); box-shadow: 0 var(--space-4) var(--space-8) var(--scrim-shadow);
+}
+.sheet-dialog[open] { display: flex; }
+.sheet-dialog::backdrop { background: var(--scrim); }
+.sheet-dialog-frame { --sheet-pad: clamp(0.75rem, 3cqi, 1.25rem); container-type: inline-size; flex: 1; display: flex; flex-direction: column;
+  min-inline-size: 0; min-block-size: 0;
+  padding: max(0rem, env(safe-area-inset-top) - var(--sheet-room-block)) max(0rem, env(safe-area-inset-right) - var(--sheet-room-inline))
+    max(0rem, env(safe-area-inset-bottom) - var(--sheet-room-block)) max(0rem, env(safe-area-inset-left) - var(--sheet-room-inline)); }
+.sheet-dialog-head { flex: none; display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--header-size);
+  padding-inline: var(--sheet-pad) var(--space-2); border-block-end: var(--hairline) solid var(--line); }
+.sheet-dialog-head:has(> .sheet-dialog-control:first-child) { padding-inline-start: var(--space-2); }
+.sheet-dialog-titles { flex: 1; display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 var(--space-2); min-inline-size: 0; }
+.sheet-dialog-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-size); font-weight: 500; }
+.sheet-dialog-subtitle { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted-foreground); font-size: var(--label-text); }
+.sheet-dialog-control { display: grid; place-items: center; flex: none; inline-size: var(--control-size); block-size: var(--control-size);
+  padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
+.sheet-dialog-control:hover { color: var(--foreground); }
+.sheet-dialog-control svg { inline-size: 1.125rem; block-size: 1.125rem; }
+.sheet-dialog-body { flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-3) var(--sheet-pad); }
+.sheet-dialog-foot { flex: none; padding: var(--space-2) var(--sheet-pad) var(--space-3); border-block-start: var(--hairline) solid var(--line); }

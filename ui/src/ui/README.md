@@ -40,3 +40,9 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `ErrorBoundary` (atom): replaces children that throw while drawing with a fallback, so everything around them keeps working.
 - `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, with optional captions, a marked block, and trailing cells that span rows.
 - `Shelf` (organism): a section at the foot of a list that switches between two forms from a group header, scrolls on its own, and reports the room it sits in.
+- `BadgeButton` (atom): an icon button drawn small with a control-sized hit area, a live-colour count of what waits on the reader, and a working dot.
+- `SheetDialog` (organism): a modal sheet that is a card while the window has room and meets each edge as the room runs out, with back, title, actions, close, a scrolling body, and a footer.
+- `StatusRow` (molecule): one pressable row for a running thing: a tone dot, a name, a detail, and a status that wraps under the name when the row is narrow.
+- `ExchangeLog` (molecule): one worker's record, oldest first: words with the speaker in a margin, one line per action, and folded output.
+- `ReplyBox` (molecule): a short text field with send and an optional second action; Enter sends and the text stays until the send succeeds.
+- `QuestionCard` (molecule): a question that waits on the reader, with a reply box while open and the answer once given.

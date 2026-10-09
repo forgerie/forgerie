@@ -1,0 +1,29 @@
+/* A two-track record: the speaker in a narrow margin, the content beside it.
+   The margin shrinks with the container and folds above the text when the
+   content would get too narrow, because flex-wrap decides, not a breakpoint. */
+.exchange-log { display: grid; gap: var(--space-2); min-inline-size: 0; font-size: var(--small-text); }
+.exchange-log-empty { margin: 0; padding-block: var(--space-6); color: var(--muted-foreground); font-size: var(--small-text); text-align: center; }
+.exchange-log-said { display: flex; flex-wrap: wrap; gap: 0 var(--space-3); padding-block: var(--space-1); }
+.exchange-log-said + .exchange-log-said, .exchange-log-output + .exchange-log-said, .exchange-log-call + .exchange-log-said { margin-block-start: var(--space-2); }
+.exchange-log-speaker { flex: 0 0 5.5rem; padding-block-start: 0.125rem; color: var(--muted-foreground); font-size: var(--label-text); }
+.exchange-log-said[data-side="in"] .exchange-log-speaker { color: var(--ink-live); }
+.exchange-log-text { flex: 1 1 16rem; min-inline-size: 0; line-height: var(--line-height); overflow-wrap: anywhere; }
+.exchange-log-said[data-side="in"] .exchange-log-text { padding-inline-start: var(--space-3); border-inline-start: 0.125rem solid var(--live); }
+/* Words still arriving: the speaker pulses in the live colour. */
+.exchange-log-said[data-streaming] .exchange-log-speaker { color: var(--live); animation: exchange-log-pulse 1.6s ease-in-out infinite; }
+@keyframes exchange-log-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .exchange-log-said[data-streaming] .exchange-log-speaker { animation: none; } }
+/* Actions and their output hang from the content track, not the margin. */
+.exchange-log-call, .exchange-log-output { margin-inline-start: min(5.5rem + var(--space-3), 22cqi); min-inline-size: 0; }
+.exchange-log-call { display: flex; align-items: baseline; gap: var(--space-2); color: var(--muted-foreground); }
+.exchange-log-name { flex: none; font-family: var(--code-font); font-size: var(--label-text); color: var(--foreground); }
+.exchange-log-summary { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--code-font); font-size: var(--code-size); }
+.exchange-log-output-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+  color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--code-size); list-style: none; }
+.exchange-log-output-line::-webkit-details-marker { display: none; }
+.exchange-log-output-line::before { content: "↳ "; }
+.exchange-log-output-line:hover { color: var(--foreground); }
+.exchange-log-output[data-error] .exchange-log-output-line { color: var(--ink-bad); }
+.exchange-log-output-text { max-block-size: 16rem; margin: var(--space-1) 0 0; padding: var(--space-2) var(--space-3); overflow: auto;
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-document); background: var(--code-surface);
+  font-family: var(--code-font); font-size: var(--code-size); white-space: pre-wrap; overflow-wrap: anywhere; }

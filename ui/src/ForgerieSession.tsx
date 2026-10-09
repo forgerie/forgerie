@@ -10,7 +10,7 @@ import { useThreadMessages } from "./useThreadMessages";
 import { foldProcessEvents } from "./processes/processEvent";
 import { loadProcessOutput } from "./processes/processApi";
 import { ProcessEventView } from "./processes/ProcessEventView";
-import type { ProcessEventArtifact } from "./transcript";
+import type { ChildEntryArtifact, ProcessEventArtifact } from "./transcript";
 import type { SystemArtifactView } from "./ui/Messages";
 import { Thread } from "./ui/Thread";
 import { SessionFrame } from "./ui/SessionFrame";
@@ -48,6 +48,11 @@ import { createPullRequestApi, type PullLink } from "./pullRequests/pullRequestA
 import { useSessionPulls } from "./pullRequests/useSessionPull";
 import { firstToShow } from "./pullRequests/pullRequestModel";
 import { PullRequestOpener, PullRequestReview } from "./ui/PullRequestReview";
+import { createChildAgentsStore } from "./childAgents/childAgentsStore";
+import { CHILDREN_CHANGED_EVENT, foldChildEntries } from "./childAgents/childAgentsModel";
+import { ChildAgentsOpener } from "./childAgents/ChildAgentsOpener";
+import { ChildAgentsPanel } from "./childAgents/ChildAgentsPanel";
+import { ChildEntryView } from "./childAgents/ChildEntryView";
 
 const pullRequests = createPullRequestApi(browserTransport.request);
 const NO_LINKS: readonly PullLink[] = [];
@@ -73,7 +78,13 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   drafts?: DraftStore | undefined;
   onSwitchSession: (session: Session, draft?: string) => void;
 }) {
-  const [store] = useState(() => createSessionStore(id, browserTransport, {}, known, createReadTracker(browserTransport, { subscribe: onUnread, isVisible: () => document.visibilityState === "visible", afterRender: afterTranscriptPaint })));
+  // Child agents: their own small store, refreshed when the server says any child changed.
+  const sessionRef = useRef<{ id: string; cwd: string } | undefined>(undefined);
+  const [childAgents] = useState(() => createChildAgentsStore(browserTransport.request, () => sessionRef.current));
+  const [store] = useState(() => createSessionStore(id, browserTransport, {}, known, createReadTracker(browserTransport, { subscribe: onUnread, isVisible: () => document.visibilityState === "visible", afterRender: afterTranscriptPaint }),
+    (eventType) => { if (eventType === CHILDREN_CHANGED_EVENT) childAgents.refresh(); }));
+  const children = useSyncExternalStore(childAgents.subscribe, childAgents.getSnapshot);
+  const [childrenOpen, setChildrenOpen] = useState(false);
   const [dictation] = useState(() => new ForgerieDictationAdapter());
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const runtimeRef = useRef<AssistantRuntime | null>(null);
@@ -81,6 +92,11 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const [chatDraft] = useState(() => createChatDraft(() => runtimeRef.current?.thread.composer, saved));
   const sessionId = state.session?.id;
   const cwd = state.session?.cwd;
+  sessionRef.current = sessionId && cwd ? { id: sessionId, cwd } : undefined;
+  const connected = state.connection.type === "ready";
+  // Read the children on every join: a reconnect may have missed their change events.
+  useEffect(() => { if (connected && sessionId) childAgents.refresh(); }, [childAgents, connected, sessionId]);
+  useEffect(() => () => { childAgents.dispose(); }, [childAgents]);
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
     [sessionId, cwd]);
   const [attachments] = useState(() => createAttachmentAdapter(store.saveAttachment));
@@ -155,14 +171,23 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   };
   const [worktreeCommand, setWorktreeCommand] = useState<WorktreeCommand>();
   const setup = worktree?.owned ? visibleSetup(worktree.setup, state.transcript.messages.length > 0 || state.transcript.isRunning) : undefined;
-  const folded = useMemo(() => foldProcessEvents(state.transcript.messages), [state.transcript.messages]);
+  const folded = useMemo(() => foldChildEntries(foldProcessEvents(state.transcript.messages)), [state.transcript.messages]);
   const messages = useThreadMessages(folded, state.transcript.isRunning);
+  const childrenAvailable = children.available === true;
+  const openChildByName = useCallback((name: string) => {
+    const child = childAgents.getSnapshot().children.find((candidate) => candidate.name === name);
+    if (child) childAgents.open(child.conversationId);
+    setChildrenOpen(true);
+  }, [childAgents]);
   const systemArtifact = useCallback<SystemArtifactView>((custom) => {
+    const entry = (custom as Partial<ChildEntryArtifact> | undefined)?.childEntry;
+    if (entry !== undefined) return <ChildEntryView entry={entry} onAnswer={childrenAvailable && !readOnly ? childAgents.answer : undefined}
+      onOpen={childrenAvailable ? openChildByName : undefined} />;
     const event = (custom as Partial<ProcessEventArtifact> | undefined)?.processEvent;
     if (event === undefined) return undefined;
     const onLoadOutput = sessionId && cwd ? () => loadProcessOutput(browserTransport.request, { id: sessionId, cwd }, event.id) : undefined;
     return <ProcessEventView event={event} onLoadOutput={onLoadOutput} />;
-  }, [sessionId, cwd]);
+  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly]);
   const runtime = useExternalStoreRuntime({
     messages, onNew, onCancel, adapters: { dictation, attachments },
     isRunning: state.transcript.isRunning,
@@ -217,6 +242,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         {/* Linked: always, even read-only, so a landed session still shows its pull request. Unlinked: only where the agent could still open one. */}
         {pullRef && (linkedCount > 0 || (!readOnly && pull.load.type === "ready")) && <PullRequestOpener pulls={readPulls} links={pull.links}
           onOpen={() => { pull.clearNotice(); setPullSelected(firstToShow(pullItems)); setPullOpen(true); }} />}
+        {childrenAvailable && (children.children.length > 0 || childrenOpen) && <ChildAgentsOpener children={children.children}
+          onOpen={() => { childAgents.refresh(); setChildrenOpen(true); }} />}
         {changes && !readOnly && <ChangesOpener notes={notes.length} onOpen={() => setReview({})} />}
         <TreeOpener idle={treeAvailable} onOpen={() => onIdleAction("tree")} />
         {archive && <ArchiveNextButton onArchive={archive.onArchive}
@@ -262,6 +289,13 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}
       {review && changes && <ChangesReview source={changes.source} files={changes.files} notes={notes} focusNoteId={review.focusNoteId}
         onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setReview(undefined)} />}
+      {childrenOpen && <ChildAgentsPanel children={children.children} openId={children.open?.conversationId}
+        transcript={children.open?.transcript} error={children.error ?? children.open?.error} actions={{
+          onOpenChild: childAgents.open, onBack: childAgents.close,
+          onClose: () => { childAgents.close(); childAgents.dismissError(); setChildrenOpen(false); },
+          onSend: childAgents.send, onAnswer: childAgents.answer,
+          onStop: (conversationId) => { void childAgents.stop(conversationId).catch(() => { /* The panel shows the error. */ }); },
+        }} />}
       {pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
         notice={pull.notice} writing={pull.writing} now={Date.now()}
         onRefresh={pull.refresh} onWatch={(number, on) => { void pull.setWatch(number, on); }} onLink={pull.linkNumber}

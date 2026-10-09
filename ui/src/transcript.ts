@@ -5,6 +5,7 @@ import { handoffDoorOf, type HandoffDoor } from "./handoffDoor";
 import { parseSkillInvocation, type SkillInvocation } from "./skills";
 import { PULL_NOTICE_TYPE, pullNoticeOf, type PullNotice } from "./pullRequests/pullNotice";
 import { PROCESS_EVENT_TYPE, parseProcessEvent, type ProcessEvent } from "./processes/processEvent";
+import { childEntryOf, type ChildEntry } from "./childAgents/childAgentsModel";
 import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCopy, reopenRun, runFromRecord, shellText, startedRun, unknownRun,
   type ShellEnd, type ShellRun } from "./shellRun";
 
@@ -42,6 +43,8 @@ export interface TranscriptMessage {
   pullNotice?: PullNotice;
   /** A managed process finished, failed, stopped, or printed a watched line. */
   processEvent?: ProcessEvent;
+  /** A child agent asked, was answered, was steered, or reported back. */
+  childEntry?: ChildEntry;
 }
 /** Compaction replaces earlier messages with a summary; a branch summary describes the branch the session left. */
 export type HistorySummaryKind = "compaction" | "branch";
@@ -113,6 +116,9 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
     // An event this app cannot read still shows, as plain system text.
     return { id, role: "system", parts: [{ type: "text", text }], ...(processEvent ? { processEvent } : {}), key: keyOf(message) };
   }
+  // A child's report is a user message to the parent model, but the reader did not write it.
+  const childEntry = role === "custom" || role === "user" ? childEntryOf(message) : undefined;
+  if (childEntry) return { id, role: "system", parts: [{ type: "text", text: textOf(message) }], childEntry, key: keyOf(message) };
   if (role === "bashExecution") return { id, role: "shell", parts: [{ type: "shell", run: runFromRecord(message) }], key: keyOf(message) };
   if (role !== "user" && role !== "assistant" && role !== "system") return undefined;
   const invoked = role === "user" ? skillOf(message) : undefined;
@@ -450,6 +456,8 @@ export type SummaryArtifact = { summary: HistorySummaryKind };
 export type PullNoticeArtifact = { pullNotice: PullNotice };
 /** UI data of a managed-process event row, carried as the system message's custom metadata. */
 export type ProcessEventArtifact = { processEvent: ProcessEvent };
+/** UI data of a child agent's row, carried as the system message's custom metadata. */
+export type ChildEntryArtifact = { childEntry: ChildEntry };
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
   if (message.role === "shell") {
     const run = shellRunOf(message)!;
@@ -460,6 +468,8 @@ export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
     metadata: { custom: { pullNotice: message.pullNotice } satisfies PullNoticeArtifact } };
   if (message.processEvent) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { processEvent: message.processEvent } satisfies ProcessEventArtifact } };
+  if (message.childEntry) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
+    metadata: { custom: { childEntry: message.childEntry } satisfies ChildEntryArtifact } };
   if (message.summary) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { summary: message.summary } satisfies SummaryArtifact } };
   if (message.role !== "assistant") {

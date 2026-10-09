@@ -109,7 +109,9 @@ export function shellAvailabilityOf(state: SessionState): ShellAvailability {
  * machine catalog read: 2.7 MB and ~0.4 s on the reference machine. Without
  * it, the store finds the session's cwd in `/api/sessions/all` itself.
  */
-export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session, reads?: ReadTracker) {
+export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session, reads?: ReadTracker,
+  /** Server events the transcript does not use, by Pi event type, such as a child agent's change. */
+  onPiEvent?: (eventType: string) => void) {
   let state: SessionState = { connection: { type: "loading" }, ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree, dialogPhase: noDialogPhase };
   let statusVersion = 0;
   const listeners = new Set<() => void>();
@@ -233,7 +235,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
           const payload = typeof event.data === "string" ? event.data
             : event.data instanceof ArrayBuffer ? new TextDecoder().decode(event.data) : undefined;
           if (payload === undefined) throw new Error("Unsupported WebSocket payload.");
-          const parsed = parseEvent(JSON.parse(payload));
+          const raw: unknown = JSON.parse(payload);
+          if (onPiEvent && typeof raw === "object" && raw !== null && "type" in raw && raw.type === "pi.event"
+            && "eventType" in raw && typeof raw.eventType === "string") onPiEvent(raw.eventType);
+          const parsed = parseEvent(raw);
           if (!parsed || parsed.seq !== undefined && parsed.seq <= attempt.seq) return;
           if (parsed.seq !== undefined) attempt.seq = parsed.seq;
           if (isAskEvent(parsed)) {
