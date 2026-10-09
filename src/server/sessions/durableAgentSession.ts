@@ -4,7 +4,7 @@ import { clampThinkingLevel, getSupportedThinkingLevels, type AssistantMessage, 
 import { ExtensionRunner, ModelRegistry, convertToLlm, createLocalBashOperations, createSyntheticSourceInfo, estimateTokens, type AgentSessionServices, type BuildSystemPromptOptions, type ExtensionUIContext, type PromptOptions, type SessionManager, type SessionStartEvent, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult } from "@earendil-works/pi-durable";
 import type { PiAgentSession } from "./piSessionService.js";
-import { DurableSessionJournal } from "./durableSessionJournal.js";
+import { DurableSessionJournal, isTranscriptEntry } from "./durableSessionJournal.js";
 import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
@@ -475,7 +475,12 @@ export class DurableAgentSession implements PiAgentSession {
           this.emit({ type: "message_update", message: this.partial, assistantMessageEvent: { ...change, partial: this.partial } });
         }
         break;
-      case "message_end": for (const message of event.entry.model ?? []) this.emit({ type: "message_end", message }); this.partial = undefined; break;
+      case "message_end":
+        // A model copy, such as a custom message's user form, already showed in its own form. Live must match the projection.
+        if (!isTranscriptEntry(event.entry.kind)) break;
+        for (const message of event.entry.model ?? []) this.emit({ type: "message_end", message });
+        this.partial = undefined;
+        break;
       case "tool_execution_start": this.emit(event); break;
       case "tool_execution_update": this.emit({ ...event, partialResult: event.details }); break;
       case "tool_execution_end": {

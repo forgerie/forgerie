@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { ModelRuntime, SessionManager, createAgentSessionServices, createCodemodeExtension, defineTool } from "@earendil-works/pi-coding-agent";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { Type } from "typebox";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DurableAgentSession } from "./durableAgentSession.js";
 
 const directories: string[] = [];
@@ -38,6 +38,15 @@ async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[
   session.subscribe((event) => events.push(event));
   await session.bindExtensions({ onError: (error) => errors.push(error.error) });
   return { directory, provider, manager, session, events, errors, services };
+}
+
+function ends(events: readonly unknown[]): { role: unknown; content: unknown }[] {
+  return events.flatMap((event) => {
+    if (typeof event !== "object" || event === null || !("type" in event) || event.type !== "message_end" || !("message" in event)) return [];
+    const message = event.message;
+    if (typeof message !== "object" || message === null || !("role" in message) || !("content" in message)) return [];
+    return [{ role: message.role, content: message.content }];
+  });
 }
 
 describe("SDK-compatible Durable execution", () => {
@@ -112,6 +121,26 @@ describe("SDK-compatible Durable execution", () => {
     await session.prompt("/skill:handoff");
 
     expect(userTexts()).toEqual([`${block}\n\nresize the sidebar`, block]);
+  });
+  it("shows a custom message once, as the custom message, not as its model copy", async () => {
+    const { provider, session, events } = await fixture();
+    provider.setResponses([fauxAssistantMessage("noted")]);
+    const content = "<process_event type=\"lifecycle\" kind=\"success\" process_id=\"p\"></process_event>";
+    await session.sendCustomMessage({ customType: "ad-process:notification", content, display: true });
+    await session.prompt("after the event");
+    // Events arrive in commit order, so the answer's end proves the custom write's events were already seen.
+    await vi.waitFor(() => { expect(ends(events).some((message) => message.role === "assistant")).toBe(true); });
+    const carrying = ends(events).filter((message) => JSON.stringify(message.content).includes("process_event"));
+    expect(carrying.map((message) => message.role)).toEqual(["custom"]);
+  });
+  it("does not show a user bash command's model copy as a message", async () => {
+    const { provider, session, events } = await fixture();
+    provider.setResponses([fauxAssistantMessage("first"), fauxAssistantMessage("seen")]);
+    await session.prompt("before the command");
+    await session.executeBash("echo marker-output");
+    await session.prompt("after the command");
+    await vi.waitFor(() => { expect(ends(events).filter((message) => message.role === "assistant")).toHaveLength(2); });
+    expect(ends(events).filter((message) => JSON.stringify(message.content).includes("marker-output"))).toEqual([]);
   });
   it("does not grant replay safety to an extension that overrides read", async () => {
     const override = defineTool({ name: "read", label: "Effect", description: "A custom read with a write", parameters: Type.Object({}),

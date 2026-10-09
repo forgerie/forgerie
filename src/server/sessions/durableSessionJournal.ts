@@ -15,6 +15,17 @@ const Imported = defineDoc({ kind: "forgerie.import", version: 1, scope: "sessio
 const DURABLE_ENTRY_PROPERTY = "forgerieDurableEntryId";
 const DURABLE_SESSION_PROPERTY = "forgerieDurableSessionId";
 
+/**
+ * Whether the session transcript shows this entry's messages. Forgerie's own
+ * entries are model copies of something the transcript already holds in its
+ * own form, such as a custom message or a shell run, or imports of old
+ * history. Child entries are the exception: the transcript shows them.
+ */
+export function isTranscriptEntry(kind: string): boolean {
+  if (isChildEntryKind(kind)) return true;
+  return !kind.startsWith("forgerie.") && kind !== "pi.system" && kind !== "pi.compaction" && kind !== "pi.reset";
+}
+
 export function durableSessionPaths(sessionFile: string): { directory: string; database: string; original: string } {
   const directory = join(dirname(sessionFile), ".durable", sessionFile.split(/[\\/]/).at(-1) ?? "session");
   return { directory, database: join(directory, "state.sqlite"), original: join(directory, "original.jsonl") };
@@ -150,7 +161,7 @@ export class DurableSessionJournal {
       this.projected.add(entry.id);
       return;
     }
-    if (this.projected.has(entry.id) || entry.kind.startsWith("forgerie.") || entry.kind === "pi.system" || entry.kind === "pi.compaction" || entry.kind === "pi.reset") return;
+    if (this.projected.has(entry.id) || !isTranscriptEntry(entry.kind)) return;
     for (const message of entry.model ?? []) {
       if (message.role === "system") continue;
       // The stamp and message are one JSONL record. Reopen can recover an interrupted projection without duplicates.
