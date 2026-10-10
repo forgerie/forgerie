@@ -14,8 +14,8 @@ const MARK = 7, GAP = 3, PITCH = MARK + GAP, R = MARK / 4;
 
 // Tones are the app's tally tones converted from oklch (theme.css).
 const palettes = {
-  light: { paper: "#faf7f0", ink: "#232323", bad: "#de3b3d", live: "#2b7fff", faint: "#9a978f" },
-  dark: { paper: "#111214", ink: "#ececea", bad: "#ff645f", live: "#4c93ff", faint: "#6a6966" },
+  light: { paper: "#faf7f0", ink: "#232323", bad: "#de3b3d", live: "#2b7fff", faint: "#9a978f", grey: "#b9b6ae" },
+  dark: { paper: "#111214", ink: "#ececea", bad: "#ff645f", live: "#4c93ff", faint: "#6a6966", grey: "#4a4a4b" },
 };
 
 const mark = (x, y, fill, extra = "") =>
@@ -28,11 +28,13 @@ const cell = (col, row, fill, extra) => mark(col * PITCH, row * PITCH, fill, ext
  * follow from the pattern: the box's diagonal fits inside the safe circle.
  */
 const grid = (name, note, rows) => {
-  const tones = { "#": "ink", r: "bad", b: "live" };
+  const tones = { "#": "ink", r: "bad", b: "live", g: "grey" };
+  // `o` is the chat's faint mark: an outline for work that never finished.
+  const outline = (x, y, p) => `<rect x="${x * PITCH + 0.4}" y="${y * PITCH + 0.4}" width="${MARK - 0.8}" height="${MARK - 0.8}" rx="${R - 0.3}" fill="none" stroke="${p.faint}" stroke-width="0.8"/>`;
   const w = Math.max(...rows.map((r) => r.length)) * PITCH - GAP, h = rows.length * PITCH - GAP;
   return {
     name, note, box: [w, h], scale: Math.floor(780 / Math.hypot(w, h)), nudge: [0, 0],
-    glyph: (p) => rows.flatMap((r, y) => [...r].map((ch, x) => tones[ch] ? cell(x, y, p[tones[ch]]) : "")).join(""),
+    glyph: (p) => rows.flatMap((r, y) => [...r].map((ch, x) => ch === "o" ? outline(x, y, p) : tones[ch] ? cell(x, y, p[tones[ch]]) : "")).join(""),
   };
 };
 
@@ -44,15 +46,17 @@ const candidates = {
   "run": grid("The run (reference)",
     "The previous pick: eight calls, wrapped and right-aligned as the chat draws them.",
     ["###", "r##", ".#b"]),
-  "run-f5": grid("Run F",
-    "Eight marks, the same count as the run, on its three-wide grid. Red sits where it sat in the run; the live mark ends the middle arm.",
-    ["###", "r..", "#b.", "#..", "#.."]),
-  "run-f5-tips": grid("Run F, coloured tips",
-    "The same eight marks. Red ends the top arm, as the falling piece does in the current mark, and the spine stays one colour.",
-    ["##r", "#..", "#b.", "#..", "#.."]),
-  "run-f4-tips": grid("Run F, short",
-    "Seven marks in four rows, with coloured tips. Fewer rows make bigger marks at every icon size.",
-    ["##r", "#..", "#b.", "#.."]),
+  // Each F below keeps red where the run has it and stays three marks wide,
+  // so the marks stay as large as the grid allows.
+  "run-head": grid("Run F, heavy head",
+    "The run's first two rows, unchanged. Its last row drops down into a stem, and the live mark becomes the middle arm.",
+    ["###", "r##", "#b.", "#.."]),
+  "run-tone": grid("Run F, toned",
+    "A full block of marks, as dense as the run. The F is in ink; the other marks are grey, the colour the chat draws them in.",
+    ["###", "rgg", "#bg", "#gg"]),
+  "run-ghost": grid("Run F, ghost cells",
+    "The full block again, but the cells outside the F are the chat's faint marks: outlines for work that never finished.",
+    ["###", "roo", "#bo", "#oo"]),
 };
 
 // The maskable icon keeps the glyph inside the safe zone. The tab icon
