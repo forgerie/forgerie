@@ -723,6 +723,7 @@ describe("PiSessionService session-tree fork-from-entry", () => {
     await fsp.writeFile(sessionFile, `${JSON.stringify(header)}\n${secondLine}\n`, "utf8");
 
     const { service, fake } = treeHarness({}, {
+      sessionFile,
       getUserMessagesForForking: () => [{ entryId: "entry-1", text: "draft text" }],
     });
     fake.runtime.fork = vi.fn(() => Promise.resolve({ cancelled: false, selectedText: "draft text" }));

@@ -63,7 +63,7 @@ describe("PiSessionService handoffSession", () => {
     });
     await preparationStarted;
     expect(promptTexts).toHaveLength(1);
-    expect(promptTexts[0]).toContain(`/tmp/forgerie-handoff-${result.handoffId}.json`);
+    expect(promptTexts[0]).toContain(join(tmpdir(), `forgerie-handoff-${result.handoffId}.json`));
     expect(promptTexts[0]).not.toContain("/sessions/source-1.jsonl");
     expect(promptTexts[0]).toContain("Continue the deployment");
     const snapshot = await readFile(join(tmpdir(), `forgerie-handoff-${result.handoffId}.json`), "utf8");

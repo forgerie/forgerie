@@ -6,6 +6,7 @@ This cleanup removes unused upstream features from the local Forgerie product. I
 
 | Removed | Current replacement or limit |
 | --- | --- |
+| Native Windows server support and the Windows CI job. | Run the server on Linux. Windows browser access remains. npm rejects native Windows installation. WSL2 has not been verified. |
 | Original browser-plugin runtime, bundled assets, declaration package, discovery, and settings editor. | Pi packages, Pi extensions, and current app-plugin settings remain. |
 | Remote-machine registry, proxies, and configuration wrappers. | One local server. The current browser's local-only URL aliases remain; they do not imply federation. |
 | Embedded PTYs and terminal-command runs. | Session shell commands and managed processes remain. |

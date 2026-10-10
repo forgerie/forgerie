@@ -1,3 +1,5 @@
+import { throws } from "node:assert/strict";
+import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -40,6 +42,15 @@ try {
   ], npmToolDir);
   const npm12ExecPath = join(npmToolDir, "node_modules", "npm", "bin", "npm-cli.js");
 
+  // npm's --os flag only affects optional dependencies. Check the real tarball
+  // with npm's own required-package validator, using an explicit Windows OS.
+  const requireNpm = createRequire(npm12ExecPath);
+  const packedManifest = await requireNpm("pacote").manifest(tarballPath);
+  const { checkPlatform } = requireNpm("npm-install-checks");
+  throws(() => checkPlatform(packedManifest, false, { os: "win32" }), {
+    code: "EBADPLATFORM", pkgid: `forgerie@${packedManifest.version}`,
+  }, "The tarball must reject native Windows installation");
+
   await runNpm(npm12ExecPath, [
     "install",
     "--global",
@@ -68,7 +79,7 @@ try {
   await execFileAsync(process.execPath, [
     join(repoRoot, "scripts", "smoke-installed-model-runtime.mjs"), packageRoot, agentDir,
   ], cliOptions);
-  console.log(`Installed-package checks passed with npm ${NPM_VERSION}: patched process sources, pinned subagent and CLIProxyAPI provider versions, CLI, offline model runtime, and retired-file exclusion. No delegated agent was launched.`);
+  console.log(`Installed-package checks passed with npm ${NPM_VERSION}: tarball rejected by npm's Windows platform validator, Linux installation, patched process sources, pinned subagent and CLIProxyAPI provider versions, CLI, offline model runtime, and retired-file exclusion. No delegated agent was launched.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }

@@ -6,7 +6,7 @@ Forgerie is a hard fork of [PI WEB](https://github.com/jmfederico/pi-web). It is
 
 ## Local development
 
-Use Node 24, npm, Git, and a configured Pi profile. The repository pins its Pi SDK versions in `package.json`.
+Use a Linux server with Node 24, npm, Git, and a configured Pi profile. Native Windows server installation is unsupported. Windows browsers can still connect. The repository pins its Pi SDK versions in `package.json`.
 
 ```bash
 nix shell nixpkgs#nodejs_24 -c npm ci

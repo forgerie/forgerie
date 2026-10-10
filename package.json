@@ -110,6 +110,9 @@
     "typescript-eslint": "^8.63.0",
     "vitest": "^4.1.10"
   },
+  "os": [
+    "!win32"
+  ],
   "engines": {
     "node": ">=22.19.0"
   },
