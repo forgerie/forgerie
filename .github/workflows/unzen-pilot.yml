@@ -40,8 +40,9 @@ jobs:
       - name: Verify static checks
         run: npm run verify:static
 
+      # Match hosted CI: avoid compiler/SDK contention within the bounded slice.
       - name: Run tests and measure coverage
-        run: npm run test:coverage
+        run: npm run test:coverage -- --no-file-parallelism
 
       - name: Verify the browser app
         run: npm run verify:ui

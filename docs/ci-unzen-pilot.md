@@ -1,10 +1,10 @@
 # Optional UNZEN Linux pilot
 
-The pilot is not active. The optional manual workflow is prepared, but runner registration needs a dedicated GitHub App and a verified restricted runner group. The existing Linux, Windows, push and PR checks in `.github/workflows/ci.yml` stay unchanged.
+The pilot is not active. The optional manual workflow is prepared, but runner registration needs a dedicated GitHub App and a verified restricted runner group. The existing GitHub-hosted Linux push and PR checks in `.github/workflows/ci.yml` stay unchanged. Native Windows server support was retired separately in PR #27.
 
 ## Admission
 
-`.github/workflows/unzen-pilot.yml` accepts only manual dispatch on `main`. It requests group `unzen-forgerie-manual` and label `unzen-forgerie`. The repository variable `UNZEN_PILOT_ENABLED` must equal `true`; leave it unset until activation passes the gates below.
+`.github/workflows/unzen-pilot.yml` accepts only manual dispatch on `main`. It requests group `unzen-forgerie-manual` and label `unzen-forgerie`. The repository variable `UNZEN_PILOT_ENABLED` must equal `true`. Keep it `false` or unset until activation passes the gates below.
 
 That variable, the job condition and the runner label are not security boundaries. Forgerie is public. GitHub must enforce all of these group properties:
 
@@ -37,7 +37,7 @@ This pilot verifies npm tests and builds, not Nix source derivations. Blocking t
 
 The unit blocks LAN, tailnet and link-local IP ranges. It keeps loopback for HTTP contract tests. Native jobs therefore share the kernel and host loopback; this is not a sandbox for untrusted code or compromised dependencies.
 
-The workflow runs the existing static, coverage, browser, build, npm 12 global-install smoke and package-content commands. `scripts/check-native-ci.mjs` records Node's store path, temporary filesystem and daemon-access result in `native-ci-report.json`. Checkout and upload actions are pinned to commits and use the runner's Node 24 runtime.
+The workflow runs the existing static, coverage, browser, build, npm 12 global-install smoke and package-content commands. Like hosted Linux CI, coverage runs test files serially to avoid CPU contention without changing deadlines or thresholds. `scripts/check-native-ci.mjs` records Node's store path, temporary filesystem and daemon-access result in `native-ci-report.json`. Checkout and upload actions are pinned to commits and use the runner's Node 24 runtime.
 
 ## Activation gates
 
@@ -49,4 +49,4 @@ The workflow runs the existing static, coverage, browser, build, npm 12 global-i
 
 The NixOS test uses the production unit policy with a deterministic workload. It checks identity, namespace hiding, writable disk scratch, loopback tests, slice membership, stopping and scratch cleanup. It does not prove GitHub registration, actual runner-worker cancellation or fork admission.
 
-An offline runner queues enabled pilot jobs. It does not fall back automatically. Disable the pilot variable and manually dispatch the existing `CI` workflow for a hosted Linux/Windows run. No required merge check depends on UNZEN.
+An offline runner queues enabled pilot jobs. It does not fall back automatically. Disable the pilot variable and manually dispatch the existing `CI` workflow for a hosted Linux run. No required merge check depends on UNZEN.
