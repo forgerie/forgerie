@@ -1,7 +1,8 @@
 import { responseCheckpoint } from "./sessionResponse.js";
 import type { SessionResponse } from "../../shared/sessionResponse.js";
-import type { Dirent, Stats } from "node:fs";
-import { open, readdir, stat } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { open, readdir } from "node:fs/promises";
+import { readSessionFileStats, type SessionFileStats } from "./sessionFileStats.js";
 import { join, sep } from "node:path";
 import type { PiSessionListEntry } from "./piSessionService.js";
 import { boundSessionCatalogFirstMessage } from "./sessionCatalogMetadata.js";
@@ -11,10 +12,10 @@ const CATALOG_WINDOW_BYTES = 64 * 1024;
 const MAX_CONCURRENT_CATALOG_READS = 32;
 
 interface CachedCatalogEntry {
-  dev: number;
-  ino: number;
+  dev: string;
+  ino: string;
   size: number;
-  mtimeMs: number;
+  mtimeNs: bigint;
   entry?: PiSessionListEntry;
 }
 
@@ -68,9 +69,9 @@ export class SessionCatalogScanner {
   }
 
   private async scanFile(filePath: string, indexedNameState: SessionNameState | undefined): Promise<PiSessionListEntry | undefined> {
-    let stats: Stats;
+    let stats: SessionFileStats;
     try {
-      stats = await stat(filePath);
+      stats = await readSessionFileStats(filePath);
     } catch {
       this.memo.delete(filePath);
       return undefined;
@@ -80,7 +81,7 @@ export class SessionCatalogScanner {
     if (cached?.dev === stats.dev
       && cached.ino === stats.ino
       && cached.size === stats.size
-      && cached.mtimeMs === stats.mtimeMs) {
+      && cached.mtimeNs === stats.mtimeNs) {
       return applyIndexedName(cached.entry, indexedNameState);
     }
 
@@ -89,7 +90,7 @@ export class SessionCatalogScanner {
       dev: stats.dev,
       ino: stats.ino,
       size: stats.size,
-      mtimeMs: stats.mtimeMs,
+      mtimeNs: stats.mtimeNs,
       ...(entry === undefined ? {} : { entry }),
     });
     return entry;
@@ -108,7 +109,7 @@ function applyIndexedName(
   return next;
 }
 
-async function readCatalogEntry(filePath: string, stats: Stats): Promise<PiSessionListEntry | undefined> {
+async function readCatalogEntry(filePath: string, stats: SessionFileStats): Promise<PiSessionListEntry | undefined> {
   let file;
   try {
     file = await open(filePath, "r");

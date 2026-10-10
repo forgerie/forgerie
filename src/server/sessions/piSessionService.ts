@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { statSync, type Stats } from "node:fs";
+import { statSync } from "node:fs";
+import { readSessionFileStats, type SessionFileStats } from "./sessionFileStats.js";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -987,8 +988,8 @@ export interface PiSessionServiceDependencies {
 /** A cached session header plus the identity of the file it was read from. */
 interface CachedSessionHeader {
   header: SessionHeaderSummary;
-  dev: number;
-  ino: number;
+  dev: string;
+  ino: string;
 }
 
 export class PiSessionService implements SessionRouteService {
@@ -1579,9 +1580,9 @@ export class PiSessionService implements SessionRouteService {
   };
 
   private async loadSessionHeader(sessionFile: string): Promise<SessionHeaderSummary | undefined> {
-    let stats: Stats;
+    let stats: SessionFileStats;
     try {
-      stats = await stat(sessionFile);
+      stats = await readSessionFileStats(sessionFile);
     } catch {
       // Gone or unreadable: report no header and forget any cached entry.
       this.sessionHeaderCache.delete(sessionFile);
