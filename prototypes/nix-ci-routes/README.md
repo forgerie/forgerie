@@ -69,6 +69,6 @@ The report delivery checkout uses newer local source, not the frozen comparison 
 
 ## Limits
 
-These results do not establish production readiness on UNZEN. Its Service currently has stricter user, namespace, network and daemon restrictions than this local harness. Testing a compatible runtime there needs separate validation without weakening those restrictions.
+These results do not establish production readiness on UNZEN. Its Service currently has stricter user, namespace, network and daemon restrictions than this local harness. Testing a compatible runtime there needs separate validation without weakening those restrictions. The later [UNZEN preflight](../unzen-package-candidate/README.md) recorded namespace denials with selected live Service restrictions. No image payload ran.
 
 A shared image still uses the host kernel and any mounted workspace filesystem. It does not replace the native bcachefs check. Times from these runs include cache state, source setup and different completed stages; they are not general performance benchmarks.
