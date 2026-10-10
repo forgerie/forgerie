@@ -17,7 +17,7 @@ const { FOLD8_POSTURES } = await import(pathToFileURL(join(repo, "scripts/lib/fo
 const out = resolve(process.env.OUT ?? "verification/local/child-agents-mockup");
 await mkdir(out, { recursive: true });
 const base = new URL("/verification/child-agents-mockup.html", process.env.APP_URL ?? "http://127.0.0.1:8521/");
-const states = (process.env.STATES ?? "waiting working finished discard conflict worktrees").split(" ");
+const states = (process.env.STATES ?? "list working waiting finished landed discard conflict blocked stale runs worktrees").split(" ");
 const schemes = (process.env.SCHEMES ?? "light,dark").split(",");
 const sheets = (process.env.SHEETS ?? "folded-portrait,unfolded-landscape").split(",");
 const profile = await mkdtemp(join(tmpdir(), "cam-mock-"));
@@ -35,11 +35,26 @@ async function shot(name) {
   const result = await evaluate(cdp, facts);
   console.log(join(out, `${name}.png`), JSON.stringify(result));
 }
-async function load(state) {
-  const url = new URL(base); url.searchParams.set("state", state);
+async function load(state, size) {
+  const url = new URL(base);
+  url.searchParams.set("state", state);
+  if (size) url.searchParams.set("size", size);
   await cdp.send("Page.navigate", { url: url.href });
-  for (let i = 0; i < 200 && !(await evaluate(cdp, `!!document.querySelector('.sheet-dialog[open], .mock-sheet')`)); i++) await sleep(50);
+  const selector = state === "all" ? ".mock-sheet" : ".sheet-dialog[open]";
+  const deadline = Date.now() + 10_000;
+  while (!(await evaluate(cdp, `!!document.querySelector(${JSON.stringify(selector)})`))) {
+    if (Date.now() > deadline) throw new Error(`Mockup did not render ${state}: ${url.href}`);
+    await sleep(50);
+  }
   await evaluate(cdp, `document.fonts.ready.then(() => true)`);
+  if (state === "all") {
+    const expected = 11;
+    const ready = `(() => { const frames = [...document.querySelectorAll('.mock-sheet iframe')]; return frames.length === ${expected} && frames.every(f => f.contentDocument?.querySelector('.sheet-dialog[open]')); })()`;
+    while (!(await evaluate(cdp, ready))) {
+      if (Date.now() > deadline) throw new Error("Overview frames did not all load");
+      await sleep(50);
+    }
+  }
   await sleep(400);
 }
 async function metrics(width, height, scale) {
@@ -53,10 +68,11 @@ try {
     // A sheet: one column of frames at the posture under test, full height.
     for (const name of sheets) {
       const posture = FOLD8_POSTURES.find((candidate) => candidate.name === name) ?? FOLD8_POSTURES[0];
-      await metrics(posture.width, posture.height, 1.5);
-      await load(`all&size=${String(posture.width)}x${String(posture.height)}`);
+      // The overview needs room for the frame plus its 2rem margins. Each iframe still uses the exact device viewport.
+      await metrics(posture.width + 64, posture.height, 1.5);
+      await load("all", `${String(posture.width)}x${String(posture.height)}`);
       const height = await evaluate(cdp, `document.documentElement.scrollHeight`);
-      await metrics(posture.width, height, 1.5);
+      await metrics(posture.width + 64, height, 1.5);
       await sleep(300);
       await shot(`sheet-${name}-${scheme}`);
     }

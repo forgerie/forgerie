@@ -1,4 +1,4 @@
-// Static hi-fi mockup: the child-agent control surface, with the branch a child
+// Interactive fixture-only mockup: the child-agent control surface, with the branch a child
 // leaves behind, the commands on it, the cleanup inventory and the run
 // accounting the server now offers. No runtime, no network.
 // ?state=<name> renders one state full page; ?state=all&size=WxH renders a sheet.
@@ -11,7 +11,7 @@
 // turning the panel into a git dashboard.
 // The one idea: the branch is the child's receipt. A finished child's report
 // ends with the branch it produced, hung from the same rail as a reply's work,
-// with the two commands that act on it. The list carries one line of branch
+// with Review, Land and Discard kept in a pinned action dock. The list carries one line of branch
 // state, marked only when it wants a decision.
 // Palette: the app's tokens only. Waiting and working are --live; a landable
 // branch is --ink-good; uncommitted files and a blocked land are --ink-warn; a
@@ -25,8 +25,8 @@
 // confirmation (it asks in place, where the command stood).
 import { createRoot } from "react-dom/client";
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
-import { GitBranchIcon, TriangleAlertIcon } from "lucide-react";
+import { useState } from "react";
+import { ChevronRightIcon, GitBranchIcon, TriangleAlertIcon } from "lucide-react";
 import "../src/ui/theme.css";
 import "./child-agents-mockup.css";
 import { SheetDialog } from "../src/ui/SheetDialog";
@@ -42,8 +42,16 @@ import { ListSection } from "../src/ui/ListSection";
 import { ActionRow } from "../src/ui/ActionRow";
 import { Lede } from "../src/ui/Lede";
 
-const noop = () => undefined;
-const noopAsync = async () => undefined;
+type Navigate = (state: string) => void;
+
+/** Readiness is independent of commit count: an idle child must also have a clean, unblocked branch. */
+function landBlocker(item: Child): string | undefined {
+  if (!item.worktree) return "This child shares its parent's folder.";
+  if (item.busy || item.question) return "Stop the child before landing its branch.";
+  if (item.worktree.dirty > 0) return `Commit or discard the ${String(item.worktree.dirty)} uncommitted files before landing.`;
+  if (item.worktree.ahead === 0) return "There are no commits to land.";
+  return undefined;
+}
 
 interface Commit { sha: string; subject: string }
 interface Worktree {
@@ -60,6 +68,7 @@ interface Child {
   agent: string;
   busy: boolean;
   question?: string;
+  ended?: string;
   worktree?: Worktree;
 }
 
@@ -82,7 +91,7 @@ const Children: readonly Child[] = [
 ];
 
 const child = (name: string): Child => Children.find((candidate) => candidate.name === name)!;
-const status = (item: Child) => item.question !== undefined ? "Waiting for your answer" : item.busy ? "Working" : "Idle";
+const status = (item: Child) => item.ended ?? (item.question !== undefined ? "Waiting for your answer" : item.busy ? "Working" : "Idle");
 const rank = (item: Child) => item.question !== undefined ? 0 : item.busy ? 1 : 2;
 
 /* -- The branch, as one line. A mark takes colour only when it wants a
@@ -95,7 +104,7 @@ function BranchLine({ worktree, landed = false }: { worktree: Worktree; landed?:
     marks.push(<span key="gone" className="cam-mark">worktree removed</span>);
   }
   else {
-    if (worktree.ahead > 0) marks.push(<span key="ahead" className="cam-mark" data-tone="good">{`${String(worktree.ahead)} commits ahead of main`}</span>);
+    if (worktree.ahead > 0) marks.push(<span key="ahead" className="cam-mark">{`${String(worktree.ahead)} commits ahead of main`}</span>);
     if (worktree.dirty > 0) marks.push(<span key="dirty" className="cam-mark" data-tone="warn">{`${String(worktree.dirty)} files not committed`}</span>);
     if (worktree.ahead === 0 && worktree.dirty === 0) marks.push(<span key="none" className="cam-mark">nothing committed yet</span>);
   }
@@ -107,43 +116,42 @@ function BranchLine({ worktree, landed = false }: { worktree: Worktree; landed?:
 }
 
 /* -- The foot of the list: what the reader can do about the branches. -- */
-function WorktreeFoot() {
-  const branches = Children.filter((item) => item.worktree !== undefined).length;
-  const landable = Children.filter((item) => item.worktree !== undefined && !item.busy && item.worktree.ahead > 0).length;
+function WorktreeFoot({ items, onNavigate }: { items: readonly Child[]; onNavigate: Navigate }) {
+  const branches = items.filter((item) => item.worktree !== undefined).length;
+  const landable = items.filter((item) => landBlocker(item) === undefined).length;
   return <p className="cam-foot">
     <span>{String(branches)} child worktrees. {landable === 1 ? "1 is ready to land." : `${String(landable)} are ready to land.`}</span>
-    <button type="button" className="cam-foot-link" onClick={noop}>Show worktrees</button>
+    <button type="button" className="cam-foot-link" onClick={() => onNavigate("worktrees")}>Show worktrees</button>
   </p>;
 }
 
-function ChildList({ foot = false }: { foot?: boolean }) {
-  const working = Children.filter((item) => item.busy).length;
-  return <SheetDialog title="Child agents" closeLabel="Close child agents" onClose={noop}
-    subtitle={`${String(Children.length)} in this session, ${String(working)} working`}>
-    {[...Children].sort((a, b) => rank(a) - rank(b)).map((item) => <StatusRow key={item.name}
+function ChildList({ items, onNavigate }: { items: readonly Child[]; onNavigate: Navigate }) {
+  const working = items.filter((item) => item.busy).length;
+  return <SheetDialog title="Child agents" closeLabel="Close child agents" onClose={() => onNavigate("closed")}
+    subtitle={`${String(items.length)} in this session, ${String(working)} working`}
+    footer={<WorktreeFoot items={items} onNavigate={onNavigate} />}>
+    {[...items].sort((a, b) => rank(a) - rank(b)).map((item) => <StatusRow key={item.name}
       tone={item.question !== undefined ? "waiting" : item.busy ? "working" : "quiet"}
-      name={item.name} detail={item.agent} status={status(item)} label={`Open ${item.name}`} onPress={noop}
+      name={item.name} detail={item.agent} status={status(item)} label={`Open ${item.name}`}
+      onPress={() => onNavigate(({ ui: "waiting", api: "working", review: "finished", docs: "runs" })[item.name] ?? "list")}
       below={item.worktree === undefined
         ? (item.question === undefined ? undefined : <p>{item.question}</p>)
         : <>
           <BranchLine worktree={item.worktree} />
           {item.question !== undefined && <p className="cam-ask">{item.question}</p>}
         </>} />)}
-    {foot && <WorktreeFoot />}
   </SheetDialog>;
 }
 
 /* -- The branch as the child's receipt, at the end of its report. -- */
-function Receipt({ worktree, stage }: { worktree: Worktree; stage: "ready" | "discard" | "landed" | "refused" }) {
+function Receipt({ worktree, stage }: { worktree: Worktree; stage: "ready" | "discard" | "landed" | "discarded" | "refused" }) {
   return <RailSection end="branch">
     <div className="cam-receipt">
-      <BranchLine worktree={worktree} landed={stage === "landed"} />
+      {stage === "discarded" ? <p>Branch discarded. Worktree removed.</p> : <BranchLine worktree={worktree} landed={stage === "landed"} />}
       <ul className="cam-paths">{worktree.paths.map((path) => <li key={path}><code>{path}</code></li>)}</ul>
-      {stage === "ready" && <div className="cam-commands">
-        <button type="button" className="cam-command" data-primary onClick={noop}>Land on main</button>
-        <button type="button" className="cam-command" onClick={noop}>Discard branch</button>
-      </div>}
-      {stage === "discard" && <DiscardConfirm worktree={worktree} />}
+      {stage === "discard" && <ul className="cam-paths cam-paths-flat">
+        {worktree.commits.map((commit) => <li key={commit.sha}><code>{commit.sha} {commit.subject}</code></li>)}
+      </ul>}
     </div>
   </RailSection>;
 }
@@ -159,22 +167,15 @@ function discardWords(worktree: Worktree): string {
   return `Discarding deletes ${parts.slice(0, -1).join(", ")} and ${parts.at(-1)!}.${lost}`;
 }
 
-/* The confirmation stands where the command stood: the branch stays in view
-   while the reader decides about it, and the chapter asks once, in place. */
-function DiscardConfirm({ worktree }: { worktree: Worktree }) {
-  const shown = worktree.commits.slice(0, 2);
-  const rest = worktree.commits.length - shown.length;
+/* The action dock becomes the confirmation. Its warning and both choices stay visible together. */
+function DiscardConfirm({ worktree, onKeep, onDiscard }: { worktree: Worktree; onKeep: () => void; onDiscard: () => void }) {
   return <div className="cam-confirm" role="group" aria-label={`Discard ${worktree.branch}`}>
     <Consequence tone="warn" icon={<TriangleAlertIcon aria-hidden />}>
       <p><strong>{discardWords(worktree)}</strong> This cannot be undone.</p>
     </Consequence>
-    <ul className="cam-paths cam-paths-flat">
-      {shown.map((commit) => <li key={commit.sha}><code><span className="cam-sha">{commit.sha}</span>{commit.subject}</code></li>)}
-      {rest > 0 && <li><code>and {String(rest)} more {rest === 1 ? "commit" : "commits"}</code></li>}
-    </ul>
     <div className="cam-commands">
-      <button type="button" className="cam-command" data-primary onClick={noop}>Keep the branch</button>
-      <button type="button" className="cam-command" data-danger onClick={noop}>Discard branch</button>
+      <button type="button" className="cam-command" data-primary onClick={onKeep}>Keep the branch</button>
+      <button type="button" className="cam-command" data-danger onClick={onDiscard}>Discard branch</button>
     </div>
   </div>;
 }
@@ -195,15 +196,15 @@ function apiRecord(): ExchangeLine[] {
     { kind: "out", key: "6", streaming: true, text: "One record per run now lands under the data dir, and the read API filters by session and by agent. A run that a restart interrupted records as stopped. Next I will" },
   ];
 }
-function uiRecord(): ExchangeLine[] {
+function uiRecord(answer?: string, stopped = false): ExchangeLine[] {
   return [
     { kind: "in", key: "1", label: "Task", text: TASK_UI },
     { kind: "call", key: "2", name: "read", summary: "docs/runs.md" },
     { kind: "output", key: "3", name: "read", isError: false, text: "# Runs\n\nGET /api/runs returns { runs: Run[] }.\nAn empty list means no run yet." },
-    { kind: "block", key: "4", content: <QuestionCard asker="ui asks" question="Should the empty state show the last run, or stay blank?" /> },
+    { kind: "block", key: "4", content: <QuestionCard asker="ui asks" question="Should the empty state show the last run, or stay blank?" answer={answer ?? (stopped ? "Question cancelled in this preview." : undefined)} /> },
   ];
 }
-function reviewRecord(stage: "ready" | "landed" | "refused", refusal?: ReactNode): ExchangeLine[] {
+function reviewRecord(stage: "ready" | "discard" | "landed" | "discarded" | "refused", refusal?: ReactNode): ExchangeLine[] {
   return [
     { kind: "in", key: "1", label: "Task", text: TASK_REVIEW },
     { kind: "call", key: "2", name: "bash", summary: "git diff --stat main" },
@@ -213,7 +214,7 @@ function reviewRecord(stage: "ready" | "landed" | "refused", refusal?: ReactNode
     ...(refusal === undefined ? [] : [{ kind: "block" as const, key: "6", content: refusal }]),
   ];
 }
-function docsRecord(stage: "ready" | "discard" | "refused", refusal?: ReactNode): ExchangeLine[] {
+function docsRecord(stage: "ready" | "discard" | "landed" | "discarded" | "refused", refusal?: ReactNode): ExchangeLine[] {
   return [
     { kind: "in", key: "1", label: "Task", text: TASK_DOCS },
     { kind: "out", key: "2", text: "The guide states the cleanup rule once, and the session-worktrees page points at it. Two more edits are staged and not committed yet." },
@@ -222,115 +223,205 @@ function docsRecord(stage: "ready" | "discard" | "refused", refusal?: ReactNode)
   ];
 }
 
-/* -- The run accounting: one quiet fold at the foot of the record. -- */
-/* -- The run accounting: one quiet fold at the foot of the record. Opened, it
-      shows each run as the app draws one: an event line whose facts open. -- */
-function Runs({ name, open = false }: { name: string; open?: boolean }) {
-  const body = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    body.current?.querySelectorAll("details").forEach((node) => { node.setAttribute("open", ""); });
-  }, [open]);
-  return <details className="cam-runs" open={open}>
-    <summary>3 runs in {name}</summary>
-    <div ref={body}>
-    <EventLine tone="positive" subject="worker" phrase="answered" time="14:22"
-      facts={[{ label: "model", value: "claude-sonnet-4-6" }, { label: "turns", value: "7" }, { label: "tokens", value: "18.4k" }, { label: "cost", value: "$0.31" }, { label: "took", value: "4m 12s" }]} />
-    <EventLine tone="positive" subject="worker" phrase="answered" time="13:48"
-      facts={[{ label: "model", value: "claude-sonnet-4-6" }, { label: "turns", value: "3" }, { label: "tokens", value: "6.1k" }, { label: "cost", value: "$0.12" }, { label: "took", value: "1m 30s" }]} />
-    <EventLine tone="neutral" hollow subject="worker" phrase="stopped by you" time="13:31"
-      facts={[{ label: "model", value: "claude-sonnet-4-6" }, { label: "turns", value: "2" }, { label: "tokens", value: "4.4k" }, { label: "cost", value: "$0.08" }, { label: "took", value: "48s" }]} />
-    </div>
-  </details>;
+/* Run accounting is a named destination, reachable from the header in every posture. */
+const RUNS = [
+  { at: "14:22", outcome: "answered", turns: 7, tokens: "18.4k", cents: 31, duration: "4m 12s" },
+  { at: "13:48", outcome: "answered", turns: 3, tokens: "6.1k", cents: 12, duration: "1m 30s" },
+  { at: "13:31", outcome: "stopped by you", turns: 2, tokens: "4.4k", cents: 8, duration: "48s" },
+];
+const TOTAL_COST = `$${(RUNS.reduce((sum, run) => sum + run.cents, 0) / 100).toFixed(2)}`;
+function Runs({ name }: { name: string }) {
+  return <section className="cam-runs" aria-label={`Run history for ${name}`}>
+    <h3>Run history</h3>
+    <p>{RUNS.length} runs · {TOTAL_COST} total</p>
+    {RUNS.map((run) => <details key={run.at} className="cam-run">
+      <summary><ChevronRightIcon aria-hidden /><span>{run.at} · {run.outcome}</span><span>${(run.cents / 100).toFixed(2)}</span></summary>
+      <EventLine tone={run.outcome === "answered" ? "positive" : "neutral"} hollow={run.outcome !== "answered"}
+        subject="worker" phrase={run.outcome} facts={[]} quoteFace="text"
+        quote={`claude-sonnet-4-6 · ${run.turns} turns · ${run.tokens} tokens · ${run.duration}`} />
+    </details>)}
+  </section>;
 }
 
-/* -- The cleanup inventory: the one view behind the foot line. -- */
-function Worktrees() {
-  return <SheetDialog title="Worktrees" subtitle="Branches the children left behind" back={{ label: "All child agents", onPress: noop }}
-    closeLabel="Close worktrees" onClose={noop}>
+/* The cleanup inventory has no promise about when a future scheduler will run. */
+function Worktrees({ items, onNavigate }: { items: readonly Child[]; onNavigate: Navigate }) {
+  return <SheetDialog title="Worktrees" subtitle="Branches the children left behind" back={{ label: "All child agents", onPress: () => onNavigate("list") }}
+    closeLabel="Close worktrees" onClose={() => onNavigate("closed")}>
     <Lede>Cleanup removes a worktree only when its branch is merged, nothing is uncommitted, and no session is using it.</Lede>
-    <ListSection title="Will be removed" empty="Nothing to remove." note="These run on the next pass, within five minutes.">
-      <ActionRow name="review/subagent-panel" status="merged, clean" detail={<code>.worktrees/subagent-panel-review</code>} />
+    <ListSection title="Eligible for cleanup" empty="Nothing to remove." note="Rechecked before removal. No cleanup runs in this preview.">
+      <ActionRow name="fix/completed-child" status="merged, clean, not in use" detail={<code>.worktrees/completed-child</code>} />
     </ListSection>
     <ListSection title="Kept" empty="Nothing kept." note="Each one says why it stays.">
-      <ActionRow name="feat/child-run-records" status="4 files not committed" detail={<code>.worktrees/child-run-records</code>} />
-      <ActionRow name="fix/child-agents-polish" status="not merged yet" detail={<code>.worktrees/child-agents-polish</code>} />
-      <ActionRow name="chore/bun-packaging" status="in use by a session" detail={<code>.worktrees/bun-packaging</code>} />
+      {items.filter((item) => item.worktree !== undefined).map((item) => {
+        const tree = item.worktree!;
+        const reason = item.busy || item.question ? `in use by ${item.name}${tree.dirty ? `; ${String(tree.dirty)} files not committed` : ""}`
+          : tree.dirty ? `${String(tree.dirty)} files not committed; not merged` : "not merged yet";
+        return <ActionRow key={item.name} name={tree.branch} status={reason} detail={<code>{tree.path}</code>} />;
+      })}
       <ActionRow name="proto/runway-pool" status="setup did not finish" detail={<code>.worktrees/proto/runway-pool</code>} />
     </ListSection>
   </SheetDialog>;
 }
 
-/* -- One child, open. `follow` is on whenever the reader has just acted, so
-      the thing that answered them is brought into view. -- */
-function ChildView({ name, stage, runs = false, runsOpen = false, follow = false, refusal }: {
-  name: string;
-  stage: "working" | "waiting" | "ready" | "landed" | "discard";
-  runs?: boolean;
-  runsOpen?: boolean;
-  follow?: boolean;
-  refusal?: ReactNode;
+type Stage = "working" | "waiting" | "ready" | "landed" | "discarded" | "discard";
+type Refusal = "conflict" | "blocked" | "stale";
+interface ChildProgress { stage: Stage; answer?: string }
+function itemWithProgress(item: Child, progress?: ChildProgress): Child {
+  if (!progress) return item;
+  const terminal = progress.stage === "landed" || progress.stage === "discarded";
+  return { ...item, busy: progress.stage === "working" || progress.stage === "waiting",
+    question: progress.stage === "waiting" ? item.question : undefined,
+    ...(terminal ? { worktree: undefined, ended: `Worktree ${progress.stage} and removed` } : {}) };
+}
+
+/** Explicitly illustrative diffs. They never read the workspace or call a server. */
+const REVIEW_PATCHES: Record<string, string> = {
+  "ui/src/childAgents/ChildAgentsPanel.test.tsx": "@@ child panel @@\n+ expect(panel.getByRole('button', { name: 'Review changes' })).toBeVisible();\n+ expect(panel.getByRole('button', { name: 'Land on main' })).toBeVisible();",
+  "docs/reviews/2026-10-09-subagent-panel.md": "@@ review notes @@\n+ Show which branch each child owns.\n+ Keep branch actions reachable in folded landscape.",
+  "docs/child-agents.md": "@@ child worktrees @@\n+ A clean, idle child branch can be reviewed before landing.",
+  "docs/session-worktrees.md": "@@ cleanup @@\n- Remove a worktree after the child answers.\n+ Keep unmerged, dirty, or in-use worktrees.",
+  "AGENTS.md": "@@ worktrees @@\n+ Check branch state and live ownership before cleanup.",
+};
+function ReviewChanges({ worktree }: { worktree: Worktree }) {
+  return <section className="cam-review" aria-label="Review changes">
+    <h3>Review changes</h3>
+    <p>Illustrative preview diff against <code>main</code>. These patches are fixture data, not a live Git read.</p>
+    {worktree.paths.map((path) => <details key={path} className="cam-diff" open>
+      <summary><ChevronRightIcon aria-hidden /><code>{path}</code></summary>
+      <pre tabIndex={0} aria-label={`Illustrative diff for ${path}`}>{REVIEW_PATCHES[path] ?? "@@ example change @@\n+ Child worktree support"}</pre>
+    </details>)}
+  </section>;
+}
+
+function RefusalNotice({ kind, branch }: { kind: Refusal; branch: string }) {
+  if (kind === "conflict") return <AlertCard subject={branch} title="could not land" label="Land refused" tone="bad"
+    code={"ui/src/childAgents/ChildAgentsPanel.test.tsx\ndocs/reviews/2026-10-09-subagent-panel.md"} codeLabel="Files in conflict">
+    Main moved while this child worked. Resolve the conflicts in this worktree, then check again. Nothing on main changed.
+  </AlertCard>;
+  if (kind === "blocked") return <AlertCard subject={branch} title="cannot land yet" label="Land blocked" tone="warn">
+    This session still owns active child worktrees. Inspect them before retrying. Clearing this blocker does not guarantee a conflict-free land.
+  </AlertCard>;
+  return <AlertCard subject={branch} title="changed while you looked" label="Discard refused" tone="warn">
+    Nothing was deleted. The branch changed after the preview. Review the current state and confirm again.
+  </AlertCard>;
+}
+
+/* One child, with fixture-only actions. Terminal branches never keep the old composer. */
+function ChildView({ name, initialStage, initialRefusal, initialRuns = false, onNavigate: navigate, progress, onRemember }: {
+  name: string; initialStage: Stage; initialRefusal?: Refusal; initialRuns?: boolean; onNavigate: Navigate;
+  progress?: ChildProgress; onRemember: (name: string, progress: ChildProgress) => void;
 }) {
-  const item = child(name);
-  // A refusal takes the commands away: the card carries the retry, and leaving
-  // the failed command in place would invite the same press twice.
-  const receipt: "ready" | "discard" | "landed" | "refused" =
-    refusal !== undefined ? "refused" : stage === "discard" ? "discard" : stage === "landed" ? "landed" : "ready";
-  const record = name === "api" ? apiRecord() : name === "ui" ? uiRecord()
-    : name === "docs" ? docsRecord(receipt, refusal)
-    : reviewRecord(receipt, refusal);
-  const busy = stage === "working";
-  const question = stage === "waiting" ? item.question : undefined;
-  // The branch sits on the input, not at the top of the record: it is context
-  // for the act of steering, so it stays visible while the record scrolls.
-  const branch = (stage === "working" || stage === "waiting") && item.worktree !== undefined
-    ? <div className="cam-strip"><BranchLine worktree={item.worktree} /></div> : null;
-  const input = question !== undefined
-    ? <ReplyBox label={`Answer ${name}: ${question}`} sendLabel="Send answer" autoFocus placeholder={`Answer ${name}`} onSend={noopAsync} />
-    : <ReplyBox label={`Message ${name}`} sendLabel={`Send to ${name}`} placeholder={busy ? `Steer ${name} while it works` : `Give ${name} another task`} onSend={noopAsync} />;
-  return <SheetDialog title={item.name} subtitle={`${item.agent}, ${status(item)}`}
-    closeLabel="Close child agents" onClose={noop} back={{ label: "All child agents", onPress: noop }}
-    actions={busy ? [{ label: "Stop", onPress: noop }] : []} footer={<>{branch}{input}</>}>
-    <ExchangeLog lines={record} follow={follow || busy || question !== undefined} empty="No messages yet." />
-    {runs && <Runs name={name} open={runsOpen} />}
+  const [stage, setStage] = useState(progress?.stage ?? initialStage);
+  const [refusal, setRefusal] = useState(initialRefusal);
+  const [page, setPage] = useState<"record" | "changes" | "runs">(initialRuns ? "runs" : "record");
+  const [composing, setComposing] = useState(false);
+  const [answer, setAnswer] = useState<string | undefined>(progress?.answer);
+  const onNavigate: Navigate = (destination) => { onRemember(name, { stage, answer }); navigate(destination); };
+  const [notice, setNotice] = useState("");
+  const [newTask, setNewTask] = useState(false);
+  const busy = stage === "working" || stage === "waiting";
+  const terminal = stage === "landed" || stage === "discarded";
+  const item = { ...child(name), busy, question: stage === "waiting" ? child(name).question : undefined };
+  const worktree = item.worktree!;
+  const blocker = landBlocker(item);
+  const mode = refusal !== undefined ? "refused" : busy ? "ready" : stage;
+  const refusalCard = refusal === undefined ? undefined : <RefusalNotice kind={refusal} branch={worktree.branch} />;
+  const record = name === "api" ? apiRecord().map((line) => line.kind === "out" ? { ...line, streaming: busy } : line)
+    : name === "ui" ? uiRecord(answer, stage !== "waiting" && answer === undefined)
+      : name === "docs" ? docsRecord(mode, refusalCard) : reviewRecord(mode, refusalCard);
+  const transition = (next: Stage) => { setStage(next); setRefusal(undefined); setPage("record"); setComposing(false); };
+  const stop = () => { transition("ready"); setNotice("Stopped in this preview. Files and commits are kept."); };
+  const returnToBranch = () => { setPage("record"); setComposing(false); };
+  const footer = terminal
+    ? <div className="cam-action-dock">
+        <p className="cam-action-note">{stage === "landed" ? "Landed on main." : "Branch discarded."} The old worktree is gone.</p>
+        {newTask ? <>
+          <p className="cam-action-note">New task destination: <strong>main</strong>, in the main checkout. This is not the removed worktree.</p>
+          <ReplyBox label="New task from main" placeholder="New task from main" sendLabel="Prepare preview task"
+            onSend={async (text) => { setNotice(`Preview only: prepared a new task on main: ${text}`); setNewTask(false); }} />
+        </> : <button className="cam-command" data-primary onClick={() => setNewTask(true)}>Start new task from main</button>}
+      </div>
+    : stage === "discard" && !refusal
+      ? <DiscardConfirm worktree={worktree} onKeep={() => transition("ready")} onDiscard={() => { transition("discarded"); setNotice("Preview only: no files were deleted."); }} />
+      : busy || composing
+        ? <>
+          <div className="cam-strip"><BranchLine worktree={worktree} /></div>
+          <ReplyBox key={stage === "waiting" ? "answer" : "message"}
+            label={stage === "waiting" ? `Answer ${name}: ${item.question}` : `Message ${name}`}
+            sendLabel={stage === "waiting" ? "Send answer" : `Send to ${name}`}
+            placeholder={stage === "waiting" ? `Answer ${name}` : busy ? `Steer ${name} while it works` : `Continue ${name} on ${worktree.branch}`}
+            secondary={composing && !busy ? { label: "Branch actions", onPress: returnToBranch } : undefined}
+            onSend={async (text) => {
+              setNotice(`Preview message to ${name}: ${text}`);
+              if (stage === "waiting") { setAnswer(text); transition("working"); }
+            }} />
+        </>
+        : <div className="cam-action-dock">
+          <BranchLine worktree={worktree} />
+          {(refusal || blocker) && <p id="cam-land-reason" className="cam-action-note">
+            {refusal === "conflict" ? "Resolve the conflicts, then check again." : refusal === "blocked" ? "Active child worktrees still block landing." : refusal === "stale" ? "Review the updated branch before confirming discard." : blocker}
+          </p>}
+          <div className="cam-commands">
+            <button className="cam-command" onClick={() => setPage(page === "changes" ? "record" : "changes")}>{page === "changes" ? "Back to report" : "Review changes"}</button>
+            {refusal ? <button className="cam-command" data-primary onClick={() => {
+              if (refusal === "blocked") onNavigate("worktrees");
+              else { setRefusal(undefined); setPage("changes"); setNotice("Preview refreshed. Inspect changes before the next action."); }
+            }}>{refusal === "blocked" ? "Show worktrees" : refusal === "stale" ? "Review updated branch" : "Check again"}</button>
+              : <button className="cam-command" data-primary disabled={blocker !== undefined} aria-describedby={blocker ? "cam-land-reason" : undefined}
+                onClick={() => { transition("landed"); setNotice("Preview only: no Git operation ran."); }}>Land on main</button>}
+            <button className="cam-command" onClick={() => transition("discard")}>Discard branch</button>
+            <button className="cam-command" onClick={() => { setComposing(true); setPage("record"); }}>Continue working</button>
+          </div>
+        </div>;
+  const runLabel = `Runs (${RUNS.length}) · ${TOTAL_COST}`;
+  return <SheetDialog title={item.name}
+    subtitle={terminal ? `Worktree ${stage === "landed" ? "landed and removed" : "discarded and removed"}` : `${item.agent}, ${status(item)}`}
+    closeLabel="Close child agents" onClose={() => onNavigate("closed")}
+    back={{ label: page === "record" ? "All child agents" : "Back to record", onPress: () => page === "record" ? onNavigate("list") : setPage("record") }}
+    actions={[
+      { label: page === "runs" ? "Record" : runLabel, onPress: () => setPage(page === "runs" ? "record" : "runs") },
+      ...(busy ? [{ label: "Stop", onPress: stop }] : []),
+    ]} footer={footer}>
+    {notice && <p className="cam-notice" role="status">{notice}</p>}
+    {page === "runs" ? <Runs name={name} /> : page === "changes" ? <ReviewChanges worktree={worktree} />
+      : <>
+        <ExchangeLog lines={record} follow={busy || stage === "discard" || refusal !== undefined} empty="No messages yet." />
+      </>}
+    {page !== "record" && <button className="cam-foot-link" onClick={returnToBranch}>Back to branch actions</button>}
   </SheetDialog>;
 }
 
-/* -- The refusals. Each one is local, and each names the next move. -- */
-function Conflict() {
-  return <AlertCard subject="review/subagent-panel" title="could not land" label="Land refused" tone="bad"
-    code={"ui/src/childAgents/ChildAgentsPanel.test.tsx and docs/reviews/2026-10-09-subagent-panel.md"} codeLabel="Files in conflict"
-    actions={[{ label: "Open the worktree", onPress: noop }, { label: "Try again", onPress: noop }]}>
-    Main moved while this child worked, and two files conflict. Resolve them in the worktree, then land it again. Nothing on main changed.
-  </AlertCard>;
-}
-function Blocked() {
-  return <AlertCard subject="review/subagent-panel" title="cannot land yet" label="Land blocked" tone="warn"
-    actions={[{ label: "Show worktrees", onPress: noop }]}>
-    This session still owns two active child worktrees, and they start from the same commit. Land or discard those first, then this branch lands cleanly.
-  </AlertCard>;
-}
-function Stale() {
-  return <AlertCard subject="docs/children-guide" title="changed while you looked" label="Discard refused" tone="warn"
-    actions={[{ label: "Look again", onPress: noop }]}>
-    Nothing was deleted. The branch moved after this preview was made, so the confirmation no longer matches it.
-  </AlertCard>;
-}
-
-/* -- Every state, once. -- */
-const states: Record<string, { label: string; note: string; view: () => ReactNode }> = {
-  list: { label: "The list", note: "Questions first. A child with its own branch carries one line of branch state, marked only when it wants a decision.", view: () => <ChildList foot /> },
-  working: { label: "Working on its own branch", note: "The branch sits on the input, where the reader steers. Stop stays in the header.", view: () => <ChildView name="api" stage="working" runs /> },
-  waiting: { label: "A question, one input", note: "The question is a card where it was asked. The one input at the foot answers it. No second box.", view: () => <ChildView name="ui" stage="waiting" /> },
-  finished: { label: "The branch as a receipt", note: "A finished child's report ends with the branch it produced, and the commands that act on it.", view: () => <ChildView name="review" stage="ready" /> },
-  landed: { label: "After landing", note: "The receipt becomes a record: what landed, and that the worktree went.", view: () => <ChildView name="review" stage="landed" /> },
-  discard: { label: "Discard asks in place", note: "The confirmation stands where the command stood, so the branch stays in view while the reader decides.", view: () => <ChildView name="docs" stage="discard" follow /> },
-  conflict: { label: "Land refused: a conflict", note: "Names the files and the next move. Main is untouched.", view: () => <ChildView name="review" stage="ready" follow refusal={<Conflict />} /> },
-  blocked: { label: "Land refused: still owned", note: "A session cannot land while it owns other child worktrees from the same commit.", view: () => <ChildView name="review" stage="ready" follow refusal={<Blocked />} /> },
-  stale: { label: "Discard refused: stale preview", note: "A branch that changed after the preview deletes nothing, and says so.", view: () => <ChildView name="docs" stage="discard" follow refusal={<Stale />} /> },
-  runs: { label: "The run accounting", note: "One quiet fold at the foot of the record: model, turns, tokens, cost, and how each run ended.", view: () => <ChildView name="docs" stage="ready" runs runsOpen /> },
-  worktrees: { label: "The cleanup inventory", note: "One view behind the list's foot line. Every kept branch says why it stays.", view: () => <Worktrees /> },
+/* Every review state is an entry into the same interactive preview. */
+const states = {
+  list: { label: "The list", note: "Questions first. Clean, idle branches count as ready. Worktree navigation stays in the footer." },
+  working: { label: "Working on its own branch", note: "The branch stays above the input. Stop and run history stay in the header." },
+  waiting: { label: "Waiting, still stoppable", note: "One answer input. Stop remains available while a question waits." },
+  finished: { label: "A branch ready for review", note: "Review, Land and Discard stay in the footer. Continue working opens the composer." },
+  landed: { label: "After landing", note: "The old worktree is gone. A new task explicitly starts from main." },
+  discard: { label: "Discard asks in place", note: "The action dock becomes a warning and confirmation, with the branch named." },
+  conflict: { label: "Land refused: a conflict", note: "Names the files and offers a recheck. It makes no clean-landing promise." },
+  blocked: { label: "Land refused: still owned", note: "Names the current blocker, without claiming that resolving it guarantees success." },
+  stale: { label: "Discard refused: stale preview", note: "Nothing deleted. Review the updated branch before confirming again." },
+  runs: { label: "Run history", note: "A header control shows the total. Individual rows have disclosure arrows for details." },
+  worktrees: { label: "Cleanup inventory", note: "Eligible versus kept, with reasons. No invented cleanup deadline." },
 };
+type StateName = keyof typeof states;
+function isState(value: string): value is StateName { return Object.hasOwn(states, value); }
+
+function Mockup({ initial }: { initial: string }) {
+  const [state, setState] = useState(initial);
+  const [progress, setProgress] = useState<Record<string, ChildProgress>>({});
+  const items = Children.map((item) => itemWithProgress(item, progress[item.name]));
+  if (state === "closed") return <div className="cam-closed"><h1>Child-agent preview</h1><p>All actions use local fixture state. No files or branches are changed.</p>
+    <button className="cam-command" onClick={() => setState("list")}>Open child agents</button></div>;
+  if (state === "worktrees") return <Worktrees items={items} onNavigate={setState} />;
+  if (state === "list") return <ChildList items={items} onNavigate={setState} />;
+  const name = state === "working" ? "api" : state === "waiting" ? "ui" : ["discard", "stale", "runs"].includes(state) ? "docs" : "review";
+  const stage: Stage = state === "working" || state === "waiting" || state === "landed" || state === "discard" ? state : "ready";
+  const refusal = state === "conflict" || state === "blocked" || state === "stale" ? state : undefined;
+  return <ChildView key={state} name={name} initialStage={stage} initialRefusal={refusal} initialRuns={state === "runs"} onNavigate={setState}
+    progress={progress[name]} onRemember={(key, value) => setProgress((current) => ({ ...current, [key]: value }))} />;
+}
 
 function Sheet({ width, height }: { width: number; height: number }) {
   return <div className="mock-sheet" style={{ gridTemplateColumns: `repeat(auto-fill, ${String(width)}px)` }}>
@@ -347,4 +438,4 @@ const [width = 475, height = 638] = (params.get("size") ?? "475x638").split("x")
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing root");
 if (key === "all") document.documentElement.classList.add("mock-sheet-page");
-createRoot(root).render(key === "all" ? <Sheet width={width} height={height} /> : <>{states[key]?.view() ?? <ChildList foot />}</>);
+createRoot(root).render(key === "all" ? <Sheet width={width} height={height} /> : <Mockup initial={isState(key) ? key : "list"} />);

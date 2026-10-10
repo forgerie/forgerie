@@ -17,8 +17,8 @@
 .cam-ask { margin: var(--space-2) 0 0; color: var(--foreground); }
 
 /* The foot of the list: what the reader can do about the branches. */
-.cam-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-4) 0 0; padding-block-start: var(--space-3);
-  border-block-start: var(--hairline) solid var(--line); color: var(--muted-foreground); font-size: var(--small-text); }
+.cam-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); margin: 0;
+  color: var(--muted-foreground); font-size: var(--small-text); }
 .cam-foot-link { min-block-size: var(--control-size); margin-inline-start: auto; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control);
   background: transparent; color: var(--live); font-size: var(--small-text); font-weight: 500; }
 .cam-foot-link:hover { background: var(--live-wash); }
@@ -44,13 +44,26 @@
 .cam-confirm { display: flex; flex-direction: column; gap: var(--space-3); }
 
 /* -- The run accounting: one quiet fold at the foot of the record. -- */
-.cam-runs { margin-block-start: var(--space-6); border-block-start: var(--hairline) solid var(--line); }
-.cam-runs > summary { display: flex; align-items: center; min-block-size: var(--control-size); cursor: pointer; list-style: none;
-  color: var(--muted-foreground); font-size: var(--small-text); }
-.cam-runs > summary::-webkit-details-marker { display: none; }
-.cam-runs > summary:hover { color: var(--foreground); }
-.cam-runs[open] > summary { color: var(--foreground); }
-.cam-runs .event-line { padding-block: var(--space-1); }
+.cam-runs h3, .cam-review h3 { margin-block: 0 var(--space-2); font-size: var(--text-size); font-weight: 500; }
+.cam-runs > p, .cam-review > p { color: var(--muted-foreground); font-size: var(--small-text); line-height: var(--line-height); }
+.cam-run { border-block-start: var(--hairline) solid var(--line); }
+.cam-run > summary, .cam-diff > summary { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size);
+  cursor: pointer; list-style: none; font-size: var(--small-text); }
+.cam-run > summary::-webkit-details-marker, .cam-diff > summary::-webkit-details-marker { display: none; }
+.cam-run > summary svg, .cam-diff > summary svg { flex: none; inline-size: 1rem; block-size: 1rem; }
+.cam-run[open] > summary svg, .cam-diff[open] > summary svg { transform: rotate(90deg); }
+.cam-run > summary span:last-child { margin-inline-start: auto; font-family: var(--code-font); }
+.cam-run .event-line { padding: var(--space-2) var(--space-4) var(--space-3); }
+.cam-diff summary code { overflow-wrap: anywhere; min-inline-size: 0; }
+.cam-diff pre { padding: var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-document);
+  overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--code-surface); font-size: var(--code-size); }
+.cam-action-dock { display: grid; gap: var(--space-2); }
+.cam-action-note, .cam-notice { margin: 0; font-size: var(--small-text); line-height: 1.45; overflow-wrap: anywhere; }
+.cam-action-note { color: var(--muted-foreground); }
+.cam-notice { margin-block-end: var(--space-3); color: var(--ink-live); }
+.cam-command:disabled { opacity: 0.45; cursor: not-allowed; }
+.cam-closed { max-inline-size: 40rem; margin: auto; padding: var(--space-4); }
+.cam-closed h1 { font-size: var(--text-size); }
 
 /* Review sheet: every state in its own frame at the posture under test. */
 .mock-sheet-page, .mock-sheet-page body { block-size: auto; }
