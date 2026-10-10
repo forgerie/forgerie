@@ -1,6 +1,7 @@
 // Child agents a session runs in its own Durable storage. The server side is
 // src/server/sessions/durableChildAgents.ts; the routes are durableChildRoutes.ts.
 import { z } from "zod";
+import { cleanupSchema } from "../worktrees/worktreeApi";
 import { partsOf, piMessageSchema, textOf, type PiMessage } from "../contracts";
 
 export const childQuestionSchema = z.object({ questionId: z.string(), question: z.string(), askedAt: z.number() });
@@ -12,6 +13,7 @@ export const childSummarySchema = z.object({
   createdAt: z.number(),
   questions: z.array(childQuestionSchema),
   worktree: z.object({
+    repo: z.string().optional(), defaultBranch: z.string().optional(), cleanup: cleanupSchema.optional(), cleanupRetryToken: z.string().optional(), statusError: z.string().optional(),
     path: z.string(), branch: z.string(), state: z.enum(["active", "landed", "discarded"]),
     ahead: z.number().int().nonnegative(), dirty: z.boolean(),
   }).optional(),
@@ -38,7 +40,7 @@ export const CHILD_NOTE_TYPE = "forgerie.child-note";
 
 /** Something a child did, as the parent's transcript records it. */
 export type ChildEntry =
-  | { kind: "question"; questionId: string; child: number; childName: string; question: string; answer?: string }
+  | { kind: "question"; questionId: string; child: number; childName: string; question: string; answer?: string; cancelled?: boolean }
   | { kind: "answer"; questionId: string; answer: string }
   | { kind: "note"; child: number; childName: string; action: "message" | "stop"; text: string }
   | { kind: "report"; childName: string; outcome: "answered" | "failed"; text: string };
@@ -113,7 +115,12 @@ export function orderChildren(children: readonly ChildSummary[]): ChildSummary[]
 
 export function childStatus(child: ChildSummary): string {
   if (child.questions.length > 0) return child.questions.length === 1 ? "Waiting for your answer" : `${String(child.questions.length)} questions for you`;
-  return child.busy ? "Working" : "Idle";
+  if (child.busy) return "Working";
+  if (child.worktree?.state === "landed") return "Landed";
+  if (child.worktree?.state === "discarded") return "Discarded";
+  if (child.worktree?.statusError) return "Cannot read worktree";
+  if (child.worktree?.dirty) return "Uncommitted changes";
+  return child.worktree && child.worktree.ahead > 0 ? "Ready to land" : "Idle";
 }
 
 /**
@@ -122,12 +129,22 @@ export function childStatus(child: ChildSummary): string {
  */
 export function foldChildEntries<T extends { childEntry?: ChildEntry | undefined }>(messages: readonly T[]): readonly T[] {
   const answers = new Map<string, string>();
-  for (const message of messages) if (message.childEntry?.kind === "answer") answers.set(message.childEntry.questionId, message.childEntry.answer);
-  if (answers.size === 0) return messages;
+  const unanswered = new Map<string, number>();
+  const cancelled = new Set<string>();
+  for (const message of messages) {
+    const entry = message.childEntry;
+    if (entry?.kind === "question") unanswered.set(entry.questionId, entry.child);
+    if (entry?.kind === "answer") { answers.set(entry.questionId, entry.answer); unanswered.delete(entry.questionId); }
+    if (entry?.kind === "note" && entry.action === "stop") {
+      for (const [id, child] of unanswered) if (child === entry.child) { cancelled.add(id); unanswered.delete(id); }
+    }
+  }
+  if (answers.size === 0 && cancelled.size === 0) return messages;
   return messages.flatMap((message) => {
     const entry = message.childEntry;
     if (entry?.kind === "answer") return [];
     const answer = entry?.kind === "question" ? answers.get(entry.questionId) : undefined;
+    if (entry?.kind === "question" && cancelled.has(entry.questionId) && answer === undefined) return [{ ...message, childEntry: { ...entry, cancelled: true } }];
     return entry?.kind === "question" && answer !== undefined ? [{ ...message, childEntry: { ...entry, answer } }] : [message];
   });
 }

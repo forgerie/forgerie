@@ -9,9 +9,10 @@ import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { answerChildQuestion, childEntryText, childMessages, childWorkIsLive, childWorktreeAction, workingChildCount, isChildEntryKind, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
+import { answerChildQuestion, childEntryText, childMessages, reviewChildWorktree, continueChild, childWorkIsLive, childWorktreeAction, workingChildCount, isChildEntryKind, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
 import type { DurableChildHost } from "./durableChildHost.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
+import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 
 export interface DurableAgentSessionOptions {
@@ -58,6 +59,7 @@ export class DurableAgentSession implements PiAgentSession {
   private childrenLive: boolean | undefined;
   private childWorktrees: DurableChildWorktrees | undefined;
   private childCount = 0;
+  private childRunRecords: DurableChildRunRecords | undefined;
 
   private constructor(private readonly options: DurableAgentSessionOptions) {
     const { services, sessionManager } = options;
@@ -95,6 +97,7 @@ export class DurableAgentSession implements PiAgentSession {
     } catch (error) {
       await session.stream?.stop();
       await session.journalValue?.close();
+      await session.childRunRecords?.close();
       session.extensionRunner.invalidate("Durable session initialization failed");
       throw error;
     }
@@ -155,12 +158,17 @@ export class DurableAgentSession implements PiAgentSession {
   get hostsDurableChildren(): boolean { return this.options.childAgents !== undefined; }
   get workingDurableChildren(): number { return this.childCount; }
   durableChildren() { return listChildren(this.journal.harness, this.journal.conversation.id, context, this.childWorktrees); }
+  reviewDurableChildWorktree(conversationId: number) { return reviewChildWorktree(this.journal.harness, this.journal.conversation.id, conversationId, context, this.childWorktrees); }
+  continueDurableChild(conversationId: number, text: string, requestId: string) { return continueChild(this.journal.harness, this.journal.conversation, conversationId, text, requestId, context, this.childWorktrees); }
   landDurableChildWorktree(conversationId: number) { return childWorktreeAction(this.journal.harness, this.journal.conversation.id, conversationId, context, this.childWorktrees, "land"); }
   previewDurableChildWorktreeDiscard(conversationId: number) { return childWorktreeAction(this.journal.harness, this.journal.conversation.id, conversationId, context, this.childWorktrees, "discard-preview"); }
   discardDurableChildWorktree(conversationId: number, confirmationToken: string) { return childWorktreeAction(this.journal.harness, this.journal.conversation.id, conversationId, context, this.childWorktrees, "discard", confirmationToken); }
   durableChildMessages(conversationId: number) { return childMessages(this.journal.harness, this.journal.conversation.id, conversationId, context); }
-  messageDurableChild(conversationId: number, text: string) { return messageChild(this.journal.harness, this.journal.conversation, conversationId, text, context, this.childWorktrees); }
-  stopDurableChild(conversationId: number) { return stopChild(this.journal.harness, this.journal.conversation, conversationId, context); }
+  async messageDurableChild(conversationId: number, text: string) {
+    await messageChild(this.journal.harness, this.journal.conversation, conversationId, text, context, this.childWorktrees);
+    await this.childRunRecords?.flush();
+  }
+  stopDurableChild(conversationId: number) { return stopChild(this.journal.harness, this.journal.conversation, conversationId, context, this.childWorktrees); }
   answerDurableChildQuestion(questionId: string, answer: string) { return answerChildQuestion(this.journal.conversation, questionId, answer, context); }
 
   private async startChildAgents(): Promise<void> {
@@ -170,10 +178,15 @@ export class DurableAgentSession implements PiAgentSession {
     const ref = { id: this.sessionId, cwd: this.options.services.cwd };
     this.childWorktrees = host.worktrees === undefined ? undefined : new DurableChildWorktrees(host.worktrees, ref);
     const extensions = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext,
-      ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }) });
+      ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
+      ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
     for (const extension of [...extensions.parent, ...extensions.childOnly]) this.registry.install(extension);
     // Children select these explicitly. The parent must not, or ask_human and the coding tools join its loadout.
     await this.journal.conversation.configure({ extensions: { remove: [...extensions.childOnly] } }, context);
+    if (host.runRecords !== undefined) {
+      this.childRunRecords = await DurableChildRunRecords.open(this.journal.harness, this.journal.conversation.id, ref, host.runRecords, context,
+        (error) => { if (host.runRecordError === undefined) this.report(error); else host.runRecordError(error); });
+    }
     const watch = await this.journal.harness.watchTaskGraph(context);
     this.childWatch = watch;
     const update = (graph: typeof watch.value) => {
@@ -446,6 +459,7 @@ export class DurableAgentSession implements PiAgentSession {
     this.bashController?.abort();
     await this.childWatch?.stop();
     await this.journal.close();
+    await this.childRunRecords?.close();
     await this.stream?.stop();
     await this.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     this.extensionRunner.invalidate("Durable session closed");

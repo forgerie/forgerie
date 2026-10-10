@@ -9,6 +9,8 @@ function setup() {
     durableChildMessages: (ref, id) => { calls.push(["messages", ref, id]); return Promise.resolve({ messages: [], busy: false }); },
     messageDurableChild: (ref, id, text) => { calls.push(["message", ref, id, text]); return Promise.resolve(); },
     stopDurableChild: (ref, id) => { calls.push(["stop", ref, id]); return Promise.resolve(); },
+    reviewDurableChildWorktree: (ref, id) => { calls.push(["review", ref, id]); return Promise.resolve({ head: "abc", sections: [], untracked: [] }); },
+    continueDurableChild: (ref, id, text, requestId) => { calls.push(["continue", ref, id, text, requestId]); return Promise.resolve({ conversationId: 8 }); },
     landDurableChildWorktree: (ref, id) => { calls.push(["land", ref, id]); return Promise.resolve({ kind: "landed", sha: "abc", cleanup: { kind: "done" } }); },
     previewDurableChildWorktreeDiscard: (ref, id) => { calls.push(["preview", ref, id]); return Promise.resolve({ confirmationToken: "current" }); },
     discardDurableChildWorktree: (ref, id, token) => { calls.push(["discard", ref, id, token]); return Promise.resolve({ kind: "stale-preview" }); },
@@ -50,6 +52,16 @@ describe("durable child routes", () => {
     expect((await app.inject({ method: "POST", url: `${base}/discard`, payload: { cwd: "/tmp", confirmationToken: "" } })).statusCode).toBe(400);
     expect((await app.inject({ method: "POST", url: `${base}/land`, payload: { cwd: "/tmp", unexpected: true } })).statusCode).toBe(400);
     expect(calls).toHaveLength(3);
+  });
+
+  it("reads owned changes and admits a validated continuation request", async () => {
+    const { app, calls } = setup();
+    expect((await app.inject({ method: "GET", url: "/sessions/s1/children/7/worktree/changes?cwd=/tmp" })).json()).toEqual({ head: "abc", sections: [], untracked: [] });
+    const url = "/sessions/s1/children/7/continue";
+    expect((await app.inject({ method: "POST", url, payload: { cwd: "/tmp", text: "next task", requestId: "r-1" } })).json()).toEqual({ conversationId: 8 });
+    expect((await app.inject({ method: "POST", url, payload: { cwd: "/tmp", text: "next", requestId: "__proto__" } })).statusCode).toBe(400);
+    expect(calls).toEqual([["review", { id: "s1", cwd: "/tmp" }, 7], ["continue", { id: "s1", cwd: "/tmp" }, 7, "next task", "r-1"]]);
+    await app.close();
   });
 
   it("rejects bad input and maps a closed question to 409", async () => {

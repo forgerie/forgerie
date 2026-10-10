@@ -101,7 +101,7 @@ Record each child run:
 - outcome: answered, failed, or stopped;
 - the session it belongs to.
 
-Store the records on disk under `PI_WEB_DATA_DIR`. Propose a retention period; 90 days is a reasonable default. Add a read API that filters by session and by agent.
+Store the records on disk under `PI_WEB_DATA_DIR`. The user approved 90-day retention for completed records on 2026-10-09. Keep unfinished records. Expiry does not delete conversations, transcripts, branches, or files. Add a read API that filters by session and by agent.
 
 Done when tests cover write, read, filter, and retention.
 

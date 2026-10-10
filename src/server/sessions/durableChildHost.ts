@@ -5,13 +5,16 @@ import { durableChildExtensions, type DurableChildExtensions } from "./durableCh
 import { ChildAgentCatalog } from "./durableChildProfiles.js";
 import type { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
 import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
+import type { ChildRunStore } from "./childRunStore.js";
 
 export interface DurableChildSessionRef { id: string; cwd: string }
 
 /** What a Durable session needs from the daemon to host child agents. */
 export interface DurableChildHost {
-  extensions(input: { cwd: string; agentDir: string; projectContext: string; worktrees?: DurableChildWorktrees }): Promise<DurableChildExtensions>;
+  extensions(input: { cwd: string; agentDir: string; projectContext: string; worktrees?: DurableChildWorktrees; flushRunRecords?: () => Promise<void> }): Promise<DurableChildExtensions>;
   worktrees?: SessionWorktrees;
+  runRecords?: ChildRunStore;
+  runRecordError?: (error: unknown) => void;
   /** Called when a session gains or loses live child work, so a restarted daemon can resume it. */
   liveChanged(ref: DurableChildSessionRef, live: boolean): void;
 }
@@ -74,15 +77,19 @@ export interface DurableChildHostOptions {
   worktrees?: SessionWorktrees;
   extraTools?: readonly ToolRegistration[];
   onIndexError?: (error: unknown) => void;
+  runRecords?: ChildRunStore;
+  onRunRecordError?: (error: unknown) => void;
 }
 
 export function createDurableChildHost(options: DurableChildHostOptions = {}): DurableChildHost {
   return {
+    ...(options.runRecords === undefined ? {} : { runRecords: options.runRecords }),
+    ...(options.onRunRecordError === undefined ? {} : { runRecordError: options.onRunRecordError }),
     ...(options.worktrees === undefined ? {} : { worktrees: options.worktrees }),
-    async extensions({ cwd, agentDir, projectContext, worktrees }) {
+    async extensions({ cwd, agentDir, projectContext, worktrees, flushRunRecords }) {
       const catalog = ChildAgentCatalog.forSession(cwd, agentDir, options.builtinAgentsDir);
       const agents = await catalog.list();
-      return durableChildExtensions({ catalog, agents, projectContext, ...(worktrees === undefined ? {} : { worktrees }), ...(options.extraTools === undefined ? {} : { extraTools: options.extraTools }) });
+      return durableChildExtensions({ catalog, agents, projectContext, ...(flushRunRecords === undefined ? {} : { flushRunRecords }), ...(worktrees === undefined ? {} : { worktrees }), ...(options.extraTools === undefined ? {} : { extraTools: options.extraTools }) });
     },
     liveChanged(ref, live) {
       void options.index?.set(ref, live).catch((error: unknown) => { options.onIndexError?.(error); });

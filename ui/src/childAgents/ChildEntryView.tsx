@@ -23,6 +23,7 @@ export function ChildEntryView({ entry, onAnswer, onOpen }: {
 }) {
   switch (entry.kind) {
     case "question": return <QuestionCard asker={`${entry.childName} asks`} question={entry.question} answer={entry.answer}
+      closedReason={entry.cancelled ? "Stopped without an answer." : undefined}
       replyLabel={`Answer ${entry.childName}`} placeholder="Your answer" sendLabel="Send answer"
       onAnswer={onAnswer && ((answer) => onAnswer(entry.questionId, answer))}
       link={onOpen && { label: `Open ${entry.childName}`, onPress: () => onOpen(entry.childName) }} />;

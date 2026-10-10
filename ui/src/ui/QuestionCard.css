@@ -9,6 +9,7 @@
 .question-card[data-open] .question-card-dot { background: var(--live); }
 .question-card-asker { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--code-font); font-size: var(--label-text); color: var(--muted-foreground); }
+.question-card[data-open] .question-card-asker { color: var(--foreground); }
 .question-card-link { position: relative; flex: none; padding: 0; border: 0; background: transparent; color: var(--ink-live);
   font-size: var(--label-text); text-decoration: underline; text-underline-offset: 0.2em; }
 .question-card-link::before { content: ""; position: absolute; inset: calc(-1 * var(--space-3)) calc(-1 * var(--space-2)); }

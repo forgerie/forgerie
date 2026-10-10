@@ -1,3 +1,8 @@
+import { useState } from "react";
+import { ActionFooter } from "../ui/ActionFooter";
+import { ChildWorkPanel } from "./ChildWorkPanel";
+import { landBlocker, resultText, totalCost, type ChildDetail, type Runs } from "./childWorkModel";
+import type { WorktreeActionResult } from "../worktrees/worktreeApi";
 import { SheetDialog } from "../ui/SheetDialog";
 import { StatusRow } from "../ui/StatusRow";
 import { ExchangeLog, type ExchangeLine } from "../ui/ExchangeLog";
@@ -14,6 +19,16 @@ export interface ChildAgentsActions {
   onStop: (conversationId: number) => void;
   onAnswer: (questionId: string, answer: string) => Promise<void>;
   onDismissError?: (() => void) | undefined;
+  onReview: (conversationId: number) => void;
+  onLand: (conversationId: number) => void;
+  onPreviewDiscard: (conversationId: number) => void;
+  onDiscard: (conversationId: number, token: string) => void;
+  onContinue: (conversationId: number, text: string) => Promise<void>;
+  onRuns: () => void;
+  onCleanup: () => void;
+  onBackDetail: () => void;
+  onDismissOutcome: () => void;
+  onRetryDetail: () => void;
 }
 
 const ANSWERED = /^The user answered: ([\s\S]*)$/u;
@@ -33,7 +48,7 @@ function exchange(child: ChildSummary, transcript: ChildTranscript): ExchangeLin
       const next = lines[index + 1];
       const answer = next?.kind === "result" && next.name === QUESTION_TOOL ? ANSWERED.exec(next.text)?.[1] : undefined;
       out.push({ kind: "block", key: line.key, content: <QuestionCard asker={`${child.name} asks`} question={line.summary}
-        answer={answer} /> });
+        answer={answer} closedReason={next?.kind === "result" && next.isError ? "Question ended without an answer." : undefined} /> });
       return;
     }
     if (line.kind === "result" && line.name === QUESTION_TOOL) return;
@@ -51,45 +66,91 @@ function exchange(child: ChildSummary, transcript: ChildTranscript): ExchangeLin
  * works or gives it a new task when it is idle. Stop sits in the header while
  * it works.
  */
-export function ChildAgentsPanel({ children, openId, transcript, error, actions }: {
+export function ChildAgentsPanel({ children, openId, transcript, error, actions, detail = { kind: "none" }, outcome, pending, runs, drafts }: {
   children: readonly ChildSummary[];
   /** The child shown, or undefined for the list. */
   openId?: number | undefined;
   transcript?: ChildTranscript | undefined;
   error?: string | undefined;
   actions: ChildAgentsActions;
+  detail?: ChildDetail | undefined;
+  outcome?: WorktreeActionResult | undefined;
+  pending?: string | undefined;
+  runs?: Runs | undefined;
+  drafts?: { values: Readonly<Record<string, string>>; update: (key: string, change: (text: string) => string) => void } | undefined;
 }) {
+  const [localDrafts, setLocalDrafts] = useState<Record<string, string>>({});
+  const draft = (key: string) => ({ value: (drafts?.values ?? localDrafts)[key] ?? "", update: (change: (text: string) => string) => {
+    if (drafts) drafts.update(key, change);
+    else setLocalDrafts((current) => ({ ...current, [key]: change(current[key] ?? "") }));
+  } });
+  const [writingId, setWritingId] = useState<number>();
+  const [newTaskId, setNewTaskId] = useState<number>();
   const child = openId === undefined ? undefined : children.find((candidate) => candidate.conversationId === openId);
   const alert = error === undefined ? null : <NoticeBar tone="alert" message={error}
     actions={actions.onDismissError ? [{ label: "Dismiss", onPress: actions.onDismissError }] : []} />;
+  const history = { label: runs ? `Runs ${totalCost(runs)}` : "Run history", onPress: actions.onRuns };
+  if (detail.kind !== "none") return <ChildWorkPanel detail={detail} error={error} pending={pending}
+    onClose={actions.onClose} onBack={actions.onBackDetail}
+    onDiscard={(token) => { if (child) actions.onDiscard(child.conversationId, token); }}
+    onRefresh={() => { if (detail.kind === "failed") actions.onRetryDetail(); else if (detail.kind === "runs") actions.onRuns(); else if (detail.kind === "cleanup") actions.onCleanup();
+      else if (child && detail.kind === "discard") actions.onPreviewDiscard(child.conversationId); else if (child) actions.onReview(child.conversationId); else actions.onBackDetail(); }} />;
   if (!child) {
     const ordered = orderChildren(children);
     const working = children.filter((candidate) => candidate.busy).length;
     return <SheetDialog title="Child agents" closeLabel="Close child agents" onClose={actions.onClose}
+      actions={[history]} footer={<ActionFooter note={`${children.filter((item) => landBlocker(item) === undefined).length} ready to land`}
+        actions={[{ label: "Worktrees", onPress: actions.onCleanup }]} />}
       subtitle={children.length === 0 ? undefined : `${String(children.length)} in this session${working > 0 ? `, ${String(working)} working` : ""}`}>
       {alert}
       {ordered.length === 0 ? <p>No child agents yet. When the agent starts one, it shows here, and you can open, steer, and stop it.</p>
         : ordered.map((item) => <StatusRow key={item.conversationId} tone={item.questions.length > 0 ? "waiting" : item.busy ? "working" : "quiet"}
           name={item.name} detail={item.agent ?? undefined} status={childStatus(item)} label={`Open ${item.name}`}
           onPress={() => actions.onOpenChild(item.conversationId)}
-          below={item.questions[0] === undefined ? undefined : <p>{item.questions[0].question}</p>} />)}
+          below={<>{item.questions[0] && <p>{item.questions[0].question}</p>}{item.worktree && <p><code>{item.worktree.branch}</code> · {item.worktree.ahead} commits ahead{item.worktree.dirty ? ", uncommitted files" : ""}</p>}</>} />)}
     </SheetDialog>;
   }
   const busy = transcript?.busy ?? child.busy;
   const question = child.questions[0];
   // One input. While the child waits on the reader, it answers the oldest open question, which the record shows as a card.
-  const footer = question !== undefined
-    ? <ReplyBox key={question.questionId} label={`Answer ${child.name}: ${question.question}`} sendLabel="Send answer" autoFocus
+  const branch = child.worktree?.defaultBranch ?? "the default branch";
+  const closed = child.worktree !== undefined && child.worktree.state !== "active";
+  const blocker = landBlocker(child);
+  const refusal = outcome?.kind === "conflict" ? "Resolve the conflict before landing again." : outcome?.kind === "blocked" ? "The last action was refused. See the details above." : undefined;
+  const footer = closed ? newTaskId === child.conversationId
+    ? <><p>A new child starts with the same agent settings and an empty conversation, in a fresh worktree from {branch}.</p>
+      <ReplyBox key={`new-${String(child.conversationId)}`} draft={draft(`new:${child.conversationId}`)} label={`New task from ${branch}`} placeholder="Describe the new task" sendLabel="Start new child" autoFocus onSend={(text) => actions.onContinue(child.conversationId, text)} /></>
+    : <ActionFooter note={`${child.worktree?.branch} is ${child.worktree?.state}. The old conversation is read-only.`}
+      actions={[{ label: `Start new task from ${branch}`, onPress: () => setNewTaskId(child.conversationId), disabled: pending !== undefined },
+        ...(child.worktree?.cleanup?.kind === "failed" ? [{ label: "Retry cleanup", onPress: () => {
+          if (child.worktree?.state === "landed") actions.onLand(child.conversationId);
+          else if (child.worktree?.cleanupRetryToken && outcome?.kind !== "stale-preview") actions.onDiscard(child.conversationId, child.worktree.cleanupRetryToken);
+          else actions.onPreviewDiscard(child.conversationId);
+        }, disabled: pending !== undefined }] : [])]} />
+    : child.worktree && !busy && question === undefined && writingId !== child.conversationId
+      ? <ActionFooter note={<><code>{child.worktree.branch}</code> · {child.worktree.ahead} commits ahead. {pending ? "Applying action…" : blocker ?? refusal ?? `Ready to land on ${branch}.`}</>}
+        actions={[{ label: "Review changes", onPress: () => actions.onReview(child.conversationId), disabled: pending !== undefined },
+          { label: "Land", tone: "primary", onPress: () => actions.onLand(child.conversationId), disabled: pending !== undefined || blocker !== undefined },
+          { label: "Discard", tone: "danger", onPress: () => actions.onPreviewDiscard(child.conversationId), disabled: pending !== undefined },
+          { label: "Continue working", onPress: () => setWritingId(child.conversationId), disabled: pending !== undefined }]} />
+    : question !== undefined
+    ? <ReplyBox key={question.questionId} draft={draft(question.questionId)} label={`Answer ${child.name}: ${question.question}`} sendLabel="Send answer" autoFocus
       placeholder={child.questions.length > 1 ? `Answer ${child.name}'s first question (1 of ${String(child.questions.length)})` : `Answer ${child.name}`}
       onSend={(answer) => actions.onAnswer(question.questionId, answer)} />
-    : <ReplyBox key="message" label={`Message ${child.name}`} sendLabel={`Send to ${child.name}`}
+    : <ReplyBox key={`message-${String(child.conversationId)}`} draft={draft(`message:${child.conversationId}`)} label={`Message ${child.name}`} sendLabel={`Send to ${child.name}`}
       placeholder={busy ? `Steer ${child.name} while it works` : `Give ${child.name} another task`}
       onSend={(text) => actions.onSend(child.conversationId, text)} />;
-  return <SheetDialog title={child.name} subtitle={[child.agent, childStatus(child)].filter(Boolean).join(", ")}
+  return <SheetDialog title={child.name} subtitle={[child.agent, refusal ? "Needs attention" : childStatus(child)].filter(Boolean).join(", ")}
     closeLabel="Close child agents" onClose={actions.onClose} back={{ label: "All child agents", onPress: actions.onBack }}
-    actions={busy ? [{ label: "Stop", onPress: () => actions.onStop(child.conversationId) }] : []} footer={footer}>
+    actions={[history, ...(busy || question !== undefined ? [{ label: "Stop", onPress: () => actions.onStop(child.conversationId) }]
+      : writingId === child.conversationId && !closed ? [{ label: "Branch actions", onPress: () => setWritingId(undefined) }] : [])]} footer={footer}>
     {alert}
-    <ExchangeLog lines={transcript === undefined ? [] : exchange(child, transcript)} follow={busy || question !== undefined}
+    <ExchangeLog lines={[...(transcript === undefined ? [] : exchange(child, transcript)),
+      ...(child.worktree?.cleanup?.kind === "failed" ? [{ kind: "block" as const, key: "cleanup-failed", content: <NoticeBar tone="alert" message={`The branch is ${child.worktree.state}, but folder cleanup failed: ${child.worktree.cleanup.error}`} actions={[]} /> }] : []),
+      ...(outcome ? [{ kind: "block" as const, key: "worktree-result", content: <NoticeBar tone={outcome.kind === "landed" || outcome.kind === "discarded" ? "plain" : "alert"}
+        message={resultText(outcome, branch)} actions={[{ label: "Dismiss", onPress: actions.onDismissOutcome },
+          ...(outcome.kind === "conflict" ? [{ label: "Ask child to resolve", onPress: () => { void actions.onSend(child.conversationId, outcome.prompt).catch(() => {}); } }] : [])]} /> }] : [])]}
+      follow={busy || question !== undefined || outcome !== undefined}
       empty={transcript === undefined ? "Reading the record…" : "No messages yet."} />
   </SheetDialog>;
 }

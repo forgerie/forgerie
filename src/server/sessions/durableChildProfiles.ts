@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -5,6 +6,7 @@ import { join } from "node:path";
 export interface ChildAgentProfile {
   name: string;
   description: string;
+  source: { path: string; sha256: string };
   model?: { provider: string; modelId: string };
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   /** Tool names from the file; undefined offers every child tool. */
@@ -35,7 +37,7 @@ export class ChildAgentCatalog {
     const byName = new Map<string, ChildAgentProfile>();
     for (const dir of this.dirs) {
       for (const file of await markdownFiles(dir)) {
-        const profile = parseChildAgentFile(await readFile(file, "utf8"), file);
+        const profile = parseChildAgentFile(await readFile(file), file);
         if (profile !== undefined && !byName.has(profile.name)) byName.set(profile.name, profile);
       }
     }
@@ -53,8 +55,8 @@ async function markdownFiles(dir: string): Promise<string[]> {
 }
 
 /** Undefined for a file without frontmatter, a disabled agent, or one pi-subagents would refuse. */
-export function parseChildAgentFile(text: string, path = "agent.md"): ChildAgentProfile | undefined {
-  const normalized = text.replace(/\r\n/g, "\n");
+export function parseChildAgentFile(text: string | Buffer, path = "agent.md"): ChildAgentProfile | undefined {
+  const normalized = (typeof text === "string" ? text : text.toString("utf8")).replace(/\r\n/g, "\n");
   if (!normalized.startsWith("---\n")) return undefined;
   const end = normalized.indexOf("\n---", 3);
   if (end === -1) return undefined;
@@ -76,6 +78,7 @@ export function parseChildAgentFile(text: string, path = "agent.md"): ChildAgent
   const tools = fields.get("tools")?.split(",").map((tool) => tool.trim()).filter((tool) => tool !== "");
   return {
     name,
+    source: { path, sha256: createHash("sha256").update(text).digest("hex") },
     description: fields.get("description") ?? "",
     ...(modelSpec !== undefined && slash > 0 ? { model: { provider: modelSpec.slice(0, slash), modelId: modelSpec.slice(slash + 1) } } : {}),
     ...(thinkingLevel !== undefined && isThinking(thinkingLevel) ? { thinkingLevel } : {}),

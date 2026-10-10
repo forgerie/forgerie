@@ -33,6 +33,8 @@ import { defaultSessionNameIndexFilePath } from "./sessions/sessionNameIndex.js"
 import { registerSessionRoutes } from "./sessions/sessionRoutes.js";
 import { registerProcessRoutes } from "./sessions/processRoutes.js";
 import { registerDurableChildRoutes } from "./sessions/durableChildRoutes.js";
+import { ChildRunStore } from "./sessions/childRunStore.js";
+import { registerChildRunRoutes } from "./sessions/childRunRoutes.js";
 import { LiveChildSessionIndex, createDurableChildHost } from "./sessions/durableChildHost.js";
 import { bundledSubagentsPackagePath } from "./sessions/bundledSubagents.js";
 import { SessionNotificationStore } from "./sessions/sessionNotificationStore.js";
@@ -191,6 +193,8 @@ async function createSessionDaemonRuntime() {
   const groups = new ProjectGroups(join(piWebDataDir(daemonEnvironment), "project-groups.json"), projectWorkspaceDeps.projects);
   const relatedWork = new ProjectWorkspaces({ ...projectWorkspaceDeps, groups, worktrees: sessionWorktrees, agentDir: activeAgentProfile.dir,
     writable: async (ref) => { await sessionWorktrees.store.assertWritable(ref); return (await sessions.inspectPullSession(ref)).available; } });
+  const childRuns = new ChildRunStore(join(piWebDataDir(daemonEnvironment), "child-runs.json"));
+  await childRuns.list();
   const liveChildren = config.durableChildren ? new LiveChildSessionIndex(join(piWebDataDir(daemonEnvironment), "durable-children-live.json")) : undefined;
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
     modelRuntime: modelRuntime,
@@ -212,6 +216,8 @@ async function createSessionDaemonRuntime() {
       builtinAgentsDir: join(bundledSubagentsPackagePath(), "agents"),
       index: liveChildren,
       worktrees: sessionWorktrees,
+      runRecords: childRuns,
+      onRunRecordError: (error) => { app.log.error({ err: error }, "durable child run record write failed"); },
       onIndexError: (error) => { app.log.warn({ err: error }, "durable child index write failed"); },
     }) }),
     github: {
@@ -278,10 +284,10 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
-  return { eventHub, workspaceActivity, sessions, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices };
+  return { eventHub, workspaceActivity, sessions, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
   registerBacklogRoutes(app, backlog);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);
@@ -293,6 +299,7 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, ru
   registerSessionRoutes(app, sessions, eventHub, "", userSessions);
   registerProcessRoutes(app, sessions);
   registerDurableChildRoutes(app, sessions);
+  registerChildRunRoutes(app, childRuns);
   registerPromptResourceRoutes(app, promptResources);
   registerPromptLibraryRoutes(app, promptLibrary);
   registerResourceEditorRoutes(app, resourceEditor);
@@ -313,13 +320,17 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, ru
   app.get("/runtime", () => runtimeComponent);
 }
 
-async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup, workspaceServices }: SessionDaemonRuntime): Promise<void> {
+async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): Promise<void> {
   pulls.start();
+  childRuns.start((error) => { app.log.error({ err: error }, "child run retention failed"); });
   let shuttingDown = false;
   const startCleanup = () => { if (!shuttingDown) worktreeCleanup.start(); };
   // Children run only while their parent session is open. Reopen the sessions that had live children at shutdown.
   if (liveChildren !== undefined) {
-    void liveChildren.list().then((refs) => sessions.resumeDurableChildren(refs)).then(async (report) => {
+    void Promise.all([liveChildren.list(), childRuns.pending()]).then(([live, pending]) => {
+      const refs = new Map([...live, ...pending.map(({ run }) => run.session)].map((ref) => [ref.id, ref]));
+      return sessions.resumeDurableChildren([...refs.values()]);
+    }).then(async (report) => {
       for (const failure of report.failed) {
         app.log.warn(failure, "could not resume a session with durable children");
         if (/session not found/i.test(failure.error)) {
@@ -348,6 +359,7 @@ async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pu
     await attempt("dispose catalog refresher", () => { catalogRefresher.dispose(); });
     await attempt("dispose sessions", () => sessions.dispose());
     await attempt("detach workspace services", () => workspaceServices.dispose());
+    await attempt("flush child run records", () => childRuns.stop());
     await attempt("flush session unread state", () => unreadStore.flush());
     await attempt("close server", () => app.close());
   }

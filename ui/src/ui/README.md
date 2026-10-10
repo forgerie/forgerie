@@ -8,6 +8,7 @@ here at its first call site, with its part and one line below.
 
 One line per component: the name in backticks, its layer, and what it decides.
 
+- `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions.
 - `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, and a refused value stays.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place.

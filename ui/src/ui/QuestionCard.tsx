@@ -7,11 +7,13 @@ import "./QuestionCard.css";
  * conversation. Who asks, the question, and a reply box while it is open;
  * once answered, the answer in place of the box. A link can open the asker.
  */
-export function QuestionCard({ asker, question, answer, replyLabel, placeholder, sendLabel, onAnswer, link }: {
+export function QuestionCard({ asker, question, answer, replyLabel, placeholder, sendLabel, onAnswer, link, closedReason }: {
   asker: string;
   question: ReactNode;
   /** The given answer. Undefined while the question is open. */
   answer?: string | undefined;
+  /** A closed question without an answer, such as a cancelled request. */
+  closedReason?: string | undefined;
   /** The reply box's words. Needed only with `onAnswer`. */
   replyLabel?: string;
   placeholder?: string;
@@ -20,7 +22,7 @@ export function QuestionCard({ asker, question, answer, replyLabel, placeholder,
   onAnswer?: ((text: string) => Promise<void>) | undefined;
   link?: { label: string; onPress: () => void } | undefined;
 }) {
-  const open = answer === undefined;
+  const open = answer === undefined && closedReason === undefined;
   return <section className="question-card" data-open={open || undefined} aria-label={`${asker} asks`}>
     <header className="question-card-head">
       <span className="question-card-dot" aria-hidden />
@@ -29,6 +31,6 @@ export function QuestionCard({ asker, question, answer, replyLabel, placeholder,
     </header>
     <div className="question-card-question">{question}</div>
     {open ? onAnswer && <ReplyBox label={replyLabel ?? `Answer ${asker}`} placeholder={placeholder ?? ""} sendLabel={sendLabel ?? "Send"} onSend={onAnswer} />
-      : <p className="question-card-answer">{answer}</p>}
+      : <p className="question-card-answer">{answer ?? closedReason}</p>}
   </section>;
 }

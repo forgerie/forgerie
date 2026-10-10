@@ -34,6 +34,8 @@ import { fromHistory } from "../src/transcript";
 import { CHILD_NOTE_TYPE, CHILD_QUESTION_TYPE, foldChildEntries, type ChildEntry } from "../src/childAgents/childAgentsModel";
 import { ChildAgentsOpener } from "../src/childAgents/ChildAgentsOpener";
 import { ChildAgentsPanel } from "../src/childAgents/ChildAgentsPanel";
+import type { ChildDetail } from "../src/childAgents/childWorkModel";
+import { REVIEW, DISCARD, CLEANUP, RUNS } from "../src/childAgents/fixtures/childWork";
 import { ChildEntryView } from "../src/childAgents/ChildEntryView";
 import { CHILDREN, STREAMING, TRANSCRIPT } from "../src/childAgents/fixtures/children";
 import type { ComposerInputElement } from "../src/ui/ComposerEditor";
@@ -470,6 +472,7 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   handoff: handoffMessages, "handoff-open": handoffMessages,
 };
 function Preview() {
+  const [childDetail, setChildDetail] = useState<ChildDetail>({ kind: "none" });
   const [childView, setChildView] = useState<{ open: boolean; id?: number }>(() => ({
     open: scenario !== "children", ...(scenario === "children-child" ? { id: 21 } : scenario === "children-steer" ? { id: 15 } : {}) }));
   const [dictation] = useState(() => new ForgerieDictationAdapter({
@@ -705,10 +708,13 @@ function Preview() {
             onCopy={() => undefined} onDismiss={(id) => setProblems((list) => list.filter((problem) => problem.id !== id))} /> } : undefined} />;
     })()}
       actions={childrenPreview ? <ChildAgentsOpener children={CHILDREN} onOpen={() => setChildView({ open: true })} /> : undefined}>
-      {childrenPreview && childView.open && <ChildAgentsPanel children={CHILDREN} openId={childView.id}
+      {childrenPreview && childView.open && <ChildAgentsPanel children={CHILDREN} openId={childView.id} detail={childDetail}
         transcript={childView.id === undefined ? undefined : childView.id === 15 ? STREAMING : TRANSCRIPT}
         actions={{ onOpenChild: (id) => setChildView({ open: true, id }), onBack: () => setChildView({ open: true }), onClose: () => setChildView({ open: false }),
-          onSend: async () => {}, onStop: () => {}, onAnswer: async () => {} }} />}
+          onSend: async () => {}, onStop: () => {}, onAnswer: async () => {},
+          onReview: () => setChildDetail(REVIEW), onPreviewDiscard: () => setChildDetail(DISCARD), onRuns: () => setChildDetail({ kind: "runs", data: RUNS }),
+          onCleanup: () => setChildDetail(CLEANUP), onBackDetail: () => setChildDetail({ kind: "none" }), onRetryDetail: () => setChildDetail({ kind: "runs", data: RUNS }),
+          onLand: () => {}, onDiscard: () => setChildDetail({ kind: "none" }), onContinue: async () => {}, onDismissOutcome: () => {} }} />}
       <SessionDoorsProvider cwd={previewCwd} open={openPreviewDoor}>
       <Thread commandResult={commandResult && { result: commandResult, disabled: false, onClose: () => setCommandResult(undefined),
         onChoose: (_requestId, value) => setCommandResult({ type: "done", presentation: "toast", message: `Forked from ${value}` }) }} systemArtifact={childrenPreview ? (custom) => {

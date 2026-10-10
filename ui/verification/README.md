@@ -24,6 +24,19 @@ A session's child agents open from the robot button in the header. The child vie
 
 Cost: the parent thread's question card keeps its own answer box, so a waiting question shows a second box above the message box, in a separate card. A child's question shows its answer only once the answer reaches the child's record. `SheetDialog` still duplicates the older `.tree-dialog` sheet in `theme.css`; moving the tree, changes, and pull request sheets onto it is not done. Physical Fold touch acceptance is not done.
 
+## Production child worktree controls
+
+`ChildAgentsPanel` now uses real child routes through `childAgentsStore`. The standalone mockup below remains an archived design reference, not the production renderer.
+
+| Verification entry | Purpose |
+| --- | --- |
+| `verification/child-controls-parts.html?state=Finished` | Renders the production Caliper scenarios with local data and no API calls. `scripts/child-controls-shots.mjs` captures every named state across all four Fold postures in both schemes. |
+| `scripts/child-controls-live.ts`, from the repository root | With `CHILD_CONTROLS_REAL=1`, creates a temporary profile and Git repository, uses the configured CLIProxyAPI credential for a real model, and starts an isolated acceptance API on port 8540. It never accesses production sessions. Stop it after acceptance; normal shutdown removes the temporary credential copy. |
+| `verification/child-controls-live.html` | An integration-only entry using the production store and component against real HTTP routes. Start Vite with `FORGERIE_API_URL=http://127.0.0.1:8540` on port 8539. Unlike Caliper parts, this entry intentionally uses a server. |
+| `scripts/child-controls-live-check.mjs`, from `ui/` | Uses the isolated seed to drive real browser clicks and assert file effects for diff review, land, a fresh child from the default branch, answer/Stop, stale discard, confirmed discard, and retained run history. Each run needs a fresh acceptance seed. |
+
+The results and completion record belong to [issue #25](https://github.com/forgerie/forgerie/issues/25). Headless tests emulate measured CSS viewports; they do not establish physical-device touch or keyboard acceptance. Untracked file contents are not in the diff. Drafts are in memory. Automatic cleanup remains conservative and the inventory is its last report, not a new scan.
+
 ## Child worktrees and run records
 
 The interactive mockup designs child branches, review and landing, discard confirmation, cleanup, and run history. It uses local fixture state only: `verification/child-agents-mockup.{html,tsx,css}`, with `?state=<name>` for one state and `?state=all&size=WxH` for a sheet. Git actions are simulated, and the diff view explicitly identifies its patches as illustrative. No back-end or production component changes are part of this design pass.

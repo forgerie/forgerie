@@ -2369,6 +2369,8 @@ export class PiSessionService implements SessionRouteService {
 
   /** The server half of "open a child". Each call reaches the child through the parent's Durable storage. */
   async durableChildren(ref: PiSessionRef) { return (await this.durableSession(ref)).durableChildren(); }
+  async reviewDurableChildWorktree(ref: PiSessionRef, conversationId: number) { return (await this.durableSession(ref)).reviewDurableChildWorktree(conversationId); }
+  async continueDurableChild(ref: PiSessionRef, conversationId: number, text: string, requestId: string) { return (await this.durableSession(ref)).continueDurableChild(conversationId, text, requestId); }
   async landDurableChildWorktree(ref: PiSessionRef, conversationId: number) { return (await this.durableSession(ref)).landDurableChildWorktree(conversationId); }
   async previewDurableChildWorktreeDiscard(ref: PiSessionRef, conversationId: number) { return (await this.durableSession(ref)).previewDurableChildWorktreeDiscard(conversationId); }
   async discardDurableChildWorktree(ref: PiSessionRef, conversationId: number, confirmationToken: string) { return (await this.durableSession(ref)).discardDurableChildWorktree(conversationId, confirmationToken); }

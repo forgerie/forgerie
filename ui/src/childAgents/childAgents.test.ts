@@ -18,6 +18,14 @@ describe("child entries in the parent transcript", () => {
     expect(childEntryOf({ role: "custom", customType: "other" })).toBeUndefined();
   });
 
+  it("closes only the unanswered questions preceding a stop, not a later run's question", () => {
+    const question = { kind: "question" as const, questionId: "q1", child: 4, childName: "ui", question: "Blue?" };
+    const rows = foldChildEntries([{ childEntry: question }, { childEntry: { kind: "note" as const, child: 4, childName: "ui", action: "stop" as const, text: "" } },
+      { childEntry: { ...question, questionId: "q2" } }]);
+    expect(rows[0]?.childEntry).toMatchObject({ cancelled: true });
+    expect(rows[2]?.childEntry).not.toHaveProperty("cancelled");
+  });
+
   it("shows a report as a system row, not as something the user wrote", () => {
     const transcript = fromHistory([{ role: "user", content: "[subagent api answered, no reply needed] Done." }, { role: "user", content: "Thanks" }]);
     expect(transcript.messages.map((message) => [message.role, message.childEntry?.kind])).toEqual([["system", "report"], ["user", undefined]]);
@@ -59,7 +67,7 @@ describe("the child agents store", () => {
     const store = createChildAgentsStore(request, () => ({ id: "s1", cwd: "/w" }), { refreshDelayMs: 10 });
     store.refresh(); store.refresh(); store.refresh();
     await vi.advanceTimersByTimeAsync(20);
-    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls.filter(([path]) => path.startsWith("/api/sessions/s1/children?"))).toHaveLength(1);
     expect(request.mock.calls[0]![0]).toBe("/api/sessions/s1/children?cwd=%2Fw");
     expect(store.getSnapshot()).toMatchObject({ available: true, children: CHILDREN });
     store.dispose();

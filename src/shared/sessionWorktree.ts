@@ -114,8 +114,19 @@ export const WorktreeActionResultSchema = Type.Union([
 ]);
 export type WorktreeActionResult = Static<typeof WorktreeActionResultSchema>;
 
+export const WorktreeReviewSchema = Type.Object({
+  head: text,
+  sections: Type.Array(Type.Object({ label: text, diff: Type.String(), truncated: Type.Boolean() })),
+  untracked: Type.Array(text),
+});
+export type WorktreeReview = Static<typeof WorktreeReviewSchema>;
+
 export const ChildWorktreeSummarySchema = Type.Object({
   path: text, branch: text,
+  repo: Type.Optional(text), defaultBranch: Type.Optional(text),
+  cleanup: Type.Optional(WorktreeCleanupSchema),
+  statusError: Type.Optional(text),
+  cleanupRetryToken: Type.Optional(text),
   state: Type.Union([Type.Literal("active"), Type.Literal("landed"), Type.Literal("discarded")]),
   ahead: Type.Integer({ minimum: 0 }), dirty: Type.Boolean(),
 });

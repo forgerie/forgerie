@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { SESSION_WORKTREE_DIRECTORY, type SessionWorktreeRecord, type SessionWorktreeInfo, type WorktreeActionResult, type WorktreeArchiveCleanupResult, type WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
 import type { WorktreeCleanupOutcome } from "../../shared/worktreeCleanup.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
+import { readWorktreeReview } from "./worktreeReview.js";
 import { discoverGitWorktrees, isGitRepository } from "./gitWorktreeDiscovery.js";
 import { SessionWorktreeStore, pathInside, worktreeInfo, type SessionWorktreeChanges, worktreeSessionMetadata } from "./sessionWorktreeStore.js";
 import { runWorktreeHook, WORKTREE_POST_CREATE_HOOK_PATH, WORKTREE_PRE_REMOVE_HOOK_PATH } from "./worktreeHooks.js";
@@ -57,9 +58,11 @@ export class SessionWorktrees {
   }
 
   /** Stable ownership is saved before Git runs. Replay reuses the same checkout and original parent HEAD. */
-  async createForChild(parent: { id: string; cwd: string }, requestId: string): Promise<SessionWorktreeRecord> {
+  async createForChild(parent: { id: string; cwd: string }, requestId: string, fromDefault = false): Promise<SessionWorktreeRecord> {
     const id = `child-${createHash("sha256").update(JSON.stringify([parent.id, requestId])).digest("hex")}`;
-    const sourceCommit = (await git(parent.cwd, "rev-parse", "HEAD")).trim();
+    const options = fromDefault ? await this.options(parent.cwd) : undefined;
+    if (options?.kind === "non-git") throw new Error("Fresh worktrees require a Git project");
+    const sourceCommit = (await git(options?.repo ?? parent.cwd, "rev-parse", options?.defaultBranch ?? "HEAD")).trim();
     return this.create(parent.cwd, undefined, undefined, undefined, { id, sourceCommit, owner: parent });
   }
 
@@ -148,6 +151,13 @@ export class SessionWorktrees {
     await assertOwnedCheckout(record);
     const committed = (await git(record.path, "diff", "--name-only", "-z", `${record.sourceCommit ?? record.defaultBranch}...HEAD`)).split("\0").filter(Boolean);
     return [...new Set([...committed, ...await dirtyFiles(record.path)])].sort();
+  }
+
+  async review(id: string) {
+    const record = await this.store.require(id);
+    if (record.state.kind !== "active") throw new Error("This worktree is no longer writable or available for review");
+    await assertOwnedCheckout(record);
+    return readWorktreeReview(record.path, record.defaultBranch);
   }
 
   async renameFromTitle(sessionId: string, title: string): Promise<void> {

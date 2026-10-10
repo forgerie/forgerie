@@ -1,5 +1,6 @@
 // Durable-native child agents through Forgerie's real session service and Durable factory, with a scripted model.
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,6 +16,7 @@ import { CapturingSessionEventHub, emptyArchiveStore } from "./piSessionService.
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import { CHILD_NOTE_KIND, CHILD_QUESTION_KIND } from "./durableChildAgents.js";
 import { LiveChildSessionIndex, createDurableChildHost } from "./durableChildHost.js";
+import { ChildRunStore } from "./childRunStore.js";
 import { SessionWorktreeStore } from "../workspaces/sessionWorktreeStore.js";
 import { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
 
@@ -35,7 +37,9 @@ const work = defineTool({
     attempts.push({ conv: Number(api.conversationId), step: args.step, phase: "start" });
     await sleep(250);
     attempts.push({ conv: Number(api.conversationId), step: args.step, phase: "end" });
-    return { content: [{ type: "text" as const, text: `work step ${String(args.step)}/${String(args.of)} done` }] };
+    return { content: [{ type: "text" as const, text: `work step ${String(args.step)}/${String(args.of)} done` }],
+      usage: { input: 7, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 10,
+        cost: { input: 0.2, output: 0.05, cacheRead: 0, cacheWrite: 0, total: 0.25 } } };
   },
 });
 
@@ -59,6 +63,7 @@ const route: FauxResponseFactory = (context) => {
   if (said.startsWith("[subagent")) return answer("Noted.");
   if (said.startsWith("[the user")) return answer("Understood.");
   if (said.startsWith("STEER")) return answer("Steered: finishing early.");
+  if (said === "FAIL") return fauxAssistantMessage("", { stopReason: "error", errorMessage: "Controlled child failure" });
   if (said === "Start three children in one reply") return fauxAssistantMessage(
     ["alpha", "beta", "gamma"].map((name) => fauxToolCall("child_agent", { action: "spawn", name, message: "run work 5 times" })),
     { stopReason: "toolUse" },
@@ -81,6 +86,8 @@ let index: LiveChildSessionIndex;
 let hub: CapturingSessionEventHub;
 let service: PiSessionService;
 let worktrees: SessionWorktrees | undefined;
+let runRecords: ChildRunStore;
+const recordErrors: unknown[] = [];
 
 async function gitWorkspace(beforeRemoval?: () => Promise<readonly []>): Promise<SessionWorktrees> {
   await git(directory, "init", "-b", "main");
@@ -101,7 +108,7 @@ function openService(): PiSessionService {
   hub = new CapturingSessionEventHub();
   const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: directory }, sessionDirEnvKeys: [] });
   return new PiSessionService(hub, { agentDir, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore(),
-    heartbeatIntervalMs: 60_000, durableChildAgents: createDurableChildHost({ extraTools: [work], index, ...(worktrees === undefined ? {} : { worktrees }) }) });
+    heartbeatIntervalMs: 60_000, durableChildAgents: createDurableChildHost({ extraTools: [work], index, runRecords, onRunRecordError: (error) => { recordErrors.push(error); }, ...(worktrees === undefined ? {} : { worktrees }) }) });
 }
 
 async function until<T>(what: string, check: () => Promise<T | undefined | false>, ms = 15_000): Promise<T> {
@@ -127,8 +134,10 @@ beforeEach(async () => {
   attempts.length = 0;
   systemSeen.length = 0;
   worktrees = undefined;
+  recordErrors.length = 0;
   directory = await mkdtemp(join(tmpdir(), "forgerie-durable-children-"));
   agentDir = join(directory, "agent");
+  runRecords = new ChildRunStore(join(agentDir, "child-runs.json"));
   models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
   const provider = fauxProvider({ tokensPerSecond: 400 });
   models.registerNativeProvider(provider.provider);
@@ -139,9 +148,95 @@ beforeEach(async () => {
 afterEach(async () => {
   await service.dispose();
   await rm(directory, { recursive: true, force: true });
+  expect(recordErrors).toEqual([]);
 });
 
 describe("Durable-native child agents in a Forgerie session", () => {
+  it("reviews real changes, lands, and continues once in a fresh default-branch checkout after restart", async () => {
+    await gitWorkspace();
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start a child named builder isolated: WRITE result.txt first result");
+    const builder = await child(ref, "builder");
+    await until("builder report", async () => (await reports(ref, "builder")).length === 1);
+    if (builder.worktree === undefined) throw new Error("Expected isolated child");
+    const path = builder.worktree.path;
+    expect((await service.reviewDurableChildWorktree(ref, builder.conversationId)).untracked).toContain("result.txt");
+    await git(path, "add", "result.txt");
+    await git(path, "commit", "-m", "first child change");
+    const review = await service.reviewDurableChildWorktree(ref, builder.conversationId);
+    expect(review.sections[0]?.diff).toContain("+first result");
+    expect(await service.landDurableChildWorktree(ref, builder.conversationId)).toMatchObject({ kind: "landed" });
+    await expect(service.reviewDurableChildWorktree(ref, 999999)).rejects.toThrow("not a child");
+    await expect(service.reviewDurableChildWorktree(ref, builder.conversationId)).rejects.toThrow("no longer");
+    const next = await service.continueDurableChild(ref, builder.conversationId, "WRITE next.txt second result", "request-1");
+    await until("continuation report", async () => (await reports(ref, "builder-2")).length === 1);
+    const continued = await child(ref, "builder-2");
+    expect(continued.conversationId).toBe(next.conversationId);
+    expect(continued.worktree?.path).not.toBe(path);
+    if (continued.worktree === undefined) throw new Error("Expected isolated continuation");
+    expect(await readFile(join(continued.worktree.path, "result.txt"), "utf8")).toBe("first result");
+    expect(await readFile(join(continued.worktree.path, "next.txt"), "utf8")).toBe("second result");
+    await service.dispose(); service = openService();
+    expect(await service.continueDurableChild(ref, builder.conversationId, "WRITE next.txt second result", "request-1")).toEqual(next);
+    expect(await service.durableChildren(ref)).toHaveLength(2);
+    await expect(service.continueDurableChild(ref, builder.conversationId, "different", "request-1")).rejects.toThrow("another task");
+  });
+
+  it("includes inherited parent commits in the landing review", async () => {
+    await gitWorkspace();
+    await git(directory, "checkout", "-b", "parent-feature");
+    await writeFile(join(directory, "inherited.txt"), "inherited parent change");
+    await git(directory, "add", "inherited.txt"); await git(directory, "commit", "-m", "parent change");
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start a child named builder isolated: WRITE child.txt child change");
+    const builder = await child(ref, "builder");
+    await until("builder report", async () => (await reports(ref, "builder")).length === 1);
+    if (!builder.worktree) throw new Error("Expected isolated child");
+    await git(builder.worktree.path, "add", "child.txt"); await git(builder.worktree.path, "commit", "-m", "child change");
+    const review = await service.reviewDurableChildWorktree(ref, builder.conversationId);
+    expect(review.sections[0]?.diff).toContain("+inherited parent change");
+    expect(review.sections[0]?.diff).toContain("+child change");
+  });
+
+  it("closes unanswered questions when the user stops the child", async () => {
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start a child named asking: ASK");
+    const asking = await until("question", async () => (await service.durableChildren(ref)).find((item) => item.questions.length > 0));
+    await service.stopDurableChild(ref, asking.conversationId);
+    expect((await child(ref, "asking")).questions).toEqual([]);
+    const question = asking.questions[0];
+    if (question === undefined) throw new Error("Expected a question");
+    await expect(service.answerDurableChildQuestion(ref, question.questionId, "Too late")).rejects.toThrow("is not open");
+  });
+
+  it("records separate idle inputs with their own committed tool spend and turn count", async () => {
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start a child named accounting: run work 1 times");
+    const helper = await child(ref, "accounting");
+    const first = await until("first accounting run", async () => (await runRecords.list({ session: ref.id })).find((row) => row.child.name === "accounting" && row.state.kind === "finished"));
+    expect(first.turns).toBe(2);
+    expect(first.usage?.tools["work"]).toMatchObject({ input: 7, output: 3, totalTokens: 10, cost: { total: 0.25 } });
+    expect(Object.values(first.usage?.models ?? {}).reduce((sum, usage) => sum + usage.totalTokens, 0)).toBeGreaterThan(0);
+    expect(first.state.kind).toBe("finished");
+    if (first.state.kind === "finished") expect(first.state.durationMs).toBe(first.state.finishedAt - first.startedAt);
+    await service.messageDurableChild(ref, helper.conversationId, "run work 1 times");
+    const rows = await until("second accounting run", async () => { const rows = await runRecords.list({ session: ref.id }); return rows.length === 2 && rows.every((row) => row.state.kind === "finished") ? rows : false; });
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+    for (const row of rows) { expect(row.turns).toBe(2); expect(row.usage?.tools["work"]?.cost.total).toBe(0.25); }
+    await service.dispose(); service = openService();
+    expect(await runRecords.list({ session: ref.id })).toEqual(rows);
+  }, 30_000);
+
+  it("records a model failure without claiming an answer", async () => {
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start a child named failure: FAIL");
+    const row = await until("failed run record", async () => (await runRecords.list({ session: ref.id })).find((row) => row.child.name === "failure" && row.state.kind === "finished"));
+    expect(row.state).toMatchObject({ kind: "finished", outcome: "failed" });
+    expect(row.turns).toBe(1);
+    expect(row.model).not.toBeNull();
+    expect(await reports(ref, "failure")).toHaveLength(1);
+  }, 30_000);
+
   it("lists a child, reads it, and delivers a user steer that the parent also sees", async () => {
     const ref = { id: (await service.start(directory)).id, cwd: directory };
     await service.prompt(ref, "Start a child named builder: run work 4 times");
@@ -158,6 +253,10 @@ describe("Durable-native child agents in a Forgerie session", () => {
     expect(parent.find((m) => m.customType === CHILD_NOTE_KIND)?.content).toBe("You told builder: STEER: finish now");
     // The tool result links the call to the child view.
     expect(JSON.stringify(parent)).toContain(`"conversationId":${String(builder.conversationId)}`);
+    const rows = await until("builder run record", async () => { const rows = await runRecords.list({ session: ref.id }); return rows[0]?.state.kind === "finished" ? rows : false; });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ child: { name: "builder", agent: null }, state: { kind: "finished", outcome: "answered" } });
+    expect(rows[0]?.turns).toBeGreaterThan(1);
   }, 30_000);
 
   it("gives a general child Durable's coding tools in the session's folder", async () => {
@@ -180,6 +279,11 @@ describe("Durable-native child agents in a Forgerie session", () => {
     expect(childRequest).toContain("\"name\":\"read\"");
     expect(childRequest).not.toContain("\"name\":\"write\"");
     await expect(readFile(join(directory, "blocked.txt"), "utf8")).rejects.toThrow();
+    const rows = await until("agent file run record", async () => { const rows = await runRecords.list({ agent: "reader" }); return rows[0]?.state.kind === "finished" ? rows : false; });
+    const path = join(directory, ".pi", "agents", "reader.md");
+    expect(rows[0]?.child.agentFile).toEqual({ path, sha256: createHash("sha256").update(await readFile(path)).digest("hex") });
+    expect(rows[0]?.session).toEqual(ref);
+    expect(rows[0]?.model).not.toBeNull();
     // An unknown agent name is an error result, not a child.
     await service.prompt(ref, "Start a child named ghost as nobody: hello");
     await sleep(300);
@@ -198,6 +302,8 @@ describe("Durable-native child agents in a Forgerie session", () => {
     expect(ended(stopper.conversationId).length).toBeLessThan(10);
     expect((await service.durableChildren(ref)).find((c) => c.name === "stopper")?.busy).toBe(false);
     expect(await reports(ref, "stopper")).toHaveLength(0);
+    const stopped = (await runRecords.list({ session: ref.id })).find((row) => row.child.name === "stopper");
+    expect(stopped?.state).toMatchObject({ kind: "finished", outcome: "stopped" });
     expect(await parentAnswers(ref)).toBe(answersBefore);
     expect((await transcript(ref)).some((m) => m.customType === CHILD_NOTE_KIND && text(m.content) === "You stopped stopper.")).toBe(true);
     await service.prompt(ref, "Start a child named survivor: run work 3 times");
@@ -236,8 +342,11 @@ describe("Durable-native child agents in a Forgerie session", () => {
     const runner = await child(ref, "runner");
     await until("runner step 2 started", () => Promise.resolve(attempts.filter((a) => a.conv === runner.conversationId && a.phase === "start").length >= 2));
     expect(await until("index lists the session", async () => (await index.list()).length === 1 && index.list())).toEqual([ref]);
+    const before = (await runRecords.list({ session: ref.id }))[0];
+    expect(before?.state.kind).toBe("running");
     await service.dispose();
     const stepsAtStop = ended(runner.conversationId).length;
+    runRecords = new ChildRunStore(join(agentDir, "child-runs.json"));
     index = new LiveChildSessionIndex(join(directory, "live-children.json"));
     service = openService();
     await sleep(800);
@@ -246,8 +355,38 @@ describe("Durable-native child agents in a Forgerie session", () => {
     await until("runner report after resume", async () => (await reports(ref, "runner")).length === 1, 20_000);
     expect([...new Set(ended(runner.conversationId).map((a) => a.step))].sort()).toEqual([1, 2, 3, 4, 5]);
     expect(await service.durableChildren(ref)).toHaveLength(1);
+    const rows = await until("recovered run record", async () => { const rows = await runRecords.list({ session: ref.id }); return rows[0]?.state.kind === "finished" ? rows : false; });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(before?.id);
+    expect(rows[0]?.startedAt).toBe(before?.startedAt);
+    expect(rows[0]?.turns).toBe(6);
+    expect(rows[0]?.usage?.tools["work"]?.cost.total).toBe(1.25);
     await until("index empties", async () => (await index.list()).length === 0);
   }, 40_000);
+
+  it("recovers a lost completion write from an unfinished checkpoint after the live index clears", async () => {
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start a child named receipt: run work 2 times");
+    const helper = await child(ref, "receipt");
+    await until("receipt tool started", () => Promise.resolve(attempts.some((attempt) => attempt.conv === helper.conversationId && attempt.phase === "start")));
+    const path = join(agentDir, "child-runs.json");
+    const runningSnapshot = await readFile(path, "utf8");
+    await until("receipt report", async () => (await reports(ref, "receipt")).length === 1);
+    const original = await until("receipt record complete", async () => (await runRecords.list({ session: ref.id })).find((row) => row.state.kind === "finished"));
+    await until("receipt live index cleared", async () => (await index.list()).length === 0);
+    await service.dispose();
+    // Reproduce a crash between the Durable completion commit and its external history-file write.
+    await writeFile(path, runningSnapshot);
+    runRecords = new ChildRunStore(path);
+    service = openService();
+    const refs = (await runRecords.pending()).map(({ run }) => run.session);
+    expect(refs).toEqual([ref]);
+    expect(await service.resumeDurableChildren(refs)).toEqual({ resumed: [ref.id], failed: [] });
+    const recovered = (await runRecords.list({ session: ref.id }))[0];
+    expect(recovered).toMatchObject({ id: original.id, startedAt: original.startedAt, turns: 3, usage: original.usage, state: { kind: "finished", outcome: "answered", timing: "recovered" } });
+    if (original.state.kind === "finished" && recovered?.state.kind === "finished") expect(recovered.state.finishedAt).toBe(original.state.finishedAt);
+    expect(await reports(ref, "receipt")).toHaveLength(1);
+  }, 30_000);
 
   it("runs three children in parallel and resumes each with one report after restart", async () => {
     const ref = { id: (await service.start(directory)).id, cwd: directory };
@@ -262,6 +401,8 @@ describe("Durable-native child agents in a Forgerie session", () => {
     const firstEnd = attempts.findIndex((attempt) => attempt.phase === "end");
     expect(new Set(attempts.slice(0, firstEnd).map((attempt) => attempt.conv)).size).toBe(3);
     await until("live index", async () => (await index.list()).length === 1);
+    const originalRecords = await runRecords.list({ session: ref.id });
+    expect(originalRecords).toHaveLength(3);
     await service.dispose();
     index = new LiveChildSessionIndex(join(directory, "live-children.json"));
     service = openService();
@@ -273,11 +414,15 @@ describe("Durable-native child agents in a Forgerie session", () => {
       expect(await reports(ref, item.name)).toHaveLength(1);
       expect([...new Set(ended(item.conversationId).map((attempt) => attempt.step))].sort()).toEqual([1, 2, 3, 4, 5]);
     }
+    const records = await until("three completed run records", async () => { const rows = await runRecords.list({ session: ref.id }); return rows.length === 3 && rows.every((row) => row.state.kind === "finished") ? rows : false; });
+    expect(records.map((row) => row.id).sort()).toEqual(originalRecords.map((row) => row.id).sort());
+    for (const row of records) { expect(row.turns).toBe(6); expect(row.usage?.tools["work"]?.cost.total).toBe(1.25); }
     await until("index cleared", async () => (await index.list()).length === 0);
     await service.dispose();
     service = openService();
     await service.status(ref);
     for (const item of initial) expect(await reports(ref, item.name)).toHaveLength(1);
+    expect(await runRecords.list({ session: ref.id })).toEqual(records);
   }, 40_000);
 
   it("isolates writers, reports their branch and files, and preserves cwd across reopen", async () => {

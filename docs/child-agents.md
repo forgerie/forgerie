@@ -11,8 +11,14 @@ A session can run background child agents inside its own Durable storage. The ag
 | See every child | The robot control in the session header | Lists the session's children. Children with a question for you come first, then working ones. The badge counts open questions; a dot means a child is working. |
 | Read a child | Open it from the list | Shows its task, its tool calls with folded output, and its replies as they stream. |
 | Steer a child | The reply box in the open child | While it works, your message joins its run at its next tool call. When it is idle, your message is a new task. |
-| Stop a child | Stop, beside the reply box | Ends the child's current work. The parent keeps running. |
+| Stop a child | Stop in the child header | Ends the child's current work and closes unanswered questions. The parent keeps running. |
 | Answer a child | The question card in the parent thread, or in the open child | The answer goes to the child. The parent model gets no turn. |
+
+Finished worktree children show Review changes, Land, Discard, and Continue working in the footer. Land stays disabled for dirty or unreadable worktrees. Discard first lists the commits and files to remove and requires confirmation. A refused action keeps the worktree and shows the reason.
+
+After removal, Start new task from the named default branch creates a new child in a fresh worktree. It copies the old child's agent settings, not its transcript. It never makes the old conversation writable again. Unsent drafts survive changing child views, opening history, and closing the panel. They stay in memory, not across page reloads or switching parent sessions.
+
+Run history is in the header. It shows retained runs, estimated costs, turns, tokens, and agent-file provenance. Worktrees opens the last automatic cleanup report. Refresh reads the report; it does not start cleanup.
 
 The parent model sees each steer and stop as a note, so it does not undo what you told a child. Each child's final answer reaches the parent as a new message, and the parent continues from it.
 
@@ -43,7 +49,7 @@ Children live in the parent's Durable storage, and they run only while the daemo
 
 ## API
 
-Browser requests use `/api` before the paths below. Sessiond uses the paths without `/api`. `:id` is the parent session ID; `:child` is its positive integer Durable conversation ID. Every request identifies the parent's `cwd`, not the child's worktree path.
+Browser requests use `/api` before the paths below. Sessiond uses the paths without `/api`. `:id` is the parent session ID; `:child` is its positive integer Durable conversation ID. Session-specific requests identify the parent's `cwd`, not the child's worktree path. The daemon-wide run-history read does not require `cwd`.
 
 ### Tool
 
@@ -84,6 +90,11 @@ interface DurableChildSummary {
   worktree?: {
     path: string;
     branch: string;
+    repo?: string;
+    defaultBranch?: string;
+    cleanup?: Cleanup;
+    cleanupRetryToken?: string; // A previous confirmed discard whose cleanup is incomplete.
+    statusError?: string; // Git status is unknown; never treat this as clean.
     state: "active" | "landed" | "discarded";
     ahead: number; // Nonnegative integer, relative to the starting parent HEAD.
     dirty: boolean;
@@ -91,7 +102,17 @@ interface DurableChildSummary {
 }
 ```
 
-Shared children omit `worktree`. Removed worktrees report `ahead: 0` and `dirty: false`; these are terminal receipt values, not a Git status check. A failed status check on an active checkout fails the read rather than reporting the checkout as clean.
+Shared children omit `worktree`. Removed worktrees report `ahead: 0` and `dirty: false`; these are terminal receipt values, not a Git status check. A failed status check on an active checkout sets `statusError`, so other children stay visible. The browser refuses to treat its zero fallback count as readiness.
+
+### Review and continuation
+
+`GET /sessions/:id/children/:child/worktree/changes?cwd=...` returns `{head: string, sections: {label: string, diff: string, truncated: boolean}[], untracked: string[]}`. Sections separate committed changes relative to the default branch, staged changes, and unstaged changes. This includes inherited unlanded parent commits. Each displayed diff is capped at 512 Ki characters. Git output above 4 MiB fails the read. Untracked paths are listed without opening their contents or following symlinks. This is a read, not a frozen approval of later Git changes.
+
+`POST /sessions/:id/children/:child/continue` takes exactly `{cwd: string, text: string, requestId: string}`. Text must contain 1 to 65536 characters and cannot be blank. The request ID contains 1 to 128 letters, digits, or hyphens. It returns `{conversationId: number}`. Only a landed or discarded child can use this operation. The new child starts from the current default-branch commit, keeps the original agent settings, and gets a fresh conversation. Its name gains a numeric suffix. The old child's conversation and receipt stay unchanged.
+
+Repeating the same continuation request ID and text returns the same child, including after restart. Reusing that ID for a different source child or task returns 409. Allocation uses a deterministic worktree receipt. A failed setup stays available for the same request to retry.
+
+These operations return 400 for malformed input, 404 for a foreign child or unknown parent, and 409 for lifecycle or Git refusal. Errors have shape `{error: string}`.
 
 ### Worktree actions
 
@@ -156,8 +177,49 @@ A job run returns HTTP 200 even when it keeps every checkout. Each kept entry st
 
 Sessiond also runs the job at startup after child recovery and every five minutes. It keeps idle unarchived sessions and their child worktrees. Automatic cleanup counts ignored files as dirty, so dependency folders can prevent removal. See [Automatic cleanup](session-worktrees.md#automatic-cleanup) for the safety rules and costs.
 
+### Run history API
+
+`GET /sessions/children/runs` accepts the optional query fields `session` and `agent`. Both are exact, nonempty strings. `agent` matches the agent-file name, not the child's name. Omit both to read all retained records. Combined filters must both match. Empty, repeated, and extra fields return HTTP 400. This read does not open a session or resume work.
+
+HTTP 200 returns `{retentionDays: 90, records: ChildRun[]}`. Records sort by `startedAt` descending, then `id` ascending. Read failures return HTTP 500 with `{error: string}`.
+
+```ts
+interface Usage {
+  input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number;
+  reasoning?: number; cacheWrite1h?: number;
+  cost: {input: number; output: number; cacheRead: number; cacheWrite: number; total: number};
+}
+interface ChildRun {
+  id: string; // Stable across restart and replay.
+  session: {id: string; cwd: string};
+  child: {
+    name: string; conversationId: number; agent: string | null;
+    agentFile?: {path: string; sha256: string};
+  };
+  model: {provider: string; modelId: string} | null;
+  startedAt: number; // Unix milliseconds, from initial input placement.
+  state:
+    | {kind: "running"}
+    | {kind: "finished"; outcome: "answered" | "failed" | "stopped";
+       finishedAt: number; durationMs: number; timing: "observed" | "recovered"};
+  turns: number;
+  usage: {models: Record<string, Usage>; tools: Record<string, Usage>} | null;
+}
+```
+
+One record follows one Durable `pi.live.run`, not the child's entire conversation. A steer joins the current record. An idle input or a queued follow-up starts another record when Durable places it. Inputs placed together share a record. A general helper has `agent: null` and no `agentFile`. Existing children without saved file provenance also omit `agentFile`. The hash covers the original file bytes selected at spawn. Editing that file later does not change a running child's instructions or recorded hash.
+
+`model` is null until a generation chooses a model. `turns` counts distinct started Durable generation tasks. Tool rounds add generations; retries and restart replay of the same task do not. Duration includes pauses and time waiting for a human. `observed` timing comes from the completion commit. `recovered` means completion was rebuilt after restart, using the task receipt's end time when available and the recovery observation time otherwise.
+
+Usage is the committed change in the child's own `pi.usage` between run boundaries. Model keys are `provider/modelId`; tool buckets retain their tool names. Parent spending and work committed outside an active run are excluded. Costs are SDK estimates, not a billing statement. Zero configured prices do not establish a free request. Uncommitted provider work is not in the Durable ledger. A missing accounting boundary returns `usage: null`, not zero.
+
+Records live in `$PI_WEB_DATA_DIR/child-runs.json`, with private recovery checkpoints and atomic file replacement. Child generation and compaction requests wait for pending record writes. This adds disk I/O before requests. A write failure is reported and blocks a new child request rather than spending without a saved accounting boundary. Startup also reopens parents with unfinished records, even if the live-child index no longer lists them. A read alone never starts that recovery.
+
+Completed records expire 90 days after `finishedAt`. Unfinished records remain. Sessiond prunes on startup, reads, writes, and a daily timer. Expiry removes only history metadata. It does not delete conversations, transcripts, branches, or worktree files. Invalid history files fail rather than being reset or overwritten. Records are new metadata, not a complete backfill of historical child runs.
+
 ## Code
 
 - Server: `src/server/sessions/durableChildAgents.ts`, `durableChildHost.ts`, `durableChildProfiles.ts`, `durableChildRoutes.ts`.
+- Run history: `src/shared/childRuns.ts`, `src/server/sessions/durableChildRunRecords.ts`, `childRunStore.ts`, `childRunRoutes.ts`.
 - Browser: `ui/src/childAgents/`.
 - Spike and findings: `prototypes/durable-child-spike/README.md`.

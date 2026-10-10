@@ -53,7 +53,7 @@ export function SheetDialog({ title, subtitle, onClose, closeLabel, back, action
         <button type="button" className="sheet-dialog-control" aria-label={closeLabel} title={closeLabel} onClick={onClose}>
           <XIcon aria-hidden /></button>
       </header>
-      <div className="sheet-dialog-body">{children}</div>
+      <div className="sheet-dialog-body" tabIndex={0} role="region" aria-label={`${title} content`}>{children}</div>
       {footer !== undefined && <footer className="sheet-dialog-foot">{footer}</footer>}
     </div>
   </dialog>;

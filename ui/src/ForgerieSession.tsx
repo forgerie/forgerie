@@ -346,7 +346,15 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setReview(undefined)} />}
       {resourcesOpen && sessionId && cwd && resourceLens?.({ id: sessionId, cwd, onClose: () => setResourcesOpen(false) })}
       {childrenOpen && <ChildAgentsPanel children={children.children} openId={children.open?.conversationId}
-        transcript={children.open?.transcript} error={children.error ?? children.open?.error} actions={{
+        transcript={children.open?.transcript} error={children.error ?? children.open?.error}
+        drafts={{ values: children.drafts ?? {}, update: childAgents.updateDraft }}
+        detail={children.detail} pending={children.pending} outcome={children.outcome} runs={children.runs} actions={{
+          onReview: (id) => { void childAgents.review(id); }, onLand: (id) => { void childAgents.land(id); },
+          onPreviewDiscard: (id) => { void childAgents.previewDiscard(id); }, onDiscard: (id, token) => { void childAgents.discard(id, token); },
+          onContinue: childAgents.continue,
+          onRuns: () => { void childAgents.openRuns(); }, onCleanup: () => { void childAgents.openCleanup(); },
+          onRetryDetail: () => { void childAgents.retryDetail(); },
+          onBackDetail: childAgents.dismissDetail, onDismissOutcome: childAgents.dismissOutcome,
           onOpenChild: childAgents.open, onBack: childAgents.close,
           onClose: () => { childAgents.close(); childAgents.dismissError(); setChildrenOpen(false); },
           onDismissError: childAgents.dismissError,

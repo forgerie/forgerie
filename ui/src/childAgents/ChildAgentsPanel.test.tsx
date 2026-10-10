@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChildAgentsPanel, type ChildAgentsActions } from "./ChildAgentsPanel";
 import { ChildEntryView } from "./ChildEntryView";
+import { FINISHED, DISCARD, RUNS } from "./fixtures/childWork";
 import { CHILDREN, STREAMING, TRANSCRIPT } from "./fixtures/children";
 
 let root: Root;
@@ -14,7 +15,8 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 const actions = (): ChildAgentsActions => ({ onOpenChild: vi.fn(), onBack: vi.fn(), onClose: vi.fn(), onSend: vi.fn(() => Promise.resolve()),
-  onStop: vi.fn(), onAnswer: vi.fn(() => Promise.resolve()) });
+  onStop: vi.fn(), onAnswer: vi.fn(() => Promise.resolve()), onReview: vi.fn(), onLand: vi.fn(), onPreviewDiscard: vi.fn(), onDiscard: vi.fn(),
+  onContinue: vi.fn(() => Promise.resolve()), onRuns: vi.fn(), onCleanup: vi.fn(), onBackDetail: vi.fn(), onDismissOutcome: vi.fn(), onRetryDetail: vi.fn() });
 const fields = () => [...document.querySelectorAll("textarea")].map((field) => field.getAttribute("aria-label"));
 const button = (text: string) => [...document.querySelectorAll("button")].find((node) => node.textContent === text);
 
@@ -41,6 +43,79 @@ describe("child agents panel", () => {
     await act(async () => root.render(<ChildAgentsPanel children={CHILDREN} openId={33} transcript={{ ...TRANSCRIPT, messages: TRANSCRIPT.messages.slice(0, 3), busy: false }} actions={actions()} />));
     expect(document.querySelector("textarea")?.getAttribute("placeholder")).toBe("Give review another task");
     expect(button("Stop")).toBeUndefined();
+  });
+
+  it("pins branch actions, explains dirty refusal, and requires a tap before another task", async () => {
+    const handlers = actions();
+    await act(async () => root.render(<ChildAgentsPanel children={[FINISHED]} openId={44} transcript={{ messages: [], busy: false }} actions={handlers} />));
+    expect(fields()).toEqual([]);
+    expect(button("Land")?.closest("footer")).not.toBeNull();
+    await act(async () => button("Review changes")!.click());
+    expect(handlers.onReview).toHaveBeenCalledWith(44);
+    await act(async () => button("Continue working")!.click());
+    expect(fields()).toEqual(["Message builder"]);
+    await act(async () => button("Branch actions")!.click());
+    await act(async () => root.render(<ChildAgentsPanel children={[{ ...FINISHED, worktree: { ...FINISHED.worktree!, dirty: true } }]} openId={44} transcript={{ messages: [], busy: false }} actions={handlers} />));
+    expect(button("Land")?.disabled).toBe(true);
+    expect(document.body.textContent).toContain("Commit the changed files");
+  });
+
+  it("removed worktrees have no old composer and name the destination of new work", async () => {
+    await act(async () => root.render(<ChildAgentsPanel children={[{ ...FINISHED, worktree: { ...FINISHED.worktree!, state: "landed", cleanup: { kind: "done" } } }]} openId={44} actions={actions()} />));
+    expect(fields()).toEqual([]);
+    await act(async () => button("Start new task from main")!.click());
+    expect(fields()).toEqual(["New task from main"]);
+    expect(document.body.textContent).toContain("fresh worktree from main");
+  });
+
+  it("confirmation sends the preview's exact token and Keep does not discard", async () => {
+    const handlers = actions();
+    await act(async () => root.render(<ChildAgentsPanel children={[FINISHED]} openId={44} detail={DISCARD} actions={handlers} />));
+    expect(document.body.textContent).toContain("README.md");
+    await act(async () => button("Keep worktree")!.click());
+    expect(handlers.onBackDetail).toHaveBeenCalledOnce();
+    expect(handlers.onDiscard).not.toHaveBeenCalled();
+    await act(async () => button("Discard worktree")!.click());
+    expect(handlers.onDiscard).toHaveBeenCalledWith(44, "fixture-confirmation");
+  });
+
+  it("shows actual history totals and disclosure content", async () => {
+    await act(async () => root.render(<ChildAgentsPanel children={[FINISHED]} detail={{ kind: "runs", data: RUNS }} actions={actions()} />));
+    expect(document.body.textContent).toContain("Estimated cost: $0.51");
+    expect(document.querySelectorAll("details")).toHaveLength(1);
+    expect(document.body.textContent).toContain("1600");
+    expect(document.body.textContent).toContain("worker.md");
+  });
+
+  it("preserves steering and answer drafts across idle transitions and history", async () => {
+    const handlers = actions();
+    const working = { ...FINISHED, busy: true };
+    await act(async () => root.render(<ChildAgentsPanel children={[working]} openId={44} transcript={{ messages: [], busy: true }} actions={handlers} />));
+    await act(async () => {
+      const field = document.querySelector("textarea")!;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "Keep this draft");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => root.render(<ChildAgentsPanel children={[FINISHED]} openId={44} transcript={{ messages: [], busy: false }} actions={handlers} />));
+    await act(async () => button("Continue working")!.click());
+    expect(document.querySelector("textarea")?.value).toBe("Keep this draft");
+    await act(async () => root.render(<ChildAgentsPanel children={[FINISHED]} openId={44} detail={{ kind: "runs", data: RUNS }} actions={handlers} />));
+    await act(async () => root.render(<ChildAgentsPanel children={[FINISHED]} openId={44} actions={handlers} />));
+    expect(document.querySelector("textarea")?.value).toBe("Keep this draft");
+  });
+
+  it("renders an aborted question as closed in the child's own record", async () => {
+    const transcript = { busy: false, messages: [...TRANSCRIPT.messages, { role: "toolResult" as const, toolName: "ask_human", isError: true, content: "Tool ask_human was aborted" }] };
+    await act(async () => root.render(<ChildAgentsPanel children={[FINISHED]} openId={44} transcript={transcript} actions={actions()} />));
+    expect(document.querySelector(".question-card")?.hasAttribute("data-open")).toBe(false);
+    expect(document.body.textContent).toContain("Question ended without an answer");
+    expect(fields()).toEqual([]);
+  });
+
+  it("cancelled parent questions have no answer control", async () => {
+    await act(async () => root.render(<ChildEntryView entry={{ kind: "question", questionId: "q", child: 44, childName: "builder", question: "Go?", cancelled: true }} onAnswer={async () => {}} />));
+    expect(fields()).toEqual([]);
+    expect(document.body.textContent).toContain("Stopped without an answer");
   });
 
   it("shows a report's first line in the text face, with the rest on request", async () => {

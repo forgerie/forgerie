@@ -6,11 +6,15 @@ import type { SessionRouteRef } from "./sessionService.js";
 
 const MAX_TEXT_LENGTH = 64 * 1024;
 const worktreeBody = Type.Object({ cwd: Type.String({ minLength: 1 }) }, { additionalProperties: false });
+const continueBody = Type.Object({ cwd: Type.String({ minLength: 1 }), text: Type.String({ minLength: 1, maxLength: MAX_TEXT_LENGTH }),
+  requestId: Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9-]+$" }) }, { additionalProperties: false });
 const discardBody = Type.Object({ cwd: Type.String({ minLength: 1 }), confirmationToken: Type.String({ minLength: 1, maxLength: 1024 }) }, { additionalProperties: false });
 
 export interface DurableChildRouteService {
   durableChildren(ref: SessionRouteRef): Promise<unknown>;
   durableChildMessages(ref: SessionRouteRef, conversationId: number): Promise<unknown>;
+  reviewDurableChildWorktree(ref: SessionRouteRef, conversationId: number): Promise<unknown>;
+  continueDurableChild(ref: SessionRouteRef, conversationId: number, text: string, requestId: string): Promise<unknown>;
   landDurableChildWorktree(ref: SessionRouteRef, conversationId: number): Promise<unknown>;
   previewDurableChildWorktreeDiscard(ref: SessionRouteRef, conversationId: number): Promise<unknown>;
   discardDurableChildWorktree(ref: SessionRouteRef, conversationId: number, confirmationToken: string): Promise<unknown>;
@@ -43,6 +47,13 @@ export function registerDurableChildRoutes(app: FastifyInstance, service: Durabl
       await service.stopDurableChild(bodyRef(request.params.sessionId, record(request.body)), childId(request.params.child));
       return { ok: true };
     }));
+  app.get<{ Params: { sessionId: string; child: string }; Querystring: { cwd?: string } }>(`${base}/:child/worktree/changes`, (request, reply) =>
+    run(reply, () => service.reviewDurableChildWorktree(queryRef(request.params.sessionId, request.query.cwd), childId(request.params.child)), 409));
+  app.post<{ Params: { sessionId: string; child: string }; Body: unknown }>(`${base}/:child/continue`, (request, reply) =>
+    run(reply, () => {
+      if (!Check(continueBody, request.body)) throw new BadRequest("Invalid continuation body");
+      return service.continueDurableChild(bodyRef(request.params.sessionId, request.body), childId(request.params.child), text(request.body.text, "text"), request.body.requestId);
+    }, 409));
   for (const action of ["land", "discard-preview", "discard"] as const) {
     app.post<{ Params: { sessionId: string; child: string }; Body: unknown }>(`${base}/:child/worktree/${action}`, (request, reply) =>
       run(reply, () => {
