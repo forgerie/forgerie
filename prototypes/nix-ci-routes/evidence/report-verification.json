@@ -1,0 +1,28 @@
+{
+  "scope": "Delivery report on local main 9e355b89, not the frozen container comparison",
+  "nodeMajor": 24,
+  "isolatedPiProfile": true,
+  "parallelVerify": {
+    "exit": 1,
+    "staticChecks": "passed",
+    "serverPassed": 1892,
+    "serverSkipped": 5,
+    "failure": "durableChildAgents.test.ts:155 exceeded its existing 5000ms deadline",
+    "cause": "not established",
+    "browserStage": "not reached"
+  },
+  "recheck": {
+    "exit": 0,
+    "commands": [
+      ["npm", "test", "--", "src/server/sessions/durableChildAgents.test.ts"],
+      ["npm", "test", "--", "--no-file-parallelism"],
+      ["npm", "run", "verify:ui"]
+    ],
+    "focusedTestsPassed": 18,
+    "server": { "passed": 1893, "skipped": 5 },
+    "browser": { "passed": 1373, "skipped": 1 },
+    "deadlinesChanged": false,
+    "assertionsChanged": false
+  },
+  "liveServicesRestarted": false
+}
