@@ -1,0 +1,736 @@
+[
+  {
+    "attempt": "arion-1791668481294715566",
+    "placement": "ZAO rootless Podman 5.8.1, not UNZEN or GitHub",
+    "route": "arion",
+    "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+    "upstreamSha": "9b24cf65c72cb0e9616e437d55e1ac8e5c6bc715",
+    "upstreamImageUnmodified": null,
+    "outcome": "failed",
+    "error": "[Errno 2] No such file or directory: '/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/user.slice/libpod-3ae768aa6f328adc0e7faf5811683500b8bd992f855291f0488fd5a67b55adbb.scope/container/init.scope/cpu.max'",
+    "image": {
+      "name": "localhost/ci:lqsjmv01wq8p1k899y76gsb16z7gi06v",
+      "id": "28123a8b4834887021569ae9f15244c6a4c5583c554b03ebd73b6802076d4994",
+      "size": 918437875,
+      "digest": "sha256:449ccf4ae0e9561695dbe56993d5847222c3046b4249f263fc497b41de03c236"
+    },
+    "archiveBytes": 918476800,
+    "startupSeconds": 1.399,
+    "hostCgroup": null,
+    "preflight": null,
+    "payload": null,
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "cancelled": false,
+    "externalRuntime": null,
+    "systemdFinal": null
+  },
+  {
+    "attempt": "arion-1791668844265407293",
+    "placement": "ZAO rootless Podman 5.8.1, not UNZEN or GitHub",
+    "route": "arion",
+    "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+    "upstreamSha": "9b24cf65c72cb0e9616e437d55e1ac8e5c6bc715",
+    "upstreamImageUnmodified": null,
+    "outcome": "failed",
+    "error": "[Errno 2] No such file or directory: '/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/user.slice/libpod-775e7724321d6fb8e7785021c922cc4128e0e9c24fb3f527c2a2af32ed726781.scope/container/init.scope/cpu.max'",
+    "image": {
+      "name": "localhost/ci:lqsjmv01wq8p1k899y76gsb16z7gi06v",
+      "id": "28123a8b4834887021569ae9f15244c6a4c5583c554b03ebd73b6802076d4994",
+      "size": 918437875,
+      "digest": "sha256:449ccf4ae0e9561695dbe56993d5847222c3046b4249f263fc497b41de03c236"
+    },
+    "archiveBytes": 918476800,
+    "startupSeconds": 2.485,
+    "hostCgroup": null,
+    "preflight": null,
+    "payload": null,
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "cancelled": false,
+    "externalRuntime": null,
+    "systemdFinal": null
+  },
+  {
+    "attempt": "arion-1791669590614862701",
+    "placement": "ZAO rootless Podman 5.8.1, not UNZEN or GitHub",
+    "route": "arion",
+    "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+    "upstreamSha": "9b24cf65c72cb0e9616e437d55e1ac8e5c6bc715",
+    "upstreamImageUnmodified": null,
+    "outcome": "passed",
+    "error": null,
+    "image": {
+      "name": "localhost/ci:rmj33rw797w2ss80v3riridpdbrb96jv",
+      "id": "3a9c903d7229107b9b294f19e95a5c03a2c07723fad16a895be51021a4f6b6fa",
+      "size": 919256929,
+      "digest": "sha256:9eb1800cdab32ac248ca9dfea242b7a32fc655087041048cb2a6abb3fdf446f1"
+    },
+    "archiveBytes": 919296000,
+    "startupSeconds": 2.562,
+    "hostCgroup": {
+      "cpu.max": "400000 100000",
+      "memory.high": "12884901888",
+      "memory.max": "17179869184",
+      "pids.max": "2048"
+    },
+    "preflight": {
+      "uid": 1000,
+      "gid": 1000,
+      "permissionDenied": true,
+      "writeError": "EACCES",
+      "flock": {
+        "exit": 0,
+        "error": null,
+        "stdout": "flock from util-linux 2.42.2\n",
+        "stderr": ""
+      }
+    },
+    "payload": {
+      "node": "v24.19.0",
+      "architecture": "x64",
+      "platform": "linux",
+      "cgroup": "0::/init.scope\n",
+      "steps": [
+        {
+          "name": "install",
+          "command": [
+            "npm",
+            "ci"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 11.522
+        },
+        {
+          "name": "static",
+          "command": [
+            "npm",
+            "run",
+            "verify:static"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 37.096
+        },
+        {
+          "name": "coverage",
+          "command": [
+            "npm",
+            "run",
+            "test:coverage",
+            "--",
+            "--no-file-parallelism"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 194.669
+        },
+        {
+          "name": "browser",
+          "command": [
+            "npm",
+            "run",
+            "verify:ui"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 91.536
+        },
+        {
+          "name": "build",
+          "command": [
+            "npm",
+            "run",
+            "build"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 33.198
+        },
+        {
+          "name": "package-smoke",
+          "command": [
+            "npm",
+            "run",
+            "smoke:package-install"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 60.652
+        },
+        {
+          "name": "package-contents",
+          "command": [
+            "npm",
+            "run",
+            "pack:dry"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 62.437
+        }
+      ],
+      "outcome": "passed"
+    },
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "cancelled": false,
+    "externalRuntime": null,
+    "systemdFinal": null
+  },
+  {
+    "attempt": "arion-1791670230452262854",
+    "placement": "ZAO rootless Podman 5.8.1, not UNZEN or GitHub",
+    "route": "arion",
+    "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+    "upstreamSha": "9b24cf65c72cb0e9616e437d55e1ac8e5c6bc715",
+    "upstreamImageUnmodified": null,
+    "outcome": "failed",
+    "error": "Interrupted by signal 15; cleaning owned resources",
+    "image": {
+      "name": "localhost/ci:rmj33rw797w2ss80v3riridpdbrb96jv",
+      "id": "3a9c903d7229107b9b294f19e95a5c03a2c07723fad16a895be51021a4f6b6fa",
+      "size": 927940449,
+      "digest": "sha256:9eb1800cdab32ac248ca9dfea242b7a32fc655087041048cb2a6abb3fdf446f1"
+    },
+    "archiveBytes": 919296000,
+    "startupSeconds": 1.343,
+    "hostCgroup": {
+      "cpu.max": "400000 100000",
+      "memory.high": "12884901888",
+      "memory.max": "17179869184",
+      "pids.max": "2048"
+    },
+    "preflight": {
+      "uid": 1000,
+      "gid": 1000,
+      "permissionDenied": true,
+      "writeError": "EACCES",
+      "flock": {
+        "exit": 0,
+        "error": null,
+        "stdout": "flock from util-linux 2.42.2\n",
+        "stderr": ""
+      }
+    },
+    "payload": {
+      "node": "v24.19.0",
+      "architecture": "x64",
+      "platform": "linux",
+      "cgroup": "0::/init.scope\n",
+      "steps": [],
+      "outcome": "running"
+    },
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "cancelled": true,
+    "externalRuntime": null,
+    "systemdFinal": null
+  },
+  {
+    "attempt": "arion-1791670248497783173",
+    "placement": "ZAO rootless Podman 5.8.1, not UNZEN or GitHub",
+    "route": "arion",
+    "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+    "upstreamSha": "9b24cf65c72cb0e9616e437d55e1ac8e5c6bc715",
+    "upstreamImageUnmodified": null,
+    "outcome": "passed",
+    "error": null,
+    "image": {
+      "name": "localhost/ci:rmj33rw797w2ss80v3riridpdbrb96jv",
+      "id": "3a9c903d7229107b9b294f19e95a5c03a2c07723fad16a895be51021a4f6b6fa",
+      "size": 927940449,
+      "digest": "sha256:9eb1800cdab32ac248ca9dfea242b7a32fc655087041048cb2a6abb3fdf446f1"
+    },
+    "archiveBytes": 919296000,
+    "startupSeconds": 1.324,
+    "hostCgroup": {
+      "cpu.max": "400000 100000",
+      "memory.high": "12884901888",
+      "memory.max": "17179869184",
+      "pids.max": "2048"
+    },
+    "preflight": {
+      "uid": 1000,
+      "gid": 1000,
+      "permissionDenied": true,
+      "writeError": "EACCES",
+      "flock": {
+        "exit": 0,
+        "error": null,
+        "stdout": "flock from util-linux 2.42.2\n",
+        "stderr": ""
+      }
+    },
+    "payload": null,
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "cancelled": false,
+    "externalRuntime": {
+      "runtime": "upstream-runner",
+      "exit": 0,
+      "stdout": "v24.19.0\n",
+      "stderr": "",
+      "scope": "Injected executable only; not a complete JavaScript action"
+    },
+    "systemdFinal": {
+      "failedUnits": ""
+    }
+  },
+  {
+    "attempt": "arion-1791670263993232567",
+    "placement": "ZAO rootless Podman 5.8.1, not UNZEN or GitHub",
+    "route": "arion",
+    "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+    "upstreamSha": "9b24cf65c72cb0e9616e437d55e1ac8e5c6bc715",
+    "upstreamImageUnmodified": null,
+    "outcome": "passed",
+    "error": null,
+    "image": {
+      "name": "localhost/ci:rmj33rw797w2ss80v3riridpdbrb96jv",
+      "id": "3a9c903d7229107b9b294f19e95a5c03a2c07723fad16a895be51021a4f6b6fa",
+      "size": 927940449,
+      "digest": "sha256:9eb1800cdab32ac248ca9dfea242b7a32fc655087041048cb2a6abb3fdf446f1"
+    },
+    "archiveBytes": 919296000,
+    "startupSeconds": 1.325,
+    "hostCgroup": {
+      "cpu.max": "400000 100000",
+      "memory.high": "12884901888",
+      "memory.max": "17179869184",
+      "pids.max": "2048"
+    },
+    "preflight": {
+      "uid": 1000,
+      "gid": 1000,
+      "permissionDenied": true,
+      "writeError": "EACCES",
+      "flock": {
+        "exit": 0,
+        "error": null,
+        "stdout": "flock from util-linux 2.42.2\n",
+        "stderr": ""
+      }
+    },
+    "payload": null,
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "cancelled": false,
+    "externalRuntime": {
+      "runtime": "nixos-runner",
+      "exit": 127,
+      "stdout": "",
+      "stderr": "Error: crun: executable file `/__e/node24/bin/node` not found: No such file or directory: OCI runtime attempted to invoke a command that was not found\n",
+      "scope": "Injected executable only; not a complete JavaScript action"
+    },
+    "systemdFinal": {
+      "failedUnits": ""
+    }
+  },
+  {
+    "attempt": "yeradon-1791668181120479767",
+    "placement": "ZAO rootless Podman 5.8.1, not UNZEN or GitHub",
+    "route": "yeradon",
+    "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+    "upstreamSha": "6c839856889e5b99dbd52a09f50cb7c42cc06207",
+    "upstreamImageUnmodified": true,
+    "outcome": "failed",
+    "error": "Command failed with exit 1: ['podman', '--root', '/tmp/nix-ci-routes/podman-storage', '--runroot', '/run/user/1000/forgerie-ci-routes', 'exec', '--env', 'CI_ROUTE_OUTPUT=/work/.ci-route-output', 'forgerie-ci-yeradon-2031557', 'node', '/probe/payload.mjs']",
+    "image": {
+      "name": "localhost/nixos-ci-image:26.05",
+      "id": "4c667109fdf3f29b0e5fa00140db91ebd3fb35124fb455051f63829b0c90f4a7",
+      "size": 1074008090,
+      "digest": "sha256:fbe492f75b97724e25e3443722cfab40c212d1f31d8c00fb7e747bb8e8d33c89"
+    },
+    "archiveBytes": 310332636,
+    "startupSeconds": 0.09,
+    "hostCgroup": {
+      "cpu.max": "400000 100000",
+      "memory.max": "17179869184",
+      "pids.max": "2048"
+    },
+    "preflight": null,
+    "payload": {
+      "node": "v24.19.0",
+      "architecture": "x64",
+      "platform": "linux",
+      "cgroup": "0::/\n",
+      "steps": [
+        {
+          "name": "install",
+          "command": [
+            "npm",
+            "ci"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 12.085
+        },
+        {
+          "name": "static",
+          "command": [
+            "npm",
+            "run",
+            "verify:static"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 37.312
+        },
+        {
+          "name": "coverage",
+          "command": [
+            "npm",
+            "run",
+            "test:coverage",
+            "--",
+            "--no-file-parallelism"
+          ],
+          "exit": 1,
+          "signal": null,
+          "error": null,
+          "seconds": 147.451
+        }
+      ],
+      "outcome": "failed"
+    },
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "cancelled": false,
+    "externalRuntime": null,
+    "systemdFinal": null
+  },
+  {
+    "attempt": "yeradon-1791668974613969057",
+    "placement": "ZAO rootless Podman 5.8.1, not UNZEN or GitHub",
+    "route": "yeradon",
+    "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+    "upstreamSha": "6c839856889e5b99dbd52a09f50cb7c42cc06207",
+    "upstreamImageUnmodified": false,
+    "outcome": "passed",
+    "error": null,
+    "image": {
+      "name": "localhost/forgerie-yeradon-compatible:test",
+      "id": "5ccac10508dddb625527685f6385fa3f33324522b56bf74bb5c2c00e47d7239c",
+      "size": 2172296418,
+      "digest": "sha256:87a23bef7e8ecdf1170617111aed0cc599393054f88e822ab7f3602ab6e9549d"
+    },
+    "archiveBytes": 630831471,
+    "startupSeconds": 0.11,
+    "hostCgroup": {
+      "cpu.max": "400000 100000",
+      "memory.max": "17179869184",
+      "pids.max": "2048"
+    },
+    "preflight": {
+      "uid": 1000,
+      "gid": 1000,
+      "permissionDenied": true,
+      "writeError": "EACCES",
+      "flock": {
+        "exit": 0,
+        "error": null,
+        "stdout": "flock from util-linux 2.42.2\n",
+        "stderr": ""
+      }
+    },
+    "payload": {
+      "node": "v24.19.0",
+      "architecture": "x64",
+      "platform": "linux",
+      "cgroup": "0::/\n",
+      "steps": [
+        {
+          "name": "install",
+          "command": [
+            "npm",
+            "ci"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 17.992
+        },
+        {
+          "name": "static",
+          "command": [
+            "npm",
+            "run",
+            "verify:static"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 43.146
+        },
+        {
+          "name": "coverage",
+          "command": [
+            "npm",
+            "run",
+            "test:coverage",
+            "--",
+            "--no-file-parallelism"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 182.803
+        },
+        {
+          "name": "browser",
+          "command": [
+            "npm",
+            "run",
+            "verify:ui"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 78.64
+        },
+        {
+          "name": "build",
+          "command": [
+            "npm",
+            "run",
+            "build"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 30.771
+        },
+        {
+          "name": "package-smoke",
+          "command": [
+            "npm",
+            "run",
+            "smoke:package-install"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 62.36
+        },
+        {
+          "name": "package-contents",
+          "command": [
+            "npm",
+            "run",
+            "pack:dry"
+          ],
+          "exit": 0,
+          "signal": null,
+          "error": null,
+          "seconds": 60.901
+        }
+      ],
+      "outcome": "passed"
+    },
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "cancelled": false,
+    "externalRuntime": null,
+    "systemdFinal": null
+  },
+  {
+    "attempt": "yeradon-1791670146811234213",
+    "placement": "ZAO rootless Podman 5.8.1, not UNZEN or GitHub",
+    "route": "yeradon",
+    "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+    "upstreamSha": "6c839856889e5b99dbd52a09f50cb7c42cc06207",
+    "upstreamImageUnmodified": false,
+    "outcome": "failed",
+    "error": "Interrupted by signal 15; cleaning owned resources",
+    "image": {
+      "name": "localhost/forgerie-yeradon-compatible:test",
+      "id": "5ccac10508dddb625527685f6385fa3f33324522b56bf74bb5c2c00e47d7239c",
+      "size": 2172562658,
+      "digest": "sha256:87a23bef7e8ecdf1170617111aed0cc599393054f88e822ab7f3602ab6e9549d"
+    },
+    "archiveBytes": 630831471,
+    "startupSeconds": 0.084,
+    "hostCgroup": {
+      "cpu.max": "400000 100000",
+      "memory.high": "12884901888",
+      "memory.max": "17179869184",
+      "pids.max": "2048"
+    },
+    "preflight": {
+      "uid": 1000,
+      "gid": 1000,
+      "permissionDenied": true,
+      "writeError": "EACCES",
+      "flock": {
+        "exit": 0,
+        "error": null,
+        "stdout": "flock from util-linux 2.42.2\n",
+        "stderr": ""
+      }
+    },
+    "payload": {
+      "node": "v24.19.0",
+      "architecture": "x64",
+      "platform": "linux",
+      "cgroup": "0::/\n",
+      "steps": [],
+      "outcome": "running"
+    },
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "cancelled": true,
+    "externalRuntime": null,
+    "systemdFinal": null
+  },
+  {
+    "attempt": "yeradon-1791670194995395831",
+    "placement": "ZAO rootless Podman 5.8.1, not UNZEN or GitHub",
+    "route": "yeradon",
+    "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+    "upstreamSha": "6c839856889e5b99dbd52a09f50cb7c42cc06207",
+    "upstreamImageUnmodified": false,
+    "outcome": "passed",
+    "error": null,
+    "image": {
+      "name": "localhost/forgerie-yeradon-compatible:test",
+      "id": "5ccac10508dddb625527685f6385fa3f33324522b56bf74bb5c2c00e47d7239c",
+      "size": 2172828898,
+      "digest": "sha256:87a23bef7e8ecdf1170617111aed0cc599393054f88e822ab7f3602ab6e9549d"
+    },
+    "archiveBytes": 630831471,
+    "startupSeconds": 0.081,
+    "hostCgroup": {
+      "cpu.max": "400000 100000",
+      "memory.high": "12884901888",
+      "memory.max": "17179869184",
+      "pids.max": "2048"
+    },
+    "preflight": {
+      "uid": 1000,
+      "gid": 1000,
+      "permissionDenied": true,
+      "writeError": "EACCES",
+      "flock": {
+        "exit": 0,
+        "error": null,
+        "stdout": "flock from util-linux 2.42.2\n",
+        "stderr": ""
+      }
+    },
+    "payload": null,
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "cancelled": false,
+    "externalRuntime": {
+      "runtime": "upstream-runner",
+      "exit": 0,
+      "stdout": "v24.19.0\n",
+      "stderr": "",
+      "scope": "Injected executable only; not a complete JavaScript action"
+    },
+    "systemdFinal": null
+  },
+  {
+    "attempt": "yeradon-1791670212999879082",
+    "placement": "ZAO rootless Podman 5.8.1, not UNZEN or GitHub",
+    "route": "yeradon",
+    "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+    "upstreamSha": "6c839856889e5b99dbd52a09f50cb7c42cc06207",
+    "upstreamImageUnmodified": false,
+    "outcome": "passed",
+    "error": null,
+    "image": {
+      "name": "localhost/forgerie-yeradon-compatible:test",
+      "id": "5ccac10508dddb625527685f6385fa3f33324522b56bf74bb5c2c00e47d7239c",
+      "size": 2172828898,
+      "digest": "sha256:87a23bef7e8ecdf1170617111aed0cc599393054f88e822ab7f3602ab6e9549d"
+    },
+    "archiveBytes": 630831471,
+    "startupSeconds": 0.08,
+    "hostCgroup": {
+      "cpu.max": "400000 100000",
+      "memory.high": "12884901888",
+      "memory.max": "17179869184",
+      "pids.max": "2048"
+    },
+    "preflight": {
+      "uid": 1000,
+      "gid": 1000,
+      "permissionDenied": true,
+      "writeError": "EACCES",
+      "flock": {
+        "exit": 0,
+        "error": null,
+        "stdout": "flock from util-linux 2.42.2\n",
+        "stderr": ""
+      }
+    },
+    "payload": null,
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "cancelled": false,
+    "externalRuntime": {
+      "runtime": "nixos-runner",
+      "exit": 127,
+      "stdout": "",
+      "stderr": "Error: crun: executable file `/__e/node24/bin/node` not found: No such file or directory: OCI runtime attempted to invoke a command that was not found\n",
+      "scope": "Injected executable only; not a complete JavaScript action"
+    },
+    "systemdFinal": null
+  }
+]

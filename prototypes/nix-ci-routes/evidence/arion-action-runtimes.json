@@ -1,0 +1,83 @@
+{
+  "route": "arion",
+  "image": "localhost/ci:lqsjmv01wq8p1k899y76gsb16z7gi06v",
+  "scope": "Node execution probe, not a complete JavaScript action or registered runner job",
+  "probes": [
+    {
+      "runtime": "upstream-runner",
+      "command": [
+        "podman",
+        "--root",
+        "/tmp/nix-ci-routes/podman-storage",
+        "--runroot",
+        "/run/user/1000/forgerie-ci-routes",
+        "run",
+        "--name",
+        "forgerie-runtime-arion-upstream-runner-2051986",
+        "--rm",
+        "--network",
+        "none",
+        "--cpus",
+        "1",
+        "--memory",
+        "512m",
+        "--pids-limit",
+        "64",
+        "--volume",
+        "/tmp/nix-ci-routes/upstream-externals:/__e:ro",
+        "--entrypoint",
+        "/__e/node24/bin/node",
+        "localhost/ci:lqsjmv01wq8p1k899y76gsb16z7gi06v",
+        "--version"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "{\"msg\":\"exec container process (missing dynamic library?) `/__e/node24/bin/node`: No such file or directory\",\"level\":\"error\",\"time\":\"2026-10-10T21:43:10.202397Z\"}\n",
+      "seconds": 0.16
+    },
+    {
+      "runtime": "nixos-runner",
+      "command": [
+        "podman",
+        "--root",
+        "/tmp/nix-ci-routes/podman-storage",
+        "--runroot",
+        "/run/user/1000/forgerie-ci-routes",
+        "run",
+        "--name",
+        "forgerie-runtime-arion-nixos-runner-2051986",
+        "--rm",
+        "--network",
+        "none",
+        "--cpus",
+        "1",
+        "--memory",
+        "512m",
+        "--pids-limit",
+        "64",
+        "--volume",
+        "/nix/store/3wmiksh6qqi8d5vghcxv0ic83nxwdm61-github-runner-2.337.0/lib/externals:/__e:ro",
+        "--entrypoint",
+        "/__e/node24/bin/node",
+        "localhost/ci:lqsjmv01wq8p1k899y76gsb16z7gi06v",
+        "--version"
+      ],
+      "exit": 127,
+      "stdout": "",
+      "stderr": "Error: crun: executable file `/__e/node24/bin/node` not found: No such file or directory: OCI runtime attempted to invoke a command that was not found\n",
+      "seconds": 0.125
+    }
+  ],
+  "cleanup": [
+    {
+      "name": "forgerie-runtime-arion-upstream-runner-2051986",
+      "removeExit": 0,
+      "containerExists": false
+    },
+    {
+      "name": "forgerie-runtime-arion-nixos-runner-2051986",
+      "removeExit": 0,
+      "containerExists": false
+    }
+  ]
+}

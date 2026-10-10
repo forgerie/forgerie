@@ -1,0 +1,28 @@
+[
+  {
+    "route": "yeradon",
+    "scope": "SIGTERM to harness during real payload; not a GitHub cancellation or power loss",
+    "secondsAfterSignal": 0.615,
+    "exit": 1,
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "attempt": "yeradon-1791670146811234213"
+  },
+  {
+    "route": "arion",
+    "scope": "SIGTERM to harness during real payload; not a GitHub cancellation or power loss",
+    "secondsAfterSignal": 0.766,
+    "exit": 1,
+    "cleanup": {
+      "stopExit": 0,
+      "removeExit": 0,
+      "containerExists": false,
+      "workspaceExists": false
+    },
+    "attempt": "arion-1791670230452262854"
+  }
+]

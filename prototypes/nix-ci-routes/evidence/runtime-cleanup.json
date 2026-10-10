@@ -1,0 +1,8 @@
+{
+  "scope": "Only /tmp/nix-ci-routes/podman-storage and its isolated runroot",
+  "containers": [],
+  "volumes": [],
+  "imagesBefore": 4,
+  "imagesAfter": 0,
+  "retained": "Source pins, archives, receipts, coverage, process logs, accepted production rollback roots"
+}

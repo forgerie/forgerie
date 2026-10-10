@@ -1,0 +1,53 @@
+{
+  "uid": 1000,
+  "tools": {
+    "nix": "/run/current-system/sw/bin/nix",
+    "podman": "/run/current-system/sw/bin/podman",
+    "docker": null,
+    "qemu-system-x86_64": null,
+    "gh": null
+  },
+  "kvm": {
+    "exists": true,
+    "accessible": true
+  },
+  "nix --version": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": "nix (Nix) 2.34.1"
+  },
+  "podman version": {
+    "exit": 0,
+    "stderr": "",
+    "version": {
+      "Client": {
+        "APIVersion": "5.8.1",
+        "Version": "5.8.1",
+        "GoVersion": "go1.25.7",
+        "GitCommit": "",
+        "BuiltTime": "Mon Dec 31 17:00:00 1979",
+        "Built": 315532800,
+        "OsArch": "linux/amd64",
+        "Os": "linux"
+      }
+    }
+  },
+  "podman info": {
+    "exit": 0,
+    "stderr": "",
+    "selected": {
+      "cgroupVersion": "v2",
+      "cgroupManager": "systemd",
+      "security": {
+        "apparmorEnabled": false,
+        "capabilities": "CAP_CHOWN,CAP_DAC_OVERRIDE,CAP_FOWNER,CAP_FSETID,CAP_KILL,CAP_NET_BIND_SERVICE,CAP_SETFCAP,CAP_SETGID,CAP_SETPCAP,CAP_SETUID,CAP_SYS_CHROOT",
+        "rootless": true,
+        "seccompEnabled": true,
+        "seccompProfilePath": "",
+        "selinuxEnabled": false
+      },
+      "graphDriverName": "overlay",
+      "graphRoot": "/home/simonwjackson/.local/share/containers/storage"
+    }
+  }
+}

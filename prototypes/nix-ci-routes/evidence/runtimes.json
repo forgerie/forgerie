@@ -1,0 +1,8 @@
+{
+  "runner": "2.337.0",
+  "upstreamNode": "24.19.0",
+  "url": "https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.gz",
+  "sha256": "f625d97cd707df4ff96254916fbc5ff014f09c09effe5a1e0ca8f6d41a8789d4",
+  "externalPath": "/tmp/nix-ci-routes/upstream-externals",
+  "nativeExternalPath": "/nix/store/3wmiksh6qqi8d5vghcxv0ic83nxwdm61-github-runner-2.337.0/lib/externals"
+}

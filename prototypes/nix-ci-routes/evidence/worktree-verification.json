@@ -1,0 +1,17 @@
+{
+  "scope": "Prototype delivery worktree, separate from the frozen 09e3ef5 container comparison",
+  "baseCommit": "2af1ef430c742a8defa212ffd9664158b61e87d2",
+  "commands": [["npm", "ci", "--no-audit", "--no-fund"], ["npm", "run", "verify"]],
+  "nodeMajor": 24,
+  "isolatedPiProfile": true,
+  "exit": 0,
+  "server": { "passed": 1893, "skipped": 5 },
+  "browser": { "passed": 1370, "skipped": 1 },
+  "prototypeChecks": {
+    "pythonCompile": "passed",
+    "payloadNodeSyntax": "passed",
+    "hostedWorkflowActionlint": "passed",
+    "realContainerCancellationAndRuntimeProbes": "passed"
+  },
+  "liveServicesRestarted": false
+}
