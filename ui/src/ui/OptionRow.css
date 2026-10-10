@@ -1,6 +1,8 @@
 /* One choice: its name over short details, a check at the end on the choice in
    effect. The row keeps a control-sized target at every width; the name wraps
-   rather than truncates, so two similar names never read the same. */
+   rather than truncates, so two similar names never read the same. With
+   `detailsPlacement: "trailing"` the details join the name's line instead and
+   give way at their end, so the row holds one height whatever the text. */
 .option-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name check" "details check";
   align-items: center; align-content: center; column-gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size);
   padding: var(--space-1) var(--space-3); border: 0; border-radius: var(--radius-control);
@@ -23,4 +25,11 @@
 .option-row-path { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left;
   font-family: var(--code-font); font-size: var(--meta-text); }
 .option-row-path > bdi { direction: ltr; }
+/* Details on the name's line, for a list that must hold one row height whatever
+   the text: the name keeps its width and the details give way at their end. */
+.option-row[data-details="trailing"] { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "name details check"; }
+.option-row[data-icon][data-details="trailing"] { grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "icon name details check"; }
+.option-row[data-details="trailing"] .option-row-details { flex-wrap: nowrap; overflow: hidden; }
+.option-row[data-details="trailing"] .option-row-details > span { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.option-row[data-details="trailing"] .option-row-details > span:first-child { flex: 1 1 auto; }
 .option-row-check { grid-area: check; }

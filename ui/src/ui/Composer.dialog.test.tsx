@@ -107,7 +107,7 @@ describe("extension dialogs in the one input bar", () => {
   it("keeps the slash list out of an input dialog's answer", async () => {
     await render({ dialog: { dialog: input }, commands: true });
     await type("/re");
-    expect(document.querySelector(".command-popover")).toBeNull();
+    expect(document.querySelector("[role=\"listbox\"]")).toBeNull();
   });
 
   it("does not pull a touch keyboard up after a tapped choice, unless the reader was typing", async () => {

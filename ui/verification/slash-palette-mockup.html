@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Slash palette — row treatment options</title>
+<style>
+  /* Throwaway verification sheet. Dark tokens are copied from
+     ui/src/ui/theme.css (prefers-color-scheme: dark) so the frames read as the
+     app reads. Fonts are the system stacks, not Public Sans: this sheet judges
+     row structure, not typeface. */
+  :root { --sheet: #101010; --sheet-ink: #e8e8e8; --sheet-quiet: #8b8b8b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 28px; background: var(--sheet); color: var(--sheet-ink);
+    font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+  p.lede { margin: 0 0 24px; color: var(--sheet-quiet); max-width: 92ch; }
+  .sheet { display: flex; flex-wrap: wrap; gap: 36px; align-items: flex-start; }
+  figure { margin: 0; }
+  figcaption { margin: 0 0 10px; max-width: 46ch; }
+  figcaption b { display: block; font-size: 13px; }
+  figcaption span { color: var(--sheet-quiet); }
+  /* The frame is the container. Every rule below reads its width, never the window. */
+  .frame { position: relative; container-type: size; overflow: hidden; display: flex; flex-direction: column;
+    background: oklch(0.17 0.003 106); color: oklch(0.985 0.002 106);
+    --foreground: oklch(0.985 0.002 106); --background: oklch(0.17 0.003 106);
+    --popover: oklch(0.215 0.003 106); --muted-foreground: oklch(0.708 0.004 106);
+    --quiet: color-mix(in oklab, var(--foreground) 70%, transparent);
+    --faint: color-mix(in oklab, var(--foreground) 62%, transparent);
+    --line: color-mix(in oklab, var(--foreground) 10%, transparent);
+    --hover-surface: color-mix(in oklab, var(--foreground) 4%, transparent);
+    --active-surface: color-mix(in oklab, var(--foreground) 6%, transparent);
+    --small-text: 0.8125rem; --label-text: 0.75rem; --control-size: 2.75rem;
+    --s1: 0.25rem; --s2: 0.5rem; --s3: 0.75rem;
+    --radius-control: 0.5rem; --radius-surface: 0.625rem;
+    border: 1px solid #2a2a2a; }
+  .frame[data-size="folded-portrait"] { width: 475px; height: 638px; }
+  .frame[data-size="unfolded-landscape"] { width: 932px; height: 553px; }
+  .transcript { flex: 1; min-height: 0; padding: 16px; color: var(--faint); display: flex; flex-direction: column; gap: 10px; }
+  .line { height: 9px; border-radius: 4px; background: color-mix(in oklab, var(--foreground) 7%, transparent); }
+  .composer { flex: none; margin: 0 12px 12px; padding: 10px 14px; min-height: 68px;
+    border: 1px solid var(--line); border-radius: 1rem; background: oklch(0.21 0.003 106);
+    font: 15px/1.4 ui-monospace, monospace; }
+  /* Window-level, anchored to the composer's top edge, exactly as .command-popover is. */
+  .popover { position: absolute; left: 12px; right: 12px; bottom: calc(68px + 12px + var(--s1));
+    max-block-size: min(22rem, calc(100cqb - 68px - 40px)); display: flex; flex-direction: column;
+    padding: var(--s1); border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover); }
+  /* The rows scroll; anything pinned at the foot of the panel must sit outside them. */
+  .popover-rows { min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .row { display: flex; align-items: center; column-gap: var(--s2); inline-size: 100%; min-block-size: var(--control-size);
+    padding: var(--s2) var(--s3); border: 0; border-radius: var(--radius-control); background: transparent;
+    color: inherit; font: inherit; text-align: start; }
+  .row[data-on] { background: var(--active-surface); }
+  .row .name { flex: none; font: 13px/1.4 ui-monospace, monospace; }
+  /* A: the description trails the name and the row cuts it. */
+  .row .desc { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    color: var(--faint); font-size: var(--label-text); }
+  /* B: a bare row still fills the row, so the list keeps one rhythm. */
+  .row[data-bare] { justify-content: flex-start; }
+  /* Today: the description is row content, so it wraps and the row grows. */
+  .row[data-stacked] { flex-direction: column; align-items: flex-start; row-gap: var(--s1); overflow-wrap: anywhere; }
+  .row[data-stacked] .name { font-weight: 500; }
+  .row[data-stacked] .desc { flex: none; overflow: visible; white-space: normal; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
+  /* C: one description for the highlighted row, under the list. */
+  .detail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+    margin: var(--s1) 0 0; padding: var(--s2) var(--s3); border-block-start: 1px solid var(--line);
+    color: var(--quiet); font-size: var(--small-text); line-height: 1.5; }
+  .empty { min-block-size: var(--control-size); }
+</style>
+</head>
+<body>
+<h1>Slash palette — row treatment</h1>
+<p class="lede">Real catalogue text: four built-in commands and five installed skills, sorted the way the server sorts them.
+Each frame is the folded-portrait container (475×638) unless its caption says otherwise. The first row carries the keyboard highlight.</p>
+<div class="sheet" id="sheet"></div>
+<script>
+// Real descriptions, copied from builtinCommands.ts and from each SKILL.md.
+const items = [
+  { name: "/compact", desc: "Manually compact session context", kind: "command" },
+  { name: "/goal", desc: "Run a goal to completion: /goal [--tokens 100k] <goal_to_complete>", kind: "command" },
+  { name: "/model", desc: "Select model", kind: "command" },
+  { name: "/new", desc: "Start a new session", kind: "command" },
+  { name: "/skill:ask-user", kind: "skill", desc: "You MUST use this before high-stakes architectural decisions, irreversible changes, or when requirements are ambiguous. Runs a decision handshake with the ask_user tool: gather evidence, present structured options, collect the user's explicit choice, then proceed." },
+  { name: "/skill:atomic-decomp", kind: "skill", desc: "Decompose a UI end to end. Classify layers with Brad Frost's atomic design (atoms, molecules, organisms, templates, pages), then decide where each component lives and how data reaches it via the system/shape/binding split, shared-space-first extraction (because agents reinvent what they cannot find), brand-neutral vs brand-carrying components, current and next versioning through a brand transition, and the one-way import rules that keep generations apart. Use when decomposing a UI or design system, deciding which layer a component belongs to, creating any UI component, deciding whether something belongs in shared or in a feature, building a second-generation screen behind a gate, extracting duplicated markup, wiring data into a view, structuring a component library, or reviewing whether a decomposition is honest and thin." },
+  { name: "/skill:caliper-parts", kind: "skill", desc: "Decompose a screen into Caliper parts gate-first, then write the *.part.tsx files that Caliper shows at true device size. Use when decomposing a screen into parts, extracting shared components from duplicated markup, creating or changing *.part.tsx files or their states, fixtures, composition, expectations or checks, adding caliper() to a Vite project, or showing non-React components in Caliper." },
+  { name: "/skill:frontend-design", kind: "skill", desc: "REQUIRED whenever designing, building, modifying, or reviewing front-end UI or user-facing visual presentation: a component, page, screen, style, typography, color palette, or layout. Before drafting UI proposals or writing front-end code, call read on this SKILL.md. Decide from the output you will produce, even when the user did not say \"design\", \"frontend\", or \"aesthetic\"." },
+  { name: "/skill:handoff", kind: "skill", desc: "Immediately detach the current conversation into a continuation session. Use when the user says \"handoff\", \"hand off\", \"hand this off\", \"continue in a new/fresh session\", or wants to compact context and continue elsewhere without waiting in the current thread." },
+  { name: "/tree", desc: "Navigate session tree", kind: "command" },
+];
+
+const esc = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// One function for all three treatments: same data, same DOM order, one row rule.
+function rows(mode) {
+  return items.map((item, index) => {
+    const on = index === 0 ? " data-on" : "";
+    if (mode === "today") return `<button class="row" data-stacked${on}><span class="name">${esc(item.name)}</span><span class="desc">${esc(item.desc)}</span></button>`;
+    if (mode === "cut") return `<button class="row"${on}><span class="name">${esc(item.name)}</span><span class="desc">${esc(item.desc)}</span></button>`;
+  // "strip": every row is a name, and the description belongs to the highlighted row alone.
+    // "tiered": a skill shows its name only, the rest of its text is agent-facing.
+    const showDesc = mode === "tiered" && item.kind === "command";
+    return `<button class="row"${showDesc ? "" : " data-bare"}${on}><span class="name">${esc(item.name)}</span>${showDesc ? `<span class="desc">${esc(item.desc)}</span>` : ""}</button>`;
+  }).join("");
+}
+
+function frame({ mode, label, note, size, wide }) {
+  const body = rows(mode);
+  const strip = mode === "strip" ? `<p class="detail">${esc(items[0].desc)}</p>` : "";
+  return `<figure>
+    <figcaption><b>${label}</b><span>${note}</span></figcaption>
+    <div class="frame" data-size="${size}">
+      <div class="transcript"><div class="line" style="width:72%"></div><div class="line" style="width:54%"></div><div class="line" style="width:63%"></div></div>
+      <div class="composer">/</div>
+      <div class="popover"><div class="popover-rows">${body}</div>${strip}</div>
+    </div>
+  </figure>`;
+}
+
+document.getElementById("sheet").innerHTML = [
+  frame({ mode: "today", label: "Now", note: "A paragraph is row content, so one skill row owns most of the panel. 5 of the 10 entries below are skills.", size: "folded-portrait" }),
+  frame({ mode: "cut", label: "Option A — one line, cut by the row", note: "Uniform rows. Skill text reads as boilerplate, cut at the row's end.", size: "folded-portrait" }),
+  frame({ mode: "tiered", label: "Option B — skills named only", note: "Uniform rows. A command keeps its one-line description; a skill shows its name.", size: "folded-portrait" }),
+  frame({ mode: "strip", label: "Option C — one description, under the list", note: "Every row is a name. The highlighted row's description sits in a fixed two-line strip at the panel's foot, outside the scroller.", size: "folded-portrait" }),
+  frame({ mode: "tiered", label: "Option B, unfolded landscape", note: "The same rules at 932×553: no new breakpoint, nothing changes structure.", size: "unfolded-landscape" }),
+].join("");
+</script>
+</body>
+</html>

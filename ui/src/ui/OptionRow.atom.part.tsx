@@ -31,3 +31,13 @@ export function HiddenAndBusy() {
     <OptionRow name="Claude Opus 5.5" blocked details={["Proxy"]} />
   </div>;
 }
+/** Details on the name's line: one row height whatever the text, for a palette. */
+export function TrailingDetails() {
+  return <div>
+    <OptionRow name="/compact" detailsPlacement="trailing" details={["Manually compact session context"]} />
+    <OptionRow name="/goal" detailsPlacement="trailing" details={["Run a goal to completion: /goal [--tokens 100k] <goal_to_complete>"]} />
+    <OptionRow name="/new" detailsPlacement="trailing" details={["Start a new session"]} />
+    <OptionRow name="/skill:atomic-decomp" detailsPlacement="trailing" />
+    <OptionRow name="/skill:frontend-design" detailsPlacement="trailing" />
+  </div>;
+}

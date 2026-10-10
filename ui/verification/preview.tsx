@@ -662,7 +662,9 @@ function Preview() {
   const working = queuePreview || compactionPreview ? { queue: running, steer: running && !compactionWaits } : undefined;
   useEffect(() => {
     if (scenario === "slash-capture") {
-      runtime.thread.composer.setText("/");
+      // A value written into the composer's state leaves the palette closed; a
+      // real input event is what opens it, so the capture harness types `/`
+      // through CDP into this focused composer.
       document.querySelector<HTMLElement>("[data-composer-input]")?.focus();
     }
     if (!attachmentPreview) return;
@@ -757,7 +759,9 @@ const previewCommands: CommandBinding = { catalog: { type: "ready", commands: [
   { name: "compact", source: "builtin", description: "Manually compact session context" },
   { name: "reload", source: "builtin", description: "Reload Pi runtime resources for this session" },
   { name: "review", source: "prompt", description: "Review the current changes" },
-  { name: "skill:testing", source: "skill", description: "Write regression tests" },
+  // One skill carries the real thing: a model-facing paragraph, the shape that
+  // broke the palette while every fixture line was short.
+  { name: "skill:testing", source: "skill", description: "Write regression tests for a change before it lands. Prefer a test that fails on the old code and passes on the new one, at the seam the change actually moves. Use when a change touches behaviour, a contract, persistence or integration, or when a defect must not come back quietly." },
   ...Array.from({ length: 20 }, (_, index) => ({ name: `extension-${index + 1}`, source: "extension" as const, description: "An extension command with a description that wraps in a narrow pane." })),
 ] }, onRetry: () => {} };
 // New session: a local API with real promises and scripted outcomes. No network.

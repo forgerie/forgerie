@@ -11,6 +11,8 @@ const { launchChrome, getFreePort, waitForDebugger, evaluate, sleep } = await im
 const { openPosturePage, pressCombo } = await import(pathToFileURL(join(repo, "scripts/lib/posture-page.mjs")));
 const { FOLD8_POSTURES } = await import(pathToFileURL(join(repo, "scripts/lib/fold8-postures.mjs")));
 const origin = process.env.APP_URL ?? "http://127.0.0.1:8521";
+// The listbox root is the accessible element; the visible surface is the panel inside it.
+const PANEL = '[role="listbox"] .floating-panel';
 const output = resolve("verification/local/slash");
 await mkdir(output, { recursive: true });
 const profile = await mkdtemp(join(tmpdir(), "aui-slash-"));
@@ -42,15 +44,27 @@ try {
   await until("!!document.querySelector('[data-composer-input]')");
   await input("/");
   await until("document.querySelectorAll('[role=option]').length === 26");
+  // The row treatment this palette was rebuilt for: one height per row, a
+  // command's line on the name's line, and no model-facing paragraph in sight.
+  const rows = await evaluate(cdp, `[...document.querySelectorAll('[role=option]')].map((row) => ({ text: row.textContent,
+    height: Math.round(row.getBoundingClientRect().height), details: row.getAttribute("data-details"), id: row.id }))`);
+  assert.equal(rows.length, 26);
+  assert.equal(new Set(rows.map((row) => row.height)).size, 1, "every palette row keeps one height");
+  assert.ok(rows.every((row) => row.details === "trailing"), "details ride the name's line, so a row cannot grow");
+  assert.equal(rows.find((row) => row.text.includes("skill:testing")).text, "/skill:testing", "a skill's paragraph never reaches its row");
+  assert.equal(rows.find((row) => row.text.startsWith("/compact")).text, "/compactManually compact session context", "a command keeps its one line");
+  result.rows = rows;
   for (const scheme of ["light", "dark"]) {
     await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
     for (const posture of [...FOLD8_POSTURES, { name: "keyboard-budget", width: 475, height: 280 }, { name: "narrow-pane", width: 280, height: 500 }]) {
       await cdp.send("Emulation.setDeviceMetricsOverride", { width: posture.width, height: posture.height, deviceScaleFactor: 2.625, mobile: true });
       await sleep(100);
       const state = await evaluate(cdp, `({ width: innerWidth, height: innerHeight, overflow: document.documentElement.scrollWidth > innerWidth,
-        popup: document.querySelector('.command-popover').getBoundingClientRect().toJSON(),
+        popup: document.querySelector('${PANEL}').getBoundingClientRect().toJSON(),
         input: document.querySelector('[data-composer-input]').getBoundingClientRect().toJSON(), draft: document.querySelector('[data-composer-input]').value,
-        scrollable: document.querySelector('.command-popover').scrollHeight > document.querySelector('.command-popover').clientHeight })`);
+        scrollable: (() => { const panel = document.querySelector('${PANEL}');
+          return panel.scrollHeight > panel.clientHeight + 1 || [...document.querySelectorAll('[role=option]')]
+            .some((row) => row.getBoundingClientRect().bottom > panel.getBoundingClientRect().bottom + 1); })() })`);
       assert.equal(state.overflow, false);
       assert.equal(state.draft, "/");
       assert.equal(state.scrollable, true);
@@ -62,11 +76,13 @@ try {
   }
   for (let index = 0; index < 25; index++) await pressCombo(cdp, "arrowdown");
   await sleep(100);
-  const highlighted = await evaluate(cdp, `({ list: document.querySelector('.command-popover').getBoundingClientRect().toJSON(), item: document.querySelector('[data-highlighted]').getBoundingClientRect().toJSON() })`);
+  const highlighted = await evaluate(cdp, `({ list: document.querySelector('${PANEL}').getBoundingClientRect().toJSON(), item: document.querySelector('[data-highlighted]').getBoundingClientRect().toJSON() })`);
   assert.ok(highlighted.item.top >= highlighted.list.top - 1 && highlighted.item.bottom <= highlighted.list.bottom + 1);
   result.keyboardScroll = true;
   await input("/re");
-  await until("document.querySelectorAll('[role=option]').length === 3");
+  // Two, not three: `/skill:testing` used to answer to its description's
+  // "regression tests", and a skill answers to its name alone now.
+  await until("document.querySelectorAll('[role=option]').length === 2");
   await pressCombo(cdp, "arrowdown");
   await pressCombo(cdp, "enter");
   assert.equal(await evaluate(cdp, "document.querySelector('[data-composer-input]').value"), "/review ");

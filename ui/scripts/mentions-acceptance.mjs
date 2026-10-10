@@ -82,7 +82,7 @@ try {
   await draft("#model"); await pressCombo(cdp, "tab");
   assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), "#provider/model-0 ");
   await draft("/name");
-  await until(`document.querySelectorAll('.command-option').length === 1`);
+  await until(`document.querySelectorAll('[role=option]').length === 1`);
   await pressCombo(cdp, "enter");
   assert.equal(await evaluate(cdp, `document.querySelector('[aria-label="Message"]').value`), "/name ");
   await draft("/review @src");

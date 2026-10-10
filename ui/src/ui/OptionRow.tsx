@@ -8,6 +8,12 @@ import "./OptionRow.css";
  * apart (the last folders of a path) stays visible; the title holds it all.
  */
 export type OptionDetail = string | { text: string; strong?: boolean | undefined; truncate?: "start" | undefined };
+/**
+ * Where a row's details sit. `under` gives them their own line, so a long one
+ * can wrap; `trailing` keeps them on the name's line and lets them give way at
+ * the end, for a list where every row must hold one height whatever the text.
+ */
+export type OptionDetailPlacement = "under" | "trailing";
 /** How strongly a choice reads: plain, quiet (offered, with less to it), or faint (off its usual list). */
 export type OptionTone = "plain" | "quiet" | "faint";
 
@@ -18,6 +24,8 @@ export interface OptionRowProps extends Omit<ButtonHTMLAttributes<HTMLButtonElem
   /** Tells a choice apart from another with the same name. */
   variant?: string | undefined;
   details?: readonly OptionDetail[] | undefined;
+  /** Where the details sit: their own line (default), or the name's line. */
+  detailsPlacement?: OptionDetailPlacement | undefined;
   /** The choice in effect: a check mark, and `aria-current`. */
   current?: boolean | undefined;
   tone?: OptionTone | undefined;
@@ -34,12 +42,14 @@ export interface OptionRowProps extends Omit<ButtonHTMLAttributes<HTMLButtonElem
  * a primitive can give it behaviour through `asChild`.
  */
 export const OptionRow = forwardRef<HTMLButtonElement, OptionRowProps>(function OptionRow(
-  { name, icon, variant, details = [], current, tone = "plain", blocked, busy, type = "button", ...rest }, ref) {
+  { name, icon, variant, details = [], detailsPlacement = "under", current, tone = "plain", blocked, busy, type = "button", ...rest }, ref) {
+  const trailing = detailsPlacement === "trailing";
   return <button ref={ref} type={type} className="option-row" data-tone={tone === "plain" ? undefined : tone} data-icon={icon ? "" : undefined}
+    data-details={trailing ? "trailing" : undefined}
     aria-current={current || undefined} aria-disabled={blocked || undefined} aria-busy={busy || undefined} {...rest}>
     {icon && <span className="option-row-icon" aria-hidden>{icon}</span>}
     <span className="option-row-name">{name}{variant && <span className="option-row-variant">{variant}</span>}</span>
-    {details.length > 0 && <span className="option-row-details">{details.map((detail, index) => typeof detail === "string"
+    {details.length > 0 && <span className="option-row-details" {...(trailing ? { title: details.map((detail) => typeof detail === "string" ? detail : detail.text).join(" ") } : {})}>{details.map((detail, index) => typeof detail === "string"
       ? <span key={index}>{detail}</span>
       : detail.truncate === "start"
         ? <span key={index} className="option-row-path" title={detail.text}><bdi dir="ltr">{detail.text}</bdi></span>

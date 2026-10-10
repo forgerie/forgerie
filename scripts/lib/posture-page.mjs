@@ -55,7 +55,7 @@ export async function openPosturePage({ debugPort, posture, colorScheme }) {
 
 /** Navigates, then walks the requested input path, settling between steps. */
 export async function drivePage(cdp, options) {
-  const { url, settle = 4000, timeout = 20000, inputMode, presses = [], clickTitles = [], label = "page" } = options;
+  const { url, settle = 4000, timeout = 20000, inputMode, presses = [], types = [], clickTitles = [], label = "page" } = options;
 
   const loaded = cdp.waitForEvent("Page.loadEventFired", timeout).catch(() => undefined);
   await cdp.send("Page.navigate", { url });
@@ -82,6 +82,15 @@ export async function drivePage(cdp, options) {
   // a keyboard shortcut are reached the way the user reaches them.
   for (const combo of presses) {
     await pressCombo(cdp, combo);
+    await sleep(settle);
+  }
+
+  // Text typed into the composer through CDP, for a surface that a real input
+  // event opens: a value written straight into the editor's state leaves a
+  // completion popover closed.
+  for (const text of types) {
+    await evaluate(cdp, `document.querySelector('[data-composer-input]')?.focus()`);
+    await cdp.send("Input.insertText", { text });
     await sleep(settle);
   }
 

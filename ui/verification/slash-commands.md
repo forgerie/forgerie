@@ -4,7 +4,9 @@ The standalone MVP uses assistant-ui 0.15.22's trigger popover and slash-command
 
 ## Behavior
 
-Type `/` at the start of the composer. Search matches names and descriptions. Arrow keys, Enter, Tab, or a pointer select a command. Selection inserts plain `/command ` text. It does not execute the command. Add arguments and use Send to execute it. Escape closes the picker without deleting text.
+Type `/` at the start of the composer. Search matches a command's name and its description; a skill is matched by its name alone, because its description is written for the model and never appears in the palette (`paletteDescription` in `src/commands.ts`). Arrow keys, Enter, Tab, or a pointer select a command. Selection inserts plain `/command ` text. It does not execute the command. Add arguments and use Send to execute it. Escape closes the picker without deleting text.
+
+One row is one height. A command's description rides its name's line and gives way at the row's end, so no row can grow into a paragraph; a skill shows its name alone. The palette is a `FloatingPanel` holding an `OptionList` in highlight mode, the same parts the `@` mention popover uses, and its rows are `OptionRow`s with `detailsPlacement: "trailing"`.
 
 This deliberately differs from the guide's immediate-action example. Pi commands can mutate sessions and often require arguments. Explicit Send prevents selection from running `/compact` or `/clone` unintentionally. Directive chips never reach Pi.
 
@@ -22,9 +24,9 @@ APP_URL=http://127.0.0.1:8510 LIVE_SESSION=<idle-session-id> \
   nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node scripts/slash-acceptance.mjs
 ```
 
-Omit `LIVE_SESSION` for fixture-only acceptance. The live check executes only `/session`, not a model prompt. Fixture rendering uses injected command data, not network interception.
+Omit `LIVE_SESSION` for fixture-only acceptance. The live check executes only `/session`, not a model prompt. Fixture rendering uses injected command data, not network interception. One fixture command is a skill with a real paragraph-length description, so the acceptance check can see a row that would grow.
 
-Use the parent repository's `scripts/capture-postures.mjs` for captures. The fixture URL is `/verification/preview.html?scenario=slash-capture`. Add `--press arrowright` to activate detection after the fixture seeds `/`. Set `CHROME_BIN` to the Chromium executable if the script's login-shell lookup cannot see the Nix shell path.
+Use the parent repository's `scripts/capture-postures.mjs` for captures. The fixture URL is `/verification/preview.html?scenario=slash-capture`, opened with `--type /`: the harness types into the composer through CDP, because a value written straight into the editor's state leaves the palette closed. Set `CHROME_BIN` to the Chromium executable if the script's login-shell lookup cannot see the Nix shell path.
 
 Verified before landing:
 
@@ -53,6 +55,27 @@ Archive Undo retains its five-second window. Errors, notes, and update offers st
 Full repository verification passed after rebasing onto `886b49b6`: typecheck, lint, knip, UI gates, build, 1,803 server tests, and 1,325 UI tests. Three server tests and one UI test were skipped. One UI test file was also skipped.
 
 Evidence is under `/tmp/forgerie-land-toasts/`: `acceptance.json`, posture captures, and three `caliper-*/result.json` files for `Toast`, `ToastRegion`, and `CommandResultPanel`. Landing uses a rebase and fast-forward onto `main`. Service restarts are excluded by the user's instruction; runtime deployment remains unverified.
+
+## Palette row treatment, 2026-10-09
+
+A skill's description is written for the model: Pi hands the agent that paragraph to decide when to load the skill. Measured on this host, 47 installed skills carry descriptions of 50 to 953 characters, median 205, and 36 of the 47 are over 120. Cutting at the first sentence still spans 5 to 189 characters, so no rule shortens that text honestly. The palette now shows a skill's name alone, and a skill no longer matches a search by its description, so a row never appears for a reason the reader cannot see. A command's description, written for a person, rides its name's line and gives way at the row's end.
+
+Every row is one height. The palette is a `FloatingPanel` holding an `OptionList` in highlight mode, the same parts the `@` mention popover uses, and its rows are `OptionRow`s with `detailsPlacement: "trailing"`. `.command-popover` and `--command-room` are gone; `.command-option` stays for the command result panel.
+
+| Check | Result |
+|---|---|
+| Build, lint, unit tests | Root `npm run verify` passed: typecheck, lint, knip for both trees, 1,824 root tests, then the `ui/` suite — build, ESLint, gates and 1,350 tests. |
+| Row treatment | `scripts/slash-acceptance.mjs`: 26 rows, every row 44 px, every row carrying `data-details="trailing"`, `/skill:testing` showing its name alone and `/compact` its line. |
+| Browser interaction | The same script passed keyboard completion, highlighted-row scrolling, and ask-mode precedence across 12 posture and theme combinations with no page exception. `/re` returns two rows, not three: the skill no longer answers to "regression tests" in its description. |
+| Fold matrix | Eight captures in `/tmp/slash-rows-shots/` (four postures, both schemes) were read and reviewed: one row height everywhere, no clipped control, no posture changes the row structure. |
+| Additional container sizes | 280×500 and a 475×280 keyboard-height budget passed in both schemes. |
+| Part render | `caliper-render` on `OptionRow.atom.part.tsx`, state `TrailingDetails`: `Rendered` on all four devices, `spill` null, `console` empty; the folded-portrait PNG was read. |
+| Mention palette | `scripts/mentions-acceptance.mjs` passed all 32 cases, so the shared parts did not move under it. |
+| Live Pi endpoint | Not re-run: it needs an idle session (`LIVE_SESSION=<id>`). The palette rows changed; the run path did not. |
+
+Limits: a skill can no longer be found in the palette by a word from its description; the Skills library in Settings shows each description in full. An extension command with a long description is cut at the row's end. At the 22rem cap the panel can end on a row boundary, so the cut row that hints "more below" may not show at the widest postures; the scrollbar is the remaining hint. Physical Fold keyboard and touch validation remains unverified.
+
+The capture harness gained `--type <text>`, which types into the composer through CDP: a value written straight into the editor's state leaves a completion popover closed. The three row treatments compared for this change are in `verification/slash-palette-mockup.html`.
 
 ## References
 

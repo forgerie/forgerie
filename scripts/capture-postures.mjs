@@ -5,6 +5,7 @@
 //   node scripts/capture-postures.mjs --url http://127.0.0.1:8504/ --out /tmp/shots --label slice2
 //   node scripts/capture-postures.mjs --url ... --click-title Sessions --label overlay
 //   node scripts/capture-postures.mjs --url ... --press ctrl+k --click-title "New Prompt"
+//   node scripts/capture-postures.mjs --url ... --type "/" --settle 1500
 //   node scripts/capture-postures.mjs --url ... --click-title "New session" --click-title Choose --click-text Local
 //
 // --click-title and --click-text steps run in the order given. --click-text
@@ -61,7 +62,7 @@ async function capturePosture({ debugPort, posture, args, outputPath }) {
 }
 
 function parseArgs(argv) {
-  const parsed = { out: "/tmp/forgerie-postures", label: "posture", settle: 4000, timeout: 20000, clickTitles: [], presses: [] };
+  const parsed = { out: "/tmp/forgerie-postures", label: "posture", settle: 4000, timeout: 20000, clickTitles: [], presses: [], types: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--url") parsed.url = argv[++i];
@@ -70,6 +71,7 @@ function parseArgs(argv) {
     else if (arg === "--click-title") parsed.clickTitles.push(argv[++i]);
     else if (arg === "--click-text") parsed.clickTitles.push({ text: argv[++i] });
     else if (arg === "--press") parsed.presses.push(argv[++i]);
+    else if (arg === "--type") parsed.types.push(argv[++i]);
     else if (arg === "--input-mode") parsed.inputMode = argv[++i];
     else if (arg === "--color-scheme") parsed.colorScheme = requireColorScheme(argv[++i]);
     else if (arg === "--chrome-bin") parsed.chromeBin = argv[++i];

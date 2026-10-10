@@ -1,5 +1,5 @@
 import { forwardRef, useId, useImperativeHandle, useRef, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
-import { OptionRow, type OptionDetail, type OptionTone } from "./OptionRow";
+import { OptionRow, type OptionDetail, type OptionDetailPlacement, type OptionTone } from "./OptionRow";
 import "./OptionList.css";
 
 export interface OptionItem {
@@ -8,6 +8,8 @@ export interface OptionItem {
   icon?: ReactNode;
   variant?: string | undefined;
   details?: readonly OptionDetail[] | undefined;
+  /** Where the details sit: their own line (default), or the name's line. */
+  detailsPlacement?: OptionDetailPlacement | undefined;
   current?: boolean | undefined;
   tone?: OptionTone | undefined;
   blocked?: boolean | undefined;
@@ -82,7 +84,7 @@ export const OptionList = forwardRef<OptionListHandle, {
   }
   const row = (option: OptionItem) => {
     const drawn = <OptionRow name={option.name} icon={option.icon} variant={option.variant} details={option.details}
-      current={option.current} tone={option.tone} blocked={option.blocked} busy={option.busy} data-option-id={option.id}
+      detailsPlacement={option.detailsPlacement} current={option.current} tone={option.tone} blocked={option.blocked} busy={option.busy} data-option-id={option.id}
       {...(highlight ? { tabIndex: -1, onMouseDown: (event) => event.preventDefault() } : { onClick: () => input.onChoose(option.id) })} />;
     return highlight ? input.wrap(drawn, option) : drawn;
   };

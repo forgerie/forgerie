@@ -22,6 +22,19 @@ export type CommandResult = z.infer<typeof commandResultSchema>;
 /** Pi executes only leading slash text. Ordinary paths inside messages stay text. */
 export function isCommand(text: string): boolean { return text.startsWith("/"); }
 
+/**
+ * The one line the slash palette may show for a command, if any.
+ *
+ * A skill's description is written for the model: Pi hands the agent that same
+ * paragraph to decide when to load the skill. It is a page of prose, so it
+ * never reaches the palette, and it never matches a search either — a row must
+ * never appear for a reason the reader cannot see. Every other source declares
+ * a line for a person, and the palette draws it.
+ */
+export function paletteDescription(command: SlashCommand): string | undefined {
+  return command.source === "skill" ? undefined : command.description;
+}
+
 /** Autocomplete only the leading word, never paths or already-entered arguments. */
 export function matchSlash(text: string, char: string, cursor: number) {
   if (!text.startsWith(char) || cursor < char.length) return null;

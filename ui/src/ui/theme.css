@@ -431,10 +431,8 @@ button:disabled { cursor: default; opacity: 0.4; }
 .destination-back { flex: none; display: flex; align-items: center; gap: var(--space-1); min-block-size: var(--control-size); padding-inline: var(--space-2); border: 0; border-block-end: 1px solid var(--line); background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 500; text-align: start; }
 .destination-back:hover, .destination-back:focus-visible { background: var(--hover-surface); }
 .dictation-status { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--small-text); color: var(--muted-foreground); }
-/* Pi picker: same homepage menu tokens, window-level so the transcript cannot
-   clip it. Its anchor measures the available height, including keyboard insets. */
-.command-popover { position: fixed; z-index: 100; max-block-size: min(22rem, calc(var(--command-room, 22rem) - var(--space-2))); overflow-y: auto; overscroll-behavior: contain;
-  padding: var(--space-1); margin-block-end: var(--space-1); border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--popover); box-shadow: 0 var(--space-2) var(--space-6) var(--line); }
+/* Pi command result: same homepage menu tokens. The palette's surface is a
+   FloatingPanel and its rows are OptionRows, so only the result keeps these. */
 .command-option { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: var(--space-1); inline-size: 100%; min-block-size: var(--control-size);
   padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; text-align: start; overflow-wrap: anywhere; }
 .command-option:hover, .command-option[data-highlighted] { background: var(--active-surface); }

@@ -80,7 +80,7 @@ describe("assistant-ui slash palette", () => {
     expect(onNew).not.toHaveBeenCalled();
     expect(input().value).toBe("/review ");
     await type("/review src/sessionStore.ts");
-    expect(document.querySelector(".command-popover")).toBeNull();
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
     await press({ key: "Enter" });
     expect(onNew.mock.calls[0]?.[0].content).toEqual([{ type: "text", text: "/review src/sessionStore.ts" }]);
   });
@@ -92,9 +92,15 @@ describe("assistant-ui slash palette", () => {
     await type("/sk");
     await press({ key: "Escape" });
     expect(input().value).toBe("/sk");
-    expect(document.querySelector(".command-popover")).toBeNull();
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
     await type("/skill:");
     expect(document.querySelector('[role="option"]')?.textContent).toContain("/skill:test");
+  });
+  it("shows a command's line and a skill's name alone, so no row carries a paragraph", async () => {
+    await render({ commands: commandList });
+    await type("/");
+    expect([...document.querySelectorAll('[role="option"]')].map((row) => row.textContent))
+      .toEqual(["/nameSet session name", "/reviewReview changes", "/skill:test"]);
   });
   it("gives the palette Enter precedence over ask submission and keeps the single input", async () => {
     const onSubmit = vi.fn();
