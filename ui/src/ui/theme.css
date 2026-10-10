@@ -97,6 +97,11 @@
      "strength" read the same everywhere; ink mixes keep small text legible. */
   --hairline: 1px;
   --meter-height: 4px;
+  /* The same meters on a surface given to them alone (LaneGrid roomy). */
+  --meter-height-roomy: 6px;
+  --meter-cut-roomy: 4px;
+  /* The space between counted pips (PipRun). */
+  --pip-gap: 2px;
   --tone-good: var(--diff-add);
   --tone-bad: var(--diff-remove);
   --tone-warn: var(--diff-modify);

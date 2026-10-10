@@ -2,7 +2,8 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 import { ArrowLeftIcon, XIcon } from "lucide-react";
 import "./SheetDialog.css";
 
-export interface SheetAction { label: string; onPress: () => void; disabled?: boolean | undefined }
+/** A header action. With an icon it is drawn as the icon alone, and its label is its name and hover text. */
+export interface SheetAction { label: string; onPress: () => void; disabled?: boolean | undefined; icon?: ReactNode }
 
 /**
  * Organism: a modal sheet over the page. It is a card while the window has
@@ -48,8 +49,10 @@ export function SheetDialog({ title, subtitle, onClose, closeLabel, back, action
           <h2 id={titleId} className="sheet-dialog-title">{title}</h2>
           {subtitle !== undefined && <span className="sheet-dialog-subtitle">{subtitle}</span>}
         </div>
-        {actions.map((action) => <button key={action.label} type="button" className="sheet-dialog-action" disabled={action.disabled}
-          onClick={action.onPress}>{action.label}</button>)}
+        {actions.map((action) => action.icon === undefined
+          ? <button key={action.label} type="button" className="sheet-dialog-action" disabled={action.disabled} onClick={action.onPress}>{action.label}</button>
+          : <button key={action.label} type="button" className="sheet-dialog-control" disabled={action.disabled} aria-label={action.label}
+            title={action.label} onClick={action.onPress}>{action.icon}</button>)}
         <button type="button" className="sheet-dialog-control" aria-label={closeLabel} title={closeLabel} onClick={onClose}>
           <XIcon aria-hidden /></button>
       </header>

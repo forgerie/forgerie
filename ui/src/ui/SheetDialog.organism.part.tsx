@@ -1,3 +1,4 @@
+import { RefreshCwIcon } from "lucide-react";
 import { SheetDialog } from "./SheetDialog";
 
 export const name = "Sheet dialog";
@@ -13,5 +14,11 @@ export function WithBack() {
   return <SheetDialog title="ui" subtitle="design-engineer, working" closeLabel="Close" onClose={() => {}}
     back={{ label: "All child agents", onPress: () => {} }} actions={[{ label: "Stop", onPress: () => {} }]}>
     <p>One item, with a way back to the list.</p>
+  </SheetDialog>;
+}
+export function WithIconAction() {
+  return <SheetDialog title="Readings" subtitle="12m old" closeLabel="Close" onClose={() => {}}
+    actions={[{ label: "Refresh", icon: <RefreshCwIcon aria-hidden />, onPress: () => {} }]}>
+    <p>An action drawn as its icon alone, named for a screen reader and on hover.</p>
   </SheetDialog>;
 }

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { meterModel } from "./meterModel";
-import { meterHeight, METER_SHARE, METER_SIZES, showNames } from "./meterPlan";
 import { parseQuotaPayload } from "./quotaData";
 
 const now = new Date("2026-10-09T04:00:00Z");
@@ -52,34 +51,15 @@ describe("the meters", () => {
     expect(codex!.accounts.map((account) => [account.routed, account.out, account.empty])).toEqual([[true, false, undefined], [false, true, "No windows reported"]]);
     expect(openrouter!.accounts[0]!.routed).toBe(false);
   });
-  it("draws a balance as a number and a pool as a token, last", () => {
-    expect(openrouter!.accounts[0]!.lines[0]).toMatchObject({ mark: { kind: "balance", amount: "$1", tone: "low" }, share: undefined, clock: { text: "—", tone: "none" } });
+  it("counts a balance in dollars with no clock, and draws a pool as a token, last", () => {
+    expect(openrouter!.accounts[0]!.lines[0]).toMatchObject({ mark: { kind: "balance", amount: "$1", units: 1.5, tone: "low" }, share: undefined });
+    // A balance never resets, so it prints no clock, not a dash.
+    expect(openrouter!.accounts[0]!.clocks).toEqual([]);
     expect(antigravity!.accounts[0]!.lines.map((line) => line.mark.kind)).toEqual(["bar", "pool"]);
     expect(antigravity!.accounts[0]!.lines[1]).toMatchObject({ mark: { kind: "pool", refusing: true }, words: "Gemini: refusing work, the provider reports no level, resets in 20h." });
   });
   it("hides the bars the user turned off, and says so when nothing is left", () => {
     const [hidden] = meterModel(payload, { five_hour: false, seven_day: false, weekly_fable: false }, now);
     expect(hidden!.accounts[0]!.empty).toBe("Every bar is turned off");
-  });
-});
-
-describe("what fits in the room the meters share with the list", () => {
-  const rows = meterModel(payload, {}, now);
-  const size = METER_SIZES;
-  const bare = meterHeight(rows, false);
-  const named = meterHeight(rows, true);
-  it("adds up the meters' height from the sizes in the stylesheet", () => {
-    // Claude 3 lines; Codex 1 + 1 (empty); OpenRouter 1; Antigravity 2.
-    const lines = 3 * size.line + 2 * size.lineGap + 2 * size.line + size.accountGap + size.line + 2 * size.line + size.lineGap;
-    expect(bare).toBe(size.header + size.padding + lines + 3 * size.providerGap);
-    expect(named - bare).toBe(5 * (size.email + size.lineGap));
-  });
-  const room = (height: number) => Math.ceil(height / METER_SHARE);
-  it("draws addresses only while they fit, either side of the line", () => {
-    expect(showNames(room(named), rows)).toBe(true);
-    expect(showNames(room(named) - 3, rows)).toBe(false);
-  });
-  it("draws addresses while the room is unmeasured", () => {
-    expect(showNames(0, rows)).toBe(true);
   });
 });

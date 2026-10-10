@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, type ReactNode } from "react";
 import "./LaneGrid.css";
 
 export interface LaneRow {
@@ -44,6 +44,14 @@ export interface LaneBlock {
   rows: readonly LaneRow[];
   spans: readonly LaneSpan[];
   action?: LaneAction | undefined;
+  /**
+   * Pressing anywhere on the block, such as to open its detail. The block
+   * keeps its lanes' hover words; a button under it carries the name for a
+   * keyboard and a screen reader. The action chip keeps its own press.
+   */
+  press?: { label: string; onPress: () => void } | undefined;
+  /** The block the reader came for: marked, and brought into view when the grid is drawn. */
+  chosen?: boolean;
 }
 export interface LaneGroup {
   key: string;
@@ -62,25 +70,38 @@ export interface LaneGroup {
  * a trailing cell that may span rows, and a block action (only when some
  * block has one). A group is named by its icon when it has one. `faded`
  * takes confidence away without adding alarm; `flush` drops the list inset,
- * for a grid that does not sit under a group header.
+ * for a grid that does not sit under a group header. `roomy` draws the same
+ * lanes one step larger, for a surface given to them alone.
  */
-export function LaneGrid({ groups, captions = true, faded = false, flush = false }: {
-  groups: readonly LaneGroup[]; captions?: boolean; faded?: boolean; flush?: boolean;
+export function LaneGrid({ groups, captions = true, faded = false, flush = false, size = "compact" }: {
+  groups: readonly LaneGroup[]; captions?: boolean; faded?: boolean; flush?: boolean; size?: "compact" | "roomy";
 }) {
   const labelled = groups.some((group) => group.blocks.some((block) => block.rows.some((row) => row.label !== undefined)));
   const acting = groups.some((group) => group.blocks.some((block) => block.action !== undefined));
-  return <div className="lane-grid-frame">
+  const frame = useRef<HTMLDivElement>(null);
+  const chosen = groups.flatMap((group) => group.blocks).find((block) => block.chosen)?.key;
+  // After a frame: a grid inside a dialog is drawn before the dialog opens, and a closed dialog has nothing to scroll.
+  useEffect(() => {
+    if (chosen === undefined) return;
+    const request = requestAnimationFrame(() => frame.current?.querySelector("[data-chosen]")?.scrollIntoView?.({ block: "center" }));
+    return () => cancelAnimationFrame(request);
+  }, [chosen]);
+  return <div ref={frame} className="lane-grid-frame">
     <div className="lane-grid" data-labelled={labelled || undefined} data-acting={acting || undefined}
-      data-faded={faded || undefined} data-flush={flush || undefined}>
+      data-faded={faded || undefined} data-flush={flush || undefined} data-size={size === "roomy" ? size : undefined}>
       {groups.map((group) => <div key={group.key} className="lane-grid-group" role="group" aria-label={group.name}>
         <span className="lane-grid-name" data-icon={group.icon ? true : undefined} title={group.name} aria-hidden="true">{group.icon ?? group.name}</span>
         {group.blocks.length === 0 ? <span className="lane-grid-note" style={{ "--row": 1 }}>{group.note}</span>
           : group.blocks.map((block) => {
             const captioned = captions && block.caption !== undefined && block.caption !== "";
             const first = captioned ? 2 : 1;
+            const press = block.press;
             return <div key={block.key} className="lane-grid-block" role="group" aria-label={block.label} title={block.caption}
               data-captioned={captioned || undefined} data-marked={block.marked || undefined} data-struck={block.struck || undefined}
-              style={{ "--rows": Math.max(1, block.rows.length) }}>
+              data-pressable={press ? true : undefined} data-chosen={block.chosen || undefined}
+              onClick={press ? () => press.onPress() : undefined} style={{ "--rows": Math.max(1, block.rows.length) }}>
+              {/* A pointer presses the block itself, so each lane keeps its hover words; a key presses this button, and its click reaches the block. */}
+              {press ? <button type="button" className="lane-grid-open" aria-label={press.label} /> : null}
               {captioned ? <span className="lane-grid-caption" aria-hidden="true">{block.caption}</span> : null}
               {block.note !== undefined && block.rows.length === 0 ? <span className="lane-grid-note" style={{ "--row": first }}>{block.note}</span> : null}
               {block.rows.map((row, index) => <Fragment key={row.key}>
@@ -91,7 +112,8 @@ export function LaneGrid({ groups, captions = true, faded = false, flush = false
               {block.spans.map((span) => <span key={span.start} className="lane-grid-trail" aria-hidden="true"
                 style={{ "--row": first + span.start, "--row-end": first + span.end }}>{span.content}</span>)}
               {block.action ? <button type="button" className="lane-grid-act" data-tone={block.action.tone ?? "live"}
-                aria-label={block.action.label} title={block.action.label} onClick={block.action.onPress}
+                aria-label={block.action.label} title={block.action.label}
+                onClick={(event) => { event.stopPropagation(); block.action?.onPress(); }}
                 style={{ "--row": first, "--row-end": first + Math.max(1, block.rows.length) }}>
                 <span className="lane-grid-chip" aria-hidden="true">{block.action.icon}{block.action.count ? <span>{block.action.count}</span> : null}</span>
               </button> : null}

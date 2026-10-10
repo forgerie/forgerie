@@ -9,8 +9,8 @@ export type Mark =
   | { kind: "bar"; remaining: number; standing: Standing; doom: number }
   /** A pool that answers or refuses and reports no level. */
   | { kind: "pool"; refusing: boolean }
-  /** A prepaid balance: a number, not a bar, because it has no maximum to plot against. */
-  | { kind: "balance"; amount: string; tone: "ok" | "low" | "out" };
+  /** A prepaid balance: counted, not filled, because it has no maximum to plot against. `units` is the dollars left. */
+  | { kind: "balance"; amount: string; units: number; tone: "ok" | "low" | "out" };
 
 export type ClockTone = "none" | "plain" | "loss" | "dry";
 export interface Clock { text: string; tone: ClockTone }
@@ -120,7 +120,7 @@ function meterLine(quotaWindow: QuotaWindow, available: boolean, labelled: boole
   if (amount !== undefined) {
     const value = quotaWindow.remainingAmount ?? 0;
     return { id: quotaWindow.id, label, share: undefined, clock: plainClock(countdown),
-      mark: { kind: "balance", amount, tone: value <= 0 ? "out" : value <= LOW_BALANCE ? "low" : "ok" },
+      mark: { kind: "balance", amount, units: value, tone: value <= 0 ? "out" : value <= LOW_BALANCE ? "low" : "ok" },
       words: sentence(`${name}: ${amount} left`, reset, available ? undefined : "not in service") };
   }
   const standing = windowStanding(quotaWindow, now);
@@ -160,10 +160,15 @@ function standingClock(text: string, standing: Standing): Clock {
   return { text, tone: "plain" };
 }
 
-/** Consecutive lines whose clocks agree share one clock: Claude's week and Fable reset together, so one clock says it once. */
+/**
+ * Consecutive lines whose clocks agree share one clock: Claude's week and
+ * Fable reset together, so one clock says it once. A balance never resets, so
+ * it prints no clock at all; a dash there would only say so in ink.
+ */
 function clockRuns(lines: readonly MeterLine[]): ClockRun[] {
   const runs: ClockRun[] = [];
   lines.forEach((line, index) => {
+    if (line.mark.kind === "balance") return;
     const last = runs.at(-1);
     if (last && last.end === index && last.clock.text === line.clock.text && last.clock.tone === line.clock.tone) last.end = index + 1;
     else runs.push({ start: index, end: index + 1, clock: line.clock });

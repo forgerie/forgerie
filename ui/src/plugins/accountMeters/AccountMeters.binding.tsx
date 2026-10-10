@@ -2,9 +2,9 @@ import { useRef, useState } from "react";
 import { accountMetersManifest } from "@shared/appPluginManifests";
 import type { AppPluginProps } from "../appPlugin";
 import { AccountMeters, type MetersView } from "./AccountMeters";
+import { QuotaSheet } from "./QuotaSheet";
 import { ResetDialog } from "./ResetDialog";
 import { meterModel } from "./meterModel";
-import { showNames } from "./meterPlan";
 import { isStale, spanLabel } from "./quotaData";
 import { newRequestId as makeRequestId, redeemReset, withoutSpent, type RedeemOutcome, type RedeemReset, type SpentResets } from "./redeemReset";
 import { resetPreview } from "./resetModel";
@@ -32,8 +32,10 @@ interface Asking { key: string; requestId: string; busy: boolean; problem: Exclu
 
 /**
  * Binding: account meters. Reads the router and the reader's stored choice,
- * takes the room the session list reports, and hands the shape plain rows.
- * A banked reset is spent only from the question it opens, through the router.
+ * and hands the shapes plain rows: the meters in the sidebar, and the detail
+ * sheet a press on an account opens. The sheet shows every window, the
+ * meters only those Settings leaves on. A banked reset is spent only from the
+ * question it opens, through the router, from either place.
  */
 export function AccountMetersShelf({ settings, read, redeem = redeemReset, newRequestId = makeRequestId, clock = () => new Date() }: AppPluginProps & {
   read?: QuotaRead; redeem?: RedeemReset; newRequestId?: () => string; clock?: () => Date;
@@ -42,7 +44,8 @@ export function AccountMetersShelf({ settings, read, redeem = redeemReset, newRe
   const endpoint = typeof configured === "string" ? configured : DEFAULT_ENDPOINT;
   const quota = useQuota(endpoint, read);
   const [open, setOpen] = useState(readOpen);
-  const [room, setRoom] = useState(0);
+  /** The account the detail sheet is open at, while it is open. */
+  const [sheet, setSheet] = useState<string | undefined>();
   const [asking, setAsking] = useState<Asking | undefined>();
   const [spent, setSpent] = useState<SpentResets>({});
   // The question a pending answer belongs to, so an answer after Cancel changes nothing on screen.
@@ -52,7 +55,9 @@ export function AccountMetersShelf({ settings, read, redeem = redeemReset, newRe
   const age = payload ? spanLabel(Math.max(0, now.getTime() - new Date(payload.updatedAt).getTime())) : "";
   const stale = payload !== undefined && isStale(payload.updatedAt, now);
   const providers = payload ? meterModel(payload, settings, now) : undefined;
-  const view: MetersView = providers ? { type: "ready", providers, names: showNames(room, providers), doubtful: quota.error !== undefined || stale }
+  const detail = payload ? meterModel(payload, {}, now) : undefined;
+  const doubtful = quota.error !== undefined || stale;
+  const view: MetersView = providers ? { type: "ready", providers, doubtful }
     : quota.loading ? { type: "loading" } : { type: "failed", message: quota.error ?? "Quota data is unavailable." };
   const status = payload === undefined ? undefined : quota.error !== undefined ? `Offline, ${age} old` : stale ? `${age} old` : undefined;
   const toggle = () => { setOpen(!open); writeOpen(!open); };
@@ -85,8 +90,11 @@ export function AccountMetersShelf({ settings, read, redeem = redeemReset, newRe
   };
 
   return <>
-    <AccountMeters view={view} open={open} status={status} statusHint={quota.error} onToggle={toggle} onRetry={quota.retry} onRoom={setRoom}
-      onAskReset={ask} />
+    <AccountMeters view={view} open={open} status={status} statusHint={quota.error} onToggle={toggle} onRetry={quota.retry}
+      onAskReset={ask} onOpen={setSheet} />
+    {sheet !== undefined && detail ? <QuotaSheet providers={detail} doubtful={doubtful} status={status} focus={sheet}
+      onClose={() => setSheet(undefined)} onRefresh={quota.retry} onAskReset={ask} /> : null}
+    {/* After the sheet, so the question opens over it. */}
     {asking && preview ? <ResetDialog preview={preview} busy={asking.busy} problem={asking.problem} onUse={use} onCancel={close} /> : null}
   </>;
 }

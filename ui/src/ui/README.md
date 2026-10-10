@@ -44,18 +44,19 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `Timeline` (molecule): shows events in order with their times in one aligned column, joined by a rail.
 - `QuoteFigure` (molecule): shows a quotation with its source as a caption in the code face.
 - `Figure` (atom): one short figure (a share, a clock, an amount) in the code face with tabular digits, toned plain, muted, warn, bad or faint.
-- `SignalDot` (atom): a yes-or-no signal with no level, neutral when on and danger when off.
+- `SignalDot` (atom): a yes-or-no signal with no level, neutral when on and danger when off, as one dot or as a run of dots across a lane.
+- `PipRun` (atom): a count with no maximum, one pip per whole unit from the lane's start, a sliver for part of one, fading out past what the lane holds.
 - `LogoMark` (atom): the app's mark, 1em square: plain marks in the text colour, one bad and two live marks in their tones.
 - `PaceBar` (atom): a budget's share left against an even spend: a cut at pace, a hatch for a shortfall, a warn-to-danger bar for a surplus.
 - `ErrorBoundary` (atom): replaces children that throw while drawing with a fallback, so everything around them keeps working.
-- `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, each group named by text or an icon, with optional captions, a marked block, trailing cells that span rows, and a small action chip per block.
+- `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, each group named by text or an icon, with optional captions, a marked block, trailing cells that span rows, a small action chip per block, a press on the whole block, a chosen block brought into view, and a roomy size.
 - `Consequence` (molecule): one consequence the reader must see before acting, set apart by a wash and an icon, plain or warn.
 - `FloatingPanel` (atom): the surface of a window-level panel that scrolls inside the height it gets; its host places it, and it sits inside the window edges until then.
 - `OptionRow` (atom): one choice as a button: a name, a variant, a leading mark, short details (their own line, or the name's line giving way at the end), and a check on the choice in effect.
 - `OptionList` (molecule): choices in named groups with search, one status line and a foot command; rows take focus, or follow a text field's highlight.
 - `Shelf` (organism): a section at the foot of a list that opens and closes from a group header (closed, the header alone), scrolls on its own, and reports the room it sits in.
 - `BadgeButton` (atom): an icon button drawn small with a control-sized hit area, a live-colour count of what waits on the reader, and a working dot.
-- `SheetDialog` (organism): a modal sheet that is a card while the window has room and meets each edge as the room runs out, with back, title, actions, close, a scrolling body, and a footer.
+- `SheetDialog` (organism): a modal sheet that is a card while the window has room and meets each edge as the room runs out, with back, title, text or icon actions, close, a scrolling body, and a footer.
 - `StatusRow` (molecule): one pressable row for a running thing: a tone dot, a name, a detail, and a status that wraps under the name when the row is narrow.
 - `ExchangeLog` (molecule): one worker's record, oldest first: words with the speaker in a margin, one line per action, and folded output.
 - `ReplyBox` (molecule): a short text field with send and an optional second action; Enter sends and the text stays until the send succeeds.

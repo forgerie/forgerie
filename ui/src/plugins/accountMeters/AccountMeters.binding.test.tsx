@@ -175,6 +175,70 @@ describe("account meters", () => {
       expect(dialog()).toBeNull();
     });
   });
+  describe("the detail sheet", () => {
+    const sheet = () => document.querySelector<HTMLDialogElement>("dialog.sheet-dialog");
+    const shelfBlocks = () => [...document.querySelectorAll<HTMLElement>(".shelf .lane-grid-block")];
+    const captions = () => [...sheet()!.querySelectorAll(".lane-grid-caption")].map((node) => node.textContent);
+    beforeEach(() => { HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.open = true; }; });
+
+    it("leaves addresses out of the sidebar, and opens the sheet at the account pressed", async () => {
+      await render(settings());
+      expect(document.querySelectorAll(".shelf .lane-grid-caption")).toHaveLength(0);
+      expect(sheet()).toBeNull();
+      await act(async () => shelfBlocks()[2]!.click());
+      expect(captions()).toEqual(["me@work.example", "a@example", "b@example"]);
+      expect(sheet()!.querySelector(".lane-grid-block[data-chosen]")!.getAttribute("aria-label")).toBe("b@example");
+      await act(async () => sheet()!.querySelector<HTMLButtonElement>('[aria-label="Close quota"]')!.click());
+      expect(sheet()).toBeNull();
+    });
+    it("names each account's press for a keyboard and a screen reader", async () => {
+      await render(settings());
+      expect([...document.querySelectorAll(".shelf .lane-grid-open")].map((node) => node.getAttribute("aria-label")))
+        .toEqual(["Quota details for me@work.example", "Quota details for a@example", "Quota details for b@example"]);
+      await act(async () => document.querySelector<HTMLButtonElement>(".shelf .lane-grid-open")!.click());
+      expect(sheet()!.querySelector(".lane-grid-block[data-chosen]")!.getAttribute("aria-label")).toBe("me@work.example");
+    });
+    it("shows the windows the sidebar hides", async () => {
+      await render(settings({ five_hour: false }));
+      expect(lanes()).toHaveLength(3);
+      await act(async () => shelfBlocks()[0]!.click());
+      expect([...sheet()!.querySelectorAll(".lane-grid-mark")].map((node) => node.getAttribute("aria-label")?.split(":")[0]))
+        .toEqual(["Five-hour", "Seven-day", "Seven-day", "Seven-day"]);
+    });
+    it("reads again on request", async () => {
+      await render(settings());
+      await act(async () => shelfBlocks()[0]!.click());
+      await act(async () => sheet()!.querySelector<HTMLButtonElement>('[aria-label="Read again"]')!.click()); await settle();
+      expect(reads).toHaveLength(2);
+    });
+    it("asks about a reset over the sheet, and a chip in the sidebar asks without opening it", async () => {
+      answer = () => Promise.resolve({ ...payload, providers: [{ ...payload.providers[0]!, accounts: [{ ...payload.providers[0]!.accounts[0]!,
+        resets: { expiresAt: ["2026-10-22T16:00:00Z"], clears: ["five_hour", "seven_day"], restartsWindows: false, applicableCount: 1 } }] }] });
+      await render(settings());
+      await act(async () => document.querySelector<HTMLButtonElement>(".shelf .lane-grid-act")!.click());
+      expect(sheet()).toBeNull();
+      expect(document.querySelector("dialog.wt-dialog")).not.toBeNull();
+      await act(async () => document.querySelector<HTMLButtonElement>("dialog.wt-dialog .wt-secondary")!.click());
+      await act(async () => shelfBlocks()[0]!.click());
+      await act(async () => sheet()!.querySelector<HTMLButtonElement>(".lane-grid-act")!.click());
+      expect(sheet()).not.toBeNull();
+      expect(document.querySelector("dialog.wt-dialog")!.textContent).toContain("does not move");
+    });
+  });
+  it("draws a pool as a run of dots and a balance as counted pips with its amount, and no clock", async () => {
+    answer = () => Promise.resolve({ ...payload, providers: [
+      { id: "antigravity", name: "Antigravity", accounts: [{ email: "g@example", available: true, selected: true, priority: 0, windows: [
+        { id: "antigravity_gemini", name: "Gemini", usedPercent: 100, remainingPercent: 0, resetsAt: "2026-10-09T23:00:00Z" }] }] },
+      { id: "openrouter", name: "OpenRouter", routing: "rotating", accounts: [{ email: "sk-or", available: true, selected: true, priority: 0, windows: [
+        { id: "openrouter_credits", name: "Credits", usedPercent: 0, remainingPercent: 100, resetsAt: null, remainingAmount: 7.1 }] }] },
+    ] });
+    await render(settings());
+    expect(document.querySelector(".signal-dot[data-run][data-off]")).not.toBeNull();
+    expect(document.querySelector<HTMLElement>(".pip-run")!.style.getPropertyValue("--pips")).toBe("7");
+    const balance = document.querySelectorAll(".lane-grid-block")[1]!;
+    expect(balance.querySelector(".lane-grid-value")!.textContent).toBe("$7");
+    expect(balance.querySelector(".lane-grid-trail")).toBeNull();
+  });
   it("refuses a payload it cannot read rather than drawing a guess", async () => {
     answer = () => Promise.resolve({ version: 2 });
     await render(settings());

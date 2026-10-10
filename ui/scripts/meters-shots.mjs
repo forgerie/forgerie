@@ -6,7 +6,9 @@
 // origin works whatever the router's CORS list says. QUOTA_FILE is a saved
 // /quota JSON; without it the script reads the live router once from Node.
 // CLOSED=1 closes the meters from the header first; by default they are open. OFFLINE=1
-// fails every quota read, to capture the error state.
+// fails every quota read, to capture the error state. SHEET=1 presses an
+// account (SHEET_AT, 0-based, default 2) and captures the detail sheet over the
+// whole window instead, after its landing mark has settled.
 //   APP_URL=http://127.0.0.1:8520/ OUT=/tmp/meters CLOSED=1 node scripts/meters-shots.mjs
 import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -22,6 +24,7 @@ const base = process.env.APP_URL ?? "http://127.0.0.1:8520/";
 const out = process.env.OUT ?? "verification/local/meters-shots";
 const closed = process.env.CLOSED === "1";
 const offline = process.env.OFFLINE === "1";
+const sheetAt = process.env.SHEET === "1" ? Number(process.env.SHEET_AT ?? "2") : undefined;
 const scale = Number(process.env.SCALE ?? "2");
 const schemes = (process.env.SCHEMES ?? "dark,light").split(",");
 const only = process.env.POSTURES?.split(",");
@@ -82,10 +85,23 @@ try {
           lane: Math.round(document.querySelector(".lane-grid-mark")?.getBoundingClientRect().width ?? 0),
           overflow: [...document.querySelectorAll(".lane-grid-name, .lane-grid-caption, .lane-grid-label")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent) };
       })()`);
-      const shot = await cdp.send("Page.captureScreenshot", { format: "png", clip: { ...box, scale: scale / 2.625 } });
-      const file = join(out, `${posture.name}-${scheme}.png`);
+      let sheet;
+      if (sheetAt !== undefined) {
+        await evaluate(cdp, `(document.querySelectorAll(".shelf .lane-grid-block")[${String(sheetAt)}].click(), true)`);
+        await ready(`!!document.querySelector(".sheet-dialog[open] .lane-grid")`, "quota sheet");
+        await sleep(2000);
+        sheet = await evaluate(cdp, `(() => {
+          const body = document.querySelector(".sheet-dialog-body"), chosen = document.querySelector(".sheet-dialog [data-chosen]");
+          const b = body.getBoundingClientRect(), c = chosen?.getBoundingClientRect();
+          return { chosen: chosen?.getAttribute("aria-label"), inView: !!c && c.top >= b.top && c.bottom <= b.bottom,
+            scrolls: body.scrollHeight > body.clientHeight + 1, pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            overflow: [...document.querySelectorAll(".sheet-dialog .lane-grid-caption, .sheet-dialog .lane-grid-label")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent) };
+        })()`);
+      }
+      const shot = await cdp.send("Page.captureScreenshot", sheetAt === undefined ? { format: "png", clip: { ...box, scale: scale / 2.625 } } : { format: "png" });
+      const file = join(out, `${sheetAt === undefined ? "" : "sheet-"}${posture.name}-${scheme}.png`);
       await writeFile(file, Buffer.from(shot.data, "base64"));
-      report.push({ posture: posture.name, scheme, picker: `${Math.round(box.width)}x${Math.round(box.height)}`, meters, errors });
+      report.push({ posture: posture.name, scheme, picker: `${Math.round(box.width)}x${Math.round(box.height)}`, meters, sheet, errors });
       await cdp.close?.();
     }
   }

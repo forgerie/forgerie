@@ -1,6 +1,5 @@
 /* Named groups of lanes on one set of columns. Names start under a group
-   header's words, as rows do in the session list. Sizes here are mirrored in
-   plugins/accountMeters/meterPlan.ts (METER_SIZES); change both. */
+   header's words, as rows do in the session list. */
 .lane-grid-frame { container: lane-grid / inline-size; }
 .lane-grid { display: grid; row-gap: 0.625rem; column-gap: var(--space-2); padding-inline: calc(var(--space-2) + 1rem) var(--space-2);
   grid-template-columns: [name] minmax(0, max-content) [label lane] minmax(2.5rem, 1fr) [value] max-content [trail] max-content [end];
@@ -56,6 +55,35 @@
 .lane-grid-act[data-tone="warn"] { color: var(--ink-warn); }
 .lane-grid-act[data-tone="warn"] .lane-grid-chip { background: var(--lapsing-wash); }
 .lane-grid-act[data-tone="warn"]:hover .lane-grid-chip { background: var(--lapsing-wash-hover); }
+/* Roomy: the same lanes one step larger, for a surface given to them alone. Only the scale changes. */
+.lane-grid[data-size="roomy"] { --meta-text: var(--label-text); --lane-line: 1.5rem; --meter-height: var(--meter-height-roomy); --meter-cut: var(--meter-cut-roomy);
+  row-gap: var(--space-5); column-gap: var(--space-3); }
+.lane-grid[data-size="roomy"] .lane-grid-group { row-gap: var(--space-3); }
+.lane-grid[data-size="roomy"] .lane-grid-name[data-icon] { font-size: 1rem; color: var(--foreground); }
+.lane-grid[data-size="roomy"] .lane-grid-caption { color: var(--foreground); font-size: var(--small-text); }
+.lane-grid[data-size="roomy"] .lane-grid-block[data-struck] .lane-grid-caption { color: var(--muted-foreground); }
+.lane-grid[data-size="roomy"] .lane-grid-chip { block-size: 1.25rem; padding-inline: 0.3125rem; }
+.lane-grid[data-size="roomy"] .lane-grid-chip svg { inline-size: 0.8125rem; block-size: 0.8125rem; }
+
+/* A pressable block: the whole block takes the press, tinted out to a small margin so the lanes do not move. */
+.lane-grid-block[data-pressable] { cursor: pointer; border-radius: var(--radius-document); transition: background-color 150ms, box-shadow 150ms; }
+.lane-grid-block[data-pressable]:hover { background: var(--hover-surface); box-shadow: 0 0 0 var(--space-1) var(--hover-surface); }
+.lane-grid-block[data-pressable]:active { background: var(--active-surface); box-shadow: 0 0 0 var(--space-1) var(--active-surface); }
+/* The press's name for a keyboard: drawn as nothing until it has focus, then as a ring round the block. */
+.lane-grid-open { position: absolute; inset: 0; padding: 0; border: 0; border-radius: var(--radius-document);
+  background: none; pointer-events: none; }
+/* The ring sits outside the block: an outline takes no room, so the last block cannot make its scroller scroll. */
+.lane-grid-open:focus-visible { outline: calc(var(--hairline) * 2) solid var(--line-focus); outline-offset: var(--space-1); }
+/* The action chip stays its own press above the block's. */
+.lane-grid-act { z-index: 1; }
+/* The block the reader came for: a wash that settles to a quiet ground, so the eye lands and the surface is calm again. */
+.lane-grid-block[data-chosen] { scroll-margin-block: 5rem; border-radius: var(--radius-document); background: var(--hover-surface);
+  box-shadow: 0 0 0 var(--space-2) var(--hover-surface); animation: lane-grid-land 1.6s ease-out; }
+@keyframes lane-grid-land { from { background: var(--live-wash); box-shadow: 0 0 0 var(--space-2) var(--live-wash); } }
+
 /* A value yields before a lane does; the row's words keep it. */
 @container lane-grid (inline-size < 14rem) { .lane-grid-value { display: none; } }
-@media (prefers-reduced-motion: reduce) { .lane-grid, .lane-grid-chip { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .lane-grid, .lane-grid-chip, .lane-grid-block[data-pressable] { transition: none; }
+  .lane-grid-block[data-chosen] { animation: none; }
+}

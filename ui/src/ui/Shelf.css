@@ -1,6 +1,6 @@
 /* A section at the foot of a list, in the list's grammar: a hairline above,
    the list's insets, and a group header that opens and closes. It takes at
-   most half the element it sits in (METER_SHARE in meterPlan.ts); past that
+   most half the element it sits in; past that
    its body scrolls. */
 /* The header never yields: it is the only way to open or close the shelf, so
    the minimum is the header itself, even when half the room is less. */

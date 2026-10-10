@@ -1,0 +1,9 @@
+/* Pips the meter's height and in its ink, a pip's step apart, from the lane's start. */
+.pip-run { --pip: var(--meter-ink); --pip-step: calc(var(--meter-height) + var(--pip-gap)); display: block; flex: none; max-inline-size: 100%;
+  inline-size: calc(var(--pips) * var(--pip-step) - var(--pip-gap)); block-size: var(--meter-height); border-radius: var(--hairline);
+  background: repeating-linear-gradient(to right, var(--pip) 0 var(--meter-height), transparent var(--meter-height) var(--pip-step)); }
+.pip-run[data-tone="warn"] { --pip: var(--tone-warn); }
+/* Part of one unit: a sliver, the meter's height. */
+.pip-run[data-part] { inline-size: var(--lane-marker); }
+/* More than the lane holds: the run fades out rather than claim a full. */
+.pip-run[data-many] { mask-image: linear-gradient(to right, black 70%, transparent); }
