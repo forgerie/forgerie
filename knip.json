@@ -10,7 +10,9 @@
     "extensions/**/*.ts"
   ],
   "ignoreBinaries": [
-    "flock"
+    "findmnt",
+    "flock",
+    "nix"
   ],
   "ignoreExportsUsedInFile": true
 }
