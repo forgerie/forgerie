@@ -46,25 +46,39 @@ const candidates = {
   "run": grid("The run (reference)",
     "The previous pick: eight calls, wrapped and right-aligned as the chat draws them.",
     ["###", "r##", ".#b"]),
-  // Each F below sits in a square block: as many marks across as down.
-  // Both arms are the same length. Cells outside the F are a light grey,
-  // so the F stands out from the block. Red sits in the spine, as in the
-  // run, and the live mark ends the middle arm.
-  "sq4-full": grid("4 × 4, full arms",
-    "Both arms run the full width of the block.",
-    ["####", "rggg", "###b", "#ggg"]),
-  "sq4-short": grid("4 × 4, short arms",
-    "Both arms stop one mark short, so a grey column frames the F on the right.",
-    ["###g", "rggg", "##bg", "#ggg"]),
-  "sq5-full": grid("5 × 5, full arms",
-    "A taller F with a longer stem. Both arms run the full width.",
-    ["#####", "rgggg", "####b", "#gggg", "#gggg"]),
-  "sq5-short": grid("5 × 5, short arms",
-    "The 5 × 5 F with both arms one mark short.",
-    ["####g", "rgggg", "###bg", "#gggg", "#gggg"]),
-  "sq5-bold": grid("5 × 5, bold spine",
-    "A spine two marks wide, for more weight. Both arms run the full width.",
-    ["#####", "#rggg", "####b", "##ggg", "##ggg"]),
+  // Two anchors from the annotated review. In both, the F is black only,
+  // and the red and blue marks sit at the edge of the block, outside the F.
+  //
+  // Anchor A: a 5 × 5 block. The F is three marks wide: the spine plus two
+  // marks in each arm. Light grey fills the rest of the square.
+  "a-left": grid("A · F left, colours bottom right",
+    "The F against the left edge. Red and blue stack in the bottom-right corner.",
+    ["###gg", "#gggg", "###gg", "#gggr", "#gggb"]),
+  "a-centre": grid("A · F centred, run corners",
+    "The F one column in. Red sits on the left edge at the run's height; blue ends the bottom-right corner, as in the run.",
+    ["g###g", "r#ggg", "g###g", "g#ggg", "g#ggb"]),
+  "a-right": grid("A · F right, colours left",
+    "The F pushed to the right edge. Red and blue take the left column, as they do in the run.",
+    ["gg###", "rg#gg", "gg###", "gg#gg", "bg#gg"]),
+  "a-floor": grid("A · F left, colours on the floor",
+    "The F against the left edge. Red and blue end the bottom row, like the last two marks of a tally.",
+    ["###gg", "#gggg", "###gg", "#gggg", "#ggrb"]),
+  // Anchor B: the run's own F. Its black marks make a 2 × 2 head on a stem.
+  "b-run": grid("B · The run, as annotated",
+    "The run's black marks as the F, unchanged. Blue and red take the left column; blue ends the bottom row.",
+    ["b##", "r##", ".#b"]),
+  "b-filled": grid("B · Filled",
+    "The same F with the empty cell and the second blue filled in grey, so the block is solid.",
+    ["g##", "r##", "g#b"]),
+  "b-left": grid("B · Colours left",
+    "Both colours in the left column, above a grey cell. The bottom-right cell is grey.",
+    ["b##", "r##", "g#g"]),
+  "b-4-wide": grid("B · 4 × 4, wide head",
+    "The run's F grown to a 4 × 4 block: a 3 × 2 head on a stem. Red on the left edge, blue in the far corner.",
+    ["g###", "r###", "g#gg", "g#gb"]),
+  "b-4-narrow": grid("B · 4 × 4, narrow head",
+    "A 2 × 2 head, as in the run, on a longer stem. Grey frames it on the right.",
+    ["g##g", "r##g", "g#gg", "g#gb"]),
 };
 
 // The maskable icon keeps the glyph inside the safe zone. The tab icon

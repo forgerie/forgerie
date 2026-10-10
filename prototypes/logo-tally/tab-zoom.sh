@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 tmp=$(mktemp -d)
 row=()
-for id in run sq4-full sq4-short sq5-full sq5-short sq5-bold; do
+for id in run a-left a-centre a-right a-floor b-run b-filled b-left b-4-wide b-4-narrow; do
   for scheme in light dark; do
     resvg --width 42 --height 42 "marks/$id-$scheme-tab.svg" "$tmp/$id-$scheme-42.png"
     resvg --width 16 --height 16 "marks/$id-$scheme-tab.svg" "$tmp/$id-$scheme-16.png"
