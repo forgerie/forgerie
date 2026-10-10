@@ -93,6 +93,12 @@ Opinion: prefer a package-only image for the current Node checks, which do not n
 
 The [prototype report](../../prototypes/nix-ci-routes/README.md) contains pinned inputs, precise receipts, compatibility changes and test limits. Production ownership and admission remain unchanged. No image was published to a registry, no host store/daemon was mounted, and no live Forgerie Service restarted.
 
+## UNZEN package-only candidate preflight
+
+The later preflight ran on physical UNZEN. Two temporary units copied selected restrictions from the live runner Service. User and mount namespace creation both failed with `Operation not permitted`. The existing runner stayed ready and idle with the same listener. No image payload ran and no registered job tested the candidate.
+
+These results block the proposed direct Podman execution under the current Service policy. The [preflight report](../../prototypes/unzen-package-candidate/README.md) contains the exact restrictions, commands, scope limits and cleanup receipt. Installing a runtime alone does not remove the namespace restriction. A further container attempt needs a separately approved execution design.
+
 ## Confidence and open questions
 
 Verified from primary sources: the image builders, concrete CI image recipe/workflow, full-system Arion example, NixOS VM test framework and GitHub integration mechanisms exist. Verified by execution: the adapted Forgerie payload works locally and on hosted Ubuntu, with the limits above.

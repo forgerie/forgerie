@@ -1,0 +1,14 @@
+{
+  "scope": "Prototype delivery worktree based on local main c8f4bc49, separate from UNZEN preflight and frozen image payload",
+  "nodeMajor": 24,
+  "isolatedPiProfile": true,
+  "command": ["npm", "run", "verify"],
+  "exit": 0,
+  "server": { "passed": 1893, "skipped": 5 },
+  "browser": { "passed": 1373, "skipped": 1 },
+  "pythonSyntax": "passed",
+  "shellSyntax": "passed",
+  "receiptAndReportLinkAudit": "passed",
+  "unzenImagePayloadStarted": false,
+  "liveForgerieServicesRestarted": false
+}

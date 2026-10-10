@@ -1,0 +1,7 @@
+{
+  "scope": "Root-owned scripts copied for this disposable UNZEN preflight",
+  "command": ["find", "/tmp", "-maxdepth", "1", "-name", "forgerie-package-candidate-*"],
+  "exit": 0,
+  "stdout": "",
+  "matchingFilesAfter": []
+}
