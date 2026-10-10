@@ -184,6 +184,33 @@ describe("session-owned worktrees with real git", () => {
     expect(await f.worktrees.discard(f.record.id, updated.confirmationToken, [f.session])).toMatchObject({ kind: "discarded", cleanup: { kind: "done" } });
   });
 
+  it("confirms service shutdown before hooks and retries the shutdown gate after a landed receipt", async () => {
+    const f = await fixture();
+    let allowed = false;
+    let attempts = 0;
+    const guarded = new SessionWorktrees(f.store, {
+      publish() { /* The assertions read the durable cleanup receipt. */ },
+      async stopServices(record) {
+        attempts++;
+        await expect(f.store.assertWritable(f.session)).rejects.toThrow();
+        await access(record.path);
+        if (!allowed) throw new Error("Service owner is unavailable");
+        await writeFile(join(f.repo, "services-stopped"), "confirmed");
+      },
+    });
+    await mkdir(join(f.repo, ".forgerie/hooks"), { recursive: true });
+    await writeFile(join(f.repo, ".forgerie/hooks/worktree-pre-remove"), '#!/bin/sh\ntest -f "$FORGERIE_REPO_PATH/services-stopped" || exit 9\nprintf "hook ran" > "$FORGERIE_REPO_PATH/hook-ran"\n', { mode: 0o755 });
+    await commit(f, f.record.path, "feature\n");
+    expect(await guarded.land(f.record.id, [f.session])).toMatchObject({ kind: "landed", cleanup: { kind: "failed", error: "Service owner is unavailable" } });
+    await access(f.record.path);
+    await expect(access(join(f.repo, "hook-ran"))).rejects.toThrow();
+    allowed = true;
+    expect(await guarded.land(f.record.id, [f.session])).toMatchObject({ kind: "landed", cleanup: { kind: "done" } });
+    expect(attempts).toBe(2);
+    expect(await readFile(join(f.repo, "hook-ran"), "utf8")).toBe("hook ran");
+    await expect(access(f.record.path)).rejects.toThrow();
+  });
+
   it("does not remove new unlanded commits during a failed Land cleanup retry", async () => {
     const f = await fixture();
     await mkdir(join(f.repo, ".forgerie/hooks"), { recursive: true });

@@ -60,8 +60,8 @@ export class DurableSessionRuntime implements PiSessionRuntime {
     // Construct first: a provider/resource failure must not close the outgoing session.
     const candidate = await this.create({ ...this.options, cwd: replacement.getCwd(), sessionManager: replacement,
       sessionStartEvent: { type: "session_start", reason: "fork", ...(sessionFile === undefined ? {} : { previousSessionFile: sessionFile }) } });
-    try { await this.session.close(); }
-    catch (error) { await candidate.session.close(); throw error; }
+    try { await this.closeResult(this.result); }
+    catch (error) { await this.closeResult(candidate); throw error; }
     this.result = candidate;
     await this.rebind?.(this.session);
     return { cancelled: false, ...(selectedText === undefined ? {} : { selectedText }) };
@@ -69,6 +69,11 @@ export class DurableSessionRuntime implements PiSessionRuntime {
   async dispose(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    await this.session.close();
+    await this.closeResult(this.result);
+  }
+  private async closeResult(result: DurableRuntimeResult): Promise<void> {
+    // SDK disposal invalidates extension callbacks without necessarily emitting session_shutdown.
+    result.services.workspaceServicesObserver?.dispose();
+    await result.session.close();
   }
 }

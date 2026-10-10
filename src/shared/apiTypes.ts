@@ -1,6 +1,7 @@
 import type { SessionResponse } from "./sessionResponse.js";
 import type { PullLink } from "./pullRequests.js";
 import type { SessionWorktreeInfo, WorktreeSessionEvent } from "./sessionWorktree.js";
+import type { WorkspaceServicesEvent } from "./workspaceServices.js";
 
 /** Public wire types; their runtime schemas live in backlog.ts. */
 export type { BacklogConfig, BacklogMetadata, BacklogProviderId, BacklogClaim, BacklogItem, BacklogWarning, BacklogListResponse, BacklogDetailResponse, BacklogLaunchRequest, BacklogLaunchResponse, BacklogReleaseRequest, BacklogReleaseResponse, BacklogErrorResponse } from "./backlog.js";
@@ -1251,5 +1252,6 @@ export type GlobalSessionEvent =
   | SessionNotificationSummaryEvent
   | SessionUnreadEvent
   | SessionStartupProgressEvent
-  | WorktreeSessionEvent;
+  | WorktreeSessionEvent
+  | WorkspaceServicesEvent;
 export type RealtimeEvent = GlobalSessionEvent | WorkspaceActivityUiEvent;

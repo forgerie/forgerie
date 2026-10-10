@@ -105,6 +105,8 @@ import type { WorkspaceActivityService } from "../activity/workspaceActivityServ
 import { createAskUserToolDefinition, type AskUserInvocation, type AskUserToolDeps } from "./askUserTool.js";
 import { createGitHubToolDefinitions, type GitHubToolDeps } from "./githubTools.js";
 import { createProjectTools, type ProjectToolDeps } from "./projectTools.js";
+import type { WorkspaceServices } from "../workspaces/workspaceServices.js";
+import { createWorkspaceServicesTool, createWorkspaceServicesObserver, type WorkspaceServicesObserver } from "./workspaceServicesTool.js";
 import type { PullNote, PullSessionGateway, PullSessionState } from "../github/pullRequestService.js";
 import type { PullSessionRef } from "../../shared/pullRequests.js";
 import { undeliveredAskAnswers } from "./askAnswerDelivery.js";
@@ -538,6 +540,7 @@ type RuntimeResourceWarnings = NonNullable<RuntimeWarningSources["services"]>;
 type PiWebRuntimeServices = RuntimeResourceWarnings & {
   processBridgeSlot?: ProcessBridgeSlot;
   sessionTitleBridgeSlot?: SessionTitleBridgeSlot;
+  workspaceServicesObserver?: WorkspaceServicesObserver;
 };
 type PiWebAgentSessionServices = AgentSessionServices & PiWebRuntimeServices;
 
@@ -801,10 +804,12 @@ export function createPiWebCustomToolDefinitions(
   github?: GitHubToolDeps,
   endTurn?: EndTurnToolDeps,
   projectTools?: ProjectToolDeps,
+  workspaceServices?: WorkspaceServices,
 ) {
   return [
     createPiWebEditToolDefinition(cwd),
     ...(projectTools === undefined ? [] : createProjectTools(cwd, projectTools)),
+    ...(workspaceServices === undefined ? [] : [createWorkspaceServicesTool(cwd, workspaceServices)]),
     ...(endTurn === undefined ? [] : [createEndTurnToolDefinition(endTurn)]),
     ...(delegationEnabled && spawn !== undefined ? [createSpawnSessionToolDefinition(cwd, { spawn })] : []),
     ...(delegationEnabled && handoff !== undefined ? [createHandoffSessionToolDefinition(cwd, { handoff })] : []),
@@ -826,10 +831,12 @@ function createDefaultRuntimeFactory(
   github?: GitHubToolDeps,
   projectTools?: ProjectToolDeps,
   durableChildAgents?: DurableChildHost,
+  workspaceServices?: WorkspaceServices,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels }) => {
     const processBridgeSlot = createProcessBridgeSlot();
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
+    const workspaceServicesObserver = workspaceServices === undefined ? undefined : createWorkspaceServicesObserver(cwd, workspaceServices);
     const providerResources = bundledCliproxyProviderResources(cwd, agentDir);
     const baseServices = await createAgentSessionServices({
       cwd,
@@ -851,13 +858,14 @@ function createDefaultRuntimeFactory(
           createProcessBridgeExtension(processBridgeSlot),
           createSessionTitleBridgeExtension(sessionTitleBridgeSlot),
           hostedCodemodeExtension(),
+          ...(workspaceServicesObserver === undefined ? [] : [workspaceServicesObserver.extension]),
         ],
       },
     });
     // After the resource loader's reload, which re-reads settings and would
     // drop an override applied any earlier.
     baseServices.settingsManager.applyOverrides({ defaultTools: codemodeDefaultTools(codemodeEnabled) });
-    const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot });
+    const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot, ...(workspaceServicesObserver === undefined ? {} : { workspaceServicesObserver }) });
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
     const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, askUser, handoff, github, {
@@ -869,7 +877,7 @@ function createDefaultRuntimeFactory(
           (error) => { console.warn("Could not persist the derived response checkpoint.", error); },
         );
       },
-    }, projectTools);
+    }, projectTools, workspaceServices);
     const session = await DurableAgentSession.open({
       services,
       sessionManager,
@@ -880,7 +888,7 @@ function createDefaultRuntimeFactory(
       ...(initialThinkingLevel === undefined ? {} : { initialThinkingLevel }),
       ...(scopedModels === undefined || scopedModels.length === 0 ? {} : { scopedModels }),
       ...(durableChildAgents === undefined ? {} : { childAgents: durableChildAgents }),
-    });
+    }).catch((error: unknown) => { workspaceServicesObserver?.dispose(); throw error; });
     return { session, services, diagnostics: services.diagnostics };
   };
 }
@@ -914,6 +922,7 @@ export interface PiSessionServiceDependencies {
   sessionManager: PiSessionManagerGateway;
   sessionWorktrees?: SessionWorktrees;
   projectTools?: ProjectToolDeps;
+  workspaceServices?: WorkspaceServices;
   archiveStore?: SessionArchiveRepository;
   /** Pinned-session catalog; defaults to an in-memory store in tests. Production wiring injects the durable store. */
   pinStore?: SessionPinRepository;
@@ -1128,6 +1137,7 @@ export class PiSessionService implements SessionRouteService {
       deps.github,
       deps.projectTools,
       deps.durableChildAgents,
+      deps.workspaceServices,
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;

@@ -2,13 +2,16 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { Check } from "typebox/value";
 import { BacklogConfigSchema } from "../../shared/backlog.js";
+import { WorkspaceEnvironmentSchema, WorkspaceServicesConfigSchema, type WorkspaceEnvironment, type WorkspaceServicesConfig } from "../../shared/workspaceServices.js";
 import { effectiveUploadsConfig, parsePathAccessConfig, parseUploadsConfig, type PiWebConfig } from "../../config.js";
 import type { BacklogConfig, PiWebPathAccessConfig, PiWebUploadsConfig } from "../../shared/apiTypes.js";
 
 export const PROJECT_PI_WEB_CONFIG_PATH = ".forgerie/config.json";
 
 export interface ProjectPiWebConfig {
-  version?: 1;
+  version?: 1 | 2;
+  env?: WorkspaceEnvironment;
+  services?: WorkspaceServicesConfig;
   backlog?: BacklogConfig;
   pathAccess?: PiWebPathAccessConfig;
   uploads?: PiWebUploadsConfig;
@@ -62,6 +65,8 @@ function parseProjectPiWebConfig(value: Record<string, unknown>, path: string): 
     ...(version !== undefined ? { version: parseProjectConfigVersion(version, path) } : {}),
     ...(value["pathAccess"] !== undefined ? { pathAccess: parsePathAccessConfig(value["pathAccess"], path) } : {}),
     ...(value["uploads"] !== undefined ? { uploads: parseUploadsConfig(value["uploads"], path) } : {}),
+    ...(version === 2 && value["env"] !== undefined ? { env: checkedSection(WorkspaceEnvironmentSchema, value["env"], "env", path) } : {}),
+    ...(version === 2 && value["services"] !== undefined ? { services: checkedSection(WorkspaceServicesConfigSchema, value["services"], "services", path) } : {}),
   };
 }
 
@@ -77,9 +82,14 @@ function parseBacklogConfig(value: unknown, path: string): BacklogConfig {
   return value;
 }
 
-function parseProjectConfigVersion(value: unknown, path: string): 1 {
-  if (value !== 1) throw new Error(`Forgerie project config version must be 1: ${path}`);
-  return 1;
+function parseProjectConfigVersion(value: unknown, path: string): 1 | 2 {
+  if (value !== 1 && value !== 2) throw new Error(`Forgerie project config version must be 1 or 2: ${path}`);
+  return value;
+}
+
+function checkedSection<T extends typeof WorkspaceEnvironmentSchema | typeof WorkspaceServicesConfigSchema>(schema: T, value: unknown, name: string, path: string): import("typebox").Static<T> {
+  if (!Check(schema, value)) throw new Error(`Invalid project ${name}: ${path}`);
+  return value;
 }
 
 function dedupe(values: readonly string[]): string[] {

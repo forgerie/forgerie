@@ -29,6 +29,7 @@
     "docs/config.md",
     "vendor",
     "docs/deployment.md",
+    "docs/session-worktrees.md",
     "docs/fork-cleanup.md"
   ],
   "bundleDependencies": [

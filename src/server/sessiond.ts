@@ -52,6 +52,8 @@ import { registerProjectGroupRoutes } from "./projects/projectGroupRoutes.js";
 import { WorkspaceService } from "./workspaces/workspaceService.js";
 import { SessionWorktreeStore } from "./workspaces/sessionWorktreeStore.js";
 import { SessionWorktrees } from "./workspaces/sessionWorktrees.js";
+import { WorkspaceServices } from "./workspaces/workspaceServices.js";
+import { registerWorkspaceServicesRoutes } from "./workspaces/workspaceServicesRoutes.js";
 import { UserSessionWorktrees, registerSessionWorktreeRoutes } from "./workspaces/sessionWorktreeRoutes.js";
 import { WorktreeCleanupJob } from "./workspaces/worktreeCleanupJob.js";
 import { registerWorktreeCleanupRoutes } from "./workspaces/worktreeCleanupRoutes.js";
@@ -158,6 +160,12 @@ async function createSessionDaemonRuntime() {
   const spawnTargets = config.spawnSessions ? new ProjectScopedSpawnTargetResolver(projectWorkspaceDeps) : undefined;
   const worktreeStore = new SessionWorktreeStore(join(piWebDataDir(daemonEnvironment), "session-worktrees.json"));
   await worktreeStore.initialize(await archiveStore.list());
+  const workspaceServices = new WorkspaceServices({
+    directory: join(piWebDataDir(daemonEnvironment), "workspace-services"), worktrees: worktreeStore,
+    publish: (snapshot) => { eventHub.publishGlobal({ type: "workspace.services", snapshot }); },
+    onError: (error) => { app.log.error({ err: error }, "workspace services observation failed"); },
+  });
+  await workspaceServices.initialize();
   const sessionWorktrees: SessionWorktrees = new SessionWorktrees(worktreeStore, {
     publish(record) {
       // A secondary checkout must never replace the chat's primary worktree in existing clients.
@@ -173,6 +181,7 @@ async function createSessionDaemonRuntime() {
       if ((actorId !== ref.id && (status.isStreaming || status.isCompacting || status.isBashRunning))
         || (status.runningProcesses ?? 0) > 0 || (status.workingAgents ?? 0) > 0) throw new Error("Stop the owning session's run, processes and agents before removing this worktree.");
     },
+    stopServices: (record) => workspaceServices.beforeRemoval(record.id),
     async beforeRemoval(record) {
       const affected = await sessions.prepareWorktreeRemoval(record.path);
       return affected;
@@ -195,6 +204,7 @@ async function createSessionDaemonRuntime() {
     projectWorkspaces,
     sessionWorktrees,
     projectTools: { work: relatedWork, worktrees: sessionWorktrees },
+    workspaceServices,
     askUserEnabled: config.askUser,
     codemodeEnabled: config.codemode,
     ...(liveChildren === undefined ? {} : { durableChildAgents: createDurableChildHost({
@@ -268,16 +278,17 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
-  return { eventHub, workspaceActivity, sessions, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup };
+  return { eventHub, workspaceActivity, sessions, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices }: SessionDaemonRuntime): void {
   registerBacklogRoutes(app, backlog);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerWorktreeCleanupRoutes(app, worktreeCleanup);
   registerSessionWorktreeRoutes(app, userSessions);
+  registerWorkspaceServicesRoutes(app, workspaceServices);
   registerProjectGroupRoutes(app, groups, projects, relatedWork);
   registerSessionRoutes(app, sessions, eventHub, "", userSessions);
   registerProcessRoutes(app, sessions);
@@ -302,7 +313,7 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, ru
   app.get("/runtime", () => runtimeComponent);
 }
 
-async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup }: SessionDaemonRuntime): Promise<void> {
+async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup, workspaceServices }: SessionDaemonRuntime): Promise<void> {
   pulls.start();
   let shuttingDown = false;
   const startCleanup = () => { if (!shuttingDown) worktreeCleanup.start(); };
@@ -336,6 +347,7 @@ async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pu
     await attempt("dispose PR watches", () => { pulls.dispose(); });
     await attempt("dispose catalog refresher", () => { catalogRefresher.dispose(); });
     await attempt("dispose sessions", () => sessions.dispose());
+    await attempt("detach workspace services", () => workspaceServices.dispose());
     await attempt("flush session unread state", () => unreadStore.flush());
     await attempt("close server", () => app.close());
   }

@@ -18,6 +18,8 @@ interface WorktreeEvents {
   /** Close idle runtimes and terminals only after the durable input gate is set. */
   beforeRemoval?(record: SessionWorktreeRecord): Promise<readonly SessionFile[]>;
   beforeRelatedAction?(record: SessionWorktreeRecord, actorId?: string): Promise<void>;
+  /** Confirm declared service shutdown before hooks, including cleanup retries after a receipt. */
+  stopServices?(record: SessionWorktreeRecord): Promise<void>;
 }
 
 /** All git lifecycle mutations are serialized per main checkout. Git's own locks protect external writers. */
@@ -341,6 +343,7 @@ export class SessionWorktrees {
     if (record.cleanup.kind === "done") return record.cleanup;
     try {
       const registered = (await discoverGitWorktrees(record.repo)).find((item) => item.path === record.path);
+      await this.events.stopServices?.(record);
       await beforeDestruction?.("before-hook");
       if (registered !== undefined && registered.prunable !== true) {
         await assertOwnedCheckout(record);

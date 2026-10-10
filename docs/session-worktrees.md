@@ -52,6 +52,40 @@ The server publishes `{type:"session.worktree",worktree:SessionWorktreeRecord}` 
 
 The branch takes a slug of the generated session title. A taken name gains `-2`, `-3`, or the next available suffix. The rename occurs only once. A branch with an upstream, a matching remote-tracking branch, or unique commits reachable from a remote-tracking ref is not renamed. This uses local Git evidence; it cannot detect a push whose remote state has not reached local tracking refs. An interrupted rename has a durable intent that is reconciled at daemon startup.
 
+## Declared workspace services
+
+Managed worktrees can own development services through Process Compose. The declaration lives in `.forgerie/config.json` version 2. See [configuration](config.md#declared-workspace-services) for the file format and service environment.
+
+The native Pi tool is `workspace_services`. Its actions are `status`, `logs`, `start`, `stop`, `restart`, and `wait`. It resolves the current worktree from the session's cwd. It cannot target another checkout. A start requires `approve=true` after user approval.
+
+Start the project without a service name before individual controls. Repeating a whole-project start against a running instance does not execute another launch.
+
+The web proxy exposes these paths with `/api`. Sessiond uses the paths without that prefix:
+
+| Request | Contract |
+| --- | --- |
+| `GET /sessions/worktrees/:worktreeId/services` | Returns a services snapshot. |
+| `POST /sessions/worktrees/:worktreeId/services` | Accepts `{action:"start"\|"stop"\|"restart",service?,approve?}`. A whole-project restart is refused. Stop and start to load changed configuration. |
+| `GET /sessions/worktrees/:worktreeId/services/logs?service=web&lines=50` | Returns `{logs:string[],truncated:boolean}`. The maximum is 200 lines and 32 KiB of UTF-8 text. |
+| `POST /sessions/worktrees/:worktreeId/services/wait` | Accepts `{timeoutMs,service?}`. The deadline is 1 through 120000 milliseconds. Returns `{kind:"ready"\|"timeout"\|"failed",snapshot}`. |
+
+Malformed requests return HTTP 400. Missing worktrees, approval failures, and operational errors return HTTP 409 with `{error:string}`. Snapshot and wait outcomes return HTTP 200. Clients must read `kind`, not only the HTTP code. If the client disconnects, Forgerie cancels a readiness wait. Controls that Forgerie already admitted continue until they finish.
+
+| Snapshot kind | Meaning |
+| --- | --- |
+| `not-configured` | No instance exists, and this worktree has no version 2 services declaration. |
+| `stopped` | No instance started, or the recorded supervisor exited. |
+| `running` | The control API responds. Individual processes can still be waiting, failed, or not ready. |
+| `unavailable` | Forgerie cannot prove reachability or safe replacement. Start and cleanup refuse an unverified instance. |
+
+A snapshot includes the worktree ID. Configured snapshots also include named ports and the retained data directory. A running snapshot includes process states, restart counts, and exit codes. Control tokens remain private. Logs are available through this API only while the supervisor responds.
+
+Forgerie publishes `{type:"workspace.services",snapshot}` on the global stream when a snapshot changes. The native extension queues readiness and failure observations for the next Pi turn. It does not start a turn to poll services. Service variables apply to the declared processes, not to ordinary Pi shell commands.
+
+New starts require completed setup and an active worktree without a lifecycle action. Land, Discard, and cleanup confirm service shutdown before the pre-remove hook. A missing socket does not prove shutdown. An uncertain supervisor keeps the checkout and reports a cleanup error. Cleanup retries repeat the shutdown check, including after a landed receipt.
+
+Services must store retained data in `FORGERIE_STATE_DIR`. Shutdown preserves this directory outside the checkout. Worktree removal does not remove this data. Browser controls, preview routing, and automatic startup remain separate work.
+
 ## Repository hooks
 
 Both hooks are optional executable files in the main repository:

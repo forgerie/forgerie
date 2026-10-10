@@ -23,6 +23,28 @@ The package-install smoke test also passes the real tarball's manifest to npm's 
 
 Use focused tests while editing. Run `npm run verify` before merging cross-cutting changes. Build and install only in an isolated worktree when active agents use the deployed checkout. Do not restart live services to run tests.
 
+## Workspace services acceptance
+
+The normal suite uses a real Unix-socket contract server. Enable the external-runtime tests to check Process Compose itself:
+
+```bash
+nix build github:NixOS/nixpkgs/e72e4f299401a3689d4b3d5fc6496b11db7064eb#process-compose \
+  --out-link /tmp/forgerie-test-process-compose
+FORGERIE_TEST_PROCESS_COMPOSE=/tmp/forgerie-test-process-compose/bin/process-compose \
+  nix shell nixpkgs#nodejs_24 -c npm run test:coverage
+```
+
+On a Linux host with a systemd user manager, build first, then check restart survival with the compiled modules:
+
+```bash
+nix shell nixpkgs#nodejs_24 -c npm run build
+nix shell nixpkgs#nodejs_24 -c node scripts/verify-workspace-services-restart.mjs
+```
+
+The script creates a temporary repository, profile, and launching unit with `KillMode=control-group`. It proves that the service has a separate cgroup and survives stopping that unit. A new manager must recover the same ports and retained data. The script then stops its service. It makes no model requests and does not restart deployed Forgerie units. A failure can retain the temporary directory and service for inspection. Read `owner.log` there, not the private `launch.json`.
+
+These checks prove API and runtime behavior. They do not prove browser controls or physical-device acceptance.
+
 ## Browser verification
 
 The browser suite uses happy-dom for DOM behavior. It does not prove layout, clipping, scroll geometry, or real device behavior.

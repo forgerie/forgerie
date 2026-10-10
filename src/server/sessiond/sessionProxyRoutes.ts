@@ -4,14 +4,17 @@ import { SessionDaemonClient } from "../../sessiond/sessionDaemonClient.js";
 import { RESOURCE_EDITOR_BODY_LIMIT } from "../../shared/resourceEditor.js";
 
 export interface SessionProxyDaemon {
-  request(method: string, path: string, body?: unknown): Promise<{ statusCode: number; headers: Record<string, string>; body: string }>;
+  request(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<{ statusCode: number; headers: Record<string, string>; body: string }>;
   connectWebSocket(path: string): WebSocket;
 }
 
 export function registerSessionProxyRoutes(app: FastifyInstance, daemon: SessionProxyDaemon = new SessionDaemonClient(), prefix = "/api"): void {
   const proxy = async (request: { method: string; url: string; body?: unknown }, reply: FastifyReply) => {
+    const controller = new AbortController();
+    const disconnected = () => { if (!reply.raw.writableFinished) controller.abort(); };
+    reply.raw.once("close", disconnected);
     try {
-      const upstream = await daemon.request(request.method, stripPrefix(request.url, prefix), request.body);
+      const upstream = await daemon.request(request.method, stripPrefix(request.url, prefix), request.body, controller.signal);
       reply.code(upstream.statusCode);
       const contentType = upstream.headers["content-type"];
       if (contentType !== undefined && contentType !== "") reply.header("content-type", contentType);
@@ -21,9 +24,9 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
       const value: unknown = JSON.parse(upstream.body);
       return value;
     } catch (error) {
-      requestFailed(reply, error);
+      if (!controller.signal.aborted) requestFailed(reply, error);
       return undefined;
-    }
+    } finally { reply.raw.off("close", disconnected); }
   };
 
   app.get(`${prefix}/sessiond/health`, (_request, reply) => proxy({ method: "GET", url: `${prefix}/health` }, reply));

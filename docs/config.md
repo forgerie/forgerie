@@ -89,7 +89,75 @@ Restart the session daemon after a Forgerie upgrade changes the bundled provider
 
 ## Project settings and worktree hooks
 
-The project file `.pi-web/config.json` remains supported for workspace configuration. It is not a second global agent profile. See [session worktrees](session-worktrees.md) for workspace creation, hooks, ownership, Land, and Discard. Those operations remain separate from the retired terminal-based workspace-deletion API.
+The project file is `.forgerie/config.json`, relative to the checkout root. It is not a second global agent profile. Version 1 and files without a version retain their existing backlog, path access, and uploads behavior. Version 2 adds declared workspace services.
+
+See [session worktrees](session-worktrees.md) for creation, hooks, ownership, Land, Discard, and the services API. Existing hooks still come from the main checkout.
+
+### Declared workspace services
+
+Services require a managed worktree and manual approval. Forgerie uses pinned Process Compose 1.120.0 through Nix. The native Pi tool is `workspace_services`. The bundled `process` tool continues to manage separate ad-hoc commands.
+
+A project declaration can name ports:
+
+```json
+{
+  "version": 2,
+  "env": "none",
+  "services": {
+    "file": "process-compose.yaml",
+    "ports": ["web"]
+  }
+}
+```
+
+| Field | Contract |
+| --- | --- |
+| `services` | A relative Process Compose file path, or an object with `file` and optional `ports` and `preview`. |
+| `services.file` | The file must exist inside the worktree. Parent traversal, absolute paths, and symlink escapes fail. |
+| `services.ports` | Up to 16 unique lowercase names. Each name starts with a letter and contains letters, digits, or underscores. |
+| `services.preview` | Names one declared port. Browser preview routing is not part of this delivery. |
+| `env` | `"auto"`, `"none"`, or an argv prefix such as `["nix", "develop", "-c"]`. The default is `"auto"`. Shell strings fail validation. |
+
+The environment prefix receives the pinned executable and its arguments. It must preserve the working directory. Forgerie adds these variables to service processes:
+
+| Variable | Value |
+| --- | --- |
+| `FORGERIE_WORKTREE_PATH` | The absolute worktree path. |
+| `FORGERIE_STATE_DIR` | A retained data directory outside the checkout. |
+| `FORGERIE_PORT_WEB` | The port for `web`. Other declared names use the same uppercase form. |
+
+For a Vite project, the Process Compose file can use the named port:
+
+```yaml
+version: "0.5"
+processes:
+  web:
+    command: "npm run dev -- --host 127.0.0.1 --port ${FORGERIE_PORT_WEB}"
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: ${FORGERIE_PORT_WEB}
+        path: /
+      initial_delay_seconds: 0
+      period_seconds: 1
+```
+
+Process Compose owns dependencies, probes, and restart policy. A process without a readiness probe is running, not proven ready. Successful one-shot processes count as complete for readiness waits. A static port in repository code can still collide with another worktree. Named ports work only when the commands and probes use their variables.
+
+### Automatic environment selection
+
+`env: "auto"` uses the first matching row. Each command must already be available in the launch environment.
+
+| File in the worktree | Prefix |
+| --- | --- |
+| `devenv.nix` | `devenv shell --` |
+| `flake.nix` | `nix develop -c` |
+| `shell.nix` or `default.nix` | Refused. Use an explicit wrapper executable or `env: "none"`. |
+| `.envrc` | `direnv exec .` |
+| `mise.toml` or `.tool-versions` | `mise exec --` |
+| No matching file | No prefix. |
+
+Forgerie disables Process Compose's implicit `.env` loading. Repository commands can still load their own files. The prefix and service commands execute repository code. Pi must obtain user approval before it sets `approve=true`.
 
 ## Dictation
 

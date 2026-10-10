@@ -59,9 +59,29 @@ describe("project Forgerie config", () => {
   });
 
   it("rejects unsupported project config versions", async () => {
-    await writeProjectConfig({ version: 2 });
+    await writeProjectConfig({ version: 3 });
 
-    await expect(loadProjectPiWebConfig(projectPath)).rejects.toThrow("Forgerie project config version must be 1");
+    await expect(loadProjectPiWebConfig(projectPath)).rejects.toThrow("Forgerie project config version must be 1 or 2");
+  });
+
+  it("loads version 2 service declarations without losing uploads, path access or backlog behavior", async () => {
+    const services = { file: "process-compose.yaml", ports: ["web", "db"], preview: "web" };
+    await writeProjectConfig({ version: 2, env: ["nix", "develop", "-c"], services, pathAccess: { allowedPaths: ["/tmp"] }, uploads: { defaultFolder: "uploads" }, backlog: { dir: "../bad" } });
+    const loaded = await loadProjectPiWebConfig(projectPath);
+    expect(loaded.config).toEqual({ version: 2, env: ["nix", "develop", "-c"], services, pathAccess: { allowedPaths: ["/tmp"] }, uploads: { defaultFolder: "uploads" } });
+    expect(loaded.backlogError).toContain("backlog.dir");
+  });
+
+  it.each(["../outside", "/outside", "nested/../../outside", "a\\\\b"])('rejects service paths outside the worktree: %s', async (file) => {
+    await writeProjectConfig({ version: 2, services: file });
+    await expect(loadProjectPiWebConfig(projectPath)).rejects.toThrow("Invalid project services");
+  });
+
+  it("rejects shell strings and conflicting port variable names", async () => {
+    await writeProjectConfig({ version: 2, env: "nix develop && echo bad" });
+    await expect(loadProjectPiWebConfig(projectPath)).rejects.toThrow("Invalid project env");
+    await writeProjectConfig({ version: 2, services: { file: "pc.yaml", ports: ["web", "WEB"] } });
+    await expect(loadProjectPiWebConfig(projectPath)).rejects.toThrow("Invalid project services");
   });
 
   it("reuses Forgerie path access schema validation", async () => {

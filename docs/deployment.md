@@ -45,6 +45,36 @@ The web unit owns speech. Set `FORGERIE_WHISPER_STT_WORKER` to an executable abs
 
 Provider and global extension changes require a sessiond restart. A browser reload or session `/reload` does not replace the daemon's provider registry.
 
+## Workspace service runtime
+
+Declared services continue across web and sessiond restarts within the same host or container lifetime. Host or container shutdown can stop them. Forgerie reconnects to surviving instances. It does not automatically relaunch an instance after shutdown.
+
+On systemd hosts, each instance has a separate transient user unit named `forgerie-services-<uuid>.service`. It must not share sessiond's cgroup. Without a user supervisor, the Unix launcher uses a detached Unix session and records its process birth and session identities. Shutdown checks include worker groups inside that session. Detached mode requires `ps` with `sess` and `stat` columns. Service commands must not detach into another session. Detached mode cannot track commands that escape this boundary. If Forgerie detects a systemd service boundary without independent user supervision, it refuses launch.
+
+The first start provisions Process Compose 1.120.0 from pinned nixpkgs through Nix. A retained `runtime` link protects the package from garbage collection. Inventory mutations serialize across worktrees to prevent duplicate launches and port allocation races. Cold provisioning can delay other controls for up to ten minutes. Startup and shutdown confirmation each have a 30-second polling budget. A pending control request can extend that time.
+
+State lives under `<data dir>/workspace-services/`. Socket paths cannot exceed 100 bytes. Use a short data directory.
+
+A corrupt inventory or another owner's lock prevents startup. Forgerie refuses controls after it loses its inventory lock. It finishes admitted controls before it releases ownership during shutdown.
+
+| Path | Purpose |
+| --- | --- |
+| `instances.json` | Stores instance identity, supervisor ownership, phase, and ports. |
+| `runtime` | Retains the pinned Nix package. |
+| `<worktree hash>/data/` | Retains service data outside the checkout. |
+| `<worktree hash>/token` | Holds the private control token. |
+| `<worktree hash>/launch.json` | Holds the private launch environment and command. Forgerie passes inherited environment values through this file. |
+| `<worktree hash>/supervisor.log` | Holds the Process Compose diagnostic log. |
+| `<worktree hash>/launcher.log` | Holds detached-launcher output. Systemd instances instead use their unit journal for runner output. |
+
+A missing socket means unavailable until Forgerie proves that the recorded owner exited. An uncertain owner prevents another launch and checkout removal. For an unavailable instance, inspect its recorded unit or process and retained logs. Do not start another supervisor with a shell command. Do not edit the inventory to bypass an uncertain owner.
+
+Prefixes must keep the working directory and run the supervisor in the foreground. Service commands must also remain in the foreground. Forgerie does not track external containers or processes that escape their supervisor. Repository code is not a sandbox. It inherits ordinary agent-visible environment values.
+
+Named ports coordinate this inventory, not every program on the host. Another program can take a port between allocation and service startup. A retained port that is busy prevents a new launch. Service data and diagnostic logs remain after shutdown and worktree removal. This retention costs disk space and needs operator cleanup.
+
+The inventory is local to one host and process namespace. Do not share it between machines. Browser controls, preview routing, and automatic startup remain follow-ups. See the [services API](session-worktrees.md#declared-workspace-services).
+
 ## Diagnostics and rollback
 
 `/api/pi-web/runtime` reports process versions, capabilities, and the active daemon profile. `/api/pi-web/version` and `/api/pi-web/status` report local installed and running versions. They do not query npm or another release registry. Version comparisons do not identify source changes made without a package version change.

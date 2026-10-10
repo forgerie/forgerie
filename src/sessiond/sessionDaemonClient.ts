@@ -11,7 +11,7 @@ export type SessionDaemonAgentProfileResult =
   | { status: "invalid"; error: string };
 
 export interface SessionDaemonRequestClient {
-  request(method: string, path: string, body?: unknown): Promise<{ statusCode: number; headers: Record<string, string>; body: string }>;
+  request(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<{ statusCode: number; headers: Record<string, string>; body: string }>;
 }
 
 export class SessionDaemonClient {
@@ -20,10 +20,12 @@ export class SessionDaemonClient {
 
   constructor(private readonly options: { requestTimeoutMs?: number } = {}) {}
 
-  async request(method: string, path: string, body?: unknown): Promise<{ statusCode: number; headers: Record<string, string>; body: string }> {
+  async request(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<{ statusCode: number; headers: Record<string, string>; body: string }> {
     const payload = body === undefined ? undefined : JSON.stringify(body);
-    if (this.baseUrl !== undefined && this.baseUrl !== "") return this.requestUrl(method, path, payload);
-    return this.requestSocket(method, path, payload);
+    const timeout = this.options.requestTimeoutMs === undefined ? undefined : AbortSignal.timeout(this.options.requestTimeoutMs);
+    const requestSignal = signal === undefined ? timeout : timeout === undefined ? signal : AbortSignal.any([signal, timeout]);
+    if (this.baseUrl !== undefined && this.baseUrl !== "") return this.requestUrl(method, path, payload, requestSignal);
+    return this.requestSocket(method, path, payload, requestSignal);
   }
 
   getActiveAgentProfile(): Promise<SessionDaemonAgentProfileResult> {
@@ -39,8 +41,8 @@ export class SessionDaemonClient {
     return new WebSocket(`ws+unix:${this.socketPath}:${path}`);
   }
 
-  private async requestUrl(method: string, path: string, payload?: string) {
-    const init: RequestInit = { method, ...(this.options.requestTimeoutMs === undefined ? {} : { signal: AbortSignal.timeout(this.options.requestTimeoutMs) }) };
+  private async requestUrl(method: string, path: string, payload?: string, signal?: AbortSignal) {
+    const init: RequestInit = { method, ...(signal === undefined ? {} : { signal }) };
     if (payload !== undefined && payload !== "") {
       init.headers = { "content-type": "application/json" };
       init.body = payload;
@@ -53,12 +55,12 @@ export class SessionDaemonClient {
     };
   }
 
-  private requestSocket(method: string, path: string, payload?: string): Promise<{ statusCode: number; headers: Record<string, string>; body: string }> {
+  private requestSocket(method: string, path: string, payload?: string, signal?: AbortSignal): Promise<{ statusCode: number; headers: Record<string, string>; body: string }> {
     return new Promise((resolve, reject) => {
       const request = http.request(
         {
           socketPath: this.socketPath,
-          ...(this.options.requestTimeoutMs === undefined ? {} : { signal: AbortSignal.timeout(this.options.requestTimeoutMs) }),
+          ...(signal === undefined ? {} : { signal }),
           path,
           method,
           headers: payload !== undefined && payload !== ""
@@ -67,6 +69,7 @@ export class SessionDaemonClient {
         },
         (response) => {
           const chunks: Uint8Array[] = [];
+          response.on("error", reject);
           response.on("data", (chunk: Buffer | string) => {
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
           });
