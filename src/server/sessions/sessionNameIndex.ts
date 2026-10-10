@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { Stats } from "node:fs";
-import { open, readFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { open, readFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { readSessionFileStats, type SessionFileStats } from "./sessionFileStats.js";
 import { dirname, join } from "node:path";
 import { piWebDataDir } from "../../config.js";
 
-const SESSION_NAME_INDEX_VERSION = 1;
+const SESSION_NAME_INDEX_VERSION = 2;
 const SESSION_INFO_PREFIX = Buffer.from('{"type":"session_info"');
 const NEWLINE = 0x0a;
 const SCAN_CHUNK_BYTES = 64 * 1024;
@@ -20,8 +20,8 @@ export type SessionNameState =
 
 interface SessionNameIndexEntry {
   readonly path: string;
-  readonly dev: number;
-  readonly ino: number;
+  readonly dev: string;
+  readonly ino: string;
   readonly observedSize: number;
   readonly resumeOffset: number;
   readonly name: SessionNameState;
@@ -84,7 +84,7 @@ export class SessionNameIndex {
   remember(filePath: string, name: string | undefined): Promise<void> {
     return this.runExclusive(async () => {
       await this.load();
-      const stats = await stat(filePath);
+      const stats = await readSessionFileStats(filePath);
       this.entries.set(filePath, {
         path: filePath,
         dev: stats.dev,
@@ -122,6 +122,9 @@ export class SessionNameIndex {
     try {
       const parsed = parsePersistedSessionNameIndex(JSON.parse(source));
       for (const entry of parsed.entries) this.entries.set(entry.path, entry);
+      if (parsed.discardedLegacyIdentities > 0) {
+        this.reportPersistenceError("load", new Error(`Discarded ${parsed.discardedLegacyIdentities.toString()} session name entries with unsafe legacy file identity`));
+      }
     } catch (error: unknown) {
       this.entries.clear();
       this.reportPersistenceError("load", error);
@@ -129,9 +132,9 @@ export class SessionNameIndex {
   }
 
   private async refreshFile(filePath: string): Promise<{ changed: boolean; usable: boolean }> {
-    let pathStats: Stats;
+    let pathStats: SessionFileStats;
     try {
-      pathStats = await stat(filePath);
+      pathStats = await readSessionFileStats(filePath);
     } catch {
       return { changed: false, usable: false };
     }
@@ -146,7 +149,7 @@ export class SessionNameIndex {
     const opened = await open(filePath, "r").catch(() => undefined);
     if (opened === undefined) return { changed: false, usable: false };
     try {
-      const stats = await opened.stat();
+      const stats = await readSessionFileStats(opened);
       const cachedPrefixIsValid = cached?.dev === stats.dev
         && cached.ino === stats.ino
         && stats.size >= cached.observedSize;
@@ -305,32 +308,52 @@ function prefixMatches(candidate: Buffer): boolean {
   return SESSION_INFO_PREFIX.subarray(0, candidate.length).equals(candidate);
 }
 
-function parsePersistedSessionNameIndex(value: unknown): PersistedSessionNameIndex {
-  if (!isRecord(value) || value["version"] !== SESSION_NAME_INDEX_VERSION || !Array.isArray(value["entries"])) {
+function parsePersistedSessionNameIndex(value: unknown): { entries: SessionNameIndexEntry[]; discardedLegacyIdentities: number } {
+  if (!isRecord(value) || (value["version"] !== 1 && value["version"] !== SESSION_NAME_INDEX_VERSION) || !Array.isArray(value["entries"])) {
     throw new Error("Unsupported session name index format");
   }
-  return {
-    version: SESSION_NAME_INDEX_VERSION,
-    entries: value["entries"].map(parsePersistedEntry),
-  };
+  const legacy = value["version"] === 1;
+  const entries: SessionNameIndexEntry[] = [];
+  let discardedLegacyIdentities = 0;
+  for (const entry of value["entries"]) {
+    // Rounded legacy identity cannot be recovered, but other names remain valid.
+    if (legacy && isRecord(entry) && (isUnsafeLegacyIdentity(entry["dev"]) || isUnsafeLegacyIdentity(entry["ino"]))) {
+      discardedLegacyIdentities += 1;
+      continue;
+    }
+    entries.push(parsePersistedEntry(entry, legacy));
+  }
+  return { entries, discardedLegacyIdentities };
 }
 
-function parsePersistedEntry(value: unknown): SessionNameIndexEntry {
+function isUnsafeLegacyIdentity(value: unknown): boolean {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && !Number.isSafeInteger(value);
+}
+
+function parsePersistedEntry(value: unknown, legacy: boolean): SessionNameIndexEntry {
   if (!isRecord(value)) throw new Error("Invalid session name index entry");
   const path = value["path"];
-  const dev = value["dev"];
-  const ino = value["ino"];
+  const dev = parseFileIdentity(value["dev"], legacy);
+  const ino = parseFileIdentity(value["ino"], legacy);
   const observedSize = value["observedSize"];
   const resumeOffset = value["resumeOffset"];
   if (typeof path !== "string" || path === ""
-    || !isNonNegativeInteger(dev)
-    || !isNonNegativeInteger(ino)
+    || dev === undefined
+    || ino === undefined
     || !isNonNegativeInteger(observedSize)
     || !isNonNegativeInteger(resumeOffset)
     || resumeOffset > observedSize) {
     throw new Error("Invalid session name index entry metadata");
   }
   return { path, dev, ino, observedSize, resumeOffset, name: parseNameState(value["name"]) };
+}
+
+function parseFileIdentity(value: unknown, legacy: boolean): string | undefined {
+  // Legacy unsafe Numbers have already lost bits; never treat them as ownership.
+  if (legacy) return isNonNegativeInteger(value) ? value.toString() : undefined;
+  return typeof value === "string" && /^(0|[1-9][0-9]{0,19})$/.test(value) && BigInt(value) <= 18446744073709551615n
+    ? value
+    : undefined;
 }
 
 function parseNameState(value: unknown): SessionNameState {

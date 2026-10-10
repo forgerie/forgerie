@@ -1,6 +1,6 @@
-import { open, readdir, stat } from "node:fs/promises";
+import { open, readdir } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
-import type { Stats } from "node:fs";
+import { readSessionFileStats, type SessionFileStats } from "./sessionFileStats.js";
 import { join, sep } from "node:path";
 import type { PiSessionListEntry } from "./piSessionService.js";
 
@@ -190,9 +190,9 @@ export class SessionSummaryScanner {
     const memoized = this.memo.get(filePath);
     if (memoized === undefined) return this.fullScan(filePath, chunkBuffer);
 
-    let stats: Stats;
+    let stats: SessionFileStats;
     try {
-      stats = await stat(filePath);
+      stats = await readSessionFileStats(filePath);
     } catch {
       // Went away between readdir and stat: drop it and skip, like the SDK.
       this.memo.delete(filePath);
@@ -276,8 +276,8 @@ export class SessionSummaryScanner {
 
 /** One memoized file: its identity, how far it was parsed, and the summary state. */
 interface MemoizedSessionSummary {
-  dev: number;
-  ino: number;
+  dev: string;
+  ino: string;
   /** Observed end-of-file offset when the fold below was completed. */
   size: number;
   /**
@@ -306,8 +306,8 @@ function createEmptyFold(): SummaryFoldState {
 
 /** Identity and resume bookkeeping from one folded range of a session file. */
 interface RangeFoldOutcome {
-  dev: number;
-  ino: number;
+  dev: string;
+  ino: string;
   /** Observed end-of-file offset after the read. */
   size: number;
   mtime: Date;
@@ -321,7 +321,7 @@ interface RangeFoldOutcome {
 }
 
 /** Open a session file for reading and fstat the opened handle. */
-async function openSessionFile(filePath: string): Promise<{ file: FileHandle; stats: Stats } | undefined> {
+async function openSessionFile(filePath: string): Promise<{ file: FileHandle; stats: SessionFileStats } | undefined> {
   let file: FileHandle | undefined;
   try {
     file = await open(filePath, "r");
@@ -329,7 +329,7 @@ async function openSessionFile(filePath: string): Promise<{ file: FileHandle; st
     return undefined;
   }
   try {
-    const stats = await file.stat();
+    const stats = await readSessionFileStats(file);
     return { file, stats };
   } catch {
     await file.close().catch(() => undefined);
@@ -366,7 +366,7 @@ async function foldWholeSessionFile(filePath: string, chunkBuffer: () => Buffer)
  * Returns undefined when the file cannot be read (unreadable or vanished
  * mid-scan).
  */
-async function foldSessionFileRange(file: FileHandle, stats: Stats, fold: SummaryFoldState, startOffset: number, chunkBuffer: Buffer): Promise<RangeFoldOutcome | undefined> {
+async function foldSessionFileRange(file: FileHandle, stats: SessionFileStats, fold: SummaryFoldState, startOffset: number, chunkBuffer: Buffer): Promise<RangeFoldOutcome | undefined> {
   try {
     const outcome = await foldFileLines(file, fold, startOffset, chunkBuffer);
     if (fold.rejected) {
