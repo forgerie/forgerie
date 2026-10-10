@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 tmp=$(mktemp -d)
 row=()
-for id in tally-f rail-f run; do
+for id in run run-f5 run-f5-tips run-f4-tips; do
   for scheme in light dark; do
     resvg --width 42 --height 42 "marks/$id-$scheme-tab.svg" "$tmp/$id-$scheme-42.png"
     resvg --width 16 --height 16 "marks/$id-$scheme-tab.svg" "$tmp/$id-$scheme-16.png"

@@ -1,6 +1,6 @@
 # Tally logo candidates
 
-Three logo candidates drawn from the tally marks in the chat margin
+Logo candidates drawn from the tally marks in the chat margin
 (`ui/src/ui/TallyRow.css`). They do not replace `ui/public/favicon.svg` yet.
 
 Every candidate uses the tally geometry: a mark is 7 units square, the gap is
@@ -8,11 +8,19 @@ Every candidate uses the tally geometry: a mark is 7 units square, the gap is
 marks. The failure and live colours are the app's `--tone-bad` and
 `--tone-live`, converted from oklch to hex.
 
-| Candidate | Idea |
-| --- | --- |
-| Tally F | The F spelled on a 3 × 5 tally grid. The last mark is red and falls into place, as in the current mark. |
-| Rail F | The turn rail is the spine. Two tally rows are the arms. The last mark is the live blue. |
-| The run | No letter. Eight marks wrapped and right-aligned as the chat draws them: one red, one live. |
+The first round compared Tally F, Rail F and The run. The run was chosen, with
+the request that it read as the letter F. Tally F and Rail F are in Git
+history at `b3a032da`.
+
+| Candidate | Pattern | Idea |
+| --- | --- | --- |
+| The run (reference) | 3 × 3, 8 marks | The chosen first-round mark, kept for comparison. |
+| Run F | 3 × 5, 8 marks | The run's marks and colours as an F. Red is in the spine, where it sat in the run. The live mark ends the middle arm. |
+| Run F, coloured tips | 3 × 5, 8 marks | Red ends the top arm, as the falling piece does in the current mark. The spine is one colour. |
+| Run F, short | 3 × 4, 7 marks | Coloured tips in four rows, so each mark is bigger. |
+
+`build.mjs` defines each candidate as rows of text: `#` is a plain mark, `r`
+a failed mark, `b` a live mark, and `.` an empty cell.
 
 ## Files
 
@@ -27,11 +35,12 @@ marks. The failure and live colours are the app's `--tone-bad` and
 
 ## Findings
 
-- At 16 px, Tally F breaks into grey dots. Its gaps are 3/7 of a mark, too
-  wide for a letter made of separate cells.
-- Rail F lands on whole pixels at 16 px and stays readable.
-- The run reads at every size but has no letter, so it depends on the name
-  beside it.
+- At 42 px, the Fold's tab size, every Run F reads as an F with clear marks.
+- At 16 px, the rows do not land on whole pixels, so plain marks turn grey.
+  The five-row candidates hold up better than the short one. A hand-drawn
+  16 px file on a 3 px pitch would make the marks sharp.
+- A bold F with a two-mark spine (4 × 5, 14 marks) was tried and dropped. At
+  16 px its marks merged into grey stripes.
 
 ## Adopt one
 

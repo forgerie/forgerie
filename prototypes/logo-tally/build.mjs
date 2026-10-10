@@ -23,46 +23,36 @@ const mark = (x, y, fill, extra = "") =>
 const cell = (col, row, fill, extra) => mark(col * PITCH, row * PITCH, fill, extra);
 
 /**
+ * A glyph drawn from rows of text: `#` is a plain mark, `r` a failed mark,
+ * `b` a live mark, and `.` an empty cell. The box and the maskable scale
+ * follow from the pattern: the box's diagonal fits inside the safe circle.
+ */
+const grid = (name, note, rows) => {
+  const tones = { "#": "ink", r: "bad", b: "live" };
+  const w = Math.max(...rows.map((r) => r.length)) * PITCH - GAP, h = rows.length * PITCH - GAP;
+  return {
+    name, note, box: [w, h], scale: Math.floor(780 / Math.hypot(w, h)), nudge: [0, 0],
+    glyph: (p) => rows.flatMap((r, y) => [...r].map((ch, x) => tones[ch] ? cell(x, y, p[tones[ch]]) : "")).join(""),
+  };
+};
+
+/**
  * Each candidate returns its glyph in tally units plus its box, so one
  * wrapper can centre it inside the maskable safe zone (the inner 80% circle).
  */
 const candidates = {
-  "tally-f": {
-    name: "Tally F",
-    note: "The F spelled on the tally grid. The last mark is the failure tone, still falling into place, like the current mark.",
-    box: [27, 47], scale: 14, nudge: [0, 1.5],
-    glyph: (p) => [
-      cell(0, 0, p.ink), cell(1, 0, p.ink),
-      cell(2, 0, p.bad, ` transform="translate(1.6 -3.2) rotate(8 ${2 * PITCH + MARK / 2} ${MARK / 2})"`),
-      cell(0, 1, p.ink),
-      cell(0, 2, p.ink), cell(1, 2, p.ink),
-      cell(0, 3, p.ink),
-      cell(0, 4, p.ink),
-    ].join(""),
-  },
-  "rail-f": {
-    name: "Rail F",
-    note: "The turn rail is the spine; two tally rows are the arms. The last mark is live, so the F is still being written.",
-    box: [33.5, 47], scale: 14, nudge: [0, 0],
-    glyph: (p) => {
-      const rail = 3.5, x0 = rail + GAP;
-      return [
-        `<rect x="0" y="0" width="${rail}" height="47" rx="${rail / 2}" fill="${p.ink}"/>`,
-        mark(x0, 0, p.ink), mark(x0 + PITCH, 0, p.ink), mark(x0 + 2 * PITCH, 0, p.ink),
-        mark(x0, 2 * PITCH, p.ink), mark(x0 + PITCH, 2 * PITCH, p.live),
-      ].join("");
-    },
-  },
-  "run": {
-    name: "The run",
-    note: "No letter. A real tally of eight calls, wrapped and right-aligned as the chat draws it: one failed, one still running.",
-    box: [27, 27], scale: 20, nudge: [0, 0],
-    glyph: (p) => [
-      cell(0, 0, p.ink), cell(1, 0, p.ink), cell(2, 0, p.ink),
-      cell(0, 1, p.bad), cell(1, 1, p.ink), cell(2, 1, p.ink),
-      cell(1, 2, p.ink), cell(2, 2, p.live),
-    ].join(""),
-  },
+  "run": grid("The run (reference)",
+    "The previous pick: eight calls, wrapped and right-aligned as the chat draws them.",
+    ["###", "r##", ".#b"]),
+  "run-f5": grid("Run F",
+    "Eight marks, the same count as the run, on its three-wide grid. Red sits where it sat in the run; the live mark ends the middle arm.",
+    ["###", "r..", "#b.", "#..", "#.."]),
+  "run-f5-tips": grid("Run F, coloured tips",
+    "The same eight marks. Red ends the top arm, as the falling piece does in the current mark, and the spine stays one colour.",
+    ["##r", "#..", "#b.", "#..", "#.."]),
+  "run-f4-tips": grid("Run F, short",
+    "Seven marks in four rows, with coloured tips. Fewer rows make bigger marks at every icon size.",
+    ["##r", "#..", "#b.", "#.."]),
 };
 
 // The maskable icon keeps the glyph inside the safe zone. The tab icon
@@ -70,7 +60,7 @@ const candidates = {
 const svg = (id, c, scheme, tab = false) => {
   const p = palettes[scheme];
   const [w, h] = c.box, [nx, ny] = c.nudge;
-  const scale = tab ? Math.round(880 / Math.max(w, h + 2 * ny)) : c.scale;
+  const scale = tab ? 880 / Math.max(w, h + 2 * ny) : c.scale;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Forgerie mark: ${c.name}">
   <rect width="1024" height="1024" fill="${p.paper}"/>
   <g transform="translate(512 512) scale(${scale}) translate(${-w / 2 + nx} ${-h / 2 + ny})">${c.glyph(p)}</g>
