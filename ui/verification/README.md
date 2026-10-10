@@ -24,6 +24,19 @@ A session's child agents open from the robot button in the header. The child vie
 
 Cost: the parent thread's question card keeps its own answer box, so a waiting question shows a second box above the message box, in a separate card. A child's question shows its answer only once the answer reaches the child's record. `SheetDialog` still duplicates the older `.tree-dialog` sheet in `theme.css`; moving the tree, changes, and pull request sheets onto it is not done. Physical Fold touch acceptance is not done.
 
+## Child worktrees and run records
+
+The server hands the browser a child's branch: its name, how many commits it is ahead of main, whether anything is uncommitted, and whether it is active, landed or discarded. It also offers land, discard with its preview, and a cleanup inventory, and it records one run per child run. The mockup designs those surfaces in the grammar the child view already uses. It is a drawing, not production code: `verification/child-agents-mockup.{html,tsx,css}`, with `?state=<name>` for one state and `?state=all&size=WxH` for a sheet.
+
+The design idea: the branch is the child's receipt. A finished child's report ends with the branch it produced, hung from the same rail as a reply's work, with the two commands that act on it. The list carries one line of branch state, and a mark takes colour only when it wants a decision. While a child works, its branch sits on the input that steers it.
+
+| Check | Result |
+| --- | --- |
+| Automated checks. | `npm run verify` in `ui/` passed: build, lint, and 1352 tests. `npm run verify:static` at the root passed (typecheck, ESLint, Knip for the root and for `ui/`). `gates/check-pending.mjs main` reports 617 -> 617. |
+| Visual review. | `scripts/child-agents-mockup-shots.mjs` captured eleven states at all four Fold postures in both schemes, 92 captures, plus a sheet at folded portrait and unfolded landscape. Every capture reported no page overflow and focus on the sheet frame with no visible ring. The list, the working child, the waiting child, the receipt, the landing record, the discard confirmation, the conflict, the blocked land, the stale preview, the run accounting, and the cleanup inventory were read. |
+
+Cost: this is a drawing, so none of it is wired to the server. The branch line sits on the input rather than pinned at the top of the record, because `position: sticky` does not pin inside the sheet's scroll body: a plain sticky probe with `top: 0` stayed in flow, so the branch is placed where the reader acts instead. The parent thread's question card still keeps its own answer box above the composer, and `SheetDialog` still duplicates the older `.tree-dialog` sheet. Physical Fold touch acceptance is not done.
+
 ## Work and answer
 
 In a reply with steps, the work hangs from a rail (`RailSection`): step rows, skill loads, session doors, and the last thinking before the answer, set in smaller muted text, with a hairline between the marks and the text. The answer is the text after the last step, the only text a step does not own, and it stays outside the rail at full size. Once the reply settles and an answer follows, a rule labelled with the totals ("20 tool calls, 1 failed, 1 stopped") closes the rail. A reply without steps is unchanged. The variants and the choice are on the branch `proto/turn-separation` (A + B + C).

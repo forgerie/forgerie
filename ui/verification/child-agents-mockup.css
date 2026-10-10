@@ -1,0 +1,63 @@
+/* Child agents, the branch a child leaves behind, and the run accounting.
+   Everything new here hangs from a device the app already has: a one-line
+   branch readout reuses the quiet-row grammar, the receipt reuses RailSection,
+   the refusals reuse AlertCard, the cleanup inventory reuses ListSection and
+   ActionRow. Only the branch line, the two commands and the run fold are new. */
+
+/* -- One branch, one line. Every mark is a fact; a mark takes colour only
+      when it wants a decision (a landable branch, uncommitted files). -- */
+.cam-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); margin: 0; color: var(--muted-foreground); font-size: var(--label-text); }
+.cam-line > svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; }
+.cam-branch { min-inline-size: 0; font-family: var(--code-font); font-size: var(--label-text); color: var(--foreground); overflow-wrap: anywhere; }
+.cam-mark { color: var(--muted-foreground); font-size: var(--label-text); }
+.cam-mark[data-tone="good"] { color: var(--ink-good); }
+.cam-mark[data-tone="warn"] { color: var(--ink-warn); }
+
+/* A question under a row, in the list. */
+.cam-ask { margin: var(--space-2) 0 0; color: var(--foreground); }
+
+/* The foot of the list: what the reader can do about the branches. */
+.cam-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-4) 0 0; padding-block-start: var(--space-3);
+  border-block-start: var(--hairline) solid var(--line); color: var(--muted-foreground); font-size: var(--small-text); }
+.cam-foot-link { min-block-size: var(--control-size); margin-inline-start: auto; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--live); font-size: var(--small-text); font-weight: 500; }
+.cam-foot-link:hover { background: var(--live-wash); }
+
+/* The branch a child works in, on the input that steers it: the reader sees
+   which branch they are talking to at the moment they type. */
+.cam-strip { margin: 0 0 var(--space-2); }
+
+/* -- The receipt: the branch a child produced, at the end of its report. -- */
+.cam-receipt { display: flex; flex-direction: column; gap: var(--space-3); }
+.cam-paths { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.cam-paths code { font-family: var(--code-font); font-size: var(--code-size); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.cam-paths-flat code { font-size: var(--small-text); }
+.cam-sha { margin-inline-end: var(--space-3); color: var(--faint-foreground); }
+.cam-commands { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.cam-command { min-block-size: var(--control-size); padding-inline: var(--space-4); border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-control); background: var(--background); color: var(--foreground); font-size: var(--small-text); font-weight: 500; }
+.cam-command:hover { border-color: var(--line-focus); }
+.cam-command[data-primary] { border-color: transparent; background: var(--primary); color: var(--primary-foreground); }
+.cam-command[data-danger] { border-color: var(--destructive-line); color: var(--destructive); }
+.cam-command[data-danger]:hover { background: var(--destructive-wash); }
+/* The confirmation keeps the branch on screen and puts the two answers together. */
+.cam-confirm { display: flex; flex-direction: column; gap: var(--space-3); }
+
+/* -- The run accounting: one quiet fold at the foot of the record. -- */
+.cam-runs { margin-block-start: var(--space-6); border-block-start: var(--hairline) solid var(--line); }
+.cam-runs > summary { display: flex; align-items: center; min-block-size: var(--control-size); cursor: pointer; list-style: none;
+  color: var(--muted-foreground); font-size: var(--small-text); }
+.cam-runs > summary::-webkit-details-marker { display: none; }
+.cam-runs > summary:hover { color: var(--foreground); }
+.cam-runs[open] > summary { color: var(--foreground); }
+.cam-runs .event-line { padding-block: var(--space-1); }
+
+/* Review sheet: every state in its own frame at the posture under test. */
+.mock-sheet-page, .mock-sheet-page body { block-size: auto; }
+.mock-sheet-page #root { block-size: auto; }
+.mock-sheet { display: grid; gap: 2rem; padding: 2rem; justify-content: center; }
+.mock-frame { margin: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.mock-frame figcaption { display: flex; flex-direction: column; gap: 0.25rem; min-block-size: 3.5rem; max-inline-size: 30rem;
+  font-size: var(--small-text); color: var(--muted-foreground); }
+.mock-frame figcaption strong { color: var(--foreground); font-size: 0.9375rem; font-weight: 600; }
+.mock-device { display: block; border: 1px solid var(--line-focus); border-radius: 1.25rem; background: var(--background); }
