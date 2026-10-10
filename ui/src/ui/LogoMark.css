@@ -1,0 +1,7 @@
+/* 1em square, so the mark sizes with the text beside it. The 16-unit box
+   keeps the tab icon's 1-unit margin, so at 16 px on a 1x screen every edge
+   is a whole pixel. */
+.logo-mark { display: inline-block; flex: none; inline-size: 1em; block-size: 1em; vertical-align: -0.125em; }
+.logo-mark [data-tone="ink"] { fill: currentColor; }
+.logo-mark [data-tone="bad"] { fill: var(--tone-bad); }
+.logo-mark [data-tone="live"] { fill: var(--tone-live); }

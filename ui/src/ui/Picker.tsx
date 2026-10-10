@@ -1,4 +1,4 @@
-import { AnvilIcon, ArchiveIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+import { ArchiveIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -8,6 +8,7 @@ import type { PickerPrefs } from "../picker/prefs";
 import { readRowPress, ROW_PRESS } from "../picker/press";
 import type { Toast as ActionMessage } from "../picker/rowActions";
 import { Toast } from "./Toast";
+import { LogoMark } from "./LogoMark";
 import { WorktreeRowMark } from "./WorktreeChip";
 import { PullRequestRowMark } from "./PullRequestReview";
 import { FilterChip } from "./FilterChip";
@@ -261,7 +262,7 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter }: {
   return <section className="picker" aria-label="Sessions" onKeyDown={onKeyDown}>
     <header className="picker-header">
       {/* The homepage sidebar header: product mark and name. */}
-      <h2 className="picker-brand"><AnvilIcon aria-hidden />Forgerie<span className="sr-only"> sessions</span></h2>
+      <h2 className="picker-brand"><LogoMark />Forgerie<span className="sr-only"> sessions</span></h2>
       <button className="picker-icon" aria-label="More session commands" aria-haspopup="menu" aria-expanded={menu === "board"}
         title="Arrange the list"
         onClick={() => { setRowMenu(undefined); setMenu(menu === "board" ? undefined : "board"); }}><EllipsisIcon aria-hidden size={16} /></button>

@@ -45,6 +45,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `QuoteFigure` (molecule): shows a quotation with its source as a caption in the code face.
 - `Figure` (atom): one short figure (a share, a clock, an amount) in the code face with tabular digits, toned plain, muted, warn, bad or faint.
 - `SignalDot` (atom): a yes-or-no signal with no level, neutral when on and danger when off.
+- `LogoMark` (atom): the app's mark, 1em square: plain marks in the text colour, one bad and two live marks in their tones.
 - `PaceBar` (atom): a budget's share left against an even spend: a cut at pace, a hatch for a shortfall, a warn-to-danger bar for a surplus.
 - `ErrorBoundary` (atom): replaces children that throw while drawing with a fallback, so everything around them keeps working.
 - `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, each group named by text or an icon, with optional captions, a marked block, trailing cells that span rows, and a small action chip per block.

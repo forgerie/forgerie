@@ -1,20 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
-  <title id="title">Forgerie mark</title>
-  <desc id="desc">A block F under assembly: the final red piece falls in to complete the top arm.</desc>
-  <!-- Paper-ink style: the paper field is part of the mark, so the same
-       source renders the tab favicon and the full-bleed PWA PNGs. -->
-  <rect width="1024" height="1024" fill="#faf7f0"/>
-  <!-- Scaled and centered to sit inside the maskable safe zone (inner 80% circle). -->
-  <g transform="translate(512 512) scale(0.9) translate(-560 -440)">
-    <g fill="#232323">
-      <!-- spine -->
-      <rect x="320" y="280" width="120" height="480"/>
-      <!-- top arm (red piece completes it) -->
-      <rect x="456" y="280" width="240" height="120"/>
-      <!-- middle arm -->
-      <rect x="456" y="460" width="240" height="120"/>
-    </g>
-    <!-- final piece, mid-fall -->
-    <rect x="716" y="120" width="120" height="120" fill="#e0532f" transform="rotate(8 776 180)"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-label="Forgerie">
+<style>
+.p{fill:#fcfcfc}.ink{fill:#232323}.bad{fill:#de3b3d}.live{fill:#2b7fff}
+@media (prefers-color-scheme:dark){.p{fill:#101011}.ink{fill:#ececea}.bad{fill:#ff645f}.live{fill:#4c93ff}}
+</style>
+<rect class="p" width="16" height="16" rx="3"/><rect x="1" y="1" width="4" height="4" rx="1" class="live"/><rect x="6" y="1" width="4" height="4" rx="1" class="ink"/><rect x="11" y="1" width="4" height="4" rx="1" class="ink"/><rect x="1" y="6" width="4" height="4" rx="1" class="bad"/><rect x="6" y="6" width="4" height="4" rx="1" class="ink"/><rect x="11" y="6" width="4" height="4" rx="1" class="ink"/><rect x="6" y="11" width="4" height="4" rx="1" class="ink"/><rect x="11" y="11" width="4" height="4" rx="1" class="live"/>
 </svg>

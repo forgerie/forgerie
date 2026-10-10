@@ -1,12 +1,13 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ComposerPrimitive, unstable_useTriggerPopoverRootContext, useAuiState } from "@assistant-ui/react";
-import { AnvilIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, LoaderIcon, XIcon, ZapIcon } from "lucide-react";
+import { ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, LoaderIcon, XIcon, ZapIcon } from "lucide-react";
 import { setupFailureText, type Launch } from "../launches";
 import type { WorktreeRecord } from "../worktrees/worktreeApi";
 import type { MentionSource } from "../mentionSource";
 import { MAX_ATTACHMENTS } from "../attachments";
 import { PortalLayerProvider } from "./portalLayer";
+import { LogoMark } from "./LogoMark";
 import { AttachButton, AttachmentErrors, ComposerAttachments } from "./Attachments";
 import { ComposerDictation } from "./ComposerDictation";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
@@ -125,7 +126,7 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
   return <ComposerPrimitive.Root className="ns-window composer">
     <header className="ns-head">
       <span className="ns-crumb">
-        <span className="ns-badge" aria-hidden><AnvilIcon size={14} /></span>
+        <span className="ns-badge" aria-hidden><LogoMark /></span>
         <ChevronRightIcon aria-hidden size={14} className="ns-crumb-sep" />
         <h2 id={titleId}>New session</h2>
       </span>

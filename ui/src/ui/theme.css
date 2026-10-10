@@ -952,7 +952,7 @@ summary.trace-line:hover { color: var(--foreground); }
 .ns-scroll { flex: 1 1 auto; min-block-size: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
 .ns-head { min-block-size: 3.5rem; padding-inline: var(--ns-pad) var(--space-2); border-block-end: 1px solid var(--line); }
 .ns-crumb { flex: 1; min-inline-size: 0; display: flex; align-items: center; gap: var(--space-2); color: var(--muted-foreground); }
-.ns-badge { flex: none; display: grid; place-items: center; inline-size: 1.875rem; block-size: 1.875rem; border-radius: var(--radius-control); background: var(--primary); color: var(--primary-foreground); }
+.ns-badge { flex: none; display: grid; place-items: center; font-size: 1rem; inline-size: 1.875rem; block-size: 1.875rem; border-radius: var(--radius-control); background: var(--primary); color: var(--primary-foreground); }
 .ns-crumb h2 { margin: 0; min-inline-size: 0; font-size: var(--text-size); font-weight: 400; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ns-close { inline-size: var(--control-size); block-size: var(--control-size); }
 /* The sentence: "Start in [where] with [model]". Chips carry the weight, the words stay quiet. */

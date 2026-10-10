@@ -56,7 +56,7 @@ side for quick comparison.
   square) and `sheet.html`.
 - `shoot.sh` runs `build.mjs`, captures `shots/sheet.png` at device scale 2,
   and rasterises each maskable mark to `shots/<id>-<scheme>-512.png` with
-  resvg, the renderer `scripts/generate-icons.sh` uses.
+  resvg, the renderer `scripts/generate-icons.mjs` uses.
 - `tab-zoom.sh` writes `shots/tab-zoom.png`: each tab icon at 42 px (16 CSS px
   on the Fold) and at 16 px, enlarged with no smoothing.
 
@@ -75,5 +75,5 @@ side for quick comparison.
 ## Adopt one
 
 Copy the chosen `marks/<id>-light.svg` over `ui/public/favicon.svg`, then run
-`scripts/generate-icons.sh`. The tab icon variant needs a separate `<link
+`scripts/generate-icons.mjs`. The tab icon variant needs a separate `<link
 rel="icon">` if the tab and the PWA icons should differ.

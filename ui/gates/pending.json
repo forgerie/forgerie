@@ -341,7 +341,7 @@
   "ui/Composer.tsx:372",
   "ui/ImageGallery.tsx:47",
   "ui/ImageViewer.tsx:158",
-  "ui/Picker.tsx:298"
+  "ui/Picker.tsx:299"
  ],
  "layer without parts": [
   "template"

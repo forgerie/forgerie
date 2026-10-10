@@ -1,7 +1,7 @@
 #!/usr/bin/env nix
 #!nix shell nixpkgs#chromium nixpkgs#resvg --command bash
 # Rebuild the marks, capture the contact sheet, and rasterise each mark at
-# 512 px with resvg, the renderer scripts/generate-icons.sh uses.
+# 512 px with resvg, the renderer scripts/generate-icons.mjs uses.
 set -euo pipefail
 cd "$(dirname "$0")"
 ./build.mjs
