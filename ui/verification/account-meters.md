@@ -10,9 +10,10 @@ Each provider is named once, by its mark (Claude, OpenAI for Codex, Google for A
 - **Hatching** between the fill and the cut means the window runs dry before it resets. The clock turns red with `↓`.
 - **A solid bar past the cut** is credit that will expire unspent. It runs from amber (the app's warn tone) to red by how many times the window's normal rate you would need to spend it all. The clock turns amber with `↑`.
 - A lane within 8 points of the cut is on pace and draws neither.
-- **A single dot** where the share stands is an Antigravity Gemini pool. It reports no level, so its lane stays empty. The dot is grey while it answers and red while it refuses; a refusing pool's clock also turns red with `↓`, as a lane run dry does, because it serves nothing until that reset.
-- **A dollar amount** where the share stands is an OpenRouter balance (`$7`); its lane stays empty. It turns amber at $2 or less and red at $0. A balance never resets, so it has no clock.
-- **A small blue dot** just past an account's clock means it has at least one banked reset. It turns amber when the first one lapses within three days. Spend it from the detail sheet.
+- **A dot and its clock** is an Antigravity Gemini pool. It reports no level, so it draws no lane. The dot is grey while it answers and red while it refuses; a refusing pool's clock also turns red with `↓`, as a lane run dry does, because it serves nothing until that reset.
+- **A dollar amount** is an OpenRouter balance (`$7`). It turns amber at $2 or less and red at $0. A balance never resets, so it has no clock.
+- A service whose accounts are each one such reading puts them **side by side on one line** after its mark (`● 6d   ▏● 5h`), instead of a line each.
+- **A blue service mark** means at least one of its accounts has a banked reset; amber when one lapses within three days. Hover the mark for how many accounts. Which account, and spending it, is in the detail sheet.
 - An account the router has taken out of service is not shown. The detail sheet still lists it, struck through.
 - **The share** (`62`) and **the clock** (`5d`, the window's reset) sit at the end. Lanes that reset together and stand the same way share one clock.
 - **A riser** to the left of an account marks the account the router sends work to, where a provider has more than one.

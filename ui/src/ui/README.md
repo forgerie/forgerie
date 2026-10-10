@@ -49,7 +49,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `LogoMark` (atom): the app's mark, 1em square: plain marks in the text colour, one bad and two live marks in their tones.
 - `PaceBar` (atom): a budget's share left against an even spend: a cut at pace, a hatch for a shortfall, a warn-to-danger bar for a surplus.
 - `ErrorBoundary` (atom): replaces children that throw while drawing with a fallback, so everything around them keeps working.
-- `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, each group named by text or an icon, with optional captions, a marked block, trailing cells that span rows, a small action chip per block, a press on the whole block, a yes-or-no flag dot at a block's edge, a chosen block brought into view, and a roomy size.
+- `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, each group named by text or an icon, with optional captions, a marked block, trailing cells that span rows, a small action chip per block, a press on the whole block, an inline group whose one-reading blocks stand side by side as tokens, a group flag that tints its name or icon, a chosen block brought into view, and a roomy size.
 - `Consequence` (molecule): one consequence the reader must see before acting, set apart by a wash and an icon, plain or warn.
 - `FloatingPanel` (atom): the surface of a window-level panel that scrolls inside the height it gets; its host places it, and it sits inside the window edges until then.
 - `OptionRow` (atom): one choice as a button: a name, a variant, a leading mark, short details (their own line, or the name's line giving way at the end), and a check on the choice in effect.

@@ -102,8 +102,6 @@
   --meter-cut-roomy: 4px;
   /* The space between counted pips (PipRun). */
   --pip-gap: 2px;
-  /* A yes-or-no dot at the edge of a lane block (LaneGrid flag). */
-  --flag-size: 5px;
   --tone-good: var(--diff-add);
   --tone-bad: var(--diff-remove);
   --tone-warn: var(--diff-modify);

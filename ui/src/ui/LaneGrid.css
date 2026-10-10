@@ -28,11 +28,16 @@
 .lane-grid-block[data-marked]::before { content: ""; position: absolute; inset-block: 0.3125rem; inset-inline-start: calc(var(--space-2) / -2 - var(--hairline));
   inline-size: var(--lane-marker); border-radius: var(--hairline); background: var(--line-focus); }
 .lane-grid-block[data-marked][data-captioned]::before { inset-block-start: calc(var(--lane-line) + 0.125rem + 0.3125rem); }
-/* A block's flag: a dot in the grid's end padding, level with the first lane, so it costs no column and no row. */
-.lane-grid-flag { position: absolute; inset-inline-end: calc(var(--space-2) / -2); inset-block-start: calc(var(--lane-line) / 2);
-  inline-size: var(--flag-size); block-size: var(--flag-size); translate: 50% -50%; border-radius: 50%; background: var(--live); pointer-events: none; }
-.lane-grid-flag[data-tone="warn"] { background: var(--tone-warn); }
-.lane-grid-block[data-captioned] .lane-grid-flag { inset-block-start: calc(var(--lane-line) * 1.5 + 0.125rem); }
+/* A group's flag: the name or icon takes the tone. */
+.lane-grid-name[data-tone="live"] { color: var(--ink-live); }
+.lane-grid-name[data-tone="warn"] { color: var(--ink-warn); }
+/* An inline group: its blocks as tokens on the first line, from where the lanes start. */
+.lane-grid-tokens { grid-column: label / end; grid-row: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 0.125rem var(--space-5);
+  min-inline-size: 0; min-block-size: var(--lane-line); }
+.lane-grid-token { position: relative; display: inline-flex; align-items: center; gap: var(--space-2); block-size: var(--lane-line); }
+.lane-grid-token-mark { display: flex; align-items: center; }
+.lane-grid-token[data-marked]::before { content: ""; position: absolute; inset-block: 0.3125rem; inset-inline-start: calc(var(--space-2) / -2 - var(--hairline));
+  inline-size: var(--lane-marker); border-radius: var(--hairline); background: var(--line-focus); }
 .lane-grid-caption { grid-column: label / end; grid-row: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
 .lane-grid-block[data-struck] .lane-grid-caption { text-decoration: line-through; opacity: 0.7; }
 .lane-grid-note { grid-column: label / end; grid-row: var(--row); color: var(--muted-foreground); line-height: var(--lane-line); }
@@ -71,9 +76,9 @@
 .lane-grid[data-size="roomy"] .lane-grid-chip svg { inline-size: 0.8125rem; block-size: 0.8125rem; }
 
 /* A pressable block: the whole block takes the press, tinted out to a small margin so the lanes do not move. */
-.lane-grid-block[data-pressable] { cursor: pointer; border-radius: var(--radius-document); transition: background-color 150ms, box-shadow 150ms; }
-.lane-grid-block[data-pressable]:hover { background: var(--hover-surface); box-shadow: 0 0 0 var(--space-1) var(--hover-surface); }
-.lane-grid-block[data-pressable]:active { background: var(--active-surface); box-shadow: 0 0 0 var(--space-1) var(--active-surface); }
+:is(.lane-grid-block, .lane-grid-token)[data-pressable] { cursor: pointer; border-radius: var(--radius-document); transition: background-color 150ms, box-shadow 150ms; }
+:is(.lane-grid-block, .lane-grid-token)[data-pressable]:hover { background: var(--hover-surface); box-shadow: 0 0 0 var(--space-1) var(--hover-surface); }
+:is(.lane-grid-block, .lane-grid-token)[data-pressable]:active { background: var(--active-surface); box-shadow: 0 0 0 var(--space-1) var(--active-surface); }
 /* The press's name for a keyboard: drawn as nothing until it has focus, then as a ring round the block. */
 .lane-grid-open { position: absolute; inset: 0; padding: 0; border: 0; border-radius: var(--radius-document);
   background: none; pointer-events: none; }
@@ -82,7 +87,7 @@
 /* The action chip stays its own press above the block's. */
 .lane-grid-act { z-index: 1; }
 /* The block the reader came for: a wash that settles to a quiet ground, so the eye lands and the surface is calm again. */
-.lane-grid-block[data-chosen] { scroll-margin-block: 5rem; border-radius: var(--radius-document); background: var(--hover-surface);
+:is(.lane-grid-block, .lane-grid-token)[data-chosen] { scroll-margin-block: 5rem; border-radius: var(--radius-document); background: var(--hover-surface);
   box-shadow: 0 0 0 var(--space-2) var(--hover-surface); animation: lane-grid-land 1.6s ease-out; }
 @keyframes lane-grid-land { from { background: var(--live-wash); box-shadow: 0 0 0 var(--space-2) var(--live-wash); } }
 

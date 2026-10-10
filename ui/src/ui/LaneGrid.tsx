@@ -52,12 +52,6 @@ export interface LaneBlock {
   press?: { label: string; onPress: () => void } | undefined;
   /** The block the reader came for: marked, and brought into view when the grid is drawn. */
   chosen?: boolean;
-  /**
-   * A yes-or-no the block carries, such as something waiting to be used:
-   * a small dot past the end of its first lane, in the grid's edge, so it
-   * takes no column and no row. Its words belong in the block's label.
-   */
-  flag?: { tone?: "live" | "warn" } | undefined;
 }
 export interface LaneGroup {
   key: string;
@@ -67,6 +61,31 @@ export interface LaneGroup {
   icon?: ReactNode;
   note?: string | undefined;
   blocks: readonly LaneBlock[];
+  /**
+   * Its blocks are one reading each, with no level to plot, so they stand
+   * side by side on the group's first line as tokens (a value and its
+   * trailing cell), wrapping when the line is full, instead of a line each.
+   */
+  inline?: boolean;
+  /**
+   * A yes-or-no the group carries, such as something waiting to be used:
+   * the name or icon itself takes the tone, so it costs no column and no row.
+   * `words` say it for hover and a screen reader.
+   */
+  flag?: { tone?: "live" | "warn"; words: string } | undefined;
+}
+
+/** One block as a token on a line it shares: each row's value (or mark), then its trailing cells. */
+function tokenOf(block: LaneBlock) {
+  const press = block.press;
+  return <div key={block.key} className="lane-grid-token" role="group" aria-label={block.label} title={block.caption}
+    data-marked={block.marked || undefined} data-struck={block.struck || undefined} data-pressable={press ? true : undefined}
+    data-chosen={block.chosen || undefined} onClick={press ? () => press.onPress() : undefined}>
+    {press ? <button type="button" className="lane-grid-open" aria-label={press.label} /> : null}
+    {block.rows.map((row) => <span key={row.key} className="lane-grid-token-mark" role="img" aria-label={row.words} title={row.words}>
+      {row.value ?? row.mark}</span>)}
+    {block.spans.map((span) => <span key={span.start} aria-hidden="true">{span.content}</span>)}
+  </div>;
 }
 
 /**
@@ -74,7 +93,8 @@ export interface LaneGroup {
  * so lanes start and end together and read against each other across groups.
  * Columns: group name, row label (only when some row has one), mark, value,
  * a trailing cell that may span rows, and a block action (only when some
- * block has one). A group is named by its icon when it has one. `faded`
+ * block has one). A group is named by its icon when it has one, and an
+ * `inline` group draws its blocks as tokens on one line. `faded`
  * takes confidence away without adding alarm; `flush` drops the list inset,
  * for a grid that does not sit under a group header. `roomy` draws the same
  * lanes one step larger, for a surface given to them alone.
@@ -95,9 +115,12 @@ export function LaneGrid({ groups, captions = true, faded = false, flush = false
   return <div ref={frame} className="lane-grid-frame">
     <div className="lane-grid" data-labelled={labelled || undefined} data-acting={acting || undefined}
       data-faded={faded || undefined} data-flush={flush || undefined} data-size={size === "roomy" ? size : undefined}>
-      {groups.map((group) => <div key={group.key} className="lane-grid-group" role="group" aria-label={group.name}>
-        <span className="lane-grid-name" data-icon={group.icon ? true : undefined} title={group.name} aria-hidden="true">{group.icon ?? group.name}</span>
+      {groups.map((group) => <div key={group.key} className="lane-grid-group" role="group"
+        aria-label={group.flag ? `${group.name}, ${group.flag.words}` : group.name}>
+        <span className="lane-grid-name" data-icon={group.icon ? true : undefined} data-tone={group.flag ? group.flag.tone ?? "live" : undefined}
+          title={group.flag ? `${group.name}: ${group.flag.words}` : group.name} aria-hidden="true">{group.icon ?? group.name}</span>
         {group.blocks.length === 0 ? <span className="lane-grid-note" style={{ "--row": 1 }}>{group.note}</span>
+          : group.inline ? <div className="lane-grid-tokens">{group.blocks.map(tokenOf)}</div>
           : group.blocks.map((block) => {
             const captioned = captions && block.caption !== undefined && block.caption !== "";
             const first = captioned ? 2 : 1;
@@ -108,7 +131,6 @@ export function LaneGrid({ groups, captions = true, faded = false, flush = false
               onClick={press ? () => press.onPress() : undefined} style={{ "--rows": Math.max(1, block.rows.length) }}>
               {/* A pointer presses the block itself, so each lane keeps its hover words; a key presses this button, and its click reaches the block. */}
               {press ? <button type="button" className="lane-grid-open" aria-label={press.label} /> : null}
-              {block.flag ? <i className="lane-grid-flag" data-tone={block.flag.tone ?? "live"} aria-hidden="true" /> : null}
               {captioned ? <span className="lane-grid-caption" aria-hidden="true">{block.caption}</span> : null}
               {block.note !== undefined && block.rows.length === 0 ? <span className="lane-grid-note" style={{ "--row": first }}>{block.note}</span> : null}
               {block.rows.map((row, index) => <Fragment key={row.key}>

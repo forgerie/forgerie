@@ -120,13 +120,13 @@ describe("account meters", () => {
     const confirm = () => dialog()!.querySelector<HTMLButtonElement>(".wt-primary")!;
     beforeEach(() => { answer = () => Promise.resolve(withResets); HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.open = true; }; });
 
-    it("flags each account that has one in the sidebar with a dot, and offers nothing to press there", async () => {
+    it("tints the service's mark in the sidebar while an account has one, and offers nothing to press there", async () => {
       await render(settings());
       expect(document.querySelectorAll(".shelf .lane-grid-act")).toHaveLength(0);
-      expect([...document.querySelectorAll(".shelf .lane-grid-block")].map((node) => [node.getAttribute("aria-label"), node.querySelector(".lane-grid-flag") !== null])).toEqual([
-        ["me@work.example, 1 reset available, expires Oct 22", true], ["a@example, routed, 2 resets available, the first expires Oct 22", true], ["b@example", false]]);
+      expect([...document.querySelectorAll(".shelf .lane-grid-name")].map((node) => [node.getAttribute("data-tone"), node.getAttribute("title")])).toEqual([
+        ["live", "Claude: 1 account has a reset banked"], ["live", "Codex: 1 account has a reset banked"]]);
+      expect(document.querySelectorAll(".shelf .lane-grid-flag")).toHaveLength(0);
     });
-
     it("marks each account that has one, and spends nothing until the question is answered", async () => {
       await render(settings());
       await openSheet();
@@ -243,24 +243,26 @@ describe("account meters", () => {
       expect(sheet()!.querySelector(".lane-grid-block[data-struck]")!.getAttribute("aria-label")).toBe("off@example, out of service");
     });
   });
-  it("draws a pool and a balance in the sidebar as a dot and an amount where shares stand, with nothing in the lane", async () => {
+  it("draws one-reading accounts side by side in the sidebar: a dot or an amount and its clock, with no lane", async () => {
     answer = () => Promise.resolve({ ...payload, providers: [
-      { id: "antigravity", name: "Antigravity", accounts: [{ email: "g@example", available: true, selected: true, priority: 0, windows: [
-        { id: "antigravity_gemini", name: "Gemini", usedPercent: 100, remainingPercent: 0, resetsAt: "2026-10-09T23:00:00Z" }] }] },
+      { id: "antigravity", name: "Antigravity", accounts: [
+        { email: "g@example", available: true, selected: false, priority: 0, windows: [
+          { id: "antigravity_gemini", name: "Gemini", usedPercent: 100, remainingPercent: 0, resetsAt: "2026-10-09T23:00:00Z" }] },
+        { email: "h@example", available: true, selected: true, priority: 0, windows: [
+          { id: "antigravity_gemini", name: "Gemini", usedPercent: 0, remainingPercent: 100, resetsAt: "2026-10-09T09:00:00Z" }] }] },
       { id: "openrouter", name: "OpenRouter", routing: "rotating", accounts: [{ email: "sk-or", available: true, selected: true, priority: 0, windows: [
         { id: "openrouter_credits", name: "Credits", usedPercent: 0, remainingPercent: 100, resetsAt: null, remainingAmount: 7.1 }] }] },
     ] });
     await render(settings());
-    const [pool, balance] = [...document.querySelectorAll(".shelf .lane-grid-block")];
-    expect(pool!.querySelector(".lane-grid-mark")!.childElementCount).toBe(0);
-    expect(pool!.querySelector(".lane-grid-value .signal-dot[data-off]:not([data-run])")).not.toBeNull();
-    // A refusing pool cannot serve until it resets, so its clock says so as a dry lane's does.
-    expect(pool!.querySelector(".lane-grid-trail")!.textContent).toBe("↓19h");
-    expect(balance!.querySelector(".lane-grid-mark")!.childElementCount).toBe(0);
-    expect(balance!.querySelector(".lane-grid-value")!.textContent).toBe("$7");
-    expect(balance!.querySelector(".lane-grid-trail")).toBeNull();
+    expect(document.querySelectorAll(".shelf .lane-grid-block")).toHaveLength(0);
+    const tokens = [...document.querySelectorAll<HTMLElement>(".shelf .lane-grid-token")];
+    // A refusing pool's clock says it cannot serve until it resets, as a dry lane's does.
+    expect(tokens.map((node) => [node.getAttribute("aria-label"), node.textContent])).toEqual([["g@example, out of service", "↓19h"], ["h@example, routed", "5h"], ["sk-or", "$7"]]);
+    expect(tokens[0]!.querySelector(".signal-dot[data-off]:not([data-run])")).not.toBeNull();
+    expect(tokens[1]!.hasAttribute("data-marked")).toBe(true);
     // The sheet keeps the full drawing: the pool's dots across the lane and the balance's pips.
-    await act(async () => (pool as HTMLElement).click());
+    await act(async () => tokens[0]!.click());
+    expect(document.querySelector("dialog.sheet-dialog .lane-grid-block[data-chosen]")!.getAttribute("aria-label")).toBe("g@example, out of service");
     expect(document.querySelector("dialog.sheet-dialog .signal-dot[data-run][data-off]")).not.toBeNull();
     expect(document.querySelector<HTMLElement>("dialog.sheet-dialog .pip-run")!.style.getPropertyValue("--pips")).toBe("7");
   });

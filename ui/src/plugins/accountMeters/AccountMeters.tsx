@@ -55,7 +55,7 @@ export interface BlockOptions {
   chosen?: string | undefined;
   /**
    * Drawn for a glance: pools and balances leave the lane empty, and a banked
-   * reset is a dot at the block's edge rather than a chip to press.
+   * reset tints the service's mark rather than offering a chip to press.
    */
   glance?: boolean;
 }
@@ -70,7 +70,6 @@ export function meterBlock(account: MeterAccount, provider: string, index: numbe
       value: valueOf(line.mark, line.share, glance) }))
     : [{ key: "empty", mark: <Figure tone="faint">—</Figure>, words: `${who}: ${account.empty ?? "nothing to show"}.` }];
   return {
-    flag: reset && glance ? { tone: reset.soon ? "warn" : "live" } : undefined,
     action: reset && onAskReset && !glance ? { label: `${reset.words}. Use a reset…`, icon: <RotateCcwIcon />, count: String(reset.count),
       tone: reset.soon ? "warn" : "live", onPress: () => onAskReset(account.key) } : undefined,
     press: onOpen ? { label: `Quota details for ${who}`, onPress: () => onOpen(account.key) } : undefined,
@@ -82,18 +81,34 @@ export function meterBlock(account: MeterAccount, provider: string, index: numbe
   };
 }
 
-/** Every account of every service as lane groups, each service named by its mark. */
+/** An account that is one reading with no level: a pool's yes or no, or a balance. */
+const single = (account: MeterAccount) => account.lines.length === 1 && account.lines[0]!.mark.kind !== "bar";
+
+/**
+ * Every account of every service as lane groups, each service named by its
+ * mark. At a glance, a service whose accounts are each one reading with no
+ * level draws them side by side on one line, and a service with a banked
+ * reset on any account tints its mark: amber when one lapses soon.
+ */
 export function meterGroups(providers: readonly MeterProvider[], options: BlockOptions = {}): LaneGroup[] {
-  return providers.map((provider) => ({ key: provider.id, name: provider.name, icon: iconOf(provider), note: "—",
-    blocks: provider.accounts.map((account, index) => meterBlock(account, provider.name, index, options)) }));
+  const glance = options.glance ?? false;
+  return providers.map((provider) => {
+    const banked = provider.accounts.filter((account) => account.reset !== undefined);
+    const flag = glance && banked.length > 0 ? { tone: banked.some((account) => account.reset?.soon) ? "warn" as const : "live" as const,
+      words: banked.length === 1 ? "1 account has a reset banked" : `${String(banked.length)} accounts have resets banked` } : undefined;
+    return { key: provider.id, name: provider.name, icon: iconOf(provider), note: "—", flag,
+      inline: glance && provider.accounts.length > 0 && provider.accounts.every(single),
+      blocks: provider.accounts.map((account, index) => meterBlock(account, provider.name, index, options)) };
+  });
 }
 
 /**
  * Shape: account meters at the foot of the session list, as a heads-up
  * display. Open, every account in service, each service named by its mark and
  * each account by its lanes alone; the addresses, the accounts out of service,
- * and the resets to spend live in the detail. A dot at an account's edge says
- * it has a reset banked. Pressing an account opens the detail at it. Closed,
+ * and the resets to spend live in the detail. A service's mark turns blue
+ * while any of its accounts has a reset banked; accounts that are each one
+ * reading with no level share one line. Pressing an account opens the detail at it. Closed,
  * the Quota header alone. The reading's age, when it is old, sits at the
  * header's end.
  */
