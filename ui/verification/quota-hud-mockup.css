@@ -17,53 +17,73 @@ body { margin: 0; }
 .hud .shelf-body:hover { background: var(--hover-surface); }
 .hud .lane-grid { padding-block: var(--space-1); }
 
-/* The detail sheet. */
-.qd { display: grid; gap: var(--space-6); padding: var(--sheet-pad); container: qd / inline-size; }
-.qd-provider { display: grid; gap: var(--space-2); }
-.qd-provider-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 var(--space-2); margin: 0 0 var(--space-1);
-  font-size: var(--small-text); font-weight: 600; }
-.qd-provider-mark { align-self: center; display: flex; color: var(--muted-foreground); }
-.qd-provider-note { color: var(--muted-foreground); font-size: var(--label-text); font-weight: 400; }
+/* Sheet header: the reading's age, refresh and settings, as marks. */
+.qd-tools { display: inline-flex; align-items: center; gap: var(--space-1); }
+.qd-icon { display: grid; place-items: center; inline-size: 2rem; block-size: 2rem; padding: 0; border: 0; border-radius: var(--radius-control);
+  background: none; color: var(--muted-foreground); cursor: pointer; }
+.qd-icon:hover { background: var(--hover-surface); color: var(--foreground); }
+.qd-icon svg { inline-size: 0.875rem; block-size: 0.875rem; }
 
-.qd-account { display: grid; gap: var(--space-2); padding: var(--space-3); border: var(--hairline) solid var(--line);
+.qd { display: grid; gap: var(--space-5); padding: var(--sheet-pad); }
+.qd-provider { display: grid; gap: var(--space-3); }
+.qd-provider-head { display: flex; align-items: center; gap: var(--space-2); margin: 0; color: var(--muted-foreground);
+  font-size: var(--label-text); font-weight: 600; }
+.qd-provider-mark { display: flex; font-size: var(--text-size); color: var(--foreground); }
+
+/* An account: its address, its resets, and its windows as tiles. The routed one wears the shelf's riser. */
+.acct { position: relative; display: grid; gap: var(--space-2); padding: var(--space-2) var(--space-3) var(--space-3);
   border-radius: var(--radius-surface); scroll-margin: var(--space-4); }
-/* The account the reader pressed: an outline in the focus ink, not a colour that means trouble. */
-.qd-account[data-chosen] { border-color: var(--line-focus); box-shadow: 0 0 0 var(--hairline) var(--line-focus); background: var(--tint-surface); }
-.qd-account[data-out] .qd-email { text-decoration: line-through; color: var(--muted-foreground); }
-.qd-account-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--space-2); min-inline-size: 0; }
-.qd-email { min-inline-size: 0; overflow-wrap: anywhere; font-size: var(--small-text); font-weight: 500; }
-.qd-tag { padding: 0.0625rem var(--space-2); border-radius: var(--radius-pill); font-size: var(--meta-text); line-height: 1rem; }
-.qd-tag[data-tone="live"] { background: var(--offer-wash); color: var(--ink-live); }
-.qd-tag[data-tone="bad"] { background: color-mix(in oklab, var(--diff-remove) 16%, transparent); color: var(--ink-bad); }
-.qd-empty { margin: 0; color: var(--muted-foreground); font-size: var(--label-text); }
+.acct[data-routed]::before { content: ""; position: absolute; inset-block: var(--space-3); inset-inline-start: 0;
+  inline-size: var(--lane-marker); border-radius: var(--hairline); background: var(--line-focus); }
+.acct[data-chosen] { background: var(--hover-surface); box-shadow: inset 0 0 0 var(--hairline) var(--line-focus); }
+.acct[data-out] { opacity: 0.5; }
+.acct[data-out] .acct-email { text-decoration: line-through; }
+.acct-head { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; min-block-size: 1.75rem; }
+.acct-email { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--small-text); font-weight: 500; }
+.acct-none { color: var(--muted-foreground); font-family: var(--code-font); }
 
-/* One window per row while the sheet is wide: name, bar, share, clock; the words underneath, under the bar.
-   Narrow, the name, share and clock share the top line and the bar takes the full width below. */
-.qd-windows { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
-.qd-window { display: grid; align-items: center; gap: var(--space-1) var(--space-3);
-  grid-template-columns: 7rem minmax(6rem, 1fr) 3rem 3.5rem;
-  grid-template-areas: "name bar share clock" ". words words words"; }
-.qd-window[data-hidden] .qd-window-bar, .qd-window[data-hidden] .qd-window-share { opacity: 0.55; }
-.qd-window-name { grid-area: name; display: grid; color: var(--foreground); font-size: var(--label-text); }
-.qd-hidden { color: var(--muted-foreground); font-size: var(--meta-text); }
-.qd-window-bar { grid-area: bar; display: flex; align-items: center; min-inline-size: 0; block-size: 1.125rem; }
-.qd-window-bar .pace-bar { inline-size: 100%; }
-.qd-window-share { grid-area: share; justify-self: end; }
-.qd-window-clock { grid-area: clock; justify-self: end; }
-.qd-window-words { grid-area: words; color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.4; }
-.qd-window-words[data-tone="warn"] { color: var(--ink-warn); }
-.qd-window-words[data-tone="bad"] { color: var(--ink-bad); }
-@container qd (inline-size < 30rem) {
-  .qd-window { grid-template-columns: minmax(0, 1fr) max-content max-content;
-    grid-template-areas: "name share clock" "bar bar bar" "words words words"; }
-  .qd-window-name { display: flex; align-items: baseline; gap: var(--space-2); }
-}
+/* Banked resets: one mark per reset, then the first expiry. */
+.acct-reset { flex: none; display: inline-flex; align-items: center; gap: 0.1875rem; block-size: 1.5rem; padding-inline: var(--space-2);
+  border: 0; border-radius: var(--radius-pill); background: var(--offer-wash); color: var(--ink-live); cursor: pointer;
+  font-family: var(--code-font); font-size: var(--meta-text); }
+.acct-reset svg { inline-size: 0.75rem; block-size: 0.75rem; stroke-width: 2.5; }
+.acct-reset > span { margin-inline-start: var(--space-1); }
+.acct-reset:hover { background: var(--offer-wash-hover); }
+.acct-reset[data-soon] { background: var(--lapsing-wash); color: var(--ink-warn); }
 
-.qd-reset { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding-block-start: var(--space-2);
-  border-block-start: var(--hairline) solid var(--line); color: var(--ink-live); font-size: var(--label-text); }
-.qd-reset[data-soon] { color: var(--ink-warn); }
-.qd-reset-icon { flex: none; inline-size: 0.875rem; block-size: 0.875rem; }
-.qd-reset-words { flex: 1 1 12rem; color: var(--foreground); }
-.qd-reset-use { min-block-size: 2rem; padding-inline: var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
-  background: transparent; color: inherit; font: inherit; font-weight: 500; cursor: pointer; }
-.qd-reset-use:hover { background: var(--hover-surface); }
+/* Tiles gain columns from the room the sheet has. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr)); gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.tile { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label big" "draw draw" ". clock";
+  align-items: end; gap: var(--space-1) var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-document);
+  background: var(--code-surface); }
+/* Faded content, not a faded tile, so the tile ground matches its neighbours. */
+.tile[data-hidden] > * { opacity: 0.45; }
+.tile-label { grid-area: label; display: flex; align-items: center; gap: var(--space-1); align-self: center; min-inline-size: 0;
+  color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--label-text); }
+.tile-eye { inline-size: 0.75rem; block-size: 0.75rem; }
+.tile-big { grid-area: big; font-family: var(--code-font); font-size: 1.375rem; font-variant-numeric: tabular-nums; line-height: 1; }
+.tile-big[data-tone="drained"], .tile-big[data-tone="out"] { color: var(--ink-bad); }
+.tile-big[data-tone="low"] { color: var(--ink-warn); }
+.tile-draw { grid-area: draw; display: grid; min-inline-size: 0; min-block-size: 4rem; }
+.tile-clock { grid-area: clock; justify-self: end; line-height: 1; }
+.tile-bar { display: flex; align-items: center; block-size: 4rem; }
+/* A pool reports no level: one large dot. */
+.tile-pool { justify-self: start; align-self: center; inline-size: 0.875rem; block-size: 0.875rem; border-radius: 50%; background: var(--meter-ink); }
+.tile-pool[data-off] { background: var(--destructive); }
+.tile[data-kind="balance"] { grid-template-areas: "label big"; }
+
+/* The burn chart. Time runs left to right; the share left runs bottom to top. */
+.burn { position: relative; display: block; block-size: 4rem; border-block-end: var(--hairline) solid var(--line-focus); }
+.burn-plot { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; overflow: visible; }
+.burn-past { fill: var(--hover-surface); }
+.burn-even { stroke: var(--line-focus); stroke-width: 1.5; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.burn-now { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+/* The wedge between the even line and the line from you to the reset is the problem. Above, credit expires:
+   solid, warn turning to danger. Below, you run dry: hatched warn, as the shelf draws it. */
+.burn-wedge { position: absolute; inset: 0; background: color-mix(in oklab, var(--destructive) calc(var(--heat) * 100%), var(--tone-warn)); opacity: 0.85; }
+.burn[data-kind="dry"] .burn-wedge, .burn[data-kind="drained"] .burn-wedge { background: var(--meter-hatch); opacity: 1;
+  --meter-hatch: repeating-linear-gradient(115deg, transparent 0 3px, var(--tone-warn) 3px 5px); }
+.burn-dot { z-index: 1; position: absolute; inset-inline-start: var(--now); inset-block-start: var(--level); inline-size: 0.5rem; block-size: 0.5rem;
+  translate: -50% -50%; border-radius: 50%; background: var(--foreground); box-shadow: 0 0 0 2px var(--code-surface); }
+.burn[data-kind="drained"] .burn-dot { z-index: 1; background: var(--destructive); }

@@ -5,128 +5,130 @@
 //
 // Design plan
 // -----------
-// Job of the shelf: answer "can I keep working, and where" in one glance.
-// It draws no account addresses at any size. Each account is its lanes only,
-// grouped under its service's mark. The reading is the whole shelf.
-// Job of the sheet: answer "which account is that, and why is it that colour".
-// Every account by address, every window by its full name (including the ones
-// turned off in the shelf), the pace in words, the reset as a date, and the
-// banked resets with their action.
-// The one idea: the shelf is one press target. Pressing any account opens the
-// sheet at that account and marks it, so the reader lands on what they touched.
-// Palette and type: the app's tokens only. No new colour, no new typeface.
-// Rejected: a hover card per account (no hover on the Fold); an expanding
-// shelf (it takes room from the session list, which the shelf must not);
-// initials or avatars in place of addresses (they are still labels).
+// Show, don't tell. Neither surface prints a sentence. Words live only in
+// hover text and screen-reader names.
+// Shelf: the existing lanes with no addresses. One press target.
+// Sheet: the one piece of text it adds is the address, because that is the
+// question the shelf cannot answer. Everything else is drawn:
+//   - each window is a burn chart: time runs left to right across the window,
+//     the diagonal is an even spend, the dot is you now, the shaded part is
+//     time already gone. The wedge from the dot to the reset, against the
+//     diagonal, is the problem: solid amber to red above it (credit you will
+//     lose), hatched below it (you run dry), as the shelf draws them;
+//   - the reset clock sits under the chart's right edge, where the reset is;
+//   - the routed account wears the shelf's riser; an account out of service
+//     is struck and faded; a window hidden in the shelf is faded with an
+//     eye-off mark;
+//   - banked resets are a chip of reset marks, one per reset.
+// Palette and type: the app's tokens only.
 import { createRoot } from "react-dom/client";
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { RotateCcwIcon } from "lucide-react";
+import { EyeOffIcon, RefreshCwIcon, RotateCcwIcon, Settings2Icon } from "lucide-react";
 import "../src/ui/theme.css";
 import "./quota-hud-mockup.css";
 import { SheetDialog } from "../src/ui/SheetDialog";
 import { PaceBar } from "../src/ui/PaceBar";
-import { SignalDot } from "../src/ui/SignalDot";
-import { Figure } from "../src/ui/Figure";
+import { Figure, type FigureTone } from "../src/ui/Figure";
 import { Glyph } from "../src/ui/Glyph";
 import { AccountMeters } from "../src/plugins/accountMeters/AccountMeters";
 import { meterAccount, meterModel, type MeterAccount, type MeterLine } from "../src/plugins/accountMeters/meterModel";
-import { orderedWindows, providerRouting, type QuotaProvider, type QuotaWindow } from "../src/plugins/accountMeters/quotaData";
+import { orderedWindows, providerRouting, windowLabel, type QuotaProvider } from "../src/plugins/accountMeters/quotaData";
 import { PROVIDER_MARKS } from "../src/plugins/accountMeters/providerMarks";
 import { NOW, QUOTA_WITH_RESETS, SETTINGS, ZONE } from "../src/plugins/accountMeters/fixtures/quota";
 
 const PACE = { ok: "even", unpaced: "even", dry: "short", loss: "surplus", drained: "empty" } as const;
+const CLOCK_TONE: Record<string, FigureTone> = { dry: "bad", loss: "warn", none: "faint", plain: "muted" };
 
 function mark(provider: { id: string; name: string }): ReactNode {
   const path = PROVIDER_MARKS[provider.id];
   return path ? <Glyph path={path} /> : <Figure>{provider.name.slice(0, 1).toUpperCase()}</Figure>;
 }
 
-function when(instant: string): string {
-  return new Date(instant).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: ZONE });
+/**
+ * A window as a burn chart. x: the window from its start to its reset. y: the
+ * share left. The diagonal is an even spend; the dot is now.
+ */
+function BurnChart({ remaining, pace, kind, doom }: { remaining: number; pace: number; kind: string; doom: number }) {
+  const now = 100 - pace;
+  const dot = 100 - remaining;
+  const even = 100 - pace;
+  const gap = kind === "loss" || kind === "dry" || kind === "drained";
+  return <span className="burn" data-kind={kind} style={{ "--now": `${String(now)}%`, "--level": `${String(dot)}%`, "--heat": doom }}>
+    <svg className="burn-plot" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+      <rect className="burn-past" x="0" y="0" width={now} height="100" />
+      <line className="burn-even" x1="0" y1="0" x2="100" y2="100" />
+      <line className="burn-now" x1={now} y1="0" x2={now} y2="100" />
+    </svg>
+    {gap ? <i className="burn-wedge" style={{ clipPath: `polygon(${String(now)}% ${String(dot)}%, 100% 100%, ${String(now)}% ${String(even)}%)` }} /> : null}
+    <i className="burn-dot" />
+  </span>;
 }
 
-/** The pace in words, and whether it is a problem. */
-function standingWords(line: MeterLine, available: boolean): { text: string; tone: "plain" | "warn" | "bad" } {
+/** One window as a tile: its short name and the share, the drawing, and the reset clock under the reset end. */
+function WindowTile({ line, name, hidden, out }: { line: MeterLine; name: string; hidden: boolean; out: boolean }) {
   const m = line.mark;
-  if (!available) return { text: "Not in service.", tone: "bad" };
-  if (m.kind === "pool") return m.refusing ? { text: "Refusing work. The provider reports no level.", tone: "bad" }
-    : { text: "Answering. The provider reports no level.", tone: "plain" };
-  if (m.kind === "balance") return { text: "Prepaid balance. It does not reset.", tone: m.tone === "ok" ? "plain" : m.tone === "low" ? "warn" : "bad" };
-  const s = m.standing;
-  if (s.kind === "drained") return { text: "Empty until it resets.", tone: "bad" };
-  if (s.kind === "unpaced") return { text: "No pace: the window states no length.", tone: "plain" };
-  const gap = Math.round(Math.abs(m.remaining - s.pace));
-  if (s.kind === "dry") return { text: `${String(gap)} points behind an even spend. It runs dry before it resets.`, tone: "bad" };
-  if (s.kind === "loss") return { text: `${String(gap)} points ahead of an even spend. What is left at the reset is lost.`, tone: "warn" };
-  return { text: "On pace.", tone: "plain" };
-}
-
-function lineMark(line: MeterLine): ReactNode {
-  const m = line.mark;
-  if (m.kind === "pool") return <SignalDot off={m.refusing} />;
-  if (m.kind === "balance") return <Figure tone={m.tone === "ok" ? "plain" : m.tone === "low" ? "warn" : "bad"}>{m.amount}</Figure>;
-  return <PaceBar value={m.remaining} pace={m.standing.pace} state={PACE[m.standing.kind]} heat={m.doom} />;
-}
-
-/** One window in the sheet: full name, the bar at full width, share, reset as countdown and date, pace in words. */
-function WindowRow({ line, quotaWindow, hidden, available }: { line: MeterLine; quotaWindow: QuotaWindow; hidden: boolean; available: boolean }) {
-  const words = standingWords(line, available);
-  const tone = line.clock.tone === "dry" ? "bad" : line.clock.tone === "loss" ? "warn" : line.clock.tone === "none" ? "faint" : "muted";
-  return <li className="qd-window" data-hidden={hidden || undefined}>
-    <span className="qd-window-name">{quotaWindow.name}{hidden ? <span className="qd-hidden">off in sidebar</span> : null}</span>
-    <span className="qd-window-bar">{lineMark(line)}</span>
-    <span className="qd-window-share">{line.share === undefined ? null : <Figure tone="plain">{`${line.share}%`}</Figure>}</span>
-    <span className="qd-window-clock"><Figure tone={tone}>{line.clock.text}</Figure></span>
-    <span className="qd-window-words" data-tone={words.tone}>
-      {words.text}{quotaWindow.resetsAt ? <> Resets {when(quotaWindow.resetsAt)}.</> : null}
-    </span>
+  let figure: ReactNode = null;
+  let drawing: ReactNode;
+  if (m.kind === "pool") {
+    drawing = <span className="tile-pool" data-off={m.refusing || undefined} />;
+  } else if (m.kind === "balance") {
+    figure = <span className="tile-big" data-tone={m.tone}>{m.amount}</span>;
+    drawing = null;
+  } else {
+    figure = <span className="tile-big" data-tone={m.standing.kind}>{String(m.remaining)}</span>;
+    drawing = m.standing.pace === undefined
+      ? <span className="tile-bar"><PaceBar value={m.remaining} state={PACE[m.standing.kind]} /></span>
+      : <BurnChart remaining={m.remaining} pace={m.standing.pace} kind={m.standing.kind} doom={m.doom} />;
+  }
+  return <li className="tile" data-hidden={hidden || undefined} data-out={out || undefined} data-kind={m.kind} title={line.words} aria-label={line.words}>
+    <span className="tile-label">{line.label ?? name}{hidden ? <EyeOffIcon aria-hidden className="tile-eye" /> : null}</span>
+    {figure}
+    <span className="tile-draw">{drawing}</span>
+    <span className="tile-clock"><Figure tone={CLOCK_TONE[line.clock.tone]}>{line.clock.text}</Figure></span>
   </li>;
 }
 
-function AccountSection({ provider, account, model, chosen }: {
-  provider: QuotaProvider; account: QuotaProvider["accounts"][number]; model: MeterAccount; chosen: boolean;
-}) {
+function AccountRow({ model, names, routed, chosen }: { model: MeterAccount; names: ReadonlyMap<string, string>; routed: boolean; chosen: boolean }) {
   const ref = useRef<HTMLElement>(null);
-  useEffect(() => { if (chosen) ref.current?.scrollIntoView({ block: "center" }); }, [chosen]);
-  const routed = providerRouting(provider) === "pinned" && provider.accounts.length > 1 && account.selected;
-  const windows = new Map(account.windows.map((w) => [w.id, w]));
-  return <section ref={ref} className="qd-account" data-chosen={chosen || undefined} data-out={model.out || undefined}
-    aria-label={model.email}>
-    <header className="qd-account-head">
-      <span className="qd-email">{model.email}</span>
-      {routed ? <span className="qd-tag" data-tone="live">Gets the work</span> : null}
-      {model.out ? <span className="qd-tag" data-tone="bad">Out of service</span> : null}
+  // The sheet opens in its own effect, after this one; scroll once it is drawn.
+  useEffect(() => {
+    if (!chosen) return;
+    const frame = requestAnimationFrame(() => ref.current?.scrollIntoView({ block: "center" }));
+    return () => cancelAnimationFrame(frame);
+  }, [chosen]);
+  const hiddenIds = SETTINGS as Record<string, boolean>;
+  return <section ref={ref} className="acct" data-chosen={chosen || undefined} data-out={model.out || undefined}
+    data-routed={routed || undefined} aria-label={`${model.email}${routed ? ", gets the work" : ""}${model.out ? ", out of service" : ""}`}>
+    <header className="acct-head">
+      <span className="acct-email">{model.email}</span>
+      {model.reset ? <button type="button" className="acct-reset" data-soon={model.reset.soon || undefined}
+        aria-label={`${model.reset.words}. Use a reset…`} title={`${model.reset.words}. Use a reset…`}>
+        {Array.from({ length: model.reset.count }, (_, index) => <RotateCcwIcon key={index} aria-hidden />)}
+        <span>{model.reset.soonest}</span>
+      </button> : null}
     </header>
-    {model.lines.length === 0 ? <p className="qd-empty">{model.empty ?? "Nothing to show"}.</p>
-      : <ul className="qd-windows">{model.lines.map((line) => {
-        const quotaWindow = windows.get(line.id);
-        return quotaWindow ? <WindowRow key={line.id} line={line} quotaWindow={quotaWindow}
-          hidden={(SETTINGS as Record<string, boolean>)[line.id] === false} available={account.available} /> : null;
-      })}</ul>}
-    {model.reset ? <div className="qd-reset" data-soon={model.reset.soon || undefined}>
-      <RotateCcwIcon aria-hidden className="qd-reset-icon" />
-      <span className="qd-reset-words">{model.reset.count === 1 ? "1 reset banked" : `${String(model.reset.count)} resets banked`}.
-        {" "}{model.reset.count === 1 ? "It expires" : "The first expires"} {model.reset.soonest}.</span>
-      <button type="button" className="qd-reset-use">Use a reset…</button>
-    </div> : null}
+    {model.lines.length === 0 ? <span className="acct-none" title={model.empty}>—</span>
+      : <ul className="tiles">{model.lines.map((line) =>
+        <WindowTile key={line.id} line={line} name={windowLabel({ id: line.id, name: names.get(line.id) ?? line.id }) ?? names.get(line.id) ?? line.id} hidden={hiddenIds[line.id] === false} out={model.out} />)}</ul>}
   </section>;
 }
 
 function QuotaSheet({ focus, onClose }: { focus: string | undefined; onClose: () => void }) {
   const age = Math.round((NOW.getTime() - new Date(QUOTA_WITH_RESETS.updatedAt).getTime()) / 60000);
-  return <SheetDialog title="Quota" subtitle={`Read ${age <= 1 ? "a minute" : `${String(age)} minutes`} ago`} onClose={onClose}
-    closeLabel="Close quota" actions={[{ label: "Refresh", onPress: () => undefined }, { label: "Settings", onPress: () => undefined }]}>
+  const tools = <span className="qd-tools">
+    <Figure>{`${String(Math.max(1, age))}m`}</Figure>
+    <button type="button" className="qd-icon" aria-label="Refresh" title="Refresh"><RefreshCwIcon aria-hidden /></button>
+    <button type="button" className="qd-icon" aria-label="Quota settings" title="Quota settings"><Settings2Icon aria-hidden /></button>
+  </span>;
+  return <SheetDialog title="Quota" subtitle={tools} onClose={onClose} closeLabel="Close quota">
     <div className="qd">
-      {QUOTA_WITH_RESETS.providers.map((provider) => <section key={provider.id} className="qd-provider" aria-label={provider.name}>
-        <h3 className="qd-provider-head">
-          <span className="qd-provider-mark" aria-hidden>{mark(provider)}</span>{provider.name}
-          <span className="qd-provider-note">{providerRouting(provider) === "pinned"
-            ? provider.accounts.length > 1 ? "Work goes to one account at a time" : "One account"
-            : "Work rotates across accounts"}</span>
-        </h3>
+      {QUOTA_WITH_RESETS.providers.map((provider: QuotaProvider) => <section key={provider.id} className="qd-provider" aria-label={provider.name}>
+        <h3 className="qd-provider-head" title={provider.name}><span className="qd-provider-mark" aria-hidden>{mark(provider)}</span>{provider.name}</h3>
         {provider.accounts.map((account) => {
           const model = meterAccount(provider.id, account, orderedWindows(account), false, NOW, ZONE);
-          return <AccountSection key={model.key} provider={provider} account={account} model={model} chosen={focus === model.key} />;
+          const routed = providerRouting(provider) === "pinned" && provider.accounts.length > 1 && account.selected;
+          const names = new Map(account.windows.map((w) => [w.id, w.name]));
+          return <AccountRow key={model.key} model={model} names={names} routed={routed} chosen={focus === model.key} />;
         })}
       </section>)}
     </div>
