@@ -1,14 +1,15 @@
 # GitHub backlog migration
 
-The open Forgerie backlog now lives in [GitHub Issues](https://github.com/forgerie/forgerie/issues).
-On 2026-10-09, 19 parking-lot items moved to issues. The two completed item directories remain as local history.
+The full Forgerie backlog now lives in [GitHub Issues](https://github.com/forgerie/forgerie/issues).
+On 2026-10-09, 19 parking-lot items and two completed records moved to issues.
+All local backlog files under `work/items/` are removed, including the active-directory placeholder.
 
 Each issue preserves the original description, acceptance criteria, metadata, and backlog ID.
 Priority uses `priority: high`, `priority: medium`, or `priority: low`. The `parking-lot` label preserves the source category.
 Forgerie lists trusted authors by default. The migration does not enable outside-author issue text for agents.
 
 GitHub issue creation dates are migration dates. Original dates remain in each issue body.
-The GitHub provider does not calculate `blocked_by` relationships. None of these 19 items declared them.
+The GitHub provider does not calculate `blocked_by` relationships. None of the 19 parking-lot items declared them.
 
 | Original ID | GitHub issue |
 | --- | --- |
@@ -31,3 +32,14 @@ The GitHub provider does not calculate `blocked_by` relationships. None of these
 | `01M2JYFC90DDHPPPVXWN33884M` | [#17](https://github.com/forgerie/forgerie/issues/17) |
 | `01M4CR9YW13CBNV54F2GDNPDNQ` | [#18](https://github.com/forgerie/forgerie/issues/18) |
 | `01M4HB7FZGB7RR4NQDFTXNEA4N` | [#19](https://github.com/forgerie/forgerie/issues/19) |
+| `01KZFNG5XM0Y6CN7B39KFZFCE5` | [#20](https://github.com/forgerie/forgerie/issues/20), completed |
+| `01KZKXSTMDPYHZQ2FDZJQAP5Y7` | [#21](https://github.com/forgerie/forgerie/issues/21), completed |
+
+## Completed records
+
+Issues #20 and #21 are closed as completed. Their comments preserve all five
+original Markdown documents, including both plans and the dictation requirements.
+The 71,113-byte dictation plan spans two comments because it exceeds the issue-body limit.
+Every document was reconstructed from GitHub and checked against its original SHA-256
+before its local file was removed. The original dates and completion evidence remain
+in the document text.

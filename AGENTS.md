@@ -7,11 +7,12 @@ product. The UX will diverge heavily from upstream by design.
 
 ## Backlog
 
-Track open work in [forgerie/forgerie GitHub Issues](https://github.com/forgerie/forgerie/issues).
+Track all work in [forgerie/forgerie GitHub Issues](https://github.com/forgerie/forgerie/issues); completed work belongs in closed issues.
 Before creating an issue, search existing open and closed issues for the same work.
 Use `priority: high`, `priority: medium`, or `priority: low` for priority.
-The `parking-lot` label marks deferred work. Do not create new markdown backlog
-items under `work/items/`; its completed records remain as history.
+The `parking-lot` label marks deferred work. The local `work/items/` backlog is
+removed. Keep backlog descriptions, plans, requirements, and completion records
+in GitHub issues and their comments.
 The original item-to-issue mapping is in `docs/backlog/2026-10-09-github-migration.md`.
 
 ## Fork model: quasi-upstream via `upstream.lock`
