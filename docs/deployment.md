@@ -2,6 +2,10 @@
 
 Forgerie runs from a checkout with separate web and session-daemon processes. The existing zao systemd user units run `node dist/server/index.js` and `node dist/server/sessiond.js`. The Tailscale proxy is a separate unit.
 
+The server deployment target is Linux. Native Windows server installations are unsupported, and npm rejects installation on `win32`. Windows browsers can still connect to a Linux server. WSL2 has not been verified as a deployment target. Excluding Windows from package metadata does not establish support for other operating systems.
+
+The daemon requires `flock` from util-linux for exclusive ownership of its Durable databases. Keep that kernel-lock guarantee and owner-only credential file permissions. Do not bypass them to run on an unsupported host.
+
 The CLI controls existing Linux units. It never writes unit files or installs a service manager.
 
 | Command | Action |

@@ -17,6 +17,10 @@ Forgerie uses Vitest for contracts, services, routes, components, and integratio
 | `npm run build` | Clean compiled server output and browser build. |
 | `npm run smoke:package-install` | Isolated installed-package managed-process and subagent smoke tests. |
 
+GitHub CI runs on Linux. It uses `npm run test:coverage -- --no-file-parallelism` to prevent compiler-graph and SDK acceptance tests from competing for CPU. Every test, deadline, isolation boundary, and coverage threshold stays enabled. The cost is a longer coverage run. Local `npm run test:coverage` still permits four workers.
+
+The package-install smoke test also passes the real tarball's manifest to npm's own platform validator with `os: "win32"`. npm's CLI `--os` override only affects optional dependencies. This verifies the package restriction, not execution on Windows. Native Windows server support is retired. Browser access from Windows is unchanged.
+
 Use focused tests while editing. Run `npm run verify` before merging cross-cutting changes. Build and install only in an isolated worktree when active agents use the deployed checkout. Do not restart live services to run tests.
 
 ## Browser verification

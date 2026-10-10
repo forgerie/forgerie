@@ -11,14 +11,9 @@ permissions:
 
 jobs:
   verify:
-    name: Verify and package (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      # Report Linux and Windows results independently instead of cancelling
-      # the matrix on the first failure.
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    # Keep the existing Linux check name for branch protection.
+    name: Verify and package (ubuntu-latest)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -37,23 +32,18 @@ jobs:
         run: npm ci
 
       - name: Verify static checks
-        if: runner.os == 'Linux'
         run: npm run verify:static
 
-      - name: Run tests
-        if: runner.os == 'Windows'
-        run: npm test
-
+      # Compiler-graph and SDK acceptance tests contend for CPU under coverage.
+      # Serialize files rather than increasing deadlines or dropping coverage.
       - name: Run tests and measure coverage
-        if: runner.os == 'Linux'
-        run: npm run test:coverage
+        run: npm run test:coverage -- --no-file-parallelism
 
       - name: Verify the browser app
-        if: runner.os == 'Linux'
         run: npm run verify:ui
 
       - name: Upload test coverage report
-        if: runner.os == 'Linux' && always()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
@@ -65,7 +55,6 @@ jobs:
         run: npm run build
 
       - name: Smoke test npm 12 global package install
-        if: runner.os == 'Linux'
         run: npm run smoke:package-install
 
       - name: Check npm package contents
