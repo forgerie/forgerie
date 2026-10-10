@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +16,12 @@ import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import { createDurableChildHost, LiveChildSessionIndex } from "./durableChildHost.js";
 import { ChildRunStore } from "./childRunStore.js";
 import { registerWorkflowRoutes } from "./workflowRoutes.js";
+import { DurableChildWorktrees } from "./durableChildWorktrees.js";
+import { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
+import { SessionWorktreeStore } from "../workspaces/sessionWorktreeStore.js";
+import { sanitizedGitEnv } from "../git/gitEnv.js";
 import { AgentDirPromptLibrary } from "../resources/promptLibrary.js";
+import { ResourceEditorService } from "../resources/resourceEditorService.js";
 import { registerPromptLibraryRoutes } from "../resources/promptLibraryRoutes.js";
 import { WorkflowRunSchema, type WorkflowRun } from "../../shared/workflowRuns.js";
 
@@ -37,6 +43,8 @@ let service: PiSessionService;
 let models: ModelRuntime;
 let store: ChildRunStore;
 let autoComplete = false;
+let worktrees: SessionWorktrees | undefined;
+let isolate = false;
 let started = 0;
 let sequence = 0;
 const errors: unknown[] = [];
@@ -70,14 +78,14 @@ const route: FauxResponseFactory = (context) => {
   if (said.startsWith("CHILD-TASK")) return fauxAssistantMessage([fauxToolCall("work", {})], { stopReason: "toolUse" });
   if (said.includes("WORKFLOW-TEST")) {
     if (said.includes('"task":"parallel"')) return fauxAssistantMessage(["alpha", "beta", "gamma"].map((name) => fauxToolCall("child_agent", { action: "spawn", name, message: "CHILD-TASK" })), { stopReason: "toolUse" });
-    return call("child_agent", { action: "spawn", name: `writer${String(++sequence)}`, message: said.includes('"task":"failure"') ? "FAIL-CHILD" : "CHILD-TASK" });
+    return call("child_agent", { action: "spawn", name: `writer${String(++sequence)}`, message: said.includes('"task":"failure"') ? "FAIL-CHILD" : "CHILD-TASK", ...(isolate ? { isolation: "worktree" } : {}) });
   }
   return answer("Session title");
 };
 function openService(): PiSessionService {
   return new PiSessionService(new CapturingSessionEventHub(), { agentDir, modelRuntime: models,
     sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] }), archiveStore: emptyArchiveStore(), heartbeatIntervalMs: 60000,
-    durableChildAgents: createDurableChildHost({ extraTools: [work], index: new LiveChildSessionIndex(join(agentDir, "live.json")), runRecords: store, onRunRecordError: (error) => { errors.push(error); } }),
+    durableChildAgents: createDurableChildHost({ extraTools: [work], index: new LiveChildSessionIndex(join(agentDir, "live.json")), runRecords: store, onRunRecordError: (error) => { errors.push(error); }, ...(worktrees === undefined ? {} : { worktrees }) }),
   });
 }
 async function until<T>(check: () => Promise<T | false | undefined>): Promise<T> {
@@ -94,7 +102,7 @@ function runBody(value: unknown): WorkflowRun {
   return value;
 }
 beforeEach(async () => {
-  errors.length = 0; started = 0; sequence = 0; autoComplete = false;
+  errors.length = 0; started = 0; sequence = 0; autoComplete = false; worktrees = undefined; isolate = false;
   root = await mkdtemp(join(tmpdir(), "forgerie-workflow-runs-"));
   agentDir = join(root, "agent");
   await mkdir(agentDir);
@@ -171,6 +179,26 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     } finally { await server.close(); }
   }, 30000);
 
+  it("keeps an accepted launch and its result after revision-checked source deletion", async () => {
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "experiment", body: definition });
+    const run = await service.runWorkflow(ref, "experiment", {}, "delete-source");
+    await until(() => Promise.resolve(started > 0));
+    const editor = new ResourceEditorService({ agentDir, bundledPaths: [], session: () => Promise.resolve({ cwd: root }) });
+    const entry = (await editor.inventory()).resources.find((resource) => resource.path === join(agentDir, "prompts/experiment.md"));
+    if (entry === undefined) throw new Error("Expected workflow resource");
+    const file = await editor.read(entry.id);
+    await editor.delete(entry.id, { baseRevision: file.revision });
+    expect((await service.runWorkflow(ref, "experiment", {}, "delete-source")).definition.text).toBe(definition);
+    await until(async () => {
+      const child = (await service.workflowRuns(ref))[0]?.children[0];
+      return child?.state.kind === "settled" && child.state.delivered;
+    });
+    await service.finishWorkflow(ref, run.id, "completed", "The accepted snapshot still ran");
+    expect((await service.workflowRuns(ref))[0]?.children[0]?.state).toMatchObject({ outcome: "answered", result: "Done." });
+    expect(await readFile(join(root, "result.txt"), "utf8")).toBe("CHILD-RESULT");
+  });
+
   it("rejects malformed inputs, scripts, foreign completions, and mutated completion results", async () => {
     const server = app();
     try {
@@ -208,7 +236,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
         return current?.children[0]?.state.kind === "settled" && current.children[0].state.deliveryError !== undefined ? current : false;
       });
       const state = failed.children[0]?.state;
-      expect(state).toMatchObject({ kind: "settled", outcome: "failed", delivered: false });
+      expect(state).toMatchObject({ kind: "settled", outcome: "answered", result: "Done.", delivered: false });
       if (state?.kind === "settled") expect(state.deliveryError).toContain("reporter");
       expect(errors.length).toBeGreaterThan(0);
       await until(async () => ((await service.status(ref)).workingAgents ?? 0) === 0);
@@ -222,6 +250,30 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     }
   });
 
+  it("keeps the child's answer when its worktree report fails", async () => {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: sanitizedGitEnv(), encoding: "utf8" });
+    git("init", "-b", "main"); git("config", "user.email", "workflow@example.invalid"); git("config", "user.name", "Workflow tests");
+    await writeFile(join(root, "base.txt"), "base");
+    git("add", "base.txt"); git("commit", "-m", "Initial workspace");
+    const ownership = new SessionWorktreeStore(join(agentDir, "ownership.json"));
+    await ownership.initialize();
+    worktrees = new SessionWorktrees(ownership, { publish: () => undefined });
+    await service.dispose(); service = openService(); isolate = true;
+    vi.spyOn(DurableChildWorktrees.prototype, "report").mockRejectedValue(new Error("Worktree report unavailable"));
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "experiment", body: definition });
+    const run = await service.runWorkflow(ref, "experiment", {}, "worktree-report-failure");
+    const recovered = await until(async () => {
+      const current = (await service.workflowRuns(ref))[0];
+      return current?.children[0]?.state.kind === "settled" && current.children[0].state.deliveryError !== undefined ? current : false;
+    });
+    expect(recovered.children[0]?.state).toMatchObject({ kind: "settled", outcome: "answered", result: "Done.", delivered: false });
+    const child = (await service.durableChildren(ref))[0];
+    if (child?.worktree === undefined) throw new Error("Expected isolated child");
+    expect(await readFile(join(child.worktree.path, "result.txt"), "utf8")).toBe("CHILD-RESULT");
+    await service.finishWorkflow(ref, run.id, "completed", "Recovered the answer; the completion report failed");
+  });
+
   it("associates three parallel children, keeps stopped and failed results, and expires only completed records", async () => {
     const ref = { id: (await service.start(root)).id, cwd: root };
     await new AgentDirPromptLibrary(agentDir).save({ name: "experiment", body: definition });
@@ -232,9 +284,12 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     await service.stopDurableChild(ref, beta.conversationId);
     const settled = await until(async () => {
       const run = (await service.workflowRuns(ref))[0];
-      return run?.children.length === 3 && run.children.every((child) => child.state.kind === "settled" && child.state.delivered) ? run : false;
+      return run?.children.length === 3 && run.children.every((child) => child.state.kind === "settled" && (child.state.delivered || child.state.deliveryError !== undefined)) ? run : false;
     });
     expect(settled.children.map((child) => child.state.kind === "settled" ? child.state.outcome : "working").sort()).toEqual(["answered", "answered", "stopped"]);
+    const stopped = settled.children.find((child) => child.name === "beta")?.state;
+    expect(stopped).toMatchObject({ kind: "settled", outcome: "stopped", delivered: false });
+    if (stopped?.kind === "settled") expect(stopped.deliveryError).toBeTruthy();
     await service.finishWorkflow(ref, first.id, "stopped", "Stopped this experiment");
     await until(async () => !(await service.status(ref)).isStreaming);
     const failed = await service.runWorkflow(ref, "experiment", { task: "failure" }, "failure-1");

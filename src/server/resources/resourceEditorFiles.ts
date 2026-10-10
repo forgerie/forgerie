@@ -71,4 +71,12 @@ export async function writeResourceFile(path: string, root: string, expected: Re
   } finally { await unlink(temporary).catch((error: unknown) => { if (!isMissingResource(error)) throw error; }); }
 }
 
+export async function deleteResourceFile(path: string, root: string, expected: ResourceFileContents): Promise<void> {
+  const target = await writableResourcePath(path, root);
+  if (target !== expected.canonicalPath || (await readResourceFile(path)).revision !== expected.revision) {
+    throw new ResourceEditorError("conflict", "This file changed on disk. Read it again before deleting.");
+  }
+  await unlink(target);
+}
+
 export function isMissingResource(error: unknown): boolean { return error instanceof Error && "code" in error && error.code === "ENOENT"; }

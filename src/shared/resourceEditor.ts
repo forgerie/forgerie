@@ -62,17 +62,21 @@ export const ResourceEditorSaveRequestSchema = Type.Object({
 }, { additionalProperties: false });
 export type ResourceEditorSaveRequest = Static<typeof ResourceEditorSaveRequestSchema>;
 
+const mutationEffect = Type.Union([
+  Type.Object({ kind: Type.Literal("file-only") }),
+  Type.Object({ kind: Type.Literal("uncommitted") }),
+  Type.Object({ kind: Type.Literal("committed"), sha: Type.String({ pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" }), branch: text }),
+]);
 export const ResourceEditorSaveSchema = Type.Object({
   file: ResourceEditorFileSchema,
-  effect: Type.Union([
-    Type.Object({ kind: Type.Literal("unchanged") }),
-    Type.Object({ kind: Type.Literal("file-only") }),
-    Type.Object({ kind: Type.Literal("uncommitted") }),
-    Type.Object({ kind: Type.Literal("committed"), sha: Type.String({ pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" }), branch: text }),
-  ]),
+  effect: Type.Union([Type.Object({ kind: Type.Literal("unchanged") }), mutationEffect]),
   reload: Type.Literal("explicit-session-reload"),
 });
 export type ResourceEditorSave = Static<typeof ResourceEditorSaveSchema>;
+export const ResourceEditorDeleteRequestSchema = Type.Object({ baseRevision: id }, { additionalProperties: false });
+export type ResourceEditorDeleteRequest = Static<typeof ResourceEditorDeleteRequestSchema>;
+export const ResourceEditorDeleteSchema = Type.Object({ resourceId: id, effect: mutationEffect, reload: Type.Literal("explicit-session-reload") });
+export type ResourceEditorDelete = Static<typeof ResourceEditorDeleteSchema>;
 
 // Git SHA-1 repositories return 40 digits; resource/revision IDs always use SHA-256.
 export const ResourceEditorErrorSchema = Type.Object({

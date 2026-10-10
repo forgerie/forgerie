@@ -1,9 +1,9 @@
 import { lock } from "proper-lockfile";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import type { ResourceEditorEntry, ResourceEditorFile, ResourceEditorInventory, ResourceEditorSave, ResourceEditorSaveRequest, ResourceEditorScope } from "../../shared/resourceEditor.js";
+import type { ResourceEditorDelete, ResourceEditorDeleteRequest, ResourceEditorEntry, ResourceEditorFile, ResourceEditorInventory, ResourceEditorSave, ResourceEditorSaveRequest, ResourceEditorScope } from "../../shared/resourceEditor.js";
 import { RESOURCE_EDITOR_MAX_BYTES } from "../../shared/resourceEditor.js";
 import { ResourceEditorDiscovery, type DiscoveredEditorResource, type EditorDiscoveryOptions } from "./resourceEditorDiscovery.js";
-import { insideResourceRoot, isMissingResource, readResourceFile, ResourceEditorError, writableResourcePath, writeResourceFile } from "./resourceEditorFiles.js";
+import { deleteResourceFile, insideResourceRoot, isMissingResource, readResourceFile, ResourceEditorError, writableResourcePath, writeResourceFile } from "./resourceEditorFiles.js";
 import { commitResource, prepareResourceCommit, resourceCheckout, resourceLockPath, type ResourceCheckout } from "./resourceEditorGit.js";
 
 export interface ResourceEditorSession { cwd: string; readOnlyReason?: string }
@@ -11,6 +11,8 @@ export interface ResourceEditorOptions extends EditorDiscoveryOptions {
   session: (sessionId: string) => Promise<ResourceEditorSession>;
 }
 interface EditorContext { scope: ResourceEditorScope; readOnlyReason?: string; checkout?: ResourceCheckout }
+type SaveMutation = ResourceEditorSaveRequest & { kind: "save" };
+type DeleteMutation = ResourceEditorDeleteRequest & { kind: "delete" };
 
 export class ResourceEditorService {
   private readonly discovery: ResourceEditorDiscovery;
@@ -34,8 +36,18 @@ export class ResourceEditorService {
     });
   }
 
-  async save(id: string, input: ResourceEditorSaveRequest, sessionId?: string): Promise<ResourceEditorSave> {
-    if (Buffer.byteLength(input.text, "utf8") > RESOURCE_EDITOR_MAX_BYTES) throw new ResourceEditorError("over-limit", "Resource files are limited to 1 MiB.");
+  save(id: string, input: ResourceEditorSaveRequest, sessionId?: string): Promise<ResourceEditorSave> {
+    return this.mutate(id, { ...input, kind: "save" }, sessionId);
+  }
+
+  delete(id: string, input: ResourceEditorDeleteRequest, sessionId?: string): Promise<ResourceEditorDelete> {
+    return this.mutate(id, { ...input, kind: "delete" }, sessionId);
+  }
+
+  private mutate(id: string, input: SaveMutation, sessionId?: string): Promise<ResourceEditorSave>;
+  private mutate(id: string, input: DeleteMutation, sessionId?: string): Promise<ResourceEditorDelete>;
+  private async mutate(id: string, input: SaveMutation | DeleteMutation, sessionId?: string): Promise<ResourceEditorSave | ResourceEditorDelete> {
+    if (input.kind === "save" && Buffer.byteLength(input.text, "utf8") > RESOURCE_EDITOR_MAX_BYTES) throw new ResourceEditorError("over-limit", "Resource files are limited to 1 MiB.");
     return this.bounded(async () => {
       const context = await this.context(sessionId);
       const resource = await this.find(id, context);
@@ -61,19 +73,23 @@ export class ResourceEditorService {
           if (currentEntry.edit.kind !== "writable") throw new ResourceEditorError("read-only", currentEntry.edit.reason);
           if (currentContext.scope.kind === "session" && context.scope.kind === "session" && currentContext.scope.cwd !== context.scope.cwd) throw new ResourceEditorError("conflict", "The session's checkout changed. Read the inventory again.");
           const current = await readResourceFile(currentEntry.path);
-          if (current.revision !== input.baseRevision) throw new ResourceEditorError("conflict", "This file changed on disk. Read it again before saving.");
-          if (current.text === input.text) return { file: { resource: currentEntry, text: current.text, revision: current.revision }, effect: { kind: "unchanged" }, reload: "explicit-session-reload" };
+          if (input.kind === "delete" && currentEntry.kind !== "prompt") throw new ResourceEditorError("invalid-request", "Only prompt files, including prose workflows, support deletion.");
+          if (current.revision !== input.baseRevision) throw new ResourceEditorError("conflict", "This file changed on disk. Read it again before changing it.");
+          if (input.kind === "save" && current.text === input.text) return { file: { resource: currentEntry, text: current.text, revision: current.revision }, effect: { kind: "unchanged" }, reload: "explicit-session-reload" };
           const commitBase = currentEntry.edit.saveEffect === "commit" && currentContext.checkout !== undefined ? await prepareResourceCommit(currentContext.checkout, current.canonicalPath) : undefined;
           if (compromised !== undefined) throw new ResourceEditorError("busy", "The resource lock changed. Retry after other writers finish.");
-          await writeResourceFile(currentEntry.path, currentResource.writeRoot, current, input.text);
+          if (input.kind === "delete") await deleteResourceFile(currentEntry.path, currentResource.writeRoot, current);
+          else await writeResourceFile(currentEntry.path, currentResource.writeRoot, current, input.text);
           written = true;
-          const commit = commitBase === undefined || currentContext.checkout === undefined ? undefined : await commitResource(currentContext.checkout, commitBase);
+          const commit = commitBase === undefined || currentContext.checkout === undefined ? undefined : await commitResource(currentContext.checkout, commitBase, input.kind === "delete" ? "deleted" : "saved");
+          const effect: ResourceEditorDelete["effect"] = commit === undefined ? { kind: currentEntry.edit.saveEffect === "uncommitted" ? "uncommitted" : "file-only" } : { kind: "committed", ...commit };
+          if (input.kind === "delete") return { resourceId: currentEntry.id, effect, reload: "explicit-session-reload" };
           const after = await readResourceFile(currentEntry.path);
           const refreshed = await this.find(id, currentContext);
           return { file: { resource: await this.entry(refreshed, currentContext), text: after.text, revision: after.revision },
-            effect: commit === undefined ? { kind: currentEntry.edit.saveEffect === "uncommitted" ? "uncommitted" : "file-only" } : { kind: "committed", ...commit }, reload: "explicit-session-reload" };
+            effect, reload: "explicit-session-reload" };
         } catch (error) {
-          if (written && !(error instanceof ResourceEditorError && error.savedToDisk)) throw new ResourceEditorError("io-error", `The file was saved, but verification failed: ${error instanceof Error ? error.message : String(error)}`, true);
+          if (written && !(error instanceof ResourceEditorError && error.savedToDisk)) throw new ResourceEditorError("io-error", `The file was ${input.kind === "delete" ? "deleted" : "saved"}, but verification failed: ${error instanceof Error ? error.message : String(error)}`, true);
           throw error;
         } finally {
           await release().catch((error: unknown) => { throw new ResourceEditorError("io-error", `Could not release the resource lock: ${error instanceof Error ? error.message : String(error)}`, written); });

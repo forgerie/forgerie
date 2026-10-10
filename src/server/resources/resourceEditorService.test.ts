@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Check } from "typebox/value";
 import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
-import { ResourceEditorFileSchema, ResourceEditorInventorySchema, ResourceEditorSaveSchema, RESOURCE_EDITOR_MAX_BYTES, type ResourceEditorInventory } from "../../shared/resourceEditor.js";
+import { ResourceEditorDeleteSchema, ResourceEditorFileSchema, ResourceEditorInventorySchema, ResourceEditorSaveSchema, RESOURCE_EDITOR_MAX_BYTES, type ResourceEditorInventory } from "../../shared/resourceEditor.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
 import { ResourceEditorService } from "./resourceEditorService.js";
 import { ResourceEditorError } from "./resourceEditorFiles.js";
@@ -49,6 +49,89 @@ beforeEach(async () => {
   await file(join(bundle, "package.json"), JSON.stringify({ name: "test-bundle", pi: { skills: ["skills"], prompts: ["prompts"] } }));
 });
 afterEach(async () => { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+
+describe("conditional prompt deletion", () => {
+  it("deletes a profile workflow only at the revision the caller read", async () => {
+    const path = join(profile, "prompts/workflow.md");
+    await file(path, "---\nworkflow:\n  version: 1\n---\nDo the work.\n");
+    const editor = service();
+    const entry = resourceAt(await editor.inventory(), path);
+    const read = await editor.read(entry.id);
+    await file(path, "Changed by another writer.\n");
+    await expect(editor.delete(entry.id, { baseRevision: read.revision })).rejects.toMatchObject({ kind: "conflict", savedToDisk: false });
+    expect(await readFile(path, "utf8")).toBe("Changed by another writer.\n");
+    const current = await editor.read(entry.id);
+    const deleted = await editor.delete(entry.id, { baseRevision: current.revision });
+    expect(Check(ResourceEditorDeleteSchema, deleted)).toBe(true);
+    expect(deleted.effect.kind).toBe("file-only");
+    await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await editor.inventory()).resources.some((resource) => resource.id === entry.id)).toBe(false);
+    await expect(editor.delete(entry.id, { baseRevision: current.revision })).rejects.toMatchObject({ kind: "not-found" });
+  });
+
+  it("commits only the deleted project prompt and preserves another staged file", async () => {
+    await initializeGit();
+    const path = join(project, ".pi/prompts/workflow.md");
+    await file(path, "Do the work.\n"); git(project, ["add", ".pi/prompts/workflow.md"]); git(project, ["commit", "-m", "Add workflow"]);
+    await file(join(project, "other.txt"), "Keep staged.\n"); git(project, ["add", "other.txt"]);
+    const editor = service(); const entry = resourceAt(await editor.inventory("session"), path);
+    const read = await editor.read(entry.id, "session");
+    const deleted = await editor.delete(entry.id, { baseRevision: read.revision }, "session");
+    expect(deleted.effect.kind).toBe("committed");
+    expect(git(project, ["diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"])).toBe("D\t.pi/prompts/workflow.md");
+    expect(git(project, ["diff", "--cached", "--name-only"])).toBe("other.txt");
+  });
+
+  it("uses uncommitted deletion in a linked checkout and rejects read-only sessions", async () => {
+    await initializeGit(); const path = join(project, ".pi/prompts/workflow.md");
+    await file(path, "Work.\n"); git(project, ["add", ".pi/prompts/workflow.md"]); git(project, ["commit", "-m", "Add workflow"]);
+    const checkout = join(root, "linked"); git(project, ["worktree", "add", "-b", "experiment", checkout]);
+    const linked = service(checkout); const entry = resourceAt(await linked.inventory("session"), join(checkout, ".pi/prompts/workflow.md"));
+    const read = await linked.read(entry.id, "session");
+    await expect(service(checkout, "Completed checkout.").delete(entry.id, { baseRevision: read.revision }, "session")).rejects.toMatchObject({ kind: "read-only" });
+    expect((await linked.delete(entry.id, { baseRevision: read.revision }, "session")).effect.kind).toBe("uncommitted");
+    expect(git(checkout, ["status", "--porcelain"])).toBe(" D .pi/prompts/workflow.md");
+    expect(await readFile(path, "utf8")).toBe("Work.\n");
+  });
+
+  it("rejects bundled, linked, and non-prompt resources", async () => {
+    const bundledPath = join(bundle, "prompts/bundled.md"); await file(bundledPath, "Bundled.\n");
+    const editor = service();
+    const bundled = resourceAt(await editor.inventory(), bundledPath); const read = await editor.read(bundled.id);
+    await expect(editor.delete(bundled.id, { baseRevision: read.revision })).rejects.toMatchObject({ kind: "read-only" });
+    const target = join(root, "target.md"); await file(target, "Keep.\n"); await mkdir(join(profile, "prompts"));
+    const linkedPath = join(profile, "prompts/linked.md"); await symlink(target, linkedPath);
+    const linked = resourceAt(await editor.inventory(), linkedPath); const linkedRead = await editor.read(linked.id);
+    await expect(editor.delete(linked.id, { baseRevision: linkedRead.revision })).rejects.toMatchObject({ kind: "read-only" });
+    await file(join(profile, "AGENTS.md"), "Context.\n"); const context = resourceAt(await editor.inventory(), join(profile, "AGENTS.md"));
+    await expect(editor.delete(context.id, { baseRevision: (await editor.read(context.id)).revision })).rejects.toMatchObject({ kind: "invalid-request" });
+    expect(await readFile(target, "utf8")).toBe("Keep.\n");
+  });
+
+  it("serializes a save and delete of the same revision without applying both", async () => {
+    const path = join(profile, "prompts/workflow.md"); await file(path, "Before.\n");
+    const editor = service(); const entry = resourceAt(await editor.inventory(), path); const read = await editor.read(entry.id);
+    const results = await Promise.allSettled([
+      editor.save(entry.id, { text: "Saved.\n", baseRevision: read.revision }),
+      editor.delete(entry.id, { baseRevision: read.revision }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    if (results[0].status === "fulfilled") expect(await readFile(path, "utf8")).toBe("Saved.\n");
+    else await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("reports that deletion applied when a main-checkout commit hook fails", async () => {
+    await initializeGit(); const path = join(project, ".pi/prompts/workflow.md");
+    await file(path, "Work.\n"); git(project, ["add", ".pi/prompts/workflow.md"]); git(project, ["commit", "-m", "Add workflow"]);
+    const hook = join(project, ".git/hooks/pre-commit"); await file(hook, "#!/bin/sh\nexit 1\n"); await chmod(hook, 0o755);
+    const editor = service(); const entry = resourceAt(await editor.inventory("session"), path); const read = await editor.read(entry.id, "session");
+    const deletion = editor.delete(entry.id, { baseRevision: read.revision }, "session");
+    await expect(deletion).rejects.toMatchObject({ kind: "commit-failed", savedToDisk: true });
+    await expect(deletion).rejects.toThrow("deleted");
+    await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(git(project, ["status", "--porcelain"])).toBe(" D .pi/prompts/workflow.md");
+  });
+});
 
 describe("resource editor inventory", () => {
   it("separates Settings from the session's project and preserves origin, shadowing and manual metadata", async () => {

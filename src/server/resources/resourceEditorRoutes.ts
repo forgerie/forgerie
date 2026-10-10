@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { Check } from "typebox/value";
-import { RESOURCE_EDITOR_BODY_LIMIT, ResourceEditorSaveRequestSchema, type ResourceEditorErrorResponse } from "../../shared/resourceEditor.js";
+import { RESOURCE_EDITOR_BODY_LIMIT, ResourceEditorDeleteRequestSchema, ResourceEditorDeleteSchema, ResourceEditorSaveRequestSchema, type ResourceEditorErrorResponse } from "../../shared/resourceEditor.js";
 import { ResourceEditorError } from "./resourceEditorFiles.js";
 import type { ResourceEditorService } from "./resourceEditorService.js";
 
@@ -23,6 +23,11 @@ export function registerResourceEditorRoutes(app: FastifyInstance, service: Reso
       rejectQuery(request.query);
       if (!Check(ResourceEditorSaveRequestSchema, request.body)) throw new ResourceEditorError("invalid-request", "Send text and the baseRevision from the file read. No other fields are accepted.");
       return service.save(resourceId(request.params.resourceId), request.body, sessionId(request.params.sessionId));
+    }));
+    app.delete<{ Params: { sessionId?: string; resourceId: string }; Querystring: Record<string, unknown>; Body: unknown }>(`${base}/:resourceId`, { bodyLimit: RESOURCE_EDITOR_BODY_LIMIT, schema: { response: { 200: ResourceEditorDeleteSchema } } }, (request, reply) => respond(reply, async () => {
+      rejectQuery(request.query);
+      if (!Check(ResourceEditorDeleteRequestSchema, request.body)) throw new ResourceEditorError("invalid-request", "Send only baseRevision from the prompt file read.");
+      return service.delete(resourceId(request.params.resourceId), request.body, sessionId(request.params.sessionId));
     }));
   }
 }

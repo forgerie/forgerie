@@ -19,7 +19,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
 import type { ChildWorktreeSummary, WorktreeActionResult, WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
 import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
-import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild } from "./durableWorkflowRuns.js";
+import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild } from "./durableWorkflowRuns.js";
 
 export const CHILD_TOOL_NAME = "child_agent";
 export const CHILD_QUESTION_KIND = "forgerie.child-question";
@@ -72,18 +72,18 @@ function childReporter(worktrees: DurableChildWorktrees | undefined, flushRunRec
       const submission = await child.submit({ type: "input", content: message, whenBusy: followUp ? "followUp" : "steer", requestId: `child:${String(reporter.id)}` }, context);
       await flushRunRecords?.();
       const settled = await submission.wait(context);
+      // Ancillary accounting/reporting must not replace the child's durable submission outcome.
+      await runtime.commit(async (tx) => { await settleWorkflowChild(tx, runtime.conversationId, reporter.id, settled); }, context);
       const worktreeReport = settled.status !== "unanswered" && reporter.input.worktreeId !== undefined
         ? await requireWorktrees(worktrees).report(reporter.input.worktreeId) : undefined;
       await runtime.commit(async (tx) => {
         const next = (report?: string): { status: "running"; checkpoint: ReporterState } => ({ status: "running", checkpoint: report === undefined ? { phase: "report" } : { phase: "report", report } });
         if (settled.status === "unanswered") {
-          await settleWorkflowChild(tx, runtime.conversationId, reporter.id, settled.reason === "aborted" ? "stopped" : "failed", settled.reason);
           return next(settled.reason === "aborted" ? undefined : `[subagent ${name} failed: ${settled.reason}]`);
         }
         if (settled.type !== "input") return next();
         const agent = (await tx.doc(Children, runtime.conversationId)).agents[name];
         const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0];
-        await settleWorkflowChild(tx, runtime.conversationId, reporter.id, "answered", textOf(isAssistant(answer) ? answer : undefined));
         if (agent === undefined || agent.reported.includes(settled.answer)) return next();
         agent.reported.push(settled.answer);
         return next(`[subagent ${name} answered, no reply needed] ${textOf(isAssistant(answer) ? answer : undefined)}${worktreeReport === undefined ? "" : `\n\n${worktreeReport}`}`);
@@ -94,19 +94,17 @@ function childReporter(worktrees: DurableChildWorktrees | undefined, flushRunRec
       const report = "report" in checkpoint ? checkpoint.report : undefined;
       if (report !== undefined) {
         const main = await runtime.conversation(runtime.conversationId, context);
-        await main?.submit({ type: "input", content: report, whenBusy: "followUp", requestId: `child-report:${String(reporter.id)}` }, context);
+        if (main === undefined) throw new Error("Child report parent is missing");
+        await main.submit({ type: "input", content: report, whenBusy: "followUp", requestId: `child-report:${String(reporter.id)}` }, context);
       }
       await runtime.commit(async (tx) => {
-        await deliveredWorkflowChild(tx, runtime.conversationId, reporter.id);
+        if (report === undefined) await undeliveredWorkflowChild(tx, runtime.conversationId, reporter.id, "Completion report suppressed; no parent message was submitted.");
+        else await deliveredWorkflowChild(tx, runtime.conversationId, reporter.id);
         return { status: "terminal", outcome: { status: "completed", result: null } };
       }, context);
     },
   },
-  abort: (task, runtime, context) => runtime.commit(async (tx) => {
-    await settleWorkflowChild(tx, runtime.conversationId, task.id, "stopped", "Reporter stopped");
-    await deliveredWorkflowChild(tx, runtime.conversationId, task.id);
-    return { status: "terminal", outcome: { status: "aborted" } };
-  }, context),
+  abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
   });
 }
 

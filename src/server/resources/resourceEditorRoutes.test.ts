@@ -4,7 +4,7 @@ import { join } from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Check } from "typebox/value";
-import { ResourceEditorErrorSchema, ResourceEditorFileSchema, ResourceEditorInventorySchema, ResourceEditorSaveSchema, RESOURCE_EDITOR_MAX_BYTES, type ResourceEditorInventory } from "../../shared/resourceEditor.js";
+import { ResourceEditorDeleteSchema, ResourceEditorErrorSchema, ResourceEditorFileSchema, ResourceEditorInventorySchema, ResourceEditorSaveSchema, RESOURCE_EDITOR_MAX_BYTES, type ResourceEditorInventory } from "../../shared/resourceEditor.js";
 import { ResourceEditorService } from "./resourceEditorService.js";
 import { ResourceEditorError } from "./resourceEditorFiles.js";
 import { registerResourceEditorRoutes } from "./resourceEditorRoutes.js";
@@ -50,6 +50,37 @@ describe("resource editor HTTP contract", () => {
     const stale = await app.inject({ method: "PUT", url: `/resources/${entry.id}`, payload: { text: "Overwrite\n", baseRevision: read.json<{ revision: string }>().revision } });
     expect(stale.statusCode).toBe(409); expect(Check(ResourceEditorErrorSchema, stale.json())).toBe(true);
     expect(stale.json()).toMatchObject({ error: { kind: "conflict", savedToDisk: false } });
+  });
+
+  it("revision-checks prompt deletion through both browser prefixes and session scopes", async () => {
+    const upstream = daemon(); const browser = Fastify(); servers.push(browser);
+    const forward = { request: async (method: string, path: string, body?: unknown) => {
+      if (method !== "GET" && method !== "DELETE") throw new Error("Unexpected proxy method.");
+      const response = await upstream.inject({ method, url: path, ...(body === undefined ? {} : { payload: JSON.stringify(body), headers: { "content-type": "application/json" } }) });
+      return { statusCode: response.statusCode, headers: { "content-type": "application/json" }, body: response.body };
+    }, connectWebSocket: () => { throw new Error("Unused."); } };
+    registerSessionProxyRoutes(browser, forward); registerSessionProxyRoutes(browser, forward, "/api/machines/local");
+    for (const prefix of ["/api", "/api/machines/local"]) {
+      for (const scope of ["/resources", "/sessions/known/resources"]) {
+        await writeFile(join(profile, "prompts/example.md"), "Workflow.\n");
+        const inventory = await browser.inject({ method: "GET", url: `${prefix}${scope}` });
+        const entry = required(inventory.json<ResourceEditorInventory>().resources.find((resource) => resource.kind === "prompt"));
+        const url = `${prefix}${scope}/${entry.id}`;
+        const read = await browser.inject({ method: "GET", url }); const baseRevision = read.json<{ revision: string }>().revision;
+        for (const payload of [{}, { baseRevision: "bad" }, { baseRevision, path: "/tmp/other.md" }, { baseRevision, cwd: "/tmp" }]) {
+          const rejected = await browser.inject({ method: "DELETE", url, payload });
+          expect(rejected.statusCode).toBe(400); expect(Check(ResourceEditorErrorSchema, rejected.json())).toBe(true);
+        }
+        await writeFile(join(profile, "prompts/example.md"), "External change.\n");
+        expect((await browser.inject({ method: "DELETE", url, payload: { baseRevision } })).statusCode).toBe(409);
+        expect(await readFile(join(profile, "prompts/example.md"), "utf8")).toBe("External change.\n");
+        const current = await browser.inject({ method: "GET", url });
+        const deleted = await browser.inject({ method: "DELETE", url, payload: { baseRevision: current.json<{ revision: string }>().revision } });
+        expect(deleted.statusCode).toBe(200); expect(Check(ResourceEditorDeleteSchema, deleted.json())).toBe(true);
+        expect(deleted.json()).toMatchObject({ resourceId: entry.id, effect: { kind: "file-only" }, reload: "explicit-session-reload" });
+        expect((await browser.inject({ method: "GET", url })).statusCode).toBe(404);
+      }
+    }
   });
 
   it("accepts a full 1 MiB file after JSON escaping and rejects extra content bytes", async () => {

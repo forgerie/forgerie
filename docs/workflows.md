@@ -74,7 +74,7 @@ The tool records a final result. Repeating the same completion is safe. A differ
 
 Durable child spawn, send, and fresh-child continuation requests retain their association in the same commit that creates their reporter. Their settled results stay in the workflow record. Each child run started while the workflow is active also saves `workflowRunId` in the existing child-run history. A steer joins its current child run. A new idle input creates another child run.
 
-Legacy pi-subagents runs are not linked to workflow records. Use `child_agent` for tracked delegation. Child questions still do not start parent turns; each normal completion report still does. If a reporter terminates without delivering, the record exposes `deliveryError`. It does not claim delivery, and explicit completion remains possible after all child work settles.
+Legacy pi-subagents runs are not linked to workflow records. Use `child_agent` for tracked delegation. Child questions still do not start parent turns; each normal completion report still does. Child outcomes come from the admitted Durable submission, independently of accounting or worktree reporting. A reporting failure preserves the child's actual answer, failure, or stop reason. If a reporter terminates without delivering, the record exposes `deliveryError`. Stopped or suppressed reports also keep `delivered: false` and a reason. Delivery means admission to the parent's inbox, not review or approval. Explicit completion remains possible after all child work settles.
 
 If the coordinator forgets to finish, the run stays active. Stop ongoing work before using the finish HTTP route to record a failed or stopped run. Finishing changes metadata; it does not cancel work.
 
@@ -92,7 +92,7 @@ Runs in the same chat share its existing context. Prose remains model-directed; 
 
 ## HTTP API
 
-Browser URLs use `/api` before these paths. Requests identify the parent's `cwd`. Save and copy complete file text through the existing `POST /prompts` endpoint. Existing resource routes edit that text with revision checks.
+Browser URLs use `/api` before these paths. Requests identify the parent's `cwd`. Save and copy complete file text through the existing `POST /prompts` endpoint. Existing resource routes edit that text with revision checks. They also provide `DELETE /resources/:resourceId` and `DELETE /sessions/:sessionId/resources/:resourceId` with `{baseRevision}` for writable prompt files. Read the resource before deletion. See [the deletion contract](resource-editor-api.md#delete-a-prompt-file) for permissions, Git effects, and failure recovery. Deletion does not remove accepted workflow snapshots.
 
 | Method and path | Request | Response |
 | --- | --- | --- |

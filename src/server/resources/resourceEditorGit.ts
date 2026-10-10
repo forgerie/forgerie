@@ -47,18 +47,18 @@ export async function prepareResourceCommit(checkout: ResourceCheckout, path: st
   return { head, branch, path: rel };
 }
 
-export async function commitResource(checkout: ResourceCheckout, base: CommitBase): Promise<{ sha: string; branch: string }> {
+export async function commitResource(checkout: ResourceCheckout, base: CommitBase, action: "saved" | "deleted" = "saved"): Promise<{ sha: string; branch: string }> {
   try {
     if (await git(checkout.root, ["rev-parse", "HEAD"]) !== base.head || await git(checkout.root, ["symbolic-ref", "--short", "HEAD"]) !== base.branch) throw new Error("The checkout's branch or HEAD changed during the save.");
     // --only excludes every other staged file. Git runs the repository's hooks.
-    await git(checkout.root, ["commit", "--only", "-m", `docs(resources): update ${base.path}`, "--", base.path]);
+    await git(checkout.root, ["commit", "--only", "-m", `docs(resources): ${action === "deleted" ? "delete" : "update"} ${base.path}`, "--", base.path]);
     const sha = await git(checkout.root, ["rev-parse", "HEAD"]);
     const parent = await git(checkout.root, ["rev-parse", "HEAD^"]);
     if (parent !== base.head) throw new Error("Git HEAD changed during the resource commit. Inspect the new commit.");
     if (await git(checkout.root, ["diff-tree", "--no-commit-id", "--name-only", "-z", "-r", sha]) !== `${base.path}\0`) throw new Error("A repository hook changed the commit's file set. Inspect the new commit; it was not reported as a successful resource-only commit.");
     return { sha, branch: base.branch };
   } catch (error) {
-    throw new ResourceEditorError("commit-failed", `The file was saved, but its Git commit failed. Inspect Git status before retrying. ${error instanceof Error ? error.message : String(error)}`, true);
+    throw new ResourceEditorError("commit-failed", `The file was ${action}, but its Git commit failed. Inspect Git status before retrying. ${error instanceof Error ? error.message : String(error)}`, true);
   }
 }
 

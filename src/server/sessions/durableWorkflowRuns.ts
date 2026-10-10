@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { defineDoc, defineExtension, defineTask, defineTool, InboxDoc, LiveDoc, type CommitPublication, type Conversation, type ConversationId, type Cursor, type Harness, type TaskId, type Tx } from "@earendil-works/pi-durable";
+import { AssistantEntry, defineDoc, defineExtension, defineTask, defineTool, InboxDoc, LiveDoc, type CommitPublication, type Conversation, type ConversationId, type Cursor, type Harness, type SubmissionRecord, type TaskId, type Tx } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { Check } from "typebox/value";
@@ -88,7 +88,7 @@ export async function launchWorkflow(harness: Harness, parent: Conversation, lib
 export async function workflowRuns(harness: Harness, parent: ConversationId, context: Context): Promise<WorkflowRun[]> {
   return harness.commit(async (tx) => {
     const doc = await tx.doc(Runs, parent);
-    for (const run of Object.values(doc.records)) if (run.state.kind === "running") await reconcileReportFailures(tx, run);
+    for (const run of Object.values(doc.records)) if (run.state.kind === "running") await reconcileReportFailures(tx, parent, run);
     const cutoff = Date.now() - WORKFLOW_RETENTION_DAYS * 86_400_000;
     doc.records = Object.fromEntries(Object.entries(doc.records).filter(([, run]) => run.state.kind !== "finished" || run.state.finishedAt > cutoff));
     return Object.values(doc.records).map(publicRun).sort((a, b) => b.startedAt - a.startedAt || a.id.localeCompare(b.id));
@@ -104,7 +104,7 @@ export async function finishWorkflow(tx: Tx, parent: ConversationId, runId: stri
     if (run.state.outcome !== outcome || run.state.result !== result) throw new WorkflowError(409, "Workflow already finished with another result");
     return;
   }
-  await reconcileReportFailures(tx, run);
+  await reconcileReportFailures(tx, parent, run);
   if (run.children.some((child) => child.state.kind === "working" || (!child.state.delivered && child.state.deliveryError === undefined))) throw new WorkflowError(409, "Wait for associated child work and reports before finishing the workflow");
   await assertChildWorkSettled(tx, parent);
   run.state = { kind: "finished", outcome, result, finishedAt: Date.now() };
@@ -120,35 +120,60 @@ export async function associateWorkflowChild(tx: Tx, parent: ConversationId, chi
   return run.id;
 }
 
-export async function settleWorkflowChild(tx: Tx, parent: ConversationId, reporter: TaskId, outcome: "answered" | "failed" | "stopped", result: string): Promise<void> {
+type WorkflowChild = WorkflowRun["children"][number];
+async function reporterChildren(tx: Tx, parent: ConversationId, reporter: TaskId): Promise<WorkflowChild[]> {
   const doc = await tx.doc(Runs, parent);
-  for (const run of Object.values(doc.records)) {
-    const child = run.children.find((item) => item.reporterId === Number(reporter));
-    if (child !== undefined) child.state = { kind: "settled", outcome, result, delivered: false };
-  }
+  return Object.values(doc.records).flatMap((run) => run.children.filter((child) => child.reporterId === Number(reporter)));
+}
+export async function settleWorkflowChild(tx: Tx, parent: ConversationId, reporter: TaskId, submission: SubmissionRecord): Promise<void> {
+  for (const child of await reporterChildren(tx, parent, reporter)) child.state = await submissionState(tx, submission);
 }
 export async function deliveredWorkflowChild(tx: Tx, parent: ConversationId, reporter: TaskId): Promise<void> {
-  const doc = await tx.doc(Runs, parent);
-  for (const run of Object.values(doc.records)) {
-    const child = run.children.find((item) => item.reporterId === Number(reporter));
-    if (child?.state.kind === "settled") child.state.delivered = true;
+  for (const child of await reporterChildren(tx, parent, reporter)) {
+    if (child.state.kind === "settled") child.state.delivered = true;
   }
+}
+export async function undeliveredWorkflowChild(tx: Tx, parent: ConversationId, reporter: TaskId, reason: string): Promise<void> {
+  for (const child of await reporterChildren(tx, parent, reporter)) {
+    if (child.state.kind === "settled") child.state.deliveryError = reason;
+  }
+}
+async function submissionState(tx: Tx, submission: SubmissionRecord): Promise<WorkflowChild["state"]> {
+  if (submission.type !== "input") throw new Error("Workflow child submission is not input");
+  if (submission.status === "queued" || submission.status === "placed") return { kind: "working" };
+  if (submission.status === "unanswered") return { kind: "settled", outcome: submission.reason === "aborted" ? "stopped" : "failed", result: submission.reason, delivered: false };
+  const answer = (await tx.entry(AssistantEntry, submission.answer))?.model?.[0];
+  if (answer?.role !== "assistant") throw new Error("Workflow child answer is missing");
+  const result = answer.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
+  return { kind: "settled", outcome: "answered", result, delivered: false };
 }
 export async function activeWorkflowRun(harness: Harness, parent: ConversationId, context: Context): Promise<string | undefined> {
   return (await harness.snapshot(Runs, parent, context))?.active ?? undefined;
 }
 const reporterIdSchema = Type.Unsafe<TaskId>(Type.Integer({ minimum: 1 }));
-async function reconcileReportFailures(tx: Tx, run: WorkflowRun): Promise<void> {
+const childIdSchema = Type.Unsafe<ConversationId>(Type.Integer({ minimum: 1 }));
+async function reconcileReportFailures(tx: Tx, parent: ConversationId, run: WorkflowRun): Promise<void> {
   for (const child of run.children) {
     if (child.state.kind === "settled" && (child.state.delivered || child.state.deliveryError !== undefined)) continue;
     const id = child.reporterId;
     if (!Check(reporterIdSchema, id)) throw new Error("Invalid workflow reporter identity");
     const reporter = await tx.task(id);
     if (reporter?.state.status !== "terminal") continue;
-    const reason = `Completion reporter ${reporter.state.outcome.status}; inspect the child transcript.`;
-    // A failed reporter must not permanently block explicit completion or pretend it delivered a report.
-    child.state = child.state.kind === "settled" ? { ...child.state, deliveryError: reason }
-      : { kind: "settled", outcome: "failed", result: reason, delivered: false, deliveryError: reason };
+    const outcome = reporter.state.outcome;
+    const detail = outcome.error?.message ?? outcome.reason;
+    const reason = `Completion reporter ${outcome.status}${detail === undefined ? "; inspect the child transcript." : `: ${detail}`}`;
+    // Recover the admitted request, not the child's latest turn or the reporter's outcome.
+    if (child.state.kind === "working") {
+      const conversationId = child.conversationId;
+      if (!Check(childIdSchema, conversationId)) throw new Error("Invalid workflow child identity");
+      const submission = await tx.submissionByRequest(conversationId, `child:${String(id)}`);
+      child.state = submission === undefined ? { kind: "settled", outcome: "failed", result: reason, delivered: false }
+        : await submissionState(tx, submission);
+      if (child.state.kind === "working") continue;
+    }
+    // A crash/abort can occur after admission but before the delivery marker commits.
+    if (await tx.submissionByRequest(parent, `child-report:${String(id)}`) !== undefined) child.state.delivered = true;
+    else child.state.deliveryError = reason;
   }
 }
 async function assertChildWorkSettled(tx: Tx, parent: ConversationId): Promise<void> {

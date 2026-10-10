@@ -30,13 +30,15 @@ The browser uses the `/api` prefix. The web server proxies these routes to the s
 | GET | `/resources` | `ResourceEditorInventorySchema` |
 | GET | `/resources/:resourceId` | `ResourceEditorFileSchema` |
 | PUT | `/resources/:resourceId` | `ResourceEditorSaveSchema` |
+| DELETE | `/resources/:resourceId` | `ResourceEditorDeleteSchema` |
 | GET | `/sessions/:sessionId/resources` | `ResourceEditorInventorySchema` |
 | GET | `/sessions/:sessionId/resources/:resourceId` | `ResourceEditorFileSchema` |
 | PUT | `/sessions/:sessionId/resources/:resourceId` | `ResourceEditorSaveSchema` |
+| DELETE | `/sessions/:sessionId/resources/:resourceId` | `ResourceEditorDeleteSchema` |
 
 The daemon has the same routes without the browser prefix. All editor routes reject query parameters. Use the full session ID, not an ID prefix. Each request resolves the current inventory again. An ID absent from that scope returns 404, even if another scope listed it earlier.
 
-The editor only reads and edits existing files. This version does not create, delete, rename, or copy resources. It does not edit JSON settings, extension code, or skill companion files. Agent-role Markdown remains in the existing `/aui/agents` editor.
+The editor reads and edits existing files. It also deletes writable prompt files, including prose workflows. It does not delete skills or context files. This version does not create, rename, or copy resources. It does not edit JSON settings, extension code, or skill companion files. Agent-role Markdown remains in the existing `/aui/agents` editor.
 
 ## Inventory
 
@@ -86,6 +88,16 @@ Files are limited to 1 MiB of UTF-8 bytes. Discovery is limited to 1000 resource
 
 `reload` is always `explicit-session-reload`. Saving never reloads a running session. The frontend can offer the existing `POST /sessions/:sessionId/reload` with `{ "cwd": "the returned session cwd" }`. Stop active session work first. Reload affects that session only. A profile edit can affect other sessions when they next reload or start.
 
+## Delete a prompt file
+
+Read the file first. Send DELETE to its resource URL with only `{ "baseRevision": "the revision from GET" }`. Deletion uses the same permissions, revision checks, file queue, cross-process lock, and Git rules as saves. Package, bundled, linked, inherited, and read-only session files remain protected.
+
+A successful deletion returns `{ resourceId, effect, reload }`. Its effect is `file-only`, `uncommitted`, or `committed`, with the same meanings as saves. Refetch the inventory. A repeated deletion returns 404. Deleting a project override can expose a matching profile prompt.
+
+Deletion does not reload sessions or erase workflow snapshots. A loaded SDK prompt can remain available until explicit reload. New workflow admissions read files from disk. Accepted workflow retries keep their frozen definition even after deletion.
+
+If Git or final verification fails after removal, the existing compatibility field `savedToDisk: true` means the deletion applied. The file is gone. Inspect Git status before retrying. The API does not restore it automatically. There is no new browser delete control in this backend change.
+
 ## Errors
 
 Editor errors use `ResourceEditorErrorSchema`:
@@ -107,7 +119,7 @@ Editor errors use `ResourceEditorErrorSchema`:
 | 404 | `not-found` | Refetch the inventory. The resource or session is no longer available. |
 | 409 | `conflict` | Keep the draft. Read the new version and let the user resolve it. |
 | 409 | `unsafe-git-state` | Resolve the Git precondition before saving. No write occurred. |
-| 409 | `commit-failed` | The file is saved. Inspect Git status and the latest commit before completing or correcting it outside the editor. |
+| 409 | `commit-failed` | The file change applied. Inspect Git status and the latest commit before completing or correcting it outside the editor. |
 | 413 | `over-limit` | Reduce the file size or inventory size. |
 | 500 | `io-error` | Show the error. Check `savedToDisk` before offering a retry. |
 | 503 | `busy` | Retry later. The daemon includes `Retry-After: 1`. |
