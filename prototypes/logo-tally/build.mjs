@@ -14,8 +14,8 @@ const MARK = 7, GAP = 3, PITCH = MARK + GAP, R = MARK / 4;
 
 // Tones are the app's tally tones converted from oklch (theme.css).
 const palettes = {
-  light: { paper: "#faf7f0", ink: "#232323", bad: "#de3b3d", live: "#2b7fff", faint: "#9a978f", grey: "#b9b6ae" },
-  dark: { paper: "#111214", ink: "#ececea", bad: "#ff645f", live: "#4c93ff", faint: "#6a6966", grey: "#4a4a4b" },
+  light: { paper: "#faf7f0", ink: "#232323", bad: "#de3b3d", live: "#2b7fff", faint: "#9a978f", grey: "#e6e2d9" },
+  dark: { paper: "#111214", ink: "#ececea", bad: "#ff645f", live: "#4c93ff", faint: "#6a6966", grey: "#26272a" },
 };
 
 const mark = (x, y, fill, extra = "") =>
@@ -46,17 +46,25 @@ const candidates = {
   "run": grid("The run (reference)",
     "The previous pick: eight calls, wrapped and right-aligned as the chat draws them.",
     ["###", "r##", ".#b"]),
-  // Each F below keeps red where the run has it and stays three marks wide,
-  // so the marks stay as large as the grid allows.
-  "run-head": grid("Run F, heavy head",
-    "The run's first two rows, unchanged. Its last row drops down into a stem, and the live mark becomes the middle arm.",
-    ["###", "r##", "#b.", "#.."]),
-  "run-tone": grid("Run F, toned",
-    "A full block of marks, as dense as the run. The F is in ink; the other marks are grey, the colour the chat draws them in.",
-    ["###", "rgg", "#bg", "#gg"]),
-  "run-ghost": grid("Run F, ghost cells",
-    "The full block again, but the cells outside the F are the chat's faint marks: outlines for work that never finished.",
-    ["###", "roo", "#bo", "#oo"]),
+  // Each F below sits in a square block: as many marks across as down.
+  // Both arms are the same length. Cells outside the F are a light grey,
+  // so the F stands out from the block. Red sits in the spine, as in the
+  // run, and the live mark ends the middle arm.
+  "sq4-full": grid("4 × 4, full arms",
+    "Both arms run the full width of the block.",
+    ["####", "rggg", "###b", "#ggg"]),
+  "sq4-short": grid("4 × 4, short arms",
+    "Both arms stop one mark short, so a grey column frames the F on the right.",
+    ["###g", "rggg", "##bg", "#ggg"]),
+  "sq5-full": grid("5 × 5, full arms",
+    "A taller F with a longer stem. Both arms run the full width.",
+    ["#####", "rgggg", "####b", "#gggg", "#gggg"]),
+  "sq5-short": grid("5 × 5, short arms",
+    "The 5 × 5 F with both arms one mark short.",
+    ["####g", "rgggg", "###bg", "#gggg", "#gggg"]),
+  "sq5-bold": grid("5 × 5, bold spine",
+    "A spine two marks wide, for more weight. Both arms run the full width.",
+    ["#####", "#rggg", "####b", "##ggg", "##ggg"]),
 };
 
 // The maskable icon keeps the glyph inside the safe zone. The tab icon
