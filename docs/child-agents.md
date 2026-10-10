@@ -1,5 +1,7 @@
 # Durable child agents
 
+Saved prose workflows can group Durable child runs into experiments. See [Saved prose workflows](workflows.md) for input snapshots, copying, and explicit completion.
+
 Status: opt-in. Set `"durableChildren": true` in the Forgerie config, or `PI_WEB_DURABLE_CHILDREN=1`, and restart the session daemon.
 
 A session can run background child agents inside its own Durable storage. The agent starts one with the `child_agent` tool. You do not switch sessions to follow it.
@@ -191,6 +193,7 @@ interface Usage {
 }
 interface ChildRun {
   id: string; // Stable across restart and replay.
+  workflowRunId?: string; // The active prose workflow when this child run began.
   session: {id: string; cwd: string};
   child: {
     name: string; conversationId: number; agent: string | null;
@@ -206,6 +209,8 @@ interface ChildRun {
   usage: {models: Record<string, Usage>; tools: Record<string, Usage>} | null;
 }
 ```
+
+`workflowRunId` links a child run to the active prose workflow at its initial input boundary. It stays fixed through steers and restarts. It is absent for work that began outside a workflow. Workflow routes and exact request shapes are documented in [Saved prose workflows](workflows.md#http-api).
 
 One record follows one Durable `pi.live.run`, not the child's entire conversation. A steer joins the current record. An idle input or a queued follow-up starts another record when Durable places it. Inputs placed together share a record. A general helper has `agent: null` and no `agentFile`. Existing children without saved file provenance also omit `agentFile`. The hash covers the original file bytes selected at spawn. Editing that file later does not change a running child's instructions or recorded hash.
 

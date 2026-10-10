@@ -14,6 +14,9 @@ import type { DurableChildHost } from "./durableChildHost.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
+import { WorkflowLibrary } from "../resources/workflowLibrary.js";
+import { workflowExtension, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit } from "./durableWorkflowRuns.js";
+import type { WorkflowInputs, WorkflowOutcome } from "../../shared/workflowRuns.js";
 
 export interface DurableAgentSessionOptions {
   services: AgentSessionServices;
@@ -157,6 +160,14 @@ export class DurableAgentSession implements PiAgentSession {
   // ─── Host operations on Durable children. None of them starts a parent turn. ───
   get hostsDurableChildren(): boolean { return this.options.childAgents !== undefined; }
   get workingDurableChildren(): number { return this.childCount; }
+  runWorkflow(name: string, inputs: WorkflowInputs, requestId: string) {
+    if (!this.hostsDurableChildren) throw new Error("Workflow launches require durableChildren");
+    return launchWorkflow(this.journal.harness, this.journal.conversation, new WorkflowLibrary(this.options.services.agentDir), this.options.services.cwd, this.sessionId, name, inputs, requestId, context);
+  }
+  workflowRuns() { return workflowRuns(this.journal.harness, this.journal.conversation.id, context); }
+  finishWorkflow(runId: string, outcome: WorkflowOutcome, result: string) {
+    return this.journal.conversation.commit((tx) => finishWorkflow(tx, this.journal.conversation.id, runId, outcome, result), context);
+  }
   durableChildren() { return listChildren(this.journal.harness, this.journal.conversation.id, context, this.childWorktrees); }
   reviewDurableChildWorktree(conversationId: number) { return reviewChildWorktree(this.journal.harness, this.journal.conversation.id, conversationId, context, this.childWorktrees); }
   continueDurableChild(conversationId: number, text: string, requestId: string) { return continueChild(this.journal.harness, this.journal.conversation, conversationId, text, requestId, context, this.childWorktrees); }
@@ -180,6 +191,7 @@ export class DurableAgentSession implements PiAgentSession {
     const extensions = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext,
       ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
       ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
+    this.registry.install(workflowExtension());
     for (const extension of [...extensions.parent, ...extensions.childOnly]) this.registry.install(extension);
     // Children select these explicitly. The parent must not, or ask_human and the coding tools join its loadout.
     await this.journal.conversation.configure({ extensions: { remove: [...extensions.childOnly] } }, context);
@@ -188,9 +200,10 @@ export class DurableAgentSession implements PiAgentSession {
         (error) => { if (host.runRecordError === undefined) this.report(error); else host.runRecordError(error); });
     }
     const watch = await this.journal.harness.watchTaskGraph(context);
-    this.childWatch = watch;
+    let workflowActive = (await activeWorkflowRun(this.journal.harness, this.journal.conversation.id, context)) !== undefined;
     const update = (graph: typeof watch.value) => {
-      const live = childWorkIsLive(graph, this.journal.conversation.id);
+      // Unfinished workflows also need startup reopening, even between child runs or before launch delivery.
+      const live = workflowActive || childWorkIsLive(graph, this.journal.conversation.id);
       this.childCount = workingChildCount(graph, this.journal.conversation.id);
       // Every graph change can move a child between working and idle; the browser refetches the list.
       this.emit({ type: "durable_children_changed" });
@@ -198,6 +211,13 @@ export class DurableAgentSession implements PiAgentSession {
       this.childrenLive = live;
       host.liveChanged(ref, live);
     };
+    const unsubscribe = this.journal.harness.subscribeCommits((publication) => {
+      const change = workflowActiveFromCommit(publication, this.journal.conversation.id);
+      if (change === undefined) return;
+      workflowActive = change.active !== null;
+      update(watch.value);
+    });
+    this.childWatch = { stop: async () => { unsubscribe(); return watch.stop(); } };
     update(watch.value);
     watch.start((graph) => { update(graph); return Promise.resolve(); });
   }

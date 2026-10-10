@@ -5,6 +5,8 @@ import { parsePromptDraft, type PromptLibrary } from "../resources/promptLibrary
 import type { ClientCommandResult, ClientSession, ClientSessionTreeSnapshot } from "../types.js";
 import { BUILTIN_COMMANDS, isBuiltinCommand } from "./builtinCommands.js";
 import { resolveCanonicalCommandSource } from "./commandCatalog.js";
+import { Check } from "typebox/value";
+import { WorkflowInputsSchema, type WorkflowInputs, type WorkflowRun } from "../../shared/workflowRuns.js";
 
 export interface CommandSession {
   sessionId: string;
@@ -53,6 +55,9 @@ export interface SessionCommandLifecycle<TSession extends CommandSession = Comma
   onCompactionStart?: (session: TSession) => void;
   onCompactionEnd?: (session: TSession, result: "success" | "cancelled" | "error", detail?: string) => void;
   reloadSession?: (session: TSession) => Promise<void>;
+  runWorkflow?: (session: TSession, name: string, inputs: WorkflowInputs, requestId: string) => Promise<WorkflowRun>;
+  workflowRuns?: (session: TSession) => Promise<WorkflowRun[]>;
+  copyWorkflow?: (session: TSession, name: string, destination: string) => Promise<{ kind: string; message?: string; path?: string }>;
   getSessionTree?: (session: TSession) => ClientSessionTreeSnapshot | undefined;
   hasActiveWork?: (session: TSession) => boolean;
   isTreeNavigationActive?: (session: TSession) => boolean;
@@ -134,8 +139,36 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     if (name === "fork") return this.fork(active);
     if (name === "tree") return this.tree(session);
     if (name === "prompt-new") return await this.savePrompt(session, parsed.args);
+    if (name === "workflow-run") return this.launchWorkflow(session, rest);
+    if (name === "workflow-copy") return this.copyWorkflow(session, rest);
+    if (name === "workflow-runs") {
+      if (this.lifecycle.workflowRuns === undefined) return { type: "unsupported", message: "Workflow runs are unavailable." };
+      const runs = await this.lifecycle.workflowRuns(session);
+      return { type: "done", message: runs.length === 0 ? "No workflow runs." : runs.map((run) => `${run.definition.name}: ${run.state.kind === "finished" ? run.state.outcome : "running"}\nRun: ${run.id}\nInputs: ${JSON.stringify(run.inputs)}${run.state.kind === "finished" ? `\nResult: ${run.state.result}` : ""}`).join("\n\n") };
+    }
 
     return { type: "unsupported", message: `/${name} is not implemented in the web UI yet` };
+  }
+
+  private async launchWorkflow(session: TSession, args: string): Promise<ClientCommandResult> {
+    if (this.lifecycle.runWorkflow === undefined) return { type: "unsupported", message: "Workflow launches are unavailable." };
+    const parsed = /^(\S+)(?:\s+([\s\S]+))?$/.exec(args);
+    if (parsed === null) return { type: "unsupported", message: "Usage: /workflow-run <name> [JSON inputs]" };
+    try {
+      const inputs: unknown = JSON.parse(parsed[2] ?? "{}");
+      if (!Check(WorkflowInputsSchema, inputs)) return { type: "unsupported", message: "Workflow inputs must be a JSON object of strings, booleans, or numbers." };
+      const run = await this.lifecycle.runWorkflow(session, parsed[1] ?? "", inputs, crypto.randomUUID());
+      return { type: "done", message: `Started ${run.definition.name}. Run: ${run.id}` };
+    } catch (error) { return { type: "unsupported", message: error instanceof Error ? error.message : String(error) }; }
+  }
+
+  private async copyWorkflow(session: TSession, args: string): Promise<ClientCommandResult> {
+    if (this.lifecycle.copyWorkflow === undefined) return { type: "unsupported", message: "Workflow copying is unavailable." };
+    const words = args.split(/\s+/u);
+    if (words.length !== 2) return { type: "unsupported", message: "Usage: /workflow-copy <source> <new-name>" };
+    const result = await this.lifecycle.copyWorkflow(session, words[0] ?? "", words[1] ?? "");
+    return result.kind === "saved" ? { type: "done", message: `Copied workflow to ${result.path ?? ""}. Edit it in Resources, then use /workflow-run ${words[1] ?? ""}.` }
+      : { type: "unsupported", message: result.message ?? "Workflow copy failed." };
   }
 
   async respond(sessionId: string, requestId: string, value: string): Promise<ClientCommandResult> {

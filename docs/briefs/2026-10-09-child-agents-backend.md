@@ -107,6 +107,8 @@ Done when tests cover write, read, filter, and retention.
 
 ### 6. Workflow library, back end
 
+The canonical prose contract is [Saved prose workflows](../workflows.md). Prompt files can retain script blocks, but launches reject them until the user selects a script runtime. Completion is explicit: the coordinator calls `workflow_finish` after child work and reports settle.
+
 - **File format.** A superset of the Pi prompt-template format. Add frontmatter for declared settings, each with a name, a type, choices, and a default. Allow an optional fenced `js workflow` block in the body.
 - **Discovery.** Read project files, then profile files. Propose the folder names.
 - **Parser.** Test it with valid files and with broken files.

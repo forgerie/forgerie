@@ -15,6 +15,7 @@ export const ChildRunUsageStateSchema = Type.Object({
 });
 export const ChildRunSchema = Type.Object({
   id: text,
+  workflowRunId: Type.Optional(text),
   session: Type.Object({ id: text, cwd: text }),
   child: Type.Object({ name: Type.String(), conversationId: Type.Integer({ minimum: 1 }), agent: Type.Union([text, Type.Null()]),
     agentFile: Type.Optional(Type.Object({ path: text, sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }) })) }),

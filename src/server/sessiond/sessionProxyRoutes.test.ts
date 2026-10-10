@@ -32,6 +32,24 @@ describe("machine-scoped session proxy routes", () => {
       { method: "DELETE", path: "/sessions/s1/pull-requests/9/watch?cwd=/repo", body: undefined },
     ]);
   });
+  it("forwards workflow discovery, launches, history, and explicit completion through the session wildcard", async () => {
+    const launch = { cwd: "/repo", name: "experiment", inputs: { task: "baseline" }, requestId: "stable-request" };
+    const finish = { cwd: "/repo", outcome: "completed", result: "Recorded" };
+    const discovery = await app.inject({ method: "GET", url: "/api/machines/local/sessions/s1/workflows?cwd=%2Frepo" });
+    const accepted = await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/workflow-runs", payload: launch });
+    const history = await app.inject({ method: "GET", url: "/api/machines/local/sessions/s1/workflow-runs?cwd=%2Frepo" });
+    daemon.respondWith({ statusCode: 409, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Children still running" }) });
+    const pending = await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/workflow-runs/r1/finish", payload: finish });
+    expect([discovery.statusCode, accepted.statusCode, history.statusCode, pending.statusCode]).toEqual([200, 200, 200, 409]);
+    expect(pending.json()).toEqual({ error: "Children still running" });
+    expect(daemon.requests).toEqual([
+      { method: "GET", path: "/sessions/s1/workflows?cwd=%2Frepo", body: undefined },
+      { method: "POST", path: "/sessions/s1/workflow-runs", body: launch },
+      { method: "GET", path: "/sessions/s1/workflow-runs?cwd=%2Frepo", body: undefined },
+      { method: "POST", path: "/sessions/s1/workflow-runs/r1/finish", body: finish },
+    ]);
+  });
+
   it("strips the machine prefix before forwarding session requests", async () => {
     const response = await app.inject({ method: "GET", url: "/api/machines/local/sessions?cwd=/repo" });
 

@@ -8,6 +8,7 @@ import { ChildRunUsageSchema, ChildRunUsageStateSchema, type ChildRun } from "..
 import { ChildRunStore, type ChildRunCheckpoint } from "./childRunStore.js";
 import { CHILD_AGENTS_DOC_KIND, durableChildRunMetadata } from "./durableChildAgents.js";
 import type { DurableChildSessionRef } from "./durableChildHost.js";
+import { activeWorkflowRun, workflowActiveFromCommit } from "./durableWorkflowRuns.js";
 
 // SDK IDs are opaque numbers. These schemas validate the persisted/publication boundary before restoring the brand.
 const positive = Type.Integer({ minimum: 1 });
@@ -27,6 +28,7 @@ interface Child { metadata: Metadata; usage: UsageState; live: Live; generations
 /** Exact committed frames, not provider callbacks or bounded event streams. It never calls Session APIs in a listener. */
 export class DurableChildRunRecords {
   private readonly children = new Map<number, Child>();
+  private workflowRunId: string | undefined;
   private writes: Promise<void> = Promise.resolve();
   private writeFailure: Error | undefined;
   private unsubscribe: (() => void) | undefined;
@@ -37,6 +39,7 @@ export class DurableChildRunRecords {
   static async open(harness: Harness, parent: ConversationId, ref: DurableChildSessionRef, store: ChildRunStore, context: Context,
     onError: (error: unknown) => void, now: () => number = Date.now): Promise<DurableChildRunRecords> {
     const recorder = new DurableChildRunRecords(ref, store, onError, now);
+    recorder.workflowRunId = await activeWorkflowRun(harness, parent, context);
     const pending = await store.pending(ref.id);
     const metadata = await durableChildRunMetadata(harness, parent, context);
     for (const [name, value] of Object.entries(metadata)) {
@@ -96,6 +99,8 @@ export class DurableChildRunRecords {
   }
 
   private adopt(publication: CommitPublication, parent: ConversationId): void {
+    const workflow = workflowActiveFromCommit(publication, parent);
+    if (workflow !== undefined) this.workflowRunId = workflow.active ?? undefined;
     for (const change of publication.changes) {
       if (change.type === "document" && change.conversationId === parent && change.record.kind === CHILD_AGENTS_DOC_KIND && Check(metadataSchema, change.value)) {
         for (const [name, metadata] of Object.entries(change.value.agents)) this.child({ ...metadata, name });
@@ -147,7 +152,7 @@ export class DurableChildRunRecords {
   private begin(child: Child, submissionId: SubmissionId, rootTaskId: TaskId, startedAt: number, baseline: UsageState | null): void {
     const metadata = child.metadata;
     const id = createHash("sha256").update(`${this.ref.id}/${String(metadata.conversationId)}/${String(submissionId)}`).digest("hex");
-    child.active = { run: { id, session: { ...this.ref }, child: { name: metadata.name, conversationId: metadata.conversationId, agent: metadata.agent,
+    child.active = { run: { id, ...(this.workflowRunId === undefined ? {} : { workflowRunId: this.workflowRunId }), session: { ...this.ref }, child: { name: metadata.name, conversationId: metadata.conversationId, agent: metadata.agent,
       ...(metadata.agentFile === undefined ? {} : { agentFile: metadata.agentFile }) }, model: null, startedAt,
       state: { kind: "running" }, turns: 0, usage: baseline === null ? null : { models: {}, tools: {} } },
       checkpoint: { submissionId, rootTaskId, generationTaskId: rootTaskId, baseline } };

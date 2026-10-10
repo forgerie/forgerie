@@ -19,6 +19,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
 import type { ChildWorktreeSummary, WorktreeActionResult, WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
 import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
+import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild } from "./durableWorkflowRuns.js";
 
 export const CHILD_TOOL_NAME = "child_agent";
 export const CHILD_QUESTION_KIND = "forgerie.child-question";
@@ -75,12 +76,16 @@ function childReporter(worktrees: DurableChildWorktrees | undefined, flushRunRec
         ? await requireWorktrees(worktrees).report(reporter.input.worktreeId) : undefined;
       await runtime.commit(async (tx) => {
         const next = (report?: string): { status: "running"; checkpoint: ReporterState } => ({ status: "running", checkpoint: report === undefined ? { phase: "report" } : { phase: "report", report } });
-        if (settled.status === "unanswered") return next(settled.reason === "aborted" ? undefined : `[subagent ${name} failed: ${settled.reason}]`);
+        if (settled.status === "unanswered") {
+          await settleWorkflowChild(tx, runtime.conversationId, reporter.id, settled.reason === "aborted" ? "stopped" : "failed", settled.reason);
+          return next(settled.reason === "aborted" ? undefined : `[subagent ${name} failed: ${settled.reason}]`);
+        }
         if (settled.type !== "input") return next();
         const agent = (await tx.doc(Children, runtime.conversationId)).agents[name];
+        const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0];
+        await settleWorkflowChild(tx, runtime.conversationId, reporter.id, "answered", textOf(isAssistant(answer) ? answer : undefined));
         if (agent === undefined || agent.reported.includes(settled.answer)) return next();
         agent.reported.push(settled.answer);
-        const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0];
         return next(`[subagent ${name} answered, no reply needed] ${textOf(isAssistant(answer) ? answer : undefined)}${worktreeReport === undefined ? "" : `\n\n${worktreeReport}`}`);
       }, context);
     },
@@ -91,10 +96,17 @@ function childReporter(worktrees: DurableChildWorktrees | undefined, flushRunRec
         const main = await runtime.conversation(runtime.conversationId, context);
         await main?.submit({ type: "input", content: report, whenBusy: "followUp", requestId: `child-report:${String(reporter.id)}` }, context);
       }
-      await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+      await runtime.commit(async (tx) => {
+        await deliveredWorkflowChild(tx, runtime.conversationId, reporter.id);
+        return { status: "terminal", outcome: { status: "completed", result: null } };
+      }, context);
     },
   },
-  abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+  abort: (task, runtime, context) => runtime.commit(async (tx) => {
+    await settleWorkflowChild(tx, runtime.conversationId, task.id, "stopped", "Reporter stopped");
+    await deliveredWorkflowChild(tx, runtime.conversationId, task.id);
+    return { status: "terminal", outcome: { status: "aborted" } };
+  }, context),
   });
 }
 
@@ -240,7 +252,9 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         } else if (!Object.hasOwn(state.agents, name)) return `No child named ${name}.`;
         const agent = state.agents[name];
         if (agent === undefined) return `No child named ${name}.`;
-        state.reporters[String(api.taskId)] = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
+        const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
+        state.reporters[String(api.taskId)] = reporter;
+        await associateWorkflowChild(tx, api.conversationId, agent.conversationId, reporter, name);
         return action === "send" ? `Sent to ${name}.` : `Started ${name}${profile === undefined ? "" : ` (${profile.name})`}.`;
       }, context);
       const current = (await api.snapshot(Children, api.conversationId, context))?.agents[name];
@@ -397,6 +411,7 @@ export async function continueChild(harness: Harness, parent: Conversation, conv
       state.agents[name] = { ...source, conversationId: child.id, createdAt: Date.now(), reported: [], worktreeId: checkout.id };
       const reporter = await tx.createTask(childReporter(lifecycle), { name, conversationId: child.id, message: text, followUp: false, worktreeId: checkout.id }, background);
       state.reporters[`continue:${requestId}`] = reporter;
+      await associateWorkflowChild(tx, parent.id, child.id, reporter, name);
       // Draft assignments clone their input. Replace the map rather than mutating an assigned plain object.
       state.continuations = { ...state.continuations, [requestId]: { from: conversationId, text, conversationId: Number(child.id) } };
       return { conversationId: Number(child.id) };

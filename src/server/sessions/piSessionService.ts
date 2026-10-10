@@ -54,6 +54,8 @@ import { attachmentsToInlineImages, saveAttachmentsToWorkspace } from "./attachm
 import { parsePromptAttachments } from "../../shared/promptAttachments.js";
 import { fingerprintPromptResourceDeliveryText, parseLeadingSlashCommand, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
 import { AgentDirPromptLibrary } from "../resources/promptLibrary.js";
+import { WorkflowLibrary } from "../resources/workflowLibrary.js";
+import type { WorkflowInputs, WorkflowOutcome } from "../../shared/workflowRuns.js";
 import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
 import { assertBoundedPromptResourceContent, readBoundedPromptResourceFile } from "../resources/promptResourceContent.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_LIMIT } from "../../shared/apiTypes.js";
@@ -1176,6 +1178,9 @@ export class PiSessionService implements SessionRouteService {
           operation,
         ),
         onUserFork: (session) => this.detachForkedSession(session),
+        runWorkflow: (session, name, inputs, requestId) => this.runWorkflow(this.activeSessionRef(session.sessionId), name, inputs, requestId),
+        workflowRuns: (session) => this.workflowRuns(this.activeSessionRef(session.sessionId)),
+        copyWorkflow: (session, name, destination) => this.copyWorkflow(this.activeSessionRef(session.sessionId), name, destination),
       },
       { listSessionNames: (cwd) => this.listSessionNames(cwd) },
       new AgentDirPromptLibrary(this.agentDir),
@@ -2378,6 +2383,24 @@ export class PiSessionService implements SessionRouteService {
   async messageDurableChild(ref: PiSessionRef, conversationId: number, text: string) { await (await this.durableSession(ref)).messageDurableChild(conversationId, text); }
   async stopDurableChild(ref: PiSessionRef, conversationId: number) { await (await this.durableSession(ref)).stopDurableChild(conversationId); }
   async answerDurableChildQuestion(ref: PiSessionRef, questionId: string, answer: string) { await (await this.durableSession(ref)).answerDurableChildQuestion(questionId, answer); }
+  async workflowInventory(ref: PiSessionRef) { await this.getOrOpen(ref); return new WorkflowLibrary(this.agentDir).list(ref.cwd); }
+  async workflowRuns(ref: PiSessionRef) { return (await this.durableSession(ref)).workflowRuns(); }
+  async runWorkflow(ref: PiSessionRef, name: string, inputs: WorkflowInputs, requestId: string) {
+    await this.assertWritable(ref);
+    const session = await this.durableSession(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
+    return this.runSessionEntryMutation(session, "launch a workflow", () => session.runWorkflow(name, inputs, requestId));
+  }
+  async finishWorkflow(ref: PiSessionRef, runId: string, outcome: WorkflowOutcome, result: string) {
+    await this.assertWritable(ref);
+    const session = await this.durableSession(ref);
+    return this.runSessionEntryMutation(session, "finish a workflow", () => session.finishWorkflow(runId, outcome, result));
+  }
+  async copyWorkflow(ref: PiSessionRef, name: string, destination: string) {
+    await this.assertWritable(ref);
+    const workflow = await new WorkflowLibrary(this.agentDir).read(ref.cwd, name);
+    return new AgentDirPromptLibrary(this.agentDir).save({ name: destination, body: workflow.text });
+  }
   private async durableSession(ref: PiSessionRef): Promise<DurableAgentSession> {
     const session = await this.getOrOpen(ref);
     if (!(session instanceof DurableAgentSession) || !session.hostsDurableChildren) throw new Error("This session does not host child agents");

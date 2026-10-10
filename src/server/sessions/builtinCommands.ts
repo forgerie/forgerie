@@ -21,6 +21,9 @@ export const BUILTIN_COMMANDS: ClientCommand[] = [
   // Forgerie-native, not a pi TUI command. This list is the set of built-in
   // slash commands the web composer offers, so it is where the entry belongs.
   { name: "prompt-new", description: "Save the rest of this message as a reusable prompt", source: "builtin" },
+  { name: "workflow-run", description: "Launch a saved prose workflow with JSON inputs", source: "builtin" },
+  { name: "workflow-copy", description: "Copy a workflow to a new prompt file", source: "builtin" },
+  { name: "workflow-runs", description: "Show this session's workflow runs and results", source: "builtin" },
   { name: "compact", description: "Manually compact session context", source: "builtin" },
   { name: "resume", description: "Resume a different session", source: "builtin" },
   { name: "reload", description: "Reload Pi runtime resources for this session", source: "builtin" },

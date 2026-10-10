@@ -35,6 +35,7 @@ import { registerProcessRoutes } from "./sessions/processRoutes.js";
 import { registerDurableChildRoutes } from "./sessions/durableChildRoutes.js";
 import { ChildRunStore } from "./sessions/childRunStore.js";
 import { registerChildRunRoutes } from "./sessions/childRunRoutes.js";
+import { registerWorkflowRoutes } from "./sessions/workflowRoutes.js";
 import { LiveChildSessionIndex, createDurableChildHost } from "./sessions/durableChildHost.js";
 import { bundledSubagentsPackagePath } from "./sessions/bundledSubagents.js";
 import { SessionNotificationStore } from "./sessions/sessionNotificationStore.js";
@@ -300,6 +301,7 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, ru
   registerProcessRoutes(app, sessions);
   registerDurableChildRoutes(app, sessions);
   registerChildRunRoutes(app, childRuns);
+  registerWorkflowRoutes(app, sessions);
   registerPromptResourceRoutes(app, promptResources);
   registerPromptLibraryRoutes(app, promptLibrary);
   registerResourceEditorRoutes(app, resourceEditor);
