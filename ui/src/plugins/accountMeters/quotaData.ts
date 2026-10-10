@@ -167,15 +167,15 @@ export function formatAmount(remainingAmount: number | undefined): string | unde
 
 /**
  * A countdown in one unit, never two. `1d 14h` reads as a precision a
- * countdown does not have. Minutes below an hour, hours below two days, days
- * above that.
+ * countdown does not have. Minutes below an hour, hours below a day, days
+ * from there.
  */
 export function spanLabel(milliseconds: number): string {
   if (!Number.isFinite(milliseconds)) return "";
   if (milliseconds <= 0) return "now";
   if (milliseconds < HOUR_MS) return `${String(Math.max(1, Math.round(milliseconds / MINUTE_MS)))}m`;
-  const hours = milliseconds / HOUR_MS;
-  return hours < 48 ? `${String(Math.round(hours))}h` : `${String(Math.round(hours / 24))}d`;
+  const hours = Math.round(milliseconds / HOUR_MS);
+  return hours < 24 ? `${String(hours)}h` : `${String(Math.max(1, Math.round(milliseconds / DAY_MS)))}d`;
 }
 
 /** The same, for a window: empty where a balance has no reset at all. */

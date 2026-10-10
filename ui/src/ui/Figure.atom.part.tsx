@@ -10,10 +10,10 @@ export function Plain() {
   return <Figure tone="plain">$7</Figure>;
 }
 export function Warn() {
-  return <Figure tone="warn" label="Credit expires unspent in 5 days">↑5d</Figure>;
+  return <Figure tone="warn" label="Credit expires unspent in 5 days">5d</Figure>;
 }
 export function Bad() {
-  return <Figure tone="bad" label="Runs dry before the reset in 4 days">↓4d</Figure>;
+  return <Figure tone="bad" label="Runs dry before the reset in 4 days">4d</Figure>;
 }
 export function Faint() {
   return <Figure tone="faint">—</Figure>;

@@ -90,7 +90,7 @@ describe("balances and clocks", () => {
     expect([undefined, Number.NaN, -1].map(formatAmount)).toEqual([undefined, undefined, undefined]);
   });
   it("writes a countdown in one unit, never two", () => {
-    expect([45 * 60_000, 90 * 60_000, 38 * 3_600_000, 65 * 3_600_000, 0, Number.NaN].map(spanLabel)).toEqual(["45m", "2h", "38h", "3d", "now", ""]);
+    expect([45 * 60_000, 90 * 60_000, 38 * 3_600_000, 65 * 3_600_000, 0, Number.NaN].map(spanLabel)).toEqual(["45m", "2h", "2d", "3d", "now", ""]);
   });
   it("leaves the countdown empty for a balance that never resets", () => {
     const now = new Date("2026-09-20T00:45:00Z");

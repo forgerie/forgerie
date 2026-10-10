@@ -32,9 +32,9 @@ describe("the meters", () => {
   const [claude, codex, openrouter, antigravity] = meterModel(payload, {}, now);
   it("labels lines only where an account has more than one, and shares one clock between lines that reset together", () => {
     const account = claude!.accounts[0]!;
-    expect(account.lines.map((line) => [line.label, line.share, line.clock.text])).toEqual([["5h", "73", "4h"], ["7d", "20", "↓4d"], ["Fable", "55", "4d"]]);
+    expect(account.lines.map((line) => [line.label, line.share, line.clock.text])).toEqual([["5h", "73", "4h"], ["7d", "20", "4d"], ["Fable", "55", "4d"]]);
     // The week is dry and Fable is not, so their clocks differ even though the reset is the same.
-    expect(account.clocks).toEqual([{ start: 0, end: 1, clock: { text: "4h", tone: "plain" } }, { start: 1, end: 2, clock: { text: "↓4d", tone: "dry" } },
+    expect(account.clocks).toEqual([{ start: 0, end: 1, clock: { text: "4h", tone: "plain" } }, { start: 1, end: 2, clock: { text: "4d", tone: "dry" } },
       { start: 2, end: 3, clock: { text: "4d", tone: "plain" } }]);
     expect(codex!.accounts[0]!.lines[0]!.label).toBeUndefined();
   });
@@ -43,7 +43,7 @@ describe("the meters", () => {
     expect(dry!.mark).toMatchObject({ kind: "bar", remaining: 20, standing: { kind: "dry" } });
     expect(dry!.words).toBe("Seven-day: 20% left, resets in 4d, 30 points behind an even spend.");
     const loss = codex!.accounts[0]!.lines[0]!;
-    expect(loss.clock).toEqual({ text: "↑4d", tone: "loss" });
+    expect(loss.clock).toEqual({ text: "4d", tone: "loss" });
     expect(loss.mark.kind === "bar" && loss.mark.doom).toBeCloseTo(Math.log(95 / 50) / Math.log(8));
   });
   it("marks the routed account only where the router pins one of several", () => {
@@ -59,7 +59,7 @@ describe("the meters", () => {
     expect(antigravity!.accounts[0]!.lines.map((line) => line.mark.kind)).toEqual(["bar", "pool"]);
     expect(antigravity!.accounts[0]!.lines[1]).toMatchObject({ mark: { kind: "pool", refusing: true }, words: "Gemini: refusing work, the provider reports no level, resets in 20h." });
     // Refusing until it resets: the clock a dry lane wears.
-    expect(antigravity!.accounts[0]!.lines[1]!.clock).toEqual({ text: "↓20h", tone: "dry" });
+    expect(antigravity!.accounts[0]!.lines[1]!.clock).toEqual({ text: "20h", tone: "dry" });
   });
   it("leaves out the accounts out of service, and a service left with none", () => {
     expect(inService(meterModel(payload, {}, now)).map((provider) => [provider.id, provider.accounts.length]))

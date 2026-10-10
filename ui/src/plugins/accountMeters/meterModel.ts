@@ -115,9 +115,9 @@ function meterLine(quotaWindow: QuotaWindow, available: boolean, labelled: boole
   const reset = countdown === "" ? "never resets" : countdown === "now" ? "resets now" : `resets in ${countdown}`;
   if (isUnmeteredWindow(quotaWindow)) {
     const refusing = !available || quotaWindow.remainingPercent <= 0;
-    // A refusing pool cannot serve until it resets: the same instruction, and the same clock, as a lane run dry.
+    // A refusing pool cannot serve until it resets: the same instruction, and the same clock tone, as a lane run dry.
     return { id: quotaWindow.id, label, mark: { kind: "pool", refusing }, share: undefined,
-      clock: refusing && countdown !== "" ? { text: `↓${countdown}`, tone: "dry" } : plainClock(countdown),
+      clock: refusing && countdown !== "" ? { text: countdown, tone: "dry" } : plainClock(countdown),
       words: sentence(`${name}: ${refusing ? "refusing work" : "answering"}`, "the provider reports no level", reset, available ? undefined : "not in service") };
   }
   const amount = formatAmount(quotaWindow.remainingAmount);
@@ -158,15 +158,15 @@ export function inService(providers: readonly MeterProvider[]): MeterProvider[] 
 const plainClock = (text: string): Clock => text === "" ? { text: "—", tone: "none" } : { text, tone: "plain" };
 
 /**
- * The clock, and which kind of trouble it names. The arrow carries the
- * meaning, not the hue: amber against red is the pair red-green colour
- * blindness collapses, and the two states are opposite instructions. Up:
- * credit is expiring unspent. Down: the lane runs dry before this reset.
+ * The clock, and which kind of trouble it names, by tone alone: red, the lane
+ * runs dry before this reset; amber, credit expires unspent at it. The bar
+ * draws the same news in shape (hatching against a solid surplus), and the
+ * lane's words say it, so the clock carries no arrow.
  */
 function standingClock(text: string, standing: Standing): Clock {
   if (text === "") return { text: "—", tone: "none" };
-  if (standing.kind === "drained" || standing.kind === "dry") return { text: `↓${text}`, tone: "dry" };
-  if (standing.kind === "loss") return { text: `↑${text}`, tone: "loss" };
+  if (standing.kind === "drained" || standing.kind === "dry") return { text, tone: "dry" };
+  if (standing.kind === "loss") return { text, tone: "loss" };
   return { text, tone: "plain" };
 }
 

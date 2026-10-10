@@ -15,11 +15,11 @@ const groups: LaneGroup[] = [
       { key: "week", label: "7d", mark: <PaceBar value={20} pace={50} state="short" />, value: <Figure>20</Figure>, words: "Seven-day: 20% left, behind pace" },
       { key: "side", label: "Side", mark: <PaceBar value={55} pace={50} />, value: <Figure>55</Figure>, words: "Side: 55% left" },
     ],
-    spans: [{ start: 0, end: 1, content: <Figure>4h</Figure> }, { start: 1, end: 3, content: <Figure tone="bad">↓4d</Figure> }] }] },
+    spans: [{ start: 0, end: 1, content: <Figure>4h</Figure> }, { start: 1, end: 3, content: <Figure tone="bad">4d</Figure> }] }] },
   { key: "b", name: "Contoso", blocks: [
     { key: "b1", label: "first@contoso.example, marked", caption: "first@contoso.example", marked: true,
       rows: [{ key: "w", mark: <PaceBar value={62} pace={50} state="surplus" heat={0.2} />, value: <Figure>62</Figure>, words: "Seven-day: 62% left, ahead of pace" }],
-      spans: [{ start: 0, end: 1, content: <Figure tone="warn">↑5d</Figure> }] },
+      spans: [{ start: 0, end: 1, content: <Figure tone="warn">5d</Figure> }] },
     { key: "b2", label: "second@contoso.example", caption: "second@contoso.example",
       rows: [{ key: "w", mark: <PaceBar value={100} pace={100} />, value: <Figure>100</Figure>, words: "Seven-day: 100% left" }],
       spans: [{ start: 0, end: 1, content: <Figure>7d</Figure> }] },

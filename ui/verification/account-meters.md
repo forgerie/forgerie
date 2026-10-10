@@ -7,15 +7,15 @@ Account meters show how much quota each AI account has left. They sit at the foo
 Each provider is named once, by its mark (Claude, OpenAI for Codex, Google for Antigravity, OpenRouter); hover the mark for its name. Every account under it draws one line per window the CLIProxyAPI router reports. The meters are a heads-up display: no account address is drawn, at any size. Press an account for the detail sheet (below). An account with more than one line labels them (`5h`, `7d`, `Fable`, `Gemini`). An account with nothing to draw shows a quiet dash; its words say why.
 
 - **The bar** is the share left. A 3px cut in the bar marks an even spend: the share that would be left if the window were spent at a constant rate.
-- **Hatching** between the fill and the cut means the window runs dry before it resets. The clock turns red with `↓`.
-- **A solid bar past the cut** is credit that will expire unspent. It runs from amber (the app's warn tone) to red by how many times the window's normal rate you would need to spend it all. The clock turns amber with `↑`.
+- **Hatching** between the fill and the cut means the window runs dry before it resets. The clock turns red.
+- **A solid bar past the cut** is credit that will expire unspent. It runs from amber (the app's warn tone) to red by how many times the window's normal rate you would need to spend it all. The clock turns amber.
 - A lane within 8 points of the cut is on pace and draws neither.
-- **A dot and its clock** is an Antigravity Gemini pool. It reports no level, so it draws no lane. The dot is grey while it answers and red while it refuses; a refusing pool's clock also turns red with `↓`, as a lane run dry does, because it serves nothing until that reset.
+- **A dot and its clock** is an Antigravity Gemini pool. It reports no level, so it draws no lane. The dot is grey while it answers and red while it refuses; a refusing pool's clock also turns red, as a lane run dry does, because it serves nothing until that reset.
 - **A dollar amount** is an OpenRouter balance (`$7`). It turns amber at $2 or less and red at $0. A balance never resets, so it has no clock.
 - A service whose accounts are each one such reading puts them **side by side on one line** after its mark (`● 6d   ▏● 5h`), instead of a line each.
 - **A blue service mark** means at least one of its accounts has a banked reset; amber when one lapses within three days. Hover the mark for how many accounts. Which account, and spending it, is in the detail sheet.
 - An account the router has taken out of service is not shown. The detail sheet still lists it, struck through.
-- **The share** (`62`) and **the clock** (`5d`, the window's reset) sit at the end. Lanes that reset together and stand the same way share one clock.
+- **The share** (`62`) and **the clock** (`5d`, the window's reset) sit at the end. The clock is in hours below a day (`19h`) and in days from there (`2d`), never both. Lanes that reset together and stand the same way share one clock.
 - **A riser** to the left of an account marks the account the router sends work to, where a provider has more than one.
 
 Hover a lane, or use a screen reader, for the whole line in words: "Seven-day: 20% left, resets in 4d, 30 points behind an even spend."

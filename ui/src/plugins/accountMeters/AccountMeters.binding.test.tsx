@@ -59,7 +59,7 @@ describe("account meters", () => {
       "Seven-day: 100% left, resets in 7d, 0 points ahead of an even spend.",
     ]);
     expect([...document.querySelectorAll(".lane-grid-block[data-marked]")].map((node) => node.getAttribute("aria-label"))).toEqual(["a@example, routed"]);
-    expect(document.querySelector(".figure[data-tone=bad]")!.textContent).toBe("↓4d");
+    expect(document.querySelector(".figure[data-tone=bad]")!.textContent).toBe("4d");
   });
   it("hides the bars turned off in Settings", async () => {
     await render(settings({ five_hour: false }));
@@ -257,7 +257,7 @@ describe("account meters", () => {
     expect(document.querySelectorAll(".shelf .lane-grid-block")).toHaveLength(0);
     const tokens = [...document.querySelectorAll<HTMLElement>(".shelf .lane-grid-token")];
     // A refusing pool's clock says it cannot serve until it resets, as a dry lane's does.
-    expect(tokens.map((node) => [node.getAttribute("aria-label"), node.textContent])).toEqual([["g@example, out of service", "↓19h"], ["h@example, routed", "5h"], ["sk-or", "$7"]]);
+    expect(tokens.map((node) => [node.getAttribute("aria-label"), node.textContent])).toEqual([["g@example, out of service", "19h"], ["h@example, routed", "5h"], ["sk-or", "$7"]]);
     expect(tokens[0]!.querySelector(".signal-dot[data-off]:not([data-run])")).not.toBeNull();
     expect(tokens[1]!.hasAttribute("data-marked")).toBe(true);
     // The sheet keeps the full drawing: the pool's dots across the lane and the balance's pips.
