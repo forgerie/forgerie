@@ -29,7 +29,7 @@ The disposable hosted comparison is [run 38089572231](https://github.com/forgeri
 | Compatible injected-runtime probes | Upstream Node 24.19.0 starts in both compatible images. In the booted Arion guest, systemd has no failed units and `ci-probe.service` stays active. The exact NixOS runner Node symlink still fails with exit 127 in both images. |
 | Controlled cancellation | SIGTERM to the driver during a real payload removes the container and copied workspace on both routes. Measured cleanup after the signal is 0.615 seconds for Yeradon and 0.766 seconds for Arion. This is not a GitHub cancellation or power-loss test. |
 | Hosted jobs | Both pass all seven stages, with the same server/browser test counts, existing skips and coverage percentages as the local runs. UID 1001 on the hosted VM maps to guest UID 1000. Resource assertions and container/workspace cleanup pass on both routes. |
-| Image identity across placements | Yeradon matches all 118 layers and its full image digest. Arion matches 98 of 99 layer hashes, configuration and history, but its final filesystem layer and image digest differ. The cause was not established; an independently streamed Arion rebuild is not proven byte-identical. |
+| Image identity across placements | Yeradon matches all 118 layers and its full image digest. Arion matches 98 of 99 layer hashes, runtime configuration and history, but its final filesystem layer and image digest differ. The cause was not established; an independently streamed Arion rebuild is not proven byte-identical. |
 
 Selected receipts are under `evidence/`, including `hosted-comparison.json` and `local-lifecycle.json`. Full hosted receipts and coverage were downloaded before their seven-day artifact retention expires. The complete local attempt records, coverage artifacts and process logs remain under `/tmp/nix-ci-routes/` and the managed process log directory during execution.
 
@@ -62,6 +62,10 @@ Current attempts request four CPU-equivalents, memory high 12 GiB, memory max 16
 These are one-run observations with cache and archive-format differences, not performance benchmarks. Arion's streaming archive is uncompressed here. The Yeradon overlay repeats some base paths, so its excess size is a prototype defect, not an intrinsic property of package-only images.
 
 Opinion: use a package-only image for the existing Forgerie checks unless the tests need guest systemd services. This has fewer boot and cgroup integration requirements. The cost is maintaining an image recipe and a container runtime. It does not supply a private kernel or fix the native injected Node link. If systemd service tests are needed, Arion's full userspace is a working alternative on the two tested placements. Build one image once and transfer that artifact before making a stronger byte-identity claim.
+
+## Delivery verification
+
+The report delivery checkout uses newer local source, not the frozen comparison revision. Static checks pass. One parallel server run exceeded an existing 5-second child-agent test deadline. The focused file then passed all 18 tests. The full serialized server suite passed 1,893 tests with five skips. Browser verification passed 1,373 tests with one skip. No deadline or assertion changed. `evidence/report-verification.json` records these separate results.
 
 ## Limits
 
