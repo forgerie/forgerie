@@ -1,70 +1,13 @@
-name: UNZEN Linux pilot
-
+name: UNZEN admission probe
 on:
+  pull_request:
   workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: unzen-forgerie-pilot
-  cancel-in-progress: false
-
+permissions: {}
 jobs:
-  verify:
-    name: Optional native NixOS verification
-    # This switch avoids queued jobs before activation. It is not an access
-    # boundary: the organization runner group must restrict workflow access.
-    if: github.repository == 'forgerie/forgerie' && github.ref == 'refs/heads/main' && vars.UNZEN_PILOT_ENABLED == 'true'
+  admission:
     runs-on:
       group: unzen-forgerie-manual
       labels: unzen-forgerie
-    timeout-minutes: 60
-    defaults:
-      run:
-        shell: bash
+    timeout-minutes: 1
     steps:
-      - name: Checkout the dispatched main revision
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-
-      # Node comes from the host's pinned NixOS closure. Do not download an
-      # unpatched setup-node binary or allow this job to use the host daemon.
-      - name: Check the native toolchain and disk-backed temporary files
-        run: node scripts/check-native-ci.mjs
-
-      - name: Install server and browser dependencies
-        run: npm ci
-
-      - name: Verify static checks
-        run: npm run verify:static
-
-      # Match hosted CI: avoid compiler/SDK contention within the bounded slice.
-      - name: Run tests and measure coverage
-        run: npm run test:coverage -- --no-file-parallelism
-
-      - name: Verify the browser app
-        run: npm run verify:ui
-
-      - name: Build
-        run: npm run build
-
-      - name: Smoke test npm 12 global package install
-        run: npm run smoke:package-install
-
-      - name: Check npm package contents
-        run: npm run pack:dry
-
-      # v6 uses node24, the runtime supplied by the pinned NixOS runner.
-      # The existing GitHub-hosted workflow remains on its current versions.
-      - name: Upload coverage and native environment report
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: unzen-pilot-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            coverage/
-            native-ci-report.json
-          if-no-files-found: error
-          retention-days: 7
+      - run: echo 'Harmless admission probe. No checkout, secrets, or application code.'
