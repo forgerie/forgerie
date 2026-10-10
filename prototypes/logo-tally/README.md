@@ -21,19 +21,28 @@ feedback set four rules for this round: the block is square (as many marks
 across as down), both arms of the F are the same length, there are no
 outline marks, and the grey cells are light so the F stands out.
 
+The fourth round (`d39a570e`) drew square blocks with equal arms. An
+annotated review of that round set two anchors for this one. In both, the F
+is black only, and the red and blue marks sit at the edge of the block,
+outside the F.
+
+- Anchor A: a 5 × 5 block. The F is three marks wide: the spine plus two
+  marks in each arm. Light grey fills the rest.
+- Anchor B: the run's own F. Its five black marks make a 2 × 2 head on a
+  stem.
+
 | Candidate | Pattern | Idea |
 | --- | --- | --- |
-| The run (reference) | 3 × 3, 8 marks | The chosen first-round mark, kept for comparison. |
-| 4 × 4, full arms | 16 cells, F of 10 | Both arms run the full width. |
-| 4 × 4, short arms | 16 cells, F of 8 | Both arms stop one mark short; a grey column frames the F. |
-| 5 × 5, full arms | 25 cells, F of 13 | Taller F, longer stem, full-width arms. |
-| 5 × 5, short arms | 25 cells, F of 11 | The 5 × 5 F with both arms one mark short. |
-| 5 × 5, bold spine | 25 cells, F of 17 | A two-mark spine with full-width arms. |
-
-Red sits in the spine, as in the run. The live mark ends the middle arm.
-
-A 3 × 3 F with equal arms is not possible: the two arms need a gap row
-between them, so the F needs at least four rows.
+| The run (reference) | 3 × 3 | The chosen first-round mark. |
+| A · F left, colours bottom right | 5 × 5 | Red and blue stack in the bottom-right corner. |
+| A · F centred, run corners | 5 × 5 | Red on the left edge at the run's height; blue in the bottom-right corner. |
+| A · F right, colours left | 5 × 5 | Red and blue take the left column. |
+| A · F left, colours on the floor | 5 × 5 | Red and blue end the bottom row. |
+| B · The run, as annotated | 3 × 3 | Blue and red in the left column, blue in the bottom-right corner, one empty cell. |
+| B · Filled | 3 × 3 | Grey replaces the empty cell and the top-left blue. |
+| B · Colours left | 3 × 3 | Blue and red in the left column; the other cells are grey. |
+| B · 4 × 4, wide head | 4 × 4 | A 3 × 2 head on a stem. |
+| B · 4 × 4, narrow head | 4 × 4 | A 2 × 2 head on a longer stem. |
 
 `build.mjs` defines each candidate as rows of text: `#` is a plain mark, `r`
 a failed mark, `b` a live mark, `g` a grey mark, `o` a faint outline, and
@@ -53,13 +62,15 @@ side for quick comparison.
 
 ## Findings
 
-- At 42 px (16 CSS px on the Fold), every square F reads as an F.
-- At 16 px, the 4 × 4 marks blur at the edges but the F holds. The 5 × 5
-  marks are about 2 px each and the F is only just readable.
-- The grey is `#e6e2d9` on light paper and `#26272a` on dark. It keeps the
-  square block visible without competing with the F.
+- Anchor A reads as an F at every size down to 16 px, because the gap row
+  between the arms stays visible.
+- Anchor B keeps the run's large marks, but its head has no gap between the
+  arms. At 3 × 3 it can read as a P or a block as easily as an F. The
+  4 × 4 versions have a longer stem and read more clearly as an F.
 - On the home-screen icon, 4 × 4 marks are 30% smaller than the run's, and
-  5 × 5 marks are 45% smaller (scale 14 and 11 against 20).
+  5 × 5 marks are 45% smaller.
+- `explore.sh` writes `shots/explore.png`, every candidate at 256 px, light
+  and dark, in the table's order.
 
 ## Adopt one
 
