@@ -2,7 +2,7 @@ import { useState } from "react";
 import { AccountMeters } from "./AccountMeters";
 import { QuotaSheet } from "./QuotaSheet";
 import { ResetDialog } from "./ResetDialog";
-import { meterModel } from "./meterModel";
+import { inService, meterModel } from "./meterModel";
 import { resetPreview } from "./resetModel";
 import type { QuotaPayload } from "./quotaData";
 import { NOW, QUOTA, QUOTA_RESET_LAPSING, QUOTA_WITH_RESETS, SETTINGS, ZONE } from "./fixtures/quota";
@@ -10,17 +10,17 @@ import { NOW, QUOTA, QUOTA_RESET_LAPSING, QUOTA_WITH_RESETS, SETTINGS, ZONE } fr
 export const name = "Account meters";
 export const note = "Each AI account's quota at the foot of the session list; press an account for its detail";
 
-const providers = meterModel(QUOTA, SETTINGS, NOW);
+const providers = inService(meterModel(QUOTA, SETTINGS, NOW));
 
-/** The meters, live: press an account to open the detail at it, or a chip to ask about a reset. */
+/** The meters, live: press an account to open the detail at it, and a chip there to ask about a reset. */
 function Live({ payload, asking: first }: { payload: QuotaPayload; asking?: string }) {
   const [open, setOpen] = useState(true);
   const [sheet, setSheet] = useState<string | undefined>();
   const [asking, setAsking] = useState<string | undefined>(first);
   const preview = asking === undefined ? undefined : resetPreview(payload, asking, NOW, ZONE);
   return <>
-    <AccountMeters open={open} onToggle={() => setOpen(!open)} onRetry={() => {}} onAskReset={setAsking} onOpen={setSheet}
-      view={{ type: "ready", providers: meterModel(payload, SETTINGS, NOW, ZONE), doubtful: false }} />
+    <AccountMeters open={open} onToggle={() => setOpen(!open)} onRetry={() => {}} onOpen={setSheet}
+      view={{ type: "ready", providers: inService(meterModel(payload, SETTINGS, NOW, ZONE)), doubtful: false }} />
     {sheet === undefined ? null : <QuotaSheet providers={meterModel(payload, {}, NOW, ZONE)} doubtful={false} focus={sheet}
       onClose={() => setSheet(undefined)} onRefresh={() => {}} onAskReset={setAsking} />}
     {preview ? <ResetDialog preview={preview} onUse={() => setAsking(undefined)} onCancel={() => setAsking(undefined)} /> : null}
@@ -36,7 +36,7 @@ export function Closed() {
     view={{ type: "ready", providers, doubtful: true }} />;
 }
 export function EveryBar() {
-  return <AccountMeters open onToggle={() => {}} onRetry={() => {}} view={{ type: "ready", providers: meterModel(QUOTA, {}, NOW), doubtful: false }} />;
+  return <AccountMeters open onToggle={() => {}} onRetry={() => {}} view={{ type: "ready", providers: inService(meterModel(QUOTA, {}, NOW)), doubtful: false }} />;
 }
 export function Stale() {
   return <AccountMeters open status="39m old" onToggle={() => {}} onRetry={() => {}} view={{ type: "ready", providers, doubtful: true }} />;

@@ -52,6 +52,12 @@ export interface LaneBlock {
   press?: { label: string; onPress: () => void } | undefined;
   /** The block the reader came for: marked, and brought into view when the grid is drawn. */
   chosen?: boolean;
+  /**
+   * A yes-or-no the block carries, such as something waiting to be used:
+   * a small dot past the end of its first lane, in the grid's edge, so it
+   * takes no column and no row. Its words belong in the block's label.
+   */
+  flag?: { tone?: "live" | "warn" } | undefined;
 }
 export interface LaneGroup {
   key: string;
@@ -102,6 +108,7 @@ export function LaneGrid({ groups, captions = true, faded = false, flush = false
               onClick={press ? () => press.onPress() : undefined} style={{ "--rows": Math.max(1, block.rows.length) }}>
               {/* A pointer presses the block itself, so each lane keeps its hover words; a key presses this button, and its click reaches the block. */}
               {press ? <button type="button" className="lane-grid-open" aria-label={press.label} /> : null}
+              {block.flag ? <i className="lane-grid-flag" data-tone={block.flag.tone ?? "live"} aria-hidden="true" /> : null}
               {captioned ? <span className="lane-grid-caption" aria-hidden="true">{block.caption}</span> : null}
               {block.note !== undefined && block.rows.length === 0 ? <span className="lane-grid-note" style={{ "--row": first }}>{block.note}</span> : null}
               {block.rows.map((row, index) => <Fragment key={row.key}>

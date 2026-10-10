@@ -113,13 +113,23 @@ describe("account meters", () => {
         ] },
       ],
     };
-    const chips = () => [...document.querySelectorAll<HTMLButtonElement>(".lane-grid-act")];
+    // A reset is spent from the sheet; the sidebar only flags that one is banked.
+    const chips = () => [...document.querySelectorAll<HTMLButtonElement>("dialog.sheet-dialog .lane-grid-act")];
+    const openSheet = () => act(async () => document.querySelector<HTMLElement>(".shelf .lane-grid-block")!.click());
     const dialog = () => document.querySelector<HTMLDialogElement>("dialog.wt-dialog");
     const confirm = () => dialog()!.querySelector<HTMLButtonElement>(".wt-primary")!;
     beforeEach(() => { answer = () => Promise.resolve(withResets); HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.open = true; }; });
 
+    it("flags each account that has one in the sidebar with a dot, and offers nothing to press there", async () => {
+      await render(settings());
+      expect(document.querySelectorAll(".shelf .lane-grid-act")).toHaveLength(0);
+      expect([...document.querySelectorAll(".shelf .lane-grid-block")].map((node) => [node.getAttribute("aria-label"), node.querySelector(".lane-grid-flag") !== null])).toEqual([
+        ["me@work.example, 1 reset available, expires Oct 22", true], ["a@example, routed, 2 resets available, the first expires Oct 22", true], ["b@example", false]]);
+    });
+
     it("marks each account that has one, and spends nothing until the question is answered", async () => {
       await render(settings());
+      await openSheet();
       expect(chips().map((chip) => chip.getAttribute("aria-label"))).toEqual([
         "1 reset available, expires Oct 22. Use a reset…", "2 resets available, the first expires Oct 22. Use a reset…"]);
       await act(async () => chips()[0]!.click());
@@ -131,6 +141,7 @@ describe("account meters", () => {
     });
     it("spends one Claude reset through the router, then stops offering it", async () => {
       await render(settings({ endpoint: "https://router.example/quota" }));
+      await openSheet();
       await act(async () => chips()[0]!.click());
       await act(async () => confirm().click()); await settle();
       expect(redeems).toEqual([{ provider: "claude", email: "me@work.example", requestId: "id-1", clockPolicy: "preserve" }]);
@@ -141,6 +152,7 @@ describe("account meters", () => {
     });
     it("holds the button where the provider would refuse, and says why", async () => {
       await render(settings());
+      await openSheet();
       await act(async () => chips()[1]!.click());
       expect(dialog()!.textContent).toContain("starts over now");
       expect(dialog()!.textContent).toContain("keeps these resets banked");
@@ -149,6 +161,7 @@ describe("account meters", () => {
     it("asks about the same request after an uncertain answer, and starts afresh after a refusal", async () => {
       redeemAnswer = () => Promise.resolve({ kind: "uncertain", message: "The router answered HTTP 502 (unknown)." });
       await render(settings());
+      await openSheet();
       await act(async () => chips()[0]!.click());
       await act(async () => confirm().click()); await settle();
       expect(dialog()!.textContent).toContain("may or may not be spent");
@@ -165,6 +178,7 @@ describe("account meters", () => {
       let finish: (outcome: RedeemOutcome) => void = () => {};
       redeemAnswer = () => new Promise((resolve) => { finish = resolve; });
       await render(settings());
+      await openSheet();
       await act(async () => chips()[0]!.click());
       await act(async () => confirm().click());
       expect(confirm().disabled).toBe(true);
@@ -211,21 +225,25 @@ describe("account meters", () => {
       await act(async () => sheet()!.querySelector<HTMLButtonElement>('[aria-label="Read again"]')!.click()); await settle();
       expect(reads).toHaveLength(2);
     });
-    it("asks about a reset over the sheet, and a chip in the sidebar asks without opening it", async () => {
+    it("asks about a reset over the sheet", async () => {
       answer = () => Promise.resolve({ ...payload, providers: [{ ...payload.providers[0]!, accounts: [{ ...payload.providers[0]!.accounts[0]!,
         resets: { expiresAt: ["2026-10-22T16:00:00Z"], clears: ["five_hour", "seven_day"], restartsWindows: false, applicableCount: 1 } }] }] });
       await render(settings());
-      await act(async () => document.querySelector<HTMLButtonElement>(".shelf .lane-grid-act")!.click());
-      expect(sheet()).toBeNull();
-      expect(document.querySelector("dialog.wt-dialog")).not.toBeNull();
-      await act(async () => document.querySelector<HTMLButtonElement>("dialog.wt-dialog .wt-secondary")!.click());
       await act(async () => shelfBlocks()[0]!.click());
       await act(async () => sheet()!.querySelector<HTMLButtonElement>(".lane-grid-act")!.click());
       expect(sheet()).not.toBeNull();
       expect(document.querySelector("dialog.wt-dialog")!.textContent).toContain("does not move");
     });
+    it("leaves an account out of service out of the sidebar, and shows it struck in the sheet", async () => {
+      answer = () => Promise.resolve({ ...payload, providers: [payload.providers[0]!, { ...payload.providers[1]!, accounts: [
+        ...payload.providers[1]!.accounts, { email: "off@example", available: false, selected: false, priority: 0, windows: [] }] }] });
+      await render(settings());
+      expect(shelfBlocks().map((node) => node.getAttribute("aria-label"))).toEqual(["me@work.example", "a@example, routed", "b@example"]);
+      await act(async () => shelfBlocks()[0]!.click());
+      expect(sheet()!.querySelector(".lane-grid-block[data-struck]")!.getAttribute("aria-label")).toBe("off@example, out of service");
+    });
   });
-  it("draws a pool as a run of dots and a balance as counted pips with its amount, and no clock", async () => {
+  it("draws a pool and a balance in the sidebar as a dot and an amount where shares stand, with nothing in the lane", async () => {
     answer = () => Promise.resolve({ ...payload, providers: [
       { id: "antigravity", name: "Antigravity", accounts: [{ email: "g@example", available: true, selected: true, priority: 0, windows: [
         { id: "antigravity_gemini", name: "Gemini", usedPercent: 100, remainingPercent: 0, resetsAt: "2026-10-09T23:00:00Z" }] }] },
@@ -233,11 +251,18 @@ describe("account meters", () => {
         { id: "openrouter_credits", name: "Credits", usedPercent: 0, remainingPercent: 100, resetsAt: null, remainingAmount: 7.1 }] }] },
     ] });
     await render(settings());
-    expect(document.querySelector(".signal-dot[data-run][data-off]")).not.toBeNull();
-    expect(document.querySelector<HTMLElement>(".pip-run")!.style.getPropertyValue("--pips")).toBe("7");
-    const balance = document.querySelectorAll(".lane-grid-block")[1]!;
-    expect(balance.querySelector(".lane-grid-value")!.textContent).toBe("$7");
-    expect(balance.querySelector(".lane-grid-trail")).toBeNull();
+    const [pool, balance] = [...document.querySelectorAll(".shelf .lane-grid-block")];
+    expect(pool!.querySelector(".lane-grid-mark")!.childElementCount).toBe(0);
+    expect(pool!.querySelector(".lane-grid-value .signal-dot[data-off]:not([data-run])")).not.toBeNull();
+    // A refusing pool cannot serve until it resets, so its clock says so as a dry lane's does.
+    expect(pool!.querySelector(".lane-grid-trail")!.textContent).toBe("↓19h");
+    expect(balance!.querySelector(".lane-grid-mark")!.childElementCount).toBe(0);
+    expect(balance!.querySelector(".lane-grid-value")!.textContent).toBe("$7");
+    expect(balance!.querySelector(".lane-grid-trail")).toBeNull();
+    // The sheet keeps the full drawing: the pool's dots across the lane and the balance's pips.
+    await act(async () => (pool as HTMLElement).click());
+    expect(document.querySelector("dialog.sheet-dialog .signal-dot[data-run][data-off]")).not.toBeNull();
+    expect(document.querySelector<HTMLElement>("dialog.sheet-dialog .pip-run")!.style.getPropertyValue("--pips")).toBe("7");
   });
   it("refuses a payload it cannot read rather than drawing a guess", async () => {
     answer = () => Promise.resolve({ version: 2 });

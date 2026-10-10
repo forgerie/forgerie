@@ -4,7 +4,7 @@ import type { AppPluginProps } from "../appPlugin";
 import { AccountMeters, type MetersView } from "./AccountMeters";
 import { QuotaSheet } from "./QuotaSheet";
 import { ResetDialog } from "./ResetDialog";
-import { meterModel } from "./meterModel";
+import { inService, meterModel } from "./meterModel";
 import { isStale, spanLabel } from "./quotaData";
 import { newRequestId as makeRequestId, redeemReset, withoutSpent, type RedeemOutcome, type RedeemReset, type SpentResets } from "./redeemReset";
 import { resetPreview } from "./resetModel";
@@ -33,9 +33,10 @@ interface Asking { key: string; requestId: string; busy: boolean; problem: Exclu
 /**
  * Binding: account meters. Reads the router and the reader's stored choice,
  * and hands the shapes plain rows: the meters in the sidebar, and the detail
- * sheet a press on an account opens. The sheet shows every window, the
- * meters only those Settings leaves on. A banked reset is spent only from the
- * question it opens, through the router, from either place.
+ * sheet a press on an account opens. The sheet shows every account and every
+ * window; the meters only the accounts in service and the windows Settings
+ * leaves on. A banked reset is spent only from the question a chip in the
+ * sheet opens, through the router.
  */
 export function AccountMetersShelf({ settings, read, redeem = redeemReset, newRequestId = makeRequestId, clock = () => new Date() }: AppPluginProps & {
   read?: QuotaRead; redeem?: RedeemReset; newRequestId?: () => string; clock?: () => Date;
@@ -54,7 +55,7 @@ export function AccountMetersShelf({ settings, read, redeem = redeemReset, newRe
   const payload = quota.payload ? withoutSpent(quota.payload, spent) : undefined;
   const age = payload ? spanLabel(Math.max(0, now.getTime() - new Date(payload.updatedAt).getTime())) : "";
   const stale = payload !== undefined && isStale(payload.updatedAt, now);
-  const providers = payload ? meterModel(payload, settings, now) : undefined;
+  const providers = payload ? inService(meterModel(payload, settings, now)) : undefined;
   const detail = payload ? meterModel(payload, {}, now) : undefined;
   const doubtful = quota.error !== undefined || stale;
   const view: MetersView = providers ? { type: "ready", providers, doubtful }
@@ -91,7 +92,7 @@ export function AccountMetersShelf({ settings, read, redeem = redeemReset, newRe
 
   return <>
     <AccountMeters view={view} open={open} status={status} statusHint={quota.error} onToggle={toggle} onRetry={quota.retry}
-      onAskReset={ask} onOpen={setSheet} />
+      onOpen={setSheet} />
     {sheet !== undefined && detail ? <QuotaSheet providers={detail} doubtful={doubtful} status={status} focus={sheet}
       onClose={() => setSheet(undefined)} onRefresh={quota.retry} onAskReset={ask} /> : null}
     {/* After the sheet, so the question opens over it. */}

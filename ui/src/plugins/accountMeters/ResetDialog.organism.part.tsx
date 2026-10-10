@@ -20,7 +20,7 @@ function Asking({ account, payload = QUOTA_WITH_RESETS, busy = false, problem }:
   account: string; payload?: QuotaPayload; busy?: boolean; problem?: Exclude<RedeemOutcome, { kind: "spent" }>;
 }) {
   return <>
-    <AccountMeters open onToggle={() => {}} onRetry={() => {}} onAskReset={() => {}}
+    <AccountMeters open onToggle={() => {}} onRetry={() => {}}
       view={{ type: "ready", providers: meterModel(payload, SETTINGS, NOW, ZONE), doubtful: false }} />
     <ResetDialog preview={preview(account, payload)} busy={busy} problem={problem} onUse={() => {}} onCancel={() => {}} />
   </>;

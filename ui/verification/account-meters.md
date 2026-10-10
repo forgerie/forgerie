@@ -10,8 +10,10 @@ Each provider is named once, by its mark (Claude, OpenAI for Codex, Google for A
 - **Hatching** between the fill and the cut means the window runs dry before it resets. The clock turns red with `↓`.
 - **A solid bar past the cut** is credit that will expire unspent. It runs from amber (the app's warn tone) to red by how many times the window's normal rate you would need to spend it all. The clock turns amber with `↑`.
 - A lane within 8 points of the cut is on pace and draws neither.
-- **A run of dots** across the lane is an Antigravity Gemini pool. It reports no level, only whether it answers (grey) or refuses (red), so it has no end to read.
-- **Pips** are an OpenRouter balance, one per whole dollar from the lane's start, with the amount (`$7`) where a share stands. It has no maximum, so it is counted, not filled: past about 24 dollars the run fades out instead of ending. At $2 or less it turns amber; part of a dollar is a sliver; $0 draws nothing and the amount turns red. A balance never resets, so it has no clock.
+- **A single dot** where the share stands is an Antigravity Gemini pool. It reports no level, so its lane stays empty. The dot is grey while it answers and red while it refuses; a refusing pool's clock also turns red with `↓`, as a lane run dry does, because it serves nothing until that reset.
+- **A dollar amount** where the share stands is an OpenRouter balance (`$7`); its lane stays empty. It turns amber at $2 or less and red at $0. A balance never resets, so it has no clock.
+- **A small blue dot** just past an account's clock means it has at least one banked reset. It turns amber when the first one lapses within three days. Spend it from the detail sheet.
+- An account the router has taken out of service is not shown. The detail sheet still lists it, struck through.
 - **The share** (`62`) and **the clock** (`5d`, the window's reset) sit at the end. Lanes that reset together and stand the same way share one clock.
 - **A riser** to the left of an account marks the account the router sends work to, where a provider has more than one.
 
@@ -30,10 +32,12 @@ The Quota header opens and closes the meters. Closed, the header is all that is 
 Press any account in the meters, or tab to it and press Enter, to open the Quota sheet at that account. The account you pressed is marked and brought into view. The sheet draws the same lanes one step larger, by the same rules, with what the meters leave out:
 
 - each account's address, struck through when it is out of service;
+- every account, including those out of service, struck through;
 - every window, including the ones turned off in Settings;
-- the reset chips, which open the same reset question over the sheet.
+- a pool as a run of dots across its lane, and a balance as one pip per whole dollar (fading out past about 24);
+- the reset chips, which open the reset question over the sheet. Resets are spent only from here.
 
-The refresh icon reads the router again. A reading older than five minutes says its age beside the title, and fades, as in the meters. A reset chip in the meters still asks about a reset directly, without opening the sheet.
+The refresh icon reads the router again. A reading older than five minutes says its age beside the title, and fades, as in the meters.
 
 ## Settings
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { meterModel } from "./meterModel";
+import { inService, meterModel } from "./meterModel";
 import { parseQuotaPayload } from "./quotaData";
 
 const now = new Date("2026-10-09T04:00:00Z");
@@ -49,6 +49,7 @@ describe("the meters", () => {
   it("marks the routed account only where the router pins one of several", () => {
     expect(claude!.accounts[0]!.routed).toBe(false);
     expect(codex!.accounts.map((account) => [account.routed, account.out, account.empty])).toEqual([[true, false, undefined], [false, true, "No windows reported"]]);
+    expect(codex!.accounts.map((account) => account.disabled)).toEqual([false, true]);
     expect(openrouter!.accounts[0]!.routed).toBe(false);
   });
   it("counts a balance in dollars with no clock, and draws a pool as a token, last", () => {
@@ -57,6 +58,12 @@ describe("the meters", () => {
     expect(openrouter!.accounts[0]!.clocks).toEqual([]);
     expect(antigravity!.accounts[0]!.lines.map((line) => line.mark.kind)).toEqual(["bar", "pool"]);
     expect(antigravity!.accounts[0]!.lines[1]).toMatchObject({ mark: { kind: "pool", refusing: true }, words: "Gemini: refusing work, the provider reports no level, resets in 20h." });
+    // Refusing until it resets: the clock a dry lane wears.
+    expect(antigravity!.accounts[0]!.lines[1]!.clock).toEqual({ text: "↓20h", tone: "dry" });
+  });
+  it("leaves out the accounts out of service, and a service left with none", () => {
+    expect(inService(meterModel(payload, {}, now)).map((provider) => [provider.id, provider.accounts.length]))
+      .toEqual([["claude", 1], ["codex", 1], ["openrouter", 1], ["antigravity", 1]]);
   });
   it("hides the bars the user turned off, and says so when nothing is left", () => {
     const [hidden] = meterModel(payload, { five_hour: false, seven_day: false, weekly_fable: false }, now);

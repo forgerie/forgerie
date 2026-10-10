@@ -49,6 +49,8 @@ export interface MeterAccount {
   routed: boolean;
   /** Unavailable, or nothing in it can serve. */
   out: boolean;
+  /** The router has taken it out of service. The sidebar leaves it out; the detail shows it struck. */
+  disabled: boolean;
   lines: MeterLine[];
   clocks: ClockRun[];
   /** Why the account draws no lines. */
@@ -102,7 +104,7 @@ export function meterAccount(providerId: string, account: QuotaAccount, windows:
   const empty = lines.length > 0 ? undefined
     : account.windows.length === 0 ? "No windows reported" : "Every bar is turned off";
   return { key: `${providerId}/${account.email}`, email: account.email, reset: resetMarker(account, now, zone),
-    routed: marksRouted && account.selected, out, lines, clocks: clockRuns(lines), empty };
+    routed: marksRouted && account.selected, out, disabled: !account.available, lines, clocks: clockRuns(lines), empty };
 }
 
 function meterLine(quotaWindow: QuotaWindow, available: boolean, labelled: boolean, now: Date): MeterLine {
@@ -113,7 +115,9 @@ function meterLine(quotaWindow: QuotaWindow, available: boolean, labelled: boole
   const reset = countdown === "" ? "never resets" : countdown === "now" ? "resets now" : `resets in ${countdown}`;
   if (isUnmeteredWindow(quotaWindow)) {
     const refusing = !available || quotaWindow.remainingPercent <= 0;
-    return { id: quotaWindow.id, label, mark: { kind: "pool", refusing }, share: undefined, clock: plainClock(countdown),
+    // A refusing pool cannot serve until it resets: the same instruction, and the same clock, as a lane run dry.
+    return { id: quotaWindow.id, label, mark: { kind: "pool", refusing }, share: undefined,
+      clock: refusing && countdown !== "" ? { text: `↓${countdown}`, tone: "dry" } : plainClock(countdown),
       words: sentence(`${name}: ${refusing ? "refusing work" : "answering"}`, "the provider reports no level", reset, available ? undefined : "not in service") };
   }
   const amount = formatAmount(quotaWindow.remainingAmount);
@@ -143,6 +147,12 @@ function meterLine(quotaWindow: QuotaWindow, available: boolean, labelled: boole
 function doom(rate: number): number {
   if (!Number.isFinite(rate) || rate <= 1) return 0;
   return Math.min(1, Math.log(rate) / Math.log(DOOM_RATE_CAP));
+}
+
+/** The meters without the accounts the router has taken out of service, and without a service left with none. */
+export function inService(providers: readonly MeterProvider[]): MeterProvider[] {
+  return providers.map((provider) => ({ ...provider, accounts: provider.accounts.filter((account) => !account.disabled) }))
+    .filter((provider) => provider.accounts.length > 0);
 }
 
 const plainClock = (text: string): Clock => text === "" ? { text: "—", tone: "none" } : { text, tone: "plain" };

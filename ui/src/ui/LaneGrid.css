@@ -28,6 +28,11 @@
 .lane-grid-block[data-marked]::before { content: ""; position: absolute; inset-block: 0.3125rem; inset-inline-start: calc(var(--space-2) / -2 - var(--hairline));
   inline-size: var(--lane-marker); border-radius: var(--hairline); background: var(--line-focus); }
 .lane-grid-block[data-marked][data-captioned]::before { inset-block-start: calc(var(--lane-line) + 0.125rem + 0.3125rem); }
+/* A block's flag: a dot in the grid's end padding, level with the first lane, so it costs no column and no row. */
+.lane-grid-flag { position: absolute; inset-inline-end: calc(var(--space-2) / -2); inset-block-start: calc(var(--lane-line) / 2);
+  inline-size: var(--flag-size); block-size: var(--flag-size); translate: 50% -50%; border-radius: 50%; background: var(--live); pointer-events: none; }
+.lane-grid-flag[data-tone="warn"] { background: var(--tone-warn); }
+.lane-grid-block[data-captioned] .lane-grid-flag { inset-block-start: calc(var(--lane-line) * 1.5 + 0.125rem); }
 .lane-grid-caption { grid-column: label / end; grid-row: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
 .lane-grid-block[data-struck] .lane-grid-caption { text-decoration: line-through; opacity: 0.7; }
 .lane-grid-note { grid-column: label / end; grid-row: var(--row); color: var(--muted-foreground); line-height: var(--lane-line); }
