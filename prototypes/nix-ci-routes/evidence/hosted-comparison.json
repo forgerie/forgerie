@@ -1,0 +1,730 @@
+{
+  "run": {
+    "conclusion": "success",
+    "headSha": "e4ef75c2a97c2fbd791feb7eb68b99639dc3d7b3",
+    "jobs": [
+      {
+        "completedAt": "2026-10-10T22:25:16Z",
+        "conclusion": "success",
+        "databaseId": 114323059036,
+        "name": "Nix route (arion)",
+        "startedAt": "2026-10-10T22:12:45Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-10T22:12:46Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-10T22:12:45Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T22:12:47Z",
+            "conclusion": "success",
+            "name": "Checkout the disposable harness",
+            "number": 2,
+            "startedAt": "2026-10-10T22:12:46Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T22:12:52Z",
+            "conclusion": "success",
+            "name": "Install Nix on the disposable hosted VM",
+            "number": 3,
+            "startedAt": "2026-10-10T22:12:47Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T22:25:13Z",
+            "conclusion": "success",
+            "name": "Build and test the route",
+            "number": 4,
+            "startedAt": "2026-10-10T22:12:52Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T22:25:15Z",
+            "conclusion": "success",
+            "name": "Preserve test receipts and coverage",
+            "number": 5,
+            "startedAt": "2026-10-10T22:25:13Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T22:25:15Z",
+            "conclusion": "success",
+            "name": "Post Checkout the disposable harness",
+            "number": 10,
+            "startedAt": "2026-10-10T22:25:15Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T22:25:15Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 11,
+            "startedAt": "2026-10-10T22:25:15Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/forgerie/forgerie/actions/runs/38089572231/job/114323059036"
+      },
+      {
+        "completedAt": "2026-10-10T22:12:43Z",
+        "conclusion": "success",
+        "databaseId": 114323059293,
+        "name": "Nix route (yeradon)",
+        "startedAt": "2026-10-10T21:57:14Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-10T21:57:15Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-10T21:57:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T21:57:16Z",
+            "conclusion": "success",
+            "name": "Checkout the disposable harness",
+            "number": 2,
+            "startedAt": "2026-10-10T21:57:15Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T21:57:20Z",
+            "conclusion": "success",
+            "name": "Install Nix on the disposable hosted VM",
+            "number": 3,
+            "startedAt": "2026-10-10T21:57:16Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T22:12:40Z",
+            "conclusion": "success",
+            "name": "Build and test the route",
+            "number": 4,
+            "startedAt": "2026-10-10T21:57:20Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T22:12:42Z",
+            "conclusion": "success",
+            "name": "Preserve test receipts and coverage",
+            "number": 5,
+            "startedAt": "2026-10-10T22:12:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T22:12:42Z",
+            "conclusion": "success",
+            "name": "Post Checkout the disposable harness",
+            "number": 10,
+            "startedAt": "2026-10-10T22:12:42Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-10T22:12:42Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 11,
+            "startedAt": "2026-10-10T22:12:42Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/forgerie/forgerie/actions/runs/38089572231/job/114323059293"
+      }
+    ],
+    "status": "completed",
+    "url": "https://github.com/forgerie/forgerie/actions/runs/38089572231"
+  },
+  "scope": "Commands in rootless test containers; checkout and artifact JavaScript actions outside containers; not a native UNZEN job",
+  "routes": [
+    {
+      "route": "yeradon",
+      "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+      "upstreamSha": "6c839856889e5b99dbd52a09f50cb7c42cc06207",
+      "image": {
+        "name": "localhost/forgerie-yeradon-compatible:test",
+        "id": "5ccac10508dddb625527685f6385fa3f33324522b56bf74bb5c2c00e47d7239c",
+        "size": 2172296418,
+        "digest": "sha256:87a23bef7e8ecdf1170617111aed0cc599393054f88e822ab7f3602ab6e9549d"
+      },
+      "archiveBytes": 630831471,
+      "startupSeconds": 0.235,
+      "hostCgroup": {
+        "cpu.max": "400000 100000",
+        "memory.high": "12884901888",
+        "memory.max": "17179869184",
+        "pids.max": "2048"
+      },
+      "preflight": {
+        "uid": 1000,
+        "gid": 1000,
+        "permissionDenied": true,
+        "writeError": "EACCES",
+        "flock": {
+          "exit": 0,
+          "error": null,
+          "stdout": "flock from util-linux 2.42.2\n",
+          "stderr": ""
+        }
+      },
+      "payload": {
+        "node": "v24.19.0",
+        "architecture": "x64",
+        "platform": "linux",
+        "cgroup": "0::/\n",
+        "steps": [
+          {
+            "name": "install",
+            "command": [
+              "npm",
+              "ci"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 26.326
+          },
+          {
+            "name": "static",
+            "command": [
+              "npm",
+              "run",
+              "verify:static"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 49.633
+          },
+          {
+            "name": "coverage",
+            "command": [
+              "npm",
+              "run",
+              "test:coverage",
+              "--",
+              "--no-file-parallelism"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 231.46
+          },
+          {
+            "name": "browser",
+            "command": [
+              "npm",
+              "run",
+              "verify:ui"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 120.969
+          },
+          {
+            "name": "build",
+            "command": [
+              "npm",
+              "run",
+              "build"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 45.667
+          },
+          {
+            "name": "package-smoke",
+            "command": [
+              "npm",
+              "run",
+              "smoke:package-install"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 112
+          },
+          {
+            "name": "package-contents",
+            "command": [
+              "npm",
+              "run",
+              "pack:dry"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 88.062
+          }
+        ],
+        "outcome": "passed"
+      },
+      "cleanup": {
+        "stopExit": 0,
+        "removeExit": 0,
+        "containerExists": false,
+        "workspaceExists": false
+      },
+      "placement": "GitHub-hosted ubuntu-24.04, not UNZEN",
+      "hosted": {
+        "route": "yeradon",
+        "placement": "GitHub-hosted Linux",
+        "commands": [
+          {
+            "command": [
+              "sudo",
+              "loginctl",
+              "enable-linger",
+              "runner"
+            ],
+            "exit": 0,
+            "seconds": 0.012
+          },
+          {
+            "command": [
+              "sudo",
+              "systemctl",
+              "start",
+              "user@1001.service"
+            ],
+            "exit": 0,
+            "seconds": 0.012
+          },
+          {
+            "command": [
+              "git",
+              "init",
+              "/tmp/nix-ci-routes/forgerie-source"
+            ],
+            "exit": 0,
+            "seconds": 0.004
+          },
+          {
+            "command": [
+              "git",
+              "remote",
+              "add",
+              "origin",
+              "https://github.com/forgerie/forgerie"
+            ],
+            "exit": 0,
+            "seconds": 0.002
+          },
+          {
+            "command": [
+              "git",
+              "fetch",
+              "--depth",
+              "1",
+              "origin",
+              "09e3ef5e2ab8cf369a346915a6469a099a6cb616"
+            ],
+            "exit": 0,
+            "seconds": 0.444
+          },
+          {
+            "command": [
+              "git",
+              "checkout",
+              "--detach",
+              "FETCH_HEAD"
+            ],
+            "exit": 0,
+            "seconds": 0.103
+          },
+          {
+            "command": [
+              "nix",
+              "build",
+              "path:/home/runner/work/forgerie/forgerie/prototypes/nix-ci-routes#yeradonCompatible",
+              "--out-link",
+              "/tmp/nix-ci-routes/yeradon-compatible-image",
+              "--max-jobs",
+              "1",
+              "--cores",
+              "2",
+              "--no-write-lock-file"
+            ],
+            "exit": 0,
+            "seconds": 154.131
+          },
+          {
+            "command": [
+              "python3",
+              "/home/runner/work/forgerie/forgerie/prototypes/nix-ci-routes/run-local.py",
+              "yeradon",
+              "--non-root-payload",
+              "--image-archive",
+              "/tmp/nix-ci-routes/yeradon-compatible-image"
+            ],
+            "exit": 0,
+            "seconds": 765.197
+          }
+        ],
+        "diskBefore": {
+          "total": 154894188544,
+          "used": 62694699008,
+          "free": 92182712320
+        },
+        "outcome": "passed",
+        "diskAfter": {
+          "total": 154894188544,
+          "used": 69399711744,
+          "free": 85477699584
+        }
+      },
+      "coverage": {
+        "lines": {
+          "total": 12454,
+          "covered": 11586,
+          "skipped": 0,
+          "pct": 93.03
+        },
+        "statements": {
+          "total": 15527,
+          "covered": 13670,
+          "skipped": 0,
+          "pct": 88.04
+        },
+        "functions": {
+          "total": 3424,
+          "covered": 3128,
+          "skipped": 0,
+          "pct": 91.35
+        },
+        "branches": {
+          "total": 10803,
+          "covered": 8470,
+          "skipped": 0,
+          "pct": 78.4
+        },
+        "branchesTrue": {
+          "total": 0,
+          "covered": 0,
+          "skipped": 0,
+          "pct": 100
+        }
+      },
+      "testCounts": {
+        "server": {
+          "passed": 1819,
+          "skipped": 3
+        },
+        "browser": {
+          "passed": 1350,
+          "skipped": 1
+        }
+      },
+      "imageIdentity": {
+        "matchesLocalImageDigest": true,
+        "localImageDigest": "sha256:87a23bef7e8ecdf1170617111aed0cc599393054f88e822ab7f3602ab6e9549d",
+        "layerCountLocal": 118,
+        "layerCountHosted": 118,
+        "unequalLayerIndexes": [],
+        "sameConfig": true,
+        "sameHistory": true
+      }
+    },
+    {
+      "route": "arion",
+      "sourceSha": "09e3ef5e2ab8cf369a346915a6469a099a6cb616",
+      "upstreamSha": "9b24cf65c72cb0e9616e437d55e1ac8e5c6bc715",
+      "image": {
+        "name": "localhost/ci:rmj33rw797w2ss80v3riridpdbrb96jv",
+        "id": "7056581f9e1eebe7ef364c1b3ba3535c81ed91c8077d52a7aac561c9da69597f",
+        "size": 919256929,
+        "digest": "sha256:d01ff0b819ec84137c86b202ee7225fdcee0ce4a82eef25ff5e4086fac5bdb3a"
+      },
+      "archiveBytes": 919296000,
+      "startupSeconds": 2.876,
+      "hostCgroup": {
+        "cpu.max": "400000 100000",
+        "memory.high": "12884901888",
+        "memory.max": "17179869184",
+        "pids.max": "2048"
+      },
+      "preflight": {
+        "uid": 1000,
+        "gid": 1000,
+        "permissionDenied": true,
+        "writeError": "EACCES",
+        "flock": {
+          "exit": 0,
+          "error": null,
+          "stdout": "flock from util-linux 2.42.2\n",
+          "stderr": ""
+        }
+      },
+      "payload": {
+        "node": "v24.19.0",
+        "architecture": "x64",
+        "platform": "linux",
+        "cgroup": "0::/init.scope\n",
+        "steps": [
+          {
+            "name": "install",
+            "command": [
+              "npm",
+              "ci"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 26.389
+          },
+          {
+            "name": "static",
+            "command": [
+              "npm",
+              "run",
+              "verify:static"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 49.469
+          },
+          {
+            "name": "coverage",
+            "command": [
+              "npm",
+              "run",
+              "test:coverage",
+              "--",
+              "--no-file-parallelism"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 231.433
+          },
+          {
+            "name": "browser",
+            "command": [
+              "npm",
+              "run",
+              "verify:ui"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 120.639
+          },
+          {
+            "name": "build",
+            "command": [
+              "npm",
+              "run",
+              "build"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 45.787
+          },
+          {
+            "name": "package-smoke",
+            "command": [
+              "npm",
+              "run",
+              "smoke:package-install"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 111.197
+          },
+          {
+            "name": "package-contents",
+            "command": [
+              "npm",
+              "run",
+              "pack:dry"
+            ],
+            "exit": 0,
+            "signal": null,
+            "error": null,
+            "seconds": 88.221
+          }
+        ],
+        "outcome": "passed"
+      },
+      "cleanup": {
+        "stopExit": 0,
+        "removeExit": 0,
+        "containerExists": false,
+        "workspaceExists": false
+      },
+      "placement": "GitHub-hosted ubuntu-24.04, not UNZEN",
+      "hosted": {
+        "route": "arion",
+        "placement": "GitHub-hosted Linux",
+        "commands": [
+          {
+            "command": [
+              "sudo",
+              "loginctl",
+              "enable-linger",
+              "runner"
+            ],
+            "exit": 0,
+            "seconds": 0.014
+          },
+          {
+            "command": [
+              "sudo",
+              "systemctl",
+              "start",
+              "user@1001.service"
+            ],
+            "exit": 0,
+            "seconds": 0.011
+          },
+          {
+            "command": [
+              "git",
+              "init",
+              "/tmp/nix-ci-routes/forgerie-source"
+            ],
+            "exit": 0,
+            "seconds": 0.004
+          },
+          {
+            "command": [
+              "git",
+              "remote",
+              "add",
+              "origin",
+              "https://github.com/forgerie/forgerie"
+            ],
+            "exit": 0,
+            "seconds": 0.002
+          },
+          {
+            "command": [
+              "git",
+              "fetch",
+              "--depth",
+              "1",
+              "origin",
+              "09e3ef5e2ab8cf369a346915a6469a099a6cb616"
+            ],
+            "exit": 0,
+            "seconds": 0.467
+          },
+          {
+            "command": [
+              "git",
+              "checkout",
+              "--detach",
+              "FETCH_HEAD"
+            ],
+            "exit": 0,
+            "seconds": 0.103
+          },
+          {
+            "command": [
+              "nix",
+              "build",
+              "path:/home/runner/work/forgerie/forgerie/prototypes/nix-ci-routes#arionCompatibleImage",
+              "path:/home/runner/work/forgerie/forgerie/prototypes/nix-ci-routes#arionCompatibleCompose",
+              "--out-link",
+              "/tmp/nix-ci-routes/arion-compatible-artifacts",
+              "--max-jobs",
+              "1",
+              "--cores",
+              "2",
+              "--no-write-lock-file"
+            ],
+            "exit": 0,
+            "seconds": 23.892
+          },
+          {
+            "command": [
+              "python3",
+              "/home/runner/work/forgerie/forgerie/prototypes/nix-ci-routes/run-local.py",
+              "arion",
+              "--non-root-payload",
+              "--arion-artifacts",
+              "/tmp/nix-ci-routes/arion-compatible-artifacts"
+            ],
+            "exit": 0,
+            "seconds": 717.201
+          }
+        ],
+        "diskBefore": {
+          "total": 154894188544,
+          "used": 62694780928,
+          "free": 92182630400
+        },
+        "outcome": "passed",
+        "diskAfter": {
+          "total": 154894188544,
+          "used": 67266072576,
+          "free": 87611338752
+        }
+      },
+      "coverage": {
+        "lines": {
+          "total": 12454,
+          "covered": 11586,
+          "skipped": 0,
+          "pct": 93.03
+        },
+        "statements": {
+          "total": 15527,
+          "covered": 13670,
+          "skipped": 0,
+          "pct": 88.04
+        },
+        "functions": {
+          "total": 3424,
+          "covered": 3128,
+          "skipped": 0,
+          "pct": 91.35
+        },
+        "branches": {
+          "total": 10803,
+          "covered": 8470,
+          "skipped": 0,
+          "pct": 78.4
+        },
+        "branchesTrue": {
+          "total": 0,
+          "covered": 0,
+          "skipped": 0,
+          "pct": 100
+        }
+      },
+      "testCounts": {
+        "server": {
+          "passed": 1819,
+          "skipped": 3
+        },
+        "browser": {
+          "passed": 1350,
+          "skipped": 1
+        }
+      },
+      "imageIdentity": {
+        "matchesLocalImageDigest": false,
+        "localImageDigest": "sha256:9eb1800cdab32ac248ca9dfea242b7a32fc655087041048cb2a6abb3fdf446f1",
+        "layerCountLocal": 99,
+        "layerCountHosted": 99,
+        "unequalLayerIndexes": [
+          98
+        ],
+        "sameConfig": true,
+        "sameHistory": true
+      }
+    }
+  ]
+}

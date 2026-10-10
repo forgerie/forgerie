@@ -1,0 +1,14 @@
+[
+  {
+    "user": "0:0",
+    "exit": 1,
+    "stdout": "{\n  \"uid\": 0,\n  \"gid\": 0,\n  \"permissionDenied\": false,\n  \"writeError\": null,\n  \"flock\": {\n    \"exit\": null,\n    \"error\": \"ENOENT\"\n  }\n}\n",
+    "stderr": ""
+  },
+  {
+    "user": "1000:1000",
+    "exit": 1,
+    "stdout": "{\n  \"uid\": 1000,\n  \"gid\": 1000,\n  \"permissionDenied\": true,\n  \"writeError\": \"EACCES\",\n  \"flock\": {\n    \"exit\": null,\n    \"error\": \"ENOENT\"\n  }\n}\n",
+    "stderr": ""
+  }
+]
