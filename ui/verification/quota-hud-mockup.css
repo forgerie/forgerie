@@ -1,89 +1,186 @@
-/* Page frame: a sidebar the width the picker measures on the Fold (287px), and empty chat beside it. */
-body { margin: 0; }
-.mock-frame { display: flex; block-size: 100dvh; background: var(--background); color: var(--foreground); font-family: var(--body-font); }
-.mock-picker { flex: none; inline-size: 287px; display: flex; flex-direction: column; min-block-size: 0;
-  background: var(--tint-surface); border-inline-end: var(--hairline) solid var(--line); }
-.mock-picker-head { flex: none; display: flex; align-items: center; block-size: var(--control-size); padding-inline: var(--space-4);
-  font-size: var(--small-text); font-weight: 600; }
-.mock-sessions { flex: 1 1 0; min-block-size: 3rem; overflow: auto; margin: 0; padding: 0 var(--space-3); list-style: none; }
-.mock-sessions li { display: flex; align-items: center; min-block-size: 2.25rem; padding-inline: var(--space-2); border-radius: var(--radius-document);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--small-text); }
-.mock-sessions li[data-current] { background: var(--hover-surface); color: var(--foreground); }
-.mock-main { flex: 1; min-inline-size: 0; }
+/* ---- The thread behind the sidebar: a stand-in, drawn in the app's own measures. ---- */
+.mock-thread { flex: 1; min-block-size: 0; display: flex; flex-direction: column; gap: var(--space-5); inline-size: 100%;
+  max-inline-size: var(--thread-max-width); margin-inline: auto; padding: var(--space-6) var(--gutter); font-size: 1rem; line-height: var(--line-height); }
+.mock-user { align-self: flex-end; max-inline-size: 80%; margin: 0; padding: var(--space-2) var(--space-4); border-radius: var(--radius-thread); background: var(--muted); }
+.mock-agent { margin: 0; }
+.mock-composer { flex: none; inline-size: 100%; max-inline-size: var(--thread-max-width); margin-inline: auto; padding: 0 var(--gutter) var(--space-4); }
+.mock-composer-shell { display: grid; gap: var(--space-3); padding: var(--space-3) var(--space-2) var(--space-2) var(--space-4); border: 1px solid var(--line);
+  border-radius: var(--radius-thread); background: color-mix(in oklab, var(--muted) 30%, var(--background)); color: var(--muted-foreground); }
+.mock-composer-actions { display: flex; align-items: center; gap: var(--space-4); }
+.mock-spacer { flex: 1; }
+.mock-send { display: grid; place-items: center; inline-size: 2rem; block-size: 2rem; border-radius: 50%; background: var(--foreground); color: var(--background); }
 
-/* The heads-up display: the existing shelf, no addresses, and its reading is one press target. */
+/* ---- The heads-up display: the product's shelf, no addresses, one press target. ---- */
 .hud { display: contents; }
-.hud .shelf-body { cursor: pointer; border-radius: var(--radius-document); transition: background-color 150ms; }
+.hud .shelf-body { cursor: pointer; margin-inline: calc(-1 * var(--space-1)); padding-inline: var(--space-1); border-radius: var(--radius-control);
+  transition: background-color 150ms; }
 .hud .shelf-body:hover { background: var(--hover-surface); }
+.hud .shelf-body:active { background: var(--active-surface); }
 .hud .lane-grid { padding-block: var(--space-1); }
 
-/* Sheet header: the reading's age, refresh and settings, as marks. */
-.qd-tools { display: inline-flex; align-items: center; gap: var(--space-1); }
-.qd-icon { display: grid; place-items: center; inline-size: 2rem; block-size: 2rem; padding: 0; border: 0; border-radius: var(--radius-control);
-  background: none; color: var(--muted-foreground); cursor: pointer; }
-.qd-icon:hover { background: var(--hover-surface); color: var(--foreground); }
-.qd-icon svg { inline-size: 0.875rem; block-size: 0.875rem; }
+/* ---- The sheet: header tools ---- */
+.qs-tools { display: inline-flex; align-items: center; gap: var(--space-1); margin-inline-start: auto; align-self: center; }
+.qs-age { margin-inline-end: var(--space-1); color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
+.qs-icon { display: grid; place-items: center; inline-size: var(--icon-size); block-size: var(--icon-size); padding: 0; border: 0; border-radius: var(--radius-control);
+  background: none; color: var(--muted-foreground); cursor: pointer; transition: color 150ms, background-color 150ms; }
+.qs-icon:hover { background: var(--hover-surface); color: var(--foreground); }
+.qs-icon svg { inline-size: 0.875rem; block-size: 0.875rem; }
+.sheet-dialog:has(.qs) { --sheet-width: 40rem; }
+.sheet-dialog:has(.qs) .sheet-dialog-titles { align-items: center; flex-wrap: nowrap; }
+.sheet-dialog-subtitle:has(.qs-tools) { flex: 1; display: flex; overflow: visible; }
 
-.qd { display: grid; gap: var(--space-5); padding: var(--sheet-pad); }
-.qd-provider { display: grid; gap: var(--space-3); }
-.qd-provider-head { display: flex; align-items: center; gap: var(--space-2); margin: 0; color: var(--muted-foreground);
-  font-size: var(--label-text); font-weight: 600; }
-.qd-provider-mark { display: flex; font-size: var(--text-size); color: var(--foreground); }
+/* ---- The sheet: providers and accounts, shared by every drawing ---- */
+.qs { --qs-gap: clamp(var(--space-3), 3cqi, var(--space-4)); container: qs / inline-size; display: grid; gap: var(--space-6);
+  padding: var(--space-4) var(--sheet-pad) var(--space-8); }
+.qs-prov { display: grid; gap: var(--space-1); }
+/* The sheet body pads its top, and a sticky edge keeps that padding: reach up through it to the body's edge. */
+.qs-prov-head { position: sticky; inset-block-start: calc(-1 * var(--space-4)); z-index: 2; display: flex; align-items: center; gap: var(--space-2);
+  margin: 0 calc(-1 * var(--sheet-pad)); padding: var(--space-2) var(--sheet-pad); background: var(--modal-surface);
+  color: var(--foreground); font-size: var(--small-text); font-weight: 600; }
+.qs-prov-mark { display: flex; font-size: 1rem; }
+.qs-prov-mark .glyph { inline-size: 1rem; block-size: 1rem; }
 
-/* An account: its address, its resets, and its windows as tiles. The routed one wears the shelf's riser. */
-.acct { position: relative; display: grid; gap: var(--space-2); padding: var(--space-2) var(--space-3) var(--space-3);
-  border-radius: var(--radius-surface); scroll-margin: var(--space-4); }
-.acct[data-routed]::before { content: ""; position: absolute; inset-block: var(--space-3); inset-inline-start: 0;
+.qs-acct { position: relative; display: grid; gap: var(--space-2); margin-inline: calc(-1 * var(--space-3)); padding: var(--space-2) var(--space-3) var(--space-3);
+  border-radius: var(--radius-surface); scroll-margin-block: 5rem; }
+.qs-acct + .qs-acct { margin-block-start: var(--space-1); }
+/* The account the work goes to: the sidebar's riser, in the same place relative to its lanes. */
+.qs-acct[data-routed]::before { content: ""; position: absolute; inset-block: var(--space-3); inset-inline-start: 0.3125rem;
   inline-size: var(--lane-marker); border-radius: var(--hairline); background: var(--line-focus); }
-.acct[data-chosen] { background: var(--hover-surface); box-shadow: inset 0 0 0 var(--hairline) var(--line-focus); }
-.acct[data-out] { opacity: 0.5; }
-.acct[data-out] .acct-email { text-decoration: line-through; }
-.acct-head { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; min-block-size: 1.75rem; }
-.acct-email { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: var(--small-text); font-weight: 500; }
-.acct-none { color: var(--muted-foreground); font-family: var(--code-font); }
+.qs-acct[data-out] { opacity: 0.45; }
+.qs-acct[data-out] .qs-email { text-decoration: line-through; }
+/* The account pressed in the sidebar: a wash that settles to a tint, so the eye lands, then the sheet is calm again. */
+.qs-acct[data-chosen] { box-shadow: inset 0 0 0 var(--hairline) var(--line-focus); animation: qs-land 1.6s ease-out; }
+@keyframes qs-land { from { background: var(--live-wash); box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklab, var(--live) 50%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .qs-acct[data-chosen] { animation: none; } }
 
-/* Banked resets: one mark per reset, then the first expiry. */
-.acct-reset { flex: none; display: inline-flex; align-items: center; gap: 0.1875rem; block-size: 1.5rem; padding-inline: var(--space-2);
+.qs-acct-head { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; min-block-size: 1.5rem; }
+.qs-email { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted-foreground); font-size: var(--label-text); }
+.qs-acct[data-routed] .qs-email, .qs-acct[data-chosen] .qs-email { color: var(--foreground); }
+.qs-none { color: var(--muted-foreground); font-family: var(--code-font); }
+
+/* Banked resets: one mark per reset, then when the first lapses. */
+.qs-reset { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); block-size: 1.375rem; padding-inline: 0.4375rem 0.5rem;
   border: 0; border-radius: var(--radius-pill); background: var(--offer-wash); color: var(--ink-live); cursor: pointer;
-  font-family: var(--code-font); font-size: var(--meta-text); }
-.acct-reset svg { inline-size: 0.75rem; block-size: 0.75rem; stroke-width: 2.5; }
-.acct-reset > span { margin-inline-start: var(--space-1); }
-.acct-reset:hover { background: var(--offer-wash-hover); }
-.acct-reset[data-soon] { background: var(--lapsing-wash); color: var(--ink-warn); }
+  font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; transition: background-color 150ms; }
+.qs-reset:hover { background: var(--offer-wash-hover); }
+.qs-reset[data-soon] { background: var(--lapsing-wash); color: var(--ink-warn); }
+.qs-reset svg { inline-size: 0.6875rem; block-size: 0.6875rem; stroke-width: 2.75; }
+.qs-reset-count { margin-inline-start: -0.0625rem; }
+.qs-reset-date { padding-inline-start: var(--space-1); border-inline-start: var(--hairline) solid color-mix(in oklab, currentColor 35%, transparent); }
 
-/* Tiles gain columns from the room the sheet has. */
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr)); gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
-.tile { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label big" "draw draw" ". clock";
-  align-items: end; gap: var(--space-1) var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-document);
-  background: var(--code-surface); }
-/* Faded content, not a faded tile, so the tile ground matches its neighbours. */
-.tile[data-hidden] > * { opacity: 0.45; }
-.tile-label { grid-area: label; display: flex; align-items: center; gap: var(--space-1); align-self: center; min-inline-size: 0;
+/* Readouts shared by the drawings. */
+.qs-share { font-family: var(--code-font); font-size: var(--label-text); font-variant-numeric: tabular-nums; line-height: 1; color: var(--foreground); }
+.qs-share[data-big] { font-size: clamp(1.125rem, 4cqi, 1.375rem); font-weight: 500; letter-spacing: -0.02em; }
+.qs-share[data-tone="out"] { color: var(--ink-bad); }
+.qs-share[data-tone="low"] { color: var(--ink-warn); }
+.qs-clock { justify-self: end; line-height: 1; }
+.qs-pool { display: block; inline-size: 0.5rem; block-size: 0.5rem; border-radius: 50%; background: var(--meter-ink); }
+.qs-pool[data-off] { background: var(--destructive); }
+.qs-share[data-big] .qs-pool { inline-size: 0.75rem; block-size: 0.75rem; }
+.qs-eye { inline-size: 0.75rem; block-size: 0.75rem; flex: none; }
+/* A window hidden in the sidebar is still here, at rest. */
+[data-hidden] > :not(.qs-tile-label, .qs-strip-label, .qs-ring-label) { opacity: 0.4; }
+[data-hidden] :is(.qs-tile-label, .qs-strip-label, .qs-ring-label) { opacity: 0.6; }
+
+/* ---- The burn chart ---- */
+.qs-burn { position: relative; display: block; inline-size: 100%; block-size: 3.5rem; }
+.qs-burn[data-size="short"] { block-size: 2rem; }
+.qs-burn::after { content: ""; position: absolute; inset-inline: 0; inset-block-end: 0; block-size: var(--hairline); background: var(--line-focus); }
+.qs-burn-past { position: absolute; inset-block: 0; inset-inline-start: 0; inline-size: var(--now);
+  background: linear-gradient(to right, transparent, var(--hover-surface)); border-inline-end: var(--hairline) solid var(--line); }
+.qs-burn-plot { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; overflow: visible; }
+.qs-burn-even { stroke: var(--line-focus); stroke-width: 1.25; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.qs-burn-wedge { position: absolute; inset: 0; background: color-mix(in oklab, var(--destructive) calc(var(--heat) * 100%), var(--tone-warn)); opacity: 0.8; }
+.qs-burn:is([data-standing="dry"], [data-standing="drained"]) .qs-burn-wedge { opacity: 1;
+  background: repeating-linear-gradient(115deg, transparent 0 2px, var(--tone-warn) 2px 4px); }
+.qs-burn-dot { position: absolute; z-index: 1; inset-inline-start: var(--now); inset-block-start: var(--level); inline-size: 0.5rem; block-size: 0.5rem;
+  translate: -50% -50%; border-radius: 50%; background: var(--foreground); box-shadow: 0 0 0 2px var(--qs-ground, var(--modal-surface)); }
+.qs-burn[data-size="short"] .qs-burn-dot { inline-size: 0.375rem; block-size: 0.375rem; box-shadow: 0 0 0 1.5px var(--qs-ground, var(--modal-surface)); }
+.qs-burn[data-standing="drained"] .qs-burn-dot { background: var(--destructive); }
+/* No known length: no pace to draw, so the plain level. */
+.qs-burn[data-flat] { display: flex; align-items: center; }
+.qs-burn[data-flat]::after { display: none; }
+.qs-burn-track { position: relative; display: block; inline-size: 100%; block-size: var(--meter-height); border-radius: var(--meter-height); background: var(--meter-rest); }
+.qs-burn-level { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: inherit; background: var(--meter-ink); }
+
+/* ---- Tiles: a card per window, gaining columns from the room ---- */
+/* A tile sits a step above the sheet in both schemes, never sunk into it. */
+.qs-tiles { --qs-ground: color-mix(in oklab, var(--foreground) 4.5%, var(--modal-surface)); display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr)); gap: var(--space-2);
+  margin: 0; padding: 0; list-style: none; }
+.qs-tile { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label share" "draw draw" ". clock";
+  align-items: center; row-gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-control); background: var(--qs-ground); }
+/* A pool or a balance has no curve to draw: it keeps a tile's width and gives up its height. */
+.qs-tile:not([data-kind="bar"]) { grid-template-areas: "label share" ". clock"; align-content: start; }
+.qs-tile-label { grid-area: label; display: flex; align-items: center; gap: var(--space-1); min-inline-size: 0;
   color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--label-text); }
-.tile-eye { inline-size: 0.75rem; block-size: 0.75rem; }
-.tile-big { grid-area: big; font-family: var(--code-font); font-size: 1.375rem; font-variant-numeric: tabular-nums; line-height: 1; }
-.tile-big[data-tone="drained"], .tile-big[data-tone="out"] { color: var(--ink-bad); }
-.tile-big[data-tone="low"] { color: var(--ink-warn); }
-.tile-draw { grid-area: draw; display: grid; min-inline-size: 0; min-block-size: 4rem; }
-.tile-clock { grid-area: clock; justify-self: end; line-height: 1; }
-.tile-bar { display: flex; align-items: center; block-size: 4rem; }
-/* A pool reports no level: one large dot. */
-.tile-pool { justify-self: start; align-self: center; inline-size: 0.875rem; block-size: 0.875rem; border-radius: 50%; background: var(--meter-ink); }
-.tile-pool[data-off] { background: var(--destructive); }
-.tile[data-kind="balance"] { grid-template-areas: "label big"; }
+.qs-tile > .qs-share { grid-area: share; justify-self: end; }
+.qs-tile-draw { grid-area: draw; display: grid; }
+.qs-tile > .qs-clock { grid-area: clock; }
 
-/* The burn chart. Time runs left to right; the share left runs bottom to top. */
-.burn { position: relative; display: block; block-size: 4rem; border-block-end: var(--hairline) solid var(--line-focus); }
-.burn-plot { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; overflow: visible; }
-.burn-past { fill: var(--hover-surface); }
-.burn-even { stroke: var(--line-focus); stroke-width: 1.5; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
-.burn-now { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
-/* The wedge between the even line and the line from you to the reset is the problem. Above, credit expires:
-   solid, warn turning to danger. Below, you run dry: hatched warn, as the shelf draws it. */
-.burn-wedge { position: absolute; inset: 0; background: color-mix(in oklab, var(--destructive) calc(var(--heat) * 100%), var(--tone-warn)); opacity: 0.85; }
-.burn[data-kind="dry"] .burn-wedge, .burn[data-kind="drained"] .burn-wedge { background: var(--meter-hatch); opacity: 1;
-  --meter-hatch: repeating-linear-gradient(115deg, transparent 0 3px, var(--tone-warn) 3px 5px); }
-.burn-dot { z-index: 1; position: absolute; inset-inline-start: var(--now); inset-block-start: var(--level); inline-size: 0.5rem; block-size: 0.5rem;
-  translate: -50% -50%; border-radius: 50%; background: var(--foreground); box-shadow: 0 0 0 2px var(--code-surface); }
-.burn[data-kind="drained"] .burn-dot { z-index: 1; background: var(--destructive); }
+/* ---- Strips: a row per window on columns shared through the sheet ---- */
+.qs-strips, .qs-lanes { display: grid; gap: 0.375rem; margin: 0; padding: 0; list-style: none; }
+.qs-strip, .qs-lane-row { display: grid; grid-template-columns: 3.5rem minmax(0, 1fr) 2.25rem 3rem; align-items: center; column-gap: var(--space-3); min-block-size: 1.75rem; }
+.qs-strip-label { display: flex; align-items: center; gap: var(--space-1); min-inline-size: 0; overflow: hidden; white-space: nowrap;
+  color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--label-text); }
+.qs-strip-draw { display: flex; align-items: flex-end; min-inline-size: 0; block-size: 2rem; }
+.qs-strip { min-block-size: 2.25rem; }
+.qs-strip > :is(.qs-share, .qs-clock, .qs-strip-label) { align-self: end; padding-block-end: 0.125rem; }
+.qs-strip-rule { display: block; inline-size: 100%; block-size: var(--hairline); background: var(--line); }
+.qs-strip > .qs-share, .qs-lane-row > .qs-share { justify-self: end; }
+.qs-strip[data-kind="pool"] > .qs-share, .qs-lane-row:has(.qs-lane[data-kind="pool"]) > .qs-share { justify-self: end; }
+
+/* ---- Schedule: one time axis for the whole sheet ---- */
+.qs-sched { display: grid; gap: var(--space-6); }
+.qs-axis { position: sticky; inset-block-start: calc(-1 * var(--space-4)); z-index: 3; display: grid; grid-template-columns: 3.5rem minmax(0, 1fr) 2.25rem 3rem;
+  align-items: center; box-sizing: border-box; block-size: 2.25rem; column-gap: var(--space-3);
+  margin: calc(-1 * var(--space-4)) calc(-1 * var(--sheet-pad)) calc(-1 * var(--space-2)); padding: 0 var(--sheet-pad);
+  background: var(--modal-surface); border-block-end: var(--hairline) solid var(--line);
+  color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); }
+.qs-axis-now { grid-column: 1; justify-self: end; }
+.qs-axis-track { grid-column: 2; position: relative; block-size: 1rem; }
+.qs-axis-tick { position: absolute; translate: -50% 0; }
+.qs-sched .qs-prov-head { inset-block-start: calc(2.25rem - var(--space-4)); }
+.qs-lane { position: relative; display: block; inline-size: 100%; block-size: 1.75rem; }
+.qs-lane-plot { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; overflow: visible; }
+.qs-lane-tick { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+/* A healthy window stays quiet however much it holds; only trouble is loud. */
+.qs-lane-shape { position: absolute; inset: 0; background: color-mix(in oklab, var(--meter-ink) 40%, transparent); }
+.qs-lane[data-standing="loss"] .qs-lane-shape { background: color-mix(in oklab, var(--destructive) calc(var(--heat) * 100%), var(--tone-warn)); }
+.qs-lane[data-standing="dry"] .qs-lane-shape { background: repeating-linear-gradient(115deg, transparent 0 2px, var(--tone-warn) 2px 4px); }
+.qs-lane::after { content: ""; position: absolute; inset-inline: 0; inset-block-end: 0; block-size: var(--hairline); background: var(--line); }
+.qs-lane-rule { position: absolute; inset-inline-start: 0; inline-size: var(--end); inset-block-end: 0; block-size: 2px; border-radius: 1px; background: var(--meter-ink); }
+.qs-lane[data-standing="drained"] .qs-lane-rule { background: var(--destructive); }
+.qs-lane[data-kind="balance"] .qs-lane-rule { background: linear-gradient(to right, var(--meter-ink), transparent); }
+.qs-lane-pool { position: absolute; inset-inline-start: 0; inset-block-end: -0.1875rem; inline-size: 0.5rem; block-size: 0.5rem; translate: -50% 0;
+  border-radius: 50%; background: var(--meter-ink); box-shadow: 0 0 0 2px var(--modal-surface); }
+.qs-lane-pool[data-off] { background: var(--destructive); }
+.qs-lane-reset { position: absolute; inset-inline-start: var(--end); inset-block-end: 0; inline-size: 2px; block-size: 0.5rem; translate: -50% 0;
+  border-radius: 1px; background: var(--foreground); }
+
+/* ---- Rings: a gauge per window ---- */
+.qs-rings { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.75rem, 1fr)); gap: var(--space-3) var(--space-2); margin: 0; padding: 0; list-style: none; }
+.qs-ring-cell { display: grid; justify-items: center; gap: var(--space-1); }
+.qs-ring { position: relative; display: grid; place-items: center; inline-size: 3.75rem; block-size: 3.75rem; margin-block-end: var(--space-1); }
+.qs-ring svg { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; overflow: visible; }
+.qs-ring circle { fill: none; stroke-width: 3.5; }
+.qs-ring-ground { stroke: var(--meter-rest); }
+.qs-ring-fill { stroke: var(--meter-ink); stroke-linecap: butt; }
+.qs-ring-surplus { stroke: color-mix(in oklab, var(--destructive) calc(var(--heat) * 100%), var(--tone-warn)); }
+.qs-ring-short { stroke: var(--tone-warn); }
+.qs-ring-pool { stroke: var(--meter-ink); }
+.qs-ring-pool[data-off] { stroke: var(--destructive); }
+.qs-ring-pace { stroke: var(--foreground); stroke-width: 1.5; stroke-linecap: round; }
+.qs-ring-centre { position: relative; display: grid; place-items: center; }
+.qs-ring-centre .qs-share { font-size: var(--small-text); font-weight: 500; }
+.qs-ring-label { display: flex; align-items: center; gap: var(--space-1); color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--label-text); }
+.qs-ring-cell > .qs-clock { justify-self: center; }
+/* With room, an account becomes one row: who on the left, its rings beside, so accounts read down one column. */
+@container qs (inline-size >= 34rem) {
+  .qs[data-variant="rings"] .qs-acct { grid-template-columns: minmax(8rem, 11rem) minmax(0, 1fr); align-items: center; column-gap: var(--space-4); }
+  .qs[data-variant="rings"] .qs-acct-head { flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+  .qs[data-variant="rings"] .qs-email { max-inline-size: 100%; }
+}
+
+/* On a short sheet, provider names scroll away with their accounts, so the readings keep the height. */
+@media (max-height: 30rem) { .qs-prov-head { position: static; } }
