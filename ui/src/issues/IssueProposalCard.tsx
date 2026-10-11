@@ -14,9 +14,9 @@ export interface IssueDecisionFailure { decision: IssueDecision; message: string
 /**
  * Shape: an issue the agent proposes, in the thread. It shows what will be
  * filed (title, repo, labels, the body cut to a few lines) and waits for
- * Create issue or Dismiss. Once decided it closes to one line: a link to the
- * new issue, or Dismissed. Without handlers the reader cannot decide here,
- * so the card says it waits.
+ * Create issue or Dismiss. Once decided it closes to one line under its
+ * title: "Created issue #N", linked to the issue, or "Dismissed". Without
+ * handlers the reader cannot decide here, so the card says it waits.
  */
 export function IssueProposalCard({ proposal, outcome, pending, failure, onCreate, onDismiss }: {
   proposal: Pick<IssueProposal, "repo" | "title" | "body" | "labels">;
@@ -34,7 +34,7 @@ export function IssueProposalCard({ proposal, outcome, pending, failure, onCreat
   const hasBody = proposal.body.trim() !== "";
   const details = outcome === undefined && (hasBody || proposal.labels.length > 0);
   return <DecisionCard icon={<CircleDotIcon />} title={proposal.title} meta={proposal.repo} open={decidable}
-    closed={outcome?.state === "created" ? `Created #${String(outcome.number)}: ${outcome.title}`
+    closed={outcome?.state === "created" ? `Created issue #${String(outcome.number)}`
       : outcome?.state === "dismissed" ? "Dismissed" : "Waiting for a decision."}
     closedHref={outcome?.state === "created" ? outcome.url : undefined}
     problem={busy ? undefined : failure?.message}

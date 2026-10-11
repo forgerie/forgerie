@@ -42,7 +42,7 @@ describe("the issue proposal binding", () => {
     expect(button("Dismiss")?.disabled).toBe(true);
     await act(async () => { calls[0]?.answer(json(200, CREATED)); });
     const link = document.querySelector("a");
-    expect(link?.textContent).toBe(`Created #38: ${SHORT.title}`);
+    expect(link?.textContent).toBe("Created issue #38");
     expect(link?.getAttribute("href")).toBe(CREATED.url);
     expect(link?.getAttribute("target")).toBe("_blank");
     expect(buttons()).toEqual([]);
@@ -90,7 +90,7 @@ describe("the issue proposal binding", () => {
     await press("Create issue");
     await act(async () => { calls[0]?.answer(json(409, { error: "Already decided.", outcome: CREATED })); });
     expect(alert()).toBeUndefined();
-    expect(document.querySelector("a")?.textContent).toBe(`Created #38: ${SHORT.title}`);
+    expect(document.querySelector("a")?.textContent).toBe("Created issue #38");
   });
 
   it("shows a dismissal another tab saved when this tab presses Create issue", async () => {

@@ -60,7 +60,7 @@ describe("an issue proposal in the thread", () => {
     await render(<IssueProposalCard proposal={SHORT} outcome={CREATED} onCreate={vi.fn()} onDismiss={vi.fn()} />);
     const links = document.querySelectorAll("a");
     expect(links).toHaveLength(1);
-    expect(links[0]?.textContent).toBe(`Created #38: ${SHORT.title}`);
+    expect(links[0]?.textContent).toBe("Created issue #38");
     expect(links[0]?.getAttribute("href")).toBe("https://github.com/forgerie/forgerie/issues/38");
     expect(links[0]?.getAttribute("target")).toBe("_blank");
     expect(links[0]?.getAttribute("rel")).toBe("noreferrer");

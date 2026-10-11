@@ -21,6 +21,7 @@ function Deciding({ proposal, pending, failure, outcome: initial }: {
 export default function Open() { return <Deciding proposal={SHORT} />; }
 export function LongBodyManyLabels() { return <Deciding proposal={LONG} />; }
 export function NoLabels() { return <Deciding proposal={NO_LABELS} />; }
+export function LongTitleLongRepo() { return <Deciding proposal={{ ...LONG, repo: NO_LABELS.repo }} />; }
 export function Creating() { return <Deciding proposal={SHORT} pending="create" />; }
 export function Dismissing() { return <Deciding proposal={SHORT} pending="dismiss" />; }
 export function Failed() { return <Deciding proposal={SHORT} failure={{ decision: "create", message: GITHUB_FAILED }} />; }
