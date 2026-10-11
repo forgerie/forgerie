@@ -17,3 +17,7 @@
 .excerpt-toggle:hover { color: var(--foreground); }
 .excerpt-toggle-mark { flex: none; inline-size: 0.875rem; block-size: 0.875rem; }
 .excerpt-toggle[aria-expanded="true"] .excerpt-toggle-mark { rotate: 180deg; }
+/* Headings in the content are structure, not titles: never larger than the text around them, still bold. */
+.excerpt .excerpt-box :is(h1, h2, h3, h4, h5, h6) { margin-block: var(--space-3) var(--space-1); font-family: inherit; font-size: 1em; font-weight: 650;
+  letter-spacing: normal; line-height: inherit; }
+.excerpt .excerpt-box :is(h1, h2, h3, h4, h5, h6):first-child { margin-block-start: 0; }

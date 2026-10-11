@@ -1,18 +1,20 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { CircleAlertIcon, ExternalLinkIcon } from "lucide-react";
+import { scrollParent } from "./scrollParent";
 import "./DecisionCard.css";
 
 /**
  * Molecule: something in a thread that waits on the reader's decision. While
  * it is open it wears the live colour on its edge and a faint live wash, and
- * its footer holds the choices. A choice that failed says why above them.
- * Once decided it goes quiet and says what was decided in one line, where the
- * choices stood; that line can open what the decision made.
+ * its footer holds the choices. A choice that failed says why above them; the
+ * reason grows the card upward, so the choices stay where the reader pressed
+ * them. Once decided it goes quiet and says what was decided in one line,
+ * where the choices stood; that line can open what the decision made.
  */
 export function DecisionCard({ icon, title, meta, open, closed, closedHref, problem, children, footer }: {
   icon: ReactNode;
   title: string;
-  /** A short fact at the end of the title line, such as the file it concerns. */
+  /** A short fact about the subject, such as the file it concerns: at the end of the title line, or under the title when they do not fit together. */
   meta?: ReactNode;
   open: boolean;
   /** What was decided, shown once the card is closed. */
@@ -25,20 +27,51 @@ export function DecisionCard({ icon, title, meta, open, closed, closedHref, prob
   /** The choices, shown while the card is open. */
   footer?: ReactNode;
 }) {
-  return <section className="decision-card" data-open={open || undefined} aria-label={title}>
+  const card = useRef<HTMLElement>(null);
+  const choices = useRef<HTMLDivElement>(null);
+  /** Where the choices sat in the card at the last layout. In the card, so scrolling does not change it. */
+  const choicesAt = useRef<number | undefined>(undefined);
+  const shown = open ? problem : undefined;
+  useLayoutEffect(() => {
+    const frame = card.current;
+    const element = choices.current;
+    if (frame === null || element === null) { choicesAt.current = undefined; return; }
+    const at = () => element.getBoundingClientRect().top - frame.getBoundingClientRect().top;
+    const before = choicesAt.current;
+    const now = at();
+    choicesAt.current = now;
+    const scroller = before !== undefined && Math.abs(now - before) >= 1 ? scrollParent(frame) : undefined;
+    if (scroller !== undefined && before !== undefined) {
+      const rest = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      // A shrink at the end is already absorbed: the browser pulls the scroll back with the content.
+      if (now > before || rest() > 1) scroller.scrollBy({ top: now - before });
+      // Close to the end, as the last row of a thread is: show the end, so the choices clear what floats over it.
+      const left = rest();
+      if (left > 1 && left < element.offsetHeight) scroller.scrollBy({ top: left });
+    }
+    // Other growth above the choices (an excerpt that opens) keeps its own place; only remember where the choices are.
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => { choicesAt.current = at(); });
+    observer.observe(frame);
+    return () => { observer.disconnect(); };
+  }, [shown]);
+  return <section className="decision-card" ref={card} data-open={open || undefined} aria-label={title}>
     <header className="decision-card-head">
       <span className="decision-card-icon" aria-hidden>{icon}</span>
-      <span className="decision-card-title">{title}</span>
-      {meta !== undefined && <span className="decision-card-meta">{meta}</span>}
+      <span className="decision-card-heading">
+        <span className="decision-card-title">{title}</span>
+        {meta !== undefined && <span className="decision-card-meta">{meta}</span>}
+      </span>
     </header>
     {children !== undefined && <div className="decision-card-body">{children}</div>}
-    {open && problem !== undefined && <p className="decision-card-problem" role="alert">
-      <CircleAlertIcon className="decision-card-problem-mark" aria-hidden />{problem}
+    {shown !== undefined && <p className="decision-card-problem" role="alert">
+      <CircleAlertIcon className="decision-card-problem-mark" aria-hidden />{shown}
     </p>}
-    {open ? footer : closed !== undefined && <p className="decision-card-closed">
-      {closedHref === undefined ? closed : <a className="decision-card-link" href={closedHref} target="_blank" rel="noreferrer">
-        {closed}<ExternalLinkIcon className="decision-card-link-mark" aria-hidden />
-      </a>}
-    </p>}
+    {open ? footer !== undefined && footer !== null && footer !== false && <div ref={choices}>{footer}</div>
+      : closed !== undefined && <p className="decision-card-closed">
+        {closedHref === undefined ? closed : <a className="decision-card-link" href={closedHref} target="_blank" rel="noreferrer">
+          {closed}<ExternalLinkIcon className="decision-card-link-mark" aria-hidden />
+        </a>}
+      </p>}
   </section>;
 }

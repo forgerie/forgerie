@@ -1,15 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDownIcon } from "lucide-react";
+import { scrollParent } from "./scrollParent";
 import "./Excerpt.css";
-
-/** The nearest ancestor that scrolls vertically, such as a thread. */
-function scroller(element: HTMLElement): HTMLElement | undefined {
-  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
-    const overflow = getComputedStyle(parent).overflowY;
-    if ((overflow === "auto" || overflow === "scroll") && parent.scrollHeight > parent.clientHeight) return parent;
-  }
-  return undefined;
-}
 
 /**
  * Molecule: long content cut to its first few lines, fading out where it is
@@ -52,7 +44,7 @@ export function Excerpt({ label, children, moreLabel = "Show more", lessLabel = 
     pressedAt.current = undefined;
     if (toggle === null || before === undefined) return;
     const moved = toggle.getBoundingClientRect().top - before;
-    if (Math.abs(moved) >= 1) scroller(toggle)?.scrollBy({ top: moved });
+    if (Math.abs(moved) >= 1) scrollParent(toggle)?.scrollBy({ top: moved });
   }, [opened]);
   const toggle = opened || cut;
   return <div className="excerpt">
