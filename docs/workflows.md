@@ -156,4 +156,6 @@ The opt-in `scripts/workflow-real.ts` check uses a real CLIProxyAPI model. It sa
 WORKFLOW_REAL=1 ./scripts/workflow-real.ts
 ```
 
+`WORKFLOW_REAL=1 ./scripts/workflow-stops-real.ts` runs a staged workflow the same way, in a temporary Git workspace. It checks that the plan stop holds the child, that approval releases it, that the land stop refuses an early completion, that **Land all** lands the child's real branch, and that the agent finishes the run.
+
 Set `WORKFLOW_MODEL` to change the model. Set `WORKFLOW_SERVE=1` to keep the isolated HTTP server on `127.0.0.1:8544` for browser acceptance, then stop it with SIGTERM. If it is killed with SIGKILL, remove the temporary `agent/models.json` credential file yourself.
