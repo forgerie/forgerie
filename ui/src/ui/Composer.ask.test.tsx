@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from "react";
+import { EditorView } from "@codemirror/view";
 import { createRoot, type Root } from "react-dom/client";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -60,6 +61,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   document.body.replaceChildren();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -70,6 +72,41 @@ const commandList: CommandCatalog = { type: "ready", commands: [
 ] };
 
 describe("assistant-ui slash palette", () => {
+  it("narrows an already open palette on each typed character without a space", async () => {
+    await render({ commands: commandList });
+    await type("/");
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(3);
+    await type("/r");
+    expect([...document.querySelectorAll('[role="option"]')].map((row) => row.textContent))
+      .toEqual(["/reviewReview changes"]);
+    await type("/re");
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(1);
+    await type("/rez");
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
+    expect(document.querySelector(".command-hint")?.textContent).toContain("No matching commands");
+    await type("/re");
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(1);
+    await type("/");
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(3);
+  });
+  it("filters while the keyboard keeps a word in composition", async () => {
+    await render({ commands: commandList });
+    await type("/");
+    // Whole-value test edits do not start CodeMirror's native DOM composition.
+    // The browser acceptance drives the real IME; hold its composing state here.
+    const composing = vi.spyOn(EditorView.findFromDOM(input())!, "composing", "get").mockReturnValue(true);
+    await act(async () => { input().dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })); });
+    await type("/r");
+    expect([...document.querySelectorAll('[role="option"]')].map((row) => row.textContent))
+      .toEqual(["/reviewReview changes"]);
+    await type("/rez");
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
+    await type("/re");
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(1);
+    composing.mockReturnValue(false);
+    await act(async () => { input().dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })); });
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(1);
+  });
   it("filters and completes plain Pi text with keyboard, then sends only after confirmation", async () => {
     const onNew = vi.fn<(message: AppendMessage) => Promise<void>>().mockResolvedValue(undefined);
     await render({ commands: commandList, onNew });

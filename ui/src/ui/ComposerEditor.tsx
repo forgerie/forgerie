@@ -188,7 +188,9 @@ export function ComposerEditor(props: ComposerEditorProps) {
               flushTapSync(() => { aui.composer.setText(text); });
               if (!update.transactions.some((transaction) => transaction.annotation(fromHost))) latest.current.props.onEdit?.();
             }
-            if ((update.docChanged || update.selectionSet) && !update.view.composing) broadcast(update.view);
+            // Android keyboards can compose an entire word. Suggestions need
+            // its current caret too, not only the position after it commits.
+            if (update.docChanged || update.selectionSet) broadcast(update.view);
           }),
         ],
       }),
