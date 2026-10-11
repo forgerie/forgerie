@@ -23,6 +23,11 @@ export function SearchResults({ view, now, where, onOpen, onRetry, onMore, listR
     alert={{ text: view.message, action: { label: "Retry", onPress: onRetry } }} />;
   if (view.type === "titles-none") return <ResultList label="Sessions" rows={[]} rootRef={listRef}
     empty={<p>No session titles match {quoted(view.query)}</p>} />;
+  if (view.type === "no-folders") return <ResultList label={`Sessions matching ${quoted(view.query)}`} rows={[]} rootRef={listRef}
+    empty={<>
+      <p>No sessions match {quoted(view.query)}</p>
+      <p>The chosen project group has no project folder on this machine, so there is nothing to search. Show all projects, or add a project to the group.</p>
+    </>} />;
   const rows = view.hits.map((hit) => ({ key: hit.sessionId, node: <HitRow title={hit.title || "Untitled session"} untitled={!hit.title}
     where={where(hit.cwd)} time={shortAge(hit.modified, now)} timeTitle={new Date(hit.modified).toLocaleString()}
     tags={[...(hit.archived ? ["Archived"] : []), ...(hit.offBranch ? ["Other branch"] : [])]}

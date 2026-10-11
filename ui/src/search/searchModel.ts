@@ -4,16 +4,28 @@ import type { SearchHit, SearchIndex } from "./searchApi";
 export const MIN_TERM = 3;
 
 /**
- * The query's terms, by the server's rules: split on spaces, quotes make a
- * phrase, terms under three characters are dropped. Case is the server's job.
+ * The query's terms, by the server's own parser (`parseSearchQuery` in
+ * `src/server/sessions/sessionSearchText.ts`), so the two never disagree on
+ * whether a query searches messages. Whitespace splits terms outside quotes;
+ * a quote opens or closes a phrase anywhere, and inside a phrase a doubled
+ * quote is a literal quote; an unfinished phrase takes the rest of the query.
+ * A term needs 3 code points, not UTF-16 units. Terms are lower-cased and unique.
  */
 export function searchTerms(query: string): string[] {
   const terms: string[] = [];
-  for (const match of query.matchAll(/"([^"]*)"?|(\S+)/gu)) {
-    const term = (match[1] ?? match[2] ?? "").trim();
-    if (term.length >= MIN_TERM) terms.push(term);
+  let term = "";
+  let quoted = false;
+  const keep = () => { if (Array.from(term).length >= MIN_TERM) terms.push(term.toLowerCase()); term = ""; };
+  for (let index = 0; index < query.length; index++) {
+    const char = query[index] ?? "";
+    if (char === '"') {
+      if (quoted && query[index + 1] === '"') { term += '"'; index++; }
+      else quoted = !quoted;
+    } else if (!quoted && /\s/u.test(char)) keep();
+    else term += char;
   }
-  return terms;
+  keep();
+  return [...new Set(terms)];
 }
 
 /**
@@ -33,7 +45,11 @@ export function titleMatches(title: string | undefined, query: string): boolean 
   return needle === "" || (title ?? "").toLocaleLowerCase().includes(needle);
 }
 
-/** The folders a group filter covers: its projects' paths. No filter means no scope, which is every folder. */
+/**
+ * The folders a group filter covers: its projects' paths. No filter is
+ * `undefined`, every folder. A group with no project this machine knows is
+ * `[]`, no folder at all: never the same as no filter.
+ */
 export function scopeFolders(projects: readonly { id: string; path: string }[], projectIds: readonly string[] | undefined): string[] | undefined {
   if (projectIds === undefined) return undefined;
   return projects.filter((project) => projectIds.includes(project.id)).map((project) => project.path);
@@ -65,7 +81,9 @@ export type ResultsView =
     more: "none" | "idle" | "loading" | "failed";
   }
   /** A title filter found no session. */
-  | { type: "titles-none"; query: string };
+  | { type: "titles-none"; query: string }
+  /** The group filter covers no folder, so nothing can match and nothing was asked. */
+  | { type: "no-folders"; query: string };
 
 export interface ResultsState {
   /** The query the shown hits answer. Undefined until a first answer arrives. */
@@ -77,9 +95,12 @@ export interface ResultsState {
   loading: boolean;
   error?: string | undefined;
   paging: "idle" | "loading" | "failed";
+  /** The answer is empty because the scope holds no folder. */
+  noFolders?: boolean | undefined;
 }
 
 export function resultsView(query: string, results: ResultsState): ResultsView {
+  if (results.noFolders === true && results.answered !== undefined) return { type: "no-folders", query: results.answered };
   if (results.answered === undefined) {
     if (results.error !== undefined && !results.loading) return { type: "failed", message: results.error };
     return { type: "loading" };

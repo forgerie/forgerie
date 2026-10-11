@@ -19,6 +19,13 @@ export const sessionTreeSnapshotSchema = z.object({
   activePathIds: z.array(z.string()),
 });
 export type SessionTreeSnapshot = z.infer<typeof sessionTreeSnapshotSchema>;
+/**
+ * `GET /api/sessions/:sessionId/tree?cwd=<cwd>`: the same snapshot as the
+ * `/tree` command's, read without running it, so a read-only session has one
+ * too. Mirrors `SessionTreeResponse` in the server's `src/shared/apiTypes.ts`.
+ * An unknown session answers 404.
+ */
+export const sessionTreeResponseSchema = z.object({ tree: sessionTreeSnapshotSchema });
 
 export type SessionTreeSummaryChoice = { mode: "none" } | { mode: "default" } | { mode: "custom"; instructions: string };
 export const SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH = 10_000;

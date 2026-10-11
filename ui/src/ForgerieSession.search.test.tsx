@@ -13,6 +13,9 @@ let root: Root;
 let server: WebSocketServer;
 let status: SessionStatus;
 let scrolls: number;
+let treeReads: string[];
+/** GET /tree answers 404 while set: the server does not know the session. */
+let treeMissing: boolean;
 const posted: { path: string; body: unknown }[] = [];
 const idle: SessionStatus = { isStreaming: false, isCompacting: false, isBashRunning: false, queuedMessages: [] };
 // Positions 0..4 of the /messages list.
@@ -43,19 +46,21 @@ const connected = () => document.querySelector(".status-chip-live") !== null && 
 const treeRequests = () => posted.filter((request) => request.path.endsWith("/commands/run"));
 
 /** Owns the found hit the way the search binding does: stepping and closing are real. */
-function Harness({ initial, onOpened }: { initial: { type: "message"; positions: number[]; current: number } | { type: "entry"; entryId: string }; onOpened?: () => void }) {
+function Harness({ initial, onOpened }: { initial: { type: "message"; positions: number[]; current: number } | { type: "entry"; entryId: string } | { type: "missing" }; onOpened?: () => void }) {
   const [current, setCurrent] = useState(initial.type === "message" ? initial.current : 0);
   const [open, setOpen] = useState(true);
+  const base = { key: 1, onRetry: () => {}, onClose: () => setOpen(false) };
   const found: FoundBinding | undefined = !open ? undefined : initial.type === "message"
-    ? { type: "message", key: 1, matches: { type: "ready", positions: initial.positions, current },
-      onStep: (delta) => setCurrent((at) => (at + delta + initial.positions.length) % initial.positions.length), onRetry: () => {}, onClose: () => setOpen(false) }
-    : { type: "entry", key: 1, entryId: initial.entryId, onOpened: () => { onOpened?.(); setOpen(false); }, onClose: () => setOpen(false) };
+    ? { ...base, type: "message", positions: initial.positions, current,
+      onStep: (delta) => setCurrent((at) => (at + delta + initial.positions.length) % initial.positions.length) }
+    : initial.type === "entry" ? { ...base, type: "entry", entryId: initial.entryId, onOpened: () => { onOpened?.(); setOpen(false); } }
+    : { ...base, type: "pending", state: { type: "missing" } };
   return <ForgerieSession id="a" known={{ id: "a", cwd: "/work" }} onSwitchSession={() => {}} found={found} />;
 }
 
 beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  status = idle; posted.length = 0; scrolls = 0;
+  status = idle; posted.length = 0; scrolls = 0; treeReads = []; treeMissing = false;
   Element.prototype.scrollTo = function scrollTo() { scrolls += 1; } as typeof Element.prototype.scrollTo;
   Element.prototype.scrollIntoView = vi.fn();
   server = new WebSocketServer({ port: 0 });
@@ -70,6 +75,10 @@ beforeEach(async () => {
     if (path.includes("/stream-snapshot?")) return Response.json({ partial: null, seq: 0 });
     if (path.includes("/status?")) return Response.json(status);
     if (path.includes("/commands?")) return Response.json([]);
+    if (path.startsWith("/api/sessions/a/tree?")) {
+      treeReads.push(path);
+      return treeMissing ? Response.json({ error: "Session a was not found." }, { status: 404 }) : Response.json({ tree });
+    }
     posted.push({ path, body: JSON.parse(String(init.body)) });
     if (path.endsWith("/commands/run")) return Response.json({ type: "tree", tree });
     throw new Error(`Unexpected request ${path}`);
@@ -114,6 +123,16 @@ describe("a session opened from an on-branch hit", () => {
   });
 });
 
+describe("a hit whose passage the session no longer holds", () => {
+  it("says so, and marks no other message in its place", async () => {
+    await act(async () => root.render(<Harness initial={{ type: "missing" }} />));
+    await until(connected);
+    await until(() => bar().includes("This passage is no longer in the session."));
+    expect(marked()).toEqual([]);
+    expect(button("Next match")).toBeNull();
+  });
+});
+
 describe("a session opened from an off-branch hit", () => {
   it("opens the history tree with the hit's entry selected, and leaves the branch alone", async () => {
     const onOpened = vi.fn();
@@ -140,5 +159,36 @@ describe("a session opened from an off-branch hit", () => {
     expect(treeRequests()).toHaveLength(1);
     expect(treeDialog()?.querySelector('[role="treeitem"][aria-selected="true"]')?.textContent).toContain("A warm store makes the deploy fast.");
     expect(bar()).toBe("");
+  });
+
+  it("reads the tree of a read-only session without running /tree, and opens it on the entry to look at only", async () => {
+    status = { ...idle, readOnly: true };
+    const onOpened = vi.fn();
+    await act(async () => root.render(<Harness initial={{ type: "entry", entryId: "a-off" }} onOpened={onOpened} />));
+    await until(() => treeDialog() !== null);
+    expect(treeReads).toEqual(["/api/sessions/a/tree?cwd=%2Fwork"]);
+    expect(treeRequests()).toEqual([]);
+    expect(treeDialog()?.querySelector('[role="treeitem"][aria-selected="true"]')?.textContent).toContain("A warm store makes the deploy fast.");
+    const action = (name: string) => [...treeDialog()!.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent?.trim() === name);
+    expect(action("Continue from here")?.disabled).toBe(true);
+    expect(action("Fork")?.disabled).toBe(true);
+    expect(action("Summarize")?.disabled).toBe(true);
+    expect(treeDialog()?.textContent).toContain("This session is read-only.");
+    expect(onOpened).toHaveBeenCalledTimes(1);
+  });
+
+  it("says in the match bar when the server does not know the session's tree, and Retry reads it again", async () => {
+    status = { ...idle, readOnly: true };
+    treeMissing = true;
+    await act(async () => root.render(<Harness initial={{ type: "entry", entryId: "a-off" }} />));
+    await until(() => bar().includes("Could not open the history tree."));
+    expect(bar()).toContain("Session a was not found.");
+    expect(treeDialog()).toBeNull();
+    expect(treeReads).toHaveLength(1);
+    treeMissing = false;
+    await click([...document.querySelectorAll<HTMLButtonElement>('[aria-label="Search matches"] button')].find((node) => node.textContent === "Retry"));
+    await until(() => treeDialog() !== null);
+    expect(treeReads).toHaveLength(2);
+    expect(treeDialog()?.querySelector('[role="treeitem"][aria-selected="true"]')?.textContent).toContain("A warm store makes the deploy fast.");
   });
 });

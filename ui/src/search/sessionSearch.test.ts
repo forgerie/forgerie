@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSearchApi, type SearchHit, type SearchMatch, type SearchPage } from "./searchApi";
-import { createSessionSearch } from "./sessionSearch";
+import { createSessionSearch, placeOf } from "./sessionSearch";
 import { HITS, MORE_HITS } from "./fixtures/hits";
 
 const ready = { state: "ready" as const, indexedFiles: 9, totalFiles: 9 };
@@ -156,36 +156,136 @@ describe("an opened hit", () => {
     { entryId: "s-deploy-entry", role: "user", offBranch: false, position: 4 },
     { entryId: "e3", role: "assistant", offBranch: false, position: 9 },
   ];
-  it("reads its session's on-branch matches and starts at the opened one", async () => {
+  async function opened(hit: SearchHit) {
     const search = createSessionSearch(api());
     search.actions.setQuery("deploy");
     await vi.advanceTimersByTimeAsync(200);
     searches()[0]!.answer(page(HITS));
     await settle();
-    search.actions.open(HITS[0]!);
-    const request = calls.at(-1)!;
-    expect(request.url.pathname).toBe("/api/sessions/s-deploy/search-matches");
-    expect(Object.fromEntries(request.url.searchParams)).toEqual({ q: "deploy", cwd: "/code/forgerie" });
-    request.answer({ matches });
+    search.actions.open(hit);
+    return search;
+  }
+  const matchesRequest = () => calls.filter((call) => call.url.pathname.endsWith("/search-matches")).at(-1)!;
+
+  it("reads its session's on-branch matches and starts at the opened one", async () => {
+    const search = await opened(HITS[0]!);
+    expect(search.getSnapshot().found).toMatchObject({ place: { type: "loading" } });
+    expect(matchesRequest().url.pathname).toBe("/api/sessions/s-deploy/search-matches");
+    expect(Object.fromEntries(matchesRequest().url.searchParams)).toEqual({ q: "deploy", cwd: "/code/forgerie" });
+    matchesRequest().answer({ matches });
     await settle();
     const found = search.getSnapshot().found;
-    expect(found).toMatchObject({ type: "message", matches: { type: "ready", current: 1 } });
-    expect(found?.type === "message" && found.matches.type === "ready" ? found.matches.list.map((match) => match.position) : []).toEqual([0, 4, 9]);
+    expect(found).toMatchObject({ place: { type: "message", current: 1 } });
+    expect(found?.place.type === "message" ? found.place.list.map((match) => match.position) : []).toEqual([0, 4, 9]);
     search.actions.step(1);
     search.actions.step(1);
-    expect(search.getSnapshot().found).toMatchObject({ matches: { current: 0 } });
+    expect(search.getSnapshot().found).toMatchObject({ place: { current: 0 } });
     search.actions.step(-1);
-    expect(search.getSnapshot().found).toMatchObject({ matches: { current: 2 } });
+    expect(search.getSnapshot().found).toMatchObject({ place: { current: 2 } });
     // The query and its hits stay for the next look at the list.
     expect(search.getSnapshot()).toMatchObject({ query: "deploy", results: { hits: HITS } });
   });
 
-  it("opens an off-branch hit without reading matches", () => {
-    const search = createSessionSearch(api());
-    search.actions.open(HITS[2]!);
-    expect(search.getSnapshot().found).toMatchObject({ type: "entry", hit: { sessionId: "s-branch" } });
-    expect(calls).toHaveLength(0);
+  it("asks where an off-branch hit lies too, because its label dates from indexing", async () => {
+    // The index said "other branch"; the session has since moved onto it.
+    const search = await opened(HITS[2]!);
+    expect(matchesRequest().url.pathname).toBe("/api/sessions/s-branch/search-matches");
+    matchesRequest().answer({ matches: [{ entryId: "s-branch-entry", role: "assistant", offBranch: false, position: 7 }] });
+    await settle();
+    expect(search.getSnapshot().found).toMatchObject({ place: { type: "message", current: 0, list: [{ position: 7 }] } });
+  });
+
+  it("opens the tree for an on-branch label that the session has since left", async () => {
+    const search = await opened(HITS[0]!);
+    matchesRequest().answer({ matches: [...matches.filter((match) => match.entryId !== "s-deploy-entry"), { entryId: "s-deploy-entry", role: "user", offBranch: true }] });
+    await settle();
+    expect(search.getSnapshot().found).toMatchObject({ place: { type: "entry", entryId: "s-deploy-entry" } });
+  });
+
+  it("says the passage is gone rather than show another one", async () => {
+    const search = await opened(HITS[0]!);
+    matchesRequest().answer({ matches: matches.filter((match) => match.entryId !== "s-deploy-entry") });
+    await settle();
+    expect(search.getSnapshot().found?.place).toEqual({ type: "missing" });
+    // An on-branch entry with no position cannot be shown either.
+    expect(placeOf("x", [{ entryId: "x", role: "user", offBranch: false }])).toEqual({ type: "missing" });
     search.actions.closeFound();
     expect(search.getSnapshot().found).toBeUndefined();
+  });
+
+  it("keeps a failure to read the matches, and Retry reads them again", async () => {
+    const search = await opened(HITS[0]!);
+    matchesRequest().answer({ error: "Gone away" }, 500);
+    await settle();
+    expect(search.getSnapshot().found?.place).toEqual({ type: "failed", message: "Gone away" });
+    search.actions.retryMatches();
+    matchesRequest().answer({ matches });
+    await settle();
+    expect(search.getSnapshot().found).toMatchObject({ place: { type: "message", current: 1 } });
+  });
+});
+
+describe("the group filter's folders", () => {
+  it("asks nothing and finds nothing for a group with no folder, unlike no filter at all", async () => {
+    const search = createSessionSearch(api());
+    search.actions.setScope([]);
+    search.actions.setQuery("deploy");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(searches()).toHaveLength(0);
+    expect(search.getSnapshot().results).toMatchObject({ answered: "deploy", hits: [], noFolders: true, loading: false });
+    // Clearing the filter searches every folder: no scope at all.
+    search.actions.setScope(undefined);
+    await settle();
+    expect(searches()).toHaveLength(1);
+    expect(searches()[0]!.url.searchParams.has("scope")).toBe(false);
+    searches()[0]!.answer(page(HITS));
+    await settle();
+    expect(search.getSnapshot().results).toMatchObject({ hits: HITS, noFolders: false });
+  });
+});
+
+describe("refreshing while the index builds", () => {
+  it("reads every loaded page again and offers more once more sessions are read", async () => {
+    const building = (indexedFiles: number) => ({ state: "building" as const, indexedFiles, totalFiles: 9 });
+    const search = createSessionSearch(api());
+    search.actions.setQuery("deploy");
+    await vi.advanceTimersByTimeAsync(200);
+    searches()[0]!.answer(page(HITS.slice(0, 2), { nextCursor: "p2", index: building(3) }));
+    await settle();
+    search.actions.more();
+    // The second page was the last one the index had read so far.
+    searches()[1]!.answer(page(HITS.slice(2), { index: building(3) }));
+    await settle();
+    expect(search.getSnapshot().results).toMatchObject({ nextCursor: undefined, hits: HITS });
+    await vi.advanceTimersByTimeAsync(3000);
+    // The refresh walks the whole chain from the first page.
+    expect(searches()[2]!.url.searchParams.has("cursor")).toBe(false);
+    searches()[2]!.answer(page(HITS.slice(0, 2), { nextCursor: "p2", index: building(6) }));
+    await settle();
+    expect(searches()[3]!.url.searchParams.get("cursor")).toBe("p2");
+    searches()[3]!.answer(page(HITS.slice(2), { nextCursor: "p3", index: building(6) }));
+    await settle();
+    expect(searches()).toHaveLength(4);
+    expect(search.getSnapshot().results).toMatchObject({ nextCursor: "p3", hits: HITS, loading: false, index: { indexedFiles: 6 } });
+    search.actions.more();
+    expect(searches()[4]!.url.searchParams.get("cursor")).toBe("p3");
+    searches()[4]!.answer(page(MORE_HITS, { index: building(6) }));
+    await settle();
+    expect(search.getSnapshot().results.hits).toEqual([...HITS, ...MORE_HITS]);
+  });
+
+  it("frees Show more when a refresh stops a page that was loading", async () => {
+    const search = createSessionSearch(api());
+    search.actions.setQuery("deploy");
+    await vi.advanceTimersByTimeAsync(200);
+    searches()[0]!.answer(page(HITS.slice(0, 2), { nextCursor: "p2", index: { state: "building", indexedFiles: 1, totalFiles: 9 } }));
+    await settle();
+    await vi.advanceTimersByTimeAsync(2900);
+    search.actions.more();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(searches()[1]!.signal.aborted).toBe(true);
+    searches()[2]!.answer(page(HITS.slice(0, 2), { nextCursor: "p2", index: ready }));
+    await settle();
+    expect(search.getSnapshot().results).toMatchObject({ paging: "idle", nextCursor: "p2" });
   });
 });

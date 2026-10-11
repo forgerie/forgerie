@@ -11,6 +11,8 @@ import {
 import { shortAge } from "../picker/board";
 import { writeClipboardText } from "../clipboard";
 
+const NOTHING_LEAVES: ReadonlySet<string> = new Set();
+
 export interface SessionTreeBinding {
   tree: SessionTreeSnapshot;
   operation: TreeOperation;
@@ -20,6 +22,8 @@ export interface SessionTreeBinding {
   onClose: () => void;
   /** The entry the tree opens on, such as a search hit's passage. Its lens widens to show it. Read once, when the tree opens. */
   initialSelectedId?: string | undefined;
+  /** Set when the tree can only be read, such as a read-only session's: the reason shows, and Summarize, Fork and Continue stay disabled. */
+  readOnly?: string | undefined;
 }
 
 /** Header control for `/tree`. Pi refuses the tree while the session works, so the button waits too. */
@@ -38,7 +42,7 @@ export function SessionTreeNavigator(props: SessionTreeBinding) {
   return createPortal(<Navigator {...props} />, document.body);
 }
 
-function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose, initialSelectedId }: SessionTreeBinding) {
+function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose, initialSelectedId, readOnly }: SessionTreeBinding) {
   const titleId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -64,7 +68,8 @@ function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose, init
   const selectedId = nearestVisibleSessionTreeId(model, rows.map((row) => row.node.id), anchorId);
   const selected = selectedId === undefined ? undefined : model.nodesById.get(selectedId);
   const position = selectedId === undefined ? -1 : rows.findIndex((row) => row.node.id === selectedId);
-  const leaving = sessionTreeAbandonedPreviewIds(tree, selectedId);
+  // A tree that can only be read moves nothing, so it previews no move.
+  const leaving = readOnly !== undefined ? NOTHING_LEAVES : sessionTreeAbandonedPreviewIds(tree, selectedId);
   const branching = rows.some((row) => row.childIds.length > 1);
   const busy = operation.type !== "idle";
   const summarizing = operation.type === "continuing" && operation.summarizing;
@@ -100,7 +105,7 @@ function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose, init
   };
   const continueHere = () => {
     const choice = summaryChoice();
-    if (busy || selectedId === undefined || choice === undefined) return;
+    if (busy || readOnly !== undefined || selectedId === undefined || choice === undefined) return;
     onContinue(selectedId, choice);
   };
   // Escape closes when idle, stops a running summary, and otherwise waits. A stray backdrop press never stops paid work.
@@ -189,18 +194,19 @@ function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose, init
           onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); continueHere(); } }} />
       </label>}
       {notice && <p className="tree-notice" data-tone={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>{notice.message}</p>}
+      {readOnly !== undefined && <p className="tree-notice" data-tone="status" role="status">{readOnly}</p>}
       </div>
       <footer className="tree-actions">
         {summarizing && <button type="button" className="tree-stop" disabled={operation.aborting} onClick={onAbort}>
           <SquareIcon aria-hidden size={12} />{operation.aborting ? "Stopping…" : "Stop summary"}</button>}
-        <button type="button" className="tree-summarize" aria-pressed={summarize} disabled={busy || !selected}
-          title="Also write a summary of the branch you leave behind"
+        <button type="button" className="tree-summarize" aria-pressed={summarize} disabled={busy || !selected || readOnly !== undefined}
+          title={readOnly ?? "Also write a summary of the branch you leave behind"}
           onClick={() => setSummarize(!summarize)}>
           <ScrollTextIcon aria-hidden size={16} />Summarize</button>
-        <button type="button" className="tree-fork" disabled={busy || !selected} title={selected ? forkDescription(selected) : undefined}
+        <button type="button" className="tree-fork" disabled={busy || !selected || readOnly !== undefined} title={readOnly ?? (selected ? forkDescription(selected) : undefined)}
           onClick={() => { if (selectedId !== undefined) onFork(selectedId); }}>
           <GitForkIcon aria-hidden size={16} />{operation.type === "forking" ? "Forking…" : "Fork"}</button>
-        <button type="button" className="tree-continue" disabled={busy || !selected} title={selected ? continueDescription(selected) : undefined}
+        <button type="button" className="tree-continue" disabled={busy || !selected || readOnly !== undefined} title={readOnly ?? (selected ? continueDescription(selected) : undefined)}
           onClick={continueHere}>
           <CornerDownRightIcon aria-hidden size={16} />
           {operation.type !== "continuing" ? "Continue from here" : operation.summarizing ? "Summarizing…" : "Continuing…"}</button>

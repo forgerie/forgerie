@@ -70,5 +70,7 @@ export function ErrorWithHits() {
 export function ShowMore() { return <Stateful initial={hits({ more: "idle" })} />; }
 export function MoreLoading() { return <Stateful initial={hits({ more: "loading" })} />; }
 export function MoreFailed() { return <Stateful initial={hits({ more: "failed" })} />; }
+/** The chosen group has no project folder this machine knows, so nothing was asked. */
+export function NoFolders() { return <Stateful initial={{ type: "no-folders", query: QUERY }} />; }
 /** A short query narrows the list by title, and no title matched. */
 export function TitlesNone() { return <Stateful initial={{ type: "titles-none", query: "zq" }} />; }

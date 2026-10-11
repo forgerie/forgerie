@@ -184,7 +184,7 @@ export function PickerToast({ toast, onUndo, onDismiss }: { toast: ActionMessage
  * in; selections, commands, and arrangement changes go out. Only open menus
  * live here.
  */
-export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search, results, narrowed = false }: {
+export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search, results, narrowed = false, onEscape }: {
   view: PickerView; prefs: PickerPrefs; onPrefs: (prefs: PickerPrefs) => void; actions: PickerActions;
   /** Plugin shelves, drawn between the list and Backlog and Settings. */
   shelves?: ReactNode;
@@ -196,6 +196,11 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
   results?: ReactNode;
   /** The sections hold only some sessions, such as those whose title matches, so the list makes no claim about the rest. */
   narrowed?: boolean;
+  /**
+   * Escape anywhere in the list asks this first, from the search box too, unless a control already used the key.
+   * It returns true when it used the key, such as to clear a search; only then does Escape not close the list.
+   */
+  onEscape?: (() => boolean) | undefined;
 }) {
   const [menu, setMenu] = useState<"board" | undefined>();
   const [rowMenu, setRowMenu] = useState<{ id: string; confirming: boolean } | undefined>();
@@ -220,8 +225,13 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
   const closeRowMenu = () => { setRowMenu(undefined); listRef.current?.focus({ preventScroll: true }); };
   const run = (row: Row, kind: RowCommandKind) => { closeRowMenu(); actions.onCommand?.(row, kind); };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      if (event.defaultPrevented) return;
+      event.preventDefault();
+      if (menu) setMenu(undefined); else if (!onEscape?.()) actions.onClose?.();
+      return;
+    }
     if (event.target instanceof HTMLElement && event.target.closest("input, textarea, [contenteditable]")) return;
-    if (event.key === "Escape") { if (menu) setMenu(undefined); else actions.onClose?.(); return; }
     if ((event.key === "ContextMenu" || event.shiftKey && event.key === "F10") && results === undefined) {
       event.preventDefault();
       if (selectedRow) openRowMenu(selectedRow.session.id);

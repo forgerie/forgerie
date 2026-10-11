@@ -33,8 +33,11 @@ export default function Stepping() { return <Stateful initial={{ type: "ready", 
 export function OneMatch() { return <Stateful initial={{ type: "ready", current: 0, total: 1, missing: false }} />; }
 export function Loading() { return <Stateful initial={{ type: "loading" }} />; }
 /** The message the server named is not in the loaded thread, such as after a compaction. */
-export function Missing() { return <Stateful initial={{ type: "ready", current: 4, total: 12, missing: true }} />; }
+export function NotLoaded() { return <Stateful initial={{ type: "ready", current: 4, total: 12, missing: true }} />; }
 export function Failed() { return <Stateful initial={{ type: "failed", message: "Could not reach the server. Check the connection, then try again." }} />; }
 /** An off-branch hit in a session at work: the history tree waits until it is idle. */
+/** The history tree for an off-branch hit could not be read, such as a session the server no longer knows. */
+export function TreeFailed() { return <Stateful initial={{ type: "treeFailed", message: "Session tree-session was not found." }} />; }
 export function OffBranchBusy() { return <Stateful initial={{ type: "waiting" }} />; }
-export function OffBranchReadOnly() { return <Stateful initial={{ type: "readOnly" }} />; }
+/** The session no longer holds the opened passage, and no other passage stands in for it. */
+export function Missing() { return <Stateful initial={{ type: "missing" }} />; }

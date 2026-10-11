@@ -19,8 +19,11 @@ export function MatchBar({ view, onStep, onRetry, onClose }: {
     case "loading": return <FindBar name={name} label="Finding matches…" close={close} />;
     case "failed": return <FindBar name={name} label="Could not load the matches." detail={view.message}
       action={{ label: "Retry", onPress: onRetry }} close={close} />;
+    case "treeFailed": return <FindBar name={name} label="Could not open the history tree." detail={view.message}
+      action={{ label: "Retry", onPress: onRetry }} close={close} />;
     case "waiting": return <FindBar name={name} label={OFF_BRANCH} detail="The history tree opens when the session is idle." close={close} />;
-    case "readOnly": return <FindBar name={name} label={OFF_BRANCH} detail="This session is read-only, so its history tree cannot open." close={close} />;
+    case "missing": return <FindBar name={name} label="This passage is no longer in the session."
+      detail="The session changed after the search index read it." action={{ label: "Retry", onPress: onRetry }} close={close} />;
     case "ready": {
       const alone = view.total < 2;
       return <FindBar name={name} label={`Match ${formatCount(view.current + 1)} of ${formatCount(view.total)}`}

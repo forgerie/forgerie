@@ -235,28 +235,37 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     state.connection.type !== "ready" ? "loading" : state.transcript.messages.length > 0 || state.transcript.isRunning ? "live" : "empty") : undefined;
   const folded = useMemo(() => foldChildEntries(foldProcessEvents(state.transcript.messages)), [state.transcript.messages]);
   // A search hit on the branch: the thread marks the match on show and brings it into view.
-  const markAt = found?.type === "message" && found.matches.type === "ready" ? found.matches.positions[found.matches.current] : undefined;
+  const markAt = found?.type === "message" ? found.positions[found.current] : undefined;
   const shown = useMemo(() => markPosition(folded, markAt), [folded, markAt]);
   const messages = useThreadMessages(shown, state.transcript.isRunning);
   const revealId = useMemo(() => threadMessageIdAt(shown, markAt), [shown, markAt]);
   const reveal = found && markAt !== undefined && revealId !== undefined ? { messageId: revealId, key: `${String(found.key)}:${String(markAt)}` } : undefined;
-  // A search hit off the branch: the history tree opens on it once the session is idle. The branch stays as it is.
-  const [treeFor, setTreeFor] = useState<{ key: number; entryId: string }>();
+  // A search hit off the branch: the history tree opens on it, and the branch stays as it is. A writable
+  // session opens it with /tree once idle, so Continue and Fork work. A read-only one reads it, to look at only.
+  const [treeFor, setTreeFor] = useState<{ key: number; entryId: string; failed?: string }>();
   const treeOpen = state.tree.type === "open";
+  const treeReadable = readOnly ? connected : treeAvailable;
   useEffect(() => {
-    if (found?.type !== "entry" || !treeAvailable || treeFor?.key === found.key) return;
-    setTreeFor({ key: found.key, entryId: found.entryId });
-    void store.openTree().catch(() => { /* The store exposes the error. */ });
-  }, [found, treeAvailable, treeFor, store]);
+    if (found?.type !== "entry" || !treeReadable || treeFor?.key === found.key) return;
+    const request = { key: found.key, entryId: found.entryId };
+    setTreeFor(request);
+    // The store also lists the failure as a problem; the match bar says it where the reader is looking.
+    void (readOnly ? store.viewTree() : store.openTree()).catch((error: unknown) => {
+      setTreeFor((current) => current === request ? { ...request, failed: error instanceof Error ? error.message : String(error) } : current);
+    });
+  }, [found, treeReadable, readOnly, treeFor, store]);
   useEffect(() => {
     if (treeOpen && found?.type === "entry" && treeFor?.key === found.key) found.onOpened();
     // A tree the reader opens later starts where it always does.
     else if (!treeOpen && treeFor && found?.key !== treeFor.key) setTreeFor(undefined);
   }, [treeOpen, found, treeFor]);
   const matchBar: MatchBarView | undefined = found?.type === "message"
-    ? found.matches.type === "ready" ? { type: "ready", current: found.matches.current, total: found.matches.positions.length,
-      missing: connected && revealId === undefined } : found.matches
-    : found?.type === "entry" && treeFor?.key !== found.key && connected && !treeAvailable ? { type: readOnly ? "readOnly" : "waiting" } : undefined;
+    ? { type: "ready", current: found.current, total: found.positions.length, missing: connected && revealId === undefined }
+    : found?.type === "pending" ? found.state
+    : found?.type === "entry" && treeFor?.key === found.key && treeFor.failed !== undefined ? { type: "treeFailed", message: treeFor.failed }
+    : found?.type === "entry" && treeFor?.key !== found.key && connected && !treeReadable ? { type: "waiting" } : undefined;
+  // Retry on a failed tree asks for it again; every other retry reads the matches again.
+  const retryFound = matchBar?.type === "treeFailed" ? () => setTreeFor(undefined) : found?.onRetry;
   const childrenAvailable = children.available === true;
   const openChildByName = useCallback((name: string) => {
     const child = childAgents.getSnapshot().children.find((candidate) => candidate.name === name);
@@ -392,8 +401,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
         reveal={reveal}
         beforeComposer={<>
-          {found && matchBar && <MatchBar view={matchBar} onClose={found.onClose}
-            onStep={found.type === "message" ? found.onStep : () => undefined} onRetry={found.type === "message" ? found.onRetry : () => undefined} />}
+          {found && matchBar && <MatchBar view={matchBar} onClose={found.onClose} onRetry={retryFound ?? (() => undefined)}
+            onStep={found.type === "message" ? found.onStep : () => undefined} />}
           {sendError && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{sendError}</p></Consequence>}
           {flows.error !== undefined && workflowSheet === undefined && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{flows.error}</p></Consequence>}
           {waiting.length > 0 && <PinnedDock label={waitingLabel(waiting.length)}>{waiting.map(renderWaiting)}</PinnedDock>}
@@ -427,6 +436,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         } : undefined} />
       </SessionDoorsProvider>
       {state.tree.type === "open" && <SessionTreeNavigator tree={state.tree.tree} operation={state.tree.operation} initialSelectedId={treeFor?.entryId}
+        readOnly={readOnly ? "This session is read-only. Its history shows here, and nothing in it can move or fork." : undefined}
         onContinue={(targetId, summary) => { void store.continueTree(targetId, summary).then(applyTree); }}
         onFork={(entryId) => { void store.forkTree(entryId).then(applyTree); }}
         onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}

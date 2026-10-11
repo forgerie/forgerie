@@ -10,7 +10,7 @@ import { compactionFromOutput, compactionFromStatus, idleCompaction, isCompactCo
 import { isAlreadyQueued, workingSend } from "./queue";
 import { noDialogPhase, type StoredDialogPhase } from "./dialog";
 import type { PromptDiffAnnotation } from "./changes/diffNotes";
-import { afterFork, afterNavigate, closedTree, openTree, treeForkResultSchema, treeNavigateResultSchema, withOperation as withTreeOperation, type SessionTreeSummaryChoice, type TreeNavigator, type TreeOutcome } from "./sessionTree";
+import { afterFork, afterNavigate, closedTree, openTree, sessionTreeResponseSchema, treeForkResultSchema, treeNavigateResultSchema, withOperation as withTreeOperation, type SessionTreeSummaryChoice, type TreeNavigator, type TreeOutcome } from "./sessionTree";
 
 export type Connection = { type: "loading" } | { type: "ready" }
   /** `attempt` counts tries since the last join; `retryAt` is when the next one starts (now or earlier: it runs already). */
@@ -644,6 +644,21 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     /** Skip the wait before the next try. Only while reconnecting. */
     retryNow: () => { if (state.connection.type === "reconnecting") recover("Trying again now."); },
     openTree: () => runSlash("commands/run", { text: "/tree" }),
+    /**
+     * Reads the tree without the `/tree` command, so a read-only session can
+     * show its history too. Nothing on the server changes.
+     */
+    viewTree: async () => {
+      const session = state.session;
+      if (!session || state.connection.type !== "ready") throw new NotSentError("The session is not connected.");
+      try {
+        const { tree } = await request(readPath("tree", session), sessionTreeResponseSchema);
+        update({ ...state, tree: openTree(tree) });
+      } catch (error) {
+        fail("Could not read the session tree", messageOf(error));
+        throw error;
+      }
+    },
     continueTree: (targetId: string, summary: SessionTreeSummaryChoice) => treeAction("continuing", summary.mode !== "none",
       "tree/navigate", treeNavigateResultSchema, { targetId, summary }, afterNavigate),
     forkTree: (entryId: string) => treeAction("forking", false, "tree/fork", treeForkResultSchema, { entryId }, afterFork),

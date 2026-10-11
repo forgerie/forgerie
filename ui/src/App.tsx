@@ -373,6 +373,14 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     : mode === "title" && pickerView.sections.length === 0 && picker.view.connection.type === "ready"
       ? <SearchResults view={{ type: "titles-none", query: query.trim() }} now={Date.now()} where={picker.where}
         onOpen={openHit} onRetry={search.actions.retry} onMore={search.actions.more} /> : undefined;
+  // Escape on the search box or its hits clears a typed query first, and puts the caret back in the box.
+  // Only Escape on an empty query closes the list.
+  const clearSearch = () => {
+    if (!search || query === "") return false;
+    search.actions.clear();
+    searchInput.current?.focus({ preventScroll: true });
+    return true;
+  };
   const sessionFound = search && found && found.hit.sessionId === selectedId ? foundBinding(found, search.actions) : undefined;
   const dialog = composing === undefined ? null : composing
     ? <NewSession key={composeKey} cwd={composing} initialPlacement={readPlace()} initialMode={composeMode} api={newSessionApi} worktrees={worktreeApi}
@@ -408,7 +416,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   return <><AppShell open={open} onOpenChange={setOpen} attention={picker.attention}
     picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs}
       shelves={shelves} filter={projectFilter ? { ...projectFilter, onManage: () => placeSettings({ section: "projects" }) } : undefined}
-      search={searchBox} results={searchResults} narrowed={mode === "title"}
+      search={searchBox} results={searchResults} narrowed={mode === "title"} onEscape={clearSearch}
       actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
         onBacklog: () => placeBacklog(backlog ?? {}), backlogOpen: backlog !== undefined,

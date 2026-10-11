@@ -32,6 +32,8 @@ async function treeServer(timing: { requestTimeoutMs?: number; treeActionTimeout
     navigateCode: 200,
     forkReply: { cancelled: false, session: { id: "fork-1", cwd: "/work tree", name: "Forked" }, promptDraft: "Second question" } as unknown,
     navigateGate: undefined as ReturnType<typeof gate> | undefined,
+    /** What GET /tree answers: the snapshot, or 404 for a session the server does not know. */
+    treeCode: 200,
   };
   const ws = new WebSocketServer({ noServer: true });
   const http = createServer(async (request, response) => {
@@ -39,12 +41,13 @@ async function treeServer(timing: { requestTimeoutMs?: number; treeActionTimeout
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body: unknown = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : undefined;
     const url = new URL(request.url ?? "/", "http://localhost");
-    requests.push({ path: url.pathname, body });
+    requests.push({ path: `${request.method ?? "GET"} ${url.pathname}${url.search}`, body });
     const send = (data: unknown, code = 200) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
     if (url.pathname.endsWith("/messages")) { state.historyReads++; send({ messages: state.history, start: 0, total: state.history.length }); }
     else if (url.pathname.endsWith("/stream-snapshot")) send({ seq: 0, partial: null });
     else if (url.pathname.endsWith("/status")) send(idle);
     else if (url.pathname.endsWith("/commands/run")) send({ type: "tree", tree });
+    else if (url.pathname.endsWith("/tree") && request.method === "GET") send(state.treeCode === 200 ? { tree } : { error: "Session test was not found." }, state.treeCode);
     else if (url.pathname.endsWith("/tree/navigate")) {
       await state.navigateGate?.promise;
       send(state.navigateCode === 200 ? state.navigateReply : { error: "The session changed since /tree was opened." }, state.navigateCode);
@@ -73,7 +76,34 @@ async function treeServer(timing: { requestTimeoutMs?: number; treeActionTimeout
   await until(() => store.getSnapshot().connection.type === "ready");
   return { state, store, requests };
 }
-const posts = (requests: { path: string; body: unknown }[], suffix: string) => requests.filter((request) => request.path.endsWith(suffix));
+const posts = (requests: { path: string; body: unknown }[], suffix: string) => requests.filter((request) => request.path.startsWith("POST ") && request.path.endsWith(suffix));
+
+describe("reading the tree without /tree", () => {
+  it("reads GET /tree with the session's folder and opens the navigator, running no command", async () => {
+    const { store, requests } = await treeServer();
+    await store.viewTree();
+    expect(requests.map((request) => request.path)).toContain("GET /api/sessions/test/tree?cwd=%2Fwork+tree");
+    expect(posts(requests, "/commands/run")).toEqual([]);
+    expect(store.getSnapshot().tree).toEqual({ type: "open", tree, operation: { type: "idle" } });
+  });
+
+  it("keeps the tree closed for a session the server does not know, and names the failure", async () => {
+    const { store, state } = await treeServer();
+    state.treeCode = 404;
+    await expect(store.viewTree()).rejects.toThrow("Session test was not found.");
+    expect(store.getSnapshot().tree).toEqual({ type: "closed" });
+    expect(store.getSnapshot().problems[0]).toMatchObject({ title: "Could not read the session tree", message: "Session test was not found." });
+  });
+
+  it("refuses a snapshot that is not the contract's shape", async () => {
+    const { store, state } = await treeServer();
+    state.treeCode = 200;
+    const original = tree.nodes;
+    (tree as { nodes: unknown }).nodes = "not a list";
+    try { await expect(store.viewTree()).rejects.toThrow(); } finally { (tree as { nodes: unknown }).nodes = original; }
+    expect(store.getSnapshot().tree).toEqual({ type: "closed" });
+  });
+});
 
 describe("session tree navigation", () => {
   it("opens /tree as a navigator, not as a command result", async () => {

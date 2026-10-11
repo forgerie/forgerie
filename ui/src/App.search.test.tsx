@@ -89,6 +89,7 @@ beforeEach(async () => {
       searches.push(url);
       return Response.json({ hits: HITS, index: { state: "ready", indexedFiles: 4, totalFiles: 4 } });
     }
+    if (url.pathname === "/api/sessions/c/search-matches") return Response.json({ matches: [{ entryId: "c-off", role: "assistant", offBranch: true }] });
     if (url.pathname === "/api/sessions/b/search-matches") return Response.json({ matches: [
       { entryId: "b-0", role: "user", offBranch: false, position: 0 },
       { entryId: "b-2", role: "user", offBranch: false, position: 2 },
@@ -176,6 +177,23 @@ describe("searching the list", () => {
     expect(box().value).toBe("");
     expect(hitTitles()).toEqual([]);
     expect(titles()).toContain("Alpha");
+  });
+
+  it("clears the query on Escape from the hits, and closes the list only on a second Escape", async () => {
+    await key(document.body, { key: "k", ctrlKey: true });
+    await until(() => document.activeElement === box());
+    await type("deploy");
+    await until(() => hitTitles().length === 2);
+    await key(box(), { key: "ArrowDown" });
+    const first = document.querySelector<HTMLButtonElement>(".hit-row")!;
+    expect(document.activeElement).toBe(first);
+    await key(first, { key: "Escape" });
+    expect(box().value).toBe("");
+    expect(hitTitles()).toEqual([]);
+    expect(sheet()).toBe("open");
+    expect(document.activeElement).toBe(box());
+    await key(box(), { key: "Escape" });
+    expect(sheet()).toBe("closed");
   });
 
   it("keeps the query and its hits across the switch to a docked list and back", async () => {

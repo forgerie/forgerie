@@ -5,10 +5,30 @@ import { HITS } from "./fixtures/hits";
 const idle: ResultsState = { hits: [], loading: false, paging: "idle" };
 
 describe("search query", () => {
-  it("keeps the server's terms: quotes make a phrase, short terms drop", () => {
-    expect(searchTerms(`deploy "cold store" to zao`)).toEqual(["deploy", "cold store", "zao"]);
-    expect(searchTerms("ab cd")).toEqual([]);
-    expect(searchTerms(`"un closed`)).toEqual(["un closed"]);
+  // The same vectors as the server's parser (src/server/sessions/sessionSearchText.ts on the build branch).
+  it.each([
+    ["deploy to zao", ["deploy", "zao"]],
+    ["Deploy DEPLOY deploy", ["deploy"]],
+    [`"cold store" retry`, ["cold store", "retry"]],
+    // A doubled quote inside a phrase is a literal quote; outside one it opens and closes an empty phrase.
+    [`"say ""hi"" now"`, [`say "hi" now`]],
+    [`ab""cd`, ["abcd"]],
+    // An unfinished phrase takes the rest of the query, spaces and all.
+    [`retry "un closed`, ["retry", "un closed"]],
+    // A quote mid-term opens a phrase there.
+    [`ab"c d`, ["abc d"]],
+    // Length is in code points: two emoji are two characters, not four UTF-16 units.
+    ["😊😊", []],
+    ["😊😊😊", ["😊😊😊"]],
+    ["éé", []],
+    ["ab cd", []],
+    [`"a b"`, ["a b"]],
+    ["  \t ", []],
+    [`"""abc`, [`"abc`]],
+    [`"   "`, ["   "]],
+    ["a\u00a0bcd", ["bcd"]],
+  ])("parses %j as the server does", (query, terms) => {
+    expect(searchTerms(query)).toEqual(terms);
   });
 
   it("filters titles under three characters and searches messages from three", () => {
@@ -18,6 +38,7 @@ describe("search query", () => {
     expect(queryMode("dep")).toBe("messages");
     // Every term is under three characters, so the server would refuse it.
     expect(queryMode("ab cd")).toBe("title");
+    expect(queryMode("😊😊")).toBe("title");
   });
 
   it("matches a title by case-insensitive substring and never an untitled session", () => {
@@ -31,6 +52,8 @@ describe("search query", () => {
     expect(scopeFolders(projects, ["a", "c"])).toEqual(["/code/a", "/code/c"]);
     expect(scopeFolders(projects, undefined)).toBeUndefined();
     expect(scopeFolders(projects, [])).toEqual([]);
+    // A group whose projects this machine no longer knows covers no folder either.
+    expect(scopeFolders(projects, ["gone", "also-gone"])).toEqual([]);
   });
 
   it("states the index progress with real numbers", () => {
@@ -54,6 +77,10 @@ describe("results view", () => {
     expect(resultsView("deploy", { ...idle, error: "Down" })).toEqual({ type: "failed", message: "Down" });
     expect(resultsView("other", { ...idle, answered: "deploy", hits: HITS, error: "Down" })).toEqual({ type: "failed", message: "Down" });
     expect(resultsView("deploy", { ...idle, answered: "deploy", hits: HITS, error: "Down" })).toMatchObject({ type: "hits", error: "Down" });
+  });
+
+  it("says a group with no folder has nothing to search", () => {
+    expect(resultsView("deploy", { ...idle, answered: "deploy", noFolders: true })).toEqual({ type: "no-folders", query: "deploy" });
   });
 
   it("adds a progress line while the index builds, and offers more only with a cursor", () => {
