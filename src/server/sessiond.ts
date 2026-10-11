@@ -37,6 +37,7 @@ import { registerProcessRoutes } from "./sessions/processRoutes.js";
 import { registerDurableChildRoutes } from "./sessions/durableChildRoutes.js";
 import { ChildRunStore } from "./sessions/childRunStore.js";
 import { registerChildRunRoutes } from "./sessions/childRunRoutes.js";
+import { registerIssueProposalRoutes } from "./sessions/issueProposalRoutes.js";
 import { registerWorkflowRoutes } from "./sessions/workflowRoutes.js";
 import { LiveChildSessionIndex, createDurableChildHost } from "./sessions/durableChildHost.js";
 import { bundledForgerieAgentsPath } from "./sessions/bundledForgerieSkills.js";
@@ -238,6 +239,8 @@ async function createSessionDaemonRuntime() {
       target: (ref, id) => relatedWork.toolCwd(ref, id),
       read: (cwd, request) => githubAgent.read(cwd, request),
       write: (cwd, id, request) => githubAgent.write(cwd, id, request),
+      prepareIssue: (cwd, input) => githubAgent.prepareIssue(cwd, input),
+      createIssue: (repo, id, input) => githubAgent.createIssue(repo, id, input),
       watch: (cwd, id, action, number) => action === "start" ? pulls.watch({ id, cwd }, number) : pulls.stopRef({ id, cwd }, number),
     },
     pullRequestWatches: { isWatching: (id) => pullStore.isWatching(id), stop: (id, reason) => pulls.stop(id, reason) },
@@ -316,6 +319,7 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, se
   registerDurableChildRoutes(app, sessions);
   registerChildRunRoutes(app, childRuns);
   registerWorkflowRoutes(app, sessions);
+  registerIssueProposalRoutes(app, sessions);
   registerPromptResourceRoutes(app, promptResources);
   registerPromptLibraryRoutes(app, promptLibrary);
   registerResourceEditorRoutes(app, resourceEditor);

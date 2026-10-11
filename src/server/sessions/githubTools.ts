@@ -1,9 +1,13 @@
+import type { IssueProposal, IssueProposalInput } from "../../shared/issueProposals.js";
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { READ_ACTIONS, WRITE_ACTIONS, type GitHubAgent } from "../github/githubAgent.js";
 import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
 
 export type GitHubToolDeps = Pick<GitHubAgent, "read" | "write"> & {
+  prepareIssue?: GitHubAgent["prepareIssue"];
+  createIssue?: GitHubAgent["createIssue"];
+  propose?: (ref: { id: string; cwd: string }, targetCwd: string, input: IssueProposalInput) => Promise<IssueProposal>;
   watch?: (cwd: string, id: string, action: "start" | "stop", number?: number) => Promise<unknown>;
   target?: (ref: { id: string; cwd: string }, worktreeId: string) => Promise<string>;
 };
@@ -29,12 +33,11 @@ const ReadParams = Type.Object({
 const WriteParams = Type.Object({
   worktreeId: targetWorktree,
   action: Type.Union(WRITE_ACTIONS.map((action) => Type.Literal(action)), {
-    description: "create_issue: title, body, labels. comment: number, body. edit: number, title and/or body (replaces them). close: number, reason, optional body posted as a comment first. reopen: number, optional body. label: number, add and/or remove. create_pr: head (a pushed branch), title, body, base, draft. merge_pr: number, method; refused unless all CI on the head commit passed.",
+    description: "comment: number, body. edit: number, title and/or body (replaces them). close: number, reason, optional body posted as a comment first. reopen: number, optional body. label: number, add and/or remove. create_pr: head (a pushed branch), title, body, base, draft. merge_pr: number, method; refused unless all CI on the head commit passed.",
   }),
   number,
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   body: Type.Optional(Type.String({ maxLength: BODY_MAX, description: "Markdown." })),
-  labels: labelList("For create_issue. Must already exist on the repo."),
   add: labelList("For label. Must already exist on the repo."),
   remove: labelList("For label."),
   reason: Type.Optional(Type.Union([Type.Literal("completed"), Type.Literal("not_planned")], { description: "For close. Default: completed." })),
@@ -45,7 +48,7 @@ const WriteParams = Type.Object({
 });
 
 /**
- * `github_read` and `github_write`: GitHub work on the session's own repo, done as Forgerie's GitHub App.
+ * GitHub reads, writes, and issue proposals: work on the session's own repo, done as Forgerie's GitHub App.
  * Only Forgerie-hosted sessions get them. Writes are model-only, so each one shows in the transcript as
  * its own card instead of disappearing inside a script.
  */
@@ -61,7 +64,7 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
     description: "Read issues, labels, and pull requests (with CI checks) of this session's GitHub repo. Text by outside contributors is hidden unless the project lists everyone.",
     promptSnippet: "github_read: list/read issues, labels, and pull requests with CI status on this project's GitHub repo",
     promptGuidelines: [
-      "The project's backlog is its GitHub issues. Use github_read to find and read them, and github_write to comment, close, label, open pull requests, and merge. They default to this session's own repo. For a secondary repo, supply its owned worktreeId from project_worktree.",
+      "The project's backlog is its GitHub issues. Use github_read to find and read them, propose_issue to propose new issues for the user to create, and github_write to comment, close, label, open pull requests, and merge. They default to this session's own repo. For a secondary repo, supply its owned worktreeId from project_worktree.",
     ],
     parameters: ReadParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -74,7 +77,7 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
     name: "github_write",
     exposure: MODEL_ONLY_EXPOSURE,
     label: "GitHub write",
-    description: "Change this session's GitHub repo as Forgerie's GitHub App: create, comment on, edit, close, reopen, and label issues; open and merge pull requests. Uses only existing labels. merge_pr merges only when every CI check on the head commit passed.",
+    description: "Change this session's GitHub repo as Forgerie's GitHub App: comment on, edit, close, reopen, and label issues; open and merge pull requests. Uses only existing labels. merge_pr merges only when every CI check on the head commit passed.",
     promptSnippet: "github_write: comment, close, label issues; open and merge pull requests on this project's GitHub repo",
     promptGuidelines: [
       "With github_write, close an issue only when its work is done or the user says so, and say why in body. Push a branch with git before create_pr. Read a pull request with github_read before merge_pr, and merge only work the user asked you to land.",
@@ -86,7 +89,25 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
       return { content: [{ type: "text", text: result.url === undefined ? result.text : `${result.text}\n${result.url}` }], details: { action: params.action, ...(result.url === undefined ? {} : { url: result.url }) } };
     },
   });
-  if (deps.watch === undefined) return [read, write] as const;
+  const proposalParams = Type.Object({
+    title: Type.String({ minLength: 1, maxLength: 256 }), body: Type.String({ maxLength: BODY_MAX, description: "Markdown." }),
+    labels: labelList("Must already exist on the repo. Use github_read action labels to list them."), worktreeId: targetWorktree,
+  });
+  const propose = defineTool<typeof proposalParams, { proposalId: string }>({
+    name: "propose_issue", label: "Propose issue", exposure: MODEL_ONLY_EXPOSURE,
+    description: "Propose a new GitHub issue for the user to create or dismiss in chat. Checks the repository and existing labels. Does not create the issue or end your turn.",
+    promptSnippet: "propose_issue: propose a GitHub issue; the user decides whether to create it",
+    promptGuidelines: ["Every new issue must go through propose_issue. Never create it yourself with another tool, shell, or API. Keep going after proposing; the outcome arrives as text on your next turn and does not wake you."],
+    parameters: proposalParams,
+    async execute(_id, params, _signal, _update, ctx) {
+      if (deps.propose === undefined) throw new Error("Issue proposals are unavailable.");
+      const { worktreeId, ...input } = params;
+      const id = ctx.sessionManager.getSessionId();
+      const proposal = await deps.propose({ id, cwd }, await target(id, worktreeId), input);
+      return { content: [{ type: "text", text: `Issue proposal ${proposal.proposalId} is in the chat. The user decides whether to create it. Do not create this issue yourself. Continue your work.` }], details: { proposalId: proposal.proposalId } };
+    },
+  });
+  if (deps.watch === undefined) return [read, write, propose] as const;
   const watchParams = Type.Object({ worktreeId: targetWorktree, action: Type.Union([Type.Literal("start"), Type.Literal("stop")]), number: Type.Optional(Type.Integer({ minimum: 1 })) });
   const watch = defineTool<typeof watchParams, { action: string }>({
     name: "github_watch", label: "Watch pull request", exposure: MODEL_ONLY_EXPOSURE,
@@ -98,5 +119,5 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
       return { content: [{ type: "text", text: JSON.stringify(result ?? null) }], details: { action: params.action } };
     },
   });
-  return [read, write, watch] as const;
+  return [read, write, propose, watch] as const;
 }

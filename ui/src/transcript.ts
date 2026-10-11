@@ -7,6 +7,8 @@ import { STEP_PREFIX } from "./ui/stepPart";
 import { PULL_NOTICE_TYPE, pullNoticeOf, type PullNotice } from "./pullRequests/pullNotice";
 import { PROCESS_EVENT_TYPE, parseProcessEvent, type ProcessEvent } from "./processes/processEvent";
 import { childEntryOf, type ChildEntry } from "./childAgents/childAgentsModel";
+import { issueProposalOf, issueProposalDecisionOf, ISSUE_PROPOSAL_OUTCOME_TYPE } from "./issues/issueProposalModel";
+import type { IssueProposal, IssueProposalArtifact } from "./issues/issueProposal";
 import { workflowEntryOf, type WorkflowEntry } from "./workflows/workflowsModel";
 import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCopy, reopenRun, runFromRecord, shellText, startedRun, unknownRun,
   type ShellEnd, type ShellRun } from "./shellRun";
@@ -57,6 +59,8 @@ export interface TranscriptMessage {
   position?: number;
   /** The thread marks this message, such as the search match the reader opened. */
   marked?: boolean;
+  /** A proposal and its branch-owned user decision. */
+  issueProposal?: IssueProposal;
 }
 /** Compaction replaces earlier messages with a summary; a branch summary describes the branch the session left. */
 export type HistorySummaryKind = "compaction" | "branch";
@@ -118,6 +122,9 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
   const summary = asSummary(message, id);
   if (summary) return summary;
   const role = message.role;
+  const issueProposal = issueProposalOf(message);
+  if (issueProposal) return { id, role: "system", parts: [{ type: "text", text: textOf(message) }], issueProposal, key: keyOf(message) };
+  if (role === "custom" && message.customType === ISSUE_PROPOSAL_OUTCOME_TYPE) return undefined;
   if (role === "custom" && message.customType === PULL_NOTICE_TYPE) {
     const text = textOf(message);
     return { id, role: "system", parts: [{ type: "text", text }], pullNotice: pullNoticeOf(text, message.details), key: keyOf(message) };
@@ -259,7 +266,20 @@ function reduceShell(state: Transcript, event: Extract<SessionEvent, { type: `sh
   }
 }
 
+function foldIssueDecision(state: Transcript, raw: PiMessage): Transcript | undefined {
+  if (raw.role !== "custom" || raw.customType !== ISSUE_PROPOSAL_OUTCOME_TYPE) return undefined;
+  const decision = issueProposalDecisionOf(raw);
+  if (!decision) return state;
+  return { ...state, messages: state.messages.map((message) => message.issueProposal?.proposalId === decision.proposalId
+    && message.issueProposal.outcome === undefined ? { ...message, issueProposal: { ...message.issueProposal, outcome: decision.outcome } } : message) };
+}
+
 function applyMessage(state: Transcript, raw: PiMessage, provisional: boolean): Transcript {
+  const folded = foldIssueDecision(state, raw);
+  if (folded) return folded;
+  const proposal = issueProposalOf(raw);
+  // History and buffered custom-message events can overlap without a shared timestamp.
+  if (proposal && state.messages.some((message) => message.issueProposal?.proposalId === proposal.proposalId)) return state;
   if (raw.role === "toolResult") return finishResult(state, raw);
   const key = keyOf(raw);
   if (key !== undefined && state.messages.some((message) => message.key === key)) return state;
@@ -289,6 +309,8 @@ export function messageText(message: TranscriptMessage): string {
 export function fromHistory(history: readonly PiMessage[], isRunning = false): Transcript {
   let state: Transcript = { messages: [], nextId: 0, isRunning };
   history.forEach((raw, index) => {
+    const folded = foldIssueDecision(state, raw);
+    if (folded) { state = folded; return; }
     const parsed = raw.role === "toolResult" ? undefined : asMessage(raw, `history-${index}`);
     state = raw.role === "toolResult" ? finishResult(state, raw)
       : parsed ? { ...state, messages: [...state.messages, { ...reconcileTools(parsed, state.messages), position: index }] } : state;
@@ -518,6 +540,8 @@ function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
     metadata: { custom: { processEvent: message.processEvent } satisfies ProcessEventArtifact } };
   if (message.childEntry) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { childEntry: message.childEntry } satisfies ChildEntryArtifact } };
+  if (message.issueProposal) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
+    metadata: { custom: { issueProposal: message.issueProposal } satisfies IssueProposalArtifact } };
   if (message.workflowEntry) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { workflowEntry: message.workflowEntry } satisfies WorkflowEntryArtifact } };
   if (message.summary) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],

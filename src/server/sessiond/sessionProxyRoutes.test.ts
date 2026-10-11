@@ -50,6 +50,22 @@ describe("machine-scoped session proxy routes", () => {
     ]);
   });
 
+  it("forwards issue-proposal decisions and saved outcomes through the session wildcard", async () => {
+    const outcome = { state: "created", number: 38, title: "Fix", url: "https://github.com/o/r/issues/38" };
+    daemon.respondWith({ statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(outcome) });
+    const created = await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/issue-proposals/p1/create", payload: { cwd: "/repo" } });
+    expect(created.statusCode).toBe(200);
+    expect(created.json()).toEqual(outcome);
+    daemon.respondWith({ statusCode: 409, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Already decided", outcome }) });
+    const dismissed = await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/issue-proposals/p1/dismiss", payload: { cwd: "/repo" } });
+    expect(dismissed.statusCode).toBe(409);
+    expect(dismissed.json()).toEqual({ error: "Already decided", outcome });
+    expect(daemon.requests).toEqual([
+      { method: "POST", path: "/sessions/s1/issue-proposals/p1/create", body: { cwd: "/repo" } },
+      { method: "POST", path: "/sessions/s1/issue-proposals/p1/dismiss", body: { cwd: "/repo" } },
+    ]);
+  });
+
   it("strips the machine prefix before forwarding session requests", async () => {
     const response = await app.inject({ method: "GET", url: "/api/machines/local/sessions?cwd=/repo" });
 

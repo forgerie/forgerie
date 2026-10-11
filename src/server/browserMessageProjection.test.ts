@@ -191,3 +191,40 @@ describe("turn declarations", () => {
     expect(projectBrowserMessage(working)).toBe(working);
   });
 });
+
+describe("issue proposal browser projection", () => {
+  it("maps search positions while hiding successful control results and retaining failures", () => {
+    const user = { role: "user", content: "Find this defect" };
+    const declaration = { role: "toolResult", toolName: "end_turn", content: [] };
+    const proposal = { role: "custom", customType: "forgerie.issue-proposal", content: "Proposed issue" };
+    const success = { role: "toolResult", toolName: "propose_issue", content: [] };
+    const failure = { ...success, isError: true, content: [{ type: "text", text: "Unknown labels" }] };
+    const reply = { role: "assistant", content: [{ type: "text", text: "I kept working" }] };
+    const positions: number[][] = [];
+    const page = projectBrowserMessageResponse({ messages: [user, declaration, proposal, failure, success, reply], start: 10, total: 16 },
+      (raw, projected) => { positions.push([raw, projected]); });
+    expect(page).toEqual({ messages: [user, proposal, failure, reply], start: 10, total: 16 });
+    expect(positions).toEqual([[0, 0], [2, 1], [3, 2], [5, 3]]);
+    expect(projectBrowserMessagePreviewResponse({ messages: [proposal, failure], start: 0, total: 2 }).messages[1]).toMatchObject(failure);
+    expect(projectBrowserSessionEvent({ type: "message.end", message: failure })).toEqual({ type: "message.end", message: failure });
+    const failedEvent = { type: "tool.end" as const, toolName: "propose_issue", toolCallId: "t1", text: "Unknown labels", isError: true };
+    expect(projectBrowserSessionEvent(failedEvent)).toBe(failedEvent);
+  });
+  it("waits for full history rather than presenting a truncated proposal as actionable", () => {
+    const message = { role: "custom", customType: "forgerie.issue-proposal", content: "Proposed issue", details: { proposal: { proposalId: "p1", repo: "o/r", title: "Fix", body: "x".repeat(65000), labels: [] } } };
+    const preview = projectBrowserMessagePreviewResponse({ messages: [message], start: 0, total: 1 });
+    expect(preview.messages[0]).not.toHaveProperty("details");
+    expect(projectBrowserMessageResponse({ messages: [message], start: 0, total: 1 }).messages[0]).toBe(message);
+  });
+  it("shows the branch-owned proposal instead of a second tool card in history and the stream", () => {
+    const assistant = { role: "assistant", content: [{ type: "text", text: "I found a defect." }, { type: "toolCall", id: "t1", name: "propose_issue", arguments: { title: "Fix", body: "" } }] };
+    const result = { role: "toolResult", toolName: "propose_issue", toolCallId: "t1", content: [{ type: "text", text: "User decides." }] };
+    const proposal = { role: "custom", customType: "forgerie.issue-proposal", content: "Proposed issue", details: { proposal: { proposalId: "p1", repo: "o/r", title: "Fix", body: "", labels: [] } } };
+    expect(projectBrowserMessageResponse({ messages: [assistant, proposal, result], start: 0, total: 3 })).toEqual({
+      messages: [{ ...assistant, content: [assistant.content[0]] }, proposal], start: 0, total: 3,
+    });
+    expect(projectBrowserSessionEvent({ type: "tool.start", toolName: "propose_issue", toolCallId: "t1", summary: "Fix" })).toEqual({ type: "pi.event", eventType: "tool_execution_start" });
+    expect(projectBrowserSessionEvent({ type: "message.end", message: result })).toEqual({ type: "message.end" });
+    expect(projectBrowserSessionEvent({ type: "message.end", message: proposal })).toEqual({ type: "message.end", message: proposal });
+  });
+});

@@ -1,3 +1,4 @@
+import { IssueProposalInputSchema, type IssueProposalInput, type IssueProposalOutcome } from "../../shared/issueProposals.js";
 import { Type, type Static, type TSchema } from "typebox";
 import { Check } from "typebox/value";
 import { canonicalBacklogRoot } from "../backlog/backlogScanner.js";
@@ -23,14 +24,14 @@ export interface GitHubAgentDependencies {
 }
 
 export const READ_ACTIONS = ["issues", "issue", "labels", "prs", "pr"] as const;
-export const WRITE_ACTIONS = ["create_issue", "comment", "edit", "close", "reopen", "label", "create_pr", "merge_pr"] as const;
+export const WRITE_ACTIONS = ["comment", "edit", "close", "reopen", "label", "create_pr", "merge_pr"] as const;
 export interface ReadRequest {
   action: typeof READ_ACTIONS[number];
   number?: number; state?: "open" | "closed" | "all"; labels?: string[]; query?: string; limit?: number;
 }
 export interface WriteRequest {
   action: typeof WRITE_ACTIONS[number];
-  number?: number; title?: string; body?: string; labels?: string[]; add?: string[]; remove?: string[];
+  number?: number; title?: string; body?: string; add?: string[]; remove?: string[];
   reason?: "completed" | "not_planned"; head?: string; base?: string; draft?: boolean; method?: "rebase" | "squash" | "merge";
 }
 export interface WriteResult { text: string; url?: string }
@@ -115,18 +116,32 @@ export class GitHubAgent {
     }
   }
 
+  /** Resolve the proposal once. Creation uses this pinned repo, not a later remote or config. */
+  async prepareIssue(cwd: string, input: IssueProposalInput): Promise<string> {
+    if (!Check(IssueProposalInputSchema, input) || input.title.trim() === "") throw new GitHubToolError("Invalid issue proposal title, body, or labels.");
+    const repo = await this.resolveRepo(cwd);
+    const call = this.caller(repo.slug);
+    await call.get("", RepoSchema, "Metadata: read");
+    await this.requireLabels(call, input.labels ?? []);
+    return repo.slug;
+  }
+
+  /** Browser-confirmed creation only. Not an action of github_write. */
+  async createIssue(repo: string, sessionId: string, input: IssueProposalInput): Promise<Extract<IssueProposalOutcome, { state: "created" }>> {
+    if (!Check(IssueProposalInputSchema, input) || input.title.trim() === "") throw new GitHubToolError("Invalid issue proposal title, body, or labels.");
+    const call = this.caller(repo);
+    await this.requireLabels(call, input.labels ?? []);
+    const issue = await call.send("POST", "/issues", { title: input.title, body: `${input.body}\n\n<!-- forgerie-session: ${sessionId} -->`, labels: input.labels ?? [] }, IssueSchema, "Issues: write");
+    return { state: "created", number: issue.number, title: issue.title, url: issue.html_url };
+  }
+
   async write(cwd: string, sessionId: string, request: WriteRequest): Promise<WriteResult> {
     const repo = await this.resolveRepo(cwd);
     const call = this.caller(repo.slug);
     const signed = (body: string) => `${body}\n\n<!-- forgerie-session: ${sessionId} -->`;
     const number = () => required(request.number, "number", request.action);
+    if (!WRITE_ACTIONS.includes(request.action)) throw new GitHubToolError("Unknown github_write action. Use propose_issue for new issues; the user decides.");
     switch (request.action) {
-      case "create_issue": {
-        const title = required(request.title, "title", "create_issue");
-        await this.requireLabels(call, request.labels ?? []);
-        const issue = await call.send("POST", "/issues", { title, body: signed(request.body ?? ""), labels: request.labels ?? [] }, IssueSchema, "Issues: write");
-        return { text: `Created issue #${String(issue.number)}: ${issue.title}`, url: issue.html_url };
-      }
       case "comment": {
         const comment = await call.send("POST", `/issues/${String(number())}/comments`, { body: signed(required(request.body, "body", "comment")) }, Type.Object({ html_url: Type.String() }), "Issues: write");
         return { text: `Commented on #${String(number())}.`, url: comment.html_url };

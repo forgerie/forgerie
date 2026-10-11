@@ -8,6 +8,7 @@ const SHA = "abc123def4567890";
 
 function fixture(options: { everyone?: boolean } = {}) {
   const github = new FakeGitHub();
+  github.always(`GET ${REPO}`, json({ default_branch: "main" }));
   const judged: GitHubAuthor[][] = [];
   let tokens = 0;
   const dropped: string[] = [];
@@ -91,7 +92,7 @@ describe("GitHub agent: writing", () => {
   it("refuses a label that does not exist, and writes nothing", async () => {
     const f = fixture();
     f.github.on(`GET ${REPO}/labels`, json([{ name: "bug", description: null }, { name: "priority: high", description: "Soon" }]));
-    await expect(f.agent.write("/repo", "s1", { action: "create_issue", title: "New", labels: ["bug", "wontfix"] }))
+    await expect(f.agent.prepareIssue("/repo", { title: "New", body: "", labels: ["bug", "wontfix"] }))
       .rejects.toThrow("These labels do not exist on the repo: wontfix.");
     expect(f.github.requests.every((request) => request.method === "GET")).toBe(true);
   });
@@ -100,8 +101,8 @@ describe("GitHub agent: writing", () => {
     const f = fixture();
     f.github.on(`GET ${REPO}/labels`, json([{ name: "bug", description: null }]));
     f.github.on(`POST ${REPO}/issues`, json(withIssue(71, { title: "New" }), { status: 201 }));
-    const result = await f.agent.write("/repo", "s1", { action: "create_issue", title: "New", body: "Details", labels: ["Bug"] });
-    expect(result).toEqual({ text: "Created issue #71: New", url: "https://github.com/korri-os/korri/issues/71" });
+    const result = await f.agent.createIssue("korri-os/korri", "s1", { title: "New", body: "Details", labels: ["Bug"] });
+    expect(result).toEqual({ state: "created", number: 71, title: "New", url: "https://github.com/korri-os/korri/issues/71" });
     expect(f.bodyOf(`POST ${REPO}/issues`)).toEqual({ title: "New", body: "Details\n\n<!-- forgerie-session: s1 -->", labels: ["Bug"] });
   });
 

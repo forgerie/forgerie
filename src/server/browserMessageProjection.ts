@@ -1,20 +1,21 @@
 import type { MessagePage, SessionUiEvent } from "../shared/apiTypes.js";
+import { ISSUE_PROPOSAL_TYPE } from "../shared/issueProposals.js";
 import { END_TURN_TOOL_NAME } from "./sessions/endTurnTool.js";
 
 /**
- * Tools whose call only declares how a run ended. The session response
- * protocol records successful declarations, so only failed results remain
- * visible. Paging keeps raw positions: `start` still counts them.
+ * Tools represented by branch-owned custom records rather than tool cards.
+ * Turn declarations use the response protocol; proposals use an issue card.
+ * Failed results remain visible. Paging keeps raw positions: `start` still counts hidden calls.
  */
-const TURN_DECLARATION_TOOLS: ReadonlySet<string> = new Set([END_TURN_TOOL_NAME]);
+const HIDDEN_TRANSCRIPT_TOOLS: ReadonlySet<string> = new Set([END_TURN_TOOL_NAME, "propose_issue"]);
 
-function isTurnDeclarationCall(part: unknown): boolean {
-  return isRecord(part) && part["type"] === "toolCall" && typeof part["name"] === "string" && TURN_DECLARATION_TOOLS.has(part["name"]);
+function isHiddenToolCall(part: unknown): boolean {
+  return isRecord(part) && part["type"] === "toolCall" && typeof part["name"] === "string" && HIDDEN_TRANSCRIPT_TOOLS.has(part["name"]);
 }
 
-function isTurnDeclarationResult(message: unknown): boolean {
+function isHiddenToolResult(message: unknown): boolean {
   return isRecord(message) && message["role"] === "toolResult" && message["isError"] !== true
-    && typeof message["toolName"] === "string" && TURN_DECLARATION_TOOLS.has(message["toolName"]);
+    && typeof message["toolName"] === "string" && HIDDEN_TRANSCRIPT_TOOLS.has(message["toolName"]);
 }
 
 /**
@@ -33,7 +34,7 @@ export function projectBrowserMessage(message: unknown): unknown {
     delete projected["thinkingSignature"];
     return projected;
   });
-  const content = unsigned.some(isTurnDeclarationCall) ? unsigned.filter((part) => !isTurnDeclarationCall(part)) : unsigned;
+  const content = unsigned.some(isHiddenToolCall) ? unsigned.filter((part) => !isHiddenToolCall(part)) : unsigned;
 
   return content === originalContent ? message : { ...message, content };
 }
@@ -45,7 +46,7 @@ export function projectBrowserMessageResponse(
 ): MessagePage {
   let projectedPosition = 0;
   const retained = response.messages.filter((message, rawPosition) => {
-    if (isTurnDeclarationResult(message)) return false;
+    if (isHiddenToolResult(message)) return false;
     onMessagePosition?.(rawPosition, projectedPosition);
     projectedPosition += 1;
     return true;
@@ -84,7 +85,7 @@ export function projectBrowserMessagePreviewResponse(response: MessagePage): Mes
   return {
     ...response,
     start: response.start + omitted,
-    messages: messages.map((message, index) => included.has(index) && !isTurnDeclarationResult(message) ? projectBrowserMessagePreview(message) : {}),
+    messages: messages.map((message, index) => included.has(index) && !isHiddenToolResult(message) ? projectBrowserMessagePreview(message) : {}),
   };
 }
 
@@ -125,7 +126,7 @@ function projectBrowserMessagePreview(message: unknown): unknown {
     if (typeof part === "string") return [truncatePreviewText(part, readableTextLimit(role))];
     if (!isRecord(part)) return [part];
     const type = part["type"];
-    if (type === "image" || isTurnDeclarationCall(part)) return [];
+    if (type === "image" || isHiddenToolCall(part)) return [];
     const boundedPart = projectToolArguments(part, 0, budget);
     const projected = isRecord(boundedPart) ? boundedPart : {};
     if (type === "text" && typeof part["text"] === "string") {
@@ -177,7 +178,9 @@ function previewMessageEnvelope(message: Record<string, unknown>, content: unkno
     if (typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) projected[field] = value;
   }
   if (Object.hasOwn(message, "output")) projected["output"] = projectToolArguments(message["output"], 0, budget);
-  if (Object.hasOwn(message, "details")) projected["details"] = projectToolArguments(message["details"], 0, budget);
+  // A preview must not turn truncated proposal Markdown into an actionable issue draft.
+  // The complete history payload supplies the card; the preview supplies no artifact.
+  if (Object.hasOwn(message, "details") && message["customType"] !== ISSUE_PROPOSAL_TYPE) projected["details"] = projectToolArguments(message["details"], 0, budget);
   return projected;
 }
 
@@ -225,11 +228,11 @@ function projectToolArguments(value: unknown, depth: number, budget = structured
 
 export function projectBrowserSessionEvent(event: SessionUiEvent): SessionUiEvent {
   if (event.type === "tool.end" && event.isError) return event;
-  if ((event.type === "tool.start" || event.type === "tool.update" || event.type === "tool.end") && TURN_DECLARATION_TOOLS.has(event.toolName)) {
+  if ((event.type === "tool.start" || event.type === "tool.update" || event.type === "tool.end") && HIDDEN_TRANSCRIPT_TOOLS.has(event.toolName)) {
     return { type: "pi.event", eventType: `tool_execution_${event.type.slice("tool.".length)}` };
   }
   if (event.type !== "message.end" || event.message === undefined) return event;
-  if (isTurnDeclarationResult(event.message)) return { type: "message.end" };
+  if (isHiddenToolResult(event.message)) return { type: "message.end" };
   const message = projectBrowserMessage(event.message);
   return message === event.message ? event : { ...event, message };
 }
