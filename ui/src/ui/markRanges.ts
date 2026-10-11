@@ -27,3 +27,26 @@ export function markRuns(text: string, ranges: readonly (readonly [number, numbe
   if (at < text.length || runs.length === 0) runs.push({ text: text.slice(at), marked: false });
   return runs;
 }
+
+/** Code points of text a passage keeps before its first mark once it is cut short. */
+export const MARK_LEAD = 16;
+const ELLIPSIS = "…";
+
+/**
+ * A passage whose first mark always shows in its first clamped line: when
+ * more than `lead` code points come before that mark, the text starts at a
+ * word break shortly before it, after a "…". The ranges move with the text.
+ */
+export function excerpt(text: string, ranges: readonly (readonly [number, number])[], lead = MARK_LEAD): { text: string; ranges: [number, number][] } {
+  const kept = ranges.map(([start, end]) => [start, end] as [number, number]);
+  const firstStart = Math.min(...kept.filter(([start, end]) => end > start && start < text.length).map(([start]) => Math.max(0, start)));
+  if (!Number.isFinite(firstStart)) return { text, ranges: kept };
+  const before = Array.from(text.slice(0, firstStart));
+  if (before.length <= lead) return { text, ranges: kept };
+  // Cut on code points, so a pair is never split, then start at the next word.
+  let cut = before.slice(0, before.length - lead).join("").length;
+  const space = text.slice(cut, firstStart).search(/\s\S/u);
+  if (space >= 0) cut += space + 1;
+  const shift = cut - ELLIPSIS.length;
+  return { text: `${ELLIPSIS}${text.slice(cut)}`, ranges: kept.map(([start, end]) => [start - shift, end - shift]) };
+}

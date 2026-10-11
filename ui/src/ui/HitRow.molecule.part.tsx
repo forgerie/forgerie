@@ -43,3 +43,8 @@ export function LongText() {
 export function Untitled() {
   return <HitRow title="Untitled" untitled where="garden" time="<1m" passage="Water the tomatoes." marks={[[10, 18]]} onPress={() => undefined} />;
 }
+/** The first matched word sits near the end of a 240-character passage: the row starts the passage just before it. */
+export function LateMark() {
+  const text = `${PASSAGE} ${PASSAGE}`.slice(0, 220) + " then the tomato beds";
+  return <HitRow title="Water before the heat" where="garden" time="3h" speaker="You" passage={text} marks={marks(text, "tomato").slice(-1)} onPress={() => undefined} />;
+}

@@ -1,11 +1,12 @@
-import { markRuns } from "./markRanges";
+import { excerpt, markRuns } from "./markRanges";
 import "./HitRow.css";
 
 /**
  * Molecule: one item a search found, as one press target. Its name and age
  * on the first line; where it lives, its quiet labels and a count of what
  * else matched under them; then the passage that matched, with the matched
- * words marked. The passage keeps as many lines as the room allows.
+ * words marked. The passage keeps as many lines as the room allows, and
+ * starts shortly before its first mark, so that mark is always in them.
  */
 export function HitRow({ title, untitled = false, where, time, timeTitle, tags = [], speaker, passage, marks, footnote, onPress }: {
   title: string;
@@ -26,6 +27,8 @@ export function HitRow({ title, untitled = false, where, time, timeTitle, tags =
   footnote?: string | undefined;
   onPress: () => void;
 }) {
+  // However few lines the room leaves the passage, the first matched word is in them.
+  const shown = excerpt(passage, marks);
   return <button type="button" className="hit-row" onClick={onPress}>
     <span className="hit-row-title" data-untitled={untitled || undefined}>{title}</span>
     <span className="hit-row-time" title={timeTitle}>{time}</span>
@@ -37,7 +40,7 @@ export function HitRow({ title, untitled = false, where, time, timeTitle, tags =
     </span>
     <span className="hit-row-passage" dir="auto">
       {speaker ? <span className="hit-row-speaker">{speaker}: </span> : null}
-      {markRuns(passage, marks).map((run, index) => run.marked ? <mark key={index} className="hit-row-mark">{run.text}</mark> : run.text)}
+      {markRuns(shown.text, shown.ranges).map((run, index) => run.marked ? <mark key={index} className="hit-row-mark">{run.text}</mark> : run.text)}
     </span>
   </button>;
 }

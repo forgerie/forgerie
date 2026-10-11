@@ -4,8 +4,11 @@
   border: var(--hairline) solid var(--line); border-radius: var(--radius-control); color: var(--muted-foreground); transition: border-color 150ms; }
 .search-field-box > svg { flex: none; }
 .search-field-box:focus-within { border-color: var(--line-focus); }
+/* Focus shows on the rounded box, as the page's own ring, never as a square ring round the bare input inside it. */
+.search-field-box:has(.search-field-input:focus-visible) { outline: calc(2 * var(--hairline)) solid var(--foreground); outline-offset: calc(2 * var(--hairline)); }
+.search-field-input:focus-visible { outline: none; }
 .search-field-input { flex: 1; min-inline-size: 0; min-block-size: calc(var(--control-size) - 2 * var(--hairline)); padding: 0; border: 0;
-  background: transparent; color: var(--foreground); font: inherit; font-size: var(--small-text); outline: none; }
+  background: transparent; color: var(--foreground); font: inherit; font-size: var(--small-text); }
 .search-field-input::placeholder { color: var(--muted-foreground); }
 /* The field draws its own clear button, one size with the row's other marks. */
 .search-field-input::-webkit-search-cancel-button { appearance: none; }
