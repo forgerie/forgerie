@@ -13,6 +13,19 @@ The theme also grew to the token kinds these grammars emit. That closes two olde
 
 Cost: the full build replaces the subset, so the main chunk grows from 2,279,519 to 3,094,668 bytes, and from 711,139 to 970,903 bytes gzipped, on every page load. The editor carries 143 grammars against highlight.js's 193, so a `nix`, `elixir`, `matlab`, or `nim` draft draws labelled plain code where the transcript colours it. Operators (`=`), punctuation, and a bare variable (`$NAME` in a shell fence) stay uncoloured, which is what `codeTokens.ts` leaves plain in the editor.
 
+## Saved workflow, from offer to landing
+
+A design mockup for a saved multi-agent workflow (contract, design and build in parallel, review, land). It uses local fixture state only: `verification/workflow-mockup.{html,tsx,css}`. Use `?state=<name>` for one screen, add `&nav=1` for a bar that steps through the flow, and use `?state=all&size=WxH&zoom=Z` for the storyboard. Buttons move between screens; nothing reaches a server.
+
+The one new device is the route: one model of the workflow drawn as a line in the offer card and the composer's workflow picker, as the full route in the plan and run sheets, and as a strip of bars above the composer. A stop that waits on the reader is a ring in the live colour. A change the agent proposes is dashed. The strip takes one row beside its bars when the session is shorter than 28rem.
+
+| Check | Result |
+| --- | --- |
+| Type check. | A focused `tsc` run with the `ui/` settings passed for `workflow-mockup.tsx`, which is outside the normal include list. |
+| Visual captures. | `APP_URL=<dev origin> scripts/workflow-mockup-shots.mjs` captured 14 screens at all four Fold postures in both schemes (112 images) and the storyboard in both schemes. No capture reported page or sheet overflow. The screens were read at unfolded portrait dark, folded portrait dark, and folded landscape dark, plus four light captures. |
+
+Cost: this is a design pass, not a product. The workflow file format, the agent's offer, the run strip, and the comparison table have no server behind them. The numbers in the screens are invented. Physical Fold touch acceptance is not done.
+
 ## Child agents
 
 A session's child agents open from the robot button in the header. The child view reads like the main thread: the task is a bubble, the child's words are prose, its tool calls hang from the work rail with output set in under each call, and a question is a card where it was asked. There is one input. While a question is open it answers it; otherwise it steers a working child or gives an idle one a new task. Stop sits in the header while the child works. In the parent thread, a report shows its first line in the text face and opens to the whole answer; a steer and a stop are one line each. The sheet takes focus itself on open, so no control wears a focus ring until the reader moves. The changes button now uses the same `BadgeButton` as the child agents button.

@@ -1,0 +1,230 @@
+/* A saved workflow, from offer to landing. Everything new hangs from devices
+   the app already has: the cards reuse the question card's live edge and wash,
+   the decisions reuse ActionFooter, the records reuse EventLine and
+   ExchangeLog, the sheets reuse SheetDialog. The one new device is the route,
+   drawn at four sizes from one model. */
+
+/* -- The mark at a stop. A dot is an agent; a ring is you. -- */
+.wf-mark { flex: none; display: grid; place-items: center; inline-size: 0.875rem; block-size: 0.875rem; border-radius: 50%;
+  border: 1.5px solid var(--line-focus); background: var(--background); color: var(--background); }
+.wf-mark svg { inline-size: 0.625rem; block-size: 0.625rem; stroke-width: 3.5; }
+.wf-mark[data-state="done"] { border-color: var(--ink-good); background: var(--ink-good); }
+.wf-mark[data-state="live"] { border-color: var(--live); background: var(--live); box-shadow: 0 0 0 0.25rem var(--live-wash); }
+.wf-mark[data-state="you"] { border: 2.5px solid var(--live); box-shadow: 0 0 0 0.25rem var(--live-wash); }
+.wf-mark[data-you][data-state="next"] { border-width: 2.5px; border-color: var(--muted-foreground); }
+.wf-mark[data-state="proposed"] { border: 1.5px dashed var(--live); }
+.wf-mark[data-state="failed"] { border-color: var(--ink-warn); background: var(--ink-warn); }
+
+/* -- The route as one line: stops joined by a short rule, wrapping by width. -- */
+.wf-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) 0; margin: 0; padding: 0; list-style: none;
+  font-size: var(--small-text); color: var(--foreground); }
+.wf-line li { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
+/* The joining rule trails each stop, so a wrapped line ends in a rule and the next line starts with a stop. */
+.wf-line li:not(:last-child)::after { content: ""; inline-size: clamp(0.75rem, 3cqi, 1.5rem); block-size: 1px; margin-inline-end: var(--space-2); background: var(--line-focus); }
+.wf-line li[data-you] > span:last-child { color: var(--ink-live); }
+
+/* -- The full route: a rail of stops, each with its workers as tracks. -- */
+.wf-route { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.wf-stop { position: relative; display: grid; grid-template-columns: 0.875rem minmax(0, 1fr); gap: var(--space-3); padding-block-end: var(--space-5); }
+.wf-stop > .wf-mark { margin-block-start: 0.3125rem; }
+.wf-stop:not(:last-child)::after { content: ""; position: absolute; inset-block: 1.375rem 0.25rem; inset-inline-start: calc(0.4375rem - 0.5px);
+  inline-size: 1px; background: var(--line-focus); }
+.wf-stop[data-state="done"]:not(:last-child)::after { background: var(--ink-good); }
+.wf-stop-body { display: grid; gap: var(--space-1); min-inline-size: 0; }
+.wf-stop-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); margin: 0; }
+.wf-stop-name { font-weight: 600; }
+.wf-stop-word { color: var(--muted-foreground); font-size: var(--small-text); }
+.wf-stop[data-state="you"] .wf-stop-word, .wf-stop[data-state="live"] .wf-stop-word { color: var(--ink-live); }
+.wf-stop[data-state="failed"] .wf-stop-word { color: var(--ink-warn); }
+.wf-stop[data-state="done"] .wf-stop-word { color: var(--ink-good); }
+.wf-stop[data-you][data-state="next"] .wf-stop-word { color: var(--foreground); }
+.wf-stop-does { margin: 0; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
+
+/* Tracks gain columns from the width the route has, never from a breakpoint. */
+.wf-tracks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr)); gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
+.wf-track-button { position: relative; display: grid; gap: 0.125rem; inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--tint-surface); color: var(--foreground);
+  font: inherit; font-size: var(--small-text); text-align: start; }
+button.wf-track-button { padding-inline-end: var(--space-8); cursor: pointer; }
+button.wf-track-button:hover { border-color: var(--line-focus); }
+.wf-track[data-state="live"] .wf-track-button { border-color: color-mix(in oklab, var(--live) 45%, transparent); }
+.wf-track[data-state="proposed"] .wf-track-button { border-style: dashed; border-color: var(--live); background: var(--live-wash); }
+.wf-track-open { position: absolute; inset-inline-end: var(--space-2); inset-block-start: 50%; translate: 0 -50%; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
+.wf-track-head { display: flex; align-items: center; gap: var(--space-2); }
+.wf-track-name { font-family: var(--code-font); font-size: var(--label-text); font-weight: 600; }
+.wf-track-word { margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--label-text); }
+.wf-track[data-state="live"] .wf-track-word { color: var(--ink-live); }
+.wf-track[data-state="done"] .wf-track-word { color: var(--ink-good); }
+.wf-track[data-state="failed"] .wf-track-word { color: var(--ink-warn); }
+button.wf-track-button .wf-track-word { margin-inline-end: 0; }
+.wf-dot { flex: none; inline-size: 0.5rem; block-size: 0.5rem; border-radius: 50%; border: 1.5px solid var(--line-focus); }
+.wf-dot[data-state="live"] { border-color: var(--live); background: var(--live); }
+.wf-dot[data-state="done"] { border-color: var(--ink-good); background: var(--ink-good); }
+.wf-dot[data-state="failed"] { border-color: var(--ink-warn); background: var(--ink-warn); }
+.wf-dot[data-state="proposed"] { border-style: dashed; border-color: var(--live); }
+.wf-who { display: flex; flex-wrap: wrap; gap: 0 var(--space-2); color: var(--muted-foreground); font-size: var(--label-text); }
+.wf-agent { font-family: var(--code-font); font-size: var(--label-text); }
+.wf-model s { color: var(--faint-foreground); }
+.wf-branch { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-inline-size: 0; margin: 0;
+  color: var(--muted-foreground); font-size: var(--label-text); }
+.wf-branch svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; }
+.wf-branch code { font-family: var(--code-font); font-size: var(--label-text); color: var(--foreground); overflow-wrap: anywhere; }
+.wf-branch-strip { display: flex; margin-block-end: var(--space-2); }
+.wf-activity { color: var(--muted-foreground); font-size: var(--label-text); overflow-wrap: anywhere; }
+.wf-activity[data-live] { color: var(--foreground); }
+
+/* Round findings hang from the review stop. */
+.wf-findings { display: grid; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0; list-style: none; font-size: var(--small-text); }
+.wf-findings li { display: grid; gap: 0.125rem; padding-inline-start: var(--space-3); border-inline-start: 2px solid var(--line); }
+.wf-findings li[data-kind="fixed"] { border-inline-start-color: var(--ink-good); }
+.wf-finding-kind { color: var(--muted-foreground); font-size: var(--label-text); font-weight: 600; }
+.wf-findings li[data-kind="fixed"] .wf-finding-kind { color: var(--ink-good); }
+.wf-findings code { font-family: var(--code-font); font-size: var(--label-text); }
+
+/* -- The route as a strip above the composer. A parallel stop is stacked bars. -- */
+.wf-strip { display: grid; gap: var(--space-2); inline-size: 100%; padding: var(--space-2) var(--space-3); border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-surface); background: var(--tint-surface); color: var(--foreground); font: inherit; text-align: start; cursor: pointer; }
+.wf-strip:hover { border-color: var(--line-focus); }
+.wf-strip-bars { display: flex; gap: 0.25rem; }
+.wf-strip-stop { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 2px; block-size: 8px; }
+.wf-strip-bar { block-size: 3px; border-radius: 2px; background: var(--line-focus); }
+.wf-strip-stop:has(> :only-child) .wf-strip-bar { block-size: 4px; }
+.wf-strip-bar[data-state="done"] { background: var(--ink-good); }
+.wf-strip-bar[data-state="live"] { background: linear-gradient(90deg, var(--live) 40%, color-mix(in oklab, var(--live) 45%, transparent) 50%, var(--live) 60%) 0 0 / 250% 100%;
+  animation: wf-flow 2s linear infinite; }
+.wf-strip-bar[data-state="you"] { background: var(--live); }
+.wf-strip-bar[data-state="proposed"] { background: repeating-linear-gradient(90deg, var(--live) 0 4px, transparent 4px 7px); }
+.wf-strip-bar[data-state="failed"] { background: var(--ink-warn); }
+@keyframes wf-flow { to { background-position: -250% 0; } }
+@media (prefers-reduced-motion: reduce) { .wf-strip-bar[data-state="live"] { animation: none; background: var(--live); } }
+.wf-strip-text { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; font-size: var(--small-text); }
+.wf-strip-text > svg { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
+.wf-strip-name { flex: none; font-weight: 600; }
+.wf-strip-status { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.wf-strip-count { flex: none; display: grid; place-items: center; min-inline-size: 1.25rem; block-size: 1.25rem; padding-inline: 0.3125rem; border-radius: 999px;
+  background: var(--live); color: white; font-size: var(--label-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.wf-strip-open { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
+/* A narrow strip drops the workflow's name first: the bars and the status carry the state. */
+@container (inline-size < 30rem) { .wf-strip-name { display: none; } }
+/* A short session spends width instead of height: the bars move beside the text, and the strip takes one row. */
+@container (block-size < 28rem) {
+  .wf-strip { grid-template-columns: minmax(4rem, 28%) minmax(0, 1fr); align-items: center; gap: var(--space-3); padding-block: var(--space-1); }
+}
+
+/* -- A card the workflow owns, in the thread: the question card's edge and wash. -- */
+.wf-card { display: grid; gap: var(--space-3); min-inline-size: 0; margin-block: var(--space-3); padding: var(--space-3) var(--space-4) var(--space-4);
+  border: var(--hairline) solid var(--line); border-inline-start: 0.1875rem solid var(--muted-foreground); border-radius: var(--radius-surface);
+  font-size: var(--small-text); line-height: 1.5; }
+.wf-card[data-open] { border-inline-start-color: var(--live); background: var(--live-wash); }
+.wf-card[data-tone="warn"] { border-inline-start-color: var(--ink-warn); background: var(--warn-wash); }
+.wf-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-inline-size: 0; }
+.wf-card-head > svg { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
+.wf-card[data-open] .wf-card-head > svg { color: var(--ink-live); }
+.wf-card[data-tone="warn"] .wf-card-head > svg { color: var(--ink-warn); }
+.wf-card-title { font-size: var(--text-size); font-weight: 600; }
+.wf-card-meta { margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--label-text); overflow-wrap: anywhere; }
+.wf-card-meta code { font-family: var(--code-font); font-size: var(--label-text); }
+.wf-card-closed { margin: 0; color: var(--muted-foreground); }
+.markdown .wf-card p { margin: 0; }
+.markdown .wf-card :is(ul, ol) { margin: 0; padding-inline-start: 0; list-style: none; }
+.markdown .wf-card li { margin: 0; }
+.wf-card .action-footer-button { background: var(--background); }
+.wf-card .action-footer-button[data-tone="primary"] { background: var(--primary); }
+
+/* Facts: label over value, cells share a row while the card is wide. */
+.wf-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr)); gap: var(--space-2) var(--space-4); margin: 0; }
+.wf-facts > [data-wide] { grid-column: 1 / -1; }
+.wf-facts dt { color: var(--muted-foreground); font-size: var(--label-text); }
+.wf-facts dd { margin: 0; overflow-wrap: anywhere; }
+.wf-facts code { font-family: var(--code-font); font-size: var(--code-size); }
+
+/* A proposed change on the route: the added stop is dashed, in the live colour. */
+.wf-diff { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.wf-diff li { display: flex; align-items: center; gap: var(--space-3); min-block-size: 2rem; padding-inline: var(--space-2); border: 1px solid transparent; border-radius: var(--radius-control); color: var(--muted-foreground); }
+.wf-diff li[data-kind="add"] { border: 1px dashed var(--live); background: var(--background); color: var(--foreground); padding-block: var(--space-2); }
+.wf-diff code, .wf-branches code { font-family: var(--code-font); font-size: var(--label-text); }
+.wf-branches { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.wf-branches li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.wf-branches svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; color: var(--muted-foreground); }
+.wf-branches span { color: var(--muted-foreground); }
+
+/* A choice the reader can turn off. */
+.wf-change { display: flex; align-items: flex-start; gap: var(--space-3); min-block-size: var(--control-size); padding-block: var(--space-2); cursor: pointer; }
+.wf-change input { flex: none; inline-size: 1.125rem; block-size: 1.125rem; margin: 0.125rem 0 0; accent-color: var(--live); }
+.wf-change > span { display: grid; gap: 0.125rem; min-inline-size: 0; }
+.wf-change strong { font-weight: 600; }
+.wf-change small { color: var(--muted-foreground); font-size: var(--small-text); }
+.wf-change code { font-family: var(--code-font); font-size: var(--code-size); }
+
+/* -- Sheets: sections under a quiet heading. -- */
+.wf-section { display: grid; gap: var(--space-2); margin-block-start: var(--space-5); }
+.wf-section h3 { margin: 0; font-size: var(--small-text); font-weight: 600; color: var(--muted-foreground); }
+.wf-section .event-line { margin: 0; }
+.wf-task { padding: var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-control); background: var(--tint-surface);
+  line-height: var(--line-height); outline: none; }
+.wf-task:focus { border-color: var(--line-focus); }
+.wf-task code { font-family: var(--code-font); font-size: var(--code-size); }
+.wf-hint { margin: 0; color: var(--muted-foreground); font-size: var(--small-text); }
+
+/* Runs, compared: a table that scrolls sideways inside its own region. */
+.wf-table-scroll { overflow-x: auto; margin-block-start: var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); }
+.wf-table { inline-size: 100%; border-collapse: collapse; font-size: var(--small-text); white-space: nowrap; }
+.wf-table th { padding: var(--space-2) var(--space-3); color: var(--muted-foreground); font-weight: 500; text-align: start; border-block-end: var(--hairline) solid var(--line); }
+.wf-table td { padding: var(--space-2) var(--space-3); border-block-end: var(--hairline) solid var(--line); }
+.wf-table tr:last-child td { border-block-end: 0; }
+.wf-table tr[data-current] td { background: var(--live-wash); }
+.wf-table code { font-family: var(--code-font); font-size: var(--label-text); }
+.wf-num { font-family: var(--code-font); font-size: var(--code-size); font-variant-numeric: tabular-nums; }
+.wf-versions { display: grid; gap: var(--space-2); margin: 0; padding-inline-start: 0; list-style: none; font-size: var(--small-text); line-height: 1.5; }
+.wf-versions code { font-family: var(--code-font); font-size: var(--label-text); }
+
+/* -- The composer's workflow button and its picker, at window level over the composer. -- */
+.wf-input { padding: var(--space-3) var(--space-4) var(--space-2); min-block-size: 3rem; }
+.wf-placeholder { color: var(--muted-foreground); }
+.wf-caret { display: inline-block; inline-size: 1.5px; block-size: 1.1em; margin-inline-start: 1px; vertical-align: text-bottom; background: var(--live); }
+.wf-spacer { flex: 1; }
+.wf-flow-button[data-open] { color: var(--ink-live); background: var(--live-wash); }
+.wf-picker { position: absolute; inset-inline: 0; inset-block-end: calc(100% + var(--space-2)); z-index: 5; display: grid; gap: var(--space-1);
+  max-block-size: min(32rem, 70cqb); overflow-y: auto; padding: var(--space-2); border: var(--hairline) solid var(--line-focus); border-radius: var(--radius-surface);
+  background: var(--popover); box-shadow: 0 1px 2px var(--scrim-shadow), 0 8px 24px var(--scrim-shadow); }
+.wf-picker-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); margin: 0; padding: var(--space-1) var(--space-2); font-weight: 600; font-size: var(--small-text); }
+.wf-picker-head span { color: var(--muted-foreground); font-weight: 400; }
+.wf-picker-row { display: grid; gap: var(--space-1); padding: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--foreground); font: inherit; font-size: var(--small-text); text-align: start; cursor: pointer; }
+.wf-picker-row:hover { background: var(--hover-surface); }
+.wf-picker-row[aria-selected="true"] { background: var(--active-surface); }
+.wf-picker-name { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--text-size); font-weight: 600; }
+.wf-fit { padding: 0.0625rem var(--space-2); border-radius: 999px; background: var(--live-wash); color: var(--ink-live); font-size: var(--label-text); font-weight: 500; }
+.wf-picker-does, .wf-picker-runs { color: var(--muted-foreground); line-height: 1.5; }
+.wf-picker-runs { font-size: var(--label-text); }
+.wf-picker-row .wf-line { margin-block: var(--space-1); }
+.wf-picker-foot { margin: 0; padding: var(--space-1) var(--space-3) var(--space-2); color: var(--muted-foreground); font-size: var(--small-text); }
+
+/* -- Review aids. Not part of the product. -- */
+.mock-page { block-size: 100%; display: flex; flex-direction: column; }
+.mock-app { flex: 1; min-block-size: 0; }
+.mock-page[data-nav] .mock-app { padding-block-start: 2.5rem; }
+.mock-flow { position: fixed; inset: 0 0 auto; margin: 0; inline-size: 100%; block-size: 2.5rem; display: flex; align-items: center; gap: var(--space-2);
+  padding: 0 var(--space-2); border: 0; border-block-end: 1px dashed var(--line-focus); background: var(--muted); color: var(--foreground); font-size: var(--small-text); }
+.mock-flow span { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.mock-flow strong { display: inline-grid; place-items: center; inline-size: 1.375rem; block-size: 1.375rem; margin-inline-end: var(--space-1); border-radius: 50%; background: var(--foreground); color: var(--background); font-size: var(--label-text); }
+.mock-flow button { inline-size: var(--control-size); block-size: 2.25rem; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--foreground); font-size: 1.375rem; }
+.mock-flow button:disabled { opacity: 0.3; }
+
+.mock-board-page, .mock-board-page body, .mock-board-page #root { block-size: auto; }
+.mock-board { padding: 2rem; }
+.mock-board-head { max-inline-size: 46rem; margin: 0 auto 2rem; }
+.mock-board-head h1 { margin: 0 0 var(--space-2); font-size: 1.375rem; letter-spacing: -0.01em; }
+.mock-board-head p { margin: 0; color: var(--muted-foreground); line-height: 1.6; }
+.mock-board-grid { display: grid; gap: 2.5rem 2rem; justify-content: center; }
+.mock-frame { display: flex; flex-direction: column; gap: 0.75rem; margin: 0; }
+.mock-frame-link { display: block; color: inherit; text-decoration: none; }
+.mock-device { position: relative; display: block; overflow: hidden; border: 1px solid var(--line-focus); border-radius: 1rem; background: var(--background); }
+.mock-frame[data-branch] .mock-device { border-style: dashed; }
+.mock-device iframe { position: absolute; inset: 0 auto auto 0; border: 0; transform-origin: 0 0; pointer-events: none; }
+.mock-frame figcaption { display: flex; flex-direction: column; gap: 0.25rem; font-size: var(--small-text); line-height: 1.5; color: var(--muted-foreground); }
+.mock-frame-title { display: flex; align-items: center; gap: var(--space-2); color: var(--foreground); }
+.mock-frame-title strong { font-size: 0.9375rem; font-weight: 600; }
+.mock-frame-letter { display: grid; place-items: center; flex: none; inline-size: 1.5rem; block-size: 1.5rem; border-radius: 50%; background: var(--foreground); color: var(--background); font-size: var(--label-text); font-weight: 600; }
+.mock-frame[data-branch] .mock-frame-letter { background: transparent; border: 1.5px dashed var(--foreground); color: var(--foreground); }
+.mock-frame-from { color: var(--foreground); font-size: var(--label-text); }
