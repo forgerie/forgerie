@@ -75,6 +75,8 @@
   --live-wash: color-mix(in oklab, var(--live) 16%, transparent);
   /* The edge of something at work, quieter than the live colour itself. */
   --live-edge: color-mix(in oklab, var(--live) 45%, transparent);
+  /* The shade at the cut edge of a region that scrolls inside a fixed height. */
+  --scroll-shade: color-mix(in oklab, var(--foreground) 30%, transparent);
   /* Behind a bar that warns of a failure or a risk to the reader's work. */
   --destructive-wash: color-mix(in oklab, var(--destructive) 8%, var(--background));
   --destructive-line: color-mix(in oklab, var(--destructive) 35%, transparent);

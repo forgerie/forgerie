@@ -1,0 +1,15 @@
+/* At most 45% of the container's height, and on a short container (a phone on its side) a third: the thread
+   keeps room to read and the input below never loses its own. Past that the items scroll, and a shade at the cut
+   edge says more is there. */
+/* A hairline and room above set the dock apart from the thread scrolling behind it. */
+.pinned-dock { display: grid; grid-template-rows: auto minmax(0, 1fr); max-block-size: 45cqb; min-inline-size: 0;
+  padding-block-start: var(--space-3); border-block-start: var(--hairline) solid var(--line); }
+.pinned-dock-label { margin: 0 0 var(--space-1); color: var(--ink-live); font-size: var(--label-text); font-weight: 600; }
+.pinned-dock-items { --surface: var(--background); --shade: var(--scroll-shade);
+  display: grid; gap: var(--space-2); min-block-size: 0; overflow-y: auto; overscroll-behavior: contain;
+  background:
+    linear-gradient(var(--surface) 50%, transparent) top / 100% 2rem no-repeat local,
+    linear-gradient(transparent, var(--surface) 50%) bottom / 100% 2rem no-repeat local,
+    radial-gradient(farthest-side at 50% 0, var(--shade), transparent) top / 100% 0.75rem no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, var(--shade), transparent) bottom / 100% 0.75rem no-repeat scroll; }
+@container (block-size < 30rem) { .pinned-dock { max-block-size: 33cqb; } }

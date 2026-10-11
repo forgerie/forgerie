@@ -72,3 +72,4 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `StageStrip` (molecule): a whole process as one row of bars above an input, with a title, a status, and a count of what waits on the reader; parallel work is stacked bars, and a narrow strip drops the title first.
 - `DecisionCard` (molecule): something in a thread that waits on the reader's decision, with the live edge and wash while open, its choices in a footer, and one line saying what was decided once closed.
 - `TextAreaField` (atom): a labelled box for a few lines of prose that grows with its text, with a hint under it.
+- `PinnedDock` (molecule): things that wait on the reader, pinned above an input under a counting heading; it takes at most 45% of the container height (a third on a container under 30rem tall) and scrolls inside past that.

@@ -371,8 +371,11 @@ describe("Durable-native child agents in a Forgerie session", () => {
     expect(listed?.questions.map((q) => q.question)).toEqual(["Which colour should the button be?"]);
     expect(hub.sessionEvents.some(({ event }) => event.type === "message.end" && JSON.stringify(event.message).includes(CHILD_QUESTION_KIND))).toBe(true);
     expect(hub.sessionEvents.some(({ event }) => event.type === "pi.event" && event.eventType === "durable_children_changed")).toBe(true);
+    // The session list reads this count to put the session under "Needs your response".
+    await until("waiting count", async () => (await service.status(ref)).waitingOnYou === 1);
     const questionId = String(question.details?.questionId);
     await service.answerDurableChildQuestion(ref, questionId, "Teal");
+    await until("waiting cleared", async () => (await service.status(ref)).waitingOnYou === undefined);
     expect(await parentAnswers(ref)).toBe(answersAtQuestion);
     await until("asker report", async () => (await reports(ref, "asker")).length === 1);
     expect(await childText(ref, asker.conversationId)).toContain("toolResult: The user answered: Teal");

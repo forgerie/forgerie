@@ -37,6 +37,9 @@ import { ChildAgentsPanel } from "../src/childAgents/ChildAgentsPanel";
 import type { ChildDetail } from "../src/childAgents/childWorkModel";
 import { REVIEW, DISCARD, CLEANUP, RUNS } from "../src/childAgents/fixtures/childWork";
 import { ChildEntryView } from "../src/childAgents/ChildEntryView";
+import { waitingItems, waitingLabel } from "../src/waitingOnYou";
+import { PinnedDock } from "../src/ui/PinnedDock";
+import { EventLine } from "../src/ui/EventLine";
 import { CHILDREN, STREAMING, TRANSCRIPT } from "../src/childAgents/fixtures/children";
 import type { ComposerInputElement } from "../src/ui/ComposerEditor";
 
@@ -444,12 +447,19 @@ const summaryMessages: TranscriptMessage[] = [
 ];
 // Child agents: the parent thread with a report, a steer, and an open question; the sheet over it.
 const childrenPreview = scenario.startsWith("children");
+// children-pinned: a long thread, so the open question would scroll away; it is pinned above the composer instead.
+const pinnedPreview = scenario === "children-pinned";
+const longer = pinnedPreview ? Array.from({ length: 4 }, (_, index) => [
+  { role: "user" as const, content: `While they work: question ${String(index + 1)} about the run list's sort order and its empty copy.` },
+  { role: "assistant" as const, content: "The list sorts newest first. The empty copy stays as it is until **ui** answers its question, because the two depend on each other. Nothing else in the sheet changes." },
+]).flat() : [];
 const childMessages = (): TranscriptMessage[] => [...foldChildEntries(fromHistory([
   { role: "user", content: "Add an empty state to the run list. Split the API and the UI between two children." },
   { role: "assistant", content: "I started **api** on the endpoint and **ui** on the view. Both work from `docs/runs.md`." },
   { role: "user", content: "[subagent api answered, no reply needed] Added GET /api/runs with an empty list for a new project.\n\nTests: 14 passed. The contract in `docs/runs.md` is unchanged." },
   { role: "custom", customType: CHILD_NOTE_TYPE, content: "", details: { child: 21, childName: "ui", action: "message", text: "[the user told child ui directly] Keep the old copy; only add the icon." } },
   { role: "custom", customType: CHILD_QUESTION_TYPE, content: "", details: { questionId: "q:40", child: 21, childName: "ui", question: "Should the empty state show the last run, or stay blank?" } },
+  ...longer,
 ]).messages)];
 const scenarios: Record<string, TranscriptMessage[]> = {
   ...childrenPreview ? { [scenario]: childMessages() } : {},
@@ -474,7 +484,7 @@ const scenarios: Record<string, TranscriptMessage[]> = {
 function Preview() {
   const [childDetail, setChildDetail] = useState<ChildDetail>({ kind: "none" });
   const [childView, setChildView] = useState<{ open: boolean; id?: number }>(() => ({
-    open: scenario !== "children", ...(scenario === "children-child" ? { id: 21 } : scenario === "children-steer" ? { id: 15 } : {}) }));
+    open: scenario !== "children" && scenario !== "children-pinned", ...(scenario === "children-child" ? { id: 21 } : scenario === "children-steer" ? { id: 15 } : {}) }));
   const [dictation] = useState(() => new ForgerieDictationAdapter({
     ready: async () => {},
     capture: async () => {
@@ -716,9 +726,14 @@ function Preview() {
           onCleanup: () => setChildDetail(CLEANUP), onBackDetail: () => setChildDetail({ kind: "none" }), onRetryDetail: () => setChildDetail({ kind: "runs", data: RUNS }),
           onLand: () => {}, onDiscard: () => setChildDetail({ kind: "none" }), onContinue: async () => {}, onDismissOutcome: () => {} }} />}
       <SessionDoorsProvider cwd={previewCwd} open={openPreviewDoor}>
-      <Thread commandResult={commandResult && { result: commandResult, disabled: false, onClose: () => setCommandResult(undefined),
+      <Thread beforeComposer={pinnedPreview ? (() => {
+        const waiting = waitingItems(messages, []);
+        return waiting.length > 0 ? <PinnedDock label={waitingLabel(waiting.length)}>{waiting.map((item) => item.kind === "question"
+          ? <ChildEntryView key={item.id} entry={item.entry} onAnswer={async () => {}} onOpen={() => setChildView({ open: true, id: 21 })} /> : null)}</PinnedDock> : undefined;
+      })() : undefined} commandResult={commandResult && { result: commandResult, disabled: false, onClose: () => setCommandResult(undefined),
         onChoose: (_requestId, value) => setCommandResult({ type: "done", presentation: "toast", message: `Forked from ${value}` }) }} systemArtifact={childrenPreview ? (custom) => {
         const entry = (custom as { childEntry?: ChildEntry } | undefined)?.childEntry;
+        if (pinnedPreview && entry?.kind === "question" && entry.answer === undefined) return <EventLine tone="active" subject={`${entry.childName} asks`} phrase="pinned below the thread" />;
         return entry && <ChildEntryView entry={entry} onAnswer={async () => {}} onOpen={() => setChildView({ open: true, id: 21 })} />;
       } : undefined} compaction={compactionPreview || queuePreview ? { state: compaction, disabled: recovering,
         onSend: async (text) => { setCompaction({ type: "queued", text }); setQueue((current) => [...current, { kind: "followUp", text }]); },

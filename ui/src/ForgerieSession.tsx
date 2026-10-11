@@ -72,6 +72,9 @@ import { WorkflowPicker } from "./workflows/WorkflowPicker";
 import { WorkflowPlanSheet } from "./workflows/WorkflowPlanSheet";
 import { WorkflowRunSheet } from "./workflows/WorkflowRunSheet";
 import { WorkflowRunStrip } from "./workflows/WorkflowRunStrip";
+import { waitingItems, waitingLabel } from "./waitingOnYou";
+import { PinnedDock } from "./ui/PinnedDock";
+import { EventLine } from "./ui/EventLine";
 
 const pullRequests = createPullRequestApi(browserTransport.request);
 const NO_LINKS: readonly PullLink[] = [];
@@ -236,8 +239,19 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   }, [childAgents]);
   const runs = flows.runs;
   const deciding = flows.deciding;
+  // What waits on the reader is pinned above the composer; its place in the thread keeps one quiet line.
+  const waiting = useMemo(() => readOnly ? [] : waitingItems(folded, runs), [folded, runs, readOnly]);
+  const pinned = useMemo(() => new Set(waiting.map((item) => item.kind === "question" ? `q:${item.entry.questionId}` : `s:${item.entry.runId}/${item.entry.stage}/${String(item.entry.round)}`)), [waiting]);
+  const renderWaiting = useCallback((item: (typeof waiting)[number]) => item.kind === "question"
+    ? <ChildEntryView key={item.id} entry={item.entry} onAnswer={childrenAvailable ? childAgents.answer : undefined} onOpen={childrenAvailable ? openChildByName : undefined} />
+    : <WorkflowEntryView key={item.id} entry={item.entry} run={runs.find((run) => run.id === item.entry.runId)} deciding={deciding === `${item.entry.runId}/${item.entry.stage}`}
+      onDecide={(decision, note) => workflows.decide(item.entry.runId, item.entry.stage, decision, note)}
+      onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />, [childrenAvailable, childAgents, openChildByName, runs, deciding, workflows]);
   const systemArtifact = useCallback<SystemArtifactView>((custom) => {
     const flow = (custom as Partial<WorkflowEntryArtifact> | undefined)?.workflowEntry;
+    if (flow?.kind === "stop" && pinned.has(`s:${flow.runId}/${flow.stage}/${String(flow.round)}`)) {
+      return <EventLine tone="active" subject={flow.stageName} phrase="waits for your decision, pinned below the thread" />;
+    }
     if (flow !== undefined) {
       const run = flow.kind === "decided" ? undefined : runs.find((candidate) => candidate.id === flow.runId);
       const stop = flow.kind === "stop" ? flow : undefined;
@@ -246,13 +260,16 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />;
     }
     const entry = (custom as Partial<ChildEntryArtifact> | undefined)?.childEntry;
+    if (entry?.kind === "question" && pinned.has(`q:${entry.questionId}`)) {
+      return <EventLine tone="active" subject={`${entry.childName} asks`} phrase="pinned below the thread" />;
+    }
     if (entry !== undefined) return <ChildEntryView entry={entry} onAnswer={childrenAvailable && !readOnly ? childAgents.answer : undefined}
       onOpen={childrenAvailable ? openChildByName : undefined} />;
     const event = (custom as Partial<ProcessEventArtifact> | undefined)?.processEvent;
     if (event === undefined) return undefined;
     const onLoadOutput = sessionId && cwd ? () => loadProcessOutput(browserTransport.request, { id: sessionId, cwd }, event.id) : undefined;
     return <ProcessEventView event={event} onLoadOutput={onLoadOutput} />;
-  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows]);
+  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned]);
   const running = activeRun(runs);
   const startWorkflow = async (name: string, inputs: WorkflowInputs, task: string | undefined) => {
     if (!await workflows.launch(name, inputs)) return;
@@ -350,6 +367,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         beforeComposer={<>
           {sendError && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{sendError}</p></Consequence>}
           {flows.error !== undefined && workflowSheet === undefined && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{flows.error}</p></Consequence>}
+          {waiting.length > 0 && <PinnedDock label={waitingLabel(waiting.length)}>{waiting.map(renderWaiting)}</PinnedDock>}
           {running !== undefined && <WorkflowRunStrip run={running} onOpen={() => setWorkflowSheet({ type: "run" })} />}
         </>}
         head={setup && <WorktreeSetupCard setup={setup} hookSeen={setup.log !== ""} branch={worktree?.branch} />}

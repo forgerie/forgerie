@@ -265,6 +265,12 @@ async function submissionState(tx: Tx, submission: SubmissionRecord): Promise<Wo
   const result = answer.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
   return { kind: "settled", outcome: "answered", result, delivered: false };
 }
+/** Stops of the active run that wait for the user's decision. */
+export async function waitingWorkflowStops(harness: Harness, parent: ConversationId, context: Context): Promise<number> {
+  const doc = await harness.snapshot(Runs, parent, context);
+  const run = doc?.active == null ? undefined : doc.records[doc.active];
+  return run?.state.kind === "running" ? Object.values(run.stops ?? {}).filter((stop) => stop.state === "waiting").length : 0;
+}
 export async function activeWorkflowRun(harness: Harness, parent: ConversationId, context: Context): Promise<string | undefined> {
   return (await harness.snapshot(Runs, parent, context))?.active ?? undefined;
 }

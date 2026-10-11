@@ -27,7 +27,8 @@ const toStatus = (status: WireStatus): PickerStatus => ({
   workingAgents: status.workingAgents, runningProcesses: status.runningProcesses,
   needsResponse: status.response === undefined ? undefined : requestsResponse(status.response),
   watchingPullRequest: status.watchingPullRequest,
-  blocked: status.pendingAsk !== undefined || (status.pendingDialogs?.length ?? 0) > 0,
+  // A child agent's question or a workflow stop waits on the reader as much as the session's own question does.
+  blocked: status.pendingAsk !== undefined || (status.pendingDialogs?.length ?? 0) > 0 || (status.waitingOnYou ?? 0) > 0,
 });
 
 /**

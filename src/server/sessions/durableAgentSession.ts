@@ -9,13 +9,13 @@ import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { answerChildQuestion, childMessages, reviewChildWorktree, continueChild, childWorkIsLive, childWorktreeAction, workingChildCount, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
+import { answerChildQuestion, CHILD_QUESTIONS_DOC_KIND, openChildQuestions, childMessages, reviewChildWorktree, continueChild, childWorkIsLive, childWorktreeAction, workingChildCount, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
 import type { DurableChildHost } from "./durableChildHost.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import { workflowExtension, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop } from "./durableWorkflowRuns.js";
+import { workflowExtension, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
 import type { WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
@@ -64,6 +64,8 @@ export class DurableAgentSession implements PiAgentSession {
   private childrenLive: boolean | undefined;
   private childWorktrees: DurableChildWorktrees | undefined;
   private childCount = 0;
+  /** Child questions and workflow stops that wait for the user. */
+  private waitingCount = 0;
   private childRunRecords: DurableChildRunRecords | undefined;
 
   private constructor(private readonly options: DurableAgentSessionOptions) {
@@ -170,6 +172,7 @@ export class DurableAgentSession implements PiAgentSession {
   // ─── Host operations on Durable children. None of them starts a parent turn. ───
   get hostsDurableChildren(): boolean { return this.options.childAgents !== undefined; }
   get workingDurableChildren(): number { return this.childCount; }
+  get waitingOnUser(): number { return this.waitingCount; }
   runWorkflow(name: string, inputs: WorkflowInputs, requestId: string) {
     if (!this.hostsDurableChildren) throw new Error("Workflow launches require durableChildren");
     return launchWorkflow(this.journal.harness, this.journal.conversation, new WorkflowLibrary(this.options.services.agentDir), this.options.services.cwd, this.sessionId, name, inputs, requestId, context);
@@ -245,8 +248,21 @@ export class DurableAgentSession implements PiAgentSession {
       this.childrenLive = live;
       host.liveChanged(ref, live);
     };
+    const parent = this.journal.conversation.id;
+    // A child's question and a workflow stop both wait on the user; the status counts them so the session list can say so.
+    const recountWaiting = async () => {
+      const waiting = await openChildQuestions(this.journal.harness, parent, context) + await waitingWorkflowStops(this.journal.harness, parent, context);
+      if (waiting === this.waitingCount) return;
+      this.waitingCount = waiting;
+      this.emit({ type: "durable_children_changed" });
+    };
+    await recountWaiting();
     const unsubscribe = this.journal.harness.subscribeCommits((publication) => {
-      if (workflowRunsChanged(publication, this.journal.conversation.id)) this.emit({ type: "workflow_runs_changed" });
+      const runsChanged = workflowRunsChanged(publication, parent);
+      if (runsChanged) this.emit({ type: "workflow_runs_changed" });
+      if (runsChanged || publication.changes.some((change) => change.type === "document" && change.conversationId === parent && change.record.kind === CHILD_QUESTIONS_DOC_KIND)) {
+        void recountWaiting().catch((error: unknown) => { this.report(error); });
+      }
       const change = workflowActiveFromCommit(publication, this.journal.conversation.id);
       if (change === undefined) return;
       workflowActive = change.active !== null;

@@ -325,6 +325,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       });
       // The agent tried to start alpha before the contract stop; Forgerie refused, and the agent asked instead.
       const held = await waitingAt("contract", "CONTRACT-SUMMARY");
+      await until(async () => (await service.status(ref)).waitingOnYou === 1);
       expect(held.children).toEqual([]);
       expect(started).toBe(0);
       expect((await server.inject({ method: "POST", url: stopUrl("land"), payload: { cwd: root, decision: "land" } })).statusCode).toBe(409);

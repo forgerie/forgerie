@@ -45,8 +45,9 @@ const Children = defineDoc<{ agents: Record<string, ChildRecord>; reporters: Rec
   kind: CHILD_AGENTS_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial",
   initial: () => ({ agents: {}, reporters: {} }),
 });
+export const CHILD_QUESTIONS_DOC_KIND = "forgerie.child-questions";
 const Questions = defineDoc<{ items: Record<string, ChildQuestion> }>({
-  kind: "forgerie.child-questions", version: 1, scope: "conversation", history: "latest", fork: "initial",
+  kind: CHILD_QUESTIONS_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial",
   initial: () => ({ items: {} }),
 });
 
@@ -323,6 +324,12 @@ export interface DurableChildSummary {
   worktree?: ChildWorktreeSummary;
   /** Open questions, oldest first. */
   questions: { questionId: string; question: string; askedAt: number }[];
+}
+
+/** Questions children asked that the user has not answered and that no stop closed. */
+export async function openChildQuestions(harness: Harness, parent: ConversationId, context: Context): Promise<number> {
+  const items = Object.values((await harness.snapshot(Questions, parent, context))?.items ?? {});
+  return items.filter((question) => question.answer === null && question.closed !== true).length;
 }
 
 /** Frozen launch provenance for the disk run-history projection, not a browser summary. */

@@ -221,6 +221,16 @@ describe("machine catalog", () => {
     expect(store.getSnapshot().statuses["b"]).toMatchObject({ blocked: true, isStreaming: false });
   });
 
+  it("marks a session blocked while a child agent or a workflow stop waits on the reader", async () => {
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    api.emit({ type: "status.update", status: { sessionId: "a", ...idle, workingAgents: 1, waitingOnYou: 1 } });
+    await until(store, () => store.getSnapshot().statuses["a"]?.blocked === true);
+    api.emit({ type: "status.update", status: { sessionId: "a", ...idle, workingAgents: 1 } });
+    await until(store, () => store.getSnapshot().statuses["a"]?.blocked === false);
+  });
+
   it("applies live events after the join", async () => {
     const api = await machine();
     const store = start(api);

@@ -3400,15 +3400,17 @@ export class PiSessionService implements SessionRouteService {
    * Both are omitted when zero so a resting session carries no extra wire
    * fields and the inbox has nothing to render.
    */
-  private liveWorkCounts(session: PiAgentSession): { workingAgents?: number; runningProcesses?: number; watchingPullRequest?: boolean } {
+  private liveWorkCounts(session: PiAgentSession): { workingAgents?: number; runningProcesses?: number; watchingPullRequest?: boolean; waitingOnYou?: number } {
     const workingAgents = (this.workingAgentsBySession.get(session.sessionId) ?? 0)
       + (session instanceof DurableAgentSession ? session.workingDurableChildren : 0);
+    const waitingOnYou = session instanceof DurableAgentSession ? session.waitingOnUser : 0;
     const bridge = this.active.get(session.sessionId)?.runtime.services?.processBridgeSlot;
     const runningProcesses = bridge?.snapshot().processes.filter((process) => process.status === "running").length ?? 0;
     return {
       ...(this.pullRequestWatches?.isWatching(session.sessionId) === true ? { watchingPullRequest: true } : {}),
       ...(workingAgents > 0 ? { workingAgents } : {}),
       ...(runningProcesses > 0 ? { runningProcesses } : {}),
+      ...(waitingOnYou > 0 ? { waitingOnYou } : {}),
     };
   }
 
