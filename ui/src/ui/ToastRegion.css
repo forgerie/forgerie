@@ -6,12 +6,12 @@
    window's side, and up to --toast-bleed where the page has room. The
    percentages in the padding read the window's width. */
 .toast-region { --toast-width: 22rem; --toast-edge: var(--space-2); --toast-bleed: var(--space-6);
-  --toast-safe-inline: calc(env(safe-area-inset-left) + env(safe-area-inset-right));
+  --toast-safe-inline: calc(var(--safe-left) + var(--safe-right));
   position: fixed; z-index: 50;
-  inset-block-start: calc(env(safe-area-inset-top) + var(--header-size));
-  inset-inline-end: env(safe-area-inset-right);
+  inset-block-start: calc(var(--safe-top) + var(--header-size));
+  inset-inline-end: var(--safe-right);
   inline-size: min(var(--toast-width) + var(--toast-edge) + var(--toast-bleed), 100% - var(--toast-safe-inline));
-  max-block-size: calc(100% - var(--header-size) - env(safe-area-inset-top));
+  max-block-size: calc(100% - var(--header-size) - var(--safe-top));
   padding: var(--toast-edge) var(--toast-edge) var(--toast-bleed)
     clamp(var(--toast-edge), 100% - var(--toast-width) - var(--toast-edge) - var(--toast-safe-inline), var(--toast-bleed));
   display: flex; flex-direction: column; gap: var(--space-2); overflow-y: auto; overscroll-behavior: contain; pointer-events: none; }

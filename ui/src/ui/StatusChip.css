@@ -41,13 +41,13 @@ button.status-chip-face:hover, button.status-chip-face[aria-expanded="true"] { b
    the window that leaves a margin, and its body scrolls inside the height
    left under the header. The page dims under it; the header does not, so the
    chip stays lit and the panel reads as the chip opened. */
-.status-chip-scrim { position: fixed; z-index: 59; inset: calc(env(safe-area-inset-top) + var(--header-size)) 0 0; background: var(--fade-scrim);
+.status-chip-scrim { position: fixed; z-index: 59; inset: calc(var(--safe-top) + var(--header-size)) 0 0; background: var(--fade-scrim);
   animation: status-chip-fade 180ms ease-out; }
 .status-chip-panel { position: fixed; z-index: 60;
-  inset-block-start: calc(env(safe-area-inset-top) + var(--header-size) + var(--space-1));
-  inset-inline-end: calc(env(safe-area-inset-right) + var(--space-2));
-  inline-size: min(25rem, 100% - var(--space-4) - env(safe-area-inset-left) - env(safe-area-inset-right));
-  max-block-size: calc(100% - var(--header-size) - var(--space-6) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  inset-block-start: calc(var(--safe-top) + var(--header-size) + var(--space-1));
+  inset-inline-end: calc(var(--safe-right) + var(--space-2));
+  inline-size: min(25rem, 100% - var(--space-4) - var(--safe-left) - var(--safe-right));
+  max-block-size: calc(100% - var(--header-size) - var(--space-6) - var(--safe-top) - var(--safe-bottom));
   display: flex; flex-direction: column; overflow: hidden;
   border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--popover); color: var(--foreground);
   box-shadow: 0 var(--space-2) var(--space-6) var(--scrim-shadow); font-size: var(--small-text);

@@ -49,6 +49,14 @@
   --control-size: 2.75rem;
   --icon-size: 1.75rem;
   --header-size: 3rem;
+  /* The screen edges the app keeps clear. The installed app runs full screen
+     with viewport-fit=cover, so the top and side insets are only a camera
+     cutout, and the app draws under it, as it does under the main screen's
+     under-display camera. The bottom inset is a gesture bar, so it stays. */
+  --safe-top: 0px;
+  --safe-right: 0px;
+  --safe-left: 0px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -191,8 +199,8 @@ button:disabled { cursor: default; opacity: 0.4; }
   content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
   inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
 .sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* viewport-fit=cover: the installed app runs full screen, so keep the shell out of a camera cutout or system bar. The composer pads the bottom itself. */
-#root { block-size: 100dvh; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+/* viewport-fit=cover: the installed app runs full screen. The --safe-* tokens say which screen edges to keep clear. The composer pads the bottom itself. */
+#root { block-size: 100dvh; padding: var(--safe-top) var(--safe-right) 0 var(--safe-left); }
 .session-shell { container-type: size; block-size: 100%; display: flex; flex-direction: column; min-inline-size: 0; }
 /* Thread header from shell.tsx: h-12, px-4 md:px-5, gap-2, title 13px medium. */
 .session-header { flex: none; block-size: var(--header-size); display: flex; align-items: center; gap: var(--space-2); padding-inline: clamp(1rem, 2.6cqi, 1.25rem); border-block-end: 1px solid var(--line); }
@@ -261,7 +269,7 @@ button:disabled { cursor: default; opacity: 0.4; }
 .quiet-button:hover { color: var(--foreground); }
 .message-actions .icon-button { inline-size: 1.5rem; block-size: 1.5rem; }
 /* Footer from thread.tsx: sticky, gap-3, pb-5, on the page background. */
-.composer-region { position: sticky; bottom: 0; margin-block-start: auto; display: flex; flex-direction: column; gap: var(--space-3); padding-block-end: max(var(--footer-space), env(safe-area-inset-bottom)); background: var(--background); }
+.composer-region { position: sticky; bottom: 0; margin-block-start: auto; display: flex; flex-direction: column; gap: var(--space-3); padding-block-end: max(var(--footer-space), var(--safe-bottom)); background: var(--background); }
 .composer { inline-size: 100%; position: relative; }
 /* Composer from composer.tsx: border-foreground/10, bg-muted/30,
    focus-within border-foreground/25, rounded-thread. */
@@ -470,8 +478,8 @@ button:disabled { cursor: default; opacity: 0.4; }
 .tree-dialog[open] { display: flex; }
 .tree-dialog::backdrop { background: var(--scrim); backdrop-filter: var(--modal-backdrop); animation: modal-scrim-in var(--modal-enter); }
 .tree-sheet { --tree-pad: clamp(0.75rem, 3cqi, 1.25rem); container-type: inline-size; flex: 1; display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0;
-  padding: max(0px, env(safe-area-inset-top) - var(--tree-room-block)) max(0px, env(safe-area-inset-right) - var(--tree-room-inline))
-    max(0px, env(safe-area-inset-bottom) - var(--tree-room-block)) max(0px, env(safe-area-inset-left) - var(--tree-room-inline)); }
+  padding: max(0px, var(--safe-top) - var(--tree-room-block)) max(0px, var(--safe-right) - var(--tree-room-inline))
+    max(0px, var(--safe-bottom) - var(--tree-room-block)) max(0px, var(--safe-left) - var(--tree-room-inline)); }
 .tree-head { flex: none; display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--header-size); padding-inline: var(--tree-pad) var(--space-2); border-block-end: 1px solid var(--line); }
 .tree-head h2 { flex: none; margin: 0; font-size: var(--text-size); font-weight: 500; }
 .tree-head .tree-count { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -550,7 +558,7 @@ button:disabled { cursor: default; opacity: 0.4; }
 .gallery-more img { opacity: 0.35; }
 .gallery-more span { position: absolute; inset: 0; display: grid; place-items: center; font-size: var(--text-size); font-weight: 500; font-variant-numeric: tabular-nums; }
 /* The viewer is the page frame while open, so it sizes from the viewport. */
-.image-viewer { position: fixed; inset: 0; inline-size: 100dvw; block-size: 100dvh; max-inline-size: none; max-block-size: none; margin: 0; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); border: 0; background: var(--background); color: var(--foreground); overflow: hidden; overscroll-behavior: none; }
+.image-viewer { position: fixed; inset: 0; inline-size: 100dvw; block-size: 100dvh; max-inline-size: none; max-block-size: none; margin: 0; padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left); border: 0; background: var(--background); color: var(--foreground); overflow: hidden; overscroll-behavior: none; }
 .image-viewer[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
 .image-viewer::backdrop { background: var(--background); }
 .viewer-bar { display: flex; align-items: center; gap: var(--space-1); min-inline-size: 0; padding-inline: var(--space-2); }
@@ -953,8 +961,8 @@ summary.trace-line:hover { color: var(--foreground); }
   border: 1px solid var(--line-focus); border-radius: min(0.875rem, var(--ns-room-inline), var(--ns-room-block));
   background: var(--background); box-shadow: 0 1.5rem 4rem -1rem var(--scrim-shadow), 0 0 0 1px color-mix(in oklab, var(--foreground) 4%, transparent);
   /* At an edge, the screen's own insets come back as padding. */
-  padding: max(0px, env(safe-area-inset-top) - var(--ns-room-block)) max(0px, env(safe-area-inset-right) - var(--ns-room-inline))
-    max(0px, env(safe-area-inset-bottom) - var(--ns-room-block)) max(0px, env(safe-area-inset-left) - var(--ns-room-inline)); }
+  padding: max(0px, var(--safe-top) - var(--ns-room-block)) max(0px, var(--safe-right) - var(--ns-room-inline))
+    max(0px, var(--safe-bottom) - var(--ns-room-block)) max(0px, var(--safe-left) - var(--ns-room-inline)); }
 .ns-head, .ns-chips, .ns-foot { flex: none; display: flex; align-items: center; gap: var(--space-2); }
 .ns-scroll { flex: 1 1 auto; min-block-size: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
 .ns-head { min-block-size: 3.5rem; padding-inline: var(--ns-pad) var(--space-2); border-block-end: 1px solid var(--line); }

@@ -17,8 +17,8 @@
 .sheet-dialog-frame:focus { outline: none; }
 .sheet-dialog-frame { --sheet-pad: clamp(0.75rem, 3cqi, 1.25rem); container-type: inline-size; flex: 1; display: flex; flex-direction: column;
   min-inline-size: 0; min-block-size: 0;
-  padding: max(0rem, env(safe-area-inset-top) - var(--sheet-room-block)) max(0rem, env(safe-area-inset-right) - var(--sheet-room-inline))
-    max(0rem, env(safe-area-inset-bottom) - var(--sheet-room-block)) max(0rem, env(safe-area-inset-left) - var(--sheet-room-inline)); }
+  padding: max(0rem, var(--safe-top) - var(--sheet-room-block)) max(0rem, var(--safe-right) - var(--sheet-room-inline))
+    max(0rem, var(--safe-bottom) - var(--sheet-room-block)) max(0rem, var(--safe-left) - var(--sheet-room-inline)); }
 .sheet-dialog-head { flex: none; display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--header-size);
   padding-inline: var(--sheet-pad) var(--space-2); border-block-end: var(--hairline) solid var(--line); }
 /* A back control sits in the start padding, and its drawn arrow, not its hit area, sets the gap to the title. */
