@@ -17,7 +17,13 @@ import { createWorktreeApi, type WorktreeRecord } from "./worktrees/worktreeApi"
 import { createDeferredFiles, createNewSessionApi, defaultDestinationCwd, newStartupToken, type Project } from "./newSession";
 import { Toast } from "./ui/Toast";
 import { createLaunchStore, type StartupListener, type WorktreeListener } from "./launches";
-import { newSessionShortcut } from "./shortcuts";
+import { newSessionShortcut, searchShortcut } from "./shortcuts";
+import type { SessionSearch } from "./search/useSessionSearch";
+import type { SearchHit } from "./search/searchApi";
+import { queryMode, resultsView } from "./search/searchModel";
+import { foundBinding } from "./search/found";
+import { SearchBox } from "./search/SearchBox";
+import { SearchResults } from "./search/SearchResults";
 import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
 import { createBacklogApi, type BacklogItem } from "./backlog/backlogApi";
 import { heldSessions, itemParam, listOf, openCount, readBacklogPlace, readItemParam, refOf, type BacklogPlace } from "./backlog/backlogModel";
@@ -82,8 +88,10 @@ const DIALOG_ENTRY = { newSession: newStartupToken() };
  * `projectFilter` offers project groups in the session list's ⋯ menu; the app adds the way to Settings → Project groups.
  * `projectSettings` draws Settings → Project groups.
  * `resourceSettings` draws Settings → Skills and prompts; `resourceLens` draws a session's own.
+ * `search` is session search, held by the binding above this app so its query and hits outlive every layout.
  */
-export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens }: {
+export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, search }: {
+  search?: SessionSearch | undefined;
   shelves?: ReactNode; projectCatalog?: readonly Project[] | undefined; projectScope?: readonly string[] | undefined;
   projectFilter?: Omit<PickerFilter, "onManage"> | undefined; projectSettings?: SettingsPageRenderer | undefined; relatedWork?: RelatedWorkRenderer | undefined;
   resourceSettings?: SettingsPageRenderer | undefined; resourceLens?: ResourceLensRenderer | undefined;
@@ -147,7 +155,9 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     drafts.forget(id);
     if (readSelected() === id) closeSession();
   }, [drafts, closeSession]);
-  const picker = usePicker(selectedId, { onDeleted, starting, projectScope, projectCatalog });
+  const query = search?.state.query ?? "";
+  const mode = queryMode(query);
+  const picker = usePicker(selectedId, { onDeleted, starting, projectScope, projectCatalog, titleFilter: mode === "title" ? query : undefined });
   const { onStartup, onWorktree } = picker;
   useEffect(() => onStartup(startup.emit), [onStartup, startup]);
   useEffect(() => onWorktree(worktreeEvents.emit), [onWorktree, worktreeEvents]);
@@ -247,12 +257,47 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     return () => window.removeEventListener("keydown", onKey);
   }, [startNew]);
   // A start still in flight: once Pi created the session it opens; before that, the window shows how it goes.
+  const found = search?.state.found;
+  const closeFound = search?.actions.closeFound;
   const select = useCallback((row: Row) => {
+    // A match bar belongs to the hit's session. Opening another session from the list ends it.
+    if (found && found.hit.sessionId !== row.session.id) closeFound?.();
     const pending = starting.find((item) => item.id === row.session.id);
     if (!pending) { switchSession(row.session); return; }
     if (pending.sessionId) switchSession({ id: pending.sessionId, cwd: pending.cwd, name: pending.title });
     else void startNew();
-  }, [starting, startNew, switchSession]);
+  }, [starting, startNew, switchSession, found, closeFound]);
+  // A hit opens its session at the matched passage. The query and its hits stay for the next look.
+  const openSearch = search?.actions.open;
+  const openHit = useCallback((hit: SearchHit) => {
+    openSearch?.(hit);
+    switchSession({ id: hit.sessionId, cwd: hit.cwd, ...(hit.title ? { name: hit.title } : {}) });
+  }, [openSearch, switchSession]);
+  // Ctrl+K reaches the search box from anywhere, and `/` from anywhere but a text field. The list opens first.
+  const searchInput = useRef<HTMLInputElement>(null);
+  const resultsList = useRef<HTMLDivElement>(null);
+  const [searchFocus, setSearchFocus] = useState(0);
+  const searching = search !== undefined;
+  useEffect(() => {
+    if (!searching) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!searchShortcut(event) || document.querySelector("dialog[open]")) return;
+      // Capture phase, before the composer's editor: on a Mac, CodeMirror reads Ctrl+K as "delete to the line end".
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(true);
+      setSearchFocus((count) => count + 1);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [searching]);
+  useEffect(() => {
+    if (searchFocus === 0) return;
+    // The sheet stops being inert in the render that opened it, so the box can take focus now.
+    const input = searchInput.current;
+    input?.focus({ preventScroll: true });
+    input?.select();
+  }, [searchFocus]);
   // Archive and next. With nothing left waiting, the list is the next thing to read.
   const { archiveAndNext } = picker;
   const archiveNext = useCallback(async (id: string) => {
@@ -314,6 +359,21 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   // One message at a time. It shows in the page's toast region, whether the list is open or not.
   const toast = picker.view.toast
     ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} /> : orphanNotice;
+  const searchBox = search ? <SearchBox query={query} busy={mode === "messages" && search.state.results.loading}
+    onQuery={search.actions.setQuery} onClear={search.actions.clear} inputRef={searchInput}
+    onKeyDown={(event) => {
+      // Down from the box goes to the first hit.
+      if (event.key !== "ArrowDown" || mode !== "messages") return;
+      const first = resultsList.current?.querySelector<HTMLElement>("li button");
+      if (first) { event.preventDefault(); first.focus(); }
+    }} /> : undefined;
+  const searchResults = !search ? undefined
+    : mode === "messages" ? <SearchResults view={resultsView(query, search.state.results)} now={Date.now()} where={picker.where}
+      onOpen={openHit} onRetry={search.actions.retry} onMore={search.actions.more} listRef={resultsList} />
+    : mode === "title" && pickerView.sections.length === 0 && picker.view.connection.type === "ready"
+      ? <SearchResults view={{ type: "titles-none", query: query.trim() }} now={Date.now()} where={picker.where}
+        onOpen={openHit} onRetry={search.actions.retry} onMore={search.actions.more} /> : undefined;
+  const sessionFound = search && found && found.hit.sessionId === selectedId ? foundBinding(found, search.actions) : undefined;
   const dialog = composing === undefined ? null : composing
     ? <NewSession key={composeKey} cwd={composing} initialPlacement={readPlace()} initialMode={composeMode} api={newSessionApi} worktrees={worktreeApi}
       item={composeItem} backlog={backlogApi} lookSession={picker.look} onItemRemoved={dropComposeItem}
@@ -335,7 +395,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
         onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }), github: githubApi, githubPage }} /></Suspense>
     : composing === "" && !selectedId
       ? <SessionFrame name="New session" status={<StatusChip label="No project" tone="bad" panel={{ title: "No project", children: <p>Forgerie knows no project yet, and this app cannot add one yet.</p> }} />}><div className="thread-empty" /></SessionFrame>
-    : selectedId ? <ForgerieSession key={selectedId} id={selectedId} onUnread={picker.onUnread}
+    : selectedId ? <ForgerieSession key={selectedId} id={selectedId} onUnread={picker.onUnread} found={sessionFound}
       known={known} relatedWork={relatedWork} resourceLens={resourceLens}
       initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
       initialError={commandSelection?.session.id === selectedId ? commandSelection.error : undefined}
@@ -348,6 +408,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   return <><AppShell open={open} onOpenChange={setOpen} attention={picker.attention}
     picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs}
       shelves={shelves} filter={projectFilter ? { ...projectFilter, onManage: () => placeSettings({ section: "projects" }) } : undefined}
+      search={searchBox} results={searchResults} narrowed={mode === "title"}
       actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
         onBacklog: () => placeBacklog(backlog ?? {}), backlogOpen: backlog !== undefined,

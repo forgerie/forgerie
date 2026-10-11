@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, type SessionTreeNode, type SessionTreeSnapshot } from "./sessionTree";
-import { buildSessionTreeModel, initialSessionTreeSelection, nearestVisibleSessionTreeId, SESSION_TREE_DEFAULT_FILTER, sessionTreeView, toggleSessionTreeFold, transitionSessionTreeKey, validateSessionTreeSummaryChoice, visibleSessionTreeRows } from "./sessionTreeModel";
+import { buildSessionTreeModel, initialSessionTreeFilter, initialSessionTreeSelection, nearestVisibleSessionTreeId, SESSION_TREE_DEFAULT_FILTER, sessionTreeView, toggleSessionTreeFold, transitionSessionTreeKey, validateSessionTreeSummaryChoice, visibleSessionTreeRows } from "./sessionTreeModel";
 
 describe("session tree hierarchy model", () => {
   it("builds a complete forest while normalizing orphans, cycles, self-links, and duplicate IDs", () => {
@@ -304,6 +304,34 @@ function snapshot(): SessionTreeSnapshot {
     activePathIds: [],
   };
 }
+
+describe("a tree opened on one entry", () => {
+  // u1 -> a1 (current), and u1 -> a2 -> u3 on another branch, with a tool result.
+  const model = buildSessionTreeModel({
+    nodes: [
+      { id: "u1", parentId: null, kind: "user", summary: "Plan it" },
+      { id: "a1", parentId: "u1", kind: "assistant", summary: "Plan A" },
+      { id: "a2", parentId: "u1", kind: "assistant", summary: "Plan B" },
+      { id: "u3", parentId: "a2", kind: "user", summary: "Go with B" },
+      { id: "t3", parentId: "u3", kind: "tool-result", summary: "ok" },
+    ],
+    activeLeafId: "a1", activePathIds: ["u1", "a1"],
+  });
+
+  it("selects the asked-for entry when the tree holds it, else the current entry", () => {
+    expect(initialSessionTreeSelection(model, "a2")).toBe("a2");
+    expect(initialSessionTreeSelection(model, "gone")).toBe("a1");
+    expect(initialSessionTreeSelection(model)).toBe("a1");
+  });
+
+  it("opens on the default lens for a user entry, and widens only as far as the entry needs", () => {
+    expect(initialSessionTreeFilter(model, "u3")).toBe(SESSION_TREE_DEFAULT_FILTER);
+    expect(initialSessionTreeFilter(model, "a2")).toBe("no-tools");
+    expect(initialSessionTreeFilter(model, "t3")).toBe("conversation");
+    expect(initialSessionTreeFilter(model, "gone")).toBe(SESSION_TREE_DEFAULT_FILTER);
+    expect(initialSessionTreeFilter(model)).toBe(SESSION_TREE_DEFAULT_FILTER);
+  });
+});
 
 function node(id: string, parentId: string | null): SessionTreeNode {
   return { id, parentId, kind: "assistant", summary: id };

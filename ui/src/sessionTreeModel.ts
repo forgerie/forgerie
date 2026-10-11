@@ -326,9 +326,22 @@ function retainsSessionTreeNode(node: SessionTreeNode, filter: SessionTreeFilter
   }
 }
 
-export function initialSessionTreeSelection(model: SessionTreeModel): string | undefined {
+/** The entry a fresh tree selects: the one asked for when the tree holds it, else the current entry, else the newest. */
+export function initialSessionTreeSelection(model: SessionTreeModel, requestedId?: string): string | undefined {
+  if (requestedId !== undefined && model.nodesById.has(requestedId)) return requestedId;
   if (model.activeLeafId !== null) return model.activeLeafId;
   return model.orderedIds.at(-1);
+}
+
+/**
+ * The lens a fresh tree opens on: the default, unless it hides the entry the
+ * tree was asked to select. Then the narrowest lens that shows it.
+ */
+export function initialSessionTreeFilter(model: SessionTreeModel, requestedId?: string): SessionTreeFilterMode {
+  if (requestedId === undefined || !model.nodesById.has(requestedId)) return SESSION_TREE_DEFAULT_FILTER;
+  const shows = (filter: SessionTreeFilterMode) => sessionTreeView(model, { foldedIds: new Set(), filter }).rows.some((row) => row.node.id === requestedId);
+  const narrowestFirst = [SESSION_TREE_DEFAULT_FILTER, ...SESSION_TREE_FILTER_OPTIONS.map((option) => option.mode).filter((mode) => mode !== SESSION_TREE_DEFAULT_FILTER && mode !== "labeled-only")];
+  return narrowestFirst.find(shows) ?? "all";
 }
 
 export function transitionSessionTreeKey(model: SessionTreeModel, state: SessionTreeKeyState, key: string): SessionTreeKeyTransition {

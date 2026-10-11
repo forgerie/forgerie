@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ChevronDownIcon, ChevronRightIcon, CopyIcon, CornerDownRightIcon, GitForkIcon, ListTreeIcon, ScrollTextIcon, SearchIcon, SquareIcon, XIcon } from "lucide-react";
 import { SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, type SessionTreeNode, type SessionTreeSnapshot, type SessionTreeSummaryChoice, type TreeOperation } from "../sessionTree";
 import {
-  buildSessionTreeModel, initialSessionTreeSelection, isSessionTreeBookkeeping, nearestVisibleSessionTreeId, SESSION_TREE_DEFAULT_FILTER,
+  buildSessionTreeModel, initialSessionTreeFilter, initialSessionTreeSelection, isSessionTreeBookkeeping, nearestVisibleSessionTreeId,
   SESSION_TREE_FILTER_OPTIONS, sessionTreeAbandonedPreviewIds, sessionTreeEntryReturnsToEditor, sessionTreeKindLabel, sessionTreeView,
   sessionTreeVisualDepth, toggleSessionTreeFold, transitionSessionTreeKey, validateSessionTreeSummaryChoice,
   type SessionTreeFilterMode, type SessionTreeRow,
@@ -18,6 +18,8 @@ export interface SessionTreeBinding {
   onFork: (entryId: string) => void;
   onAbort: () => void;
   onClose: () => void;
+  /** The entry the tree opens on, such as a search hit's passage. Its lens widens to show it. Read once, when the tree opens. */
+  initialSelectedId?: string | undefined;
 }
 
 /** Header control for `/tree`. Pi refuses the tree while the session works, so the button waits too. */
@@ -36,17 +38,17 @@ export function SessionTreeNavigator(props: SessionTreeBinding) {
   return createPortal(<Navigator {...props} />, document.body);
 }
 
-function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose }: SessionTreeBinding) {
+function Navigator({ tree, operation, onContinue, onFork, onAbort, onClose, initialSelectedId }: SessionTreeBinding) {
   const titleId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const focusInput = useRef<HTMLInputElement>(null);
   const model = useMemo(() => buildSessionTreeModel(tree), [tree]);
-  const [filter, setFilter] = useState<SessionTreeFilterMode>(SESSION_TREE_DEFAULT_FILTER);
+  const [filter, setFilter] = useState<SessionTreeFilterMode>(() => initialSessionTreeFilter(model, initialSelectedId));
   const [search, setSearch] = useState("");
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
   // The entry the reader means. A lens may hide it; widening the lens returns to it.
-  const [anchorId, setAnchorId] = useState(() => initialSessionTreeSelection(model));
+  const [anchorId, setAnchorId] = useState(() => initialSessionTreeSelection(model, initialSelectedId));
   const [summarize, setSummarize] = useState(false);
   const [focusText, setFocusText] = useState("");
   const [copied, setCopied] = useState<string>();

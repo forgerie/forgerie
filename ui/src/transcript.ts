@@ -49,6 +49,14 @@ export interface TranscriptMessage {
   childEntry?: ChildEntry;
   /** A workflow started, waits at a stop, or passed on the reader's decision. */
   workflowEntry?: WorkflowEntry;
+  /**
+   * The message's index in the `/messages` list it was read from. A search
+   * match names a message by it. A message first seen live has none until
+   * the next history read.
+   */
+  position?: number;
+  /** The thread marks this message, such as the search match the reader opened. */
+  marked?: boolean;
 }
 /** Compaction replaces earlier messages with a summary; a branch summary describes the branch the session left. */
 export type HistorySummaryKind = "compaction" | "branch";
@@ -283,7 +291,7 @@ export function fromHistory(history: readonly PiMessage[], isRunning = false): T
   history.forEach((raw, index) => {
     const parsed = raw.role === "toolResult" ? undefined : asMessage(raw, `history-${index}`);
     state = raw.role === "toolResult" ? finishResult(state, raw)
-      : parsed ? { ...state, messages: [...state.messages, reconcileTools(parsed, state.messages)] } : state;
+      : parsed ? { ...state, messages: [...state.messages, { ...reconcileTools(parsed, state.messages), position: index }] } : state;
   });
   // Only the current turn of a running session can still have open tools.
   const lastUser = state.messages.findLastIndex((message) => message.role === "user");
@@ -467,7 +475,38 @@ export type ProcessEventArtifact = { processEvent: ProcessEvent };
 export type ChildEntryArtifact = { childEntry: ChildEntry };
 /** UI data of a workflow's row, carried as the system message's custom metadata. */
 export type WorkflowEntryArtifact = { workflowEntry: WorkflowEntry };
+/** UI data of a marked message, carried in its custom metadata. A joined reply is marked when any of its messages is. */
+export type MarkArtifact = { marked: true };
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
+  const converted = convertUnmarked(message);
+  if (message.marked !== true) return converted;
+  const marked: MarkArtifact = { marked: true };
+  return { ...converted, metadata: { ...converted.metadata, custom: { ...converted.metadata?.custom, ...marked } } };
+}
+/**
+ * The messages with the one at `position` marked. The same array when no
+ * message is there, so nothing in the thread renders again for nothing.
+ */
+export function markPosition(messages: readonly TranscriptMessage[], position: number | undefined): readonly TranscriptMessage[] {
+  if (position === undefined || !messages.some((message) => message.position === position)) return messages;
+  return messages.map((message) => message.position === position ? { ...message, marked: true } : message);
+}
+/** Whether a message converts to an assistant reply, which joins the assistant messages next to it. */
+function joinsReply(message: TranscriptMessage): boolean {
+  return message.role === "assistant" && !message.pullNotice && !message.processEvent && !message.childEntry && !message.workflowEntry && !message.summary;
+}
+/**
+ * The thread's id for the message at `position`. Adjacent replies join into
+ * one thread message that keeps the first one's id (`useThreadMessages`).
+ */
+export function threadMessageIdAt(messages: readonly TranscriptMessage[], position: number | undefined): string | undefined {
+  if (position === undefined) return undefined;
+  let index = messages.findIndex((message) => message.position === position);
+  if (index < 0) return undefined;
+  if (joinsReply(messages[index]!)) while (index > 0 && joinsReply(messages[index - 1]!)) index -= 1;
+  return messages[index]!.id;
+}
+function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
   if (message.role === "shell") {
     const run = shellRunOf(message)!;
     return { id: message.id, role: "system", content: [{ type: "text", text: shellText(run) }],

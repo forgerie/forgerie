@@ -184,12 +184,18 @@ export function PickerToast({ toast, onUndo, onDismiss }: { toast: ActionMessage
  * in; selections, commands, and arrangement changes go out. Only open menus
  * live here.
  */
-export function Picker({ view, prefs, onPrefs, actions, shelves, filter }: {
+export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search, results, narrowed = false }: {
   view: PickerView; prefs: PickerPrefs; onPrefs: (prefs: PickerPrefs) => void; actions: PickerActions;
   /** Plugin shelves, drawn between the list and Backlog and Settings. */
   shelves?: ReactNode;
   /** Which projects the list shows. Without it, the list shows every project and the menu offers no filter. */
   filter?: PickerFilter | undefined;
+  /** A search box, drawn first under the header. */
+  search?: ReactNode;
+  /** Drawn in the list's place while set, such as what a search found. The list's own keys rest meanwhile. */
+  results?: ReactNode;
+  /** The sections hold only some sessions, such as those whose title matches, so the list makes no claim about the rest. */
+  narrowed?: boolean;
 }) {
   const [menu, setMenu] = useState<"board" | undefined>();
   const [rowMenu, setRowMenu] = useState<{ id: string; confirming: boolean } | undefined>();
@@ -216,13 +222,15 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter }: {
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.target instanceof HTMLElement && event.target.closest("input, textarea, [contenteditable]")) return;
     if (event.key === "Escape") { if (menu) setMenu(undefined); else actions.onClose?.(); return; }
-    if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") {
+    if ((event.key === "ContextMenu" || event.shiftKey && event.key === "F10") && results === undefined) {
       event.preventDefault();
       if (selectedRow) openRowMenu(selectedRow.session.id);
       return;
     }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const key = event.key.toLowerCase();
+    // Rows the reader cannot see are not for the keys to walk or command; arranging the list still works.
+    if (results !== undefined && key !== "n" && key !== "g" && key !== "a") return;
     if (key === "j" || key === "k" || event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const index = order.findIndex((row) => row.session.id === view.selectedId);
@@ -286,6 +294,7 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter }: {
         </> : null}
       </div> : null}
     </header>
+    {search ? <div className="picker-search">{search}</div> : null}
     {filterChosen ? <FilterChip icon={<FolderTreeIcon aria-hidden />} label={filterChosen.label} detail={filterChosen.detail}
       clear="Show all projects" onClear={() => filter?.onChoose("")} /> : null}
     {/* The homepage thread list opens with "New Thread"; here it starts a session. */}
@@ -295,14 +304,14 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter }: {
     {connection.type === "failed" && !empty ? <p className="picker-notice" data-tone="error" role="alert">{connection.message}<button onClick={actions.onRetry}>Retry now</button></p> : null}
     {/* The room the list shares with plugin shelves. A shelf measures it to decide how much of it to take. */}
     <div className="picker-room">
-    {connection.type === "loading" && empty ? <div className="picker-list" role="status" aria-label="Loading sessions">
-      {[38, 90, 70, 38, 90, 70].map((width, index) => <span key={index} className="picker-skeleton" style={{ inlineSize: `${String(width)}%` }} />)}
+    {results !== undefined ? results : connection.type === "loading" && empty ? <div className="picker-list" role="status" aria-label="Loading sessions">
+      {[38, 90, 70, 38, 90, 70].map((width, index) => <span key={index} className="picker-skeleton" style={{ "--picker-skeleton-width": `${String(width)}%` }} />)}
     </div> : connection.type === "failed" && empty ? <div className="picker-state" role="alert">
       <strong>Could not load sessions</strong><span>{connection.message}</span><button onClick={actions.onRetry}>Retry now</button>
     </div> : empty ? <div className="picker-state"><strong>No sessions yet</strong><span>Start one with New session, and it appears here.</span></div>
     : <div className="picker-list" role="listbox" aria-label="Sessions" tabIndex={0} ref={listRef}
         aria-activedescendant={view.selectedId ? `picker-row-${view.selectedId}` : undefined}>
-      {view.sections.every((section) => section.kind === "band" || section.kind === "archived" || section.kind === "project")
+      {!narrowed && view.sections.every((section) => section.kind === "band" || section.kind === "archived" || section.kind === "project")
         && prefs.grouping === "state" ? <p className="picker-clear">Nothing is waiting for you</p> : null}
       {view.sections.map((section) => <div key={section.key} className="picker-group" data-kind={section.kind}>
           <button className="picker-group-header" aria-expanded={!collapsed.has(section.key)} onClick={() => toggle(section.key)}>

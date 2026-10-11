@@ -9,6 +9,7 @@ import { writeClipboardText } from "./clipboard";
 import { browserTransport } from "./sessionStore";
 import type { PickerActions, PickerView } from "./ui/Picker";
 import { archiveNote } from "./worktrees/worktreeModel";
+import { titleMatches } from "./search/searchModel";
 
 const MINUTE = 60_000;
 const NONE: readonly StartingSession[] = [];
@@ -18,7 +19,11 @@ const storage = () => { try { return window.localStorage; } catch { return undef
 /** A session this browser is starting, before Pi has saved it. */
 export interface StartingSession { id: string; cwd: string; title: string; startedAt: string; sessionId?: string | undefined }
 
-export function usePicker(selectedId: string | undefined, options: { onDeleted?: (id: string) => void; starting?: readonly StartingSession[]; projectScope?: readonly string[] | undefined; projectCatalog?: readonly PickerProject[] | undefined } = {}) {
+/**
+ * `titleFilter` narrows the list to sessions whose title holds it, archived ones included,
+ * within the project scope. A short search query does this; a long one searches messages instead.
+ */
+export function usePicker(selectedId: string | undefined, options: { onDeleted?: (id: string) => void; starting?: readonly StartingSession[]; projectScope?: readonly string[] | undefined; projectCatalog?: readonly PickerProject[] | undefined; titleFilter?: string | undefined } = {}) {
   const starting = options.starting ?? NONE;
   const [store] = useState(() => createCatalogStore(browserTransport));
   const onDeleted = useRef(options.onDeleted);
@@ -47,15 +52,21 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
     });
   }, [state.sessions, state.statuses, state.activities, state.unread, starting, locate, now]);
   const scopedRows = useMemo(() => options.projectScope === undefined ? rows : rows.filter((row) => options.projectScope?.includes(row.location.projectKey)), [rows, options.projectScope]);
-  const view: PickerView = useMemo(() => ({
-    connection: state.connection,
-    sections: boardSections(scopedRows, { grouping: prefs.grouping, showArchived: prefs.showArchived, allPinned: prefs.allPinned, selectedId, now }),
-    machines: 1,
-    selectedId,
-    archivedCount: scopedRows.filter((row) => row.state === "archived").length,
-    toast: actionState.toast,
-    pending: actionState.pending,
-  }), [state.connection, scopedRows, prefs.grouping, prefs.showArchived, prefs.allPinned, now, selectedId, actionState]);
+  const titleFilter = options.titleFilter?.trim() ? options.titleFilter : undefined;
+  const view: PickerView = useMemo(() => {
+    const shown = titleFilter === undefined ? scopedRows : scopedRows.filter((row) => titleMatches(row.session.name, titleFilter));
+    return {
+      connection: state.connection,
+      // A title filter looks through archived sessions too, and through the pinned cap.
+      sections: boardSections(shown, { grouping: prefs.grouping, showArchived: prefs.showArchived || titleFilter !== undefined,
+        allPinned: prefs.allPinned || titleFilter !== undefined, selectedId, now }),
+      machines: 1,
+      selectedId,
+      archivedCount: scopedRows.filter((row) => row.state === "archived").length,
+      toast: actionState.toast,
+      pending: actionState.pending,
+    };
+  }, [state.connection, scopedRows, titleFilter, prefs.grouping, prefs.showArchived, prefs.allPinned, now, selectedId, actionState]);
   /** Where the newest unarchived session lives, for a new session's default folder. */
   const recent = useMemo(() => state.sessions.filter((session) => !session.archived).map((session) => ({ cwd: session.cwd, modified: session.modified })), [state.sessions]);
   const find = useCallback((id: string) => {
@@ -110,7 +121,9 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
     const row = rows.find((candidate) => candidate.session.id === id);
     return row ? { state: row.state, time: row.time, ...(row.session.name ? { name: row.session.name } : {}) } : undefined;
   }, [rows]);
-  return { view, prefs, setPrefs, find, look, recent, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext,
+  /** Where a folder lives, in the list's words: its project, and its branch off the main checkout. */
+  const where = useCallback((cwd: string) => { const location = locate(cwd); return location.branch ? `${location.project} · ${location.branch}` : location.project; }, [locate]);
+  return { view, prefs, setPrefs, find, look, recent, where, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext,
     onUnread: store.onUnread, onStartup: store.onStartup, onWorktree: store.onWorktree };
 }
 

@@ -12,7 +12,9 @@ import { useThreadMessages } from "./useThreadMessages";
 import { foldProcessEvents } from "./processes/processEvent";
 import { loadProcessOutput } from "./processes/processApi";
 import { ProcessEventView } from "./processes/ProcessEventView";
-import type { ChildEntryArtifact, ProcessEventArtifact, WorkflowEntryArtifact } from "./transcript";
+import { markPosition, threadMessageIdAt, type ChildEntryArtifact, type ProcessEventArtifact, type WorkflowEntryArtifact } from "./transcript";
+import type { FoundBinding, MatchBarView } from "./search/found";
+import { MatchBar } from "./search/MatchBar";
 import type { SystemArtifactView } from "./ui/Messages";
 import { Thread } from "./ui/Thread";
 import { SessionFrame } from "./ui/SessionFrame";
@@ -80,7 +82,9 @@ const pullRequests = createPullRequestApi(browserTransport.request);
 const NO_LINKS: readonly PullLink[] = [];
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, worktrees, onNewSession, relatedWork, resourceLens }: {
+export function ForgerieSession({ id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, worktrees, onNewSession, relatedWork, resourceLens, found }: {
+  /** The search hit the reader opened in this session: a message to mark and step from, or an off-branch entry for the history tree. */
+  found?: FoundBinding | undefined;
   relatedWork?: RelatedWorkRenderer | undefined;
   /** The session's Skills and prompts sheet, opened from its header menu. */
   resourceLens?: ResourceLensRenderer | undefined;
@@ -230,7 +234,29 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const setup = worktree?.owned ? visibleSetup(worktree.setup,
     state.connection.type !== "ready" ? "loading" : state.transcript.messages.length > 0 || state.transcript.isRunning ? "live" : "empty") : undefined;
   const folded = useMemo(() => foldChildEntries(foldProcessEvents(state.transcript.messages)), [state.transcript.messages]);
-  const messages = useThreadMessages(folded, state.transcript.isRunning);
+  // A search hit on the branch: the thread marks the match on show and brings it into view.
+  const markAt = found?.type === "message" && found.matches.type === "ready" ? found.matches.positions[found.matches.current] : undefined;
+  const shown = useMemo(() => markPosition(folded, markAt), [folded, markAt]);
+  const messages = useThreadMessages(shown, state.transcript.isRunning);
+  const revealId = useMemo(() => threadMessageIdAt(shown, markAt), [shown, markAt]);
+  const reveal = found && markAt !== undefined && revealId !== undefined ? { messageId: revealId, key: `${String(found.key)}:${String(markAt)}` } : undefined;
+  // A search hit off the branch: the history tree opens on it once the session is idle. The branch stays as it is.
+  const [treeFor, setTreeFor] = useState<{ key: number; entryId: string }>();
+  const treeOpen = state.tree.type === "open";
+  useEffect(() => {
+    if (found?.type !== "entry" || !treeAvailable || treeFor?.key === found.key) return;
+    setTreeFor({ key: found.key, entryId: found.entryId });
+    void store.openTree().catch(() => { /* The store exposes the error. */ });
+  }, [found, treeAvailable, treeFor, store]);
+  useEffect(() => {
+    if (treeOpen && found?.type === "entry" && treeFor?.key === found.key) found.onOpened();
+    // A tree the reader opens later starts where it always does.
+    else if (!treeOpen && treeFor && found?.key !== treeFor.key) setTreeFor(undefined);
+  }, [treeOpen, found, treeFor]);
+  const matchBar: MatchBarView | undefined = found?.type === "message"
+    ? found.matches.type === "ready" ? { type: "ready", current: found.matches.current, total: found.matches.positions.length,
+      missing: connected && revealId === undefined } : found.matches
+    : found?.type === "entry" && treeFor?.key !== found.key && connected && !treeAvailable ? { type: readOnly ? "readOnly" : "waiting" } : undefined;
   const childrenAvailable = children.available === true;
   const openChildByName = useCallback((name: string) => {
     const child = childAgents.getSnapshot().children.find((candidate) => candidate.name === name);
@@ -364,7 +390,10 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
       </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
+        reveal={reveal}
         beforeComposer={<>
+          {found && matchBar && <MatchBar view={matchBar} onClose={found.onClose}
+            onStep={found.type === "message" ? found.onStep : () => undefined} onRetry={found.type === "message" ? found.onRetry : () => undefined} />}
           {sendError && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{sendError}</p></Consequence>}
           {flows.error !== undefined && workflowSheet === undefined && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{flows.error}</p></Consequence>}
           {waiting.length > 0 && <PinnedDock label={waitingLabel(waiting.length)}>{waiting.map(renderWaiting)}</PinnedDock>}
@@ -397,7 +426,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           onClose: store.dismissCommand,
         } : undefined} />
       </SessionDoorsProvider>
-      {state.tree.type === "open" && <SessionTreeNavigator tree={state.tree.tree} operation={state.tree.operation}
+      {state.tree.type === "open" && <SessionTreeNavigator tree={state.tree.tree} operation={state.tree.operation} initialSelectedId={treeFor?.entryId}
         onContinue={(targetId, summary) => { void store.continueTree(targetId, summary).then(applyTree); }}
         onFork={(entryId) => { void store.forkTree(entryId).then(applyTree); }}
         onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}

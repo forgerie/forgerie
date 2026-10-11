@@ -226,6 +226,16 @@ button:disabled { cursor: default; opacity: 0.4; }
 .message-user { display: flex; flex-direction: column; align-items: flex-end; }
 .user-bubble { max-inline-size: 80%; border-radius: var(--radius-thread); background: var(--muted); padding: var(--space-2) var(--space-4); white-space: pre-wrap; }
 .user-bubble p, .message-system p { margin: 0; }
+/* The message a search hit opened at: a ring on the reader's bubble, a live rail in the
+   margin beside a reply, and a wash that fades as the thread lands on it. */
+.message[data-marked] { position: relative; }
+.message-assistant[data-marked]::before { content: ""; position: absolute; inset-block: 0; inset-inline-start: calc(-1 * var(--space-3));
+  inline-size: var(--lane-marker); border-radius: var(--radius-pill); background: var(--live); }
+.message-user[data-marked] .user-bubble { box-shadow: 0 0 0 var(--lane-marker) var(--live-edge); }
+.message[data-marked]::after { content: ""; position: absolute; inset: calc(-1 * var(--space-2)); border-radius: var(--radius-surface);
+  background: var(--live-wash); opacity: 0; pointer-events: none; animation: message-marked 1.8s ease-out; }
+@keyframes message-marked { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .message[data-marked]::after { animation: none; } }
 /* A skill invocation rides on the user's message like an attachment (Tana's
    skill chip): the command stays in view and the skill text opens below it
    at the column's full width. The typed argument stays in the bubble. */
@@ -830,12 +840,15 @@ summary.trace-line:hover { color: var(--foreground); }
 .picker-notice > span { font-family: var(--code-font); color: var(--live); }
 .picker-notice[data-tone="error"] { color: var(--destructive); }
 .picker-notice button, .picker-state button { margin-inline-start: auto; padding: 0; border: 0; background: none; color: inherit; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
-/* The list and any plugin shelves share this room; the list takes what the shelves leave. */
-.picker-room { flex: 1; min-block-size: 0; display: flex; flex-direction: column; }
+/* The search box sits inset like the filter chip, so both read as the list's own state. */
+.picker-search { flex: none; margin: var(--space-2) var(--space-2) 0; }
+/* The list and any plugin shelves share this room; the list takes what the shelves leave.
+   It is a size container, so a search hit can give up passage lines when the room is short. */
+.picker-room { flex: 1; min-block-size: 0; display: flex; flex-direction: column; container-type: size; }
 /* Sidebar body: p-3; rows inset by px-2 inside it. */
 .picker-list { flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1) var(--space-3) var(--space-3); outline: none; }
 .picker-list:focus-visible { box-shadow: inset 0 0 0 2px var(--line-focus); }
-.picker-skeleton { display: block; block-size: 0.875rem; margin: 1.125rem var(--space-2) 0; border-radius: var(--radius-document); background: var(--muted); animation: skeleton-pulse 2s ease-in-out infinite; }
+.picker-skeleton { display: block; inline-size: var(--picker-skeleton-width, 70%); block-size: 0.875rem; margin: 1.125rem var(--space-2) 0; border-radius: var(--radius-document); background: var(--muted); animation: skeleton-pulse 2s ease-in-out infinite; }
 .picker-state { flex: 1; display: grid; place-content: center; gap: var(--space-2); padding: var(--space-6) var(--space-4); text-align: center; color: var(--muted-foreground); font-size: var(--small-text); overflow-wrap: anywhere; }
 .picker-state strong { color: var(--foreground); font-weight: 500; }
 .picker-state button { margin: 0; justify-self: center; }

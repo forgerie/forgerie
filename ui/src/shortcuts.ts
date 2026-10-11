@@ -14,3 +14,14 @@ function editable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return target.isContentEditable || target.closest("input, textarea, select, [contenteditable]") !== null;
 }
+
+/**
+ * Session search: Ctrl+K (Cmd+K on a Mac) reaches the search box from
+ * anywhere, a text field included, and `/` does from anywhere but a text
+ * field, where it is a character (and the composer's command trigger).
+ */
+export function searchShortcut(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "target" | "isComposing">): boolean {
+  if (event.isComposing || event.altKey) return false;
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "k") return true;
+  return event.key === "/" && !event.ctrlKey && !event.metaKey && !editable(event.target);
+}

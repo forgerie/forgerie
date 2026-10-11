@@ -82,8 +82,12 @@ function stepRow(step: ToolStepView, { text: stepText, thought: stepThought }: S
 // The invocation renders apart from the bubble, which keeps only the typed argument.
 const invocationParts = { Text: () => null, data: { by_name: { skill: SkillInvocationRecord } } };
 
+/** Whether the binding marked this message, such as the search match the reader opened. */
+const isMarked = (custom: Record<string, unknown> | undefined) => custom?.["marked"] === true;
+
 export function UserMessage() {
-  return <MessagePrimitive.Root className="message message-user" data-role="user" aria-label="Your message">
+  const marked = useAuiState((s) => isMarked(s.message.metadata.custom));
+  return <MessagePrimitive.Root className="message message-user" data-role="user" aria-label="Your message" data-marked={marked || undefined}>
     <UserMessageAttachments />
     <MessagePrimitive.Parts components={invocationParts} />
     <AuiIf condition={(s) => s.message.content.some((part) => part.type === "text" && part.text.length > 0)}>
@@ -105,7 +109,8 @@ export function AssistantMessage({ fileLinks }: { fileLinks?: FileLinks | undefi
   const settled = useAuiState((s) => s.message.status?.type !== "running");
   const boundary = steps.boundary;
   const closing = settled && boundary?.answered ? boundary : undefined;
-  return <MessagePrimitive.Root className="message message-assistant" data-role="assistant" aria-label="Assistant reply">
+  const marked = useAuiState((s) => isMarked(s.message.metadata.custom));
+  return <MessagePrimitive.Root className="message message-assistant" data-role="assistant" aria-label="Assistant reply" data-marked={marked || undefined}>
     <div className="message-text">
       <MessagePrimitive.GroupedParts groupBy={groupBy}>
         {({ part, children }) => {
