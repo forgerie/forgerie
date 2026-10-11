@@ -219,7 +219,10 @@ export class DurableAgentSession implements PiAgentSession {
     const projectContext = this.resourceLoader.getAgentsFiles().agentsFiles.map((file) => `## ${file.path}\n\n${file.content}`).join("\n\n");
     const ref = { id: this.sessionId, cwd: this.options.services.cwd };
     this.childWorktrees = host.worktrees === undefined ? undefined : new DurableChildWorktrees(host.worktrees, ref);
-    const extensions = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext,
+    // Children resolve their agent files' skills against the skills this session sees.
+    const sessionSkills = this.resourceLoader.getSkills().skills.filter((skill) => !skill.disableModelInvocation)
+      .map((skill) => ({ name: skill.name, description: skill.description, path: skill.filePath }));
+    const extensions = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext, sessionSkills,
       ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
       ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
     this.registry.install(workflowExtension());

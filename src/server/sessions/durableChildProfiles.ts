@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /** What a Durable child runs with, read from one agent file. */
 export interface ChildAgentProfile {
@@ -15,6 +15,14 @@ export interface ChildAgentProfile {
   prompt: string;
   /** Whether the child also gets the project's AGENTS.md files. Default true. */
   inheritProjectContext: boolean;
+  /** The folder the file is in; `skillPaths` are relative to it. */
+  dir: string;
+  /** Skills the file names, by name. */
+  skills: readonly string[];
+  /** Extra skill folders, relative to `dir`. */
+  skillPaths: readonly string[];
+  /** Whether the child sees every skill the session sees. Only an explicit `inheritSkills: true` turns it on. */
+  inheritSkills: boolean;
 }
 
 const THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
@@ -75,7 +83,8 @@ export function parseChildAgentFile(text: string | Buffer, path = "agent.md"): C
   const suffix = modelSpec === undefined ? undefined : /^(.*):(off|minimal|low|medium|high|xhigh)$/.exec(modelSpec);
   if (suffix !== null && suffix !== undefined) { modelSpec = suffix[1]; thinkingLevel = suffix[2]; }
   const slash = modelSpec?.indexOf("/") ?? -1;
-  const tools = fields.get("tools")?.split(",").map((tool) => tool.trim()).filter((tool) => tool !== "");
+  const list = (key: string) => fields.get(key)?.split(",").map((item) => item.trim()).filter((item) => item !== "");
+  const tools = list("tools");
   return {
     name,
     source: { path, sha256: createHash("sha256").update(text).digest("hex") },
@@ -85,5 +94,9 @@ export function parseChildAgentFile(text: string | Buffer, path = "agent.md"): C
     ...(tools === undefined || tools.length === 0 ? {} : { tools }),
     prompt: normalized.slice(end + 4).trim(),
     inheritProjectContext: fields.get("inheritProjectContext") !== "false",
+    dir: dirname(path),
+    skills: [...(list("skills") ?? []), ...(list("skill") ?? [])],
+    skillPaths: list("skillPath") ?? [],
+    inheritSkills: fields.get("inheritSkills") === "true",
   };
 }

@@ -19,6 +19,8 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
 import type { ChildWorktreeSummary, WorktreeActionResult, WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
 import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
+import { planChildRuntime, runtimeGaps, type ChildRuntimePlan, type ChildSkill } from "./durableChildRuntime.js";
+import { readsImages, watchdogDiffTool } from "./durableChildTools.js";
 import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild, workflowChildRefusal, workflowWorkerModel } from "./durableWorkflowRuns.js";
 
 export const CHILD_TOOL_NAME = "child_agent";
@@ -143,17 +145,13 @@ const askHumanTool = defineTool({
   },
 });
 
-/** Agent-file tool names mapped to Durable's coding tools. Search tools need a shell here. */
-const CODING_TOOL_FOR: Record<string, string> = { read: "read", write: "write", edit: "edit", bash: "bash", grep: "bash", find: "bash", ls: "bash" };
 const codingTools: readonly ToolRegistration[] = CodingTools.tools ?? [];
+const readTool = codingTools.find((tool) => tool.name === "read");
 
-function childToolsFor(profile: ChildAgentProfile | undefined, extra: readonly ToolRegistration[]): ToolRegistration[] {
-  const wanted = profile?.tools === undefined ? undefined : new Set(profile.tools.flatMap((tool) => {
-    const mapped = CODING_TOOL_FOR[tool];
-    return mapped === undefined ? [tool] : [mapped];
-  }));
-  const coding = codingTools.filter((tool) => wanted === undefined || wanted.has(tool.name));
-  return [askHumanTool, ...coding, ...extra.filter((tool) => wanted === undefined || wanted.has(tool.name))];
+/** The tools a child gets: every child tool, or the ones its agent file names as `planChildRuntime` translates them. */
+function childToolsFor(plan: ChildRuntimePlan, extra: readonly ToolRegistration[]): ToolRegistration[] {
+  const all = [askHumanTool, ...codingTools, watchdogDiffTool, ...extra];
+  return plan.tools === undefined ? all : all.filter((tool) => plan.tools?.includes(tool.name) === true);
 }
 
 export interface DurableChildExtensions {
@@ -170,6 +168,8 @@ export interface DurableChildExtensionOptions {
   agents?: readonly Pick<ChildAgentProfile, "name" | "description">[];
   /** The project's AGENTS.md text, for children whose agent file inherits project context. */
   projectContext?: string;
+  /** Skills the parent session sees; an agent file's `skills` resolve against them. */
+  sessionSkills?: readonly ChildSkill[];
   /** Extra tools every child may use. Tests pass a deterministic one. */
   extraTools?: readonly ToolRegistration[];
   worktrees?: DurableChildWorktrees;
@@ -186,7 +186,8 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       hook(GenerationTask, { beforeRequest: async () => { await options.flushRunRecords?.(); return undefined; } }),
       hook(CompactionTask, { beforeCompact: async () => { await options.flushRunRecords?.(); return undefined; } }),
     ] }),
-    tools: [askHumanTool, ...codingTools, ...extraTools],
+    tools: [askHumanTool, ...codingTools, watchdogDiffTool, ...extraTools],
+    ...(readTool === undefined ? {} : { wraps: [readsImages(readTool)] }),
     sections: [section("environment", (input) => input.env === undefined ? undefined : `Working directory: ${input.env.cwd}`)],
   });
   const agentList = (options.agents ?? []).map((agent) => `- ${agent.name}: ${agent.description}`).join("\n");
@@ -234,6 +235,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       if (action === "spawn" && args.agent !== undefined && profile === undefined) {
         return { content: [{ type: "text" as const, text: `No agent named ${args.agent}.${agentList === "" ? "" : ` Choose one of:\n${agentList}`}` }], isError: true };
       }
+      const runtime = action === "spawn" ? planChildRuntime(profile, extraTools.map((tool) => tool.name), options.sessionSkills ?? []) : undefined;
       const checkout = action === "spawn" && args.isolation === "worktree"
         ? await requireWorktrees(options.worktrees).prepare(String(api.taskId)) : undefined;
       const result = await api.commit(async (tx) => {
@@ -252,10 +254,10 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
           await configure(tx, child.id, {
             ...(checkout === undefined ? {} : { cwd: checkout.path }),
             extensions: [ChildTools],
-            tools: childToolsFor(profile, extraTools),
+            tools: childToolsFor(runtime ?? planChildRuntime(profile, extraTools.map((tool) => tool.name), []), extraTools),
             ...(chosenModel === undefined ? {} : { model: chosenModel }),
             ...(chosenThinking === undefined ? {} : { thinkingLevel: chosenThinking }),
-            instructions: `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked.${project}`,
+            instructions: `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked.${runtime === undefined || runtime.section === "" ? "" : `\n\n${runtime.section}`}${project}`,
           });
           state.agents[name] = { conversationId: child.id, reported: [], agent: profile?.name ?? null, createdAt: Date.now(),
             ...(profile === undefined ? {} : { agentFile: profile.source }),
@@ -266,7 +268,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
         state.reporters[String(api.taskId)] = reporter;
         await associateWorkflowChild(tx, api.conversationId, agent.conversationId, reporter, name);
-        return action === "send" ? `Sent to ${name}.` : `Started ${name}${profile === undefined ? "" : ` (${profile.name})`}.`;
+        return action === "send" ? `Sent to ${name}.` : `Started ${name}${profile === undefined ? "" : ` (${profile.name})`}.${runtime === undefined ? "" : runtimeGaps(runtime)}`;
       }, context);
       const current = (await api.snapshot(Children, api.conversationId, context))?.agents[name];
       return { content: [{ type: "text" as const, text: result }], ...(current === undefined ? {} : { details: { name, conversationId: Number(current.conversationId) } }) };

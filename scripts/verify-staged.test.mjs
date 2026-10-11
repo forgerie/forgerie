@@ -94,6 +94,7 @@ describe("staged validation planning", () => {
           "src/client/src/components/ChatView.ts",
         ],
       },
+      ui: false,
     });
   });
 
@@ -140,6 +141,13 @@ describe("staged validation planning", () => {
       mode: "full",
       files: [],
     });
+  });
+
+  it("adds the browser app's Knip analysis when a ui file is staged", () => {
+    const plan = createValidationPlan(["ui/src/workflows/workflowsModel.ts"], { pathExists: () => true });
+    expect(createValidationSteps(plan).map((step) => step.npmArgs).slice(0, 3)).toEqual([["run", "typecheck:cached"], ["run", "knip"], ["run", "knip:ui"]]);
+    const server = createValidationPlan(["src/server/index.ts"], { pathExists: () => true });
+    expect(createValidationSteps(server).map((step) => step.npmArgs)).not.toContainEqual(["run", "knip:ui"]);
   });
 
   it("always includes cached typechecking and Knip before scoped checks", () => {

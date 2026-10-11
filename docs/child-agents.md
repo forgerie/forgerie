@@ -30,9 +30,20 @@ Esc in the parent does not stop its children.
 
 `child_agent` may name an agent file with `agent`. Forgerie reads the same files as pi-subagents, in this order: the project's `.pi/agents/`, the profile's `agents/`, then the bundled pi-subagents agents. The first file with the name wins.
 
-Forgerie reads these frontmatter keys: `name`, `description`, `model` (with an optional `:thinking` suffix), `thinking`, `tools`, `inheritProjectContext`, and `disabled`. A file that lists `fallbackModels` is skipped. Other keys are ignored.
+Forgerie reads these frontmatter keys: `name`, `description`, `model` (with an optional `:thinking` suffix), `thinking`, `tools`, `skills`, `skillPath`, `inheritSkills`, `inheritProjectContext`, and `disabled`. A file that lists `fallbackModels` is skipped. Other keys are ignored.
 
-A child gets Durable's `read`, `write`, `edit`, and `bash` tools, plus `ask_human`. `tools` narrows them: `grep`, `find`, and `ls` map to `bash`. A child cannot start children of its own.
+Agent files are written for pi-subagents. `src/server/sessions/durableChildRuntime.ts` translates each one, in one place, and never drops a capability silently:
+
+| Agent file names | A Durable child gets |
+| --- | --- |
+| `read`, `write`, `edit`, `bash` | Durable's coding tools. `read` also returns PNG, JPEG, GIF, and WebP files as images, up to 3.75 MB. |
+| `grep`, `find`, `ls` | `bash`. |
+| `contact_supervisor` | `ask_human`, which asks the user in the parent's chat. Every child has it. |
+| `watchdog_diff` | Forgerie's read-only `watchdog_diff`. Without `range` it shows uncommitted changes against `HEAD` plus untracked paths, as in pi-subagents. With `range` it shows a committed range's commits and diff. `cwd` picks another repository or worktree, and `offset` pages through output longer than 60,000 characters. |
+| `skills` | A list of those skills' files in the child's instructions. `skillPath` folders, relative to the agent file, come first, then the skills the parent session sees. `inheritSkills: true` lists every session skill. |
+| Anything else | Nothing. The child's instructions name it under "This runtime", and the parent's spawn result says `Not available to it here: …`. |
+
+Without `tools`, a child gets every tool above. A child cannot start children of its own.
 
 ## Restarts
 

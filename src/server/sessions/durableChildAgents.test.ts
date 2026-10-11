@@ -27,6 +27,8 @@ const git = async (cwd: string, ...args: string[]) => (await execute("git", ["-C
 interface Attempt { conv: number; step: number; phase: "start" | "end" }
 const attempts: Attempt[] = [];
 const systemSeen: string[] = [];
+/** Image parts a child's model received in tool results. */
+const imagesSeen: string[] = [];
 
 const work = defineTool({
   name: "work",
@@ -53,8 +55,11 @@ const route: FauxResponseFactory = (context) => {
   const said = text(last?.content);
   const call = (name: string, args: Record<string, string | number>) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
   const answer = (value: string): AssistantMessage => fauxAssistantMessage([fauxText(value)]);
-  if (said.includes("PROFILE")) systemSeen.push(JSON.stringify(context));
+  // A child whose agent file carries a PROFILE marker: keep what its model was sent.
+  const seen = JSON.stringify(context);
+  if (said.includes("PROFILE") || seen.includes("PROFILE-")) systemSeen.push(seen);
   if (last?.role === "toolResult") {
+    for (const part of Array.isArray(last.content) ? last.content : []) if (part.type === "image") imagesSeen.push(part.mimeType);
     if (said.startsWith("Started") || said.startsWith("Sent")) return answer(`OK. ${said}`);
     const step = /work step (\d+)\/(\d+) done/.exec(said);
     if (step !== null) return Number(step[1]) < Number(step[2]) ? call("work", { step: Number(step[1]) + 1, of: Number(step[2]) }) : answer(`All ${step[2] ?? ""} steps done.`);
@@ -74,6 +79,10 @@ const route: FauxResponseFactory = (context) => {
     ...(spawn[2] === undefined ? {} : { agent: spawn[2] }), ...(spawn[3] === undefined ? {} : { isolation: "worktree" }) });
   const steps = /run work (\d+) times/.exec(said);
   if (steps !== null) return call("work", { step: 1, of: Number(steps[1]) });
+  const diff = /^DIFF (\S+)$/.exec(said);
+  if (diff !== null) return call("watchdog_diff", { range: diff[1] ?? "" });
+  const image = /^IMAGE (\S+)$/.exec(said);
+  if (image !== null) return call("read", { path: image[1] ?? "" });
   const write = /WRITE (\S+) (.*)$/.exec(said);
   if (write !== null) return call("write", { path: write[1] ?? "", content: write[2] ?? "" });
   if (said.includes("ASK")) return call("ask_human", { question: "Which colour should the button be?" });
@@ -134,6 +143,7 @@ const ended = (conv: number) => attempts.filter((a) => a.conv === conv && a.phas
 beforeEach(async () => {
   attempts.length = 0;
   systemSeen.length = 0;
+  imagesSeen.length = 0;
   worktrees = undefined;
   recordErrors.length = 0;
   directory = await mkdtemp(join(tmpdir(), "forgerie-durable-children-"));
@@ -289,6 +299,38 @@ describe("Durable-native child agents in a Forgerie session", () => {
     await service.prompt(ref, "Start a child named ghost as nobody: hello");
     await sleep(300);
     expect((await service.durableChildren(ref)).map((c) => c.name)).toEqual(["looker"]);
+  }, 30_000);
+
+  it("runs a pi-subagents reviewer file with a committed-range diff, image reads, and the gaps reported to the parent", async () => {
+    await git(directory, "init", "-b", "main");
+    await git(directory, "config", "user.email", "test@example.invalid");
+    await git(directory, "config", "user.name", "Test");
+    await writeFile(join(directory, "base.txt"), "base\n");
+    await git(directory, "add", "base.txt");
+    await git(directory, "commit", "-m", "base");
+    await writeFile(join(directory, "base.txt"), "base\nRANGE-CHANGE\n");
+    await git(directory, "commit", "-am", "Change in range");
+    // A one-pixel PNG.
+    await writeFile(join(directory, "shot.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
+    await mkdir(join(directory, ".pi", "agents"), { recursive: true });
+    await writeFile(join(directory, ".pi", "agents", "checker.md"), "---\nname: checker\ndescription: Reviews\ntools: read, grep, watchdog_diff, contact_supervisor, web_search\n---\nDo not use shell commands. PROFILE-CHECKER\n");
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start a child named differ as checker: DIFF main~1..main");
+    await until("differ report", async () => (await reports(ref, "differ")).length === 1);
+    const report = text((await reports(ref, "differ"))[0]?.content);
+    expect(report).toContain("Change in range");
+    expect(report).toContain("+RANGE-CHANGE");
+    const spawned = (await transcript(ref)).find((m) => m.role === "toolResult" && text(m.content).startsWith("Started differ"));
+    expect(text(spawned?.content)).toBe("Started differ (checker). Not available to it here: tools web_search.");
+    const instructions = systemSeen.find((request) => request.includes("PROFILE-CHECKER")) ?? "";
+    expect(instructions).toContain("## This runtime");
+    expect(instructions).toContain("contact_supervisor is ask_human here");
+    expect(instructions).toContain("\"name\":\"watchdog_diff\"");
+    expect(instructions).not.toContain("\"name\":\"write\"");
+    await service.prompt(ref, "Start a child named looker as checker: IMAGE shot.png");
+    await until("looker report", async () => (await reports(ref, "looker")).length === 1);
+    expect(imagesSeen).toEqual(["image/png"]);
+    expect(text((await reports(ref, "looker"))[0]?.content)).toContain("shot.png: image/png");
   }, 30_000);
 
   it("stops a child without a parent turn, and Esc in the parent does not reach a child", async () => {

@@ -35,7 +35,9 @@ export function createValidationPlan(stagedPaths, options = {}) {
     ? { mode: "full", files: [] }
     : scopedValidation(paths.filter((path) => isLintablePath(path) && pathExists(path)), "scoped");
 
-  return { paths, lint, tests: createTestPlan(paths, { pathExists }) };
+  // The browser app has its own Knip configuration; the root analysis does not see its unused exports.
+  const ui = paths.some((path) => path.startsWith("ui/"));
+  return { paths, lint, tests: createTestPlan(paths, { pathExists }), ui };
 }
 
 export function createValidationPlanForChanges(changes) {
@@ -72,8 +74,11 @@ export function createStagedSnapshot(options = {}) {
       stdio: ["ignore", "ignore", "inherit"],
     });
     const nodeModulesPath = join(cwd, "node_modules");
-    if (existsSync(nodeModulesPath)) {
-      symlinkSync(nodeModulesPath, join(snapshotRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+    for (const modules of ["node_modules", join("ui", "node_modules")]) {
+      const source = join(cwd, modules);
+      if (existsSync(source) && existsSync(join(snapshotRoot, modules, ".."))) {
+        symlinkSync(source, join(snapshotRoot, modules), process.platform === "win32" ? "junction" : "dir");
+      }
     }
     return snapshotRoot;
   } catch (error) {
@@ -93,6 +98,7 @@ export function createValidationSteps(plan) {
       npmArgs: ["run", "knip"],
     },
   ];
+  if (plan.ui === true) steps.push({ label: "browser app Knip analysis", npmArgs: ["run", "knip:ui"] });
 
   if (plan.lint.mode === "full") {
     steps.push({ label: "full ESLint validation (configuration changed)", npmArgs: ["run", "lint"] });
