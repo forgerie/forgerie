@@ -99,4 +99,3 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
     dispose() { disposed = true; if (timer !== undefined) clearTimeout(timer); listeners.clear(); },
   };
 }
-export type WorkflowsStore = ReturnType<typeof createWorkflowsStore>;

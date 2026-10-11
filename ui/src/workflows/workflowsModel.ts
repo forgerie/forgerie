@@ -44,7 +44,6 @@ export const workflowInventorySchema = z.object({
 });
 export type WorkflowRun = z.infer<typeof workflowRunSchema>;
 export type WorkflowStage = z.infer<typeof stageSchema>;
-export type WorkflowInput = z.infer<typeof inputSchema>;
 export type SavedWorkflow = z.infer<typeof workflowInventorySchema>["workflows"][number];
 export type WorkflowInputs = Record<string, string | boolean | number>;
 export type StopDecision = "approve" | "changes" | "land";
