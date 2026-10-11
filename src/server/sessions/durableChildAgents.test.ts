@@ -15,6 +15,7 @@ import { PiSessionService } from "./piSessionService.js";
 import { CapturingSessionEventHub, emptyArchiveStore } from "./piSessionService.testSupport.js";
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import { CHILD_NOTE_KIND, CHILD_QUESTION_KIND } from "./durableChildAgents.js";
+import { modelChoice } from "./durableChildAgents.js";
 import { LiveChildSessionIndex, createDurableChildHost } from "./durableChildHost.js";
 import { ChildRunStore } from "./childRunStore.js";
 import { SessionWorktreeStore } from "../workspaces/sessionWorktreeStore.js";
@@ -540,4 +541,14 @@ describe("Durable-native child agents in a Forgerie session", () => {
     await until("waiter report", async () => (await reports(ref, "waiter")).length === 1, 20_000);
     expect(text((await reports(ref, "waiter"))[0]?.content)).toContain("Amber");
   }, 40_000);
+});
+
+describe("a model named for one spawn", () => {
+  it("reads provider/model-id with an optional thinking level and refuses anything else", () => {
+    expect(modelChoice("anthropic/claude-opus-5.5")).toEqual({ model: { provider: "anthropic", modelId: "claude-opus-5.5" } });
+    expect(modelChoice("cliproxyapi/gpt-6.1:high")).toEqual({ model: { provider: "cliproxyapi", modelId: "gpt-6.1" }, thinkingLevel: "high" });
+    // A colon that is not a thinking level belongs to the model id.
+    expect(modelChoice("local/qwen:32b")).toEqual({ model: { provider: "local", modelId: "qwen:32b" } });
+    for (const bad of ["gpt-6.1", "/gpt", "anthropic/", ""]) expect(modelChoice(bad)).toBeNull();
+  });
 });

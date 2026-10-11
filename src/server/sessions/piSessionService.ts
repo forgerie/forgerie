@@ -55,7 +55,7 @@ import { parsePromptAttachments } from "../../shared/promptAttachments.js";
 import { fingerprintPromptResourceDeliveryText, parseLeadingSlashCommand, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
 import { AgentDirPromptLibrary } from "../resources/promptLibrary.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import type { WorkflowInputs, WorkflowOutcome } from "../../shared/workflowRuns.js";
+import type { WorkflowInputs, WorkflowOutcome, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
 import { assertBoundedPromptResourceContent, readBoundedPromptResourceFile } from "../resources/promptResourceContent.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_LIMIT } from "../../shared/apiTypes.js";
@@ -2395,6 +2395,11 @@ export class PiSessionService implements SessionRouteService {
     await this.assertWritable(ref);
     const session = await this.durableSession(ref);
     return this.runSessionEntryMutation(session, "finish a workflow", () => session.finishWorkflow(runId, outcome, result));
+  }
+  async decideWorkflowStop(ref: PiSessionRef, runId: string, stage: string, decision: WorkflowStopDecision, note: string | undefined) {
+    await this.assertWritable(ref);
+    const session = await this.durableSession(ref);
+    return this.runSessionEntryMutation(session, "decide at a workflow stop", () => session.decideWorkflowStop(runId, stage, decision, note));
   }
   async copyWorkflow(ref: PiSessionRef, name: string, destination: string) {
     await this.assertWritable(ref);

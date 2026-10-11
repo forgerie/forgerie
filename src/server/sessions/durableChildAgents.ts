@@ -19,7 +19,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
 import type { ChildWorktreeSummary, WorktreeActionResult, WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
 import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
-import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild } from "./durableWorkflowRuns.js";
+import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild, workflowChildRefusal } from "./durableWorkflowRuns.js";
 
 export const CHILD_TOOL_NAME = "child_agent";
 export const CHILD_QUESTION_KIND = "forgerie.child-question";
@@ -205,6 +205,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       message: Type.String({ description: "The full task. The child does not see this conversation." }),
       agent: Type.Optional(Type.String({ description: "Agent file name for spawn." })),
       isolation: Type.Optional(Type.Union([Type.Literal("shared"), Type.Literal("worktree")], { description: "Working directory for spawn. Default shared." })),
+      model: Type.Optional(Type.String({ description: "Model for spawn as provider/model-id, optionally with :thinking-level. Overrides the agent file." })),
     }),
     // Tool calls serialize name allocation. Children themselves remain parallel background conversations.
     executionMode: "sequential",
@@ -220,6 +221,11 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       }
       if (action === "spawn" && existing !== undefined) return { content: [{ type: "text" as const, text: `${name} already exists; use send.` }] };
       if (action === "send" && existing === undefined) return { content: [{ type: "text" as const, text: `No child named ${name}.` }] };
+      // A workflow stop holds work that belongs after it. Ask before preparing a worktree, and again in the commit.
+      const held = await api.commit((tx) => workflowChildRefusal(tx, api.conversationId, name), context);
+      if (held !== undefined) return { content: [{ type: "text" as const, text: held }], isError: true };
+      const model = action === "spawn" && args.model !== undefined ? modelChoice(args.model) : undefined;
+      if (model === null) return { content: [{ type: "text" as const, text: `Write model as provider/model-id, optionally with :thinking-level. Got ${args.model ?? ""}.` }], isError: true };
       if (existing?.worktreeId !== undefined) await requireWorktrees(options.worktrees).assertWritable(existing.worktreeId);
       const profile = action === "spawn" && args.agent !== undefined ? await options.catalog?.find(args.agent) : undefined;
       if (action === "spawn" && args.agent !== undefined && profile === undefined) {
@@ -228,20 +234,24 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       const checkout = action === "spawn" && args.isolation === "worktree"
         ? await requireWorktrees(options.worktrees).prepare(String(api.taskId)) : undefined;
       const result = await api.commit(async (tx) => {
+        const refusal = await workflowChildRefusal(tx, api.conversationId, name);
+        if (refusal !== undefined) return refusal;
         const state = await tx.doc(Children, api.conversationId);
         const background = { ownership: { kind: "conversation" }, background: true } as const;
         if (action === "spawn") {
           if (Object.hasOwn(state.agents, name)) return `${name} already exists; use send.`;
           const anchor = await tx.createTask(Anchor, null, background);
           const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
+          const chosenModel = model?.model ?? profile?.model;
+          const chosenThinking = model?.thinkingLevel ?? profile?.thinkingLevel;
           const project = profile?.inheritProjectContext !== false && options.projectContext !== undefined && options.projectContext !== ""
             ? `\n\n<project_context>\n${options.projectContext}\n</project_context>` : "";
           await configure(tx, child.id, {
             ...(checkout === undefined ? {} : { cwd: checkout.path }),
             extensions: [ChildTools],
             tools: childToolsFor(profile, extraTools),
-            ...(profile?.model === undefined ? {} : { model: profile.model }),
-            ...(profile?.thinkingLevel === undefined ? {} : { thinkingLevel: profile.thinkingLevel }),
+            ...(chosenModel === undefined ? {} : { model: chosenModel }),
+            ...(chosenThinking === undefined ? {} : { thinkingLevel: chosenThinking }),
             instructions: `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked.${project}`,
           });
           state.agents[name] = { conversationId: child.id, reported: [], agent: profile?.name ?? null, createdAt: Date.now(),
@@ -263,6 +273,20 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
     parent: [defineExtension({ name: "forgerie.child-agents", tasks: [Anchor, Reporter], tools: [childTool] })],
     childOnly: [ChildTools],
   };
+}
+
+type Thinking = NonNullable<ChildAgentProfile["thinkingLevel"]>;
+const THINKING: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh"] satisfies Thinking[];
+const isThinking = (value: string): value is Thinking => THINKING.includes(value);
+/** provider/model-id with an optional :thinking-level, as agent files write it. Null when it cannot be read. */
+export function modelChoice(spec: string): { model: { provider: string; modelId: string }; thinkingLevel?: Thinking } | null {
+  const colon = spec.lastIndexOf(":");
+  const suffix = colon > 0 ? spec.slice(colon + 1) : "";
+  const level = isThinking(suffix) ? suffix : undefined;
+  const id = level === undefined ? spec : spec.slice(0, colon);
+  const slash = id.indexOf("/");
+  if (slash <= 0 || slash === id.length - 1) return null;
+  return { model: { provider: id.slice(0, slash), modelId: id.slice(slash + 1) }, ...(level === undefined ? {} : { thinkingLevel: level }) };
 }
 
 function withChildAdmission<T>(worktrees: DurableChildWorktrees | undefined, operation: () => Promise<T>): Promise<T> {

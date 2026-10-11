@@ -76,4 +76,17 @@ describe("prose workflows in the prompt library", () => {
     const scripted = parseWorkflow("experiment", "experiment.md", `${definition}\n\x60\x60\x60js workflow\nthrow new Error('must not execute')\n\x60\x60\x60`);
     expect(() => { assertProseOnly(scripted); }).toThrow("script runtime");
   });
+
+  it("reads a declared route, rejects one it cannot enforce, and tells the agent how stops work", () => {
+    const staged = definition.replace("workflow:\n", "workflow:\n  stages:\n    - { id: contract, name: Contract, stop: approve }\n    - { id: build, name: Build, workers: [{ name: ui, agent: design-engineer, model: anthropic/opus:high }] }\n    - { id: land, name: Land, stop: land }\n");
+    const workflow = parseWorkflow("staged", "staged.md", staged);
+    expect(workflow.definition.stages?.map((stage) => stage.id)).toEqual(["contract", "build", "land"]);
+    const prompt = workflowPrompt("run-1", workflow, workflowInputs(workflow.definition, { task: "x" }));
+    expect(prompt).toContain("1. Contract (id contract) [stop: the user approves]");
+    expect(prompt).toContain("Workers: ui (agent design-engineer, model anthropic/opus:high).");
+    expect(prompt).toContain('call workflow_stop with runId "run-1"');
+    expect(() => parseWorkflow("bad", "bad.md", staged.replace("stop: approve }", "stop: approve, workers: [{ name: x }] }"))).toThrow("cannot declare workers");
+    expect(() => parseWorkflow("bad", "bad.md", staged.replace("stop: land", "stop: later"))).toThrow("optional stages");
+    expect(workflowPrompt("run-1", parseWorkflow("plain", "plain.md", definition), { task: "x" })).not.toContain("workflow_stop");
+  });
 });

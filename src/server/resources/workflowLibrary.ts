@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
 import { WorkflowDefinitionSchema, WorkflowInputsSchema, type WorkflowDefinition, type WorkflowInputs } from "../../shared/workflowRuns.js";
+import { routeProblems } from "../../shared/workflowStops.js";
 import { readResourceFile, isMissingResource } from "./resourceEditorFiles.js";
 import { promptNameProblem } from "./promptLibrary.js";
 
@@ -54,7 +55,9 @@ export function parseWorkflow(name: string, path: string, text: string): ProseWo
   if (promptNameProblem(name) !== undefined) throw new WorkflowError(400, "Invalid workflow name");
   const { frontmatter, body } = parseFrontmatter(text);
   const definition: unknown = frontmatter["workflow"];
-  if (!Check(WorkflowDefinitionSchema, definition)) throw new WorkflowError(400, "Expected workflow frontmatter with version: 1 and typed inputs");
+  if (!Check(WorkflowDefinitionSchema, definition)) throw new WorkflowError(400, "Expected workflow frontmatter with version: 1, typed inputs, and optional stages");
+  const problems = routeProblems(definition.stages ?? []);
+  if (problems.length > 0) throw new WorkflowError(400, `Invalid workflow stages: ${problems.join("; ")}`);
   if (body.trim() === "") throw new WorkflowError(400, "Workflow prose is empty");
   for (const [name, input] of Object.entries(definition.inputs ?? {})) {
     const accepts = (value: string | number | boolean) => typeof value === input.type && (input.choices === undefined || input.choices.includes(value));
@@ -82,7 +85,17 @@ export function workflowInputs(definition: WorkflowDefinition, supplied: Workflo
 
 export function workflowPrompt(runId: string, workflow: ProseWorkflow, inputs: WorkflowInputs): string {
   // Do not interpolate arbitrary user values into instructions or expand slash commands a second time.
-  return `Workflow run ${runId}\n\n${workflow.body}\n\nWorkflow inputs (JSON):\n${JSON.stringify(inputs)}\n\nCoordinate this workflow in this conversation. Use child_agent for tracked delegation; legacy subagent runs are not part of this record. Its sequence, models, reviews, and human involvement come from the prose above. When all associated child work and reports settle, call workflow_finish with runId "${runId}", outcome (completed, failed, or stopped), and a final result. Idle pauses do not finish the run.`;
+  const stages = workflow.definition.stages ?? [];
+  const route = stages.length === 0 ? "" : `\n\nRoute (stages in order):\n${stages.map(stageLine).join("\n")}\n\n${STOP_RULES.replaceAll("RUN_ID", runId)}`;
+  return `Workflow run ${runId}\n\n${workflow.body}${route}\n\nWorkflow inputs (JSON):\n${JSON.stringify(inputs)}\n\nCoordinate this workflow in this conversation. Use child_agent for tracked delegation; legacy subagent runs are not part of this record. ${stages.length === 0 ? "Its sequence, models, reviews, and human involvement come from the prose above." : "The prose above guides how you run each stage."} When all associated child work and reports settle, call workflow_finish with runId "${runId}", outcome (completed, failed, or stopped), and a final result. Idle pauses do not finish the run.`;
+}
+
+const STOP_RULES = `A stage marked "stop" is the user's. Forgerie holds the run there: when the work for that stop is ready, call workflow_stop with runId "RUN_ID", the stage id, and a short summary of what the user decides on, then end your turn. The user's decision arrives as a new message. Until the user approves a stop, child_agent refuses work that belongs after it. At a land stop, Forgerie lands the children's branches itself when the user chooses to; do not land, merge, or push them yourself. Name each child after its declared worker so its work joins the right stage.`;
+
+function stageLine(stage: NonNullable<WorkflowDefinition["stages"]>[number], index: number): string {
+  const kind = stage.stop === "approve" ? " [stop: the user approves]" : stage.stop === "land" ? " [stop: the user lands the branches]" : "";
+  const workers = (stage.workers ?? []).map((worker) => `${worker.name}${worker.agent === undefined ? "" : ` (agent ${worker.agent}${worker.model === undefined ? "" : `, model ${worker.model}`})`}`);
+  return `${String(index + 1)}. ${stage.name} (id ${stage.id})${kind}${stage.does === undefined ? "" : `: ${stage.does}`}${workers.length === 0 ? "" : ` Workers: ${workers.join(", ")}.`}`;
 }
 
 export function assertProseOnly(workflow: ProseWorkflow): void {

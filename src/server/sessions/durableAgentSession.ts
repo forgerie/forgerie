@@ -9,14 +9,16 @@ import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { answerChildQuestion, childEntryText, childMessages, reviewChildWorktree, continueChild, childWorkIsLive, childWorktreeAction, workingChildCount, isChildEntryKind, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
+import { answerChildQuestion, childMessages, reviewChildWorktree, continueChild, childWorkIsLive, childWorktreeAction, workingChildCount, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
 import type { DurableChildHost } from "./durableChildHost.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import { workflowExtension, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit } from "./durableWorkflowRuns.js";
-import type { WorkflowInputs, WorkflowOutcome } from "../../shared/workflowRuns.js";
+import { workflowExtension, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop } from "./durableWorkflowRuns.js";
+import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
+import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
+import type { WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 
 export interface DurableAgentSessionOptions {
   services: AgentSessionServices;
@@ -176,6 +178,27 @@ export class DurableAgentSession implements PiAgentSession {
   finishWorkflow(runId: string, outcome: WorkflowOutcome, result: string) {
     return this.journal.conversation.commit((tx) => finishWorkflow(tx, this.journal.conversation.id, runId, outcome, result), context);
   }
+  decideWorkflowStop(runId: string, stage: string, decision: WorkflowStopDecision, note: string | undefined) {
+    return decideWorkflowStop(this.journal.harness, this.journal.conversation, runId, stage, decision, note, (run) => this.landWorkflowBranches(run), context);
+  }
+  /** Lands each child branch of the run that has commits, in the order the children started. Stops at the first failure. */
+  private async landWorkflowBranches(run: WorkflowRun): Promise<{ landed: string[]; error?: string }> {
+    const children = await this.durableChildren();
+    const landed: string[] = [];
+    for (const conversationId of [...new Set(run.children.map((child) => child.conversationId))]) {
+      const worktree = children.find((child) => child.conversationId === conversationId)?.worktree;
+      if (worktree?.state !== "active" || (worktree.ahead === 0 && !worktree.dirty)) continue;
+      const failed = (reason: string) => ({ landed, error: `${landed.length === 0 ? "Nothing landed." : `Landed ${landed.join(", ")}.`} ${worktree.branch} could not land: ${reason}` });
+      let result: WorktreeActionResult;
+      try { result = await this.landDurableChildWorktree(conversationId); }
+      catch (error) { return failed(error instanceof Error ? error.message : String(error)); }
+      if (result.kind === "conflict") return failed(`conflicts with ${result.defaultBranch} in ${result.files.join(", ")}`);
+      if (result.kind === "blocked") return failed(result.reason);
+      if (result.kind !== "landed") return failed(`unexpected result ${result.kind}`);
+      landed.push(worktree.branch);
+    }
+    return { landed };
+  }
   durableChildren() { return listChildren(this.journal.harness, this.journal.conversation.id, context, this.childWorktrees); }
   reviewDurableChildWorktree(conversationId: number) { return reviewChildWorktree(this.journal.harness, this.journal.conversation.id, conversationId, context, this.childWorktrees); }
   continueDurableChild(conversationId: number, text: string, requestId: string) { return continueChild(this.journal.harness, this.journal.conversation, conversationId, text, requestId, context, this.childWorktrees); }
@@ -220,6 +243,7 @@ export class DurableAgentSession implements PiAgentSession {
       host.liveChanged(ref, live);
     };
     const unsubscribe = this.journal.harness.subscribeCommits((publication) => {
+      if (workflowRunsChanged(publication, this.journal.conversation.id)) this.emit({ type: "workflow_runs_changed" });
       const change = workflowActiveFromCommit(publication, this.journal.conversation.id);
       if (change === undefined) return;
       workflowActive = change.active !== null;
@@ -552,8 +576,8 @@ export class DurableAgentSession implements PiAgentSession {
       case "task_failed": this.report(event.message); break;
       case "entry_appended":
         // A child's question, the user's answer, or a steer is a write entry. Show it live as a display-only message.
-        if (isChildEntryKind(event.entry.kind)) {
-          this.emit({ type: "message_end", message: { role: "custom", customType: event.entry.kind, content: childEntryText(event.entry.kind, event.entry.data), display: true, details: event.entry.data, timestamp: Date.now() } });
+        if (isHostEntryKind(event.entry.kind)) {
+          this.emit({ type: "message_end", message: { role: "custom", customType: event.entry.kind, content: hostEntryText(event.entry.kind, event.entry.data), display: true, details: event.entry.data, timestamp: Date.now() } });
         }
         this.emit(event);
         break;

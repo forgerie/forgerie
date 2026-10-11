@@ -37,6 +37,20 @@ workflow:
 WORKFLOW-TEST
 Delegate the task, then inspect its result. Finish only when the experiment is complete.
 `;
+const staged = `---
+description: A staged experiment
+workflow:
+  version: 1
+  stages:
+    - { id: contract, name: Contract, stop: approve }
+    - id: build
+      name: Build
+      workers: [{ name: alpha, agent: nobody-checks-this }]
+    - { id: land, name: Land, stop: land }
+---
+WORKFLOW-STAGED
+Write the contract, ask for approval, build it in a worktree, then ask the user to land.
+`;
 let root = "";
 let agentDir = "";
 let service: PiSessionService;
@@ -65,17 +79,30 @@ const route: FauxResponseFactory = (context) => {
   const said = textOf(last?.content);
   const call = (name: string, args: Record<string, string>) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
   const answer = (text: string) => fauxAssistantMessage([fauxText(text)]);
-  const workflow = [...context.messages].reverse().find((message) => message.role === "user" && textOf(message.content).includes("WORKFLOW-TEST"));
+  const workflow = [...context.messages].reverse().find((message) => message.role === "user" && textOf(message.content).startsWith("Workflow run "));
   const runId = /^Workflow run ([a-f0-9]+)/u.exec(textOf(workflow?.content))?.[1];
+  const isStaged = textOf(workflow?.content).includes("WORKFLOW-STAGED");
+  const commits = context.messages.some((message) => message.role === "user" && textOf(message.content).startsWith("CHILD-COMMIT"));
+  const spawnAlpha = () => call("child_agent", { action: "spawn", name: "alpha", message: "CHILD-COMMIT", isolation: "worktree" });
+  if (isStaged && runId !== undefined) {
+    if (last?.role === "toolResult" && said.includes("is held at the stop")) return call("workflow_stop", { runId, stage: "contract", summary: "CONTRACT-SUMMARY" });
+    if (last?.role === "toolResult" && said.startsWith("Waiting for the user")) return answer("Waiting for the user.");
+    if (last?.role === "user" && said.includes("WORKFLOW-STAGED")) return spawnAlpha();
+    if (last?.role === "user" && said.includes("asked for changes")) return call("workflow_stop", { runId, stage: "contract", summary: "CONTRACT-REVISED" });
+    if (last?.role === "user" && said.includes('approved "Contract"')) return spawnAlpha();
+    if (last?.role === "user" && said.startsWith("[subagent alpha")) return call("workflow_stop", { runId, stage: "land", summary: "LAND-SUMMARY" });
+    if (last?.role === "user" && said.includes("The user landed")) return call("workflow_finish", { runId, outcome: "completed", result: "STAGED-DONE" });
+  }
   if (last?.role === "toolResult") {
     if (said === "WORK-DONE") return call("write", { path: "result.txt", content: "CHILD-RESULT" });
+    if (commits && said.startsWith("Successfully wrote")) return call("bash", { command: "git add -A && git commit -qm 'Child result'" });
     if (said.startsWith("Started")) return answer("Waiting for the child.");
     if (said.includes("Wait for")) return runId === undefined ? answer("Cannot finish") : call("workflow_finish", { runId, outcome: "completed", result: "REVIEWED-RESULT" });
     return answer("Done.");
   }
   if (said.startsWith("[subagent")) return autoComplete && runId !== undefined ? call("workflow_finish", { runId, outcome: "completed", result: "REVIEWED-RESULT" }) : answer("Reviewed. Await explicit finish.");
   if (said === "FAIL-CHILD") return fauxAssistantMessage("", { stopReason: "error", errorMessage: "Controlled workflow child failure" });
-  if (said.startsWith("CHILD-TASK")) return fauxAssistantMessage([fauxToolCall("work", {})], { stopReason: "toolUse" });
+  if (said.startsWith("CHILD-TASK") || said.startsWith("CHILD-COMMIT")) return fauxAssistantMessage([fauxToolCall("work", {})], { stopReason: "toolUse" });
   if (said.includes("WORKFLOW-TEST")) {
     if (said.includes('"task":"parallel"')) return fauxAssistantMessage(["alpha", "beta", "gamma"].map((name) => fauxToolCall("child_agent", { action: "spawn", name, message: "CHILD-TASK" })), { stopReason: "toolUse" });
     return call("child_agent", { action: "spawn", name: `writer${String(++sequence)}`, message: said.includes('"task":"failure"') ? "FAIL-CHILD" : "CHILD-TASK", ...(isolate ? { isolation: "worktree" } : {}) });
@@ -272,6 +299,69 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     if (child?.worktree === undefined) throw new Error("Expected isolated child");
     expect(await readFile(join(child.worktree.path, "result.txt"), "utf8")).toBe("CHILD-RESULT");
     await service.finishWorkflow(ref, run.id, "completed", "Recovered the answer; the completion report failed");
+  });
+
+  it("holds the run at each stop, refuses later work, and lands the child branch only when the user decides", async () => {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: sanitizedGitEnv(), encoding: "utf8" });
+    git("init", "-b", "main"); git("config", "user.email", "workflow@example.invalid"); git("config", "user.name", "Workflow tests");
+    await writeFile(join(root, "base.txt"), "base");
+    git("add", "base.txt"); git("commit", "-m", "Initial workspace");
+    const ownership = new SessionWorktreeStore(join(agentDir, "ownership.json"));
+    await ownership.initialize();
+    worktrees = new SessionWorktrees(ownership, { publish: () => undefined });
+    await service.dispose(); service = openService();
+    const server = app();
+    try {
+      const ref = { id: (await service.start(root)).id, cwd: root };
+      await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+      const run = await service.runWorkflow(ref, "staged", {}, "staged-1");
+      expect(run.stages?.map((stage) => stage.id)).toEqual(["contract", "build", "land"]);
+      expect(run.stops).toEqual({ contract: { state: "open", round: 0 }, land: { state: "open", round: 0 } });
+      const stopUrl = (stage: string) => `/sessions/${ref.id}/workflow-runs/${run.id}/stops/${stage}`;
+      const waitingAt = (stage: string, summary: string) => until(async () => {
+        const current = (await service.workflowRuns(ref))[0];
+        return current?.stops?.[stage]?.state === "waiting" && current.stops[stage].summary === summary ? current : false;
+      });
+      // The agent tried to start alpha before the contract stop; Forgerie refused, and the agent asked instead.
+      const held = await waitingAt("contract", "CONTRACT-SUMMARY");
+      expect(held.children).toEqual([]);
+      expect(started).toBe(0);
+      expect((await server.inject({ method: "POST", url: stopUrl("land"), payload: { cwd: root, decision: "land" } })).statusCode).toBe(409);
+      expect((await server.inject({ method: "POST", url: stopUrl("contract"), payload: { cwd: root, decision: "changes", note: " " } })).statusCode).toBe(400);
+      const changes = await server.inject({ method: "POST", url: stopUrl("contract"), payload: { cwd: root, decision: "changes", note: "Name the columns." } });
+      expect(changes.statusCode).toBe(200);
+      const revised = await waitingAt("contract", "CONTRACT-REVISED");
+      expect(revised.stops?.["contract"]?.round).toBe(1);
+      const approved = await server.inject({ method: "POST", url: stopUrl("contract"), payload: { cwd: root, decision: "approve" } });
+      expect(approved.statusCode).toBe(200);
+      expect(runBody(approved.json()).stops?.["contract"]).toMatchObject({ state: "approved", summary: "CONTRACT-REVISED", round: 2 });
+      // A repeated decision finds nothing waiting.
+      expect((await server.inject({ method: "POST", url: stopUrl("contract"), payload: { cwd: root, decision: "approve" } })).statusCode).toBe(409);
+      const landing = await waitingAt("land", "LAND-SUMMARY");
+      expect(landing.children).toMatchObject([{ name: "alpha", stage: "build", state: { kind: "settled", outcome: "answered" } }]);
+      const finish = `/sessions/${ref.id}/workflow-runs/${run.id}/finish`;
+      const early = await server.inject({ method: "POST", url: finish, payload: { cwd: root, outcome: "completed", result: "Skip the land" } });
+      expect(early.statusCode).toBe(409);
+      expect(early.json<{ error: string }>().error).toContain('"Land"');
+      const alpha = (await service.durableChildren(ref)).find((child) => child.name === "alpha");
+      expect(alpha?.worktree).toMatchObject({ state: "active", ahead: 1 });
+      const landed = await server.inject({ method: "POST", url: stopUrl("land"), payload: { cwd: root, decision: "land" } });
+      expect(landed.statusCode).toBe(200);
+      expect(runBody(landed.json()).stops?.["land"]).toMatchObject({ state: "approved", landed: [alpha?.worktree?.branch] });
+      expect(git("log", "-1", "--format=%s", "main").trim()).toBe("Child result");
+      expect(await readFile(join(root, "result.txt"), "utf8")).toBe("CHILD-RESULT");
+      const finished = await until(async () => {
+        const current = (await service.workflowRuns(ref))[0];
+        return current?.state.kind === "finished" ? current : false;
+      });
+      expect(finished.state).toMatchObject({ outcome: "completed", result: "STAGED-DONE" });
+    } finally { await server.close(); }
+  }, 30000);
+
+  it("rejects a route it cannot enforce", async () => {
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "broken", body: staged.replace("{ id: land, name: Land, stop: land }", "{ id: land, name: Land, stop: land }\n    - { id: after, name: After }") });
+    await expect(service.runWorkflow(ref, "broken", {}, "broken-1")).rejects.toThrow("Land stage land must be the last stage");
   });
 
   it("associates three parallel children, keeps stopped and failed results, and expires only completed records", async () => {

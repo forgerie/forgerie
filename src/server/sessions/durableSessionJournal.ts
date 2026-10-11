@@ -10,7 +10,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { MemoryStorage } from "@earendil-works/pi-durable/storage/memory";
 import { acquireDurableOwnership, type DurableOwnership } from "./durableOwnership.js";
 import { durableJson } from "./durableJson.js";
-import { childEntryText, isChildEntryKind } from "./durableChildAgents.js";
+import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 
 const Imported = defineDoc({ kind: "forgerie.import", version: 1, scope: "session", initial: (): { complete: boolean } => ({ complete: false }) });
 const DURABLE_ENTRY_PROPERTY = "forgerieDurableEntryId";
@@ -21,10 +21,10 @@ const CUSTOM_INPUT_REQUEST_PREFIX = "forgerie.custom-message:";
  * Whether the session transcript shows this entry's messages. Forgerie's own
  * entries are model copies of something the transcript already holds in its
  * own form, such as a custom message or a shell run, or imports of old
- * history. Child entries are the exception: the transcript shows them.
+ * history. Host entries (child questions, steers, workflow stops) are the exception: the transcript shows them.
  */
 export function isTranscriptEntry(kind: string): boolean {
-  if (isChildEntryKind(kind)) return true;
+  if (isHostEntryKind(kind)) return true;
   return !kind.startsWith("forgerie.") && kind !== "pi.system" && kind !== "pi.compaction" && kind !== "pi.reset";
 }
 
@@ -185,9 +185,9 @@ export class DurableSessionJournal {
   }
 
   private projectEntry(entry: EntryRecord): void {
-    if (!this.projected.has(entry.id) && isChildEntryKind(entry.kind)) {
+    if (!this.projected.has(entry.id) && isHostEntryKind(entry.kind)) {
       const data = typeof entry.data === "object" && entry.data !== null && !Array.isArray(entry.data) ? entry.data : {};
-      this.manager.appendCustomMessageEntry(entry.kind, childEntryText(entry.kind, entry.data), true,
+      this.manager.appendCustomMessageEntry(entry.kind, hostEntryText(entry.kind, entry.data), true,
         { ...data, [DURABLE_SESSION_PROPERTY]: this.ownerSessionId, [DURABLE_ENTRY_PROPERTY]: entry.id });
       this.projected.add(entry.id);
       return;
