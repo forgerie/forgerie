@@ -1,8 +1,23 @@
 /* The models page's search measure: a hairline box a finger can hit, which darkens its edge while in use. */
-.search-field { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); padding-inline: var(--space-3);
+.search-field { display: flex; flex-direction: column; gap: var(--space-1); min-inline-size: 0; }
+.search-field-box { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); padding-inline: var(--space-3) var(--space-2);
   border: var(--hairline) solid var(--line); border-radius: var(--radius-control); color: var(--muted-foreground); transition: border-color 150ms; }
-.search-field:focus-within { border-color: var(--line-focus); }
+.search-field-box > svg { flex: none; }
+.search-field-box:focus-within { border-color: var(--line-focus); }
 .search-field-input { flex: 1; min-inline-size: 0; min-block-size: calc(var(--control-size) - 2 * var(--hairline)); padding: 0; border: 0;
   background: transparent; color: var(--foreground); font: inherit; font-size: var(--small-text); outline: none; }
 .search-field-input::placeholder { color: var(--muted-foreground); }
-@media (prefers-reduced-motion: reduce) { .search-field { transition: none; } }
+/* The field draws its own clear button, one size with the row's other marks. */
+.search-field-input::-webkit-search-cancel-button { appearance: none; }
+.search-field-clear { position: relative; flex: none; display: grid; place-items: center; inline-size: var(--icon-size); block-size: var(--icon-size); padding: 0;
+  border: 0; border-radius: var(--radius-document); background: transparent; color: var(--muted-foreground); transition: color 150ms, background-color 150ms; }
+.search-field-clear::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: var(--control-size); block-size: var(--control-size); translate: -50% -50%; }
+.search-field-clear:hover { background: var(--hover-surface); color: var(--foreground); }
+.search-field-spinner { color: var(--live); animation: search-field-spin 900ms linear infinite; }
+@keyframes search-field-spin { to { rotate: 1turn; } }
+.search-field-status { position: absolute; inline-size: var(--hairline); block-size: var(--hairline); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.search-field-hint { margin: 0; padding-inline: var(--space-1); color: var(--muted-foreground); font-size: var(--meta-text); line-height: 1rem; }
+@media (prefers-reduced-motion: reduce) {
+  .search-field-box, .search-field-clear { transition: none; }
+  .search-field-spinner { animation-duration: 2.4s; }
+}

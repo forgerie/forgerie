@@ -1,0 +1,39 @@
+/* The answers fill and scroll in the room their parent column gives them. */
+.result-list { position: relative; flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; padding: var(--space-1) var(--space-2) var(--space-3); }
+.result-list-rows { display: flex; flex-direction: column; gap: var(--hairline); margin: 0; padding: 0; list-style: none; }
+.result-list-row { min-inline-size: 0; }
+/* A newer answer is on its way: a thin sweep along the top edge, never a dimmed list. */
+.result-list-busy { position: sticky; inset-block-start: 0; z-index: 1; flex: none; display: block; block-size: var(--lane-marker); margin-block-end: calc(-1 * var(--lane-marker));
+  border-radius: var(--radius-pill); background: linear-gradient(90deg, transparent, var(--live), transparent) 0 0 / 40% 100% no-repeat; animation: result-list-sweep 1.1s ease-in-out infinite; }
+@keyframes result-list-sweep { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.result-list-progress { flex: none; display: grid; gap: var(--space-1); padding: var(--space-2) var(--space-2) var(--space-3); }
+.result-list-progress-text { margin: 0; color: var(--muted-foreground); font-size: var(--meta-text); line-height: 1rem; font-variant-numeric: tabular-nums; }
+.result-list-meter { position: relative; display: block; block-size: var(--meter-height); overflow: hidden; border-radius: var(--radius-pill); background: var(--meter-rest); }
+.result-list-meter::after { content: ""; position: absolute; inset: 0; transform-origin: left; transform: scaleX(var(--result-list-share, 0));
+  background: var(--bar-fill); transition: transform 400ms ease-out; }
+.result-list-alert { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); margin: var(--space-1) 0 var(--space-2);
+  padding: var(--space-2) var(--space-3); border: var(--hairline) solid var(--destructive-line); border-radius: var(--radius-control); background: var(--destructive-wash); }
+.result-list-alert-text { flex: 1 1 12rem; margin: 0; color: var(--foreground); font-size: var(--small-text); overflow-wrap: anywhere; }
+.result-list-alert-action { position: relative; flex: none; padding: 0; border: 0; background: none; color: var(--foreground); font-size: var(--small-text); font-weight: 500;
+  text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; }
+.result-list-alert-action::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: max(100%, var(--control-size)); block-size: var(--control-size); translate: -50% -50%; }
+.result-list-skeleton { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-3) var(--space-2); }
+.result-list-ghost { display: grid; gap: var(--space-2); }
+.result-list-ghost i { display: block; block-size: 0.75rem; border-radius: var(--radius-document); background: var(--muted); animation: skeleton-pulse 2s ease-in-out infinite; }
+.result-list-ghost i:first-child { inline-size: 55%; block-size: 0.875rem; }
+.result-list-ghost i:nth-child(2) { inline-size: 92%; }
+.result-list-ghost i:last-child { inline-size: 70%; }
+.result-list-empty { flex: 1; display: grid; place-content: center; gap: var(--space-2); padding: var(--space-6) var(--space-4); text-align: center;
+  color: var(--muted-foreground); font-size: var(--small-text); overflow-wrap: anywhere; }
+.result-list-foot { flex: none; display: grid; gap: var(--space-1); margin-block-start: var(--space-2); }
+.result-list-foot-note { margin: 0; padding-inline: var(--space-2); color: var(--destructive); font-size: var(--meta-text); }
+.result-list-more { min-block-size: var(--control-size); padding-inline: var(--space-2); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
+  background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 500; cursor: pointer; transition: background-color 150ms; }
+.result-list-more:hover:not(:disabled) { background: var(--hover-surface); }
+.result-list-more:disabled { color: var(--muted-foreground); cursor: progress; }
+@media (prefers-reduced-motion: reduce) {
+  .result-list-busy { animation: none; background: var(--live-edge); }
+  .result-list-ghost i { animation: none; }
+  .result-list-meter::after, .result-list-more { transition: none; }
+}

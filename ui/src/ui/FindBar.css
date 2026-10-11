@@ -1,0 +1,19 @@
+/* A found-place readout above the input: the filter chip's hairline strip on
+   the sidebar tint, with a live edge so it reads as the reader's own search. */
+.find-bar { flex: none; display: flex; align-items: center; gap: var(--space-1); min-inline-size: 0; min-block-size: var(--control-size);
+  padding-inline: var(--space-3) var(--space-1); border: var(--hairline) solid var(--line); border-inline-start: var(--lane-marker) solid var(--live-edge);
+  border-radius: var(--radius-control); background: var(--tint-surface); font-size: var(--small-text); }
+.find-bar-text { flex: 1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); min-inline-size: 0; margin: 0; padding-block: var(--space-1); }
+.find-bar-label { color: var(--foreground); font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.find-bar-detail { min-inline-size: 0; color: var(--quiet-foreground); font-size: var(--meta-text); overflow-wrap: anywhere; }
+.find-bar-step { position: relative; flex: none; display: grid; place-items: center; inline-size: var(--icon-size); block-size: var(--icon-size); padding: 0;
+  border: 0; border-radius: var(--radius-document); background: transparent; color: var(--muted-foreground); cursor: pointer; transition: color 150ms, background-color 150ms; }
+/* Steps sit a space apart, so their full hit areas meet without overlapping. */
+.find-bar-step + .find-bar-step { margin-inline-start: calc(var(--control-size) - var(--icon-size) - var(--space-1)); }
+.find-bar-step::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: var(--control-size); block-size: var(--control-size); translate: -50% -50%; }
+.find-bar-step:hover:not(:disabled) { background: var(--hover-surface); color: var(--foreground); }
+.find-bar-step:disabled { color: var(--faint-foreground); cursor: default; }
+.find-bar-action { position: relative; flex: none; margin-inline-end: var(--space-2); padding: 0; border: 0; background: none; color: var(--foreground);
+  font-size: var(--small-text); font-weight: 500; text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; }
+.find-bar-action::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: max(100%, var(--control-size)); block-size: var(--control-size); translate: -50% -50%; }
+@media (prefers-reduced-motion: reduce) { .find-bar-step { transition: none; } }

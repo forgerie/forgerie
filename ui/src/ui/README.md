@@ -64,7 +64,10 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `Glyph` (atom): a one-colour mark from an SVG path on a 24-unit grid, at the size and colour of the text beside it.
 - `Toast` (molecule): a short message that does not stop the reader: the message at full width with dismiss in its corner, and a foot row with the detail's first words (cut, they open the whole text) and one action; it always shows in the page's `ToastRegion`.
 - `ToastRegion` (organism): the one place toasts appear, at the window's top end under the header, above the sheet and the thread; mounted once at the entry.
-- `SearchField` (atom): one search box over a list, with a magnifier, in a control-sized row; its label is also its placeholder.
+- `SearchField` (atom): one search box over a list, with a magnifier, in a control-sized row; its label is also its placeholder; optionally a ✕ that Escape also presses, a spinner while busy, and a hint under it.
+- `HitRow` (molecule): one item a search found, as one press target: name and age, where it lives with quiet labels, the matched passage with its words marked (fewer lines in a short room), and a count of what else matched.
+- `ResultList` (molecule): a search's answers scrolling in the room they get: skeleton rows before the first answer, a busy sweep over old rows, a progress line with a meter, an inline failure with retry, an empty text, a foot control for more; arrow keys move between rows.
+- `FindBar` (molecule): a slim bar for stepping through found places ("2 of 7", previous, next, close; arrows and Escape), or one note about a found place with an optional action.
 - `ListTools` (molecule): the controls that choose what a list shows, such as a switch and a search box, stacked and set apart from the list.
 - `FileFrame` (organism): one file to read or edit: facts and notices above it, then the file on a framed surface that grows with its text.
 - `StatusChip` (molecule): a header's one status word as a toned pill, announced while it is quiet and hidden; with a panel it is a button that opens the long story under the header at the window's end, with a count that rides along and a ring for each new arrival.

@@ -1,0 +1,31 @@
+/* A found item set like a list row: the title line of a session row, then
+   the passage in the reading face, quieter, with its matched words lit. */
+.hit-row { --hit-row-lines: 3; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--space-2); row-gap: var(--space-1);
+  inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-2); border: 0; border-radius: var(--radius-control);
+  background: transparent; color: inherit; text-align: start; cursor: pointer; transition: background-color 150ms; }
+.hit-row:hover { background: var(--hover-surface); }
+.hit-row:focus-visible { outline: calc(2 * var(--hairline)) solid var(--line-focus); outline-offset: calc(-2 * var(--hairline)); }
+.hit-row:active { background: var(--active-surface); }
+.hit-row-title { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground);
+  font-size: var(--small-text); font-weight: 500; line-height: 1.25rem; }
+.hit-row-title[data-untitled] { color: var(--muted-foreground); font-weight: 400; }
+.hit-row-time { color: var(--faint-foreground); font-family: var(--code-font); font-size: var(--meta-text); line-height: 1.25rem;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hit-row-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-inline-size: 0;
+  color: var(--muted-foreground); font-size: var(--meta-text); line-height: 1rem; }
+.hit-row-where { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hit-row-tag { flex: none; padding: 0 var(--space-1); border: var(--hairline) solid var(--line); border-radius: var(--radius-document);
+  color: var(--quiet-foreground); font-size: var(--meta-text); line-height: 1rem; }
+.hit-row-passage { grid-column: 1 / -1; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--hit-row-lines); line-clamp: var(--hit-row-lines);
+  overflow: hidden; color: var(--quiet-foreground); font-size: var(--small-text); line-height: 1.25rem; overflow-wrap: anywhere; }
+.hit-row-speaker { color: var(--muted-foreground); }
+/* The one loud mark in the list: the words the reader typed, lit in the live colour. */
+.hit-row-mark { padding-inline: calc(var(--space-1) / 2); margin-inline: calc(var(--space-1) / -2); border-radius: var(--radius-document);
+  background: var(--live-wash); color: var(--foreground); font-weight: 600; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.hit-row-footnote { flex: none; margin-inline-start: auto; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text);
+  line-height: 1rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* A short list room keeps more hits in view: the passage gives up lines first.
+   Unfolded landscape (a 344 px room) keeps two lines; folded landscape (165 px) keeps one. */
+@container (max-height: 24rem) { .hit-row { --hit-row-lines: 2; } }
+@container (max-height: 12rem) { .hit-row { --hit-row-lines: 1; } }
+@media (prefers-reduced-motion: reduce) { .hit-row { transition: none; } }
