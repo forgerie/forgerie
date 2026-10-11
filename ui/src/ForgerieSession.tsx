@@ -77,6 +77,8 @@ import { WorkflowRunStrip } from "./workflows/WorkflowRunStrip";
 import { waitingItems, waitingLabel } from "./waitingOnYou";
 import { PinnedDock } from "./ui/PinnedDock";
 import { EventLine } from "./ui/EventLine";
+import { IssueProposalEntry } from "./issues/IssueProposalEntry";
+import type { IssueProposalArtifact } from "./issues/issueProposal";
 
 const pullRequests = createPullRequestApi(browserTransport.request);
 const NO_LINKS: readonly PullLink[] = [];
@@ -294,6 +296,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onDecide={stop !== undefined && !readOnly ? (decision, note) => workflows.decide(stop.runId, stop.stage, decision, note) : undefined}
         onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />;
     }
+    const issue = (custom as Partial<IssueProposalArtifact> | undefined)?.issueProposal;
+    if (issue !== undefined) return <IssueProposalEntry key={issue.proposalId} proposal={issue} sessionId={sessionId} cwd={cwd} readOnly={readOnly}
+      request={browserTransport.request} />;
     const entry = (custom as Partial<ChildEntryArtifact> | undefined)?.childEntry;
     if (entry?.kind === "question" && pinned.has(`q:${entry.questionId}`)) {
       return <EventLine tone="active" subject={`${entry.childName} asks`} phrase="pinned below the thread" />;
