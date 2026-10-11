@@ -28,6 +28,7 @@ import type {
   SessionUnreadAcknowledgeRequest,
   SessionUnreadCatalogSnapshot,
   SessionTreeNavigateResult,
+  SessionTreeResponse,
   ThinkingLevel,
 } from "../../shared/apiTypes.js";
 import { SessionEventHub } from "../realtime/sessionEventHub.js";
@@ -1490,6 +1491,10 @@ class CapturingRouteSessionService implements SessionRouteService {
 
   messages(): Promise<MessagePage> {
     return Promise.resolve(this.messagesResponse);
+  }
+
+  tree(): Promise<SessionTreeResponse> {
+    return Promise.resolve({ tree: { nodes: [], activeLeafId: null, activePathIds: [] } });
   }
 
   status(lookup: SessionRouteRef) {

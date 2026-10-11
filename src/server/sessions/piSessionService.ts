@@ -29,7 +29,7 @@ import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult,
 import { DurableAgentSession } from "./durableAgentSession.js";
 import type { DurableChildHost, DurableChildSessionRef } from "./durableChildHost.js";
 import { DurableSessionRuntime, type DurableRuntimeFactory, type DurableRuntimeResult } from "./durableSessionRuntime.js";
-import { projectBrowserMessage } from "../browserMessageProjection.js";
+import { projectBrowserMessage, projectBrowserMessageResponse } from "../browserMessageProjection.js";
 import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { runningAgentCount, spawnedSessionFiles } from "./delegationProgress.js";
@@ -84,6 +84,7 @@ import type {
   QueuedSessionMessage,
   SessionUnreadAcknowledgeRequest,
   SessionUnreadCatalogSnapshot,
+  SessionTreeResponse,
   SessionWarning,
   ManagedProcessKillResult,
   ManagedProcessOutputResult,
@@ -450,6 +451,8 @@ export interface PiSessionManagerGateway {
    */
   defaultSessionsRoot?(): string;
   open(path: string): PiSessionManager;
+  /** Non-persistent SDK view; never repairs or migrates the source file. */
+  openReadOnly?(path: string): Promise<PiSessionManager>;
 }
 
 interface PiExtensionError {
@@ -2436,13 +2439,29 @@ export class PiSessionService implements SessionRouteService {
 
   async searchMessagePositions(ref: PiSessionRef): Promise<ReadonlyMap<string, number>> {
     const positions = new Map<string, number>();
-    historyMessages(await this.historySessionManager(ref), (entryId, position) => { positions.set(entryId, position); });
+    const entryIds = new Map<number, string>();
+    const messages = historyMessages(await this.historySessionManager(ref), (entryId, rawPosition) => { entryIds.set(rawPosition, entryId); });
+    // Use the unpaged browser projection itself: paging still uses raw offsets,
+    // but search targets the indices in the array the browser actually receives.
+    projectBrowserMessageResponse({ messages, start: 0, total: messages.length }, (rawPosition, projectedPosition) => {
+      const entryId = entryIds.get(rawPosition);
+      if (entryId !== undefined) positions.set(entryId, projectedPosition);
+    });
     return positions;
   }
 
   async messages(ref: PiSessionRef, page?: { before?: number; limit?: number }): Promise<ClientMessagePage> {
     const sessionManager = await this.historySessionManager(ref);
     return pageMessagesAtSafeBoundary(historyMessages(sessionManager), page);
+  }
+
+  async tree(ref: PiSessionRef): Promise<SessionTreeResponse> {
+    const manager = await this.historySessionManager(ref, (path) => {
+      if (this.sessionManager.openReadOnly === undefined) throw new Error("Read-only session loading is not available with this Pi runtime");
+      return this.sessionManager.openReadOnly(path);
+    });
+    if (manager.getTree === undefined) throw new Error("Session tree is not available with this Pi runtime");
+    return { tree: projectSessionTree(manager.getTree(), manager.getLeafId()) };
   }
 
   async status(ref: PiSessionRef): Promise<ClientSessionStatus> {
@@ -3823,18 +3842,21 @@ export class PiSessionService implements SessionRouteService {
     return (await this.getActive(ref)).runtime.session;
   }
 
-  private async historySessionManager(ref: PiSessionRef): Promise<PiSessionManager> {
+  private async historySessionManager(
+    ref: PiSessionRef,
+    open: (path: string) => PiSessionManager | Promise<PiSessionManager> = (path) => this.sessionManager.open(path),
+  ): Promise<PiSessionManager> {
     const active = this.activeForRef(ref);
     if (active !== undefined) return active.runtime.session.sessionManager;
 
     const archived = await this.getArchived(ref);
-    if (archived?.archivePath !== undefined) return this.sessionManager.open(archived.archivePath);
+    if (archived?.archivePath !== undefined) return open(archived.archivePath);
     const readonly = await this.sessionWorktrees?.store.readOnly(ref);
-    if (readonly !== undefined) return this.sessionManager.open(readonly.transcriptPath);
+    if (readonly !== undefined) return open(readonly.transcriptPath);
 
     const match = await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader);
     if (!match) throw new Error("Session not found");
-    return this.sessionManager.open(match.path);
+    return open(match.path);
   }
 
   private async getActive(ref: PiSessionRef, options: Pick<CreateSessionRuntimeOptions, "notificationGeneration"> = {}): Promise<ActiveSession<PiSessionRuntime>> {

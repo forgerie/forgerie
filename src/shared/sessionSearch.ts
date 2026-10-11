@@ -34,7 +34,7 @@ export interface SessionSearchMatch {
   entryId: string;
   role: "user" | "assistant";
   offBranch: boolean;
-  /** Index in the current historyMessages() list, not the filtered browser projection. */
+  /** Index in the unpaged /messages response after browser projection. */
   position?: number;
 }
 

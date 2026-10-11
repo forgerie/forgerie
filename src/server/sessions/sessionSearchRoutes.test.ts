@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo } from "../../shared/apiTypes.js";
 import type { SessionSearchResponse, SessionSearchMatchesResponse } from "../../shared/sessionSearch.js";
 import { registerSessionProxyRoutes } from "../sessiond/sessionProxyRoutes.js";
+import { END_TURN_TOOL_NAME } from "./endTurnTool.js";
 import { PiSessionService } from "./piSessionService.js";
 import { CapturingSessionEventHub, emptyArchiveStore, fakeRuntime, fakeSessionManager, runtimeCreator, sessionGateway, sessionRecord, testModelRuntime } from "./piSessionService.testSupport.js";
 import { registerSessionRoutes } from "./sessionRoutes.js";
@@ -82,7 +83,32 @@ describe("session search HTTP and proxy contract", () => {
     const data = (await app.inject("/sessions/search?q=searchable&limit=1000")).json<SessionSearchResponse>();
     expect(data.hits).toHaveLength(100); expect(data.nextCursor).toBeDefined();
   });
-  it("maps matches to the same raw positions as /messages and recomputes the live branch", async () => {
+  it("indexes matches in the actual unpaged /messages array after hidden end_turn results", async () => {
+    const path = info("one").path;
+    const entries = [
+      searchEntry("root", null, "start"),
+      { type: "message", id: "declaration", parentId: "root", message: { role: "assistant", content: [{ type: "toolCall", id: "call", name: END_TURN_TOOL_NAME, arguments: {} }] } },
+      { type: "message", id: "result", parentId: "declaration", message: { role: "toolResult", toolName: END_TURN_TOOL_NAME, toolCallId: "call", content: [{ type: "text", text: "declared" }] } },
+      searchEntry("matched", "result", "needle after declaration", "assistant"),
+    ];
+    await rename(path, path + ".old"); await writeSearchSession(path, "one", entries); await search.refreshFile(path);
+    const response = await app.inject("/sessions/one/messages?cwd=/repo");
+    expect(response.statusCode).toBe(200);
+    const page = response.json<{ messages: { role: string; content: unknown }[]; start: number; total: number }>();
+    expect(page.messages).toHaveLength(3);
+    expect(page.messages[1]?.content).toEqual([]);
+    const matchedIndex = page.messages.findIndex((message) => JSON.stringify(message.content).includes("needle"));
+    const matches = (await app.inject("/sessions/one/search-matches?q=needle&cwd=/repo")).json<SessionSearchMatchesResponse>();
+    expect(matches.matches).toEqual([{ entryId: "matched", role: "assistant", offBranch: false, position: matchedIndex }]);
+    expect(matchedIndex).toBe(2);
+    // Paging coordinates still count the hidden result and retain safe boundaries.
+    expect(page.total).toBe(4);
+    const paged = (await app.inject("/sessions/one/messages?cwd=/repo&before=3&limit=2")).json<{ messages: unknown[]; start: number; total: number }>();
+    expect(paged).toMatchObject({ start: 0, total: 4 });
+    expect(paged.messages).toHaveLength(2);
+  });
+
+  it("maps matches to the same returned positions as /messages and recomputes the live branch", async () => {
     const entries = [
       searchEntry("root", null, "needle root"),
       searchEntry("other", "root", "needle other", "assistant", "2026-01-05T00:00:00.000Z"),

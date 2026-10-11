@@ -12,11 +12,13 @@ Wire types live in `src/shared/sessionSearch.ts`.
 ```text
 GET /api/sessions/search?q=retry%20%22connection%20lost%22&scope=/repo&limit=50
 GET /api/sessions/:sessionId/search-matches?q=retry&cwd=/repo
+GET /api/sessions/:sessionId/tree?cwd=/repo
 ```
 
-Both routes also work under `/api/machines/local/sessions/`. Sessiond registers
-`/sessions/search` and `/sessions/:sessionId/search-matches` without an API prefix.
-The existing web proxy forwards both routes. The static search route is registered
+All three routes also work under `/api/machines/local/sessions/`. Sessiond registers
+`/sessions/search`, `/sessions/:sessionId/search-matches`, and
+`/sessions/:sessionId/tree` without an API prefix.
+The existing web proxy forwards these routes. The static search route is registered
 before the other session routes.
 
 - Whitespace separates terms. Double quotes enclose a phrase. Doubled quotes
@@ -46,15 +48,24 @@ before the other session routes.
 
 `search-matches` returns matching entry ids and roles. It computes `offBranch`
 from the live branch at request time. On-branch matches are ordered by `position`;
-off-branch matches follow and have no position. `position` is the raw message's
-index in `historyMessages()`, including displayed custom messages, summaries,
-and tool results. This is the same coordinate system as message paging, not an
-index into the browser's filtered rendering. The mapping reuses the history
-projection; it does not infer positions from index rows.
+off-branch matches follow and have no position. `position` is the message's index
+in the unpaged `/messages` response after browser projection. Displayed custom
+messages, summaries, and ordinary tool results count. Hidden `end_turn` results
+do not. The mapping uses the same browser projection as the route; it does not
+infer positions from index rows. Paging retains its existing raw offsets and
+raw `total`, independently of the unpaged search position.
 
 A search hit's `offBranch` is only an indexing-time snapshot. Use
 `search-matches` before navigating a passage. An off-branch passage must not
 switch the current branch.
+
+The tree GET returns `SessionTreeResponse` from `src/shared/apiTypes.ts`:
+`{ tree: SessionTreeSnapshot }`, the same snapshot used by the `/tree` command.
+It reads active managers or source transcripts without starting a writing runtime,
+restoring archives, or requiring a writable worktree. Completed landed/discarded
+worktrees use their saved transcripts. Persisted files load through an in-memory
+SDK manager, so SDK migrations and missing-newline repair cannot change the source.
+An unknown session returns 404; missing or invalid cwd returns 400.
 
 ## Extraction sources
 

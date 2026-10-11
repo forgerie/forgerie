@@ -1,8 +1,8 @@
 import type { Dirent } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { parseSessionEntries, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { canonicalizeStoredCwd, cwdPathsEqual } from "../workingDirectory.js";
 import type { SessionHeaderSummary } from "./sessionFileHeader.js";
 import type { SessionHeaderReader } from "./parentSessionLocator.js";
@@ -166,6 +166,19 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
 
   open(path: string): PiSessionManager {
     return SessionManager.open(path, dirname(path));
+  }
+
+  async openReadOnly(path: string): Promise<PiSessionManager> {
+    const source = await readFile(path, "utf8").catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") throw new Error("Session not found");
+      throw error;
+    });
+    const entries = parseSessionEntries(source);
+    const header = entries[0];
+    if (header?.type !== "session" || typeof header.id !== "string") throw new Error("Session not found");
+    // SessionManager.open() repairs missing newlines and persists migrations.
+    // In-memory loading gives the same SDK tree without touching the receipt.
+    return SessionManager.inMemory(header.cwd, undefined, entries);
   }
 }
 

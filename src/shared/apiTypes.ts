@@ -1092,6 +1092,11 @@ export interface SessionTreeSnapshot {
   activePathIds: string[];
 }
 
+/** Read-only session-tree snapshot, including for completed worktree sessions. */
+export interface SessionTreeResponse {
+  tree: SessionTreeSnapshot;
+}
+
 export const SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH = 10_000;
 
 /**

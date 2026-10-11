@@ -92,6 +92,31 @@ describe("PiSessionService session-tree behavior", () => {
     await service.dispose();
   });
 
+  it("reads the live tree while streaming without reopening files, navigating, or publishing events", async () => {
+    const roots = [treeNode({ type: "message", id: "leaf-1", parentId: null, message: {
+      role: "assistant", content: [{ type: "text", text: "live answer" }, { type: "thinking", thinking: "private reasoning" }],
+    } })];
+    const gateway = { ...sessionGateway([sessionRecord(SESSION_ID)]), openReadOnly: vi.fn(() => Promise.reject(new Error("Must use the live manager"))) };
+    const open = vi.spyOn(gateway, "open");
+    const navigateTree = vi.fn<NavigateTree>(() => Promise.resolve({ cancelled: false }));
+    const { service, fake, hub } = treeHarness({ getTree: () => roots }, { navigateTree }, { sessionManager: gateway });
+    try {
+      await service.status(sessionRef(SESSION_ID));
+      const opened = open.mock.calls.length;
+      const bound = fake.calls.bindExtensions.length;
+      const sessionEvents = hub.sessionEvents.length; const globalEvents = hub.globalEvents.length;
+      fake.session.isStreaming = true;
+      await expect(service.tree(sessionRef(SESSION_ID))).resolves.toEqual({ tree: {
+        nodes: [{ id: "leaf-1", parentId: null, kind: "assistant", summary: "live answer" }],
+        activeLeafId: "leaf-1", activePathIds: ["leaf-1"],
+      } });
+      expect(open).toHaveBeenCalledTimes(opened);
+      expect(gateway.openReadOnly).not.toHaveBeenCalled(); expect(navigateTree).not.toHaveBeenCalled();
+      expect(fake.calls.bindExtensions).toHaveLength(bound);
+      expect(hub.sessionEvents).toHaveLength(sessionEvents); expect(hub.globalEvents).toHaveLength(globalEvents);
+    } finally { await service.dispose(); }
+  });
+
   it("maps none, default, and trimmed custom summary choices exactly and returns only editor text", async () => {
     const navigateTree = vi.fn<NavigateTree>();
     navigateTree

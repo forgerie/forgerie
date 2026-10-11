@@ -38,8 +38,19 @@ export function projectBrowserMessage(message: unknown): unknown {
   return content === originalContent ? message : { ...message, content };
 }
 
-export function projectBrowserMessageResponse(response: MessagePage): MessagePage {
-  const visible = response.messages.some(isTurnDeclarationResult) ? response.messages.filter((message) => !isTurnDeclarationResult(message)) : response.messages;
+/** Optionally map raw message positions to the returned array, without changing paging metadata. */
+export function projectBrowserMessageResponse(
+  response: MessagePage,
+  onMessagePosition?: (rawPosition: number, projectedPosition: number) => void,
+): MessagePage {
+  let projectedPosition = 0;
+  const retained = response.messages.filter((message, rawPosition) => {
+    if (isTurnDeclarationResult(message)) return false;
+    onMessagePosition?.(rawPosition, projectedPosition);
+    projectedPosition += 1;
+    return true;
+  });
+  const visible = retained.length === response.messages.length ? response.messages : retained;
   const messages = mapChanged(visible, projectBrowserMessage);
   return messages === response.messages ? response : { ...response, messages };
 }
