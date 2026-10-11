@@ -55,11 +55,11 @@ export function planChildRuntime(profile: ChildAgentProfile | undefined, extraTo
   const lines = [
     ...notes,
     ...(has("read") ? ["read also opens PNG, JPEG, GIF, and WebP images: they come back as images you can see."] : []),
-    ...(has("watchdog_diff") ? ["watchdog_diff also takes `range` (such as `main...feature`) for committed changes, `cwd` for another repository or worktree, and `offset` to page through a long diff."] : []),
+    ...(has("watchdog_diff") ? ["watchdog_diff reads committed ranges here: pass `range` (such as `main...HEAD`) and `cwd` for a worktree or another repository, and `offset` to page through a long diff. Do not ask anyone for a diff you can read this way."] : []),
     ...(unavailable.length === 0 ? [] : [`Not available here: ${unavailable.join(", ")}. Do not wait for them. Say in your answer what you could not check without them.`]),
     ...(missing.length === 0 ? [] : [`Skills your agent file names but this machine does not have: ${missing.join(", ")}.`]),
   ];
-  const runtime = lines.length === 0 ? "" : `## This runtime\n\nYou run as a Forgerie child agent. Your agent file was written for another runtime, so some things differ:\n\n${lines.map((line) => `- ${line}`).join("\n")}`;
+  const runtime = lines.length === 0 ? "" : `## This runtime\n\nYou run as a Forgerie child agent. Your agent file may have been written for another runtime. Where it describes a tool differently, this section is correct here:\n\n${lines.map((line) => `- ${line}`).join("\n")}`;
   return { tools, unavailable, skills, missingSkills: missing, section: [runtime, skillsSection(skills)].filter((part) => part !== "").join("\n\n") };
 }
 

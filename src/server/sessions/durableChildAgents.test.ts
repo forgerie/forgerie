@@ -350,7 +350,7 @@ describe("Durable-native child agents in a Forgerie session", () => {
     await until("second report", async () => (await reports(ref, "kept")).length === 2);
     const second = systemSeen.find((request) => request.includes("PROFILE-NEW")) ?? "";
     expect(second).toContain("\"name\":\"watchdog_diff\"");
-    expect(second).toContain("watchdog_diff also takes `range`");
+    expect(second).toContain("watchdog_diff reads committed ranges here");
     // Durable keeps earlier instructions in the child's history; the current ones follow them.
     expect(second.lastIndexOf("PROFILE-NEW")).toBeGreaterThan(second.lastIndexOf("PROFILE-OLD"));
     // The run record of the second run names the file it ran with.

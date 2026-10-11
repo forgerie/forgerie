@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bundledSubagentsPackagePath } from "./bundledSubagents.js";
-import { parseChildAgentFile } from "./durableChildProfiles.js";
+import { bundledForgerieAgentsPath } from "./bundledForgerieSkills.js";
+import { ChildAgentCatalog, parseChildAgentFile } from "./durableChildProfiles.js";
 import { planChildRuntime, runtimeGaps } from "./durableChildRuntime.js";
 import { diffInputProblem, imageType, page, DIFF_PAGE_CHARS } from "./durableChildTools.js";
 
@@ -31,7 +32,7 @@ describe("a pi-subagents agent file in a Durable child", () => {
     expect([...(plan.tools ?? [])].sort()).toEqual(["ask_human", "bash", "read", "watchdog_diff"]);
     expect(plan.unavailable).toEqual([]);
     expect(plan.section).toContain("contact_supervisor is ask_human here");
-    expect(plan.section).toContain("watchdog_diff also takes `range`");
+    expect(plan.section).toContain("watchdog_diff reads committed ranges here");
     expect(plan.section).toContain("read also opens PNG");
     expect(runtimeGaps(plan)).toBe("");
   });
@@ -66,6 +67,21 @@ describe("a pi-subagents agent file in a Durable child", () => {
     expect(plan.tools).toBeUndefined();
     expect(plan.section).toContain("read also opens PNG");
     expect(plan.unavailable).toEqual([]);
+  });
+});
+
+describe("Forgerie's own agent files", () => {
+  it("serve the reviewer before pi-subagents' copy, with every tool it names and nothing that contradicts this runtime", async () => {
+    const catalog = ChildAgentCatalog.forSession(root, join(root, "profile"), [bundledForgerieAgentsPath(), bundled]);
+    const reviewer = await catalog.find("reviewer");
+    expect(reviewer?.source.path).toBe(join(bundledForgerieAgentsPath(), "reviewer.md"));
+    const plan = planChildRuntime(reviewer, [], []);
+    expect([...(plan.tools ?? [])].sort()).toEqual(["ask_human", "bash", "read", "watchdog_diff"]);
+    expect(plan.unavailable).toEqual([]);
+    expect(reviewer?.prompt).toContain("Pass `range` for committed work");
+    expect(reviewer?.prompt).not.toMatch(/does not inspect committed ranges|Do not use shell commands/u);
+    // pi-subagents' other built-ins still resolve.
+    expect((await catalog.find("scout"))?.source.path).toBe(join(bundled, "scout.md"));
   });
 });
 

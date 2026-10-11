@@ -36,9 +36,9 @@ const isThinking = (value: string): value is Thinking => THINKING.has(value);
 export class ChildAgentCatalog {
   constructor(private readonly dirs: readonly string[]) {}
 
-  /** Project `.pi/agents`, then the profile's `agents`, then any built-in folder. */
-  static forSession(cwd: string, agentDir: string, builtinDir?: string): ChildAgentCatalog {
-    return new ChildAgentCatalog([join(cwd, ".pi", "agents"), join(agentDir, "agents"), ...(builtinDir === undefined ? [] : [builtinDir])]);
+  /** Project `.pi/agents`, then the profile's `agents`, then the built-in folders in order. */
+  static forSession(cwd: string, agentDir: string, builtinDirs: readonly string[] = []): ChildAgentCatalog {
+    return new ChildAgentCatalog([join(cwd, ".pi", "agents"), join(agentDir, "agents"), ...builtinDirs]);
   }
 
   async list(): Promise<ChildAgentProfile[]> {

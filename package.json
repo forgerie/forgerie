@@ -25,6 +25,7 @@
     "speech",
     "extensions",
     "skills",
+    "agents",
     "docs/plugins.md",
     "docs/config.md",
     "vendor",
