@@ -1,5 +1,25 @@
 # Verification and limits
 
+## Session search (browser side)
+
+A search box sits at the top of the session list (issue #37). Ctrl+K (Cmd+K on a Mac) reaches it from anywhere and opens the list first; `/` reaches it from anywhere but a text field. A query with no term of 3 or more characters narrows the list by title, archived sessions included, and says how to search messages. A longer query replaces the list with hits from `GET /api/sessions/search`. Opening an on-branch hit marks the matched message, scrolls to it, and shows a match bar that steps through `search-matches`; opening an off-branch hit opens the history tree on its entry once the session is idle. The query and its hits live in `useSessionSearch`, called by `app/App.binding.tsx` above the layout switch.
+
+The server routes are built on another branch. To review this side alone, `scripts/search-fixture-server.mjs` serves the catalog, the session reads and both search routes by the contract, from fixture sessions:
+
+```sh
+node scripts/search-fixture-server.mjs 8572 &
+FORGERIE_API_URL=http://127.0.0.1:8572 npx vite --port 8571 --strictPort --host 127.0.0.1 &
+# from the repository root
+node scripts/capture-postures.mjs --url http://127.0.0.1:8571/ --out /tmp/search-shots --label hits-dark --color-scheme dark --press ctrl+k --type deploy
+node scripts/capture-postures.mjs --url http://127.0.0.1:8571/ --out /tmp/search-shots --label match-dark --color-scheme dark --press ctrl+k --type deploy --click-text "Fix the deploy script"
+# from ui/: boxes, overflow and colours at every posture
+APP_URL=http://127.0.0.1:8571/ node scripts/search-probe.mjs hits
+```
+
+`SEARCH_INDEX=building` makes the fixture index report that it is still being built.
+
+Cost: the fixture server is not the real index. Its ranking, passages and positions follow the contract, but no test here proves the real server agrees with them.
+
 ## Colour in a code fence
 
 A code fence now takes colour for every label highlight.js has a grammar for. The renderer asked highlight.js's `common` build what a label meant, and that build carries 36 languages: `nix`, `dockerfile`, `cmake`, `powershell`, `elixir`, `matlab`, `nim`, `http`, and about 150 more drew as plain text. The transcript and the composer now share one instance of the full build (`ui/src/ui/codeGrammars.ts`), so a `nix` fence colours in a reply, and the composer still calls a tag a code block by the same test. A label highlight.js has no grammar for stays plain text: nothing is guessed for it.
