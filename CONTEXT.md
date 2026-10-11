@@ -5,11 +5,11 @@ Forgerie is a browser control surface for persistent Pi coding agent sessions on
 ## Search
 
 **Session search**:
-A text search over the user's messages and the assistant's replies in active and archived sessions on one machine. Thinking, tool calls, tool results, and child sessions are not searched.
+A text search over the user's messages and the assistant's replies in active and archived sessions on one machine. The user's messages count as what the user typed or pasted. Skill and file blocks, thinking, tool calls, tool results, and child sessions are not searched.
 _Avoid_: History search (that is the search inside one session's tree)
 
 **Search hit**:
-A session that matches a query, shown with its matched passage.
+A session that matches a query, shown with its newest matched passage and the count of its other matches.
 _Avoid_: Result, match
 
 **Matched passage**:
