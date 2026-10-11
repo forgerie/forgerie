@@ -3,8 +3,8 @@ import { END_TURN_TOOL_NAME } from "./sessions/endTurnTool.js";
 
 /**
  * Tools whose call only declares how a run ended. The session response
- * protocol records the declaration, so the transcript shows neither the call
- * nor its result. Paging keeps raw positions: `start` still counts them.
+ * protocol records successful declarations, so only failed results remain
+ * visible. Paging keeps raw positions: `start` still counts them.
  */
 const TURN_DECLARATION_TOOLS: ReadonlySet<string> = new Set([END_TURN_TOOL_NAME]);
 
@@ -13,7 +13,8 @@ function isTurnDeclarationCall(part: unknown): boolean {
 }
 
 function isTurnDeclarationResult(message: unknown): boolean {
-  return isRecord(message) && message["role"] === "toolResult" && typeof message["toolName"] === "string" && TURN_DECLARATION_TOOLS.has(message["toolName"]);
+  return isRecord(message) && message["role"] === "toolResult" && message["isError"] !== true
+    && typeof message["toolName"] === "string" && TURN_DECLARATION_TOOLS.has(message["toolName"]);
 }
 
 /**
@@ -212,6 +213,7 @@ function projectToolArguments(value: unknown, depth: number, budget = structured
 }
 
 export function projectBrowserSessionEvent(event: SessionUiEvent): SessionUiEvent {
+  if (event.type === "tool.end" && event.isError) return event;
   if ((event.type === "tool.start" || event.type === "tool.update" || event.type === "tool.end") && TURN_DECLARATION_TOOLS.has(event.toolName)) {
     return { type: "pi.event", eventType: `tool_execution_${event.type.slice("tool.".length)}` };
   }

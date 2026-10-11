@@ -7,6 +7,7 @@ import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-work
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DurableAgentSession } from "./durableAgentSession.js";
+import { createEndTurnToolDefinition } from "./endTurnTool.js";
 
 const directories: string[] = [];
 const sessions: DurableAgentSession[] = [];
@@ -80,6 +81,31 @@ describe("SDK-compatible Durable execution", () => {
     expect(provider.state.callCount).toBe(1);
     expect(session.messages.some((message) => message.role === "toolResult" && message.toolName === "end_turn")).toBe(true);
   });
+  it("bounds silent end_turn retries through the production runtime without declaring completion", async () => {
+    const declare = vi.fn();
+    const { provider, session } = await fixture([createEndTurnToolDefinition({ declare })]);
+    provider.setResponses(Array.from({ length: 3 }, (_, index) => fauxAssistantMessage([
+      { type: "thinking", thinking: "The result is ready." },
+      fauxToolCall("end_turn", { awaiting: "nothing" }, { id: `empty-${String(index)}` }),
+    ], { stopReason: "toolUse" })));
+    await session.prompt("Tell the user the result, then end the run.");
+    expect(provider.state.callCount).toBe(2);
+    const results = session.messages.filter(message => message.role === "toolResult" && message.toolName === "end_turn");
+    expect(results).toHaveLength(2);
+    expect(results.every(message => message.role === "toolResult" && message.isError)).toBe(true);
+    expect(JSON.stringify(results.at(-1))).toContain("run stopped");
+    expect(declare).not.toHaveBeenCalled();
+
+    // The next actual input gets its own correction budget, not the previous run's exhausted one.
+    provider.setResponses([
+      fauxAssistantMessage([fauxToolCall("end_turn", { awaiting: "nothing" }, { id: "next-empty" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([{ type: "text", text: "The result is ready." }, fauxToolCall("end_turn", { awaiting: "nothing" }, { id: "corrected" })], { stopReason: "toolUse" }),
+    ]);
+    await session.prompt("Continue and write visible text.");
+    expect(declare).toHaveBeenCalledExactlyOnceWith("nothing");
+    expect(session.messages.at(-1)).toMatchObject({ role: "toolResult", toolCallId: "corrected", isError: false });
+  });
+
   it("runs real QuickJS codemode through the same tool registry", async () => {
     const { directory, provider, session } = await fixture([], true);
     await writeFile(join(directory, "code-input.txt"), "nested read");

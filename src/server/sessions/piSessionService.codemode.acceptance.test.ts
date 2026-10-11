@@ -7,6 +7,7 @@ import type { SessionUiEvent } from "../../shared/apiTypes.js";
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import { PiSessionService } from "./piSessionService.js";
 import { CapturingSessionEventHub, createTestModelRuntime } from "./piSessionService.testSupport.js";
+import { projectBrowserMessageResponse, projectBrowserSessionEvent } from "../browserMessageProjection.js";
 
 const roots: string[] = [];
 const services: PiSessionService[] = [];
@@ -106,6 +107,29 @@ describe("Hosted response declarations", () => {
     expect((await harness.service.status(harness.ref)).response).toEqual(awaiting === "reply" ? { kind: "needs-response", reason: "reply" } : { kind: "none" });
     await harness.service.stop(harness.ref);
     expect((await harness.service.status(harness.ref)).response).toEqual(awaiting === "reply" ? { kind: "needs-response", reason: "reply" } : { kind: "none" });
+  });
+
+  it("stops repeated silent declarations, exposes the errors, and keeps the response request after restart", async () => {
+    const harness = await hostedSession(true, (seenTools) => Array.from({ length: 3 }, (_, index) => recordTools(seenTools,
+      fauxAssistantMessage([fauxToolCall("end_turn", { awaiting: "nothing" }, { id: `silent-${String(index)}` })], { stopReason: "toolUse" }))));
+    const events = await runPrompt(harness);
+    expect(harness.seenTools).toHaveLength(2);
+    expect((await harness.service.status(harness.ref)).response).toEqual({ kind: "needs-response", reason: "undeclared" });
+    const visible = projectBrowserMessageResponse(await harness.service.messages(harness.ref));
+    expect(visible.messages.filter(message => typeof message === "object" && message !== null && Reflect.get(message, "role") === "toolResult"))
+      .toEqual([expect.objectContaining({ toolName: "end_turn", isError: true }), expect.objectContaining({ toolName: "end_turn", isError: true })]);
+    expect(events.map(projectBrowserSessionEvent).filter(event => event.type === "tool.end" && event.isError)).toHaveLength(2);
+    expect(JSON.stringify(visible.messages)).toContain("run stopped");
+
+    await harness.service.dispose();
+    const reopened = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: harness.agentDir, modelRuntime: harness.modelRuntime,
+      sessionManager: createPiSessionManagerGateway({ agentDir: harness.agentDir, env: {}, sessionDirEnvKeys: [] }),
+      askUserEnabled: true, heartbeatIntervalMs: 60_000,
+    });
+    services.push(reopened);
+    expect((await reopened.machineListing()).sessions.find(item => item.id === harness.ref.id)?.response).toEqual({ kind: "needs-response", reason: "undeclared" });
+    expect(JSON.stringify(projectBrowserMessageResponse(await reopened.messages(harness.ref)).messages)).toContain("run stopped");
   });
 
   it("rebuilds an unanswered browser form after constructing a new daemon service", async () => {

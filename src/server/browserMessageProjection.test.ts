@@ -166,6 +166,19 @@ describe("turn declarations", () => {
     expect(preview.messages[2]).toEqual({});
   });
 
+  it("preserves refused declarations in history and previews without exposing thinking signatures", () => {
+    const failed = { ...declared, isError: true, content: [{ type: "text", text: "The run stopped after two failed attempts to end without a visible reply." }] };
+    const page: MessagePage = { messages: [declaring, failed], start: 4, total: 6 };
+    expect(projectBrowserMessageResponse(page)).toEqual({ start: 4, total: 6, messages: [{ role: "assistant", content: [{ type: "text", text: "Which option?" }] }, failed] });
+    expect(projectBrowserMessagePreviewResponse(page).messages[1]).toMatchObject(failed);
+    expect(projectBrowserSessionEvent({ type: "message.end", message: failed })).toEqual({ type: "message.end", message: failed });
+  });
+
+  it("preserves live failed declaration results even though the start event was hidden", () => {
+    const failure = { type: "tool.end" as const, toolName: "end_turn", toolCallId: "end-1", text: "The user sees no reply", isError: true };
+    expect(projectBrowserSessionEvent(failure)).toBe(failure);
+  });
+
   it("keeps live declaration events out of the transcript, and leaves other tools alone", () => {
     expect(projectBrowserSessionEvent({ type: "tool.start", toolName: "end_turn", toolCallId: "end-1", summary: "", args: { awaiting: "reply" } }))
       .toEqual({ type: "pi.event", eventType: "tool_execution_start" });

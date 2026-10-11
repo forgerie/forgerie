@@ -106,6 +106,25 @@ export function assertTerminalToolAlone(entries: readonly unknown[], toolCallId:
   if (calls.length !== 1 || calls[0]?.["id"] !== toolCallId) throw new Error("Call this turn-ending tool alone, after all other tools finish.");
 }
 
+const MISSING_REPLY_ERROR = "The user sees no reply: this message has no text, and thinking is not shown. Write your reply as text, then call end_turn alone in the same message.";
+
+/** Recovery is derived from the active transcript, so restart and branch navigation cannot reset it. */
+export function previousToolRefusedReply(entries: readonly unknown[], toolName: string): boolean {
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = record(entries[i]);
+    // Protocol boundaries reset recovery; checkpoints only cache response state.
+    if (entry?.["type"] === "custom" && entry["customType"] === SESSION_RESPONSE_CUSTOM_TYPE
+      && record(entry["data"])?.["kind"] !== "checkpoint") return false;
+    const message = record(entry?.["message"]);
+    if (message?.["role"] === "user") return false;
+    if (message?.["role"] !== "toolResult") continue;
+    const content = message["content"];
+    return message["toolName"] === toolName && message["isError"] === true && isUnknownArray(content)
+      && content.some((part) => record(part)?.["text"] === MISSING_REPLY_ERROR);
+  }
+  return false;
+}
+
 /**
  * A declaration ends the run, so the reply must already be visible text in the
  * same message. Thinking is never shown, and text in an earlier message of the
@@ -118,7 +137,7 @@ export function assertReplyWritten(entries: readonly unknown[]): void {
     const block = record(part);
     return block?.["type"] === "text" && typeof block["text"] === "string" && block["text"].trim() !== "";
   });
-  if (!written) throw new Error("The user sees no reply: this message has no text, and thinking is not shown. Write your reply as text, then call end_turn alone in the same message.");
+  if (!written) throw new Error(MISSING_REPLY_ERROR);
 }
 
 /** Compact, reconstructible catalog projection stored in the same session log at settlement. */
