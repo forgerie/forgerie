@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { ModelRuntime, SessionManager, createAgentSessionServices, createCodemodeExtension, defineTool } from "@earendil-works/pi-coding-agent";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { Type } from "typebox";
@@ -41,8 +42,11 @@ async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[
 }
 
 function ends(events: readonly unknown[]): { role: unknown; content: unknown }[] {
+  return messagesOfType(events, "message_end");
+}
+function messagesOfType(events: readonly unknown[], type: "message_start" | "message_end"): { role: unknown; content: unknown }[] {
   return events.flatMap((event) => {
-    if (typeof event !== "object" || event === null || !("type" in event) || event.type !== "message_end" || !("message" in event)) return [];
+    if (typeof event !== "object" || event === null || !("type" in event) || event.type !== type || !("message" in event)) return [];
     const message = event.message;
     if (typeof message !== "object" || message === null || !("role" in message) || !("content" in message)) return [];
     return [{ role: message.role, content: message.content }];
@@ -132,6 +136,102 @@ describe("SDK-compatible Durable execution", () => {
     await vi.waitFor(() => { expect(ends(events).some((message) => message.role === "assistant")).toBe(true); });
     const carrying = ends(events).filter((message) => JSON.stringify(message.content).includes("process_event"));
     expect(carrying.map((message) => message.role)).toEqual(["custom"]);
+    expect(messagesOfType(events, "message_start").filter((message) => JSON.stringify(message.content).includes("process_event"))).toEqual([]);
+  });
+  it("resumes an idle session with the notification itself, without adding a user prompt", async () => {
+    const { provider, session, manager, events, services } = await fixture();
+    const content = "Background work finished.";
+    const requests: string[] = [];
+    provider.setResponses([fauxAssistantMessage("first answer"), (request) => {
+      requests.push(JSON.stringify(request.messages));
+      return fauxAssistantMessage("notification handled");
+    }]);
+    await session.prompt("start work");
+    await session.sendCustomMessage({ customType: "test:notification", content, display: true }, { triggerTurn: true });
+    await vi.waitFor(() => { expect(ends(events).filter((message) => message.role === "assistant")).toHaveLength(2); });
+    expect(provider.state.callCount).toBe(2);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.split(content)).toHaveLength(2);
+    expect(requests[0]).not.toContain("Continue with the new message");
+    expect(messagesOfType(events, "message_start").filter((message) => JSON.stringify(message.content).includes(content))).toEqual([]);
+    expect(session.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(ends(events).filter((message) => JSON.stringify(message.content).includes(content)).map((message) => message.role)).toEqual(["custom"]);
+    const file = manager.getSessionFile();
+    if (file === undefined) throw new Error("Fixture must persist");
+    await session.close();
+    const reopened = await DurableAgentSession.open({ services, sessionManager: SessionManager.open(file), ...(session.model === undefined ? {} : { initialModel: session.model }) });
+    sessions.push(reopened);
+    expect(reopened.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(reopened.messages.filter((message) => message.role === "custom" && message.customType === "test:notification")).toHaveLength(1);
+    expect(JSON.stringify((await reopened.journal.conversation.context(context)).messages).split(content)).toHaveLength(2);
+  });
+  it.each(["steer", "followUp"] as const)("delivers a busy %s notification at its native boundary without an extra user prompt", async (deliverAs) => {
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const held = defineTool({ name: "held", label: "Held", description: "Wait for release", parameters: Type.Object({}),
+      execute: async () => { enter(); await released; return { content: [{ type: "text" as const, text: "released" }], details: undefined }; } });
+    const { provider, session, events } = await fixture([held]);
+    const content = "A background result arrived.";
+    const requests: string[] = [];
+    provider.setResponses([
+      fauxAssistantMessage([fauxToolCall("held", {})], { stopReason: "toolUse" }),
+      (request) => {
+        requests.push(JSON.stringify(request.messages));
+        return fauxAssistantMessage("original work complete");
+      },
+      (request) => { requests.push(JSON.stringify(request.messages)); return fauxAssistantMessage("follow-up handled"); },
+    ]);
+    const running = session.prompt("do the work");
+    try {
+      await entered;
+      await session.sendCustomMessage({ customType: "test:notification", content, display: true }, { triggerTurn: true, deliverAs });
+      expect(session.pendingMessageCount).toBe(1);
+    } finally { release(); }
+    await running;
+    await session.journal.conversation.waitForIdle(context);
+    await session.journal.project();
+    await vi.waitFor(() => { expect(provider.state.callCount).toBe(deliverAs === "steer" ? 2 : 3); });
+    expect(requests[0]?.includes(content)).toBe(deliverAs === "steer");
+    expect(requests.at(-1)?.split(content)).toHaveLength(2);
+    expect(messagesOfType(events, "message_start").filter((message) => JSON.stringify(message.content).includes(content))).toEqual([]);
+    expect(session.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(JSON.stringify(session.messages)).not.toContain("Continue with the new message");
+    expect(ends(events).filter((message) => JSON.stringify(message.content).includes(content)).map((message) => message.role)).toEqual(["custom"]);
+  });
+  it("keeps next-turn notifications passive even when triggerTurn is true", async () => {
+    const { provider, session } = await fixture();
+    provider.setResponses([fauxAssistantMessage("seen")]);
+    await session.sendCustomMessage({ customType: "test:notification", content: "Read this next turn.", display: true }, { triggerTurn: true, deliverAs: "nextTurn" });
+    expect(provider.state.callCount).toBe(0);
+    await session.prompt("next user input");
+    expect(provider.state.callCount).toBe(1);
+    expect(session.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(JSON.stringify((await session.journal.conversation.context(context)).messages)).toContain("Read this next turn.");
+  });
+  it("does not hide a real user input that has the same content as a notification", async () => {
+    const { provider, session, events } = await fixture();
+    provider.setResponses([fauxAssistantMessage("notification handled"), fauxAssistantMessage("user answered")]);
+    const content = "The same text.";
+    await session.sendCustomMessage({ customType: "test:notification", content, display: false }, { triggerTurn: true });
+    await session.prompt(content);
+    await vi.waitFor(() => { expect(ends(events).filter((message) => message.role === "assistant")).toHaveLength(2); });
+    expect(session.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(ends(events).filter((message) => JSON.stringify(message.content).includes(content)).map((message) => message.role)).toEqual(["custom", "user"]);
+    expect(messagesOfType(events, "message_start").filter((message) => JSON.stringify(message.content).includes(content)).map((message) => message.role)).toEqual(["user"]);
+  });
+  it("delivers repeated notifications and image content without a model-only duplicate", async () => {
+    const { provider, session } = await fixture();
+    const requests: string[] = [];
+    provider.setResponses([1, 2].map(() => (request) => { requests.push(JSON.stringify(request.messages)); return fauxAssistantMessage("seen"); }));
+    const content = [{ type: "text" as const, text: "Notification with image." }, { type: "image" as const, data: "aGVsbG8=", mimeType: "image/png" }];
+    await session.sendCustomMessage({ customType: "test:notification", content, display: true }, { triggerTurn: true });
+    await session.sendCustomMessage({ customType: "test:notification", content, display: true }, { triggerTurn: true });
+    expect(requests.map((request) => request.split("Notification with image.").length - 1)).toEqual([1, 2]);
+    expect(requests[0]).toContain("aGVsbG8=");
+    expect(session.messages.filter((message) => message.role === "user")).toHaveLength(0);
+    expect(session.messages.filter((message) => message.role === "custom")).toHaveLength(2);
   });
   it("does not show a user bash command's model copy as a message", async () => {
     const { provider, session, events } = await fixture();

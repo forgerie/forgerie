@@ -4,7 +4,7 @@ import { clampThinkingLevel, getSupportedThinkingLevels, type AssistantMessage, 
 import { ExtensionRunner, ModelRegistry, convertToLlm, createLocalBashOperations, createSyntheticSourceInfo, estimateTokens, type AgentSessionServices, type BuildSystemPromptOptions, type ExtensionUIContext, type PromptOptions, type SessionManager, type SessionStartEvent, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult } from "@earendil-works/pi-durable";
 import type { PiAgentSession } from "./piSessionService.js";
-import { DurableSessionJournal, isTranscriptEntry } from "./durableSessionJournal.js";
+import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
@@ -154,7 +154,15 @@ export class DurableAgentSession implements PiAgentSession {
     await this.startChildAgents();
     this.stream = await watchEvents(this.journal.harness, this.journal.conversation.id, context);
     await this.applyEvent(this.stream.snapshot);
-    this.stream.start(async (events) => { for (const event of events) await this.applyEvent(event); });
+    this.stream.start(async (events) => {
+      // Start events have no entry ID. Pair them with their ends from the same committed batch so neither
+      // half of a model-only notification is emitted as a user message.
+      const hiddenMessages = new Set(events.flatMap((event) => event.type === "message_end" && !this.journal.isTranscriptEntry(event.entry) ? event.entry.model ?? [] : []));
+      for (const event of events) {
+        if (event.type === "message_start" && hiddenMessages.has(event.message)) continue;
+        await this.applyEvent(event);
+      }
+    });
   }
 
   // ─── Host operations on Durable children. None of them starts a parent turn. ───
@@ -325,11 +333,24 @@ export class DurableAgentSession implements PiAgentSession {
   }
 
   async sendCustomMessage(message: { customType: string; content: string | ({ type: "text"; text: string } | ImageContent)[]; display: boolean; details?: unknown }, options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void> {
+    await this.mutation;
+    if (this.closed) throw new Error("Session is closed");
     this.sessionManager.appendCustomMessageEntry(message.customType, message.content, message.display, message.details);
-    const converted = convertToLlm([{ role: "custom", ...message, timestamp: Date.now() }]);
-    for (const modelMessage of converted) await this.journal.appendMessage(modelMessage);
-    this.emit({ type: "message_end", message: { role: "custom", ...message, timestamp: Date.now() } });
-    if (options?.triggerTurn === true) await this.prompt("Continue with the new message.", { streamingBehavior: options.deliverAs === "steer" ? "steer" : "followUp", expandPromptTemplates: false });
+    const customMessage = { role: "custom" as const, ...message, timestamp: Date.now() };
+    this.emit({ type: "message_end", message: customMessage });
+    if (options?.triggerTurn === true && options.deliverAs !== "nextTurn") {
+      // The notification itself is the input. A separate continuation prompt creates a false user message and
+      // appending a passive model copy first exposes follow-ups before their requested boundary.
+      const submission = await this.journal.submitCustomMessage(message.content, options.deliverAs === "followUp" ? "followUp" : "steer");
+      if ((await submission.status(context)).status === "queued") {
+        this.queued = (await this.journal.harness.snapshot(InboxDoc, this.journal.conversation.id, context))?.items ?? [];
+        return;
+      }
+      await submission.wait(context);
+      await this.journal.project();
+    } else {
+      for (const modelMessage of convertToLlm([customMessage])) await this.journal.appendMessage(modelMessage);
+    }
   }
 
   async executeBash(command: string, onChunk?: (chunk: string) => void, options?: { excludeFromContext?: boolean }) {
@@ -511,7 +532,7 @@ export class DurableAgentSession implements PiAgentSession {
         break;
       case "message_end":
         // A model copy, such as a custom message's user form, already showed in its own form. Live must match the projection.
-        if (!isTranscriptEntry(event.entry.kind)) break;
+        if (!this.journal.isTranscriptEntry(event.entry)) break;
         for (const message of event.entry.model ?? []) this.emit({ type: "message_end", message });
         this.partial = undefined;
         break;

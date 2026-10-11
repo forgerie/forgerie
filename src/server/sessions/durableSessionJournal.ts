@@ -1,10 +1,11 @@
 import { constants } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models, Message } from "@earendil-works/pi-ai";
 import { convertToLlm, type SessionManager } from "@earendil-works/pi-coding-agent";
-import { Harness, defineDoc, type AgentChange, type Conversation, type Cursor, type EntryRecord, type Harness as DurableHarness, type HarnessOptions, type HarnessSettings, type Registry, type Storage } from "@earendil-works/pi-durable";
+import { Harness, defineDoc, type AgentChange, type Conversation, type Cursor, type EntryRecord, type Harness as DurableHarness, type HarnessOptions, type HarnessSettings, type Registry, type Storage, type SubmissionRecord, type UserInput } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { MemoryStorage } from "@earendil-works/pi-durable/storage/memory";
 import { acquireDurableOwnership, type DurableOwnership } from "./durableOwnership.js";
@@ -14,6 +15,7 @@ import { childEntryText, isChildEntryKind } from "./durableChildAgents.js";
 const Imported = defineDoc({ kind: "forgerie.import", version: 1, scope: "session", initial: (): { complete: boolean } => ({ complete: false }) });
 const DURABLE_ENTRY_PROPERTY = "forgerieDurableEntryId";
 const DURABLE_SESSION_PROPERTY = "forgerieDurableSessionId";
+const CUSTOM_INPUT_REQUEST_PREFIX = "forgerie.custom-message:";
 
 /**
  * Whether the session transcript shows this entry's messages. Forgerie's own
@@ -51,6 +53,8 @@ export class DurableSessionJournal {
   private projectionFileReady = false;
   private readonly ownerSessionId: string;
   private scanned: EntryRecord["id"] | undefined;
+  private readonly customInputEntries = new Set<EntryRecord["id"]>();
+  private readonly unsubscribe: () => void;
 
   private constructor(
     harness: DurableHarness,
@@ -61,6 +65,9 @@ export class DurableSessionJournal {
     this.harness = harness;
     this.conversation = conversation;
     this.ownerSessionId = manager.getSessionId();
+    this.unsubscribe = harness.subscribeCommits((publication) => {
+      for (const change of publication.changes) if (change.type === "submission") this.noteCustomInput(change.value);
+    });
     for (const entry of manager.getEntries()) {
       // Projected child entries carry their stamp in details.
       if (entry.type === "custom_message" && typeof entry.details === "object" && entry.details !== null && DURABLE_ENTRY_PROPERTY in entry.details
@@ -122,6 +129,13 @@ export class DurableSessionJournal {
         imported.complete = true;
       }, BACKGROUND_CONTEXT);
       const journal = new DurableSessionJournal(harness, conversation, options.manager, ownership);
+      // Submission identity survives restart; content matching would hide genuine user messages with the same text.
+      let cursor: Cursor | undefined;
+      do {
+        const page = await storage.scanSubmissions({ conversationId: conversation.id }, 256, cursor, BACKGROUND_CONTEXT);
+        for (const submission of page.items) journal.noteCustomInput(submission);
+        cursor = page.next;
+      } while (cursor !== undefined);
       await journal.project();
       return journal;
     } catch (error) {
@@ -133,6 +147,23 @@ export class DurableSessionJournal {
   }
 
   assertOwned(): void { this.ownership?.assertOwned(); }
+
+  private noteCustomInput(submission: SubmissionRecord): void {
+    if (submission.conversationId === this.conversation.id && submission.type === "input"
+      && submission.requestId?.startsWith(CUSTOM_INPUT_REQUEST_PREFIX) === true && submission.entry !== undefined) {
+      this.customInputEntries.add(submission.entry);
+    }
+  }
+
+  isTranscriptEntry(entry: EntryRecord): boolean {
+    return isTranscriptEntry(entry.kind) && !this.customInputEntries.has(entry.id);
+  }
+
+  /** Use native admission and queue boundaries, but project the notification only in its SDK custom form. */
+  submitCustomMessage(content: UserInput, whenBusy: "steer" | "followUp") {
+    this.assertOwned();
+    return this.conversation.submit({ type: "input", content, whenBusy, requestId: `${CUSTOM_INPUT_REQUEST_PREFIX}${randomUUID()}` }, BACKGROUND_CONTEXT);
+  }
 
   /** Called before tools and after committed events, so extension hooks see committed assistant calls. */
   project(): Promise<void> {
@@ -161,7 +192,7 @@ export class DurableSessionJournal {
       this.projected.add(entry.id);
       return;
     }
-    if (this.projected.has(entry.id) || !isTranscriptEntry(entry.kind)) return;
+    if (this.projected.has(entry.id) || !this.isTranscriptEntry(entry)) return;
     for (const message of entry.model ?? []) {
       if (message.role === "system") continue;
       // The stamp and message are one JSONL record. Reopen can recover an interrupted projection without duplicates.
@@ -213,7 +244,7 @@ export class DurableSessionJournal {
   close(): Promise<void> {
     this.closing ??= (async () => {
       try { await this.harness.close(BACKGROUND_CONTEXT); }
-      finally { await this.ownership?.release(); }
+      finally { this.unsubscribe(); await this.ownership?.release(); }
     })();
     return this.closing;
   }

@@ -69,6 +69,23 @@ describe("Durable session journal", () => {
     journals.push(reopened);
     expect(manager.getEntries().filter((entry) => entry.type === "message")).toHaveLength(4);
   });
+  it("does not recover a notification's native input as a user message after a missed projection", async () => {
+    const options = await fixture();
+    const journal = await DurableSessionJournal.open(options);
+    journals.push(journal);
+    options.manager.appendCustomMessageEntry("test:notification", "Background work finished.", true);
+    const submission = await journal.submitCustomMessage("Background work finished.", "followUp");
+    await submission.wait(context);
+    await journal.close();
+    const file = options.manager.getSessionFile();
+    if (file === undefined) throw new Error("Fixture must persist");
+    const manager = SessionManager.open(file);
+    const reopened = await DurableSessionJournal.open({ ...options, manager });
+    journals.push(reopened);
+    expect(manager.buildSessionContext().messages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(manager.buildSessionContext().messages.filter((message) => message.role === "custom")).toHaveLength(1);
+    expect(manager.buildSessionContext().messages.filter((message) => message.role === "assistant")).toHaveLength(2);
+  });
   it("makes the first user-only projection discoverable before an assistant completes", async () => {
     const options = await fixture();
     const manager = SessionManager.create(options.manager.getCwd(), options.manager.getSessionDir());
