@@ -5,7 +5,7 @@ import { HeaderButton } from "../ui/HeaderButton";
 import { MenuButton, type MenuCommand } from "../ui/MenuButton";
 import { TitleField } from "../ui/TitleField";
 import { ChoiceList } from "../ui/ChoiceList";
-import { TextSubmit } from "../ui/TextSubmit";
+import { TextSubmit, type TextSubmitFollowUp } from "../ui/TextSubmit";
 import type { Project } from "../newSession";
 
 export interface GroupDraft { name: string; projectIds: string[] }
@@ -24,8 +24,11 @@ export function GroupEditor({ back, close, fresh, draft, projects, dirty, pendin
   onChange: (draft: GroupDraft) => void; onSave: () => void; onDiscard: () => void;
   /** Absent for a group that is not saved yet. */
   onDelete?: (() => void) | undefined;
-  /** Register a folder as a project and add it to this draft. */
-  onRegister: (path: string) => Promise<void>;
+  /**
+   * Register a folder as a project and add it to this draft. A folder that
+   * does not exist comes back as an offer to create it.
+   */
+  onRegister: (path: string) => Promise<TextSubmitFollowUp | void>;
 }) {
   const form = useId();
   const commands: MenuCommand[] = [
@@ -47,7 +50,7 @@ export function GroupEditor({ back, close, fresh, draft, projects, dirty, pendin
         choices={projects.map((project) => ({ id: project.id, label: project.name, detail: project.path }))}
         chosen={draft.projectIds} onChange={(projectIds) => onChange({ ...draft, projectIds })} />
     </form>
-    <TextSubmit label="Add a project folder" hint="For a repository that is not in the list yet. Forgerie adds the folder as a project and checks it here."
+    <TextSubmit label="Add a project folder" hint="For a repository that is not in the list yet. Forgerie adds the folder as a project and checks it here. If the folder does not exist, Forgerie offers to create it."
       action="Add folder" placeholder="/path/to/repository" pending={pending} onSubmit={onRegister} />
   </SettingsFrame>;
 }

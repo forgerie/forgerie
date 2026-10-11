@@ -6,7 +6,7 @@ import fastifyCompress from "@fastify/compress";
 import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
 import { ProjectStore } from "./storage/projectStore.js";
-import { ProjectService } from "./projects/projectService.js";
+import { MissingFolderError, ProjectService } from "./projects/projectService.js";
 import { WorkspaceService } from "./workspaces/workspaceService.js";
 import { loadEffectiveProjectUploadsConfig } from "./workspaces/projectPiWebConfig.js";
 import { listDirectorySuggestions } from "./projects/directorySuggestions.js";
@@ -54,6 +54,8 @@ function registerLocalProjectRoutes(app: FastifyInstance, projects: ProjectServi
     try {
       return await projects.add(request.body);
     } catch (error) {
+      // `code` lets the browser offer to create a missing folder instead of only showing the error.
+      if (error instanceof MissingFolderError) return reply.code(400).send({ error: error.message, code: error.code });
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
   });

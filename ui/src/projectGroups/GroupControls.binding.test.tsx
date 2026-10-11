@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ProjectGroupSettings, useProjectGroups, type ProjectGroupState } from "./GroupControls.binding";
-import type { GroupCatalog, ProjectGroupApi } from "./projectGroupApi";
+import { ApiError, type GroupCatalog, type ProjectGroupApi } from "./projectGroupApi";
 import { catalog } from "./fixtures/groups";
 
 let root: Root;
@@ -94,4 +94,31 @@ it("a folder added from a group's page is checked in that group's draft", async 
   await flush();
   expect(checkbox("extra").checked).toBe(true);
   expect(document.body.textContent).toContain("Unsaved changes");
+});
+
+it("a folder that does not exist is offered for creation, and is created only on confirm", async () => {
+  const register = vi.spyOn(api, "register").mockImplementation(async (path: string, create = false) => {
+    calls.push(["register", path, create]);
+    if (!create) throw new ApiError(`No folder at ${path}`, "missing-folder");
+    const project = { id: "new-project", name: "fresh", path };
+    served = { ...served, projects: [...served.projects, project] };
+    return project;
+  });
+  await act(async () => root.render(<Harness group="kori" />));
+  await flush();
+  const field = document.querySelector<HTMLInputElement>("input[placeholder='/path/to/repository']")!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "/code/fresh"); field.dispatchEvent(new Event("input", { bubbles: true })); });
+  await act(async () => field.form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await flush();
+  expect(calls).toEqual([["register", "/code/fresh", false]]);
+  expect(document.body.textContent).toContain("No folder at /code/fresh. Create it and add it as a project?");
+  expect(seen?.error).toBeUndefined();
+  expect(field.value).toBe("/code/fresh");
+  await act(async () => button("Create folder")!.click());
+  await flush();
+  expect(calls).toEqual([["register", "/code/fresh", false], ["register", "/code/fresh", true]]);
+  expect(checkbox("fresh").checked).toBe(true);
+  expect(button("Create folder")).toBeUndefined();
+  expect(field.value).toBe("");
+  register.mockRestore();
 });

@@ -12,4 +12,13 @@
   background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 500; transition: background-color 150ms, opacity 150ms; }
 .text-submit-button:not(:disabled):hover { background: var(--hover-surface); }
 .text-submit-button:disabled { opacity: 0.45; }
+/* A follow-up to a refused value: the question, then its action and Cancel. */
+/* Empty, it takes no room and adds no gap, but stays a live region so the question is announced. */
+.text-submit-follow-up { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-inline-size: 0; }
+.text-submit-follow-up:empty { display: contents; }
+.text-submit-follow-up-message { flex: 1 1 14rem; min-inline-size: 0; margin: 0; font-size: var(--small-text); line-height: 1.5; overflow-wrap: anywhere; }
+.text-submit-follow-up-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.text-submit-button[data-emphasis="strong"] { border-color: transparent; background: var(--primary); color: var(--primary-foreground); }
+.text-submit-button[data-emphasis="strong"]:not(:disabled):hover { background: var(--primary); opacity: 0.88; }
+.text-submit-button[data-emphasis="quiet"] { border-color: transparent; color: var(--muted-foreground); }
 @media (prefers-reduced-motion: reduce) { .text-submit-input, .text-submit-button { transition: none; } }

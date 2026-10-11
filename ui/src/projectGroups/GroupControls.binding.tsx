@@ -6,7 +6,8 @@ import type { PickerFilter } from "../ui/Picker";
 import type { WorktreeInfo } from "../worktrees/worktreeApi";
 import { ProjectGroups } from "./ProjectGroups";
 import { GroupEditor, type GroupDraft } from "./GroupEditor";
-import type { ProjectGroupApi, GroupCatalog } from "./projectGroupApi";
+import { isMissingFolder, type ProjectGroupApi, type GroupCatalog } from "./projectGroupApi";
+import type { Project } from "../newSession";
 
 /** The chosen group survives a reload, a fold and a rotation, as the list's other arrangement does. */
 const SELECTED_KEY = "forgerie.projectGroup";
@@ -107,6 +108,10 @@ export function ProjectGroupSettings({ api, state, group, onOpen, back, close }:
     redraw((count) => count + 1);
   };
   const forget = () => { drafts.delete(group); redraw((count) => count + 1); };
+  const include = (project: Project) => {
+    const current = drafts.get(group) ?? draft;
+    if (!current.projectIds.includes(project.id)) change({ name: current.name, projectIds: [...current.projectIds, project.id] });
+  };
   return <GroupEditor back={back} close={close} fresh={fresh} draft={draft} projects={catalog.projects} dirty={dirty} pending={pending} error={error}
     onChange={change} onDiscard={forget}
     onSave={() => {
@@ -118,8 +123,13 @@ export function ProjectGroupSettings({ api, state, group, onOpen, back, close }:
       void mutate(() => api.remove({ ...saved, revision: draft.revision ?? saved.revision }))
         .then(() => { forget(); onOpen(undefined); }).catch(() => undefined);
     } : undefined}
-    onRegister={(path) => mutate(() => api.register(path)).then((project) => {
-      const current = drafts.get(group) ?? draft;
-      if (!current.projectIds.includes(project.id)) change({ name: current.name, projectIds: [...current.projectIds, project.id] });
+    onRegister={(path) => mutate(() => api.register(path).catch((cause: unknown) => {
+      // A missing folder is a question for the reader, not a page error.
+      if (isMissingFolder(cause)) return undefined;
+      throw cause;
+    })).then((project) => project ? include(project) : {
+      message: `No folder at ${path}. Create it and add it as a project?`,
+      action: "Create folder",
+      run: () => mutate(() => api.register(path, true)).then(include),
     })} />;
 }

@@ -14,6 +14,19 @@ export const checks = {
       await input.click(canvas.getByRole("button", { name: "Save" }));
       expect(canvas.getByText("Saved 3 projects")).toBeVisible();
     },
+    "a folder that does not exist is offered for creation": async ({ canvas, input, expect }) => {
+      await input.type(canvas.getByRole("textbox", { name: "Add a project folder" }), "/code/new-repo");
+      await input.click(canvas.getByRole("button", { name: "Add folder" }));
+      expect(canvas.getByRole("button", { name: "Create folder" })).toBeVisible();
+      expect(canvas.queryByRole("checkbox", { name: /new-repo/ })).toBeNull();
+    },
+    "a folder that does not exist is created only on confirm": async ({ canvas, input, expect }) => {
+      await input.type(canvas.getByRole("textbox", { name: "Add a project folder" }), "/code/new-repo");
+      await input.click(canvas.getByRole("button", { name: "Add folder" }));
+      expect(canvas.getByText("No folder at /code/new-repo. Create it and add it as a project?")).toBeVisible();
+      await input.click(canvas.getByRole("button", { name: "Create folder" }));
+      expect(canvas.getByRole("checkbox", { name: /new-repo/ })).toBeChecked();
+    },
   },
 } satisfies StateChecks;
 export const composition = { default: [
@@ -36,9 +49,14 @@ function Editor({ fresh, start, error }: { fresh: boolean; start: GroupDraft; er
       onChange={setDraft} onDiscard={() => setDraft(base)} onSave={() => { setBase(draft); setSaid(`Saved ${String(draft.projectIds.length)} projects`); }}
       onDelete={fresh ? undefined : () => setSaid("Deleted")}
       onRegister={async (path) => {
-        const id = `p-${String(projects.length)}`;
-        setProjects([...projects, { id, name: path.split("/").at(-1) ?? path, path }]);
-        setDraft({ ...draft, projectIds: [...draft.projectIds, id] });
+        const add = async () => {
+          const id = `p-${String(projects.length)}`;
+          setProjects([...projects, { id, name: path.split("/").at(-1) ?? path, path }]);
+          setDraft({ ...draft, projectIds: [...draft.projectIds, id] });
+        };
+        // In this fixture, a path under /code/new- names a folder that does not exist yet.
+        if (!path.startsWith("/code/new-")) return add();
+        return { message: `No folder at ${path}. Create it and add it as a project?`, action: "Create folder", run: add };
       }} />
     <p>{said}</p>
   </>;

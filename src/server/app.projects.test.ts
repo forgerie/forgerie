@@ -32,14 +32,21 @@ describe("buildApp project routes", () => {
   });
 
   it("returns stable errors for invalid project requests", async () => {
+    const missing = join(appTestContext.tempDir, "missing");
     const addResponse = await appTestContext.app.inject({
       method: "POST",
       url: "/api/projects",
-      payload: { name: "Missing", path: join(appTestContext.tempDir, "missing") },
+      payload: { name: "Missing", path: missing },
     });
 
     expect(addResponse.statusCode).toBe(400);
-    expect(addResponse.json()).toHaveProperty("error");
+    expect(addResponse.json()).toEqual({ error: `No folder at ${missing}`, code: "missing-folder" });
+
+    const file = join(appTestContext.tempDir, "not-a-folder.txt");
+    await writeFile(file, "");
+    const fileResponse = await appTestContext.app.inject({ method: "POST", url: "/api/projects", payload: { path: file } });
+    expect(fileResponse.statusCode).toBe(400);
+    expect(fileResponse.json()).toEqual({ error: "Project path must be a directory" });
 
     const closeResponse = await appTestContext.app.inject({ method: "DELETE", url: "/api/projects/does-not-exist" });
     expect(closeResponse.statusCode).toBe(404);
