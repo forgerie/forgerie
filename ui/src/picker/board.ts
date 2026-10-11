@@ -110,8 +110,10 @@ export function rowState(session: PickerSession, status: PickerStatus | undefine
   if (activity?.phase === "error") return "errored";
   if (status?.isStreaming === true || status?.isCompacting === true || status?.isBashRunning === true || activity?.phase === "active") return "working";
   if (status?.needsResponse ?? requestsResponse(session.response)) return "blocked";
-  // A watched pull request keeps its session at work between wakes (T3's rule). A request for a response still wins.
+  // Work the session started and is waiting on keeps it in Working while its own turn has ended: a watched pull
+  // request between wakes (T3's rule), and delegated agents that are still running. A request for a response still wins.
   if (status?.watchingPullRequest === true || session.pullRequests?.some((link) => link.watch.kind === "watching") === true) return "working";
+  if ((status?.workingAgents ?? 0) > 0) return "working";
   return unread ? "unread" : "open";
 }
 

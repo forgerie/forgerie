@@ -45,6 +45,13 @@ describe("row state", () => {
     expect(rowState(session("c"), { ...idle, watchingPullRequest: true, needsResponse: true }, undefined, false)).toBe("blocked");
     expect(rowState(session("d", { pullRequests: [off, { ...off, number: 2, watch: { kind: "stopped", reason: "Merged.", at: ago(1) } }] }), idle, undefined, false)).toBe("open");
   });
+  it("keeps an idle session whose agents are still working in Working, unless it asks for a response", () => {
+    expect(rowState(session("a"), { ...idle, workingAgents: 2 }, { phase: "idle" }, true)).toBe("working");
+    expect(rowState(session("b"), { ...idle, workingAgents: 1, needsResponse: true }, undefined, false)).toBe("blocked");
+    expect(rowState(session("c"), { ...idle, workingAgents: 0 }, undefined, false)).toBe("open");
+    // A running process alone, such as a dev server, does not count as work in progress.
+    expect(rowState(session("d"), { ...idle, runningProcesses: 1 }, undefined, false)).toBe("open");
+  });
   it("ranks archived over blocked over errored over working over unread", () => {
     const s = session("a");
     expect(rowState({ ...s, archived: true }, { ...idle, blocked: true }, undefined, true)).toBe("archived");
