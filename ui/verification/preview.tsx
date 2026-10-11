@@ -41,6 +41,9 @@ import { waitingItems, waitingLabel } from "../src/waitingOnYou";
 import { PinnedDock } from "../src/ui/PinnedDock";
 import { EventLine } from "../src/ui/EventLine";
 import { CHILDREN, STREAMING, TRANSCRIPT } from "../src/childAgents/fixtures/children";
+import { IssueProposalEntry, type IssueRequest } from "../src/issues/IssueProposalEntry";
+import type { IssueProposal } from "../src/issues/issueProposal";
+import { CREATED, DISMISSED, GITHUB_FAILED, LONG, NO_LABELS, SHORT } from "../src/issues/fixtures/proposals";
 import type { ComposerInputElement } from "../src/ui/ComposerEditor";
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
@@ -461,7 +464,29 @@ const childMessages = (): TranscriptMessage[] => [...foldChildEntries(fromHistor
   { role: "custom", customType: CHILD_QUESTION_TYPE, content: "", details: { questionId: "q:40", child: 21, childName: "ui", question: "Should the empty state show the last run, or stay blank?" } },
   ...longer,
 ]).messages)];
+// Issue proposals: cards the reader creates or dismisses. The server's transcript rows are not on this branch,
+// so the proposal rides in a system row's child-entry slot, which the thread passes through as custom metadata.
+const issuePreview = scenario.startsWith("issue");
+const proposalRow = (id: string, proposal: IssueProposal): TranscriptMessage =>
+  ({ id, role: "system", parts: [{ type: "text", text: "" }], childEntry: proposal as unknown as ChildEntry });
+const issueJson = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+let issueCalls = 0;
+/** A stand-in for the issue routes: the long proposal fails once on GitHub, then succeeds. */
+const issueRequest: IssueRequest = (path) => new Promise((resolve) => {
+  issueCalls += 1;
+  const response = path.endsWith("/dismiss") ? issueJson(200, DISMISSED)
+    : path.includes(LONG.proposalId) && issueCalls === 1 ? issueJson(502, { error: GITHUB_FAILED })
+    : issueJson(200, { ...CREATED, title: path.includes(LONG.proposalId) ? LONG.title : SHORT.title });
+  setTimeout(() => resolve(response), 1_200);
+});
+const issueMessages = (proposals: readonly IssueProposal[]): TranscriptMessage[] => [
+  say("issue-q", "user", "File the draft-loss bug, and the card idea we discussed."),
+  say("issue-a", "assistant", "I drafted both. Check them before they go to GitHub."),
+  ...proposals.map((proposal, index) => proposalRow(`issue-${String(index)}`, proposal)),
+];
 const scenarios: Record<string, TranscriptMessage[]> = {
+  issue: issueMessages([SHORT, LONG]), "issue-long": issueMessages([LONG]), "issue-readonly": issueMessages([NO_LABELS, LONG]),
+  "issue-decided": issueMessages([{ ...SHORT, outcome: CREATED }, { ...NO_LABELS, outcome: DISMISSED }, { ...LONG, outcome: { ...CREATED, number: 1204, title: LONG.title, url: "https://github.com/forgerie/forgerie/issues/1204" } }]),
   ...childrenPreview ? { [scenario]: childMessages() } : {},
   summary: summaryMessages, "summary-open": summaryMessages,
   shell: shellMessages(false), "shell-running": shellMessages(true), "shell-blocked": shellMessages(true),
@@ -731,7 +756,10 @@ function Preview() {
         return waiting.length > 0 ? <PinnedDock label={waitingLabel(waiting.length)}>{waiting.map((item) => item.kind === "question"
           ? <ChildEntryView key={item.id} entry={item.entry} onAnswer={async () => {}} onOpen={() => setChildView({ open: true, id: 21 })} /> : null)}</PinnedDock> : undefined;
       })() : undefined} commandResult={commandResult && { result: commandResult, disabled: false, onClose: () => setCommandResult(undefined),
-        onChoose: (_requestId, value) => setCommandResult({ type: "done", presentation: "toast", message: `Forked from ${value}` }) }} systemArtifact={childrenPreview ? (custom) => {
+        onChoose: (_requestId, value) => setCommandResult({ type: "done", presentation: "toast", message: `Forked from ${value}` }) }} systemArtifact={issuePreview ? (custom) => {
+        const proposal = (custom as { childEntry?: IssueProposal } | undefined)?.childEntry;
+        return proposal && <IssueProposalEntry proposal={proposal} sessionId="preview" cwd={previewCwd} readOnly={scenario === "issue-readonly"} request={issueRequest} />;
+      } : childrenPreview ? (custom) => {
         const entry = (custom as { childEntry?: ChildEntry } | undefined)?.childEntry;
         if (pinnedPreview && entry?.kind === "question" && entry.answer === undefined) return <EventLine tone="active" subject={`${entry.childName} asks`} phrase="pinned below the thread" />;
         return entry && <ChildEntryView entry={entry} onAnswer={async () => {}} onOpen={() => setChildView({ open: true, id: 21 })} />;
