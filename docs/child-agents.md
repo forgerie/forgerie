@@ -45,6 +45,8 @@ Agent files are written for pi-subagents. `src/server/sessions/durableChildRunti
 
 Without `tools`, a child gets every tool above. A child cannot start children of its own.
 
+Each `send` from the parent reads the child's agent file again and applies the current tools, skills, and instructions before the message arrives. A child spawned under an older Forgerie, or before its file changed, catches up on its next task. The model stays as it was spawned, because a workflow or the parent may have chosen it. If the agent file is gone, the child keeps its spawn-time tools and the send result says so. A message the user types into a child does not refresh it.
+
 ## Restarts
 
 Children live in the parent's Durable storage, and they run only while the daemon has the parent session open. The daemon records sessions with live child work in `$PI_WEB_DATA_DIR/durable-children-live.json` and reopens them at startup, so a restart pauses a child and does not lose it. A tool call that was interrupted reruns only when the tool is replay-safe; otherwise the child is told that the call was interrupted.

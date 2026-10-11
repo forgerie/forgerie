@@ -236,7 +236,11 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       if (action === "spawn" && args.agent !== undefined && profile === undefined) {
         return { content: [{ type: "text" as const, text: `No agent named ${args.agent}.${agentList === "" ? "" : ` Choose one of:\n${agentList}`}` }], isError: true };
       }
-      const runtime = action === "spawn" ? planChildRuntime(profile, extraTools.map((tool) => tool.name), options.sessionSkills ?? []) : undefined;
+      // A send re-reads the child's agent file, so a child spawned under an older runtime or file gets the current one.
+      const sentProfile = action === "send" && existing?.agent != null ? await options.catalog?.find(existing.agent) : undefined;
+      const refresh = action === "send" && (existing?.agent == null || sentProfile !== undefined);
+      const runtime = action === "spawn" || refresh
+        ? planChildRuntime(action === "spawn" ? profile : sentProfile, extraTools.map((tool) => tool.name), options.sessionSkills ?? []) : undefined;
       const checkout = action === "spawn" && args.isolation === "worktree"
         ? await requireWorktrees(options.worktrees).prepare(String(api.taskId)) : undefined;
       const result = await api.commit(async (tx) => {
@@ -250,15 +254,14 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
           const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
           const chosenModel = model?.model ?? profile?.model;
           const chosenThinking = model?.thinkingLevel ?? profile?.thinkingLevel;
-          const project = profile?.inheritProjectContext !== false && options.projectContext !== undefined && options.projectContext !== ""
-            ? `\n\n<project_context>\n${options.projectContext}\n</project_context>` : "";
+          const plan = runtime ?? planChildRuntime(profile, extraTools.map((tool) => tool.name), []);
           await configure(tx, child.id, {
             ...(checkout === undefined ? {} : { cwd: checkout.path }),
             extensions: [ChildTools],
-            tools: childToolsFor(runtime ?? planChildRuntime(profile, extraTools.map((tool) => tool.name), []), extraTools),
+            tools: childToolsFor(plan, extraTools),
             ...(chosenModel === undefined ? {} : { model: chosenModel }),
             ...(chosenThinking === undefined ? {} : { thinkingLevel: chosenThinking }),
-            instructions: `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked.${runtime === undefined || runtime.section === "" ? "" : `\n\n${runtime.section}`}${project}`,
+            instructions: childInstructions(name, profile, plan, options.projectContext),
           });
           state.agents[name] = { conversationId: child.id, reported: [], agent: profile?.name ?? null, createdAt: Date.now(),
             ...(profile === undefined ? {} : { agentFile: profile.source }),
@@ -266,10 +269,18 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         } else if (!Object.hasOwn(state.agents, name)) return `No child named ${name}.`;
         const agent = state.agents[name];
         if (agent === undefined) return `No child named ${name}.`;
+        if (refresh && runtime !== undefined) {
+          // Tools, skills, and instructions follow the current runtime and agent file. The model stays as spawned:
+          // a workflow or the agent may have chosen it for this child.
+          await configure(tx, agent.conversationId, { extensions: [ChildTools], tools: childToolsFor(runtime, extraTools),
+            instructions: childInstructions(name, sentProfile, runtime, options.projectContext) });
+          if (sentProfile !== undefined) agent.agentFile = sentProfile.source;
+        }
         const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
         state.reporters[String(api.taskId)] = reporter;
         await associateWorkflowChild(tx, api.conversationId, agent.conversationId, reporter, name);
-        return action === "send" ? `Sent to ${name}.` : `Started ${name}${profile === undefined ? "" : ` (${profile.name})`}.${runtime === undefined ? "" : runtimeGaps(runtime)}`;
+        if (action === "send") return refresh ? `Sent to ${name}.` : `Sent to ${name}. Its agent file ${String(agent.agent)} is gone, so it keeps the tools it was started with.`;
+        return `Started ${name}${profile === undefined ? "" : ` (${profile.name})`}.${runtime === undefined ? "" : runtimeGaps(runtime)}`;
       }, context);
       const current = (await api.snapshot(Children, api.conversationId, context))?.agents[name];
       return { content: [{ type: "text" as const, text: result }], ...(current === undefined ? {} : { details: { name, conversationId: Number(current.conversationId) } }) };
@@ -293,6 +304,13 @@ export function modelChoice(spec: string): { model: { provider: string; modelId:
   const slash = id.indexOf("/");
   if (slash <= 0 || slash === id.length - 1) return null;
   return { model: { provider: id.slice(0, slash), modelId: id.slice(slash + 1) }, ...(level === undefined ? {} : { thinkingLevel: level }) };
+}
+
+/** A child's instructions: its agent file's prompt, its role, how this runtime differs, and the project's context. */
+function childInstructions(name: string, profile: ChildAgentProfile | undefined, plan: ChildRuntimePlan, projectContext: string | undefined): string {
+  const project = profile?.inheritProjectContext !== false && projectContext !== undefined && projectContext !== ""
+    ? `\n\n<project_context>\n${projectContext}\n</project_context>` : "";
+  return `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked.${plan.section === "" ? "" : `\n\n${plan.section}`}${project}`;
 }
 
 function withChildAdmission<T>(worktrees: DurableChildWorktrees | undefined, operation: () => Promise<T>): Promise<T> {

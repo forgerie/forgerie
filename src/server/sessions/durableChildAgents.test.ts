@@ -74,6 +74,8 @@ const route: FauxResponseFactory = (context) => {
     ["alpha", "beta", "gamma"].map((name) => fauxToolCall("child_agent", { action: "spawn", name, message: "run work 5 times" })),
     { stopReason: "toolUse" },
   );
+  const send = /^Send child (\w+): ([\s\S]*)$/.exec(said);
+  if (send !== null) return call("child_agent", { action: "send", name: send[1] ?? "", message: send[2] ?? "" });
   const spawn = /^Start a child named (\w+)(?: as (\w+))?(?: (isolated))?: ([\s\S]*)$/.exec(said);
   if (spawn !== null) return call("child_agent", { action: "spawn", name: spawn[1] ?? "", message: spawn[4] ?? "",
     ...(spawn[2] === undefined ? {} : { agent: spawn[2] }), ...(spawn[3] === undefined ? {} : { isolation: "worktree" }) });
@@ -331,6 +333,29 @@ describe("Durable-native child agents in a Forgerie session", () => {
     await until("looker report", async () => (await reports(ref, "looker")).length === 1);
     expect(imagesSeen).toEqual(["image/png"]);
     expect(text((await reports(ref, "looker"))[0]?.content)).toContain("shot.png: image/png");
+  }, 30_000);
+
+  it("re-reads a child's agent file on each send, so a long-lived child gets the current tools and instructions", async () => {
+    await mkdir(join(directory, ".pi", "agents"), { recursive: true });
+    const path = join(directory, ".pi", "agents", "keeper.md");
+    await writeFile(path, "---\nname: keeper\ndescription: Reads\ntools: read\n---\nPROFILE-OLD\n");
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start a child named kept as keeper: hello");
+    await until("first report", async () => (await reports(ref, "kept")).length === 1);
+    const first = systemSeen.find((request) => request.includes("PROFILE-OLD")) ?? "";
+    expect(first).not.toContain("\"name\":\"watchdog_diff\"");
+    await writeFile(path, "---\nname: keeper\ndescription: Reads\ntools: read, watchdog_diff\n---\nPROFILE-NEW\n");
+    await until("parent idle", async () => !(await service.status(ref)).isStreaming);
+    await service.prompt(ref, "Send child kept: again");
+    await until("second report", async () => (await reports(ref, "kept")).length === 2);
+    const second = systemSeen.find((request) => request.includes("PROFILE-NEW")) ?? "";
+    expect(second).toContain("\"name\":\"watchdog_diff\"");
+    expect(second).toContain("watchdog_diff also takes `range`");
+    // Durable keeps earlier instructions in the child's history; the current ones follow them.
+    expect(second.lastIndexOf("PROFILE-NEW")).toBeGreaterThan(second.lastIndexOf("PROFILE-OLD"));
+    // The run record of the second run names the file it ran with.
+    const sha = createHash("sha256").update(await readFile(path)).digest("hex");
+    await until("second run record", async () => (await runRecords.list({ agent: "keeper" })).some((row) => row.child.agentFile?.sha256 === sha));
   }, 30_000);
 
   it("stops a child without a parent turn, and Esc in the parent does not reach a child", async () => {
