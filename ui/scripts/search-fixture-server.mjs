@@ -9,6 +9,8 @@
 //   FORGERIE_API_URL=http://127.0.0.1:8572 npx vite --port 8571 --strictPort
 //
 // SEARCH_INDEX=building makes the index report that it is still being built.
+// "Try two ways to cache the store" is read-only and its "deploy" match is off
+// the branch, so it opens through GET /api/sessions/:id/tree.
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 
@@ -36,7 +38,7 @@ const sessions = [
     say("user", "After a merge to main the units keep running the old build."),
     say("assistant", "I restarted forgerie-web.service and forgerie-sessiond.service. The deploy now tracks main without a NixOS rebuild."),
   ] },
-  { id: "s-cache", cwd: "/code/forgerie", name: "Try two ways to cache the store", minutes: 3 * 24 * 60, messages: [
+  { id: "s-cache", cwd: "/code/forgerie", name: "Try two ways to cache the store", minutes: 3 * 24 * 60, readOnly: true, messages: [
     say("user", "Compare a warm store against a binary cache for the build."),
     say("assistant", "The binary cache wins for fresh machines; the warm store wins for repeat builds on zao."),
   ], offBranch: [say("assistant", "A blue-green deploy needs two ports, and the proxy has to switch between them.", { entryId: "s-cache-off" })] },
@@ -62,39 +64,61 @@ const history = (session) => session.messages.map((message, index) => message.ro
   ? { role: "user", content: message.text, timestamp: at(index, session) }
   : { role: "assistant", content: [{ type: "text", text: message.text }], timestamp: at(index, session), stopReason: "stop" });
 
+/** The server's parser (parseSearchQuery in src/server/sessions/sessionSearchText.ts), line for line. */
 function terms(query) {
   const found = [];
-  for (const match of query.matchAll(/"([^"]*)"?|(\S+)/gu)) {
-    const term = (match[1] ?? match[2] ?? "").trim().toLowerCase();
-    if (term.length >= 3) found.push(term);
+  let term = "";
+  let quoted = false;
+  for (let i = 0; i < query.length; i++) {
+    const char = query[i];
+    if (char === '"') {
+      if (quoted && query[i + 1] === '"') { term += '"'; i++; }
+      else quoted = !quoted;
+    } else if (!quoted && /\s/u.test(char ?? "")) {
+      if (Array.from(term).length >= 3) found.push(term.toLowerCase());
+      term = "";
+    } else term += char ?? "";
   }
-  return found;
+  if (Array.from(term).length >= 3) found.push(term.toLowerCase());
+  return [...new Set(found)];
 }
-const marksOf = (text, words) => words.flatMap((word) => {
-  const out = [];
+/** As the server cuts it: from 80 characters before the first match, 240 characters, every match marked. */
+function passageOf(text, words) {
   const lower = text.toLowerCase();
-  for (let index = lower.indexOf(word); index >= 0; index = lower.indexOf(word, index + word.length)) out.push([index, index + word.length]);
-  return out;
-}).sort((a, b) => a[0] - b[0]);
-/** Every message of a session that holds every term, newest last, with its branch position. */
+  const first = Math.min(...words.map((word) => lower.indexOf(word)).filter((at) => at >= 0));
+  const start = Math.max(0, first - 80);
+  const cut = text.slice(start, start + 240);
+  const marks = words.flatMap((word) => {
+    const out = [];
+    for (let at = lower.indexOf(word, start); at >= 0 && at < start + cut.length; at = lower.indexOf(word, at + 1)) out.push([at - start, Math.min(cut.length, at - start + word.length)]);
+    return out;
+  }).sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const mark of marks) { const last = merged.at(-1); if (last && mark[0] <= last[1]) last[1] = Math.max(last[1], mark[1]); else merged.push(mark); }
+  return { text: cut, marks: merged };
+}
+/**
+ * As the server reads a session: a message matches when it holds any term, and
+ * the session is a hit when its matching messages hold every term between them.
+ */
 function matchesOf(session, words) {
   const onBranch = session.messages.map((message, position) => ({ message, position, entryId: `${session.id}-${String(position)}`, offBranch: false }));
   const off = (session.offBranch ?? []).map((message) => ({ message, entryId: message.entryId, offBranch: true }));
-  return [...onBranch, ...off].filter(({ message }) => words.every((word) => message.text.toLowerCase().includes(word)));
+  return [...onBranch, ...off].filter(({ message }) => words.some((word) => message.text.toLowerCase().includes(word)));
 }
 function search(url) {
   const words = terms(url.searchParams.get("q") ?? "");
-  if (words.length === 0) return [400, { error: "Type 3 or more characters.", code: "query_too_short" }];
+  if (words.length === 0) return [400, { error: "Use at least one term with at least 3 characters", code: "query_too_short" }];
   const scope = url.searchParams.getAll("scope");
   const hits = sessions
     .filter((session) => scope.length === 0 || scope.some((folder) => session.cwd === folder || session.cwd.startsWith(`${folder}/`)))
     .flatMap((session) => {
       const found = matchesOf(session, words);
-      if (found.length === 0) return [];
-      // The newest matched passage: an off-branch entry counts when the branch has none.
+      if (!words.every((word) => found.some(({ message }) => message.text.toLowerCase().includes(word)))) return [];
+      // The newest matching message: an off-branch entry counts when the branch has none.
       const newest = found.filter((match) => !match.offBranch).at(-1) ?? found.at(-1);
       return [{ sessionId: session.id, cwd: session.cwd, title: session.name, modified: ago(session.minutes), archived: session.archived === true,
-        passage: { entryId: newest.entryId, role: newest.message.role, timestamp: ago(session.minutes), text: newest.message.text.slice(0, 240), marks: marksOf(newest.message.text.slice(0, 240), words) },
+        passage: { entryId: newest.entryId, role: newest.message.role, timestamp: ago(session.minutes), ...passageOf(newest.message.text, words) },
         otherMatches: found.length - 1, offBranch: newest.offBranch, minutes: session.minutes }];
     })
     .sort((a, b) => a.minutes - b.minutes)
@@ -103,6 +127,13 @@ function search(url) {
   return [200, { hits, index: { state: building ? "building" : "ready", indexedFiles: building ? 4210 : 13_719, totalFiles: 13_719 } }];
 }
 
+function treeOf(session) {
+  const nodes = session.messages.map((message, index) => ({ id: `${session.id}-${String(index)}`, parentId: index === 0 ? null : `${session.id}-${String(index - 1)}`,
+    kind: message.role, summary: message.text }));
+  for (const message of session.offBranch ?? []) nodes.push({ id: message.entryId, parentId: `${session.id}-0`, kind: message.role, summary: message.text });
+  const leaf = `${session.id}-${String(session.messages.length - 1)}`;
+  return { nodes, activeLeafId: leaf, activePathIds: session.messages.map((_, index) => `${session.id}-${String(index)}`) };
+}
 const idle = { isStreaming: false, isCompacting: false, isBashRunning: false, queuedMessages: [] };
 function route(method, url) {
   const path = url.pathname.replace(/^\/api\/machines\/local(?=\/sessions)/u, "/api");
@@ -124,17 +155,14 @@ function route(method, url) {
     }
     if (action === "messages") { const messages = history(found); return [200, { messages, start: 0, total: messages.length }]; }
     if (action === "stream-snapshot") return [200, { partial: null, seq: 0 }];
-    if (action === "status") return [200, idle];
+    if (action === "status") return [200, { ...idle, ...(found.readOnly ? { readOnly: true } : {}) }];
     if (action === "commands") return [200, []];
     if (action === "unread/acknowledge") return [200, { catalogId: "fixture", sessions: [] }];
-    if (action === "commands/run" && method === "POST") {
-      const nodes = found.messages.map((message, index) => ({ id: `${found.id}-${String(index)}`, parentId: index === 0 ? null : `${found.id}-${String(index - 1)}`,
-        kind: message.role, summary: message.text }));
-      for (const message of found.offBranch ?? []) nodes.push({ id: message.entryId, parentId: `${found.id}-0`, kind: message.role, summary: message.text });
-      const leaf = `${found.id}-${String(found.messages.length - 1)}`;
-      return [200, { type: "tree", tree: { nodes, activeLeafId: leaf, activePathIds: found.messages.map((_, index) => `${found.id}-${String(index)}`) } }];
-    }
+    if (action === "commands/run" && method === "POST") return [200, { type: "tree", tree: treeOf(found) }];
+    // Reads the tree without running /tree, for a read-only session too.
+    if (action === "tree" && method === "GET") return [200, { tree: treeOf(found) }];
   }
+  if (session && !found && session[2] === "tree") return [404, { error: `Session ${decodeURIComponent(session[1])} was not found.` }];
   return [404, { error: `Not in the search fixture: ${method} ${url.pathname}` }];
 }
 

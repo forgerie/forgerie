@@ -2,7 +2,7 @@
 
 ## Session search (browser side)
 
-A search box sits at the top of the session list (issue #37). Ctrl+K (Cmd+K on a Mac) reaches it from anywhere and opens the list first; `/` reaches it from anywhere but a text field. A query with no term of 3 or more characters narrows the list by title, archived sessions included, and says how to search messages. A longer query replaces the list with hits from `GET /api/sessions/search`. Opening an on-branch hit marks the matched message, scrolls to it, and shows a match bar that steps through `search-matches`; opening an off-branch hit opens the history tree on its entry once the session is idle. The query and its hits live in `useSessionSearch`, called by `app/App.binding.tsx` above the layout switch.
+A search box sits at the top of the session list (issue #37). Ctrl+K (Cmd+K on a Mac) reaches it from anywhere and opens the list first; `/` reaches it from anywhere but a text field. A query with no term of 3 or more characters narrows the list by title, archived sessions included, and says how to search messages. A longer query replaces the list with hits from `GET /api/sessions/search`. Opening any hit reads the session's `search-matches` first, because a hit's `offBranch` dates from indexing: the hit's own `passage.entryId` in that answer decides. On the branch, the thread marks the message, scrolls to it, and a match bar steps through the matches; off it, the history tree opens on the entry, through `/tree` once a writable session is idle, or through `GET /api/sessions/:id/tree` in a read-only session, where Continue and Fork stay disabled. An entry the answer does not hold is reported in the match bar; no other passage stands in for it. A group with no project folder searches nothing and asks nothing. Escape on the box or its hits clears a typed query; only Escape on an empty query closes the list. The query and its hits live in `useSessionSearch`, called by `app/App.binding.tsx` above the layout switch.
 
 The server routes are built on another branch. To review this side alone, `scripts/search-fixture-server.mjs` serves the catalog, the session reads and both search routes by the contract, from fixture sessions:
 
@@ -16,7 +16,7 @@ node scripts/capture-postures.mjs --url http://127.0.0.1:8571/ --out /tmp/search
 APP_URL=http://127.0.0.1:8571/ node scripts/search-probe.mjs hits
 ```
 
-`SEARCH_INDEX=building` makes the fixture index report that it is still being built.
+`SEARCH_INDEX=building` makes the fixture index report that it is still being built. The fixture follows the build branch's `parseSearchQuery` line for line, matches a session when its messages hold every term between them, cuts passages from 80 characters before the first match, and serves `GET /api/sessions/:id/tree`. "Try two ways to cache the store" is read-only, with its match off the branch. `HIT="Try two ways" node scripts/search-probe.mjs match` measures that tree at every posture.
 
 Cost: the fixture server is not the real index. Its ranking, passages and positions follow the contract, but no test here proves the real server agrees with them.
 

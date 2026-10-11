@@ -5,6 +5,7 @@
 // then reports boxes, overflow, clipped controls and colours as JSON.
 //   APP_URL=http://127.0.0.1:8571/ node scripts/search-probe.mjs hits
 //   APP_URL=http://127.0.0.1:8571/ node scripts/search-probe.mjs match
+//   APP_URL=http://127.0.0.1:8571/ HIT="Try two ways" node scripts/search-probe.mjs match   (a read-only off-branch hit)
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -46,11 +47,21 @@ const facts = `(() => {
     hitText: rows.slice(0, 2).map((row) => row.innerText.replace(/\\n+/g, " | ")),
     mark: style(document.querySelector(".hit-row-mark")), passageStyle: style(passage), title: style(rows[0]?.querySelector(".hit-row-title")),
     tags: [...document.querySelectorAll(".hit-row-tag")].map((tag) => tag.textContent),
+    // Every hit's first mark must sit inside its clamped passage.
+    hiddenMarks: rows.filter((row) => { const p = row.querySelector(".hit-row-passage"); const m = row.querySelector(".hit-row-mark");
+      if (!p || !m) return true; const pr = p.getBoundingClientRect(), mr = m.getBoundingClientRect(); return mr.top < pr.top - 0.5 || mr.bottom > pr.bottom + 0.5; })
+      .map((row) => row.querySelector(".hit-row-title")?.textContent),
+    focusRing: (() => { const input = document.querySelector(".search-field-input"); const box = document.querySelector(".search-field-box");
+      return input && box ? { focused: document.activeElement === input, input: getComputedStyle(input).outlineStyle, box: getComputedStyle(box).outlineStyle + " " + getComputedStyle(box).outlineColor } : null; })(),
     clipped: [...document.querySelectorAll(".picker button, .picker input, .find-bar button, .composer button")].filter(outside).map((el) => el.getAttribute("aria-label") ?? el.textContent?.trim()),
     overflowingText: [...document.querySelectorAll(".hit-row-meta, .hit-row-passage, .find-bar-text, .search-field-box")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.className),
     bar: box(bar), barText: bar?.innerText.replace(/\\n+/g, " | "), barStyle: style(bar), composer: box(composer),
     marked: box(marked), markedText: marked?.innerText.slice(0, 60), transcript: box(viewport),
     markedInView: !!(marked && viewport && marked.getBoundingClientRect().top >= viewport.getBoundingClientRect().top && marked.getBoundingClientRect().top < (bar ?? composer ?? viewport).getBoundingClientRect().top),
+    tree: (() => { const dialog = document.querySelector("dialog.tree-dialog[open]"); if (!dialog) return null;
+      const button = (name) => [...dialog.querySelectorAll("button")].find((node) => node.textContent?.trim() === name);
+      return { selected: dialog.querySelector('[role="treeitem"][aria-selected="true"]')?.textContent?.slice(0, 50), lens: dialog.querySelector('[aria-pressed="true"]')?.textContent,
+        continueDisabled: button("Continue from here")?.disabled, forkDisabled: button("Fork")?.disabled, sheet: box(dialog.querySelector(".tree-sheet")) }; })(),
     barOverlapsComposer: !!(bar && composer && bar.getBoundingClientRect().bottom > composer.getBoundingClientRect().top + 0.5),
   };
 })()`;
@@ -68,7 +79,8 @@ try {
       await cdp.send("Input.insertText", { text: query });
       await sleep(1200);
       if (mode === "match") {
-        await evaluate(cdp, `document.querySelector(".hit-row")?.click()`);
+        // HIT names the hit to open by the start of its title; the first hit otherwise.
+        await evaluate(cdp, `[...document.querySelectorAll(".hit-row")].find((row) => row.querySelector(".hit-row-title")?.textContent?.startsWith(${JSON.stringify(process.env.HIT ?? "")}))?.click()`);
         await sleep(2500);
       }
       console.log(JSON.stringify({ scheme: colorScheme, posture: posture.name, ...(await evaluate(cdp, facts)) }));
