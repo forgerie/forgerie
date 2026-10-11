@@ -12,6 +12,17 @@ export default function Open() {
     <p>The endpoint is GET /sessions/:id/child-runs.csv. Columns follow the run history sheet. The button has four states.</p>
   </DecisionCard>;
 }
+export function Failed() {
+  return <DecisionCard icon={<FileTextIcon />} title="Contract" meta="Design, build, review" open
+    problem="The server did not answer in time. Nothing was approved."
+    footer={<ActionFooter actions={[{ label: "Ask for changes", onPress: () => {} }, { label: "Retry", onPress: () => {}, tone: "primary" }]} />}>
+    <p>The endpoint is GET /sessions/:id/child-runs.csv. Columns follow the run history sheet.</p>
+  </DecisionCard>;
+}
+export function ClosedWithLink() {
+  return <DecisionCard icon={<FileTextIcon />} title="Contract" meta="Design, build, review" open={false}
+    closed="Saved as docs/contracts/run-export.md" closedHref="https://example.com/docs/contracts/run-export.md" />;
+}
 export function Closed() {
   return <DecisionCard icon={<FileTextIcon />} title="Contract" meta="Design, build, review" open={false} closed="Approved by you.">
     <p>The endpoint is GET /sessions/:id/child-runs.csv. Columns follow the run history sheet.</p>

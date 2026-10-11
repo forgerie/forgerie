@@ -9,5 +9,16 @@
 .decision-card[data-open] .decision-card-icon { color: var(--ink-live); }
 .decision-card-title { font-size: var(--text-size); font-weight: 600; }
 .decision-card-meta { margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--label-text); overflow-wrap: anywhere; }
+/* The live wash darkens the muted ink below a readable contrast, so an open card's fact is set a step stronger. */
+.decision-card[data-open] .decision-card-meta { color: var(--quiet-foreground); }
 .decision-card-body { display: grid; gap: var(--space-2); min-inline-size: 0; overflow-wrap: anywhere; }
+/* A failed choice: said in the failure ink right above the choices, so the retry sits under its reason. */
+.decision-card-problem { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0; color: var(--ink-bad); overflow-wrap: anywhere; }
+.decision-card-problem-mark { flex: none; inline-size: 1rem; block-size: 1lh; }
 .decision-card-closed { margin: 0; color: var(--muted-foreground); overflow-wrap: anywhere; }
+/* The closed line as a way to what the decision made. Its press area reaches past the line's own height. */
+.decision-card-link { display: inline-flex; align-items: flex-start; gap: var(--space-1); max-inline-size: 100%;
+  padding-block: var(--space-2); margin-block: calc(-1 * var(--space-2));
+  color: var(--ink-live); font-weight: 500; text-decoration: underline; text-decoration-color: var(--live-edge); text-underline-offset: 0.2em; }
+.decision-card-link:hover { text-decoration-color: currentColor; }
+.decision-card-link-mark { flex: none; inline-size: 0.875rem; block-size: 1lh; }

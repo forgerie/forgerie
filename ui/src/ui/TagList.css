@@ -1,0 +1,4 @@
+/* Tags wrap as a group under what they classify; a long one breaks rather than pushing the row wide. */
+.tag-list { display: flex; flex-wrap: wrap; gap: var(--space-1); min-inline-size: 0; margin: 0; padding: 0; list-style: none; }
+.tag-list-item { max-inline-size: 100%; padding: 0.0625rem var(--space-2); border: var(--hairline) solid var(--line); border-radius: var(--radius-pill);
+  background: var(--tint-surface); color: var(--quiet-foreground); font-size: var(--label-text); line-height: 1.45; overflow-wrap: anywhere; }

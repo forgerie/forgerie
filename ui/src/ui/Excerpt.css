@@ -1,0 +1,19 @@
+/* Cut content: a few lines while the pane is tall, fewer as it gets short (cqb reads the nearest sized container,
+   the session pane), never under two. Opened, it scrolls inside half the pane at most. */
+.excerpt { display: grid; justify-items: start; min-inline-size: 0; }
+.excerpt-box {
+  /** Lines shown before the toggle. @label Excerpt lines @min 2 @max 12 @step 1 */
+  --excerpt-lines: 5;
+  justify-self: stretch; min-inline-size: 0; overflow: hidden;
+  max-block-size: min(calc(var(--excerpt-lines) * 1lh), max(2lh, 20cqb)); }
+.excerpt-box[data-cut] { mask-image: linear-gradient(to bottom, black calc(100% - 1.5lh), transparent); }
+.excerpt-box[data-opened] { max-block-size: min(28rem, max(6lh, 40cqb)); overflow-y: auto; }
+.excerpt-box[data-opened]:focus-visible { outline-offset: 0.125rem; }
+/* Drawn as a quiet line of text; pressed through a control-sized area. */
+.excerpt-toggle { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); block-size: 1.75rem; padding: 0; border: 0;
+  background: none; color: var(--quiet-foreground); font-size: var(--label-text); font-weight: 500; }
+.excerpt-toggle::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: var(--control-size); translate: -50% -50%; }
+.excerpt-toggle:hover { color: var(--foreground); }
+.excerpt-toggle-mark { flex: none; inline-size: 0.875rem; block-size: 0.875rem; }
+.excerpt-toggle[aria-expanded="true"] .excerpt-toggle-mark { rotate: 180deg; }

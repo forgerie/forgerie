@@ -73,6 +73,8 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `StatusChip` (molecule): a header's one status word as a toned pill, announced while it is quiet and hidden; with a panel it is a button that opens the long story under the header at the window's end, with a count that rides along and a ring for each new arrival.
 - `RouteMap` (molecule): a process as steps on one rail, oldest first: the reader's own steps are rings, finished steps are checked, and each step's workers are tracks that sit side by side while there is room and can open their worker.
 - `StageStrip` (molecule): a whole process as one row of bars above an input, with a title, a status, and a count of what waits on the reader; parallel work is stacked bars, and a narrow strip drops the title first.
-- `DecisionCard` (molecule): something in a thread that waits on the reader's decision, with the live edge and wash while open, its choices in a footer, and one line saying what was decided once closed.
+- `DecisionCard` (molecule): something in a thread that waits on the reader's decision, with the live edge and wash while open, its choices in a footer and a failed choice's reason above them, and one line saying what was decided once closed, which can link to what the decision made in a new tab.
 - `TextAreaField` (atom): a labelled box for a few lines of prose that grows with its text, with a hint under it.
 - `PinnedDock` (molecule): things that wait on the reader, pinned above an input under a counting heading; it takes at most 45% of the container height (a third on a container under 30rem tall) and scrolls inside past that.
+- `TagList` (atom): a few short words that classify something, as quiet pills on one wrapping row; readouts, not controls.
+- `Excerpt` (molecule): long content cut to its first few lines with a fade and a Show more toggle that appears only when it is cut; opened, it scrolls inside a share of the pane.
