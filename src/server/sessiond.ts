@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { SessionSearchService } from "./sessions/sessionSearchService.js";
+import { registerSessionSearchRoutes } from "./sessions/sessionSearchRoutes.js";
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import Fastify from "fastify";
@@ -197,9 +199,19 @@ async function createSessionDaemonRuntime() {
   const childRuns = new ChildRunStore(join(piWebDataDir(daemonEnvironment), "child-runs.json"));
   await childRuns.list();
   const liveChildren = config.durableChildren ? new LiveChildSessionIndex(join(piWebDataDir(daemonEnvironment), "durable-children-live.json")) : undefined;
+  const sessionSearch = new SessionSearchService({
+    filePath: join(piWebDataDir(daemonEnvironment), "session-search.sqlite"),
+    sessionsDir: join(activeAgentProfile.dir, "sessions"),
+    catalog: async () => (await sessions.machineListing()).sessions,
+    positions: (ref) => sessions.searchMessagePositions(ref),
+    log: (message) => { app.log.warn(message); },
+  });
+  void sessionSearch.scan().catch((error: unknown) => { app.log.error({ err: error }, "session search startup scan failed"); });
+  app.addHook("onClose", async () => { await sessionSearch.close(); });
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
     modelRuntime: modelRuntime,
     agentDir: activeAgentProfile.dir,
+    sessionSearch,
     archiveStore: withBacklogClaimRelease(archiveStore, backlogClaims),
     pinStore,
     tabsStore,
@@ -285,10 +297,10 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
-  return { eventHub, workspaceActivity, sessions, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
+  return { eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
   registerBacklogRoutes(app, backlog);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);
@@ -297,6 +309,7 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, ru
   registerSessionWorktreeRoutes(app, userSessions);
   registerWorkspaceServicesRoutes(app, workspaceServices);
   registerProjectGroupRoutes(app, groups, projects, relatedWork);
+  registerSessionSearchRoutes(app, sessionSearch);
   registerSessionRoutes(app, sessions, eventHub, "", userSessions);
   registerProcessRoutes(app, sessions);
   registerDurableChildRoutes(app, sessions);

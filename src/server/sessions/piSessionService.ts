@@ -1,3 +1,4 @@
+import type { SessionSearchService } from "./sessionSearchService.js";
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { readSessionFileStats, type SessionFileStats } from "./sessionFileStats.js";
@@ -921,6 +922,7 @@ function createPiWebEditToolDefinition(cwd: string) {
 
 export interface PiSessionServiceDependencies {
   agentDir: string;
+  sessionSearch?: Pick<SessionSearchService, "refreshFile" | "scan">;
   sessionManager: PiSessionManagerGateway;
   sessionWorktrees?: SessionWorktrees;
   projectTools?: ProjectToolDeps;
@@ -1067,6 +1069,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly pinStore: SessionPinRepository;
   private readonly tabsStore: SessionTabsRepository;
   private readonly agentDir: string;
+  private readonly sessionSearch: PiSessionServiceDependencies["sessionSearch"];
   private readonly pullRequestWatches: PiSessionServiceDependencies["pullRequestWatches"];
   private readonly sessionManager: PiSessionManagerGateway;
   private readonly sessionWorktrees: SessionWorktrees | undefined;
@@ -1108,6 +1111,7 @@ export class PiSessionService implements SessionRouteService {
     this.sessionWorktrees = deps.sessionWorktrees;
     this.modelRuntime = deps.modelRuntime;
     this.spawnTargets = deps.spawnTargets;
+    this.sessionSearch = deps.sessionSearch;
     this.projectWorkspaces = deps.projectWorkspaces;
     this.logger = deps.logger ?? noopLogger;
     this.now = deps.now ?? (() => new Date());
@@ -2430,6 +2434,12 @@ export class PiSessionService implements SessionRouteService {
     return { resumed, failed };
   }
 
+  async searchMessagePositions(ref: PiSessionRef): Promise<ReadonlyMap<string, number>> {
+    const positions = new Map<string, number>();
+    historyMessages(await this.historySessionManager(ref), (entryId, position) => { positions.set(entryId, position); });
+    return positions;
+  }
+
   async messages(ref: PiSessionRef, page?: { before?: number; limit?: number }): Promise<ClientMessagePage> {
     const sessionManager = await this.historySessionManager(ref);
     return pageMessagesAtSafeBoundary(historyMessages(sessionManager), page);
@@ -3015,6 +3025,7 @@ export class PiSessionService implements SessionRouteService {
         sessionId: readonly.session.id, ...readonly.session,
         path: sessionFileExists(readonly.session.path) ? readonly.session.path : readonly.transcriptPath,
       });
+      this.scheduleSearchScan();
       await this.forgetUnreadSessions([{ sessionId: readonly.session.id, cwd: readonly.session.cwd }]);
       return;
     }
@@ -3028,6 +3039,7 @@ export class PiSessionService implements SessionRouteService {
         const archiveInput = await this.archiveInputForSession(session);
         await this.closeActive(session.sessionId, { kind: "clear", reason: "archive" });
         await this.archiveStore.archive(archiveInput);
+        this.scheduleSearchScan();
         await this.forgetUnreadSessions([archiveInput]);
       },
     );
@@ -3182,6 +3194,7 @@ export class PiSessionService implements SessionRouteService {
     const readonly = await this.sessionWorktrees?.store.readOnly(ref);
     if (readonly === undefined) await this.archiveStore.restore(archived.sessionId);
     else await this.archiveStore.restore(archived.sessionId, readonly.transcriptPath);
+    this.scheduleSearchScan();
     await this.forgetUnreadSessions([archived]);
   }
 
@@ -3615,19 +3628,35 @@ export class PiSessionService implements SessionRouteService {
     return new Map(entries);
   }
 
+  private scheduleSearchScan(): void {
+    void this.sessionSearch?.scan().catch((error: unknown) => {
+      this.logger.info({ err: error }, "session search scan failed");
+    });
+  }
+
   private async archiveStoreArchiveMany(inputs: readonly ArchiveSessionInput[]): Promise<ArchivedSessionRecord[]> {
     if (inputs.length === 0) return [];
-    if (this.archiveStore.archiveMany !== undefined) return this.archiveStore.archiveMany(inputs);
+    if (this.archiveStore.archiveMany !== undefined) {
+      const records = await this.archiveStore.archiveMany(inputs);
+      this.scheduleSearchScan();
+      return records;
+    }
     const records: ArchivedSessionRecord[] = [];
     for (const input of inputs) records.push(await this.archiveStore.archive(input));
+    this.scheduleSearchScan();
     return records;
   }
 
   private async archiveStoreDeleteArchivedMany(sessionIds: readonly string[]): Promise<string[]> {
     if (sessionIds.length === 0) return [];
-    if (this.archiveStore.deleteArchivedMany !== undefined) return this.archiveStore.deleteArchivedMany(sessionIds);
+    if (this.archiveStore.deleteArchivedMany !== undefined) {
+      const deleted = await this.archiveStore.deleteArchivedMany(sessionIds);
+      this.scheduleSearchScan();
+      return deleted;
+    }
     if (this.archiveStore.deleteArchived === undefined) throw new Error("Archive store does not support deletion");
     for (const sessionId of sessionIds) await this.archiveStore.deleteArchived(sessionId);
+    this.scheduleSearchScan();
     return [...sessionIds];
   }
 
@@ -4353,6 +4382,13 @@ export class PiSessionService implements SessionRouteService {
       if (eventType === "agent_end") {
         this.checkpointResponse(session);
         this.abortRunScopedExtensionDialogs(session.sessionId);
+      }
+      // agent_end precedes extension handlers and retries. agent_settled fires
+      // after agent_end handlers and transcript projection finish.
+      if (eventType === "agent_settled" && session.sessionFile !== undefined) {
+        void this.sessionSearch?.refreshFile(session.sessionFile).catch((error: unknown) => {
+          this.logger.info({ err: error, sessionId: session.sessionId }, "session search refresh failed");
+        });
       }
       if (eventType === "compaction_start") this.resolveCompactionStartGate(session.sessionId);
       if (eventType === "compaction_end") this.scheduleCompactionQueueDrain(session.sessionId);
@@ -5492,21 +5528,25 @@ function annotateAssistantThinkingLevel(message: unknown, thinkingLevel: string 
   return { ...message, thinkingLevel };
 }
 
-function historyMessages(sessionManager: Pick<PiSessionManager, "getBranch">): unknown[] {
+function historyMessages(sessionManager: Pick<PiSessionManager, "getBranch">, onMessage?: (entryId: string, position: number) => void): unknown[] {
   const messages: unknown[] = [];
+  const append = (entry: Record<string, unknown>, message: unknown) => {
+    if (typeof entry["id"] === "string") onMessage?.(entry["id"], messages.length);
+    messages.push(message);
+  };
   // Pi records the initial level at session creation and every later change, so
   // walking the branch yields the level in effect for each assistant message.
   let thinkingLevel: string | undefined;
   for (const entry of sessionManager.getBranch()) {
     if (!isRecord(entry)) continue;
-    if (entry["type"] === "message") messages.push(annotateAssistantThinkingLevel(entry["message"], thinkingLevel));
+    if (entry["type"] === "message") append(entry, annotateAssistantThinkingLevel(entry["message"], thinkingLevel));
     else if (entry["type"] === "thinking_level_change") {
       const level = getString(entry, "thinkingLevel");
       if (level !== undefined) thinkingLevel = level;
     }
-    else if (entry["type"] === "custom_message" && entry["display"] === true) messages.push({ role: "custom", content: entry["content"], customType: entry["customType"], details: entry["details"] });
-    else if (entry["type"] === "compaction") messages.push({ role: "system", source: "compaction", content: `Compacted history:\n\n${stringValue(entry["summary"])}` });
-    else if (entry["type"] === "branch_summary") messages.push({ role: "system", source: "branch_summary", content: `Branch summary:\n\n${stringValue(entry["summary"])}` });
+    else if (entry["type"] === "custom_message" && entry["display"] === true) append(entry, { role: "custom", content: entry["content"], customType: entry["customType"], details: entry["details"] });
+    else if (entry["type"] === "compaction") append(entry, { role: "system", source: "compaction", content: `Compacted history:\n\n${stringValue(entry["summary"])}` });
+    else if (entry["type"] === "branch_summary") append(entry, { role: "system", source: "branch_summary", content: `Branch summary:\n\n${stringValue(entry["summary"])}` });
   }
   return messages;
 }
