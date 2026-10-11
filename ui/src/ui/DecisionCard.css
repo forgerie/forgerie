@@ -1,0 +1,13 @@
+/* The question card's edge and wash, for a decision with more than an answer box. */
+.decision-card { display: grid; gap: var(--space-3); min-inline-size: 0; margin-block: var(--space-2); padding: var(--space-3) var(--space-4) var(--space-4);
+  border: var(--hairline) solid var(--line); border-inline-start: 0.1875rem solid var(--muted-foreground); border-radius: var(--radius-surface);
+  font-size: var(--small-text); line-height: 1.5; }
+.decision-card[data-open] { border-inline-start-color: var(--live); background: var(--live-wash); }
+.decision-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-inline-size: 0; }
+.decision-card-icon { display: grid; flex: none; color: var(--muted-foreground); }
+.decision-card-icon svg { inline-size: 1rem; block-size: 1rem; }
+.decision-card[data-open] .decision-card-icon { color: var(--ink-live); }
+.decision-card-title { font-size: var(--text-size); font-weight: 600; }
+.decision-card-meta { margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--label-text); overflow-wrap: anywhere; }
+.decision-card-body { display: grid; gap: var(--space-2); min-inline-size: 0; overflow-wrap: anywhere; }
+.decision-card-closed { margin: 0; color: var(--muted-foreground); overflow-wrap: anywhere; }

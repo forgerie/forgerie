@@ -65,6 +65,8 @@
   --live: oklch(0.623 0.214 259.815);
   /* A count or badge that waits on the reader: the live colour as a faint wash. */
   --live-wash: color-mix(in oklab, var(--live) 16%, transparent);
+  /* The edge of something at work, quieter than the live colour itself. */
+  --live-edge: color-mix(in oklab, var(--live) 45%, transparent);
   /* Behind a bar that warns of a failure or a risk to the reader's work. */
   --destructive-wash: color-mix(in oklab, var(--destructive) 8%, var(--background));
   --destructive-line: color-mix(in oklab, var(--destructive) 35%, transparent);

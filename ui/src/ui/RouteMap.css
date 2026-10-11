@@ -1,0 +1,45 @@
+/* One rail, one mark per step. A dot is an agent's step; a ring is the reader's. */
+.route-map { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.route-map-step { position: relative; display: grid; grid-template-columns: 0.875rem minmax(0, 1fr); gap: var(--space-3); padding-block-end: var(--space-5); }
+.route-map-step:last-child { padding-block-end: 0; }
+.route-map-step:not(:last-child)::after { content: ""; position: absolute; inset-block: 1.375rem 0.25rem; inset-inline-start: calc(0.4375rem - var(--hairline) / 2);
+  inline-size: var(--hairline); background: var(--line-focus); }
+.route-map-step[data-state="done"]:not(:last-child)::after { background: var(--ink-good); }
+.route-map-mark { display: grid; place-items: center; inline-size: 0.875rem; block-size: 0.875rem; margin-block-start: 0.3125rem; border-radius: 50%;
+  border: 0.09375rem solid var(--line-focus); background: var(--background); color: var(--background); }
+.route-map-mark svg { inline-size: 0.625rem; block-size: 0.625rem; stroke-width: 3.5; }
+.route-map-mark[data-state="done"] { border-color: var(--ink-good); background: var(--ink-good); }
+.route-map-mark[data-state="working"] { border-color: var(--live); background: var(--live); box-shadow: 0 0 0 0.25rem var(--live-wash); }
+.route-map-mark[data-state="waiting"] { border: 0.15625rem solid var(--live); box-shadow: 0 0 0 0.25rem var(--live-wash); }
+.route-map-mark[data-mine][data-state="next"] { border-width: 0.15625rem; border-color: var(--muted-foreground); }
+/* The reader's own step at work is a ring too: the reader acts there, not an agent. */
+.route-map-mark[data-mine][data-state="working"] { background: var(--background); border-width: 0.15625rem; }
+.route-map-body { display: grid; gap: var(--space-1); min-inline-size: 0; }
+.route-map-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); margin: 0; }
+.route-map-name { font-weight: 600; }
+.route-map-word { color: var(--muted-foreground); font-size: var(--small-text); }
+.route-map-step:is([data-state="working"], [data-state="waiting"]) .route-map-word { color: var(--ink-live); }
+.route-map-step[data-state="done"] .route-map-word { color: var(--ink-good); }
+.route-map-step[data-mine][data-state="next"] .route-map-word { color: var(--foreground); }
+.route-map-does { margin: 0; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; overflow-wrap: anywhere; }
+
+/* Tracks gain columns from the width the route has, never from a breakpoint. */
+.route-map-tracks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr)); gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
+.route-map-track-body { position: relative; display: grid; gap: 0.125rem; inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--tint-surface); color: var(--foreground);
+  font: inherit; font-size: var(--small-text); text-align: start; }
+button.route-map-track-body { padding-inline-end: var(--space-8); cursor: pointer; }
+button.route-map-track-body:hover { border-color: var(--line-focus); }
+.route-map-track[data-state="working"] .route-map-track-body { border-color: var(--live-edge); }
+.route-map-track[data-state="waiting"] .route-map-track-body { border-color: var(--live); background: var(--live-wash); }
+.route-map-track-open { position: absolute; inset-inline-end: var(--space-2); inset-block-start: 50%; translate: 0 -50%; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
+.route-map-track-head { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; }
+.route-map-track-name { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--code-font); font-size: var(--label-text); font-weight: 600; }
+.route-map-track-word { margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--label-text); }
+.route-map-track:is([data-state="working"], [data-state="waiting"]) .route-map-track-word { color: var(--ink-live); }
+.route-map-track[data-state="done"] .route-map-track-word { color: var(--ink-good); }
+.route-map-dot { flex: none; inline-size: 0.5rem; block-size: 0.5rem; border-radius: 50%; border: 0.09375rem solid var(--line-focus); }
+.route-map-dot[data-state="working"] { border-color: var(--live); background: var(--live); }
+.route-map-dot[data-state="waiting"] { border-color: var(--live); }
+.route-map-dot[data-state="done"] { border-color: var(--ink-good); background: var(--ink-good); }
+.route-map-track-line { color: var(--muted-foreground); font-size: var(--label-text); overflow-wrap: anywhere; }

@@ -13,6 +13,8 @@ export class WorkflowError extends Error {
 }
 export interface ProseWorkflow {
   name: string; path: string; sha256: string; text: string; body: string; definition: WorkflowDefinition;
+  /** The prompt file's own description, for pickers. */
+  description?: string;
 }
 export interface WorkflowInventory { workflows: ProseWorkflow[]; diagnostics: { name: string; path: string; error: string }[] }
 
@@ -65,7 +67,8 @@ export function parseWorkflow(name: string, path: string, text: string): ProseWo
       throw new WorkflowError(400, `Invalid choices or default for input ${name}`);
     }
   }
-  return { name, path, text, body, definition, sha256: createHash("sha256").update(text).digest("hex") };
+  const description = typeof frontmatter["description"] === "string" && frontmatter["description"].trim() !== "" ? frontmatter["description"].trim() : undefined;
+  return { name, path, text, body, definition, sha256: createHash("sha256").update(text).digest("hex"), ...(description === undefined ? {} : { description }) };
 }
 
 export function workflowInputs(definition: WorkflowDefinition, supplied: WorkflowInputs): WorkflowInputs {

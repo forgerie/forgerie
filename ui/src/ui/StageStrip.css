@@ -1,0 +1,29 @@
+/* The process as bars: done in the done colour, work in the live colour (moving), the reader's turn solid live. */
+.stage-strip { container-type: inline-size; display: grid; gap: var(--space-2); inline-size: 100%; padding: var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--tint-surface); color: var(--foreground);
+  font: inherit; text-align: start; cursor: pointer; }
+.stage-strip:hover { border-color: var(--line-focus); }
+.stage-strip-bars { display: flex; gap: 0.25rem; }
+.stage-strip-segment { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 0.125rem; block-size: 0.5rem; }
+.stage-strip-bar { block-size: 0.25rem; border-radius: 0.125rem; background: var(--line-focus); }
+.stage-strip-segment[data-lanes] .stage-strip-bar { block-size: 0.1875rem; }
+.stage-strip-bar[data-state="done"] { background: var(--ink-good); }
+.stage-strip-bar[data-state="waiting"] { background: var(--live); }
+.stage-strip-bar[data-state="working"] { background: linear-gradient(90deg, var(--live) 40%, var(--live-edge) 50%, var(--live) 60%) 0 0 / 250% 100%;
+  animation: stage-strip-flow 2s linear infinite; }
+@keyframes stage-strip-flow { to { background-position: -250% 0; } }
+@media (prefers-reduced-motion: reduce) { .stage-strip-bar[data-state="working"] { animation: none; background: var(--live); } }
+.stage-strip-text { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; font-size: var(--small-text); }
+.stage-strip-icon { display: grid; flex: none; color: var(--muted-foreground); }
+.stage-strip-icon svg { inline-size: 1rem; block-size: 1rem; }
+.stage-strip-title { flex: none; font-weight: 600; }
+.stage-strip-status { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.stage-strip-count { flex: none; display: grid; place-items: center; min-inline-size: 1.25rem; block-size: 1.25rem; padding-inline: 0.3125rem; border-radius: 0.625rem;
+  background: var(--live); color: var(--primary-foreground); font-size: var(--label-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.stage-strip-open { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
+/* A narrow strip drops the title first: the bars and the status carry the state. */
+@container (inline-size < 30rem) { .stage-strip-title { display: none; } }
+/* A short session spends width instead of height: the bars move beside the text. */
+@container (block-size < 28rem) {
+  .stage-strip { grid-template-columns: minmax(4rem, 28%) minmax(0, 1fr); align-items: center; gap: var(--space-3); padding-block: var(--space-1); }
+}

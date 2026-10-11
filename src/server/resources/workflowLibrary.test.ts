@@ -81,6 +81,7 @@ describe("prose workflows in the prompt library", () => {
     const staged = definition.replace("workflow:\n", "workflow:\n  stages:\n    - { id: contract, name: Contract, stop: approve }\n    - { id: build, name: Build, workers: [{ name: ui, agent: design-engineer, model: anthropic/opus:high }] }\n    - { id: land, name: Land, stop: land }\n");
     const workflow = parseWorkflow("staged", "staged.md", staged);
     expect(workflow.definition.stages?.map((stage) => stage.id)).toEqual(["contract", "build", "land"]);
+    expect(workflow.description).toBe("An experiment");
     const prompt = workflowPrompt("run-1", workflow, workflowInputs(workflow.definition, { task: "x" }));
     expect(prompt).toContain("1. Contract (id contract) [stop: the user approves]");
     expect(prompt).toContain("Workers: ui (agent design-engineer, model anthropic/opus:high).");

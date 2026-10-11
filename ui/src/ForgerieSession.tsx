@@ -12,7 +12,7 @@ import { useThreadMessages } from "./useThreadMessages";
 import { foldProcessEvents } from "./processes/processEvent";
 import { loadProcessOutput } from "./processes/processApi";
 import { ProcessEventView } from "./processes/ProcessEventView";
-import type { ChildEntryArtifact, ProcessEventArtifact } from "./transcript";
+import type { ChildEntryArtifact, ProcessEventArtifact, WorkflowEntryArtifact } from "./transcript";
 import type { SystemArtifactView } from "./ui/Messages";
 import { Thread } from "./ui/Thread";
 import { SessionFrame } from "./ui/SessionFrame";
@@ -64,6 +64,14 @@ import { CHILDREN_CHANGED_EVENT, foldChildEntries } from "./childAgents/childAge
 import { ChildAgentsOpener } from "./childAgents/ChildAgentsOpener";
 import { ChildAgentsPanel } from "./childAgents/ChildAgentsPanel";
 import { ChildEntryView } from "./childAgents/ChildEntryView";
+import { createWorkflowsStore } from "./workflows/workflowsStore";
+import { activeRun, waitingStops, WORKFLOW_RUNS_CHANGED_EVENT, type WorkflowInputs } from "./workflows/workflowsModel";
+import { WorkflowEntryView } from "./workflows/WorkflowEntryView";
+import { WorkflowOpener } from "./workflows/WorkflowOpener";
+import { WorkflowPicker } from "./workflows/WorkflowPicker";
+import { WorkflowPlanSheet } from "./workflows/WorkflowPlanSheet";
+import { WorkflowRunSheet } from "./workflows/WorkflowRunSheet";
+import { WorkflowRunStrip } from "./workflows/WorkflowRunStrip";
 
 const pullRequests = createPullRequestApi(browserTransport.request);
 const NO_LINKS: readonly PullLink[] = [];
@@ -94,8 +102,15 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   // Child agents: their own small store, refreshed when the server says any child changed.
   const sessionRef = useRef<{ id: string; cwd: string } | undefined>(undefined);
   const [childAgents] = useState(() => createChildAgentsStore(browserTransport.request, () => sessionRef.current));
+  // Workflows: the saved ones this session can start, and its runs. Refreshed on the same kind of change events.
+  const [workflows] = useState(() => createWorkflowsStore(browserTransport.request, () => sessionRef.current, () => crypto.randomUUID()));
+  const flows = useSyncExternalStore(workflows.subscribe, workflows.getSnapshot);
+  const [workflowSheet, setWorkflowSheet] = useState<{ type: "picker" } | { type: "plan"; name: string; task?: string } | { type: "run" }>();
   const [store] = useState(() => createSessionStore(id, browserTransport, {}, known, createReadTracker(browserTransport, { subscribe: onUnread, isVisible: () => document.visibilityState === "visible", afterRender: afterTranscriptPaint }),
-    (eventType) => { if (eventType === CHILDREN_CHANGED_EVENT) childAgents.refresh(); }));
+    (eventType) => {
+      if (eventType === CHILDREN_CHANGED_EVENT) { childAgents.refresh(); workflows.refresh(); }
+      if (eventType === WORKFLOW_RUNS_CHANGED_EVENT) workflows.refresh();
+    }));
   const children = useSyncExternalStore(childAgents.subscribe, childAgents.getSnapshot);
   const [childrenOpen, setChildrenOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
@@ -109,8 +124,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   sessionRef.current = sessionId && cwd ? { id: sessionId, cwd } : undefined;
   const connected = state.connection.type === "ready";
   // Read the children on every join: a reconnect may have missed their change events.
-  useEffect(() => { if (connected && sessionId) childAgents.refresh(); }, [childAgents, connected, sessionId]);
-  useEffect(() => () => { childAgents.dispose(); }, [childAgents]);
+  useEffect(() => { if (connected && sessionId) { childAgents.refresh(); workflows.refresh(); } }, [childAgents, workflows, connected, sessionId]);
+  useEffect(() => () => { childAgents.dispose(); workflows.dispose(); }, [childAgents, workflows]);
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
     [sessionId, cwd]);
   const [attachments] = useState(() => createAttachmentAdapter(store.saveAttachment));
@@ -219,7 +234,17 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     if (child) childAgents.open(child.conversationId);
     setChildrenOpen(true);
   }, [childAgents]);
+  const runs = flows.runs;
+  const deciding = flows.deciding;
   const systemArtifact = useCallback<SystemArtifactView>((custom) => {
+    const flow = (custom as Partial<WorkflowEntryArtifact> | undefined)?.workflowEntry;
+    if (flow !== undefined) {
+      const run = flow.kind === "decided" ? undefined : runs.find((candidate) => candidate.id === flow.runId);
+      const stop = flow.kind === "stop" ? flow : undefined;
+      return <WorkflowEntryView entry={flow} run={run} deciding={stop !== undefined && deciding === `${stop.runId}/${stop.stage}`}
+        onDecide={stop !== undefined && !readOnly ? (decision, note) => workflows.decide(stop.runId, stop.stage, decision, note) : undefined}
+        onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />;
+    }
     const entry = (custom as Partial<ChildEntryArtifact> | undefined)?.childEntry;
     if (entry !== undefined) return <ChildEntryView entry={entry} onAnswer={childrenAvailable && !readOnly ? childAgents.answer : undefined}
       onOpen={childrenAvailable ? openChildByName : undefined} />;
@@ -227,7 +252,17 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     if (event === undefined) return undefined;
     const onLoadOutput = sessionId && cwd ? () => loadProcessOutput(browserTransport.request, { id: sessionId, cwd }, event.id) : undefined;
     return <ProcessEventView event={event} onLoadOutput={onLoadOutput} />;
-  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly]);
+  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows]);
+  const running = activeRun(runs);
+  const startWorkflow = async (name: string, inputs: WorkflowInputs, task: string | undefined) => {
+    if (!await workflows.launch(name, inputs)) return;
+    setWorkflowSheet(undefined);
+    // The task came from the composer: it now lives in the run, so the draft would only repeat it.
+    const composer = runtimeRef.current?.thread.composer;
+    if (task !== undefined && composer !== undefined && composer.getState().text === task) composer.setText("");
+  };
+  const workflowBlock = running !== undefined ? "Finish the running workflow before you start another."
+    : busy ? "Wait for the agent to finish its turn." : undefined;
   const runtime = useExternalStoreRuntime({
     messages, onNew, onCancel, adapters: { dictation, attachments },
     isRunning: state.transcript.isRunning,
@@ -296,6 +331,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         {/* Linked: always, even read-only, so a landed session still shows its pull request. Unlinked: only where the agent could still open one. */}
         {pullRef && (linkedCount > 0 || (!readOnly && pull.load.type === "ready")) && <PullRequestOpener pulls={readPulls} links={pull.links}
           onOpen={() => { pull.clearNotice(); setPullSelected(firstToShow(pullItems)); setPullOpen(true); }} />}
+        {childrenAvailable && !readOnly && <WorkflowOpener waiting={waitingStops(running)} running={running !== undefined}
+          onOpen={() => { void workflows.readSaved(); setWorkflowSheet({ type: "picker" }); }} />}
         {childrenAvailable && (children.children.length > 0 || childrenOpen) && <ChildAgentsOpener children={children.children}
           onOpen={() => { childAgents.refresh(); setChildrenOpen(true); }} />}
         {changes && !readOnly && <ChangesOpener notes={notes.length} onOpen={() => setReview({})} />}
@@ -310,7 +347,11 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
       </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
       <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
-        beforeComposer={sendError && !readOnly ? <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{sendError}</p></Consequence> : undefined}
+        beforeComposer={<>
+          {sendError && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{sendError}</p></Consequence>}
+          {flows.error !== undefined && workflowSheet === undefined && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{flows.error}</p></Consequence>}
+          {running !== undefined && <WorkflowRunStrip run={running} onOpen={() => setWorkflowSheet({ type: "run" })} />}
+        </>}
         head={setup && <WorktreeSetupCard setup={setup} hookSeen={setup.log !== ""} branch={worktree?.branch} />}
         inputContext={worktree && worktree.state.kind === "active" ? <WorktreeChip info={worktree} /> : null}
         readOnly={readOnly ? <WorktreeReceipt state={worktree?.state} defaultBranch={worktree?.defaultBranch}
@@ -361,6 +402,22 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           onSend: childAgents.send, onAnswer: childAgents.answer,
           onStop: (conversationId) => { void childAgents.stop(conversationId).catch(() => { /* The panel shows the error. */ }); },
         }} />}
+      {workflowSheet?.type === "picker" && <WorkflowPicker saved={flows.saved ?? []} broken={flows.broken} loading={flows.saved === undefined}
+        error={flows.error} onClose={() => { workflows.dismissError(); setWorkflowSheet(undefined); }}
+        onChoose={(name) => {
+          const draft = runtimeRef.current?.thread.composer.getState().text.trim();
+          setWorkflowSheet({ type: "plan", name, ...(draft === undefined || draft === "" ? {} : { task: draft }) });
+        }} />}
+      {workflowSheet?.type === "plan" && (() => {
+        const workflow = flows.saved?.find((candidate) => candidate.name === workflowSheet.name);
+        return workflow && <WorkflowPlanSheet workflow={workflow} blocked={workflowBlock} starting={flows.launching === true} error={flows.error}
+          initialTask={workflowSheet.task} onStart={(inputs) => { void startWorkflow(workflow.name, inputs, workflowSheet.task); }}
+          onBack={() => { workflows.dismissError(); setWorkflowSheet({ type: "picker" }); }}
+          onClose={() => { workflows.dismissError(); setWorkflowSheet(undefined); }} />;
+      })()}
+      {workflowSheet?.type === "run" && running !== undefined && <WorkflowRunSheet run={running}
+        workers={children.children.map((child) => ({ name: child.name, agent: child.agent, branch: child.worktree?.branch, asking: child.questions.length > 0 }))}
+        onOpenChild={(name) => { setWorkflowSheet(undefined); openChildByName(name); }} onClose={() => setWorkflowSheet(undefined)} />}
       {pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
         notice={pull.notice} writing={pull.writing} now={Date.now()}
         onRefresh={pull.refresh} onWatch={(number, on) => { void pull.setWatch(number, on); }} onLink={pull.linkNumber}

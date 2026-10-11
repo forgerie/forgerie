@@ -68,3 +68,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `ListTools` (molecule): the controls that choose what a list shows, such as a switch and a search box, stacked and set apart from the list.
 - `FileFrame` (organism): one file to read or edit: facts and notices above it, then the file on a framed surface that grows with its text.
 - `StatusChip` (molecule): a header's one status word as a toned pill, announced while it is quiet and hidden; with a panel it is a button that opens the long story under the header at the window's end, with a count that rides along and a ring for each new arrival.
+- `RouteMap` (molecule): a process as steps on one rail, oldest first: the reader's own steps are rings, finished steps are checked, and each step's workers are tracks that sit side by side while there is room and can open their worker.
+- `StageStrip` (molecule): a whole process as one row of bars above an input, with a title, a status, and a count of what waits on the reader; parallel work is stacked bars, and a narrow strip drops the title first.
+- `DecisionCard` (molecule): something in a thread that waits on the reader's decision, with the live edge and wash while open, its choices in a footer, and one line saying what was decided once closed.
+- `TextAreaField` (atom): a labelled box for a few lines of prose that grows with its text, with a hint under it.

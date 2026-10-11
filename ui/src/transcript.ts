@@ -7,6 +7,7 @@ import { STEP_PREFIX } from "./ui/stepPart";
 import { PULL_NOTICE_TYPE, pullNoticeOf, type PullNotice } from "./pullRequests/pullNotice";
 import { PROCESS_EVENT_TYPE, parseProcessEvent, type ProcessEvent } from "./processes/processEvent";
 import { childEntryOf, type ChildEntry } from "./childAgents/childAgentsModel";
+import { workflowEntryOf, type WorkflowEntry } from "./workflows/workflowsModel";
 import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCopy, reopenRun, runFromRecord, shellText, startedRun, unknownRun,
   type ShellEnd, type ShellRun } from "./shellRun";
 
@@ -46,6 +47,8 @@ export interface TranscriptMessage {
   processEvent?: ProcessEvent;
   /** A child agent asked, was answered, was steered, or reported back. */
   childEntry?: ChildEntry;
+  /** A workflow started, waits at a stop, or passed on the reader's decision. */
+  workflowEntry?: WorkflowEntry;
 }
 /** Compaction replaces earlier messages with a summary; a branch summary describes the branch the session left. */
 export type HistorySummaryKind = "compaction" | "branch";
@@ -117,6 +120,9 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
     // An event this app cannot read still shows, as plain system text.
     return { id, role: "system", parts: [{ type: "text", text }], ...(processEvent ? { processEvent } : {}), key: keyOf(message) };
   }
+  // A workflow's launch and each decision are user messages to the parent model, but the reader did not type them.
+  const workflowEntry = role === "custom" || role === "user" ? workflowEntryOf(message) : undefined;
+  if (workflowEntry) return { id, role: "system", parts: [{ type: "text", text: textOf(message) }], workflowEntry, key: keyOf(message) };
   // A child's report is a user message to the parent model, but the reader did not write it.
   const childEntry = role === "custom" || role === "user" ? childEntryOf(message) : undefined;
   if (childEntry) return { id, role: "system", parts: [{ type: "text", text: textOf(message) }], childEntry, key: keyOf(message) };
@@ -459,6 +465,8 @@ export type PullNoticeArtifact = { pullNotice: PullNotice };
 export type ProcessEventArtifact = { processEvent: ProcessEvent };
 /** UI data of a child agent's row, carried as the system message's custom metadata. */
 export type ChildEntryArtifact = { childEntry: ChildEntry };
+/** UI data of a workflow's row, carried as the system message's custom metadata. */
+export type WorkflowEntryArtifact = { workflowEntry: WorkflowEntry };
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
   if (message.role === "shell") {
     const run = shellRunOf(message)!;
@@ -471,6 +479,8 @@ export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
     metadata: { custom: { processEvent: message.processEvent } satisfies ProcessEventArtifact } };
   if (message.childEntry) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { childEntry: message.childEntry } satisfies ChildEntryArtifact } };
+  if (message.workflowEntry) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
+    metadata: { custom: { workflowEntry: message.workflowEntry } satisfies WorkflowEntryArtifact } };
   if (message.summary) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { summary: message.summary } satisfies SummaryArtifact } };
   if (message.role !== "assistant") {
