@@ -72,7 +72,7 @@ workflow:
     - { id: land, name: Land, stop: land }
 ```
 
-A stage with `stop` names you as its actor. `approve` asks you to approve what the agent prepared. `land` lands the run's child branches. A stop stage declares no workers. A land stage must be the last stage. Stage ids and worker names use lowercase letters, digits, and dashes. A worker name appears in one stage only. A worker's `model` is `provider/model-id`, optionally with `:thinking-level`. The agent passes it to `child_agent`, which now accepts `model` for one spawn.
+A stage with `stop` names you as its actor. `approve` asks you to approve what the agent prepared. `land` lands the run's child branches. A stop stage declares no workers. A land stage must be the last stage. Stage ids and worker names use lowercase letters, digits, and dashes. A worker name appears in one stage only. A worker's `model` is `provider/model-id`, optionally with `:thinking-level`. When the agent spawns a child with a declared worker's name, Forgerie uses that model, whatever model the agent asked for and whatever the agent file says. Without a declared model, the agent file's model applies. `child_agent` also accepts `model` for one spawn of an undeclared child.
 
 Forgerie enforces three rules:
 

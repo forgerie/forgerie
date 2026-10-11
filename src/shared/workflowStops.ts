@@ -51,6 +51,15 @@ export function stageForChild(run: Pick<WorkflowRun, "stages" | "stops">, name: 
   return before.filter((stage) => stage.stop === undefined).at(-1);
 }
 
+/** The worker a stage declares under this name, if any. Its model is the user's choice, so it wins over the agent's. */
+export function declaredWorker(run: Pick<WorkflowRun, "stages">, name: string): NonNullable<WorkflowStage["workers"]>[number] | undefined {
+  for (const stage of run.stages ?? []) {
+    const worker = stage.workers?.find((candidate) => candidate.name === name);
+    if (worker !== undefined) return worker;
+  }
+  return undefined;
+}
+
 export type ChildAdmission = { kind: "admitted"; stage?: string } | { kind: "refused"; reason: string };
 
 /** Whether the agent may start or message a child now. Runs without stages admit everything, as before. */

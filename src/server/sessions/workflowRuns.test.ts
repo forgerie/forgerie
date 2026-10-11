@@ -45,7 +45,7 @@ workflow:
     - { id: contract, name: Contract, stop: approve }
     - id: build
       name: Build
-      workers: [{ name: alpha, agent: nobody-checks-this }]
+      workers: [{ name: alpha, agent: nobody-checks-this, model: faux/faux-declared }]
     - { id: land, name: Land, stop: land }
 ---
 WORKFLOW-STAGED
@@ -135,7 +135,8 @@ beforeEach(async () => {
   await mkdir(agentDir);
   store = new ChildRunStore(join(agentDir, "child-runs.json"));
   models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-  const provider = fauxProvider({ tokensPerSecond: 600 });
+  // A second model lets a test tell a declared worker model from the session default.
+  const provider = fauxProvider({ tokensPerSecond: 600, models: [{ id: "faux-1" }, { id: "faux-declared" }] });
   models.registerNativeProvider(provider.provider);
   provider.setResponses(Array.from({ length: 300 }, () => route));
   service = openService();
@@ -343,6 +344,8 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       const early = await server.inject({ method: "POST", url: finish, payload: { cwd: root, outcome: "completed", result: "Skip the land" } });
       expect(early.statusCode).toBe(409);
       expect(early.json<{ error: string }>().error).toContain('"Land"');
+      // The agent passed no model; Forgerie applied the one the workflow declares for alpha.
+      expect((await store.list({ session: ref.id })).find((record) => record.child.name === "alpha")?.model).toEqual({ provider: "faux", modelId: "faux-declared" });
       const alpha = (await service.durableChildren(ref)).find((child) => child.name === "alpha");
       expect(alpha?.worktree).toMatchObject({ state: "active", ahead: 1 });
       const landed = await server.inject({ method: "POST", url: stopUrl("land"), payload: { cwd: root, decision: "land" } });

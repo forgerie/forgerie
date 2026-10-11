@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowRun, WorkflowStage, WorkflowStopState } from "./workflowRuns.js";
-import { admitChild, completionProblem, heldAt, routeProblems, stageViews, stopRequestProblem } from "./workflowStops.js";
+import { admitChild, completionProblem, declaredWorker, heldAt, routeProblems, stageViews, stopRequestProblem } from "./workflowStops.js";
 
 const ROUTE: WorkflowStage[] = [
   { id: "contract", name: "Contract", stop: "approve" },
@@ -54,6 +54,13 @@ describe("workflow stops", () => {
     expect(completionProblem(run({ contract: "approved" }))).toContain('"Land"');
     expect(completionProblem(run({ contract: "approved", land: "approved" }))).toBeUndefined();
     expect(completionProblem(run({}, [], []))).toBeUndefined();
+  });
+
+  it("finds a declared worker by name in any stage", () => {
+    const stages: WorkflowStage[] = [{ id: "review", name: "Review", workers: [{ name: "review", agent: "reviewer", model: "cliproxyapi/gpt-6.1-sol" }] }];
+    expect(declaredWorker({ stages }, "review")?.model).toBe("cliproxyapi/gpt-6.1-sol");
+    expect(declaredWorker({ stages }, "helper")).toBeUndefined();
+    expect(declaredWorker({}, "review")).toBeUndefined();
   });
 
   it("rejects routes it cannot enforce", () => {

@@ -19,7 +19,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
 import type { ChildWorktreeSummary, WorktreeActionResult, WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
 import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
-import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild, workflowChildRefusal } from "./durableWorkflowRuns.js";
+import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild, workflowChildRefusal, workflowWorkerModel } from "./durableWorkflowRuns.js";
 
 export const CHILD_TOOL_NAME = "child_agent";
 export const CHILD_QUESTION_KIND = "forgerie.child-question";
@@ -224,8 +224,11 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       // A workflow stop holds work that belongs after it. Ask before preparing a worktree, and again in the commit.
       const held = await api.commit((tx) => workflowChildRefusal(tx, api.conversationId, name), context);
       if (held !== undefined) return { content: [{ type: "text" as const, text: held }], isError: true };
-      const model = action === "spawn" && args.model !== undefined ? modelChoice(args.model) : undefined;
-      if (model === null) return { content: [{ type: "text" as const, text: `Write model as provider/model-id, optionally with :thinking-level. Got ${args.model ?? ""}.` }], isError: true };
+      // A model the workflow declares for this worker is the user's choice: it wins over the agent's argument.
+      const declared = action === "spawn" ? await api.commit((tx) => workflowWorkerModel(tx, api.conversationId, name), context) : undefined;
+      const spec = declared ?? (action === "spawn" ? args.model : undefined);
+      const model = spec === undefined ? undefined : modelChoice(spec);
+      if (model === null) return { content: [{ type: "text" as const, text: `Write model as provider/model-id, optionally with :thinking-level. Got ${spec ?? ""}${declared === undefined ? "" : " from the workflow file"}.` }], isError: true };
       if (existing?.worktreeId !== undefined) await requireWorktrees(options.worktrees).assertWritable(existing.worktreeId);
       const profile = action === "spawn" && args.agent !== undefined ? await options.catalog?.find(args.agent) : undefined;
       if (action === "spawn" && args.agent !== undefined && profile === undefined) {

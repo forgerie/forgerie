@@ -4,7 +4,7 @@ import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { Check } from "typebox/value";
 import { WorkflowOutcomeSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowInputs, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
-import { admitChild, completionProblem, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
+import { admitChild, completionProblem, declaredWorker, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
 import { assertProseOnly, WorkflowError, workflowInputs, workflowPrompt, type WorkflowLibrary } from "../resources/workflowLibrary.js";
 
 export const WORKFLOW_DOC_KIND = "forgerie.workflow-runs";
@@ -219,6 +219,13 @@ export async function workflowChildRefusal(tx: Tx, parent: ConversationId, name:
   if (run === undefined) return undefined;
   const admission = admitChild(run, name);
   return admission.kind === "refused" ? admission.reason : undefined;
+}
+
+/** The model the active workflow declares for a worker with this name. A spawn uses it whatever model the agent asked for. */
+export async function workflowWorkerModel(tx: Tx, parent: ConversationId, name: string): Promise<string | undefined> {
+  const doc = await tx.doc(Runs, parent);
+  const run = doc.active === null ? undefined : doc.records[doc.active];
+  return run === undefined ? undefined : declaredWorker(run, name)?.model;
 }
 
 /** Called in the same commit that allocates a reporter, so association cannot be lost after a crash. */
