@@ -59,8 +59,8 @@ Children live in the parent's Durable storage, and they run only while the daemo
 ## Limits
 
 - Children share the parent's working folder unless spawn sets `isolation: "worktree"`.
-- Shared tools keep the parent extension's execution context and working directory. Worktree isolation applies to child-native coding tools, not session extension tools.
-- Children never share `child_agent`, `ask_user`, `end_turn`, `spawn_session`, `handoff_session`, `workflow_finish`, `workflow_stop`, `propose_workflow`, any `propose_*` tool, or `subagent`. Tools with `model-only` or `hidden` exposure are also excluded.
+- Shared tools run in the parent session's working folder even when the child uses `isolation: "worktree"`. They keep the parent extension's execution context. For example, the bundled `process` tool and `workspace_services` act on the parent checkout. Worktree isolation applies to child-native coding tools, not shared session tools.
+- Children never share `child_agent`, `ask_user`, `end_turn`, `spawn_session`, `handoff_session`, `workflow_finish`, `workflow_stop`, `propose_workflow`, any `propose_*` tool, `subagent`, `bg_wait`, or `web_enable`. The parent's `grep`, `find`, and `ls` are also excluded; agent files translate these names to child-native `bash`. Tools with `model-only` or `hidden` exposure are also excluded.
 - `childToolsDeny` denies more shared session tool names (default `[]`). It does not remove child-native tools and is not a shell or filesystem sandbox.
 - Worktree isolation starts at the parent's committed `HEAD`. It does not copy uncommitted parent files.
 - Landing targets the repository's default branch. It can also land commits inherited from an unlanded parent branch. The `ahead` summary counts only commits after the parent's starting `HEAD`.
@@ -247,7 +247,7 @@ Completed records expire 90 days after `finishedAt`. Unfinished records remain. 
 
 `durableChildSessionTools.test.ts` uses the production Durable session with registered extension tools. It checks named-tool selection, exclusions, missing-tool reports, validation, extension hooks, separate call IDs, late registration, and replacement registries after reload.
 
-The opt-in real-model check installs `npm:pi-web-access@0.39.0` into a temporary profile. The bundled `researcher` calls `web_search` and `fetch_content` once each. The check removes both search-key environment variables, records extension-hook timings, and removes its copied model credentials and temporary workspace on exit. It never opens the live daemon. Model calls incur costs.
+The opt-in real-model check keeps a temporary profile install of `npm:pi-web-access@0.39.0` so it also works on builds without bundled pi-web-access. When Forgerie bundles pi-web-access, it ignores this profile copy with a warning and uses the bundled tools instead. The bundled `researcher` calls `web_search` and `fetch_content` once each. The check removes every provider-key environment variable using the same filter as `web-access-real.ts`, records extension-hook timings, and removes its copied model credentials and temporary workspace on exit. It never opens the live daemon. Model calls incur costs.
 
 ```bash
 RESEARCH_REAL=1 RESEARCH_MODEL=<model-id> \

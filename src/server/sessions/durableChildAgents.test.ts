@@ -315,7 +315,7 @@ describe("Durable-native child agents in a Forgerie session", () => {
     // A one-pixel PNG.
     await writeFile(join(directory, "shot.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
     await mkdir(join(directory, ".pi", "agents"), { recursive: true });
-    await writeFile(join(directory, ".pi", "agents", "checker.md"), "---\nname: checker\ndescription: Reviews\ntools: read, grep, watchdog_diff, contact_supervisor, web_search\n---\nDo not use shell commands. PROFILE-CHECKER\n");
+    await writeFile(join(directory, ".pi", "agents", "checker.md"), "---\nname: checker\ndescription: Reviews\ntools: read, grep, watchdog_diff, contact_supervisor, missing_tool\n---\nDo not use shell commands. PROFILE-CHECKER\n");
     const ref = { id: (await service.start(directory)).id, cwd: directory };
     await service.prompt(ref, "Start a child named differ as checker: DIFF main~1..main");
     await until("differ report", async () => (await reports(ref, "differ")).length === 1);
@@ -323,7 +323,7 @@ describe("Durable-native child agents in a Forgerie session", () => {
     expect(report).toContain("Change in range");
     expect(report).toContain("+RANGE-CHANGE");
     const spawned = (await transcript(ref)).find((m) => m.role === "toolResult" && text(m.content).startsWith("Started differ"));
-    expect(text(spawned?.content)).toBe("Started differ (checker). Not available to it here: tools web_search.");
+    expect(text(spawned?.content)).toBe("Started differ (checker). Not available to it here: tools missing_tool.");
     const instructions = systemSeen.find((request) => request.includes("PROFILE-CHECKER")) ?? "";
     expect(instructions).toContain("## This runtime");
     expect(instructions).toContain("contact_supervisor is ask_human here");

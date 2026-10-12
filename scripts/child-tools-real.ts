@@ -47,13 +47,15 @@ try {
   await mkdir(cwd);
   // pi-web-access resolves configuration via this environment variable. Never let it see the live profile.
   process.env.PI_CODING_AGENT_DIR = agentDir;
-  delete process.env.BRAVE_SEARCH_API_KEY;
-  delete process.env.SERPER_API_KEY;
+  // Remove provider credentials without reading or reporting their values, as in web-access-real.ts.
+  for (const name of Object.keys(process.env)) {
+    if (/(?:API_KEY|API_TOKEN|AUTH_TOKEN|ACCESS_TOKEN)$/u.test(name) || name === "GOOGLE_APPLICATION_CREDENTIALS") delete process.env[name];
+  }
   await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { "research-acceptance": {
     baseUrl: source.baseUrl.replace(/\/$/u, "").replace(/\/v1$/u, "") + "/v1", apiKey: source.apiKey, api: "openai-completions",
     models: [{ id: model, name: "Research acceptance", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 }],
   } } }), { mode: 0o600 });
-  // Pi installs this exact package into the temporary profile from its settings, independently of Forgerie's bundles.
+  // Keep the profile install for builds without bundled pi-web-access. When bundled, Forgerie ignores this profile copy with a warning.
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "research-acceptance", defaultModel: model,
     defaultThinkingLevel: "off", packages: ["npm:pi-web-access@0.39.0"], compaction: { enabled: false } }));
   await mkdir(join(agentDir, "extensions"));

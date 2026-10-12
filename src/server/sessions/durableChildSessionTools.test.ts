@@ -7,6 +7,7 @@ import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-work
 import { Type } from "typebox";
 import { afterEach, expect, it, vi } from "vitest";
 import { DurableAgentSession } from "./durableAgentSession.js";
+import { DurableSdkTools } from "./durableSdkTools.js";
 import { createDurableChildHost } from "./durableChildHost.js";
 
 const roots: string[] = [];
@@ -90,7 +91,11 @@ async function fixture(named: string[], definitions: Pick<ToolDefinition, "name"
       expect(session.isStreaming).toBe(false);
     }, { timeout: 10000 });
   }
-  return { session, calls, hooks, offered, instructions, spawn, registerTool: (name: string) => {
+  return { session, calls, hooks, offered, instructions, spawn, sharedToolNames: () => {
+    const sdk = new DurableSdkTools({ cwd: root, settings: services.settingsManager, runner: session.extensionRunner, customTools: [],
+      beforeCall: () => Promise.resolve(), emit: () => undefined });
+    return sdk.childTools(() => sdk, deny).map((tool) => tool.name);
+  }, registerTool: (name: string) => {
     if (registerTool === undefined) throw new Error("Extension did not load");
     registerTool({ name });
   }, setVersion: (value: number) => { version = value; }, setBlocked: () => { blocked = true; }, setQuery: (value: string) => { query = value; } };
@@ -137,13 +142,22 @@ it.each(["deferred", "codemode"] as const)("offers named %s session tools direct
   expect(probe.calls).toHaveLength(1);
 });
 
-it.each(["child_agent", "ask_user", "end_turn", "spawn_session", "handoff_session", "workflow_finish", "workflow_stop", "propose_workflow", "propose_issue", "propose_future", "subagent"])("never offers parent-only %s even if registered and named", async (name) => {
+it.each(["child_agent", "ask_user", "end_turn", "spawn_session", "handoff_session", "workflow_finish", "workflow_stop", "propose_workflow", "propose_issue", "propose_future", "subagent", "bg_wait", "web_enable"])("never offers parent-only %s even if registered and named", async (name) => {
   const probe = await fixture([name], [{ name }]);
   await probe.spawn();
   expect(probe.offered[0]).toEqual(["ask_human"]);
   expect(probe.calls).toEqual([]);
   expect(probe.instructions[0]).toContain(`Not available here: ${name}`);
   expect(JSON.stringify(probe.session.messages)).toContain(`Not available to it here: tools ${name}`);
+});
+
+it.each(["grep", "find", "ls"])("excludes the parent's %s tool from shared declarations and translates it to child-native bash", async (name) => {
+  const probe = await fixture([name], [{ name }]);
+  expect(probe.session.extensionRunner.getToolDefinition(name)?.name).toBe(name);
+  expect(probe.sharedToolNames()).not.toContain(name);
+  await probe.spawn();
+  expect(probe.offered[0]).toEqual(["ask_human", "bash"]);
+  expect(probe.calls).toEqual([]);
 });
 
 it.each(["model-only", "hidden"] as const)("never offers a tool with %s exposure", async (exposure) => {
