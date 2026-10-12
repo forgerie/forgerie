@@ -323,6 +323,23 @@ describe("codemodeEnabled", () => {
   });
 });
 
+describe("childToolsDeny", () => {
+  it("defaults to empty and persists named session tools", () => {
+    expect(effectivePiWebConfig(testOptions()).config.childToolsDeny).toEqual([]);
+    savePiWebConfig({ childToolsDeny: ["web_search", "fetch_content"] }, testOptions());
+    expect(loadPiWebConfig(testOptions()).config.childToolsDeny).toEqual(["web_search", "fetch_content"]);
+    savePiWebConfig({ port: 9000 }, testOptions());
+    expect(loadPiWebConfig(testOptions()).config.childToolsDeny).toEqual(["web_search", "fetch_content"]);
+    savePiWebConfig({ childToolsDeny: [] }, testOptions());
+    expect(loadPiWebConfig(testOptions()).config.childToolsDeny).toEqual([]);
+  });
+
+  it.each([null, "web_search", [7], [""]])("rejects invalid deny lists %j", async (childToolsDeny) => {
+    await writeFile(configPath, JSON.stringify({ childToolsDeny }));
+    expect(() => loadPiWebConfig(testOptions())).toThrow("Forgerie config childToolsDeny must be an array of non-empty strings");
+  });
+});
+
 describe("durableChildrenEnabled", () => {
   it("is off by default, and the env var overrides the config", () => {
     expect(durableChildrenEnabled({}, {})).toBe(false);

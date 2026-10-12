@@ -15,6 +15,7 @@ export interface ChildSkill { name: string; description: string; path: string }
 
 /** Tools every Durable child can be given. */
 const PROVIDED = new Set(["read", "write", "edit", "bash", "ask_human", "watchdog_diff"]);
+export const isChildNativeTool = (name: string): boolean => PROVIDED.has(name);
 /** Agent-file tool names with a different name or mechanism here, and what the child must know about it. */
 const EQUIVALENT: Readonly<Record<string, { tool: string; note: string }>> = {
   grep: { tool: "bash", note: "grep, find, and ls run through bash." },
@@ -24,7 +25,7 @@ const EQUIVALENT: Readonly<Record<string, { tool: string; note: string }>> = {
 };
 
 export interface ChildRuntimePlan {
-  /** Tool names to offer; undefined offers every child tool. Always includes ask_human. */
+  /** Tool names to offer; undefined offers child-native tools and host extras, not shared session tools. Always includes ask_human. */
   tools: readonly string[] | undefined;
   /** Tools the agent file names that this runtime cannot provide. */
   unavailable: readonly string[];
@@ -36,17 +37,17 @@ export interface ChildRuntimePlan {
 }
 
 /**
- * The child's tools and skills from its agent file. `extraTools` are tools the host adds for every child (tests use
- * one). `sessionSkills` are the skills the parent session can see; the agent file's own `skillPath` folders win.
+ * The child's tools and skills from its agent file. `availableTools` are eligible session tools and host extras.
+ * `sessionSkills` are the skills the parent session can see; the agent file's own `skillPath` folders win.
  */
-export function planChildRuntime(profile: ChildAgentProfile | undefined, extraTools: readonly string[], sessionSkills: readonly ChildSkill[]): ChildRuntimePlan {
+export function planChildRuntime(profile: ChildAgentProfile | undefined, availableTools: readonly string[], sessionSkills: readonly ChildSkill[]): ChildRuntimePlan {
   const offered = new Set<string>(["ask_human"]);
   const unavailable: string[] = [];
   const notes = new Set<string>();
   for (const name of profile?.tools ?? []) {
     const equivalent = EQUIVALENT[name];
     if (equivalent !== undefined) { offered.add(equivalent.tool); notes.add(equivalent.note); }
-    else if (PROVIDED.has(name) || extraTools.includes(name)) offered.add(name);
+    else if (PROVIDED.has(name) || availableTools.includes(name)) offered.add(name);
     else if (!unavailable.includes(name)) unavailable.push(name);
   }
   const tools = profile?.tools === undefined ? undefined : [...offered];

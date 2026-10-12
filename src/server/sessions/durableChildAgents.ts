@@ -16,6 +16,7 @@ import {
   type ToolRegistration, type Tx,
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
+import type { DurableSdkTools } from "./durableSdkTools.js";
 import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
 import type { ChildWorktreeSummary, WorktreeActionResult, WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
 import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
@@ -150,9 +151,9 @@ const codingTools: readonly ToolRegistration[] = CodingTools.tools ?? [];
 const readTool = codingTools.find((tool) => tool.name === "read");
 
 /** The tools a child gets: every child tool, or the ones its agent file names as `planChildRuntime` translates them. */
-function childToolsFor(plan: ChildRuntimePlan, extra: readonly ToolRegistration[]): ToolRegistration[] {
-  const all = [askHumanTool, ...codingTools, watchdogDiffTool, ...extra];
-  return plan.tools === undefined ? all : all.filter((tool) => plan.tools?.includes(tool.name) === true);
+function childToolsFor(plan: ChildRuntimePlan, extra: readonly ToolRegistration[], shared: readonly ToolRegistration[]): ToolRegistration[] {
+  const native = [askHumanTool, ...codingTools, watchdogDiffTool, ...extra];
+  return plan.tools === undefined ? native : [...native, ...shared].filter((tool) => plan.tools?.includes(tool.name) === true);
 }
 
 export interface DurableChildExtensions {
@@ -160,6 +161,8 @@ export interface DurableChildExtensions {
   parent: readonly Extension[];
   /** Installed for task definitions and children; removed from the parent's selection. */
   childOnly: readonly Extension[];
+  /** Rebuild declarations from the live session registry after extension tool registration. */
+  refresh(): DurableChildExtensions;
 }
 
 export interface DurableChildExtensionOptions {
@@ -173,12 +176,21 @@ export interface DurableChildExtensionOptions {
   sessionSkills?: readonly ChildSkill[];
   /** Extra tools every child may use. Tests pass a deterministic one. */
   extraTools?: readonly ToolRegistration[];
+  /** A getter because reload replaces the parent's tool registry. */
+  sessionTools?: () => DurableSdkTools;
+  childToolsDeny?: readonly string[];
   worktrees?: DurableChildWorktrees;
   flushRunRecords?: () => Promise<void>;
 }
 
 export function durableChildExtensions(options: DurableChildExtensionOptions = {}): DurableChildExtensions {
   const extraTools = options.extraTools ?? [];
+  const sessionTools = options.sessionTools;
+  const sharedTools = sessionTools === undefined ? [] : sessionTools().childTools(sessionTools, options.childToolsDeny ?? []);
+  const availableNames = () => {
+    const current = sessionTools === undefined ? [] : sessionTools().childTools(sessionTools, options.childToolsDeny ?? []);
+    return [...extraTools.map((tool) => tool.name), ...current.filter((tool) => sharedTools.some((installed) => installed.name === tool.name)).map((tool) => tool.name)];
+  };
   const Reporter = childReporter(options.worktrees, options.flushRunRecords);
   const ChildTools = defineExtension({
     name: "forgerie.child-tools",
@@ -187,7 +199,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       hook(GenerationTask, { beforeRequest: async () => { await options.flushRunRecords?.(); return undefined; } }),
       hook(CompactionTask, { beforeCompact: async () => { await options.flushRunRecords?.(); return undefined; } }),
     ] }),
-    tools: [askHumanTool, ...codingTools, watchdogDiffTool, ...extraTools],
+    tools: [askHumanTool, ...codingTools, watchdogDiffTool, ...extraTools, ...sharedTools],
     ...(readTool === undefined ? {} : { wraps: [readsImages(readTool)] }),
     sections: [section("environment", (input) => input.env === undefined ? undefined : `Working directory: ${input.env.cwd}`)],
   });
@@ -240,7 +252,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       const sentProfile = action === "send" && existing?.agent != null ? await options.catalog?.find(existing.agent) : undefined;
       const refresh = action === "send" && (existing?.agent == null || sentProfile !== undefined);
       const runtime = action === "spawn" || refresh
-        ? planChildRuntime(action === "spawn" ? profile : sentProfile, extraTools.map((tool) => tool.name), options.sessionSkills ?? []) : undefined;
+        ? planChildRuntime(action === "spawn" ? profile : sentProfile, availableNames(), options.sessionSkills ?? []) : undefined;
       const checkout = action === "spawn" && args.isolation === "worktree"
         ? await requireWorktrees(options.worktrees).prepare(String(api.taskId)) : undefined;
       const result = await api.commit(async (tx) => {
@@ -254,11 +266,11 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
           const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
           const chosenModel = model?.model ?? profile?.model;
           const chosenThinking = model?.thinkingLevel ?? profile?.thinkingLevel;
-          const plan = runtime ?? planChildRuntime(profile, extraTools.map((tool) => tool.name), []);
+          const plan = runtime ?? planChildRuntime(profile, availableNames(), []);
           await configure(tx, child.id, {
             ...(checkout === undefined ? {} : { cwd: checkout.path }),
             extensions: [ChildTools],
-            tools: childToolsFor(plan, extraTools),
+            tools: childToolsFor(plan, extraTools, sharedTools),
             ...(chosenModel === undefined ? {} : { model: chosenModel }),
             ...(chosenThinking === undefined ? {} : { thinkingLevel: chosenThinking }),
             instructions: childInstructions(name, profile, plan, options.projectContext),
@@ -272,7 +284,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         if (refresh && runtime !== undefined) {
           // Tools, skills, and instructions follow the current runtime and agent file. The model stays as spawned:
           // a workflow or the agent may have chosen it for this child.
-          await configure(tx, agent.conversationId, { extensions: [ChildTools], tools: childToolsFor(runtime, extraTools),
+          await configure(tx, agent.conversationId, { extensions: [ChildTools], tools: childToolsFor(runtime, extraTools, sharedTools),
             instructions: childInstructions(name, sentProfile, runtime, options.projectContext) });
           if (sentProfile !== undefined) agent.agentFile = sentProfile.source;
         }
@@ -289,6 +301,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
   return {
     parent: [defineExtension({ name: "forgerie.child-agents", tasks: [Anchor, Reporter], tools: [childTool] })],
     childOnly: [ChildTools],
+    refresh: () => durableChildExtensions(options),
   };
 }
 

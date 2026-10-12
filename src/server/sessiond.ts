@@ -227,6 +227,7 @@ async function createSessionDaemonRuntime() {
     askUserEnabled: config.askUser,
     codemodeEnabled: config.codemode,
     ...(liveChildren === undefined ? {} : { durableChildAgents: createDurableChildHost({
+      childToolsDeny: config.childToolsDeny,
       // Forgerie's own agent files first, then pi-subagents' built-in agents (worker, scout), which run as Durable children too.
       builtinAgentsDirs: [bundledForgerieAgentsPath(), join(bundledSubagentsPackagePath(), "agents")],
       index: liveChildren,

@@ -37,12 +37,19 @@ describe("a pi-subagents agent file in a Durable child", () => {
     expect(runtimeGaps(plan)).toBe("");
   });
 
-  it("names tools it cannot provide, in the child's instructions and in the parent's spawn result", async () => {
-    const plan = planChildRuntime(await bundledAgent("researcher"), [], []);
-    expect(plan.unavailable).toEqual(expect.arrayContaining(["web_search", "fetch_content"]));
-    expect(plan.tools).not.toContain("web_search");
-    expect(plan.section).toContain("Not available here: web_search");
-    expect(runtimeGaps(plan)).toContain("Not available to it here: tools web_search");
+  it("gives the bundled researcher the session tools its file names", async () => {
+    const plan = planChildRuntime(await bundledAgent("researcher"), ["web_search", "fetch_content"], []);
+    expect(plan.tools).toEqual(expect.arrayContaining(["web_search", "fetch_content"]));
+    expect(plan.unavailable).not.toContain("web_search");
+    expect(plan.unavailable).not.toContain("fetch_content");
+  });
+
+  it("reports missing named tools in the child's instructions and the parent's spawn result", async () => {
+    const plan = planChildRuntime(await bundledAgent("researcher"), ["web_search"], []);
+    expect(plan.unavailable).toContain("fetch_content");
+    expect(plan.tools).not.toContain("fetch_content");
+    expect(plan.section).toContain("Not available here: fetch_content");
+    expect(runtimeGaps(plan)).toContain("Not available to it here: tools fetch_content");
   });
 
   it("lists the skills the file names, from its own skill folder first, and reports the ones it cannot find", async () => {

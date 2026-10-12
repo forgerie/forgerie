@@ -4,6 +4,14 @@ import { defineTool as sdkDefineTool, createReadToolDefinition, createBashToolDe
 import { defineExtension, defineTool, type Extension, type ToolRegistration } from "@earendil-works/pi-durable";
 import { Value } from "typebox/value";
 import { durableJson } from "./durableJson.js";
+import { isChildNativeTool } from "./durableChildRuntime.js";
+
+// These tools act on the parent session or its approval surfaces, not a child conversation.
+const PARENT_ONLY = new Set(["child_agent", "ask_user", "end_turn", "spawn_session", "handoff_session", "workflow_finish", "workflow_stop", "propose_workflow", "subagent"]);
+function shareWithChild(tool: ToolDefinition, deny: readonly string[]): boolean {
+  return !isChildNativeTool(tool.name) && !PARENT_ONLY.has(tool.name) && !tool.name.startsWith("propose_")
+    && tool.exposure !== "model-only" && tool.exposure !== "hidden" && !deny.includes(tool.name);
+}
 
 export interface DurableSdkToolsOptions {
   cwd: string;
@@ -117,6 +125,32 @@ export class DurableSdkTools {
       });
     });
     return defineExtension({ name: "forgerie.sdk-tools", tools });
+  }
+
+  /** Snapshot declarations, but resolve and check the live session registry again for every call (including reload). */
+  childTools(current: () => DurableSdkTools, deny: readonly string[]): ToolRegistration[] {
+    return this.getDefinitions().filter((tool) => shareWithChild(tool, deny)).map((definition) => defineTool({
+      name: definition.name, description: definition.description, parameters: definition.parameters,
+      ...(definition.prepareArguments === undefined ? {} : { prepareArguments: definition.prepareArguments }),
+      ...(definition.executionMode === undefined ? {} : { executionMode: definition.executionMode }),
+      replay: "unsafe",
+      execute: async (args, api, context) => {
+        const tools = current();
+        const live = tools.definitions.get(definition.name);
+        if (live === undefined || !shareWithChild(live, deny)) {
+          return { content: [{ type: "text", text: `Not available here: ${definition.name}` }], isError: true };
+        }
+        // Model-generated ids may repeat across conversations. The durable child task makes this id its own.
+        const id = `child:${String(api.conversationId)}:${String(api.taskId)}:${api.callId}`;
+        const outcome = await tools.execute(id, definition.name, args, context.abortSignal, undefined, async (partial) => {
+          await api.details(durableJson(partial), context);
+        });
+        return { content: outcome.result.content, isError: outcome.isError,
+          ...(outcome.result.details === undefined ? {} : { details: durableJson(outcome.result.details) }),
+          ...(outcome.result.usage === undefined ? {} : { usage: outcome.result.usage }),
+          ...(outcome.result.terminate === true ? { control: { terminate: true as const } } : {}) };
+      },
+    }));
   }
 
   async executeNested(parentId: string, name: string, args: unknown, options: ExecuteToolOptions): Promise<AgentToolCallOutcome> {

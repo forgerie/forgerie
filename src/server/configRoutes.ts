@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { agentDirEnvSource, hasAgentDirEnvOverride, hasAgentSessionDirEnvOverride, loadPiWebConfig, parseAgentConfig, parseUploadsConfig, resolveEffectivePiWebConfig, savePiWebConfig, type AgentPathHost, type LoadOptions, type PiWebConfig } from "../config.js";
+import { agentDirEnvSource, hasAgentDirEnvOverride, hasAgentSessionDirEnvOverride, loadPiWebConfig, parseAgentConfig, parseChildToolsDeny, parseUploadsConfig, resolveEffectivePiWebConfig, savePiWebConfig, type AgentPathHost, type LoadOptions, type PiWebConfig } from "../config.js";
 import type { PiWebAgentDirEnvSource, PiWebConfigEnvOverrides, PiWebConfigResponse, PiWebConfigValues } from "../shared/apiTypes.js";
 import { isPiWebPluginId } from "../shared/pluginIds.js";
 
@@ -75,6 +75,7 @@ function parseConfigRequest(value: unknown, agentPathHost: AgentPathHost = "curr
   const askUser = value["askUser"];
   const codemode = value["codemode"];
   const agent = value["agent"];
+  if (value["childToolsDeny"] !== undefined) config.childToolsDeny = parseChildToolsDeny(value["childToolsDeny"], "request");
   if (host !== undefined) {
     if (typeof host !== "string") throw new Error("Forgerie config host must be a string");
     config.host = host;

@@ -15,12 +15,13 @@ export interface LoadedPiWebConfig {
   config: PiWebConfig;
 }
 
-export interface EffectivePiWebConfig extends Omit<PiWebConfig, "uploads" | "spawnSessions" | "askUser" | "codemode" | "durableChildren" | "agent" | "extensionDialogsTimeoutMs"> {
+export interface EffectivePiWebConfig extends Omit<PiWebConfig, "uploads" | "spawnSessions" | "askUser" | "codemode" | "durableChildren" | "childToolsDeny" | "agent" | "extensionDialogsTimeoutMs"> {
   uploads: NonNullable<PiWebConfig["uploads"]>;
   spawnSessions: boolean;
   askUser: boolean;
   codemode: boolean;
   durableChildren: boolean;
+  childToolsDeny: string[];
   extensionDialogsTimeoutMs: number;
   agent: Required<NonNullable<PiWebConfig["agent"]>>;
 }
@@ -169,6 +170,7 @@ export function resolveEffectivePiWebConfig(loaded: LoadedPiWebConfig, options: 
       codemode: codemodeEnabled(env, loaded.config),
       // Resolved off by default while Durable child agents are new.
       durableChildren: durableChildrenEnabled(env, loaded.config),
+      childToolsDeny: loaded.config.childToolsDeny ?? [],
       // Always resolved; the unattended-dialog safety valve, not a gate.
       extensionDialogsTimeoutMs: loaded.config.extensionDialogsTimeoutMs ?? DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS,
       agent: { command: agent.command, dir: agent.dir },
@@ -222,6 +224,7 @@ function piWebConfigRecord(config: PiWebConfig): Record<string, unknown> {
     ...(config.askUser !== undefined ? { askUser: config.askUser } : {}),
     ...(config.codemode !== undefined ? { codemode: config.codemode } : {}),
     ...(config.durableChildren !== undefined ? { durableChildren: config.durableChildren } : {}),
+    ...(config.childToolsDeny !== undefined ? { childToolsDeny: config.childToolsDeny } : {}),
     ...(config.agent !== undefined ? { agent: config.agent } : {}),
   };
 }
@@ -238,6 +241,7 @@ function parsePiWebConfig(value: Record<string, unknown>, path: string): PiWebCo
     ...(value["askUser"] !== undefined ? { askUser: parseAskUser(value["askUser"], path) } : {}),
     ...(value["codemode"] !== undefined ? { codemode: parseCodemode(value["codemode"], path) } : {}),
     ...(value["durableChildren"] !== undefined ? { durableChildren: parseDurableChildren(value["durableChildren"], path) } : {}),
+    ...(value["childToolsDeny"] !== undefined ? { childToolsDeny: parseChildToolsDeny(value["childToolsDeny"], path) } : {}),
     ...(value["extensionDialogsTimeoutMs"] !== undefined ? { extensionDialogsTimeoutMs: parseExtensionDialogsTimeoutMs(value["extensionDialogsTimeoutMs"], path) } : {}),
     ...(value["sessionTitleModel"] !== undefined ? { sessionTitleModel: parseSessionTitleModel(value["sessionTitleModel"], path) } : {}),
     ...(value["agent"] !== undefined ? { agent: parseAgentConfig(value["agent"], path) } : {}),
@@ -316,6 +320,11 @@ export function codemodeEnabled(env: NodeJS.ProcessEnv = process.env, config: Pi
   const fromEnv = env["PI_WEB_CODEMODE"];
   if (fromEnv !== undefined && fromEnv !== "") return fromEnv === "1" || fromEnv.toLowerCase() === "true";
   return config.codemode ?? true;
+}
+
+export function parseChildToolsDeny(value: unknown, path: string): string[] {
+  if (!isNonEmptyStringArray(value)) throw new Error(`Forgerie config childToolsDeny must be an array of non-empty strings: ${path}`);
+  return value;
 }
 
 function parseDurableChildren(value: unknown, path: string): boolean {

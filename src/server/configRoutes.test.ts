@@ -60,6 +60,22 @@ describe("config routes", () => {
     expect(response.json<PiWebConfigResponse>().config).toEqual(expectedConfig);
   });
 
+  it("parses and serves childToolsDeny, including an empty list", async () => {
+    for (const childToolsDeny of [["web_search"], []]) {
+      const response = await app.inject({ method: "PUT", url: "/api/config", payload: { config: { childToolsDeny } } });
+      expect(response.statusCode).toBe(200);
+      expect(savedConfig.childToolsDeny).toEqual(childToolsDeny);
+      expect(parsePiWebConfigResponseBody(response.json()).effectiveConfig.childToolsDeny).toEqual(childToolsDeny);
+      expect((await app.inject({ method: "GET", url: "/api/config" })).json<PiWebConfigResponse>().config.childToolsDeny).toEqual(childToolsDeny);
+    }
+  });
+
+  it.each([null, "web_search", [7], [""]])("rejects invalid childToolsDeny %j before writing", async (childToolsDeny) => {
+    const response = await app.inject({ method: "PUT", url: "/api/config", payload: { config: { childToolsDeny } } });
+    expect(response.statusCode).toBe(400);
+    expect(service.write).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid config payloads before writing", async () => {
     const response = await app.inject({
       method: "PUT",

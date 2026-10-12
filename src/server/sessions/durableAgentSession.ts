@@ -9,7 +9,7 @@ import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { answerChildQuestion, CHILD_QUESTIONS_DOC_KIND, openChildQuestions, childMessages, reviewChildWorktree, continueChild, childWorkIsLive, childWorktreeAction, workingChildCount, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
+import { answerChildQuestion, CHILD_QUESTIONS_DOC_KIND, openChildQuestions, childMessages, reviewChildWorktree, continueChild, childWorkIsLive, childWorktreeAction, workingChildCount, listChildren, messageChild, stopChild, type DurableChildExtensions } from "./durableChildAgents.js";
 import type { DurableChildHost } from "./durableChildHost.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { DurableChildRunRecords } from "./durableChildRunRecords.js";
@@ -63,6 +63,7 @@ export class DurableAgentSession implements PiAgentSession {
   private childWatch: { stop(): Promise<unknown> } | undefined;
   private childrenLive: boolean | undefined;
   private childWorktrees: DurableChildWorktrees | undefined;
+  private childExtensions: DurableChildExtensions | undefined;
   private childCount = 0;
   /** Child questions, workflow stops, and workflow proposals that wait for the user. */
   private waitingCount = 0;
@@ -229,23 +230,42 @@ export class DurableAgentSession implements PiAgentSession {
   private async startChildAgents(): Promise<void> {
     const host = this.options.childAgents;
     if (host === undefined) return;
-    const projectContext = this.resourceLoader.getAgentsFiles().agentsFiles.map((file) => `## ${file.path}\n\n${file.content}`).join("\n\n");
     const ref = { id: this.sessionId, cwd: this.options.services.cwd };
     this.childWorktrees = host.worktrees === undefined ? undefined : new DurableChildWorktrees(host.worktrees, ref);
-    // Children resolve their agent files' skills against the skills this session sees.
-    const sessionSkills = this.resourceLoader.getSkills().skills.filter((skill) => !skill.disableModelInvocation)
-      .map((skill) => ({ name: skill.name, description: skill.description, path: skill.filePath }));
-    const extensions = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext, sessionSkills,
-      ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
-      ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
-    this.registry.install(workflowExtension());
-    for (const extension of [...extensions.parent, ...extensions.childOnly]) this.registry.install(extension);
+    const extensions = await this.installChildExtensions();
     // Children select these explicitly. The parent must not, or ask_human and the coding tools join its loadout.
     await this.journal.conversation.configure({ extensions: { remove: [...extensions.childOnly] } }, context);
     if (host.runRecords !== undefined) {
       this.childRunRecords = await DurableChildRunRecords.open(this.journal.harness, this.journal.conversation.id, ref, host.runRecords, context,
         (error) => { if (host.runRecordError === undefined) this.report(error); else host.runRecordError(error); });
     }
+    await this.watchChildAgents(host, ref);
+  }
+
+  private async installChildExtensions() {
+    const host = this.options.childAgents;
+    if (host === undefined) throw new Error("Child agents are not enabled");
+    const projectContext = this.resourceLoader.getAgentsFiles().agentsFiles.map((file) => `## ${file.path}\n\n${file.content}`).join("\n\n");
+    // Children resolve their agent files' skills against the skills this session sees.
+    const sessionSkills = this.resourceLoader.getSkills().skills.filter((skill) => !skill.disableModelInvocation)
+      .map((skill) => ({ name: skill.name, description: skill.description, path: skill.filePath }));
+    const extensions = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext, sessionSkills, sessionTools: () => this.tools,
+      ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
+      ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
+    this.registry.install(workflowExtension());
+    this.childExtensions = extensions;
+    for (const extension of [...extensions.parent, ...extensions.childOnly]) this.registry.install(extension);
+    return extensions;
+  }
+
+  private refreshChildExtensions(): void {
+    const extensions = this.childExtensions?.refresh();
+    if (extensions === undefined) return;
+    this.childExtensions = extensions;
+    for (const extension of [...extensions.parent, ...extensions.childOnly]) this.registry.install(extension);
+  }
+
+  private async watchChildAgents(host: DurableChildHost, ref: { id: string; cwd: string }): Promise<void> {
     const watch = await this.journal.harness.watchTaskGraph(context);
     let workflowActive = (await activeWorkflowRun(this.journal.harness, this.journal.conversation.id, context)) !== undefined;
     const update = (graph: typeof watch.value) => {
@@ -317,7 +337,7 @@ export class DurableAgentSession implements PiAgentSession {
         ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }) })),
       getSettings: () => this.settingsManager.getSettings(),
       setActiveTools: (names) => { this.tools.setActive(names); this.registry.install(this.tools.extension()); },
-      refreshTools: () => { this.tools.refresh(); this.registry.install(this.tools.extension()); },
+      refreshTools: () => { this.tools.refresh(); this.registry.install(this.tools.extension()); this.refreshChildExtensions(); },
       getCommands: () => this.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, description: command.description ?? "", source: "extension" as const, sourceInfo: command.sourceInfo })),
       setModel: async (model) => { await this.setModel(model); return true; },
       getThinkingLevel: () => this.thinkingLevel, setThinkingLevel: (level) => { this.setThinkingLevel(level); },
@@ -542,6 +562,10 @@ export class DurableAgentSession implements PiAgentSession {
     this.registry.install(this.tools.extension());
     this.basePrompt = this.promptOptions();
     this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
+    if (this.options.childAgents !== undefined) {
+      const children = await this.installChildExtensions();
+      await this.journal.conversation.configure({ extensions: { remove: [...children.childOnly] } }, context);
+    }
     old.invalidate("Durable extensions reloaded");
     await options?.beforeSessionStart?.();
     await runner.emit({ type: "session_start", reason: "reload" });

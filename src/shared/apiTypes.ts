@@ -65,6 +65,8 @@ export interface PiWebConfigValues {
    * can open, steer, stop, and answer. Off by default while it is new.
    */
   durableChildren?: boolean;
+  /** Session tool names that Durable children must not share. Defaults to []. */
+  childToolsDeny?: string[];
   /**
    * How long an extension dialog may wait for an answer before the daemon
    * auto-cancels it, in milliseconds. Applies only when the extension set no

@@ -43,9 +43,12 @@ Agent files are written for pi-subagents. `src/server/sessions/durableChildRunti
 | `contact_supervisor` | `ask_human`, which asks the user in the parent's chat. Every child has it. |
 | `watchdog_diff` | Forgerie's read-only `watchdog_diff`. Without `range` it shows uncommitted changes against `HEAD` plus untracked paths, as in pi-subagents. With `range` it shows a committed range's commits and diff. `cwd` picks another repository or worktree, and `offset` pages through output longer than 60,000 characters. |
 | `skills` | A list of those skills' files in the child's instructions. `skillPath` folders, relative to the agent file, come first, then the skills the parent session sees. `inheritSkills: true` lists every session skill. |
-| Anything else | Nothing. The child's instructions name it under "This runtime", and the parent's spawn result says `Not available to it here: …`. |
+| Other named tools registered in the parent session | The session's tool, including extension tools such as `web_search`, `fetch_content`, `get_search_content`, and `source_check`. The parent's active-tool selection does not limit sharing. Argument validation and extension `tool_call`/`tool_result` hooks still apply. |
+| Missing or excluded tools | Nothing. The child's instructions say `Not available here: …`, and the parent's spawn result says `Not available to it here: …`. Excluded tools include parent-only tools, tools with `model-only` or `hidden` exposure, and names in `childToolsDeny`. |
 
-Without `tools`, a child gets every tool above. A child cannot start children of its own.
+Without `tools`, a child gets every child-native tool, not the parent's extension tools. A child cannot start children of its own.
+
+Tools registered after the session opens become available to new spawns and parent sends without a reload. Shared tools resolve from the parent's current registry by name at call time, including after `/reload`. Each child call has its own ID. Shared calls are replay-unsafe: an interrupted call is reported, not rerun automatically. A tool removed or excluded after spawn returns an explicit unavailable error.
 
 Each `send` from the parent reads the child's agent file again and applies the current tools, skills, and instructions before the message arrives. A child spawned under an older Forgerie, or before its file changed, catches up on its next task. The model stays as it was spawned, because a workflow or the parent may have chosen it. If the agent file is gone, the child keeps its spawn-time tools and the send result says so. A message the user types into a child does not refresh it.
 
@@ -56,6 +59,9 @@ Children live in the parent's Durable storage, and they run only while the daemo
 ## Limits
 
 - Children share the parent's working folder unless spawn sets `isolation: "worktree"`.
+- Shared tools keep the parent extension's execution context and working directory. Worktree isolation applies to child-native coding tools, not session extension tools.
+- Children never share `child_agent`, `ask_user`, `end_turn`, `spawn_session`, `handoff_session`, `workflow_finish`, `workflow_stop`, `propose_workflow`, any `propose_*` tool, or `subagent`. Tools with `model-only` or `hidden` exposure are also excluded.
+- `childToolsDeny` denies more shared session tool names (default `[]`). It does not remove child-native tools and is not a shell or filesystem sandbox.
 - Worktree isolation starts at the parent's committed `HEAD`. It does not copy uncommitted parent files.
 - Landing targets the repository's default branch. It can also land commits inherited from an unlanded parent branch. The `ahead` summary counts only commits after the parent's starting `HEAD`.
 - Landed and discarded children keep their Durable transcript, but cannot accept new work. Spawn another child.
@@ -236,6 +242,20 @@ Usage is the committed change in the child's own `pi.usage` between run boundari
 Records live in `$PI_WEB_DATA_DIR/child-runs.json`, with private recovery checkpoints and atomic file replacement. Child generation and compaction requests wait for pending record writes. This adds disk I/O before requests. A write failure is reported and blocks a new child request rather than spending without a saved accounting boundary. Startup also reopens parents with unfinished records, even if the live-child index no longer lists them. A read alone never starts that recovery.
 
 Completed records expire 90 days after `finishedAt`. Unfinished records remain. Sessiond prunes on startup, reads, writes, and a daily timer. Expiry removes only history metadata. It does not delete conversations, transcripts, branches, or worktree files. Invalid history files fail rather than being reset or overwritten. Records are new metadata, not a complete backfill of historical child runs.
+
+## Verification
+
+`durableChildSessionTools.test.ts` uses the production Durable session with registered extension tools. It checks named-tool selection, exclusions, missing-tool reports, validation, extension hooks, separate call IDs, late registration, and replacement registries after reload.
+
+The opt-in real-model check installs `npm:pi-web-access@0.39.0` into a temporary profile. The bundled `researcher` calls `web_search` and `fetch_content` once each. The check removes both search-key environment variables, records extension-hook timings, and removes its copied model credentials and temporary workspace on exit. It never opens the live daemon. Model calls incur costs.
+
+```bash
+RESEARCH_REAL=1 RESEARCH_MODEL=<model-id> \
+  RESEARCH_CREDENTIAL_FILE=<private-json-with-baseUrl-and-apiKey> \
+  ./scripts/child-tools-real.ts
+```
+
+A SIGKILL cannot run cleanup. If that happens, remove `/tmp/forgerie-child-tools-real-*/agent/models.json` for the interrupted check.
 
 ## Code
 
