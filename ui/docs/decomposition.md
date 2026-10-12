@@ -90,7 +90,7 @@ deleted from `gates/layers.test.ts`. See
 Layout follows `intrinsic-design`. A component decides from the size of its own
 container, through container queries and container units, never from the
 viewport, the device or a width breakpoint. Do not add a width breakpoint in or
-near the 475 to 932 px posture range (`AGENTS.md`). A component that changes
+near the 475 to 932 px posture range (`docs/testing.md`). A component that changes
 structure at a size has a pure `plan(width, height)` with named thresholds and
 unit tests one pixel either side of each threshold.
 

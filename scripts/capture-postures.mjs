@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Captures the Fold 8 acceptance posture matrix from AGENTS.md against a
+// Captures the Fold 8 acceptance posture matrix from docs/testing.md against a
 // running Forgerie instance, optionally after driving the UI (shadow-DOM aware).
 //
 //   node scripts/capture-postures.mjs --url http://127.0.0.1:8504/ --out /tmp/shots --label slice2
