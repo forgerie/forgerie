@@ -27,7 +27,7 @@ async function server(options: { promptFailure?: boolean; unknownSession?: boole
       send(options.commandResults?.shift() ?? { type: "done", message: "Command completed" });
     } else if (url.pathname.endsWith("/prompt")) {
       if (options.promptFailure) { send({ error: "Model unavailable" }, 400); return; }
-      expect(body).toEqual({ cwd: "/workspace with spaces", text: "hello" });
+      expect(body).toEqual({ cwd: "/workspace with spaces", requestId: expect.any(String), text: "hello" });
       send({ accepted: true });
       // Acknowledgement is not completion. Emit the run after the HTTP response.
     } else if (url.pathname.endsWith("/abort")) { send({ aborted: true }); }

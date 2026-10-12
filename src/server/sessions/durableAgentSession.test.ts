@@ -15,7 +15,7 @@ afterEach(async () => {
   await Promise.all(sessions.splice(0).map((session) => session.close()));
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
-async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[], skillFile?: string) {
+async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[], skillFile?: string, keepRecentTokens = 20_000) {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-session-"));
   directories.push(directory);
   if (skillFile !== undefined) {
@@ -31,7 +31,7 @@ async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[
     resourceLoaderOptions: { noExtensions: true, noSkills: true, noContextFiles: true, noPromptTemplates: true,
       ...(skillFile === undefined ? {} : { additionalSkillPaths: [join(directory, "skills", "handoff", "SKILL.md")] }),
       ...(codemode ? { extensionFactories: [{ name: "codemode", factory: createCodemodeExtension() }] } : {}) } });
-  services.settingsManager.applyOverrides({ compaction: { enabled: false }, ...(defaultTools === undefined ? codemode ? { defaultTools: ["read", "bash", "edit", "write", "+codemode"] } : {} : { defaultTools }) });
+  services.settingsManager.applyOverrides({ compaction: { enabled: false, keepRecentTokens }, ...(defaultTools === undefined ? codemode ? { defaultTools: ["read", "bash", "edit", "write", "+codemode"] } : {} : { defaultTools }) });
   const manager = SessionManager.create(directory, join(directory, "sessions"));
   const session = await DurableAgentSession.open({ services, sessionManager: manager, initialModel: model, customTools });
   sessions.push(session);
@@ -55,6 +55,74 @@ function messagesOfType(events: readonly unknown[], type: "message_start" | "mes
 }
 
 describe("SDK-compatible Durable execution", () => {
+  it("reuses an idle prompt after its receipt is lost, including after reopen", async () => {
+    const { provider, session, services, manager, events } = await fixture();
+    provider.setResponses([fauxAssistantMessage("one answer"), fauxAssistantMessage("duplicate answer")]);
+    const options = { requestId: "lost-receipt-1" };
+    await session.prompt("send once", options);
+    // The caller loses the receipt and retries after the original run is idle.
+    await session.prompt("send once", options);
+    expect(provider.state.callCount).toBe(1);
+    expect(session.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    await vi.waitFor(() => { expect(ends(events).filter((message) => message.role === "user")).toHaveLength(1); });
+    const file = manager.getSessionFile();
+    if (file === undefined) throw new Error("Fixture must persist");
+    await session.close();
+    const reopened = await DurableAgentSession.open({ services, sessionManager: SessionManager.open(file), initialModel: provider.getModel() });
+    sessions.push(reopened);
+    await reopened.prompt("send once", options);
+    expect(provider.state.callCount).toBe(1);
+    expect(reopened.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    await reopened.prompt("send once", { requestId: "new-send-2" });
+    expect(provider.state.callCount).toBe(2);
+    expect(reopened.messages.filter((message) => message.role === "user")).toHaveLength(2);
+  });
+
+  it.each(["steer", "followUp"] as const)("deduplicates a busy %s input by request ID", async (streamingBehavior) => {
+    const { provider, session } = await fixture();
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    provider.setResponses([
+      async () => { enter(); await held; return fauxAssistantMessage("first answer"); },
+      fauxAssistantMessage("queued answer"),
+    ]);
+    const running = session.prompt("first input", { requestId: "first-input" });
+    try {
+      await entered;
+      await session.prompt("next input", { requestId: "busy-input", streamingBehavior });
+      await session.prompt("next input", { requestId: "busy-input", streamingBehavior });
+      expect(session.pendingMessageCount).toBe(1);
+    } finally { release(); await running; }
+    await session.journal.conversation.waitForIdle(context);
+    await session.journal.project();
+    expect(provider.state.callCount).toBe(2);
+    expect(session.messages.filter((message) => message.role === "user")).toHaveLength(2);
+  });
+
+  it("Durable starts input while manual compaction is still summarizing", async () => {
+    const { provider, session } = await fixture([], false, undefined, undefined, 1);
+    await session.prompt("seed the context");
+    await session.prompt("one more turn");
+    let entered!: () => void;
+    let release!: () => void;
+    const summarizing = new Promise<void>((resolve) => { entered = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    provider.setResponses([
+      async () => { entered(); await held; return fauxAssistantMessage("compacted context"); },
+      fauxAssistantMessage("input answered before compaction finishes"),
+    ]);
+    const compacting = session.compact();
+    try {
+      await Promise.race([summarizing, compacting.then(() => { throw new Error("Compaction settled without requesting a summary"); })]);
+      await session.prompt("input during compaction", { streamingBehavior: "followUp" });
+      expect(provider.state.callCount).toBe(4);
+      expect(session.messages.filter((message) => message.role === "user")).toHaveLength(3);
+      expect(session.messages.at(-1)).toMatchObject({ role: "assistant", content: [{ type: "text", text: "input answered before compaction finishes" }] });
+    } finally { release(); await compacting; }
+  });
+
   it("executes the SDK read tool through Durable and saves the transcript", async () => {
     const { directory, provider, manager, session, errors } = await fixture();
     await writeFile(join(directory, "input.txt"), "journaled input");

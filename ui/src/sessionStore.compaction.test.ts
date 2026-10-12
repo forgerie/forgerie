@@ -99,7 +99,7 @@ describe("compaction transport and recovery", () => {
     await expect(api.store.send("change course", undefined, { steer: true })).rejects.toThrow("Steering works only");
     await api.store.send("ordinary follow-up");
     expect(api.requests.filter(({ path }) => path.endsWith("/prompt"))).toEqual([
-      { path: "/api/sessions/test/prompt", body: { cwd: "/work tree", text: "ordinary follow-up", streamingBehavior: "followUp" } },
+      { path: "/api/sessions/test/prompt", body: { cwd: "/work tree", requestId: expect.any(String), text: "ordinary follow-up", streamingBehavior: "followUp" } },
     ]);
   });
   it.each([

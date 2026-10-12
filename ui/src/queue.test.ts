@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionStatus } from "./contracts";
 import type { CompactionState } from "./compaction";
-import { queueKindOf, isAlreadyQueued, workingSend } from "./queue";
+import { queueKindOf, workingSend } from "./queue";
 
 const idle: SessionStatus = { isStreaming: false, isCompacting: false, isBashRunning: false, queuedMessages: [] };
 const none: CompactionState = { type: "idle" };
@@ -39,12 +39,5 @@ describe("queued items", () => {
     expect(queueKindOf({ kind: "followUp", text: "add tests" })).toBe("followUp");
     expect(queueKindOf({ kind: "followUp", text: "/compact keep decisions" })).toBe("compaction");
     expect(queueKindOf({ kind: "followUp", text: "/compactor" })).toBe("followUp");
-  });
-
-  it("knows a text Pi would ignore as a duplicate", () => {
-    const status = { ...idle, isStreaming: true, queuedMessages: [{ kind: "followUp" as const, text: "add tests" }] };
-    expect(isAlreadyQueued(status, "add tests")).toBe(true);
-    expect(isAlreadyQueued(status, "add tests ")).toBe(false);
-    expect(isAlreadyQueued(undefined, "add tests")).toBe(false);
   });
 });

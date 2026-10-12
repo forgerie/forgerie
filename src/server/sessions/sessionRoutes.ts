@@ -7,6 +7,7 @@ import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { normalizeSessionCleanupRequest } from "./sessionCleanup.js";
 import { isKnownThinkingLevel, type ThinkingLevel } from "../../shared/thinkingLevels.js";
+import { promptRequestOptionsSchema } from "../../shared/promptRequest.js";
 import { composeDiffAnnotationPrompt } from "./promptDiffAnnotations.js";
 
 interface SessionQuery {
@@ -20,6 +21,7 @@ interface MessageQuery extends SessionQuery {
 }
 
 interface PromptRequestBody {
+  requestId?: unknown;
   cwd?: unknown;
   text?: unknown;
   streamingBehavior?: unknown;
@@ -328,7 +330,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     try {
       const body = optionalRecord(request.body);
       const text = composeDiffAnnotationPrompt(body["text"], body["diffAnnotations"]);
-      await sessions.prompt(sessionRefFromBody(request.params.sessionId, body), text, body["streamingBehavior"], body["attachments"]);
+      await sessions.prompt(sessionRefFromBody(request.params.sessionId, body), text, body["streamingBehavior"], body["attachments"], promptRequestOptionsSchema.parse(body));
       return { accepted: true };
     } catch (error) {
       return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
@@ -338,7 +340,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
   app.post<{ Params: { sessionId: string }; Body: PromptResourceCommandRequestBody | undefined }>(`${prefix}/sessions/:sessionId/prompt-resource-command`, async (request, reply) => {
     try {
       const body = optionalRecord(request.body);
-      return await sessions.runPromptResourceCommand(sessionRefFromBody(request.params.sessionId, body), requireString(body, "text"), requirePromptResourceCommandIdentity(body["identity"]), body["streamingBehavior"], body["attachments"]);
+      return await sessions.runPromptResourceCommand(sessionRefFromBody(request.params.sessionId, body), requireString(body, "text"), requirePromptResourceCommandIdentity(body["identity"]), body["streamingBehavior"], body["attachments"], promptRequestOptionsSchema.parse(body));
     } catch (error) {
       return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
     }

@@ -4,6 +4,7 @@ import type { QueuedSessionMessage } from "../../shared/apiTypes.js";
 export type QueuedPromptKind = "steer" | "followUp";
 
 export interface QueuedPrompt {
+  requestId?: string;
   kind: QueuedPromptKind;
   text: string;
   images?: ImageContent[];
@@ -88,6 +89,11 @@ export class SessionCompactionQueue {
     const queued = this.compactions.get(sessionId);
     if (queued !== undefined) queued.followingPrompts.push(prompt);
     else this.appendReadyPrompts(sessionId, [prompt]);
+  }
+
+  hasPromptRequest(sessionId: string, requestId: string): boolean {
+    return [...this.readyPrompts(sessionId), ...(this.compactions.get(sessionId)?.followingPrompts ?? [])]
+      .some((prompt) => prompt.requestId === requestId);
   }
 
   hasReadyPrompts(sessionId: string): boolean {

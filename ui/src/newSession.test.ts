@@ -81,7 +81,7 @@ describe("starting a session", () => {
     expect(result).toEqual({ type: "started", session: { id: "new-1", cwd: "/code/forgerie" } });
     expect(requests.map((request) => request.path)).toEqual(["/api/sessions", "/api/sessions/new-1/prompt"]);
     expect(requests[0]!.body).toMatchObject({ cwd: "/code/forgerie", modelSpec: "cliproxyapi/claude-opus-5-5", thinkingLevel: "high" });
-    expect(requests[1]!.body).toEqual({ cwd: "/code/forgerie", text: "Fix the build" });
+    expect(requests[1]!.body).toEqual({ cwd: "/code/forgerie", requestId: expect.any(String), text: "Fix the build" });
   });
 
   it("leaves Pi's defaults alone when nothing was chosen", async () => {
@@ -111,7 +111,7 @@ describe("starting a session", () => {
     expect(requests.map((request) => request.path)).toEqual(["/api/sessions", "/api/sessions/new-1/attachments", "/api/sessions/new-1/prompt"]);
     expect(requests[0]!.body).toEqual({ cwd: "/code/forgerie", startupToken: "t-1" });
     expect(requests[1]!.body).toEqual({ cwd: "/code/forgerie", attachments: [file] });
-    expect(requests[2]!.body).toEqual({ cwd: "/code/forgerie", text: "Review these\n@.forgerie/attachments/notes.txt", attachments: [image] });
+    expect(requests[2]!.body).toEqual({ cwd: "/code/forgerie", requestId: expect.any(String), text: "Review these\n@.forgerie/attachments/notes.txt", attachments: [image] });
   });
 
   it("starts a skill or prompt template through its own route, with the identity the folder listed", async () => {
@@ -119,7 +119,7 @@ describe("starting a session", () => {
     const identity = { source: "skill" as const, name: "skill:testing", fingerprint: "f1" };
     await api.start("/code/forgerie", { text: "/skill:testing add cases", command: identity }, {});
     expect(requests[1]).toEqual({ path: "/api/sessions/new-1/prompt-resource-command",
-      body: { cwd: "/code/forgerie", text: "/skill:testing add cases", identity } });
+      body: { cwd: "/code/forgerie", requestId: expect.any(String), text: "/skill:testing add cases", identity } });
   });
 
   it("reports a session that exists without its message when its files could not be saved", async () => {
@@ -129,11 +129,13 @@ describe("starting a session", () => {
     expect(requests.some((request) => request.path.endsWith("/prompt"))).toBe(false);
   });
 
-  it("names the session it made when only the first message failed, and never sends it twice", async () => {
+  it("names the session it made when both first-message delivery attempts lose their receipt", async () => {
     const { api, requests } = await server({ prompt: "drop" });
     const result = await api.start("/code/forgerie", "hi", {});
     expect(result.type === "failed" && result.failure.stage === "prompt" && result.failure.session.id).toBe("new-1");
-    expect(requests.filter((request) => request.path.endsWith("/prompt"))).toHaveLength(1);
+    const attempts = requests.filter((request) => request.path.endsWith("/prompt"));
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]!.body).toEqual(attempts[0]!.body);
   });
 });
 

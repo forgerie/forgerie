@@ -1,3 +1,7 @@
+import { request as httpRequest } from "node:http";
+import Fastify from "fastify";
+import fastifyWebsocket from "@fastify/websocket";
+import { registerSessionRoutes } from "./sessionRoutes.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,7 +34,7 @@ class CompletionSessionEventHub extends CapturingSessionEventHub {
 }
 
 describe("Forgerie default Durable runtime", () => {
-  it("runs a parent through the production factory and leaves a native journal", async () => {
+  it("retries a dropped idle HTTP receipt with one run, user entry, and native journal", async () => {
     const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-service-"));
     const agentDir = join(directory, "agent");
     const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
@@ -40,21 +44,48 @@ describe("Forgerie default Durable runtime", () => {
     provider.setResponses([fauxAssistantMessage("durable service answer"), fauxAssistantMessage("durable service answer"), fauxAssistantMessage("durable service answer")]);
     const hub = new CompletionSessionEventHub();
     const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: directory }, sessionDirEnvKeys: [] });
+    const app = Fastify({ logger: false });
+    await app.register(fastifyWebsocket);
     const service = new PiSessionService(hub, { agentDir, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore(), heartbeatIntervalMs: 60_000 });
     try {
       const session = await service.start(directory);
       const ref = { id: session.id, cwd: directory };
-      await service.prompt(ref, "complete the integration request");
+      registerSessionRoutes(app, service, hub);
+      const origin = await app.listen({ host: "127.0.0.1", port: 0 });
+      const body = { cwd: directory, text: "complete the integration request", requestId: "dropped-http-receipt" };
+      // Drop the HTTP socket after the server accepts the prompt, before reading its receipt.
+      await new Promise<void>((resolve, reject) => {
+        const request = httpRequest(`${origin}/sessions/${session.id}/prompt`, { method: "POST", headers: { "Content-Type": "application/json" } });
+        request.on("response", (response) => { response.destroy(); request.destroy(); resolve(); });
+        request.on("error", reject);
+        request.end(JSON.stringify(body));
+      });
       const timeout = setTimeout(() => { hub.rejectPending(new Error(`Native integration did not settle: ${JSON.stringify({ calls: provider.state.callCount, events: hub.sessionEvents.slice(-12) })}`)); }, 2_000);
       try { await hub.completed; } finally { clearTimeout(timeout); }
-      expect(provider.state.callCount).toBeGreaterThanOrEqual(1);
+      const runs = hub.sessionEvents.filter(({ event }) => event.type === "agent.start").length;
+      const appends = hub.sessionEvents.filter(({ event }) => event.type === "message.append").length;
+      expect(appends).toBe(1);
+      const retry = await fetch(`${origin}/sessions/${session.id}/prompt`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      expect(retry.status).toBe(200);
+      expect(await retry.json()).toEqual({ accepted: true });
+      expect(hub.sessionEvents.filter(({ event }) => event.type === "agent.start")).toHaveLength(runs);
+      expect(runs).toBe(1);
+      expect(hub.sessionEvents.filter(({ event }) => event.type === "message.append")).toHaveLength(appends);
+      expect((await service.messages(ref)).messages.filter((message) => typeof message === "object" && message !== null && "role" in message && message.role === "user")).toHaveLength(1);
       expect((await service.status(ref)).isStreaming).toBe(false);
+      await service.stop(ref);
+      const afterReopen = await fetch(`${origin}/sessions/${session.id}/prompt`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      expect(afterReopen.status).toBe(200);
+      expect(hub.sessionEvents.filter(({ event }) => event.type === "agent.start")).toHaveLength(1);
+      expect(hub.sessionEvents.filter(({ event }) => event.type === "message.append")).toHaveLength(1);
+      expect((await service.messages(ref)).messages.filter((message) => typeof message === "object" && message !== null && "role" in message && message.role === "user")).toHaveLength(1);
       const listed = await gateway.list(directory);
       const stored = listed.find((entry) => entry.id === session.id);
       if (stored === undefined) throw new Error("Native session must remain discoverable");
       expect(await readFile(stored.path, "utf8")).toContain("forgerieDurableSessionId");
       expect((await readFile(durableSessionPaths(stored.path).database)).subarray(0, 16).toString()).toBe("SQLite format 3\u0000");
     } finally {
+      await app.close();
       await service.dispose();
       await rm(directory, { recursive: true, force: true });
     }

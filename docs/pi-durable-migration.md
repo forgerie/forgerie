@@ -81,3 +81,32 @@ nix shell nixpkgs#nodejs_24 -c npm run verify
 ```
 
 This result proves the checked mechanisms. It does not prove feature parity, delegated execution, integrated restart recovery, or production readiness.
+
+## Browser prompt request identity (#48)
+
+Browser chat sends and first prompts now allocate one opaque request ID per send.
+A transport retry reuses the serialized body and ID. It makes at most two
+attempts; other mutations are not retried. `/prompt` and
+`/prompt-resource-command` validate the optional ID and carry it into Durable's
+`conversation.submit`. Durable owns admitted request identity, including after
+reopen. The service holds only in-flight receipts, including when the caller's
+preflight deadline expires. Retries skip optimistic echoes and ask closure.
+Matching text is not delivery identity: a deliberate repeated send gets a new ID.
+
+The ID remains optional for server-owned `/skill:*` command forwarding,
+`spawnSession`, and handoff continuation. These callers make new inputs rather
+than transport retries. Callers without an ID do not get retry deduplication.
+Extension commands or inputs handled before Durable submission are outside this
+receipt contract. Browser shell and slash command endpoints keep their existing
+no-retry policy.
+
+Keep `SessionCompactionQueue`. In pi-durable 1.1.0, manual compaction summarizes
+in the background while the conversation keeps working. The test
+`Durable starts input while manual compaction is still summarizing` holds the
+summary provider response, submits an input, and observes its user entry and
+answer before releasing the summary. This differs from Forgerie's existing
+hold-until-compaction-finishes contract. The service's compaction-held queue
+now retains and checks request IDs and passes them to Durable when draining.
+This queue remains in memory: input acknowledged behind compaction is still
+not crash-durable until it reaches Durable. Removing this limit needs a separate
+persisted ordering-boundary design, not deletion of the queue.

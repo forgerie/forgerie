@@ -49,14 +49,14 @@ describe("attachment upload and prompt API binding", () => {
     await store.send(prompt.text, prompt.attachments);
     expect(requests).toEqual([
       { path: "/api/sessions/session/attachments", body: { cwd: "/workspace with spaces", attachments: [{ kind: "file", name: "notes.txt", mimeType: "text/plain", data: "bm90ZXM=" }] } },
-      { path: "/api/sessions/session/prompt", body: { cwd: "/workspace with spaces", text: "Read this\n@.forgerie/attachments/notes.txt" } },
+      { path: "/api/sessions/session/prompt", body: { cwd: "/workspace with spaces", requestId: expect.any(String), text: "Read this\n@.forgerie/attachments/notes.txt" } },
     ]);
   });
   it("passes an image-only prompt inline without an upload", async () => {
     const { store, requests } = await server();
     const attachment = { kind: "image" as const, mimeType: "image/png", data: "aGk=", name: "image.png" };
     await store.send("", [attachment]);
-    expect(requests).toEqual([{ path: "/api/sessions/session/prompt", body: { cwd: "/workspace with spaces", text: "", attachments: [attachment] } }]);
+    expect(requests).toEqual([{ path: "/api/sessions/session/prompt", body: { cwd: "/workspace with spaces", requestId: expect.any(String), text: "", attachments: [attachment] } }]);
   });
   it("does not prompt or retry after an upload refusal", async () => {
     const { store, requests } = await server({ uploadError: true });

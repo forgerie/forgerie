@@ -26,8 +26,3 @@ export function workingSend(status: SessionStatus | undefined, compaction: Compa
 export function queueKindOf(message: QueuedMessage): QueueKind {
   return message.kind === "followUp" && isCompactCommand(message.text) ? "compaction" : message.kind;
 }
-
-/** Pi drops a text-only message that matches one already waiting. */
-export function isAlreadyQueued(status: SessionStatus | undefined, text: string): boolean {
-  return status?.queuedMessages.some((message) => message.text === text) === true;
-}

@@ -1,3 +1,4 @@
+export type { PromptRequestOptions } from "./promptRequest.js";
 import type { SessionResponse } from "./sessionResponse.js";
 import type { PullLink } from "./pullRequests.js";
 import type { SessionWorktreeInfo, WorktreeSessionEvent } from "./sessionWorktree.js";

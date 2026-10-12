@@ -1,13 +1,14 @@
 import type { ReadTracker } from "./readReceipt";
 import { z } from "zod";
 import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, dialogCloseResponseSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, modelsResponseSchema, parseEvent, snapshotSchema, statusSchema, thinkingLevelsResponseSchema, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
+import { deliverPrompt, promptDelivery } from "./promptDelivery";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
 import { carryUnsavedShellRows, fromHistory, hasRunningShell, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
 import { shellAvailability, shellDraftOf, type ShellAvailability } from "./shellDraft";
 import { commandCatalogSchema, commandResultSchema, isCommand, type CommandCatalog, type CommandResult } from "./commands";
 import { savedAttachmentsSchema, type PromptAttachment } from "./attachments";
 import { compactionFromOutput, compactionFromStatus, idleCompaction, isCompactCommand, type CompactionState } from "./compaction";
-import { isAlreadyQueued, workingSend } from "./queue";
+import { workingSend } from "./queue";
 import { noDialogPhase, type StoredDialogPhase } from "./dialog";
 import type { PromptDiffAnnotation } from "./changes/diffNotes";
 import { afterFork, afterNavigate, closedTree, openTree, sessionTreeResponseSchema, treeForkResultSchema, treeNavigateResultSchema, withOperation as withTreeOperation, type SessionTreeSummaryChoice, type TreeNavigator, type TreeOutcome } from "./sessionTree";
@@ -177,8 +178,9 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     retryDelay = Math.min(retryDelay * 1.6, timing.maxRetryDelayMs ?? 5000);
   }
   async function request<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}, signal = lifetime.signal,
-    timeoutMs: number | null = timing.requestTimeoutMs ?? 20_000): Promise<T> {
-    const response = await transport.request(path, {
+    timeoutMs: number | null = timing.requestTimeoutMs ?? 20_000, idempotentPrompt = false): Promise<T> {
+    const send = idempotentPrompt ? (path: string, init: RequestInit) => deliverPrompt(transport.request, path, init) : transport.request;
+    const response = await send(path, {
       ...init, signal: timeoutMs === null ? signal : AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
     });
     if (!response.ok) {
@@ -424,7 +426,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
    * as before. While the session works, a prompt becomes a follow-up, or a
    * steer when asked. Every refusal here happens before any request.
    */
-  function deliveryOf(text: string, attachments: PromptAttachment[] | undefined, steer: boolean, annotated: boolean): "steer" | "followUp" | undefined {
+  function deliveryOf(attachments: PromptAttachment[] | undefined, steer: boolean): "steer" | "followUp" | undefined {
     if (state.sending) throw new NotSentError("Wait for the current message to send.");
     const working = workingSend(state.status, state.compaction, state.transcript.isRunning);
     if (!state.transcript.isRunning && !working.queue) return undefined;
@@ -433,25 +435,22 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     // Stop returns only the text of queued work, so a queued inline image could be lost.
     // A file saved to the workspace travels as its path in that text, so it can queue.
     if (attachments?.length) throw new NotSentError("Images attached to a message cannot be queued. Save them to .forgerie/attachments, or send them after the run.");
-    // The server folds notes into the queued text, so a noted message never equals a queued one.
-    // Notes need no such rule as attachments: Stop returns their text with the message.
-    if (!annotated && isAlreadyQueued(state.status, text)) throw new NotSentError("This message is already queued.");
     return steer ? "steer" : "followUp";
   }
   async function command(endpoint: "prompt" | "abort", text?: string, attachments?: PromptAttachment[], steer = false,
     diffAnnotations?: PromptDiffAnnotation[]) {
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new NotSentError("The session is not connected.");
-    const streamingBehavior = endpoint === "prompt" ? deliveryOf(text ?? "", attachments, steer, !!diffAnnotations?.length) : undefined;
+    const streamingBehavior = endpoint === "prompt" ? deliveryOf(attachments, steer) : undefined;
     update({ ...state, sending: true, commandError: undefined });
     try {
-      // Never automatically retry a mutation: the server may have accepted it
-      // even if its HTTP acknowledgement was lost.
-      const result = await request<z.infer<typeof acceptedSchema> | z.infer<typeof abortResultSchema>>(`${root}/${endpoint}`, endpoint === "prompt" ? acceptedSchema : abortResultSchema, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd: session.cwd, ...(text === undefined ? {} : { text }), ...(attachments?.length ? { attachments } : {}),
-          ...(streamingBehavior ? { streamingBehavior } : {}), ...(diffAnnotations?.length ? { diffAnnotations } : {}) }),
-      });
+      const body = { cwd: session.cwd, ...(text === undefined ? {} : { text }), ...(attachments?.length ? { attachments } : {}),
+        ...(streamingBehavior ? { streamingBehavior } : {}), ...(diffAnnotations?.length ? { diffAnnotations } : {}) };
+      const init = endpoint === "prompt" ? promptDelivery(body) : {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      };
+      const result = await request<z.infer<typeof acceptedSchema> | z.infer<typeof abortResultSchema>>(`${root}/${endpoint}`,
+        endpoint === "prompt" ? acceptedSchema : abortResultSchema, init, lifetime.signal, timing.requestTimeoutMs ?? 20_000, endpoint === "prompt");
       if (endpoint === "abort") void refreshStatus();
       return "restoredMessages" in result ? result.restoredMessages : [];
     } catch (error) {

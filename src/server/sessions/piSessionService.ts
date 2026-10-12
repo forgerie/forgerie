@@ -41,7 +41,7 @@ import { BUILTIN_COMMANDS } from "./builtinCommands.js";
 import { buildActiveCommandCatalog, buildActiveCommandList, expandPromptResourceCommand, resolvePromptResourceIdentity, type ActiveCommandCatalog } from "./commandCatalog.js";
 import { canonicalPromptResourceOrigin } from "./promptResourceOrigin.js";
 import { SessionCommandService } from "./sessionCommandService.js";
-import { SessionCompactionQueue, type QueuedCompactionHandle, type QueuedPromptKind } from "./sessionCompactionQueue.js";
+import { SessionCompactionQueue, type QueuedCompactionHandle, type QueuedPrompt, type QueuedPromptKind } from "./sessionCompactionQueue.js";
 import { projectSessionTree, type ProjectableSessionTreeNode } from "./sessionTreeProjection.js";
 import { SessionArchiveStore, type ArchivedSessionRecord, type ArchiveSessionInput } from "./sessionArchiveStore.js";
 import { SessionPinStore, type PinnedSessionRecord, type PinSessionInput } from "./sessionPinStore.js";
@@ -92,6 +92,7 @@ import type {
   ManagedProcessesSnapshot,
   ManagedProcessWriteResult,
 } from "../../shared/apiTypes.js";
+import { promptRequestOptionsSchema, type PromptRequestOptions } from "../../shared/promptRequest.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { CODEMODE_TOOL_NAME, codemodeScriptSummary } from "../../shared/codemodeScript.js";
 import { codemodeDefaultTools, hostedCodemodeExtension, isNestedToolEvent } from "./codemode.js";
@@ -520,7 +521,8 @@ export interface PiAgentSession {
   getSessionStats(): { sessionId: string; totalMessages: number; userMessages: number; assistantMessages: number; toolCalls: number; tokens: ClientSessionStatus["tokens"]; cost: number };
   reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void>;
   getContextUsage(): ClientSessionStatus["contextUsage"] | undefined;
-  prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; preflightResult?: PromptOptions["preflightResult"] }): Promise<void>;
+  hasPromptRequest?(requestId: string): Promise<boolean>;
+  prompt(text: string, options?: PromptRequestOptions & { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; preflightResult?: PromptOptions["preflightResult"] }): Promise<void>;
   sendCustomMessage(message: { customType: string; content: string; display: boolean; details?: unknown }, options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void>;
   executeBash(command: string, onChunk?: (chunk: string) => void, options?: { excludeFromContext?: boolean }): Promise<{ output: string; exitCode: number | undefined; cancelled: boolean; truncated: boolean; fullOutputPath?: string }>;
   navigateTree?(targetId: string, options?: { summarize?: boolean; customInstructions?: string }): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean; summaryEntry?: unknown }>;
@@ -1057,6 +1059,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly claimedSessionTitleIntents = new WeakSet<PiAgentSession>();
   private readonly sessionTitleGenerationControllers = new WeakMap<PiAgentSession, AbortController>();
   private readonly compactionQueue = new SessionCompactionQueue();
+  private readonly pendingPromptRequests = new WeakMap<PiAgentSession, Map<string, Promise<void>>>();
   private readonly compactionDrainTimers = new Map<string, NodeJS.Timeout>();
   private readonly queuedCompactionTimers = new Map<string, NodeJS.Timeout>();
   private readonly compactionStartGates = new Map<string, CompactionStartGate>();
@@ -2742,7 +2745,8 @@ export class PiSessionService implements SessionRouteService {
     });
   }
 
-  async prompt(ref: PiSessionRef, text: unknown, streamingBehavior?: unknown, attachments?: unknown, options?: { echoUserMessage?: boolean; handoffContinuation?: boolean }): Promise<void> {
+  async prompt(ref: PiSessionRef, text: unknown, streamingBehavior?: unknown, attachments?: unknown, options?: PromptRequestOptions & { echoUserMessage?: boolean; handoffContinuation?: boolean }): Promise<void> {
+    const { requestId } = promptRequestOptionsSchema.parse(options ?? {});
     const promptText = requirePromptText(text);
     // Command-forwarded prompts (e.g. /skill:*) are expanded by the agent, which
     // streams the canonical message back. The client doesn't render the raw
@@ -2756,31 +2760,51 @@ export class PiSessionService implements SessionRouteService {
     const parsedAttachments = parsePromptAttachments(attachments, { enforceInlineSizeLimit: false });
     const images = (await attachmentsToInlineImages(parsedAttachments)).map((entry) => entry.image);
     this.assertTreeNavigationInactive(session, "send a prompt");
-    const isQueued = session.isStreaming || session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
-    if (isQueued && images.length === 0 && this.hasQueuedMessageText(session, promptText)) {
-      this.publishActivity(session, "duplicate queued message ignored", "active");
-      this.publishStatus(session);
-      return;
-    }
-    // A chat message answers the session's open ask in the user's own words, so
-    // the form is void: keeping it open would invite answers to questions the
-    // conversation has already moved past. Ignored duplicates skip this on
-    // purpose: they must not void an ask posted after the queued original.
-    await this.voidOpenAskForUserMessage(session);
-    const waitsForCompaction = session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
-    const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : undefined;
-    if (waitsForCompaction) {
-      this.enqueuePromptBehindCompaction(session, promptText, behavior ?? "followUp", images, echoUserMessage);
-      return;
-    }
-    const accepted = await this.submitPromptUntilPreflight(session, promptText, behavior, images, echoUserMessage);
-    if (!accepted) throw new Error("Prompt delivery was rejected before agent start.");
+    await this.withPromptRequest(session, requestId, async () => {
+      // A new chat message answers the open ask. A retry must not void an ask
+      // created after the original input, so check its identity first.
+      await this.voidOpenAskForUserMessage(session);
+      const waitsForCompaction = session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
+      const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : undefined;
+      if (waitsForCompaction) {
+        this.enqueuePromptBehindCompaction(session, promptText, behavior ?? "followUp", images, echoUserMessage, true, requestId);
+        return;
+      }
+      const accepted = await this.submitPromptUntilPreflight(session, promptText, behavior, images, echoUserMessage, true, undefined, requestId);
+      if (!accepted) throw new Error("Prompt delivery was rejected before agent start.");
+    });
   }
 
-  private submitPrompt(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, preflightResult?: (accepted: boolean) => void, onCompletion?: (completion: PromptCompletion) => void): Promise<boolean> {
+  private async withPromptRequest(session: PiAgentSession, requestId: string | undefined, deliver: () => Promise<void>): Promise<void> {
+    if (requestId === undefined) { await deliver(); return; }
+    let pending = this.pendingPromptRequests.get(session);
+    if (pending === undefined) { pending = new Map(); this.pendingPromptRequests.set(session, pending); }
+    const existing = pending.get(requestId);
+    if (existing !== undefined) { await this.waitForPromptRequestReceipt(existing); return; }
+    // Only in-flight receipts live here. Durable and the compaction queue own
+    // admitted input; no completed request cache can drift from their state.
+    const receipt = (async () => {
+      if (this.compactionQueue.hasPromptRequest(session.sessionId, requestId) || (await session.hasPromptRequest?.(requestId)) === true) return;
+      await deliver();
+    })();
+    pending.set(requestId, receipt);
+    void receipt.then(() => { pending.delete(requestId); }, () => { pending.delete(requestId); });
+    await this.waitForPromptRequestReceipt(receipt);
+  }
+
+  private async waitForPromptRequestReceipt(receipt: Promise<void>): Promise<void> {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([receipt, new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => { reject(new Error("Prompt preflight receipt timed out.")); }, this.promptPreflightTimeoutMs);
+      })]);
+    } finally { if (timeout !== undefined) clearTimeout(timeout); }
+  }
+
+  private submitPrompt(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, preflightResult?: (accepted: boolean) => void, onCompletion?: (completion: PromptCompletion) => void, requestId?: string): Promise<boolean> {
     this.publishActivity(session, behavior === "steer" ? "steering queued" : behavior === "followUp" ? "message queued" : "prompt accepted", "active");
     if (behavior === undefined && echoUserMessage) this.events.publish(session.sessionId, { type: "message.append", message: userMessage(text, images) });
-    const promptOptions = buildPromptOptions(behavior, images, expandPromptTemplates, preflightResult);
+    const promptOptions = buildPromptOptions(behavior, images, expandPromptTemplates, preflightResult, requestId);
     const promptPromise = this.runSessionEntryMutation(session, "send a prompt", () => session.prompt(text, promptOptions)).then(() => {
       onCompletion?.({ accepted: true });
       return true;
@@ -2795,21 +2819,21 @@ export class PiSessionService implements SessionRouteService {
     return promptPromise;
   }
 
-  private async submitPromptUntilPreflight(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, onCompletion?: (completion: PromptCompletion) => void): Promise<boolean> {
+  private async submitPromptUntilPreflight(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, onCompletion?: (completion: PromptCompletion) => void, requestId?: string): Promise<boolean> {
     return await new Promise<boolean>((resolvePreflight, rejectPreflight) => {
       let settled = false;
       const settle = (accepted: boolean) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
+        if (timeout !== undefined) clearTimeout(timeout);
         resolvePreflight(accepted);
       };
-      const timeout = setTimeout(() => {
+      const timeout = requestId === undefined ? setTimeout(() => {
         if (settled) return;
         settled = true;
         rejectPreflight(new Error("Prompt preflight receipt timed out."));
-      }, this.promptPreflightTimeoutMs);
-      const completion = this.submitPrompt(session, text, behavior, images, echoUserMessage, expandPromptTemplates, settle, onCompletion);
+      }, this.promptPreflightTimeoutMs) : undefined;
+      const completion = this.submitPrompt(session, text, behavior, images, echoUserMessage, expandPromptTemplates, settle, onCompletion, requestId);
       void completion.then(settle);
     });
   }
@@ -2820,14 +2844,15 @@ export class PiSessionService implements SessionRouteService {
     }
   }
 
-  private enqueuePromptBehindCompaction(session: PiAgentSession, text: string, kind: QueuedPromptKind, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true): void {
-    const prompt = { kind, text, ...(images.length > 0 ? { images } : {}), ...(echoUserMessage ? {} : { echoUserMessage: false }), ...(expandPromptTemplates ? {} : { expandPromptTemplates: false }) };
+  private enqueuePromptBehindCompaction(session: PiAgentSession, text: string, kind: QueuedPromptKind, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, requestId?: string): void {
+    const prompt = { kind, text, ...(requestId === undefined ? {} : { requestId }), ...(images.length > 0 ? { images } : {}), ...(echoUserMessage ? {} : { echoUserMessage: false }), ...(expandPromptTemplates ? {} : { expandPromptTemplates: false }) };
     this.compactionQueue.enqueuePrompt(session.sessionId, prompt);
     this.publishActivity(session, session.isCompacting ? "message queued during compaction" : "message queued behind compaction", "active");
     this.publishStatus(session);
   }
 
-  async runPromptResourceCommand(ref: PiSessionRef, text: string, identity: PromptResourceCommandIdentity, streamingBehavior?: unknown, attachments?: unknown): Promise<{ accepted: true; deliveryFingerprint: string }> {
+  async runPromptResourceCommand(ref: PiSessionRef, text: string, identity: PromptResourceCommandIdentity, streamingBehavior?: unknown, attachments?: unknown, options?: PromptRequestOptions): Promise<{ accepted: true; deliveryFingerprint: string }> {
+    const { requestId } = promptRequestOptionsSchema.parse(options ?? {});
     const requestedBehavior = parseStreamingBehavior(streamingBehavior);
     await this.assertWritable(ref);
     const session = await this.getOrOpen(ref);
@@ -2839,20 +2864,16 @@ export class PiSessionService implements SessionRouteService {
     const resolved = resolvePromptResourceIdentity(catalog, text, identity);
     if (resolved.kind !== "matched") throw new Error("Prompt-resource command is no longer available for this session.");
     const expanded = expandPromptResourceCommand(resolved.command, resolved.args);
-    const isQueued = session.isStreaming || session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
-    if (isQueued && images.length === 0 && this.hasQueuedMessageText(session, expanded)) {
-      this.publishActivity(session, "duplicate queued message ignored", "active");
-      this.publishStatus(session);
-      return { accepted: true, deliveryFingerprint: await deliveryFingerprint(expanded) };
-    }
-    await this.voidOpenAskForUserMessage(session);
-    const waitsForCompaction = session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
-    const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : undefined;
-    if (waitsForCompaction) this.enqueuePromptBehindCompaction(session, expanded, behavior ?? "followUp", images, true, false);
-    else {
-      const accepted = await this.submitPromptUntilPreflight(session, expanded, behavior, images, true, false);
-      if (!accepted) throw new Error("Prompt-resource command delivery was rejected before agent start.");
-    }
+    await this.withPromptRequest(session, requestId, async () => {
+      await this.voidOpenAskForUserMessage(session);
+      const waitsForCompaction = session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
+      const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : undefined;
+      if (waitsForCompaction) this.enqueuePromptBehindCompaction(session, expanded, behavior ?? "followUp", images, true, false, requestId);
+      else {
+        const accepted = await this.submitPromptUntilPreflight(session, expanded, behavior, images, true, false, undefined, requestId);
+        if (!accepted) throw new Error("Prompt-resource command delivery was rejected before agent start.");
+      }
+    });
     return { accepted: true, deliveryFingerprint: await deliveryFingerprint(expanded) };
   }
 
@@ -4584,15 +4605,28 @@ export class PiSessionService implements SessionRouteService {
       const queued = this.compactionQueue.takeReadyPrompts(sessionId);
       if (queued.length === 0) return;
       this.publishStatus(session);
-      for (const prompt of queued) void this.submitPrompt(session, prompt.text, prompt.kind, prompt.images, prompt.echoUserMessage ?? true, prompt.expandPromptTemplates ?? true);
+      for (const prompt of queued) this.submitCompactionPrompt(session, prompt, prompt.kind);
       return;
     }
 
     const prompt = this.compactionQueue.shiftReadyPrompt(sessionId);
     if (prompt === undefined) return;
     this.publishStatus(session);
-    const submitted = this.submitPrompt(session, prompt.text, undefined, prompt.images, prompt.echoUserMessage ?? true, prompt.expandPromptTemplates ?? true);
-    void submitted.finally(() => { this.scheduleCompactionQueueDrain(sessionId); });
+    this.submitCompactionPrompt(session, prompt, undefined, () => { this.scheduleCompactionQueueDrain(sessionId); });
+  }
+
+  private submitCompactionPrompt(session: PiAgentSession, prompt: QueuedPrompt, behavior: QueuedPromptKind | undefined, onCompletion?: () => void): void {
+    if (prompt.requestId === undefined) {
+      void this.submitPrompt(session, prompt.text, behavior, prompt.images, prompt.echoUserMessage ?? true,
+        prompt.expandPromptTemplates ?? true, undefined, onCompletion);
+      return;
+    }
+    void this.withPromptRequest(session, prompt.requestId, async () => {
+      await this.submitPromptUntilPreflight(session, prompt.text, behavior, prompt.images, prompt.echoUserMessage ?? true,
+        prompt.expandPromptTemplates ?? true, onCompletion, prompt.requestId);
+    }).catch((error: unknown) => {
+      this.events.publish(session.sessionId, { type: "session.error", message: error instanceof Error ? error.message : String(error) });
+    });
   }
 
   private clearDeferredCompactionWork(sessionId: string): void {
@@ -5019,10 +5053,6 @@ export class PiSessionService implements SessionRouteService {
 
   private queuedMessages(session: PiAgentSession): QueuedSessionMessage[] {
     return this.compactionQueue.queuedMessages(session.sessionId, runtimeQueuedMessages(session));
-  }
-
-  private hasQueuedMessageText(session: PiAgentSession, text: string): boolean {
-    return this.queuedMessages(session).some((message) => message.text === text);
   }
 }
 
@@ -5601,8 +5631,9 @@ function userMessage(text: string, images: ImageContent[]): { role: "user"; cont
   return { role: "user", content };
 }
 
-function buildPromptOptions(behavior: QueuedPromptKind | undefined, images: ImageContent[], expandPromptTemplates = true, preflightResult?: (accepted: boolean) => void): { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; preflightResult?: PromptOptions["preflightResult"] } | undefined {
-  const options: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; preflightResult?: PromptOptions["preflightResult"] } = {};
+function buildPromptOptions(behavior: QueuedPromptKind | undefined, images: ImageContent[], expandPromptTemplates = true, preflightResult?: (accepted: boolean) => void, requestId?: string): PromptRequestOptions & { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; preflightResult?: PromptOptions["preflightResult"] } | undefined {
+  const options: PromptRequestOptions & { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; preflightResult?: PromptOptions["preflightResult"] } = {};
+  if (requestId !== undefined) options.requestId = requestId;
   if (behavior !== undefined) options.streamingBehavior = behavior;
   if (images.length > 0) options.images = images;
   if (!expandPromptTemplates) options.expandPromptTemplates = false;

@@ -288,6 +288,19 @@ describe("PiSessionService.prompt with an open ask", () => {
     await service.dispose();
   });
 
+  it("does not void a later ask when an admitted prompt is retried", async () => {
+    const { service, store, events, fake } = askService({ withActiveSession: true });
+    fake.session.hasPromptRequest = (requestId) => Promise.resolve(requestId === "already-admitted");
+    try {
+      await service.openAsk({ sessionId: ACTIVE_SESSION_ID, questions });
+      await service.prompt(sessionRef(ACTIVE_SESSION_ID), "earlier input", undefined, undefined, { requestId: "already-admitted" });
+      expect(store.pendingAsk(ACTIVE_SESSION_ID)?.askId).toBe("ask-1");
+      expect(fake.calls.sendCustomMessage).toEqual([]);
+      expect(fake.calls.prompt).toEqual([]);
+      expect(askEvents(events).map(({ event }) => event.type)).toEqual(["ask.opened"]);
+    } finally { await service.dispose(); }
+  });
+
   it("sends a plain message untouched when no ask is open", async () => {
     const { service, events, fake } = askService({ withActiveSession: true });
 

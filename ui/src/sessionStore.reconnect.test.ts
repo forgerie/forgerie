@@ -323,13 +323,13 @@ describe("automatic connection recovery", () => {
     expect(api.state.connections).toBe(1);
   });
 
-  it("never retries a prompt whose HTTP outcome is unknown", async () => {
+  it("retries an unknown prompt receipt once, but does not resubmit during reconnect", async () => {
     const api = await recoveryServer();
     await api.store.start();
     await expect(api.store.send("hello")).rejects.toThrow("Request outcome unknown");
     api.close();
     await until(() => api.state.connections === 2 && ready(api.store));
-    expect(api.state.prompts).toBe(1);
+    expect(api.state.prompts).toBe(2);
     expect(api.store.getSnapshot().commandError).toBe("Request outcome unknown");
   });
 

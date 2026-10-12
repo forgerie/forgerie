@@ -29,7 +29,7 @@ describe("starting a session from a backlog item", () => {
     expect(result).toEqual({ type: "started", session: { id: "s1", cwd: "/code/forgerie/.worktree/s-1" } });
     expect(calls[0]).toEqual({ path: "/api/backlog/p1/items/01A/launch", body: { requestId: "start-1",
       start: { cwd: "/code/forgerie", modelSpec: "p/opus", thinkingLevel: "high", destination: { kind: "fresh-worktree" } } } });
-    expect(calls[1]).toEqual({ path: "/api/sessions/s1/prompt", body: { cwd: "/code/forgerie/.worktree/s-1", text: "This is backlog item 01A.\n\n# Fix\n\nStart with the scanner." } });
+    expect(calls[1]).toEqual({ path: "/api/sessions/s1/prompt", body: { cwd: "/code/forgerie/.worktree/s-1", requestId: expect.any(String), text: "This is backlog item 01A.\n\n# Fix\n\nStart with the scanner." } });
     expect(calls.some((call) => call.path === "/api/sessions")).toBe(false);
   });
 
@@ -60,7 +60,7 @@ describe("starting a session from a backlog item", () => {
       : { body: { accepted: true } });
     const identity = { source: "skill" as const, name: "skill:tdd", fingerprint: "x" };
     await createNewSessionApi(fetchFn).start("/r", { text: "/skill:tdd", command: identity }, {}, { item: { projectId: "p1", itemId: "01A" } });
-    expect(calls[1]).toEqual({ path: "/api/sessions/s1/prompt-resource-command", body: { cwd: "/r", text: "/skill:tdd\n\nThis is backlog item 01A.", identity } });
+    expect(calls[1]).toEqual({ path: "/api/sessions/s1/prompt-resource-command", body: { cwd: "/r", requestId: expect.any(String), text: "/skill:tdd\n\nThis is backlog item 01A.", identity } });
   });
 });
 

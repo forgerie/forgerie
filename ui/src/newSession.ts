@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { deliverPrompt, promptDelivery } from "./promptDelivery";
 import { errorSchema, sessionModelSchema, sessionSchema, type Session, type SessionModel } from "./contracts";
 import type { PromptAttachment } from "./attachments";
 import { workspaceOf } from "./workspaceOf";
@@ -147,10 +148,10 @@ const refused = (error: unknown): error is Refusal => error instanceof Refusal &
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 export type Fetch = (path: string, init?: RequestInit) => Promise<Response>;
-/** The reads and writes of starting a session. Nothing here retries. */
+/** Creation is not retried. First prompts use Durable delivery identity. */
 export function createNewSessionApi(fetchFn: Fetch) {
-  async function call<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}): Promise<T> {
-    const response = await fetchFn(path, init);
+  async function call<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}, idempotentPrompt = false): Promise<T> {
+    const response = await (idempotentPrompt ? deliverPrompt(fetchFn, path, init) : fetchFn(path, init));
     if (!response.ok) {
       const body = errorSchema.safeParse(await response.json().catch(() => undefined));
       throw new Refusal(body.success ? body.data.error : `Request failed: HTTP ${response.status}`, response.status);
@@ -224,8 +225,8 @@ export function createNewSessionApi(fetchFn: Fetch) {
         }
         const images = prompt.images?.length ? { attachments: prompt.images } : {};
         if (prompt.command) await call(`${root}/prompt-resource-command`, z.object({ accepted: z.literal(true) }),
-          post({ cwd: session.cwd, text, identity: prompt.command, ...images }));
-        else await call(`${root}/prompt`, z.object({ accepted: z.literal(true) }), post({ cwd: session.cwd, text, ...images }));
+          promptDelivery({ cwd: session.cwd, text, identity: prompt.command, ...images }), true);
+        else await call(`${root}/prompt`, z.object({ accepted: z.literal(true) }), promptDelivery({ cwd: session.cwd, text, ...images }), true);
       } catch (error) {
         return { type: "failed", failure: { stage: "prompt", session, message: messageOf(error) } };
       }

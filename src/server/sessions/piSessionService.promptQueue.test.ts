@@ -39,6 +39,69 @@ afterEach(() => {
 });
 
 describe("PiSessionService prompt, queue, and auth warnings", () => {
+  it("shares the preflight receipt for concurrent retries without echoing twice", async () => {
+    const runtime = fakeRuntime("concurrent-request-session");
+    const hub = new CapturingSessionEventHub();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const prompts: string[] = [];
+    runtime.session.prompt = async (text) => { prompts.push(text); await held; };
+    const service = new PiSessionService(hub, {
+      agentDir: TEST_AGENT_DIR, modelRuntime: testModelRuntime, createAgentRuntime: runtimeCreator(runtime.runtime),
+      sessionManager: sessionGateway([sessionRecord("concurrent-request-session")]), heartbeatIntervalMs: 60_000,
+    });
+    try {
+      const first = service.prompt(sessionRef("concurrent-request-session"), "once", undefined, undefined, { requestId: "concurrent-1" });
+      const retry = service.prompt(sessionRef("concurrent-request-session"), "once", undefined, undefined, { requestId: "concurrent-1" });
+      await vi.waitFor(() => { expect(prompts).toEqual(["once"]); });
+      release();
+      await Promise.all([first, retry]);
+      expect(prompts).toEqual(["once"]);
+      expect(hub.sessionEvents.filter(({ event }) => event.type === "message.append")).toHaveLength(1);
+    } finally { release(); await service.dispose(); }
+  });
+
+  it("keeps a timed-out request in flight until Durable admission settles", async () => {
+    const runtime = fakeRuntime("slow-request-session");
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const prompts: string[] = [];
+    runtime.session.prompt = async (text) => { prompts.push(text); await held; };
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR, modelRuntime: testModelRuntime, createAgentRuntime: runtimeCreator(runtime.runtime),
+      sessionManager: sessionGateway([sessionRecord("slow-request-session")]), heartbeatIntervalMs: 60_000, promptPreflightTimeoutMs: 15,
+    });
+    try {
+      await expect(service.prompt(sessionRef("slow-request-session"), "once", undefined, undefined, { requestId: "slow-1" })).rejects.toThrow("timed out");
+      await expect(service.prompt(sessionRef("slow-request-session"), "once", undefined, undefined, { requestId: "slow-1" })).rejects.toThrow("timed out");
+      expect(prompts).toEqual(["once"]);
+    } finally { release(); await service.dispose(); }
+  });
+
+  it("deduplicates compaction-held requests by identity and retains it during drain", async () => {
+    const runtime = fakeRuntime("compaction-request-session", { isCompacting: true });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR, modelRuntime: testModelRuntime, createAgentRuntime: runtimeCreator(runtime.runtime),
+      sessionManager: sessionGateway([sessionRecord("compaction-request-session")]), heartbeatIntervalMs: 60_000,
+    });
+    const ref = sessionRef("compaction-request-session");
+    try {
+      await service.prompt(ref, "same text", "followUp", undefined, { requestId: "held-1" });
+      await service.prompt(ref, "same text", "followUp", undefined, { requestId: "held-1" });
+      await service.prompt(ref, "same text", "followUp", undefined, { requestId: "held-2" });
+      expect((await service.status(ref)).queuedMessages).toEqual([
+        { kind: "followUp", text: "same text" }, { kind: "followUp", text: "same text" },
+      ]);
+      expect(runtime.calls.prompt).toEqual([]);
+      runtime.session.isCompacting = false;
+      runtime.emit({ type: "compaction_end" });
+      await vi.waitFor(() => { expect(runtime.calls.prompt).toEqual([
+        { text: "same text", options: { requestId: "held-1" } },
+        { text: "same text", options: { requestId: "held-2" } },
+      ]); });
+    } finally { await service.dispose(); }
+  });
+
   it("sends prompts to an injected runtime without touching the SDK runtime", async () => {
     const fake = fakeRuntime("prompt-session");
     const service = new PiSessionService(new CapturingSessionEventHub(), {
@@ -910,7 +973,7 @@ target`, options: { expandPromptTemplates: false } },
     await service.dispose();
   });
 
-  it("does not enqueue duplicate queued message text", async () => {
+  it("does not treat matching text as delivery identity", async () => {
     const fake = fakeRuntime("dedupe-session", {
       isStreaming: true,
       pendingMessageCount: 1,
@@ -926,7 +989,7 @@ target`, options: { expandPromptTemplates: false } },
 
     await service.prompt(sessionRef("dedupe-session"), "already queued", "followUp");
 
-    expect(fake.calls.prompt).toEqual([]);
+    expect(fake.calls.prompt).toEqual([{ text: "already queued", options: { streamingBehavior: "followUp" } }]);
     await service.dispose();
   });
 

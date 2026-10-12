@@ -40,6 +40,19 @@ function send(payload: object) {
 }
 
 describe("diff annotations through the prompt route and runtime", () => {
+  it("carries the request identity with formatted annotations", async () => {
+    const response = await send({ text: "Fix", requestId: "annotation-send-1", diffAnnotations: [annotation] });
+    expect(response.statusCode).toBe(200);
+    expect(runtime.calls.prompt[0]?.options).toEqual({ requestId: "annotation-send-1" });
+    expect(runtime.calls.prompt[0]?.text).toContain("Keep the retry limit.");
+  });
+
+  it.each([null, 7, "", " ", "x".repeat(257)])("rejects an invalid request identity before opening the runtime: %j", async (requestId) => {
+    expect((await send({ text: "Fix", requestId })).statusCode).toBe(400);
+    expect(runtime.calls.prompt).toEqual([]);
+    expect(runtime.calls.bindExtensions).toEqual([]);
+  });
+
   it("delivers formatted annotations to the selected session and transcript", async () => {
     const response = await send({ text: "Fix this.", diffAnnotations: [annotation] });
     expect(response.statusCode).toBe(200);

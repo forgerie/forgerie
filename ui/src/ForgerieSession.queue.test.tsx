@@ -86,8 +86,8 @@ it("queues and steers through Pi, shows Pi's queue, and Stop returns it to the d
   await act(async () => button("Steer")!.click());
   await until(() => rows().length === 2);
   expect(api.prompts).toEqual([
-    { cwd: "/work", text: "add tests after this", streamingBehavior: "followUp" },
-    { cwd: "/work", text: "use the existing helper", streamingBehavior: "steer" },
+    { cwd: "/work", requestId: expect.any(String), text: "add tests after this", streamingBehavior: "followUp" },
+    { cwd: "/work", requestId: expect.any(String), text: "use the existing helper", streamingBehavior: "steer" },
   ]);
   expect(rows()).toEqual(["Steer: use the existing helper", "Follow-up: add tests after this"]);
   expect(input().value).toBe("");
@@ -97,17 +97,15 @@ it("queues and steers through Pi, shows Pi's queue, and Stop returns it to the d
   await until(() => rows().length === 0);
 });
 
-it("says a duplicate is already queued, keeps the draft, and sends nothing", async () => {
+it("queues deliberate repeated text as a separate send", async () => {
   const api = await respondingSession();
   await type("add tests");
   await act(async () => button("Queue message")!.click());
   await until(() => rows().length === 1);
   await type("add tests");
   await act(async () => button("Queue message")!.click());
-  await until(() => document.querySelector(".consequence")?.textContent?.includes("This message is already queued.") === true);
-  expect(document.querySelector(".consequence")?.textContent).not.toContain("Check the transcript");
-  // A refusal is the composer's note, not a problem in the status chip.
-  expect(document.querySelector(".status-chip-live")?.textContent).not.toContain("roblem");
-  expect(input().value).toBe("add tests");
-  expect(api.prompts).toHaveLength(1);
+  await until(() => rows().length === 2);
+  expect(input().value).toBe("");
+  expect(api.prompts).toHaveLength(2);
+  expect(api.prompts[1]).not.toEqual(api.prompts[0]);
 });

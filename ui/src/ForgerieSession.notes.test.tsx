@@ -161,7 +161,7 @@ describe("notes on changes", () => {
     await setValue(input(), "Fix these.");
     await click(button("Send message"));
     await until(() => api.prompts().length === 1);
-    expect(api.prompts()[0]).toEqual({ cwd: "/work", text: "Fix these.", diffAnnotations: [retryNote()] });
+    expect(api.prompts()[0]).toEqual({ cwd: "/work", requestId: expect.any(String), text: "Fix these.", diffAnnotations: [retryNote()] });
     await until(() => chips().length === 0);
   });
 
@@ -179,7 +179,7 @@ describe("notes on changes", () => {
     api.control.refusePrompt = false;
     await click(button("Send notes"));
     await until(() => chips().length === 0);
-    expect(api.prompts().at(-1)).toEqual({ cwd: "/work", text: "", diffAnnotations: [retryNote()] });
+    expect(api.prompts().at(-1)).toEqual({ cwd: "/work", requestId: expect.any(String), text: "", diffAnnotations: [retryNote()] });
   });
 
   it("leaves notes waiting while a `!` command runs, and says so", async () => {
@@ -200,7 +200,7 @@ describe("notes on changes", () => {
     await click(button("Close changes"));
     await click(button("Queue message"));
     await until(() => api.prompts().length === 1);
-    expect(api.prompts()[0]).toEqual({ cwd: "/work", text: "", streamingBehavior: "followUp", diffAnnotations: [retryNote()] });
+    expect(api.prompts()[0]).toEqual({ cwd: "/work", requestId: expect.any(String), text: "", streamingBehavior: "followUp", diffAnnotations: [retryNote()] });
   });
 
   it("edits and removes a note in the review, and opens the review at a note from its chip", async () => {

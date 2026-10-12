@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { clampThinkingLevel, getSupportedThinkingLevels, type AssistantMessage, type ImageContent } from "@earendil-works/pi-ai";
 import { ExtensionRunner, ModelRegistry, convertToLlm, createLocalBashOperations, createSyntheticSourceInfo, estimateTokens, type AgentSessionServices, type BuildSystemPromptOptions, type ExtensionUIContext, type PromptOptions, type SessionManager, type SessionStartEvent, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult } from "@earendil-works/pi-durable";
+import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult, type Submission } from "@earendil-works/pi-durable";
+import type { PromptRequestOptions } from "../../shared/promptRequest.js";
 import type { PiAgentSession } from "./piSessionService.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { DurableSdkTools } from "./durableSdkTools.js";
@@ -373,9 +374,19 @@ export class DurableAgentSession implements PiAgentSession {
       toolGuidelines: Object.fromEntries(this.tools.getDefinitions().map((tool) => [tool.name, tool.promptGuidelines ?? []])) };
   }
 
-  async prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; source?: PromptOptions["source"]; preflightResult?: PromptOptions["preflightResult"] }): Promise<void> {
+  async prompt(text: string, options?: PromptRequestOptions & { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[]; expandPromptTemplates?: boolean; source?: PromptOptions["source"]; preflightResult?: PromptOptions["preflightResult"] }): Promise<void> {
     await this.mutation;
     if (this.closed) throw new Error("Session is closed");
+    if (options?.requestId !== undefined) {
+      const requestId = options.requestId;
+      const existing = await this.journal.conversation.commit((tx) => tx.submissionByRequest(this.journal.conversation.id, requestId), context);
+      if (existing !== undefined) {
+        const submission = await this.journal.harness.submission(existing.id, context);
+        if (submission === undefined) throw new Error("Durable prompt submission disappeared");
+        await this.receivePromptSubmission(submission, options.preflightResult);
+        return;
+      }
+    }
     if (options?.expandPromptTemplates !== false) {
       const command = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);
       const registered = command?.[1] === undefined ? undefined : this.extensionRunner.getCommand(command[1]);
@@ -397,9 +408,17 @@ export class DurableAgentSession implements PiAgentSession {
     this.systemPrompt = await buildSdkSystemPrompt(before.systemPromptOptions);
     for (const message of before.messages) await this.sendCustomMessage(message);
     const content = images === undefined || images.length === 0 ? text : [{ type: "text" as const, text }, ...images];
-    const submission = await this.journal.conversation.submit({ type: "input", content, ...(options?.streamingBehavior === undefined ? { whenBusy: "reject" as const } : { whenBusy: options.streamingBehavior }) }, context);
+    const submission = await this.journal.conversation.submit({ type: "input", content, ...(options?.requestId === undefined ? {} : { requestId: options.requestId }), ...(options?.streamingBehavior === undefined ? { whenBusy: "reject" as const } : { whenBusy: options.streamingBehavior }) }, context);
+    await this.receivePromptSubmission(submission, options?.preflightResult);
+  }
+
+  async hasPromptRequest(requestId: string): Promise<boolean> {
+    return await this.journal.conversation.commit(async (tx) => (await tx.submissionByRequest(this.journal.conversation.id, requestId)) !== undefined, context);
+  }
+
+  private async receivePromptSubmission(submission: Submission, preflightResult?: PromptOptions["preflightResult"]): Promise<void> {
     const state = await submission.status(context);
-    options?.preflightResult?.(state.status === "queued" ? "queued" : "started");
+    preflightResult?.(state.status === "queued" ? "queued" : "started");
     if (state.status === "queued") { this.queued = (await this.journal.harness.snapshot(InboxDoc, this.journal.conversation.id, context))?.items ?? []; return; }
     await submission.wait(context);
     await this.journal.project();

@@ -13,7 +13,7 @@ async function until(predicate: () => boolean) { await expect.poll(predicate, { 
 /** A Forgerie session API that queues like Pi: follow-ups and steers wait in status until the run ends. */
 async function queueServer(initial: SessionStatus) {
   const requests: { path: string; body: unknown }[] = [];
-  const state = { status: initial, seq: 0, dropAcknowledgment: false };
+  const state = { status: initial, seq: 0, dropAcknowledgment: false, droppedReceipts: 0 };
   const ws = new WebSocketServer({ noServer: true });
   const http = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -25,7 +25,7 @@ async function queueServer(initial: SessionStatus) {
     if (url.pathname.endsWith("/messages")) send({ messages: [{ role: "user", content: "existing", timestamp: 1 }], start: 0, total: 1 });
     else if (url.pathname.endsWith("/stream-snapshot")) send({ seq: state.seq, partial: null });
     else if (url.pathname.endsWith("/prompt")) {
-      if (state.dropAcknowledgment) { response.destroy(); return; }
+      if (state.dropAcknowledgment || state.droppedReceipts > 0) { state.droppedReceipts--; response.destroy(); return; }
       send({ accepted: true });
     } else if (url.pathname.endsWith("/queue/clear")) {
       state.status = { ...state.status, queuedMessages: [] }; send(state.status);
@@ -62,10 +62,22 @@ async function queueServer(initial: SessionStatus) {
 }
 
 describe("sending while the session works", () => {
-  it("sends an idle prompt exactly as before, without a streaming behavior", async () => {
+  it("retries a dropped receipt with the same request ID, but gives the next send a new ID", async () => {
+    const api = await queueServer(idle);
+    api.state.droppedReceipts = 1;
+    await api.store.send("hello");
+    expect(api.prompts()).toHaveLength(2);
+    expect(api.prompts()[0]).toMatchObject({ requestId: expect.any(String), text: "hello" });
+    expect(api.prompts()[1]).toEqual(api.prompts()[0]);
+    await api.store.send("hello");
+    expect(api.prompts()[2]).toMatchObject({ requestId: expect.any(String), text: "hello" });
+    expect(api.prompts()[2]).not.toEqual(api.prompts()[0]);
+  });
+
+  it("sends an idle prompt with delivery identity, without a streaming behavior", async () => {
     const api = await queueServer(idle);
     await api.store.send("hello");
-    expect(api.prompts()).toEqual([{ cwd: "/work tree", text: "hello" }]);
+    expect(api.prompts()).toEqual([{ cwd: "/work tree", requestId: expect.any(String), text: "hello" }]);
   });
 
   it("queues a follow-up during a response, and steers only when asked", async () => {
@@ -73,8 +85,8 @@ describe("sending while the session works", () => {
     await api.store.send("add tests after this");
     await api.store.send("use the existing helper", undefined, { steer: true });
     expect(api.prompts()).toEqual([
-      { cwd: "/work tree", text: "add tests after this", streamingBehavior: "followUp" },
-      { cwd: "/work tree", text: "use the existing helper", streamingBehavior: "steer" },
+      { cwd: "/work tree", requestId: expect.any(String), text: "add tests after this", streamingBehavior: "followUp" },
+      { cwd: "/work tree", requestId: expect.any(String), text: "use the existing helper", streamingBehavior: "steer" },
     ]);
   });
 
@@ -82,23 +94,25 @@ describe("sending while the session works", () => {
     const api = await queueServer({ ...idle, isCompacting: true });
     await api.store.send("continue after compaction");
     await expect(api.store.send("change course", undefined, { steer: true })).rejects.toBeInstanceOf(NotSentError);
-    expect(api.prompts()).toEqual([{ cwd: "/work tree", text: "continue after compaction", streamingBehavior: "followUp" }]);
+    expect(api.prompts()).toEqual([{ cwd: "/work tree", requestId: expect.any(String), text: "continue after compaction", streamingBehavior: "followUp" }]);
   });
 
   it("sends an ordinary prompt beside a shell command, without a queue behavior", async () => {
     // Pi queues only during streaming or compaction, so it starts this prompt at once.
     const api = await queueServer({ ...idle, isBashRunning: true });
     await api.store.send("hello");
-    expect(api.prompts()).toEqual([{ cwd: "/work tree", text: "hello" }]);
+    expect(api.prompts()).toEqual([{ cwd: "/work tree", requestId: expect.any(String), text: "hello" }]);
   });
 
-  it("does not send a text Pi would ignore as already queued, and says so", async () => {
+  it("gives a deliberate repeated queued text its own delivery identity", async () => {
     const api = await queueServer({ ...streaming, queuedMessages: [{ kind: "followUp", text: "add tests" }] });
-    const refused = api.store.send("add tests");
-    await expect(refused).rejects.toBeInstanceOf(NotSentError);
-    await expect(refused).rejects.toThrow("This message is already queued.");
-    await api.store.send("add more tests");
-    expect(api.prompts()).toEqual([{ cwd: "/work tree", text: "add more tests", streamingBehavior: "followUp" }]);
+    await api.store.send("add tests");
+    await api.store.send("add tests");
+    expect(api.prompts()).toEqual([
+      { cwd: "/work tree", requestId: expect.any(String), text: "add tests", streamingBehavior: "followUp" },
+      { cwd: "/work tree", requestId: expect.any(String), text: "add tests", streamingBehavior: "followUp" },
+    ]);
+    expect(api.prompts()[1]).not.toEqual(api.prompts()[0]);
   });
 
   it("refuses attachments on a queued message, because Stop could only return its text", async () => {
@@ -108,13 +122,14 @@ describe("sending while the session works", () => {
     expect(api.prompts()).toEqual([]);
   });
 
-  it("does not retry a queued message whose acknowledgement was lost", async () => {
+  it("bounds retries of a queued message whose acknowledgement stays lost", async () => {
     const api = await queueServer(streaming);
     api.state.dropAcknowledgment = true;
     const sent = api.store.send("maybe queued");
     await expect(sent).rejects.toThrow();
     await expect(sent).rejects.not.toBeInstanceOf(NotSentError);
-    expect(api.prompts()).toHaveLength(1);
+    expect(api.prompts()).toHaveLength(2);
+    expect(api.prompts()[1]).toEqual(api.prompts()[0]);
   });
 
   it("follows the server queue as it changes, and Stop returns steers and follow-ups in delivery order", async () => {
