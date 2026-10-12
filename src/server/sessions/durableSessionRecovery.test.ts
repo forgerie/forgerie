@@ -12,6 +12,7 @@ import { durableSessionNeedsRecovery, recoverDurableSessions } from "./durableSe
 import { DurableSessionJournal, durableSessionPaths } from "./durableSessionJournal.js";
 import { acquireDurableOwnership } from "./durableOwnership.js";
 import { WORKFLOW_DOC_KIND } from "./durableWorkflowRuns.js";
+import { writeDurableSessionLocator } from "./durableSessionLocator.js";
 import { DurableJournalPool } from "./durableJournalPool.js";
 import { createDurableNativeHistory, durableEntryPresentationId } from "./durableNativeHistory.js";
 
@@ -97,6 +98,35 @@ describe("Durable recovery discovery", () => {
       expect(await durableSessionNeedsRecovery(parent.address)).toBe(false);
       const report = await recoverDurableSessions({
         catalog: () => Promise.resolve([{ id: "parent", cwd: directory, path: "unused", address: parent.address }, { id: "fork", cwd: directory, path: "unused", address: fork.address }]),
+        available: () => Promise.resolve(true), stopped: () => false, reopen: () => Promise.resolve(),
+      });
+      expect(report).toEqual({ resumed: ["fork"], failed: [] });
+    } finally { await pool.close(context); }
+  });
+  it("recovers a fork from catalog paths whose directories contain only locators", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "forgerie-recovery-paths-"));
+    directories.push(directory);
+    const pool = new DurableJournalPool();
+    const options = { models: createModels(), registry: createRegistry() };
+    const workflow = defineDoc({ kind: WORKFLOW_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial", initial: (): { active: string | null } => ({ active: null }) });
+    try {
+      const parent = await pool.acquire({ databasePath: join(directory, "state.sqlite"), sessionId: "parent", create: {} }, options, context);
+      const anchor = (await parent.conversation.entries({}, 1, undefined, context)).items[0];
+      if (anchor === undefined) throw new Error("Missing origin");
+      const history = createDurableNativeHistory(parent, { acquire: (address, ctx) => pool.acquireCandidate(address, options, ctx) });
+      const fork = (await history.fork(durableEntryPresentationId(parent.address.journalId, anchor, 0), "at", "fork", context)).handle;
+      await fork.conversation.commit(async (tx) => { (await tx.doc(workflow, fork.conversation.id)).active = "waiting-at-stop"; }, context);
+      const parentPath = join(directory, "parent.jsonl");
+      const forkPath = join(directory, "fork.jsonl");
+      await writeDurableSessionLocator(durableSessionPaths(parentPath).directory, parent.address);
+      await writeDurableSessionLocator(durableSessionPaths(forkPath).directory, fork.address);
+      await parent.release(context);
+      await fork.release(context);
+      await expect(stat(durableSessionPaths(forkPath).database)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await durableSessionNeedsRecovery(forkPath)).toBe(true);
+      expect(await durableSessionNeedsRecovery(parentPath)).toBe(false);
+      const report = await recoverDurableSessions({
+        catalog: () => Promise.resolve([{ id: "parent", cwd: directory, path: parentPath }, { id: "fork", cwd: directory, path: forkPath }]),
         available: () => Promise.resolve(true), stopped: () => false, reopen: () => Promise.resolve(),
       });
       expect(report).toEqual({ resumed: ["fork"], failed: [] });

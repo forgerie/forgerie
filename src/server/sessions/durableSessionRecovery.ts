@@ -8,6 +8,7 @@ import { DurableSessionJournal, durableSessionPaths } from "./durableSessionJour
 import { WORKFLOW_DOC_KIND, WorkflowActiveSchema } from "./durableWorkflowRuns.js";
 import type { DurableJournalPool } from "./durableJournalPool.js";
 import { SessionBindingsSchema } from "./durableSessionBindings.js";
+import { readDurableSessionLocator } from "./durableSessionLocator.js";
 import { parseDurableSessionAddress, type DurableSessionAddress } from "./durableSessionAddress.js";
 
 interface SessionRef { id: string; cwd: string }
@@ -46,9 +47,10 @@ export async function recoverDurableSessions(options: DurableRecoveryOptions): P
         if (!needed && ref.path !== undefined) {
           if (options.needsRecovery !== undefined) needed = await options.needsRecovery(ref.path);
           else {
-            const path = ref.address?.databasePath ?? durableSessionPaths(ref.path).database;
+            const address = ref.address ?? await readDurableSessionLocator(durableSessionPaths(ref.path).directory);
+            const path = address?.databasePath ?? durableSessionPaths(ref.path).database;
             let inspection = inspections.get(path);
-            if (inspection === undefined) { inspection = inspectFamily(ref.address ?? ref.path, options.pool); inspections.set(path, inspection); }
+            if (inspection === undefined) { inspection = inspectFamily(address ?? ref.path, options.pool); inspections.set(path, inspection); }
             const state = await inspection;
             needed = state.legacy ? state.any : state.sessions.has(ref.id);
           }
@@ -68,22 +70,23 @@ export async function recoverDurableSessions(options: DurableRecoveryOptions): P
 /** Inspect through Durable's public storage contract under the same ownership lock as execution. Never schedule work. */
 export async function durableSessionNeedsRecovery(session: string | DurableSessionAddress, pool?: DurableJournalPool): Promise<boolean> {
   const result = await inspectFamily(session, pool);
-  return typeof session === "string" ? result.any : result.sessions.has(session.sessionId);
+  return result.requestedSessionId === undefined ? result.any : result.sessions.has(result.requestedSessionId);
 }
-interface FamilyRecovery { legacy: boolean; any: boolean; sessions: Set<string> }
+interface FamilyRecovery { legacy: boolean; any: boolean; sessions: Set<string>; requestedSessionId?: string }
 async function inspectFamily(session: string | DurableSessionAddress, pool = DurableSessionJournal.pool): Promise<FamilyRecovery> {
-  const address = typeof session === "string" ? undefined : parseDurableSessionAddress(session);
+  const address = typeof session === "string" ? await readDurableSessionLocator(durableSessionPaths(session).directory) : parseDurableSessionAddress(session);
   const database = address?.databasePath ?? durableSessionPaths(typeof session === "string" ? session : "").database;
-  const result: FamilyRecovery = { legacy: true, any: false, sessions: new Set() };
+  const request = address === undefined ? {} : { requestedSessionId: address.sessionId };
+  const result: FamilyRecovery = { legacy: true, any: false, sessions: new Set(), ...request };
   if (!await exists(database)) return result;
   const borrowed = await pool.inspectStorage(database, (storage) => inspectStorage(storage, address), context);
-  if (borrowed.found) return borrowed.value;
+  if (borrowed.found) return { ...borrowed.value, ...request };
   const ownership = await acquireDurableOwnership(database);
   let storage: Storage | undefined;
   try {
     if (!await exists(ownership.databasePath)) return result;
     storage = await openNodeSqliteStorage(ownership.databasePath);
-    return await inspectStorage(storage, address);
+    return { ...await inspectStorage(storage, address), ...request };
   } finally {
     try { await storage?.close(context); }
     finally { await ownership.release(); }
