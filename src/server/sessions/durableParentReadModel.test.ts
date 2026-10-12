@@ -69,10 +69,15 @@ describe("native Durable parent reads", () => {
     await conversation.commit(async (tx) => {
       await tx.appendEntry(AssistantEntry, conversation.id, { model: [fauxAssistantMessage([fauxToolCall("end_turn", {}, { id: "end" })])] });
       await tx.appendEntry(conversation.id, { kind: "pi.tool-result", model: [{ role: "toolResult", toolCallId: "end", toolName: "end_turn", content: [{ type: "text", text: "declaration" }], isError: false, timestamp: 2 }] });
+      (await tx.doc(LiveDoc, conversation.id)).tools = [{ callId: "end", name: "end_turn", status: "running", output: "internal progress" }];
     }, context);
     expect(await reader.messages(context)).toMatchObject([{ role: "assistant", content: [] }]);
     const view = await conversation.viewState(context);
-    try { expect(reader.snapshot(view.value, "epoch", 0).history.messages).toMatchObject([{ role: "assistant", content: [] }]); }
+    try {
+      const snapshot = reader.snapshot(view.value, "epoch", 0);
+      expect(snapshot.history.messages).toMatchObject([{ role: "assistant", content: [] }]);
+      expect(snapshot.tools).toEqual([]);
+    }
     finally { view.dispose(); }
   });
 

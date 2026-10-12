@@ -7,7 +7,7 @@ import type { ContextView, ConversationView, Cursor, EntryRecord, UsageState, Wa
 import { UsageDoc } from "@earendil-works/pi-durable";
 import type { SessionStatus } from "../../shared/apiTypes.js";
 import { durableBrowserMessageSchema, durableBrowserSnapshotSchema, type DurableBrowserAppState, type DurableBrowserMessage, type DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
-import { projectBrowserMessage, projectBrowserMessageResponse } from "../browserMessageProjection.js";
+import { projectBrowserMessage, projectBrowserMessageResponse, projectBrowserSessionEvent } from "../browserMessageProjection.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import { pageMessagesAtSafeBoundary, type MessagePageRequest } from "./messagePaging.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
@@ -147,7 +147,7 @@ export class DurableParentReadModel {
       type: "session.snapshot", epoch, revision, ...(app === undefined ? {} : { app }),
       history: this.page(value.entries.flatMap((entry) => this.entryMessages(entry))),
       partial: partial === undefined ? null : durableBrowserMessageSchema.parse(projectBrowserMessage(partial)),
-      tools: (live.tools ?? []).map((slot) => ({ toolCallId: slot.callId, toolName: slot.name, status: slot.status, output: slot.output ?? "" })),
+      tools: (live.tools ?? []).filter((slot) => projectBrowserSessionEvent({ type: "tool.start", toolName: slot.name, toolCallId: slot.callId, summary: "" }).type === "tool.start").map((slot) => ({ toolCallId: slot.callId, toolName: slot.name, status: slot.status, output: slot.output ?? "" })),
       queuedMessages, isStreaming: live.run !== undefined, isCompacting: (live.compactions?.length ?? 0) > 0,
     });
   }
