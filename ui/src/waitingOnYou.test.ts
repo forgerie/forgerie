@@ -21,3 +21,13 @@ describe("what waits on the reader", () => {
     expect(waitingLabel(3)).toBe("3 waiting for you");
   });
 });
+
+describe("a workflow proposal that waits on the reader", () => {
+  it("pins only once the records say it is open", async () => {
+    const { PROPOSAL, PROPOSAL_ENTRY, STARTED_PROPOSAL } = await import("./workflows/fixtures/proposals");
+    const messages = [{ id: "7", workflowEntry: PROPOSAL_ENTRY }];
+    expect(waitingItems(messages, [], [PROPOSAL])).toEqual([{ kind: "proposal", id: "7", entry: PROPOSAL_ENTRY }]);
+    expect(waitingItems(messages, [], [STARTED_PROPOSAL])).toEqual([]);
+    expect(waitingItems(messages, [])).toEqual([]);
+  });
+});

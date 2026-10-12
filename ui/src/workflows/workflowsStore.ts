@@ -1,7 +1,10 @@
-// The browser's view of one session's workflows: the saved ones it can start, and its runs.
+// The browser's view of one session's workflows: the saved ones it can start, the ones the agent proposed, and its runs.
 // Routes: src/server/sessions/workflowRoutes.ts.
 import { z } from "zod";
-import { workflowInventorySchema, workflowRunSchema, workflowRunsSchema, type SavedWorkflow, type StopDecision, type WorkflowInputs, type WorkflowRun } from "./workflowsModel";
+import {
+  workflowInventorySchema, workflowProposalSchema, workflowProposalsSchema, workflowRunSchema, workflowRunsSchema,
+  type ProposalAction, type SavedWorkflow, type StopDecision, type WorkflowInputs, type WorkflowProposal, type WorkflowRun,
+} from "./workflowsModel";
 
 export type Request = (path: string, init: RequestInit) => Promise<Response>;
 export interface SessionRef { id: string; cwd: string }
@@ -15,6 +18,12 @@ export interface WorkflowsState {
   /** The stop with a decision on its way, as runId/stage. */
   deciding?: string;
   launching?: boolean;
+  /** The agent's proposals, newest first. Undefined until the first read answers. */
+  proposals?: readonly WorkflowProposal[];
+  /** Why the last read of the proposals failed. Cleared by the next read that answers. */
+  proposalsError?: string;
+  /** The proposal with a decision on its way, and which one. */
+  proposing?: { id: string; action: ProposalAction };
   /** The last action that failed, in words for the reader. */
   error?: string;
 }
@@ -49,18 +58,58 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
   async function readRuns() {
     const session = ref();
     if (!session) return;
-    try { update({ ...state, runs: await call(url(session, "workflow-runs", true), workflowRunsSchema) }); }
+    // Await before spreading: the runs and the proposals are read side by side, and each must keep the other's answer.
+    try { const runs = await call(url(session, "workflow-runs", true), workflowRunsSchema); update({ ...state, runs }); }
     // A session without Durable children has no workflow records; it shows no strip.
     catch { update({ ...state, runs: [] }); }
   }
+
+  async function readProposals() {
+    const session = ref();
+    if (!session) return;
+    try { const proposals = await call(url(session, "workflow-proposals", true), workflowProposalsSchema); update({ ...state, proposals, proposalsError: undefined }); }
+    // Keep what was read before: a card that was open stays open while the read is retried.
+    catch (error) { update({ ...state, proposalsError: message(error) }); }
+  }
+
+  /** Sends one decision on a proposal. Any failure is the reader's to see; the records are read again, since another tab may have decided. */
+  async function decideProposal<T>(id: string, action: ProposalAction, body: Record<string, unknown>, schema: z.ZodType<T>, apply: (answer: T) => Partial<WorkflowsState>): Promise<boolean> {
+    const session = ref();
+    if (!session || state.proposing !== undefined) return false;
+    update({ ...state, proposing: { id, action }, error: undefined });
+    try {
+      const answer = await call(url(session, `workflow-proposals/${encodeURIComponent(id)}/${action}`), schema, { cwd: session.cwd, ...body });
+      update({ ...state, proposing: undefined, ...apply(answer) });
+      void readProposals();
+      return true;
+    } catch (error) {
+      update({ ...state, proposing: undefined, error: message(error) });
+      void readProposals();
+      void readRuns();
+      return false;
+    }
+  }
+  const withProposal = (proposal: WorkflowProposal): Partial<WorkflowsState> =>
+    ({ proposals: (state.proposals ?? []).some((candidate) => candidate.id === proposal.id)
+      ? state.proposals?.map((candidate) => candidate.id === proposal.id ? proposal : candidate) : [proposal, ...state.proposals ?? []] });
 
   return {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     getSnapshot: () => state,
     refresh() {
       if (timer !== undefined) clearTimeout(timer);
-      timer = setTimeout(() => { timer = undefined; void readRuns(); }, refreshDelayMs);
+      timer = setTimeout(() => { timer = undefined; void readRuns(); void readProposals(); }, refreshDelayMs);
     },
+    /** Reads the proposals again at once, such as after a failed read. */
+    retryProposals: () => readProposals(),
+    /** Starts a proposal with the reader's inputs. Resolves true once the server accepted it; the run strip follows the runs. */
+    startProposal: (id: string, inputs: WorkflowInputs) => decideProposal(id, "start", { inputs, requestId: newRequestId() }, workflowRunSchema, (run) => ({
+      runs: [run, ...state.runs.filter((candidate) => candidate.id !== run.id)],
+      proposals: state.proposals?.map((proposal) => proposal.id === id ? { ...proposal, state: { kind: "started", runId: run.id, decidedAt: run.startedAt } } : proposal),
+    })),
+    /** Closes a proposal with what the reader wants changed; the agent proposes again. */
+    askProposalChanges: (id: string, note: string) => decideProposal(id, "changes", { note }, workflowProposalSchema, withProposal),
+    dismissProposal: (id: string) => decideProposal(id, "dismiss", {}, workflowProposalSchema, withProposal),
     async readSaved() {
       const session = ref();
       if (!session) return;

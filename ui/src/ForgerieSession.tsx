@@ -67,11 +67,12 @@ import { ChildAgentsOpener } from "./childAgents/ChildAgentsOpener";
 import { ChildAgentsPanel } from "./childAgents/ChildAgentsPanel";
 import { ChildEntryView } from "./childAgents/ChildEntryView";
 import { createWorkflowsStore } from "./workflows/workflowsStore";
-import { activeRun, waitingStops, WORKFLOW_RUNS_CHANGED_EVENT, type WorkflowInputs } from "./workflows/workflowsModel";
+import { activeRun, waitingStops, WORKFLOW_RUNS_CHANGED_EVENT, type ProposalEntry, type WorkflowInputs } from "./workflows/workflowsModel";
 import { WorkflowEntryView } from "./workflows/WorkflowEntryView";
 import { WorkflowOpener } from "./workflows/WorkflowOpener";
 import { WorkflowPicker } from "./workflows/WorkflowPicker";
 import { WorkflowPlanSheet } from "./workflows/WorkflowPlanSheet";
+import { WorkflowProposalSheet } from "./workflows/WorkflowProposalSheet";
 import { WorkflowRunSheet } from "./workflows/WorkflowRunSheet";
 import { WorkflowRunStrip } from "./workflows/WorkflowRunStrip";
 import { waitingItems, waitingLabel } from "./waitingOnYou";
@@ -114,7 +115,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   // Workflows: the saved ones this session can start, and its runs. Refreshed on the same kind of change events.
   const [workflows] = useState(() => createWorkflowsStore(browserTransport.request, () => sessionRef.current, () => crypto.randomUUID()));
   const flows = useSyncExternalStore(workflows.subscribe, workflows.getSnapshot);
-  const [workflowSheet, setWorkflowSheet] = useState<{ type: "picker" } | { type: "plan"; name: string; task?: string } | { type: "run" }>();
+  const [workflowSheet, setWorkflowSheet] = useState<{ type: "picker" } | { type: "plan"; name: string; task?: string } | { type: "run" }
+    | { type: "proposal"; entry: ProposalEntry }>();
   const [store] = useState(() => createSessionStore(id, browserTransport, {}, known, createReadTracker(browserTransport, { subscribe: onUnread, isVisible: () => document.visibilityState === "visible", afterRender: afterTranscriptPaint }),
     (eventType) => {
       if (eventType === CHILDREN_CHANGED_EVENT) { childAgents.refresh(); workflows.refresh(); }
@@ -277,15 +279,24 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const runs = flows.runs;
   const deciding = flows.deciding;
   // What waits on the reader is pinned above the composer; its place in the thread keeps one quiet line.
-  const waiting = useMemo(() => readOnly ? [] : waitingItems(folded, runs), [folded, runs, readOnly]);
-  const pinned = useMemo(() => new Set(waiting.map((item) => item.kind === "question" ? `q:${item.entry.questionId}` : `s:${item.entry.runId}/${item.entry.stage}/${String(item.entry.round)}`)), [waiting]);
+  const proposals = flows.proposals;
+  const waiting = useMemo(() => readOnly ? [] : waitingItems(folded, runs, proposals), [folded, runs, proposals, readOnly]);
+  const pinned = useMemo(() => new Set(waiting.map((item) => item.kind === "question" ? `q:${item.entry.questionId}`
+    : item.kind === "proposal" ? `p:${item.entry.proposalId}` : `s:${item.entry.runId}/${item.entry.stage}/${String(item.entry.round)}`)), [waiting]);
+  // A proposal card renders from its entry at once; the session's record decides whether it is still open.
+  const proposalView = useCallback((entry: ProposalEntry, key?: string) => <WorkflowEntryView key={key} entry={entry}
+    proposal={proposals?.find((candidate) => candidate.id === entry.proposalId)} proposalsRead={proposals !== undefined}
+    onReviewProposal={readOnly ? undefined : () => setWorkflowSheet({ type: "proposal", entry })} />, [proposals, readOnly]);
   const renderWaiting = useCallback((item: (typeof waiting)[number]) => item.kind === "question"
     ? <ChildEntryView key={item.id} entry={item.entry} onAnswer={childrenAvailable ? childAgents.answer : undefined} onOpen={childrenAvailable ? openChildByName : undefined} />
+    : item.kind === "proposal" ? proposalView(item.entry, item.id)
     : <WorkflowEntryView key={item.id} entry={item.entry} run={runs.find((run) => run.id === item.entry.runId)} deciding={deciding === `${item.entry.runId}/${item.entry.stage}`}
       onDecide={(decision, note) => workflows.decide(item.entry.runId, item.entry.stage, decision, note)}
-      onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />, [childrenAvailable, childAgents, openChildByName, runs, deciding, workflows]);
+      onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />, [childrenAvailable, childAgents, openChildByName, runs, deciding, workflows, proposalView]);
   const systemArtifact = useCallback<SystemArtifactView>((custom) => {
     const flow = (custom as Partial<WorkflowEntryArtifact> | undefined)?.workflowEntry;
+    if (flow?.kind === "proposal") return pinned.has(`p:${flow.proposalId}`)
+      ? <EventLine tone="active" subject={flow.name} phrase="waits for your review, pinned below the thread" /> : proposalView(flow);
     if (flow?.kind === "stop" && pinned.has(`s:${flow.runId}/${flow.stage}/${String(flow.round)}`)) {
       return <EventLine tone="active" subject={flow.stageName} phrase="waits for your decision, pinned below the thread" />;
     }
@@ -309,7 +320,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     if (event === undefined) return undefined;
     const onLoadOutput = sessionId && cwd ? () => loadProcessOutput(browserTransport.request, { id: sessionId, cwd }, event.id) : undefined;
     return <ProcessEventView event={event} onLoadOutput={onLoadOutput} />;
-  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned]);
+  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned, proposalView]);
   const running = activeRun(runs);
   const startWorkflow = async (name: string, inputs: WorkflowInputs, task: string | undefined) => {
     if (!await workflows.launch(name, inputs)) return;
@@ -320,6 +331,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   };
   const workflowBlock = running !== undefined ? "Finish the running workflow before you start another."
     : busy ? "Wait for the agent to finish its turn." : undefined;
+  const proposalBlock = running !== undefined ? "Another workflow is running." : busy ? "Wait for the agent to finish its turn." : undefined;
+  /** Closes the proposal's sheet once its decision went through, unless the reader already moved on. */
+  const closeProposal = (id: string) => setWorkflowSheet((current) => current?.type === "proposal" && current.entry.proposalId === id ? undefined : current);
   const runtime = useExternalStoreRuntime({
     messages, onNew, onCancel, adapters: { dictation, attachments },
     isRunning: state.transcript.isRunning,
@@ -475,6 +489,16 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         return workflow && <WorkflowPlanSheet workflow={workflow} blocked={workflowBlock} starting={flows.launching === true} error={flows.error}
           initialTask={workflowSheet.task} onStart={(inputs) => { void startWorkflow(workflow.name, inputs, workflowSheet.task); }}
           onBack={() => { workflows.dismissError(); setWorkflowSheet({ type: "picker" }); }}
+          onClose={() => { workflows.dismissError(); setWorkflowSheet(undefined); }} />;
+      })()}
+      {workflowSheet?.type === "proposal" && (() => {
+        const id = workflowSheet.entry.proposalId;
+        return <WorkflowProposalSheet key={id} entry={workflowSheet.entry} proposal={proposals?.find((candidate) => candidate.id === id)}
+          readError={flows.proposalsError} blocked={proposalBlock} pending={flows.proposing?.id === id ? flows.proposing.action : undefined} error={flows.error}
+          onRetry={() => { void workflows.retryProposals(); }}
+          onStart={(inputs) => { void workflows.startProposal(id, inputs).then((done) => { if (done) closeProposal(id); }); }}
+          onChanges={async (note) => { const done = await workflows.askProposalChanges(id, note); if (done) closeProposal(id); return done; }}
+          onDismiss={() => { void workflows.dismissProposal(id).then((done) => { if (done) closeProposal(id); }); }}
           onClose={() => { workflows.dismissError(); setWorkflowSheet(undefined); }} />;
       })()}
       {workflowSheet?.type === "run" && running !== undefined && <WorkflowRunSheet run={running}

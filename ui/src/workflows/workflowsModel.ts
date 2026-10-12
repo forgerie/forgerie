@@ -37,28 +37,53 @@ export const workflowRunSchema = z.object({
   })),
 });
 export const workflowRunsSchema = z.array(workflowRunSchema);
+const definitionSchema = z.object({ version: z.literal(1), inputs: z.record(z.string(), inputSchema).optional(), stages: z.array(stageSchema).optional() });
 export const workflowInventorySchema = z.object({
-  workflows: z.array(z.object({ name: z.string(), path: z.string(), sha256: z.string(), description: z.string().optional(),
-    definition: z.object({ version: z.literal(1), inputs: z.record(z.string(), inputSchema).optional(), stages: z.array(stageSchema).optional() }) })),
+  workflows: z.array(z.object({ name: z.string(), path: z.string(), sha256: z.string(), description: z.string().optional(), definition: definitionSchema })),
   diagnostics: z.array(z.object({ name: z.string(), path: z.string(), error: z.string() })),
 });
+/** A workflow the agent wrote for the current task. It lives in the session's records, never in the repository. */
+export const workflowProposalSchema = z.object({
+  id: z.string(), name: z.string(), summary: z.string(), text: z.string(), sha256: z.string(), createdAt: z.number(),
+  definition: definitionSchema,
+  /** The agent's pre-filled values. */
+  inputs: z.record(z.string(), valueSchema),
+  state: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("open") }),
+    z.object({ kind: z.literal("started"), runId: z.string(), decidedAt: z.number() }),
+    z.object({ kind: z.literal("changes"), note: z.string(), decidedAt: z.number() }),
+    z.object({ kind: z.literal("dismissed"), decidedAt: z.number() }),
+    z.object({ kind: z.literal("replaced"), by: z.string(), decidedAt: z.number() }),
+  ]),
+});
+/** Newest first, as the server lists them. */
+export const workflowProposalsSchema = z.array(workflowProposalSchema);
 export type WorkflowRun = z.infer<typeof workflowRunSchema>;
 export type WorkflowStage = z.infer<typeof stageSchema>;
+export type WorkflowInput = z.infer<typeof inputSchema>;
 export type SavedWorkflow = z.infer<typeof workflowInventorySchema>["workflows"][number];
+export type WorkflowProposal = z.infer<typeof workflowProposalSchema>;
 export type WorkflowInputs = Record<string, string | boolean | number>;
 export type StopDecision = "approve" | "changes" | "land";
+/** What the reader can do with an open proposal. */
+export type ProposalAction = "start" | "changes" | "dismiss";
 
 /** The server's event when any workflow record of this session changes. */
 export const WORKFLOW_RUNS_CHANGED_EVENT = "workflow_runs_changed";
 /** The transcript entry the server writes when the agent asks the user to decide at a stop. */
 export const WORKFLOW_STOP_TYPE = "forgerie.workflow-stop";
+/** The transcript entry the server writes when the agent proposes a workflow for the current task. */
+export const WORKFLOW_PROPOSAL_TYPE = "forgerie.workflow-proposal";
 
 /** Something a workflow did, as the parent's transcript records it. */
 export type WorkflowEntry =
   | { kind: "started"; runId: string; text: string }
   | { kind: "stop"; runId: string; stage: string; stageName: string; stop: "approve" | "land"; summary: string; workflow: string; round: number }
-  | { kind: "decided"; workflow: string; text: string };
+  | { kind: "decided"; workflow: string; text: string }
+  | { kind: "proposal"; proposalId: string; name: string; summary: string; stages: WorkflowStage[] };
 export type StopEntry = Extract<WorkflowEntry, { kind: "stop" }>;
+export type ProposalEntry = Extract<WorkflowEntry, { kind: "proposal" }>;
+const proposalDetailsSchema = z.object({ proposalId: z.string().min(1), name: z.string(), summary: z.string().catch(""), stages: z.array(stageSchema).catch([]) });
 
 const str = (record: Record<string, unknown>, key: string) => typeof record[key] === "string" ? record[key] : "";
 const recordOf = (value: unknown): Record<string, unknown> => typeof value === "object" && value !== null ? Object.fromEntries(Object.entries(value)) : {};
@@ -75,6 +100,10 @@ export function workflowEntryOf(message: PiMessage): WorkflowEntry | undefined {
     // The second line tells the agent what to do next; the reader needs only the first.
     if (decided) return { kind: "decided", workflow: decided[1]!, text: decided[2]!.split("\n")[0]!.trim() };
     return undefined;
+  }
+  if (message.role === "custom" && message.customType === WORKFLOW_PROPOSAL_TYPE) {
+    const details = proposalDetailsSchema.safeParse(message.details);
+    return details.success ? { kind: "proposal", ...details.data } : undefined;
   }
   if (message.role !== "custom" || message.customType !== WORKFLOW_STOP_TYPE) return undefined;
   const details = recordOf(message.details);
@@ -133,7 +162,8 @@ export function runStatus(run: WorkflowRun): string {
 }
 
 /** Inputs a launch needs, from the workflow's declared defaults and what the reader typed. */
-export function launchInputs(workflow: SavedWorkflow, typed: Readonly<Record<string, string>>): { inputs: WorkflowInputs } | { problem: string } {
+export function launchInputs(workflow: { definition: { inputs?: Record<string, WorkflowInput> | undefined } },
+  typed: Readonly<Record<string, string>>): { inputs: WorkflowInputs } | { problem: string } {
   const inputs: WorkflowInputs = {};
   for (const [name, input] of Object.entries(workflow.definition.inputs ?? {})) {
     const raw = typed[name];
@@ -191,6 +221,59 @@ export function stripSegments(run: WorkflowRun): StageStripSegment[] {
       return mine.some((child) => child.state.kind === "working") ? "working" : mine.length > 0 || view === "done" ? "done" : view === "working" ? "next" : view;
     }) };
   });
+}
+
+const count = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
+
+/** A proposal at a glance: "4 stages · 3 workers · 2 stops". Workers count once by name; a zero count of workers or stops is left out. */
+export function proposalGlance(stages: readonly WorkflowStage[]): string {
+  if (stages.length === 0) return "Prose only, no stages";
+  const workers = new Set(stages.flatMap((stage) => (stage.workers ?? []).map((worker) => worker.name))).size;
+  const stops = stages.filter((stage) => stage.stop !== undefined).length;
+  return [count(stages.length, "stage", "stages"), workers === 0 ? undefined : count(workers, "worker", "workers"),
+    stops === 0 ? undefined : count(stops, "stop", "stops")].filter((part) => part !== undefined).join(" · ");
+}
+
+/**
+ * Whether a proposal card still waits on the reader. Before the session's proposals are first read, the card
+ * trusts its transcript entry and stays open; once they are read, only a record in the open state keeps it open.
+ */
+export function proposalIsOpen(proposal: WorkflowProposal | undefined, read: boolean): boolean {
+  return proposal === undefined ? !read : proposal.state.kind === "open";
+}
+
+/** What became of a proposal, for its closed card. */
+export function proposalOutcome(proposal: WorkflowProposal | undefined): string {
+  switch (proposal?.state.kind) {
+    case undefined: return "This proposal is no longer in the session's records.";
+    case "open": return "Waiting for a decision.";
+    case "started": return "Started";
+    case "changes": return `You asked for changes: ${proposal.state.note}`;
+    case "dismissed": return "Dismissed";
+    case "replaced": return "Replaced by a newer proposal";
+  }
+}
+
+/**
+ * The inputs a proposal asks for, in the order the sheet shows them: the task first, then the declared ones, then
+ * any value the agent filled that the definition does not declare (typed by its value). Each starts at the agent's
+ * value, else the declared default, else empty.
+ */
+export function proposalInputs(proposal: Pick<WorkflowProposal, "definition" | "inputs">): { inputs: [string, WorkflowInput][]; values: Record<string, string> } {
+  const declared: [string, WorkflowInput][] = Object.entries(proposal.definition.inputs ?? {});
+  const extra: [string, WorkflowInput][] = Object.entries(proposal.inputs).filter(([name]) => proposal.definition.inputs?.[name] === undefined)
+    .map(([name, value]) => [name, { type: typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string" }]);
+  const inputs = [...declared, ...extra].sort(([a], [b]) => Number(b === "task") - Number(a === "task"));
+  const values = Object.fromEntries(inputs.map(([name, input]) => {
+    const value = proposal.inputs[name] ?? input.default;
+    return [name, value === undefined ? "" : String(value)];
+  }));
+  return { inputs, values };
+}
+
+/** A workflow file's prose: its text without the frontmatter, which the route already shows. */
+export function proseOf(text: string): string {
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---[^\S\r\n]*(?:\r?\n|$)/u, "").trim();
 }
 
 /** How many stops wait on the reader in this run. */

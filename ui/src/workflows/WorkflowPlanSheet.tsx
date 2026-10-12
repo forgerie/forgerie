@@ -3,8 +3,7 @@ import { ActionFooter } from "../ui/ActionFooter";
 import { Lede } from "../ui/Lede";
 import { RouteMap } from "../ui/RouteMap";
 import { SheetDialog } from "../ui/SheetDialog";
-import { TextAreaField } from "../ui/TextAreaField";
-import { ToggleGroup } from "../ui/ToggleGroup";
+import { WorkflowInputFields } from "./WorkflowInputFields";
 import { launchInputs, routeSteps, type SavedWorkflow, type WorkflowInputs } from "./workflowsModel";
 
 /**
@@ -40,11 +39,7 @@ export function WorkflowPlanSheet({ workflow, blocked, starting, error, initialT
     back={{ label: "All workflows", onPress: onBack }} closeLabel="Close the plan" onClose={onClose}
     footer={<ActionFooter note={note} actions={[{ label: "Start workflow", onPress: start, tone: "primary", disabled: starting || blocked !== undefined }]} />}>
     {workflow.description !== undefined && <Lede>{workflow.description}</Lede>}
-    {inputs.map(([name, input]) => input.type === "boolean" || input.choices !== undefined
-      ? <ToggleGroup key={name} label={input.description ?? name} value={typed[name] ?? ""} onChange={(value) => set(name, value)}
-        options={(input.choices ?? [true, false]).map((choice) => ({ value: String(choice), label: input.type === "boolean" ? (choice === true ? "Yes" : "No") : String(choice) }))} />
-      : <TextAreaField key={name} label={name === "task" ? "Task" : name} value={typed[name] ?? ""} onChange={(value) => set(name, value)}
-        rows={name === "task" ? 4 : 1} hint={input.description} />)}
+    <WorkflowInputFields inputs={inputs} values={typed} onChange={set} />
     {stages.length > 0 && <RouteMap label="What happens" steps={routeSteps(stages, undefined)} />}
   </SheetDialog>;
 }

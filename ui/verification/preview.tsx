@@ -45,6 +45,11 @@ import { IssueProposalEntry, type IssueRequest } from "../src/issues/IssuePropos
 import type { IssueProposal, IssueProposalArtifact } from "../src/issues/issueProposal";
 import { CREATED, DISMISSED, GITHUB_FAILED, LONG, NO_LABELS, SHORT } from "../src/issues/fixtures/proposals";
 import type { ComposerInputElement } from "../src/ui/ComposerEditor";
+import { WorkflowEntryView } from "../src/workflows/WorkflowEntryView";
+import { WorkflowProposalSheet } from "../src/workflows/WorkflowProposalSheet";
+import { WorkflowRunStrip } from "../src/workflows/WorkflowRunStrip";
+import type { WorkflowEntry, WorkflowProposal, WorkflowRun } from "../src/workflows/workflowsModel";
+import { CHANGES_PROPOSAL, PROPOSAL, PROPOSAL_ENTRY, PROPOSAL_RUN } from "../src/workflows/fixtures/proposals";
 
 const say = (id: string, role: TranscriptMessage["role"], text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
 const tool = (id: string, name: string, args: unknown, state: ToolState): TranscriptPart => ({ type: "tool", id, name, args, state });
@@ -491,7 +496,19 @@ const issueMessages = (name: string, list: readonly IssueProposal[]): Transcript
   say("issue-a", "assistant", "I drafted both. Check them before they go to GitHub."),
   ...list.map((proposal, index) => proposalRow(`${name}-${String(index)}`, proposal)),
 ];
+// Workflow proposals: an earlier proposal the reader asked to change, and the agent's new one, pinned above the
+// composer while it waits. `workflow-proposal-sheet` opens its sheet; Start shows the run strip. No network.
+const proposalPreview = scenario.startsWith("workflow-proposal");
+const EARLIER: WorkflowProposal = { ...CHANGES_PROPOSAL, id: "wp-5e01", state: { kind: "changes", decidedAt: CHANGES_PROPOSAL.createdAt + 60_000, note: "Land the API first, then the page, and stop between them." } };
+const proposalMessages = (): TranscriptMessage[] => [...fromHistory([
+  { role: "user", content: "Port the settings page to the shared store. Plan it as a workflow so the API and the page move together." },
+  { role: "assistant", content: [{ type: "text", text: "Here is a workflow for this task. Review it below; nothing starts until you do." }] },
+  { role: "custom", customType: "forgerie.workflow-proposal", content: "", details: { proposalId: EARLIER.id, name: EARLIER.name, summary: EARLIER.summary, stages: PROPOSAL_ENTRY.stages } },
+  { role: "assistant", content: [{ type: "text", text: "I split the landing as you asked: the API lands first, then the page, with a stop between them." }] },
+  { role: "custom", customType: "forgerie.workflow-proposal", content: "", details: { proposalId: PROPOSAL.id, name: PROPOSAL.name, summary: PROPOSAL.summary, stages: PROPOSAL_ENTRY.stages } },
+]).messages];
 const scenarios: Record<string, TranscriptMessage[]> = {
+  ...proposalPreview ? { [scenario]: proposalMessages() } : {},
   issue: issueMessages("issue", [SHORT, LONG]), "issue-long": issueMessages("issue-long", [LONG]),
   "issue-readonly": issueMessages("issue-readonly", [NO_LABELS, LONG]),
   "issue-decided": issueMessages("issue-decided", [{ ...SHORT, outcome: CREATED }, { ...NO_LABELS, outcome: DISMISSED }, { ...LONG, outcome: { ...CREATED, number: 1204, title: LONG.title, url: "https://github.com/forgerie/forgerie/issues/1204" } }]),
@@ -529,6 +546,13 @@ function Preview() {
     transcribe: async () => ({ text: "This is a local dictation preview." }),
   }));
   const [messages, setMessages] = useState<TranscriptMessage[]>(scenarios[scenario] ?? initialMessages);
+  const [flowProposals, setFlowProposals] = useState<WorkflowProposal[]>([PROPOSAL, EARLIER]);
+  const [flowSheet, setFlowSheet] = useState<string | undefined>(scenario === "workflow-proposal-sheet" ? PROPOSAL.id : undefined);
+  const [flowRun, setFlowRun] = useState<WorkflowRun>();
+  const decideProposal = (id: string, state: WorkflowProposal["state"]) => {
+    setFlowProposals((list) => list.map((proposal) => proposal.id === id ? { ...proposal, state } : proposal));
+    setFlowSheet(undefined);
+  };
   const [commandResult, setCommandResult] = useState<CommandResult | undefined>(commandFeedback[scenario]);
   const [compaction, setCompaction] = useState<CompactionState>(compactionScenarios[scenario] ?? idleCompaction);
   // `skills-open` opens every skill record for screenshots. `skills-invocation`
@@ -760,12 +784,33 @@ function Preview() {
           onCleanup: () => setChildDetail(CLEANUP), onBackDetail: () => setChildDetail({ kind: "none" }), onRetryDetail: () => setChildDetail({ kind: "runs", data: RUNS }),
           onLand: () => {}, onDiscard: () => setChildDetail({ kind: "none" }), onContinue: async () => {}, onDismissOutcome: () => {} }} />}
       <SessionDoorsProvider cwd={previewCwd} open={openPreviewDoor}>
-      <Thread beforeComposer={pinnedPreview ? (() => {
+      {proposalPreview && flowSheet !== undefined && (() => {
+        const proposal = flowProposals.find((candidate) => candidate.id === flowSheet);
+        return proposal && <WorkflowProposalSheet entry={{ ...PROPOSAL_ENTRY, proposalId: proposal.id }} proposal={proposal} onRetry={() => {}} onClose={() => setFlowSheet(undefined)}
+          onStart={() => { setFlowRun(PROPOSAL_RUN); decideProposal(proposal.id, { kind: "started", runId: PROPOSAL_RUN.id, decidedAt: PROPOSAL_RUN.startedAt }); }}
+          onChanges={async (note) => { decideProposal(proposal.id, { kind: "changes", note, decidedAt: PROPOSAL.createdAt }); return true; }}
+          onDismiss={() => decideProposal(proposal.id, { kind: "dismissed", decidedAt: PROPOSAL.createdAt })} />;
+      })()}
+      <Thread beforeComposer={proposalPreview ? (() => {
+        const waiting = waitingItems(messages, [], flowProposals);
+        return <>
+          {waiting.length > 0 && <PinnedDock label={waitingLabel(waiting.length)}>{waiting.map((item) => item.kind === "proposal"
+            ? <WorkflowEntryView key={item.id} entry={item.entry} proposal={flowProposals.find((candidate) => candidate.id === item.entry.proposalId)} proposalsRead
+              onReviewProposal={() => setFlowSheet(item.entry.proposalId)} /> : null)}</PinnedDock>}
+          {flowRun && <WorkflowRunStrip run={flowRun} onOpen={() => {}} />}
+        </>;
+      })() : pinnedPreview ? (() => {
         const waiting = waitingItems(messages, []);
         return waiting.length > 0 ? <PinnedDock label={waitingLabel(waiting.length)}>{waiting.map((item) => item.kind === "question"
           ? <ChildEntryView key={item.id} entry={item.entry} onAnswer={async () => {}} onOpen={() => setChildView({ open: true, id: 21 })} /> : null)}</PinnedDock> : undefined;
       })() : undefined} commandResult={commandResult && { result: commandResult, disabled: false, onClose: () => setCommandResult(undefined),
-        onChoose: (_requestId, value) => setCommandResult({ type: "done", presentation: "toast", message: `Forked from ${value}` }) }} systemArtifact={issuePreview ? (custom) => {
+        onChoose: (_requestId, value) => setCommandResult({ type: "done", presentation: "toast", message: `Forked from ${value}` }) }} systemArtifact={proposalPreview ? (custom) => {
+        const entry = (custom as { workflowEntry?: WorkflowEntry } | undefined)?.workflowEntry;
+        if (entry?.kind !== "proposal") return undefined;
+        const proposal = flowProposals.find((candidate) => candidate.id === entry.proposalId);
+        if (proposal?.state.kind === "open") return <EventLine tone="active" subject={entry.name} phrase="waits for your review, pinned below the thread" />;
+        return <WorkflowEntryView entry={entry} proposal={proposal} proposalsRead onReviewProposal={() => setFlowSheet(entry.proposalId)} />;
+      } : issuePreview ? (custom) => {
         const proposal = (custom as Partial<IssueProposalArtifact> | undefined)?.issueProposal;
         return proposal && <IssueProposalEntry proposal={proposal} sessionId="preview" cwd={previewCwd} readOnly={scenario === "issue-readonly"} request={issueRequest} />;
       } : childrenPreview ? (custom) => {
