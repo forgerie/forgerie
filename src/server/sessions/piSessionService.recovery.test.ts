@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ExtensionRunner, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -7,10 +7,11 @@ import { Harness, LiveDoc, createRegistry } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SessionArchiveStore } from "./sessionArchiveStore.js";
+import { durableSessionPaths } from "./durableSessionJournal.js";
 import { PiSessionService } from "./piSessionService.js";
 import { CapturingSessionEventHub, emptyArchiveStore } from "./piSessionService.testSupport.js";
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
-import { durableSessionPaths } from "./durableSessionJournal.js";
 
 const directories: string[] = [];
 const services: PiSessionService[] = [];
@@ -146,6 +147,47 @@ describe("daemon-owned Durable recovery", () => {
     expect(restarted.hub.sessionEvents.filter(({ sessionId, event }) => sessionId === sibling.id && event.type === "session.error")).toEqual([]);
     const messages = (await restarted.service.messages(sibling)).messages;
     expect(messages.filter((message) => typeof message === "object" && message !== null && "role" in message && message.role === "user" && "content" in message && message.content === "unfinished sibling")).toHaveLength(1);
+  }, 20_000);
+
+  it("keeps the shared journal through parent archive, restore and deletion while the fork is live", async () => {
+    const { directory, provider, gateway, open } = await fixture();
+    const archive = new SessionArchiveStore(join(directory, "archive.json"));
+    const original = open(archive);
+    provider.setResponses(Array.from({ length: 8 }, () => fauxAssistantMessage("archive seed")));
+    const parent = { id: (await original.service.start(directory, { initialModel: provider.getModel() })).id, cwd: directory };
+    await original.service.prompt(parent, "seed archive family");
+    await vi.waitFor(() => { expect(hasAnswer(original.hub, "archive seed")).toBe(true); });
+    const stored = (await gateway.list(directory)).find((entry) => entry.id === parent.id);
+    if (stored === undefined) throw new Error("Missing parent export");
+    const database = durableSessionPaths(stored.path).database;
+    const clone = await original.service.runCommand(parent, "/clone live fork");
+    if (clone.type !== "done" || clone.session === undefined) throw new Error(`Clone failed: ${JSON.stringify(clone)}`);
+    const fork = { id: clone.session.id, cwd: directory };
+    const entered = holdRequest(provider, "live fork during cleanup");
+    await original.service.prompt(fork, "live fork during cleanup");
+    await vi.waitFor(() => { expect(entered()).toBe(true); });
+    await original.service.archive(parent);
+    await expect(readFile(stored.path)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await readFile(database)).subarray(0, 16).toString()).toBe("SQLite format 3\u0000");
+    await original.service.restore(parent);
+    expect(await readFile(stored.path, "utf8")).toContain(parent.id);
+    expect((await original.service.status(fork)).isStreaming).toBe(true);
+    await original.service.archive(parent);
+    const deleted = await original.service.deleteArchivedMany([parent]);
+    expect(deleted.deletedSessionIds).toEqual([parent.id]);
+    expect((await original.service.status(fork)).isStreaming).toBe(true);
+    expect((await readFile(database)).subarray(0, 16).toString()).toBe("SQLite format 3\u0000");
+    await original.service.dispose();
+    provider.setResponses(Array.from({ length: 8 }, () => fauxAssistantMessage("fork survives parent deletion")));
+    const restarted = open(archive);
+    await restarted.service.status(fork);
+    await vi.waitFor(() => { expect(hasAnswer(restarted.hub, "fork survives parent deletion")).toBe(true); });
+    await vi.waitFor(async () => { expect((await restarted.service.status(fork)).isStreaming).toBe(false); });
+    provider.setResponses([fauxAssistantMessage("fresh turn after parent deletion")]);
+    await restarted.service.prompt(fork, "another turn after deletion");
+    await vi.waitFor(() => { expect(hasAnswer(restarted.hub, "fresh turn after parent deletion")).toBe(true); });
+    await vi.waitFor(async () => { expect((await restarted.service.messages(fork)).messages.filter((message) => typeof message === "object" && message !== null && "role" in message && message.role === "user" && "content" in message && message.content === "another turn after deletion")).toHaveLength(1); });
+    expect((await readFile(database)).subarray(0, 16).toString()).toBe("SQLite format 3\u0000");
   }, 20_000);
 
   it("keeps the run start through tools and steering, then uses follow-up placement time for the next run", async () => {

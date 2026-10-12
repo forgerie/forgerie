@@ -3234,6 +3234,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async archive(ref: PiSessionRef): Promise<void> {
+    // Archive only the JSONL file. Its .durable/<name>/ journal can still own live forks.
     const readonly = await this.sessionWorktrees?.store.readOnly(ref);
     if (readonly !== undefined) {
       if (await this.isPinned(readonly.session.id)) throw new Error("Unpin session before archiving");
@@ -3865,6 +3866,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async archiveStoreDeleteArchivedMany(sessionIds: readonly string[]): Promise<string[]> {
+    // Never remove .durable/<name>/ because <name>.jsonl is gone; forks share that journal.
     if (sessionIds.length === 0) return [];
     if (this.archiveStore.deleteArchivedMany !== undefined) {
       const deleted = await this.archiveStore.deleteArchivedMany(sessionIds);
