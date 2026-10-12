@@ -142,6 +142,72 @@ describe("the issue proposal binding", () => {
     expect(document.querySelector("a")).toBeNull();
   });
 
+  it("retires its own answer once the transcript records it, so an undecided branch shows the card open", async () => {
+    const { request, calls } = held();
+    await mount(request);
+    await press("Create issue");
+    await act(async () => { calls[0]?.answer(json(200, CREATED)); });
+    expect(closedLine()).toBe("Created issue #38");
+    await mount(request, { ...SHORT, outcome: CREATED });
+    expect(closedLine()).toBe("Created issue #38");
+    await mount(request, SHORT);
+    expect(document.querySelector("a")).toBeNull();
+    expect(buttons().map((candidate) => candidate.textContent)).toEqual(["Dismiss", "Create issue"]);
+    expect(button("Create issue")?.disabled).toBe(false);
+  });
+
+  it("drops an answer that lands after the transcript recorded the outcome", async () => {
+    const { request, calls } = held();
+    await mount(request);
+    await press("Create issue");
+    await mount(request, { ...SHORT, outcome: CREATED });
+    await act(async () => { calls[0]?.answer(json(200, CREATED)); });
+    await mount(request, SHORT);
+    expect(button("Create issue")?.disabled).toBe(false);
+  });
+
+  it("moves focus to the closed line after the reader's own decision", async () => {
+    const { request, calls } = held();
+    await mount(request);
+    await press("Create issue");
+    await act(async () => { calls[0]?.answer(json(200, CREATED)); });
+    expect(document.activeElement).toBe(document.querySelector("a"));
+  });
+
+  it("moves focus to Dismissed after the reader dismisses, even when the transcript answers first", async () => {
+    const { request, calls } = held();
+    await mount(request);
+    await press("Dismiss");
+    await mount(request, { ...SHORT, outcome: DISMISSED });
+    expect(document.activeElement).toBe(document.querySelector(".decision-card-closed"));
+    await act(async () => { calls[0]?.answer(json(200, DISMISSED)); });
+    expect(document.activeElement).toBe(document.querySelector(".decision-card-closed"));
+  });
+
+  it("leaves focus alone when the outcome arrives from elsewhere", async () => {
+    const { request } = held();
+    const outside = document.body.appendChild(document.createElement("button"));
+    outside.focus();
+    await mount(request);
+    await mount(request, { ...SHORT, outcome: CREATED });
+    expect(document.activeElement).toBe(outside);
+    // Back on an undecided branch and forward again: still not the reader's own decision here.
+    await mount(request, SHORT);
+    await mount(request, { ...SHORT, outcome: DISMISSED });
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it("does not take focus for another tab's decision after a failed press", async () => {
+    const { request, calls } = held();
+    const outside = document.body.appendChild(document.createElement("button"));
+    await mount(request);
+    await press("Create issue");
+    await act(async () => { calls[0]?.answer(json(502, { error: GITHUB_FAILED })); });
+    outside.focus();
+    await mount(request, { ...SHORT, outcome: DISMISSED });
+    expect(document.activeElement).toBe(outside);
+  });
+
   it("offers no choices and sends nothing in a read-only transcript", async () => {
     const { request } = held();
     await mount(request, SHORT, true);

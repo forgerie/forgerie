@@ -1,5 +1,5 @@
 // Routes: src/server/sessions (issue proposals), owned by the server. This file only calls them.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { IssueProposalCard, type IssueDecision, type IssueDecisionFailure } from "./IssueProposalCard";
 import type { IssueProposal, IssueProposalOutcome } from "./issueProposal";
@@ -49,9 +49,11 @@ async function decide(request: IssueRequest, sessionId: string, cwd: string, pro
 
 /**
  * Binding for one proposal row: it calls the create and dismiss routes and
- * holds what is in flight, the last failure, and the route's answer. Once
- * the transcript carries the outcome, the transcript wins. A failure is local:
- * it never reaches the transcript, and a reload shows the card open again.
+ * holds what is in flight, the last failure, and the route's answer. The
+ * answer shows only until the transcript records the outcome; from then on
+ * the transcript alone decides, so a branch where the proposal is undecided
+ * shows it open again. A failure is local: it never reaches the transcript,
+ * and a reload shows the card open again.
  */
 export function IssueProposalEntry({ proposal, sessionId, cwd, readOnly, request }: {
   proposal: IssueProposal;
@@ -63,20 +65,37 @@ export function IssueProposalEntry({ proposal, sessionId, cwd, readOnly, request
   const [pending, setPending] = useState<IssueDecision>();
   const [failure, setFailure] = useState<IssueDecisionFailure>();
   const [answer, setAnswer] = useState<IssueProposalOutcome>();
+  /** Set by the reader's own press, so the card takes focus when that press closes it; a stream update never does. */
+  const [decidedHere, setDecidedHere] = useState(false);
   // A second press before React draws the disabled buttons must not send a second request.
   const inFlight = useRef(false);
-  const outcome = proposal.outcome ?? answer;
+  /** Counts the transcript's records of an outcome. An answer that lands after one is stale. */
+  const recorded = useRef(0);
+  const recordedOutcome = proposal.outcome;
+  useEffect(() => {
+    if (recordedOutcome === undefined) { setDecidedHere(false); return; }
+    recorded.current += 1;
+    setAnswer(undefined);
+    setFailure(undefined);
+  }, [recordedOutcome]);
+  const outcome = recordedOutcome ?? answer;
   const send = async (decision: IssueDecision) => {
     if (inFlight.current || sessionId === undefined || cwd === undefined) return;
     inFlight.current = true;
+    const seen = recorded.current;
     setPending(decision);
     setFailure(undefined);
-    try { setAnswer(await decide(request, sessionId, cwd, proposal.proposalId, decision)); }
-    catch (error) { setFailure({ decision, message: error instanceof Error ? error.message : String(error) }); }
-    finally { inFlight.current = false; setPending(undefined); }
+    setDecidedHere(true);
+    try {
+      const result = await decide(request, sessionId, cwd, proposal.proposalId, decision);
+      if (recorded.current === seen) setAnswer(result);
+    } catch (error) {
+      setDecidedHere(false);
+      if (recorded.current === seen) setFailure({ decision, message: error instanceof Error ? error.message : String(error) });
+    } finally { inFlight.current = false; setPending(undefined); }
   };
   const decidable = !readOnly && sessionId !== undefined && cwd !== undefined && outcome === undefined;
-  return <IssueProposalCard proposal={proposal} outcome={outcome} pending={pending} failure={failure}
+  return <IssueProposalCard proposal={proposal} outcome={outcome} pending={pending} failure={failure} decidedHere={decidedHere}
     onCreate={decidable ? () => { void send("create"); } : undefined}
     onDismiss={decidable ? () => { void send("dismiss"); } : undefined} />;
 }

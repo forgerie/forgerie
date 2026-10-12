@@ -18,12 +18,14 @@ export interface IssueDecisionFailure { decision: IssueDecision; message: string
  * title: "Created issue #N", linked to the issue, or "Dismissed". Without
  * handlers the reader cannot decide here, so the card says it waits.
  */
-export function IssueProposalCard({ proposal, outcome, pending, failure, onCreate, onDismiss }: {
+export function IssueProposalCard({ proposal, outcome, pending, failure, decidedHere = false, onCreate, onDismiss }: {
   proposal: Pick<IssueProposal, "repo" | "title" | "body" | "labels">;
   /** What was decided. Undefined while the proposal waits. */
   outcome?: IssueProposalOutcome | undefined;
   pending?: IssueDecision | undefined;
   failure?: IssueDecisionFailure | undefined;
+  /** The reader's own press decided it here: the closed line takes focus. */
+  decidedHere?: boolean;
   /** Absent where the reader cannot decide, such as a read-only transcript. */
   onCreate?: (() => void) | undefined;
   onDismiss?: (() => void) | undefined;
@@ -36,7 +38,7 @@ export function IssueProposalCard({ proposal, outcome, pending, failure, onCreat
   return <DecisionCard icon={<CircleDotIcon />} title={proposal.title} meta={proposal.repo} open={decidable}
     closed={outcome?.state === "created" ? `Created issue #${String(outcome.number)}`
       : outcome?.state === "dismissed" ? "Dismissed" : "Waiting for a decision."}
-    closedHref={outcome?.state === "created" ? outcome.url : undefined}
+    closedHref={outcome?.state === "created" ? outcome.url : undefined} focusClosed={decidedHere}
     problem={busy ? undefined : failure?.message}
     footer={decidable && <ActionFooter actions={[
       { label: pending === "dismiss" ? "Dismissing…" : "Dismiss", onPress: onDismiss, disabled: busy },

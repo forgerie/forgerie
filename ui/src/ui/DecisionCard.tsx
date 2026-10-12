@@ -11,7 +11,7 @@ import "./DecisionCard.css";
  * them. Once decided it goes quiet and says what was decided in one line,
  * where the choices stood; that line can open what the decision made.
  */
-export function DecisionCard({ icon, title, meta, open, closed, closedHref, problem, children, footer }: {
+export function DecisionCard({ icon, title, meta, open, closed, closedHref, problem, focusClosed = false, children, footer }: {
   icon: ReactNode;
   title: string;
   /** A short fact about the subject, such as the file it concerns: at the end of the title line, or under the title when they do not fit together. */
@@ -23,6 +23,12 @@ export function DecisionCard({ icon, title, meta, open, closed, closedHref, prob
   closedHref?: string | undefined;
   /** Why the last choice failed, shown above the choices while the card is open. */
   problem?: string | undefined;
+  /**
+   * Set when the reader's own choice closes the card: focus moves to the closed
+   * line, since the button they pressed is gone. Leave it unset for a card that
+   * closes from elsewhere, so a background update never moves focus.
+   */
+  focusClosed?: boolean;
   children?: ReactNode;
   /** The choices, shown while the card is open. */
   footer?: ReactNode;
@@ -31,6 +37,13 @@ export function DecisionCard({ icon, title, meta, open, closed, closedHref, prob
   const choices = useRef<HTMLDivElement>(null);
   /** Where the choices sat in the card at the last layout. In the card, so scrolling does not change it. */
   const choicesAt = useRef<number | undefined>(undefined);
+  const closedLine = useRef<HTMLElement | null>(null);
+  const holdClosed = (element: HTMLElement | null) => { closedLine.current = element; };
+  const wasOpen = useRef(open);
+  useLayoutEffect(() => {
+    if (wasOpen.current && !open && focusClosed) closedLine.current?.focus();
+    wasOpen.current = open;
+  }, [open, focusClosed]);
   const shown = open ? problem : undefined;
   useLayoutEffect(() => {
     const frame = card.current;
@@ -68,8 +81,9 @@ export function DecisionCard({ icon, title, meta, open, closed, closedHref, prob
       <CircleAlertIcon className="decision-card-problem-mark" aria-hidden />{shown}
     </p>}
     {open ? footer !== undefined && footer !== null && footer !== false && <div ref={choices}>{footer}</div>
-      : closed !== undefined && <p className="decision-card-closed">
-        {closedHref === undefined ? closed : <a className="decision-card-link" href={closedHref} target="_blank" rel="noreferrer">
+      : closed !== undefined && <p className="decision-card-closed" ref={closedHref === undefined ? holdClosed : undefined}
+        tabIndex={closedHref === undefined && focusClosed ? -1 : undefined}>
+        {closedHref === undefined ? closed : <a className="decision-card-link" ref={holdClosed} href={closedHref} target="_blank" rel="noreferrer">
           {closed}<ExternalLinkIcon className="decision-card-link-mark" aria-hidden />
         </a>}
       </p>}
