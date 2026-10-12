@@ -7,10 +7,7 @@ export function bundledForgerieSkillsPackagePath(): string {
   return fileURLToPath(new URL("../../../skills/", import.meta.url));
 }
 
-/**
- * Agent files Forgerie writes for its Durable children. They shadow pi-subagents' built-in files of the same name,
- * whose instructions describe pi-subagents' tools, and lose to project and profile files.
- */
+/** Forgerie's built-in agent files for Durable children. Project, home, and profile files of the same name win. */
 export function bundledForgerieAgentsPath(): string {
   return fileURLToPath(new URL("../../../agents/", import.meta.url));
 }

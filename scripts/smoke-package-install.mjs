@@ -63,7 +63,6 @@ try {
 
   const packageRoot = join(globalPrefix, "lib", "node_modules", "forgerie");
   await smokeInstalledManagedProcesses(packageRoot);
-  await smokeInstalledSubagents(packageRoot);
   await smokeInstalledWebAccess(packageRoot);
   await smokeInstalledCliproxyProvider(packageRoot);
   const cli = join(globalPrefix, "bin", "forgerie");
@@ -80,7 +79,7 @@ try {
   await execFileAsync(process.execPath, [
     join(repoRoot, "scripts", "smoke-installed-model-runtime.mjs"), packageRoot, agentDir,
   ], cliOptions);
-  console.log(`Installed-package checks passed with npm ${NPM_VERSION}: tarball rejected by npm's Windows platform validator, Linux installation, patched process sources, pinned subagent and CLIProxyAPI provider versions, CLI, offline model runtime, and retired-file exclusion. No delegated agent was launched.`);
+  console.log(`Installed-package checks passed with npm ${NPM_VERSION}: tarball rejected by npm's Windows platform validator, Linux installation, patched process sources, pinned CLIProxyAPI provider version, CLI, offline model runtime, and retired-file exclusion. No delegated agent was launched.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }
@@ -129,14 +128,6 @@ async function smokeInstalledManagedProcesses(packageRoot) {
   }
   if (!channels.includes('COMMAND_WRITE: "processes:command:write"')) {
     throw new Error("Installed package does not contain Forgerie's managed-process stdin protocol patch");
-  }
-}
-
-async function smokeInstalledSubagents(packageRoot) {
-  const manifest = JSON.parse(await readFile(join(packageRoot, "node_modules", "pi-subagents", "package.json"), "utf8"));
-  const expected = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")).dependencies["pi-subagents"];
-  if (manifest.version !== expected) {
-    throw new Error(`Installed package bundles pi-subagents ${String(manifest.version)}, expected ${expected}`);
   }
 }
 

@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Extension, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
-import { bundledSubagentsPackagePath } from "./bundledSubagents.js";
 import { bundledWebAccessPackagePath } from "./bundledWebAccess.js";
 
 const WEB_TOOLS = new Set(["web_search", "fetch_content", "get_search_content", "source_check"]);
@@ -13,7 +12,6 @@ const WEB_TOOLS = new Set(["web_search", "fetch_content", "get_search_content", 
  */
 export function preferBundledExtensions(result: LoadExtensionsResult): LoadExtensionsResult {
   const bundles = new Map([
-    ["pi-subagents", bundledSubagentsPackagePath()],
     ["pi-web-access", bundledWebAccessPackagePath()],
   ]);
   const strayRoots = new Map<string, { name: string; bundledRoot: string }>();

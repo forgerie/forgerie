@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { DefaultResourceLoader, ExtensionRunner, ModelRegistry, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { preferBundledExtensions } from "./bundledExtensions.js";
-import { bundledSubagentsPackagePath } from "./bundledSubagents.js";
 import { bundledWebAccessPackagePath } from "./bundledWebAccess.js";
 
 const tempRoots: string[] = [];
@@ -23,7 +22,7 @@ describe("bundled web access resources", () => {
     const { loader } = await webLoader();
     expectWebTools(loader);
     expect(loader.getExtensions().warnings ?? []).toEqual([]);
-    expect(loader.getExtensions().extensions.some((extension) => extension.tools.has("subagent"))).toBe(true);
+    expect(loader.getExtensions().extensions.some((extension) => extension.tools.has("subagent"))).toBe(false);
   });
 
   it("deduplicates a profile using the bundled path", async () => {
@@ -46,13 +45,14 @@ describe("bundled web access resources", () => {
 
   it("warns for competing web tools, preserves other errors and tools, and keeps Pi's first winner", async () => {
     const root = await tempRoot();
-    const competitor = await extensionPackage(root, "other-web-tools", [...webTools, "web_fetch", "subagent"]);
-    const { loader, agentDir } = await webLoader([competitor], root);
+    const competitor = await extensionPackage(root, "other-web-tools", [...webTools, "web_fetch"]);
+    const rival = await extensionPackage(root, "rival-fetch", ["web_fetch"]);
+    const { loader, agentDir } = await webLoader([competitor, rival], root);
     const loaded = loader.getExtensions();
     expect(loaded.extensions.some((extension) => extension.path.startsWith(competitor))).toBe(true);
     expect(loaded.errors).toEqual([{
-      path: join(competitor, "index.js"),
-      error: `Tool "subagent" conflicts with ${join(bundledSubagentsPackagePath(), "index.js")}`,
+      path: join(rival, "index.js"),
+      error: `Tool "web_fetch" conflicts with ${join(competitor, "index.js")}`,
     }]);
     expect(loaded.warnings).toHaveLength(4);
     for (const name of webTools) {
@@ -92,7 +92,7 @@ async function webLoader(packages: string[] = [], existingRoot?: string): Promis
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages }));
   const loader = new DefaultResourceLoader({
     cwd: root, agentDir,
-    additionalExtensionPaths: [bundledSubagentsPackagePath(), bundledWebAccessPackagePath()],
+    additionalExtensionPaths: [bundledWebAccessPackagePath()],
     extensionsOverride: preferBundledExtensions,
     noContextFiles: true,
   });

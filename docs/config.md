@@ -17,7 +17,7 @@ The default config file is `$XDG_CONFIG_HOME/forgerie/config.json`, or `~/.confi
   "spawnSessions": true,
   "askUser": true,
   "codemode": true,
-  "durableChildren": false,
+  "durableChildren": true,
   "childToolsDeny": []
 }
 ```
@@ -36,7 +36,7 @@ The inherited `PI_WEB_*` names remain supported. They do not enable upstream ins
 | `spawnSessions` | Enable the session-making tool. Defaults to `true`. |
 | `askUser` | Enable the browser question tool. Defaults to `true`. Extension dialogs are separate and stay enabled. |
 | `codemode` | Enable hosted scripts that call active tools. Defaults to `true`. Run-ending and session-making tools remain outside scripts. |
-| `durableChildren` | Enable children stored inside the parent session's Durable storage. Defaults to `false`. See [child agents](child-agents.md). |
+| `durableChildren` | Enable children stored inside the parent session's Durable storage. This is the only delegation tool. Defaults to `true`. See [child agents](child-agents.md). |
 | `childToolsDeny` | Session tool names that Durable children must not share. Array of non-empty strings, default `[]`. For example `["web_search"]`. Missing and denied tools are reported to the child and parent. Does not remove child-native tools or sandbox their shell. Restart sessiond to apply. |
 | `extensionDialogsTimeoutMs` | Default extension-dialog timeout, in milliseconds. Defaults to `300000`; `0` waits without a deadline. An extension's shorter timeout still wins. |
 | `sessionTitleModel` | The `provider/model-id` that writes a new session's title from its first prompt, for example a small fast model. Unset: each session's own model writes its title. Set it in **Settings → Models → Session titles**. The session daemon reads it for each title, so a change applies to the next new session without a restart. If no signed-in provider offers the model, the session's own model writes the title, and the daemon logs `title_model_unavailable`. |

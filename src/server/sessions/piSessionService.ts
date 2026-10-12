@@ -114,7 +114,6 @@ import { withReplyFormatGuide } from "../../shared/replyFormatGuide.js";
 import { bundledManagedProcessesPackagePath } from "./bundledManagedProcesses.js";
 import { bundledCliproxyProviderPackagePath, bundledCliproxyProviderResources } from "./bundledCliproxyProvider.js";
 import { preferBundledExtensions } from "./bundledExtensions.js";
-import { bundledSubagentsPackagePath } from "./bundledSubagents.js";
 import { bundledWebAccessPackagePath } from "./bundledWebAccess.js";
 import { canonicalizeStoredCwd, cwdPathsEqual } from "../workingDirectory.js";
 import { readSessionHeaderSummary, type SessionHeaderSummary } from "./sessionFileHeader.js";
@@ -873,7 +872,6 @@ function createDefaultRuntimeFactory(
       resourceLoaderOptions: {
         additionalExtensionPaths: [
           bundledManagedProcessesPackagePath(),
-          bundledSubagentsPackagePath(),
           bundledWebAccessPackagePath(),
           bundledForgerieSkillsPackagePath(),
           bundledCliproxyProviderPackagePath(),

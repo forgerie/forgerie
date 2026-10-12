@@ -342,7 +342,8 @@ describe("childToolsDeny", () => {
 
 describe("durableChildrenEnabled", () => {
   it("is off by default, and the env var overrides the config", () => {
-    expect(durableChildrenEnabled({}, {})).toBe(false);
+    expect(durableChildrenEnabled({}, {})).toBe(true);
+    expect(durableChildrenEnabled({}, { durableChildren: false })).toBe(false);
     expect(durableChildrenEnabled({}, { durableChildren: true })).toBe(true);
     expect(durableChildrenEnabled({ PI_WEB_DURABLE_CHILDREN: "0" }, { durableChildren: true })).toBe(false);
     expect(durableChildrenEnabled({ PI_WEB_DURABLE_CHILDREN: "1" }, {})).toBe(true);

@@ -22,7 +22,6 @@ const webConfigSchema = z.looseObject({ plugins: z.record(z.string(), z.looseObj
 const pendingSchema = z.object({ stamp: z.array(z.string()), required: z.boolean() });
 const packageJsonSchema = z.object({ name: z.string().optional(), version: z.string().optional(), description: z.string().optional() });
 const builtins: readonly (readonly [string, string])[] = [
-  ["pi-subagents", "Lets a session hand work to the agents in Settings."],
   ["pi-processes", "Runs dev servers, watchers, and other long commands in the background."],
   ["codemode", "Lets the model run several tool calls from one JavaScript script."],
   ["ask-user", "Lets the agent ask you a question in a browser form."],

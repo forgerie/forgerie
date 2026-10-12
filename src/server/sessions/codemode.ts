@@ -8,7 +8,6 @@ import { CODEMODE_TOOL_NAME } from "../../shared/codemodeScript.js";
  * or start a session the transcript must show (`spawn_session`).
  * A script's call is not a transcript entry and cannot
  * end the run, so the model declares them while scripts never reach them.
- * `pi-subagents` declares `subagent` the same way.
  */
 export const MODEL_ONLY_EXPOSURE: ToolExposure = "model-only";
 

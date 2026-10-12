@@ -16,7 +16,7 @@ import { emptyArchiveStore } from "../src/server/sessions/piSessionService.testS
 import { SessionEventHub } from "../src/server/realtime/sessionEventHub.js";
 import { createPiSessionManagerGateway } from "../src/server/sessions/piSessionManagerGateway.js";
 import { createDurableChildHost } from "../src/server/sessions/durableChildHost.js";
-import { bundledSubagentsPackagePath } from "../src/server/sessions/bundledSubagents.js";
+import { bundledForgerieAgentsPath } from "../src/server/sessions/bundledForgerieSkills.js";
 
 if (process.env.RESEARCH_REAL !== "1") throw new Error("Set RESEARCH_REAL=1 to authorize real-model acceptance (provider costs apply)");
 const credentialFile = process.env.RESEARCH_CREDENTIAL_FILE;
@@ -74,7 +74,7 @@ export default function(pi) {
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
   service = new PiSessionService(new SessionEventHub(), { agentDir, modelRuntime: models, archiveStore: emptyArchiveStore(), codemodeEnabled: config.codemode,
     sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] }),
-    durableChildAgents: createDurableChildHost({ childToolsDeny: config.childToolsDeny, builtinAgentsDirs: [join(bundledSubagentsPackagePath(), "agents")] }),
+    durableChildAgents: createDurableChildHost({ childToolsDeny: config.childToolsDeny, builtinAgentsDirs: [bundledForgerieAgentsPath()] }),
   });
   const ref = { id: (await service.start(cwd)).id, cwd };
   const readyMs = Date.now() - started;

@@ -200,18 +200,19 @@ describe("Forgerie codemode", () => {
     expect(result).toMatchObject({ toolName: "codemode", toolCallId: "call_script", details: { calls: [{ name: "bash" }, { name: "read" }] } });
   });
 
-  it("keeps run-ending, session-making, and delegating tools out of scripts", async () => {
+  it("keeps run-ending and session-making tools out of scripts", async () => {
     const harness = await hostedSession(true, (seenTools) => [
       recordTools(seenTools, scriptCall(
-        "return JSON.stringify({ ask: 'ask_user' in tools, subagent: 'subagent' in tools, bash: 'bash' in tools });",
+        "return JSON.stringify({ ask: 'ask_user' in tools, bash: 'bash' in tools });",
       )),
       fauxAssistantMessage("Done."),
     ]);
 
     const events = await runPrompt(harness);
     // The model itself still declares ask_user; only scripts cannot reach it.
-    expect(harness.seenTools[0]).toEqual(expect.arrayContaining(["ask_user", "subagent", "codemode"]));
-    expect(scriptResultText(events)).toContain("{\"ask\":false,\"subagent\":false,\"bash\":true}");
+    expect(harness.seenTools[0]).toEqual(expect.arrayContaining(["ask_user", "codemode"]));
+    expect(harness.seenTools[0]).not.toContain("subagent");
+    expect(scriptResultText(events)).toContain("{\"ask\":false,\"bash\":true}");
   });
 
   it("leaves codemode inactive when the setting is off", async () => {

@@ -12,7 +12,7 @@ This cleanup removes unused upstream features from the local Forgerie product. I
 | Embedded PTYs and terminal-command runs. | Session shell commands and managed processes remain. |
 | Terminal-based workspace deletion. | Session-owned worktrees keep Land, Discard, ownership checks, and pre-remove hooks. There is no replacement API for deleting arbitrary unowned worktrees. |
 | Browser OAuth and API-key login flows. | Configure credentials in the actual Pi profile. Existing stored credentials remain usable. |
-| Tracked-subsession spawning, control, and completion notices. | Normal sessions, `pi-subagents`, and opt-in Durable children remain. Historical links stay in session data and retain reciprocal-file validation. |
+| Tracked-subsession spawning, control, and completion notices. | Normal sessions and Durable children remain. Historical links stay in session data and retain reciprocal-file validation. |
 | Release-registry discovery, installation detection, and generic service installers. | Local version diagnostics and controls for existing systemd user units remain. |
 | Production Smart Turn workers and check-turn endpoint. | User-driven Whisper dictation remains. Status keeps the inert compatibility field. |
 | Standalone HTML documentation site and retired development probes. | Current Markdown guides and browser-app verification remain. |
@@ -53,7 +53,7 @@ The manifests name the retired files. The archives preserve source, not an opera
 
 The package includes the pinned Pi SDK `1.1.0` used by the checkout. The SDK packages are runtime dependencies, not consumer-provided peers. Bundling the SDK increases the tarball size, but prevents npm from marking omitted peer files as bundled dependencies during installation.
 
-Forgerie still uses the SDK for models and credentials, persisted session files, extension loading, and coding tools. Durable runs the parent agent loop; `pi-subagents` also uses the SDK's agent-session factory. Removing the SDK requires replacements for these contracts. Its CLI and terminal UI exports are part of the SDK package, not the retired PiWeb browser runtime. This cleanup does not strip SDK internals.
+Forgerie still uses the SDK for models and credentials, persisted session files, extension loading, and coding tools. Durable runs the parent agent loop. Removing the SDK requires replacements for these contracts. Its CLI and terminal UI exports are part of the SDK package, not the retired PiWeb browser runtime. This cleanup does not strip SDK internals.
 
 `npm run smoke:package-install` installs the tarball with npm `12.0.1`, executes the installed CLI, and creates an offline model runtime with an isolated profile. It checks that stored test credentials remain unchanged. It also checks the patched process sources, pinned subagent version, and exclusion of retired files. It does not launch a delegated agent or prove configured agent execution.
 

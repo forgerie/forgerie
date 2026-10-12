@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { bundledSubagentsPackagePath } from "../sessions/bundledSubagents.js";
+import { bundledForgerieAgentsPath } from "../sessions/bundledForgerieSkills.js";
 import { errorMessage, isErrnoCode, readJsonBody, sendJson, SettingsHttpError as HttpError } from "./http.js";
 import type { Middleware } from "./routes.js";
 import { activeForgerieProfile, agentsInProfile, type Gateway } from "./forgerieProfile.js";
@@ -25,10 +25,10 @@ export const AGENTS_PREFIX = "/aui/agents";
 export type AgentScope = "home" | "user" | "builtin";
 export interface AgentDirs { home?: string | undefined; user: string; builtin: string | undefined }
 
-/** `~/.agents`, the active profile's agents, and the built-in ones of the pi-subagents copy Forgerie ships. */
+/** `~/.agents`, the active profile's agents, and the built-in ones Forgerie ships. */
 export async function defaultAgentDirs(gateway: Gateway): Promise<AgentDirs> {
   const profile = await activeForgerieProfile(gateway);
-  return { home: join(homedir(), ".agents"), user: agentsInProfile(profile), builtin: join(bundledSubagentsPackagePath(), "agents") };
+  return { home: join(homedir(), ".agents"), user: agentsInProfile(profile), builtin: bundledForgerieAgentsPath() };
 }
 
 const WRITABLE: ReadonlySet<string> = new Set(["home", "user"]);

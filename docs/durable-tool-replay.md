@@ -41,7 +41,6 @@ The audit checked the installed source, not descriptions alone.
 | `workflow_stop` | safe | `stopReceipts[taskId]` commits with the stop/card. Replay returns its receipt even if the user approved or reopened the stop meanwhile. |
 | `codemode` | unsafe | SDK `extensions/codemode/tool.js`: scripts can call effectful tools, model APIs, and append entries. Safe nested reads do not make the script safe. |
 | bundled `process` | unsafe | `@aliou/pi-processes` `extensions/processes/tools/index.ts`: start/stop/stdin/update/clear effects share one tool. |
-| bundled `subagent` | unsafe | `pi-subagents` `src/extension/index.js`: delegates work and routes mutable management actions. |
 | bundled `subagents_enable` | unsafe | `src/extension/tool-activation.js`: changes the active loadout and records selection. |
 | bundled `bg_wait` | unsafe | `src/runs/background/wait-tool.js`: can persist a wake subscription. |
 | bundled `subagent_supervisor` | unsafe | `src/intercom/native-supervisor-channel.js`: writes replies and changes supervisor request state. |

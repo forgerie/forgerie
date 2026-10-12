@@ -5,7 +5,6 @@ import type { ResourceEditorEntry, ResourceEditorScope } from "../../shared/reso
 import { RESOURCE_EDITOR_MAX_ITEMS, RESOURCE_EDITOR_MAX_BYTES } from "../../shared/resourceEditor.js";
 import { bundledForgerieSkillsPackagePath } from "../sessions/bundledForgerieSkills.js";
 import { bundledManagedProcessesPackagePath } from "../sessions/bundledManagedProcesses.js";
-import { bundledSubagentsPackagePath } from "../sessions/bundledSubagents.js";
 import { insideResourceRoot, isMissingResource, readResourceFile, resourceHash, ResourceEditorError } from "./resourceEditorFiles.js";
 
 export interface DiscoveredEditorResource {
@@ -22,7 +21,7 @@ export class ResourceEditorDiscovery {
   private readonly bundledPaths: readonly string[];
   constructor(options: EditorDiscoveryOptions) {
     this.agentDir = resolve(options.agentDir);
-    this.bundledPaths = options.bundledPaths ?? [bundledManagedProcessesPackagePath(), bundledSubagentsPackagePath(), bundledForgerieSkillsPackagePath()];
+    this.bundledPaths = options.bundledPaths ?? [bundledManagedProcessesPackagePath(), bundledForgerieSkillsPackagePath()];
   }
 
   async discover(scope: ResourceEditorScope): Promise<EditorDiscovery> {

@@ -75,7 +75,7 @@ function sessionRef(value: unknown): DurableChildSessionRef | undefined {
 export interface DurableChildHostOptions {
   /** The user's own agent folder, normally `~/.agents`. Its files rank below project files and above profile files. */
   homeAgentsDir?: string;
-  /** Built-in agent folders, after project and profile files, in order. Forgerie's own come before pi-subagents'. */
+  /** Built-in agent folders, after project and profile files, in order. */
   builtinAgentsDirs?: readonly string[];
   index?: LiveChildSessionIndex;
   worktrees?: SessionWorktrees;

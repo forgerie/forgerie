@@ -42,7 +42,6 @@ import { registerIssueProposalRoutes } from "./sessions/issueProposalRoutes.js";
 import { registerWorkflowRoutes } from "./sessions/workflowRoutes.js";
 import { LiveChildSessionIndex, createDurableChildHost } from "./sessions/durableChildHost.js";
 import { bundledForgerieAgentsPath } from "./sessions/bundledForgerieSkills.js";
-import { bundledSubagentsPackagePath } from "./sessions/bundledSubagents.js";
 import { SessionNotificationStore } from "./sessions/sessionNotificationStore.js";
 import { initializeSessionArchive } from "./sessions/sessionArchiveInitialization.js";
 import { SessionArchiveStore, defaultSessionArchiveFilePath } from "./sessions/sessionArchiveStore.js";
@@ -229,10 +228,10 @@ async function createSessionDaemonRuntime() {
     codemodeEnabled: config.codemode,
     ...(liveChildren === undefined ? {} : { durableChildAgents: createDurableChildHost({
       childToolsDeny: config.childToolsDeny,
-      // The user's own agent files, which pi-subagents also reads, so one file serves both runtimes.
+      // The user's own agent files, shared by every Pi profile.
       homeAgentsDir: join(homedir(), ".agents"),
-      // Forgerie's own agent files first, then pi-subagents' built-in agents (worker, scout), which run as Durable children too.
-      builtinAgentsDirs: [bundledForgerieAgentsPath(), join(bundledSubagentsPackagePath(), "agents")],
+      // Forgerie's built-in agents (worker, scout, reviewer, researcher, ...).
+      builtinAgentsDirs: [bundledForgerieAgentsPath()],
       index: liveChildren,
       worktrees: sessionWorktrees,
       runRecords: childRuns,

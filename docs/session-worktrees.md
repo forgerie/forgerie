@@ -4,7 +4,7 @@
 
 New browser-created sessions in Git projects use a fresh worktree by default. The draft creates nothing until the browser sends its first message and calls the session creation API. The user can choose an existing workspace for that session.
 
-Agent-created sessions do not use this default. `spawn_session`, handoff, and pi-subagents keep their existing cwd inheritance. Their internal creation path does not call the browser coordinator.
+Agent-created sessions do not use this default. `spawn_session` and handoff keep their existing cwd inheritance. Their internal creation path does not call the browser coordinator.
 
 Land is a local rebase and fast-forward. It does not push commits or create pull requests.
 

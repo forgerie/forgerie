@@ -15,7 +15,7 @@ const causes = new Map<string, number>();
 
 test("the corpus includes the repository's tracked Markdown", () => {
   expect(paths).toContain("README.md");
-  expect(paths).toContain("AGENTS.md");
+  expect(paths).toContain("docs/testing.md");
 });
 
 test.each(paths)("%s never throws, and round-trips byte for byte if editable", (path) => {

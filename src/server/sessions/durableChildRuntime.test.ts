@@ -2,14 +2,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { bundledSubagentsPackagePath } from "./bundledSubagents.js";
 import { bundledForgerieAgentsPath } from "./bundledForgerieSkills.js";
 import { ChildAgentCatalog, parseChildAgentFile } from "./durableChildProfiles.js";
 import { planChildRuntime, runtimeGaps } from "./durableChildRuntime.js";
 import { diffInputProblem, imageType, page, DIFF_PAGE_CHARS } from "./durableChildTools.js";
 
 // The agent files sessiond really falls back to.
-const bundled = join(bundledSubagentsPackagePath(), "agents");
+const bundled = bundledForgerieAgentsPath();
 const bundledAgent = async (name: string) => {
   const path = join(bundled, `${name}.md`);
   const profile = parseChildAgentFile(await readFile(path), path);
@@ -26,9 +25,10 @@ async function skill(dir: string, name: string, description: string) {
   return { name, description, path: join(dir, name, "SKILL.md") };
 }
 
-describe("a pi-subagents agent file in a Durable child", () => {
-  it("gives the bundled reviewer its diff tool and its way to the user, and says how they differ", async () => {
-    const plan = planChildRuntime(await bundledAgent("reviewer"), [], []);
+describe("an agent file in a Durable child", () => {
+  it("translates pi-subagents tool names to this runtime's tools, and says how they differ", () => {
+    const profile = parseChildAgentFile("---\nname: legacy-reviewer\ndescription: Review\ntools: read, grep, bash, watchdog_diff, contact_supervisor\n---\nReview.\n", join(root, "legacy-reviewer.md"));
+    const plan = planChildRuntime(profile, [], []);
     expect([...(plan.tools ?? [])].sort()).toEqual(["ask_human", "bash", "read", "watchdog_diff"]);
     expect(plan.unavailable).toEqual([]);
     expect(plan.section).toContain("contact_supervisor is ask_human here");
@@ -78,8 +78,8 @@ describe("a pi-subagents agent file in a Durable child", () => {
 });
 
 describe("Forgerie's own agent files", () => {
-  it("serve the reviewer before pi-subagents' copy, with every tool it names and nothing that contradicts this runtime", async () => {
-    const catalog = ChildAgentCatalog.forSession(root, join(root, "profile"), { builtin: [bundledForgerieAgentsPath(), bundled] });
+  it("serve the reviewer with every tool it names and nothing that contradicts this runtime", async () => {
+    const catalog = ChildAgentCatalog.forSession(root, join(root, "profile"), { builtin: [bundled] });
     const reviewer = await catalog.find("reviewer");
     expect(reviewer?.source.path).toBe(join(bundledForgerieAgentsPath(), "reviewer.md"));
     const plan = planChildRuntime(reviewer, [], []);
@@ -87,8 +87,13 @@ describe("Forgerie's own agent files", () => {
     expect(plan.unavailable).toEqual([]);
     expect(reviewer?.prompt).toContain("Pass `range` for committed work");
     expect(reviewer?.prompt).not.toMatch(/does not inspect committed ranges|Do not use shell commands/u);
-    // pi-subagents' other built-ins still resolve.
-    expect((await catalog.find("scout"))?.source.path).toBe(join(bundled, "scout.md"));
+    // The other built-ins resolve, and every one of them parses and has a description.
+    for (const name of ["worker", "scout", "delegate", "researcher", "evidence-auditor"]) {
+      const agent = await catalog.find(name);
+      expect(agent?.source.path).toBe(join(bundled, `${name}.md`));
+      expect(agent?.description).not.toBe("");
+      expect(planChildRuntime(agent, ["web_search", "fetch_content", "get_search_content", "source_check"], []).unavailable).toEqual([]);
+    }
   });
 });
 

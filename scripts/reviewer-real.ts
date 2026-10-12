@@ -1,7 +1,6 @@
 #!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#git -c npx tsx
 // Opt-in acceptance: a real model, as a Durable reviewer child, reviews a committed branch without asking for diffs.
 // REVIEWER_REAL=1 ./scripts/reviewer-real.ts            Forgerie's agents first, as sessiond runs them.
-// REVIEWER_AGENTS=bundled ...                           pi-subagents' reviewer only, to reproduce the old failure.
 // Owns only a temporary profile and Git repository. Model calls cost money.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -18,7 +17,6 @@ import { emptyArchiveStore } from "../src/server/sessions/piSessionService.testS
 import { SessionEventHub } from "../src/server/realtime/sessionEventHub.js";
 import { createPiSessionManagerGateway } from "../src/server/sessions/piSessionManagerGateway.js";
 import { createDurableChildHost, LiveChildSessionIndex } from "../src/server/sessions/durableChildHost.js";
-import { bundledSubagentsPackagePath } from "../src/server/sessions/bundledSubagents.js";
 import { bundledForgerieAgentsPath } from "../src/server/sessions/bundledForgerieSkills.js";
 import { sanitizedGitEnv } from "../src/server/git/gitEnv.js";
 
@@ -27,7 +25,6 @@ const source: unknown = JSON.parse(await readFile(`${process.env.HOME}/.local/sh
 if (!Check(Type.Object({ baseUrl: Type.String(), apiKey: Type.String() }), source)) throw new Error("The live CLIProxyAPI config is unavailable");
 const parentModel = process.env.PARENT_MODEL ?? "deepseek-v4.1-flash";
 const reviewerModel = process.env.REVIEWER_MODEL ?? "gpt-6.1-sol";
-const bundledOnly = process.env.REVIEWER_AGENTS === "bundled";
 const root = await mkdtemp(join(tmpdir(), "forgerie-reviewer-real-"));
 const agentDir = join(root, "agent");
 const repo = join(root, "repo");
@@ -54,7 +51,7 @@ const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json")
 const service = new PiSessionService(new SessionEventHub(), { agentDir, modelRuntime: models, archiveStore: emptyArchiveStore(),
   sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] }),
   durableChildAgents: createDurableChildHost({ index: new LiveChildSessionIndex(join(root, "live.json")),
-    builtinAgentsDirs: [...(bundledOnly ? [] : [bundledForgerieAgentsPath()]), join(bundledSubagentsPackagePath(), "agents")] }),
+    builtinAgentsDirs: [bundledForgerieAgentsPath()] }),
 });
 try {
   const ref = { id: (await service.start(repo)).id, cwd: repo };
@@ -76,7 +73,7 @@ try {
   if (child === undefined) throw new Error("No reviewer child");
   const transcript = await service.durableChildMessages(ref, child.conversationId);
   const calls = transcript.messages.flatMap((message) => message.role === "assistant" ? message.content.flatMap((part) => part.type === "toolCall" ? [`${part.name} ${JSON.stringify(part.arguments)}`] : []) : []);
-  const summary = { agents: bundledOnly ? "pi-subagents only" : "Forgerie first", parentModel, reviewerModel, outcome: outcome.kind, calls, text: outcome.text.slice(0, 1500) };
+  const summary = { agents: "Forgerie", parentModel, reviewerModel, outcome: outcome.kind, calls, text: outcome.text.slice(0, 1500) };
   await writeFile(join(root, "result.json"), JSON.stringify(summary, null, 2));
   console.log(JSON.stringify(summary, null, 2));
   assert.equal(outcome.kind, "report", "The reviewer asked the user instead of reviewing");

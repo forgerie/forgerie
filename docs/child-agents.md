@@ -2,7 +2,7 @@
 
 Saved prose workflows can group Durable child runs into experiments. See [Saved prose workflows](workflows.md) for input snapshots, copying, and explicit completion.
 
-Status: opt-in. Set `"durableChildren": true` in the Forgerie config, or `PI_WEB_DURABLE_CHILDREN=1`, and restart the session daemon.
+Status: on by default. Durable children are the only way a hosted session delegates. To turn them off, set `"durableChildren": false` in the Forgerie config, or `PI_WEB_DURABLE_CHILDREN=0`, and restart the session daemon.
 
 A session can run background child agents inside its own Durable storage. The agent starts one with the `child_agent` tool. You do not switch sessions to follow it.
 
@@ -28,13 +28,13 @@ Esc in the parent does not stop its children.
 
 ## Agent files
 
-`child_agent` may name an agent file with `agent`. Forgerie reads the same files as pi-subagents, in this order: the project's `.pi/agents/`, your home folder's `~/.agents/`, the profile's `agents/`, Forgerie's own `agents/`, then the bundled pi-subagents agents. The first file with the name wins. Keep agents you own in `~/.agents/`: both runtimes and every Pi profile read them there. Forgerie reads only the top level of `~/.agents/`, so its `skills/` folder is not read as agents. Settings > Agents lists these files under **Shared with every profile** and edits them in place; a new agent or a customized built-in still saves to the profile.
+`child_agent` may name an agent file with `agent`. Forgerie reads agent files in this order: the project's `.pi/agents/`, your home folder's `~/.agents/`, the profile's `agents/`, then Forgerie's own `agents/`. The first file with the name wins. Forgerie's built-ins are `worker`, `scout`, `delegate`, `reviewer`, `researcher`, and `evidence-auditor`. Keep agents you own in `~/.agents/`: every Pi profile reads them there. Forgerie reads only the top level of `~/.agents/`, so its `skills/` folder is not read as agents. Settings > Agents lists these files under **Shared with every profile** and edits them in place; a new agent or a customized built-in still saves to the profile.
 
-Forgerie's `agents/reviewer.md` replaces pi-subagents' reviewer for Durable children. The pi-subagents file says `watchdog_diff` cannot read committed ranges and forbids shell commands, which is true there and false here; a real-model check showed reviewers following it and asking the user for diffs instead of reviewing. Forgerie's reviewer reads committed ranges, runs read-only commands and requested tests, and still never changes the repository: it names a scratch merge as work for the parent. `REVIEWER_REAL=1 ./scripts/reviewer-real.ts` repeats the check; `REVIEWER_AGENTS=bundled` uses only pi-subagents' files.
+Forgerie's reviewer reads committed ranges, runs read-only commands and requested tests, and never changes the repository: it names a scratch merge as work for the parent. `REVIEWER_REAL=1 ./scripts/reviewer-real.ts` checks this with a real model.
 
 Forgerie reads these frontmatter keys: `name`, `description`, `model` (with an optional `:thinking` suffix), `thinking`, `tools`, `skills`, `skillPath`, `inheritSkills`, `inheritProjectContext`, and `disabled`. A file that lists `fallbackModels` is skipped. Other keys are ignored.
 
-Agent files are written for pi-subagents. `src/server/sessions/durableChildRuntime.ts` translates each one, in one place, and never drops a capability silently:
+Agent files use the pi-subagents format, and older files name pi-subagents tools. `src/server/sessions/durableChildRuntime.ts` translates each one, in one place, and never drops a capability silently:
 
 | Agent file names | A Durable child gets |
 | --- | --- |
@@ -68,7 +68,7 @@ Children live in the parent's Durable storage, and they run only while the daemo
 - A session-owned parent worktree cannot land or discard while it owns active child worktrees.
 - A child is not a Forgerie session: it has no catalog entry, title, archive, or pin.
 - Each child report gives the parent model a turn, which costs parent tokens.
-- pi-subagents still loads beside this feature. Its `subagent` tool is unchanged.
+- There is no fork context: a child starts from its task, not from the parent's conversation. External CLI runners (`runner:` blocks) are ignored, so such a file runs as an ordinary child.
 
 ## API
 

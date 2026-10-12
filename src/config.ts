@@ -334,13 +334,13 @@ function parseDurableChildren(value: unknown, path: string): boolean {
 
 /**
  * Whether hosted sessions get the `child_agent` tool for Durable child agents.
- * Off by default. The env var `PI_WEB_DURABLE_CHILDREN` takes precedence over
- * the `durableChildren` config key.
+ * On by default: it is the only way a hosted session delegates. The env var
+ * `PI_WEB_DURABLE_CHILDREN` takes precedence over the `durableChildren` config key.
  */
 export function durableChildrenEnabled(env: NodeJS.ProcessEnv = process.env, config: PiWebConfig = {}): boolean {
   const fromEnv = env["PI_WEB_DURABLE_CHILDREN"];
   if (fromEnv !== undefined && fromEnv !== "") return fromEnv === "1" || fromEnv.toLowerCase() === "true";
-  return config.durableChildren ?? false;
+  return config.durableChildren ?? true;
 }
 
 const OFFLINE_ENV_KEYS = ["PI_WEB_OFFLINE", "PI_OFFLINE"] as const;
