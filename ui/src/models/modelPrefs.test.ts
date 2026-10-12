@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyChange, cycleTarget, parseFavorite, resolveFavorites } from "./modelPrefs";
+import { applyChange, cycleTarget, parseFavorite, resolveFavorites, titleModelState } from "./modelPrefs";
 
 const opus = { provider: "proxy", id: "claude-opus-5-5" };
 const flash = { provider: "proxy", id: "gemini-3.8-flash" };
@@ -73,6 +73,23 @@ describe("changes", () => {
     expect(applyChange(lists, { type: "favorite", key: "proxy/claude-opus-5-5", on: false }, models).favorites).toEqual(lists.favorites);
     const hidden = applyChange(lists, { type: "show", keys: ["proxy/claude-opus-5-5", "proxy/gemini-3.8-flash"], on: false }, models);
     expect(hidden).toMatchObject({ favorites: ["proxy/claude-opus-5-5"], visible: ["proxy/claude-opus-5-5"], defaultModel: "proxy/claude-opus-5-5" });
+  });
+
+  it("sets and clears the title model, and keeps it through every other change", () => {
+    const lists = { favorites: ["proxy/claude-opus-5-5"], visible: ["proxy/claude-opus-5-5"], titleModel: "proxy/claude-3-5-haiku-20241022" };
+    expect(applyChange(lists, { type: "titleModel", key: "local/llama3:8b" }, models)).toEqual({ ...lists, titleModel: "local/llama3:8b" });
+    expect(applyChange(lists, { type: "titleModel", key: null }, models).titleModel).toBeNull();
+    // A title model need not be shown in the menu: hiding it leaves it in place.
+    expect(applyChange(lists, { type: "show", keys: ["proxy/claude-3-5-haiku-20241022"], on: false }, models).titleModel).toBe(lists.titleModel);
+    expect(applyChange(lists, { type: "favorite", key: "local/llama3:8b", on: true }, models).titleModel).toBe(lists.titleModel);
+    expect(applyChange(lists, { type: "default", key: "local/llama3:8b" }, models).titleModel).toBe(lists.titleModel);
+  });
+
+  it("says who writes titles: the session's model when unset or not offered, else the chosen model", () => {
+    expect(titleModelState(null, models)).toBe("unset");
+    expect(titleModelState(undefined, models)).toBe("unset");
+    expect(titleModelState("gone/small", models)).toBe("unavailable");
+    expect(titleModelState("proxy/claude-3-5-haiku-20241022", models)).toBe("chosen");
   });
 
   it("shows models without listing one twice", () => {

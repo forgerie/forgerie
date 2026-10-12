@@ -44,7 +44,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  prefs = { revision: "r1", favorites: ["proxy/gemini-3.8-flash", "proxy/claude-opus-5-5:low"], visible: ["openai-codex/gpt-5.6-sol"], defaultModel: "proxy/claude-opus-5-5", defaultThinkingLevel: "high", favoritesPath: "/s", visiblePath: "/v", home: "/h" };
+  prefs = { revision: "r1", favorites: ["proxy/gemini-3.8-flash", "proxy/claude-opus-5-5:low"], visible: ["openai-codex/gpt-5.6-sol"], defaultModel: "proxy/claude-opus-5-5", defaultThinkingLevel: "high", titleModel: null, favoritesPath: "/s", visiblePath: "/v", configPath: "/c", home: "/h" };
   source = createModelPrefsSource(async () => new Response(JSON.stringify(prefs), { status: 200, headers: { "content-type": "application/json" } }));
   current = opus;
   moves = [];

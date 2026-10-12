@@ -500,7 +500,7 @@ target`, options: { expandPromptTemplates: false } },
       const service = new PiSessionService(new CapturingSessionEventHub(), {
         agentDir: TEST_AGENT_DIR,
         modelRuntime,
-        sessionTitleModel: `${TEST_MODEL_PROVIDER}/${TITLE_MODEL_ID}`,
+        sessionTitleModel: () => `${TEST_MODEL_PROVIDER}/${TITLE_MODEL_ID}`,
         createAgentRuntime: runtimeCreator(fake.runtime),
         sessionManager: sessionGateway([sessionRecord("title-model-session")]),
         heartbeatIntervalMs: 60_000,
@@ -520,7 +520,7 @@ target`, options: { expandPromptTemplates: false } },
       const service = new PiSessionService(new CapturingSessionEventHub(), {
         agentDir: TEST_AGENT_DIR,
         modelRuntime: testModelRuntime,
-        sessionTitleModel: `${TEST_MODEL_PROVIDER}/${TITLE_MODEL_ID}`,
+        sessionTitleModel: () => `${TEST_MODEL_PROVIDER}/${TITLE_MODEL_ID}`,
         logger,
         createAgentRuntime: runtimeCreator(fake.runtime),
         sessionManager: sessionGateway([sessionRecord("title-model-missing-session")]),
@@ -534,6 +534,55 @@ target`, options: { expandPromptTemplates: false } },
       expect(logger.info).toHaveBeenCalledWith(
         expect.objectContaining({ sessionId: "title-model-missing-session", outcome: "title_model_unavailable" }),
         "session title model is unavailable; using the session's model",
+      );
+      await service.dispose();
+    });
+
+    it("reads the setting when it writes a title, so a change applies without a restart", async () => {
+      const credentials = new InMemoryCredentialStore();
+      await seedCredential(credentials, TEST_MODEL_PROVIDER, { type: "api_key", key: "sk-test" });
+      const modelRuntime = await createTestModelRuntime(credentials);
+      const seen: string[] = [];
+      let setting: string | undefined = undefined;
+      const fake = fakeRuntime("title-model-live-session", { model: testModel(), agent: { streamFunction: titleStreamFn(seen) } });
+      const service = new PiSessionService(new CapturingSessionEventHub(), {
+        agentDir: TEST_AGENT_DIR,
+        modelRuntime,
+        sessionTitleModel: () => setting,
+        createAgentRuntime: runtimeCreator(fake.runtime),
+        sessionManager: sessionGateway([sessionRecord("title-model-live-session")]),
+        heartbeatIntervalMs: 60_000,
+      });
+
+      setting = `${TEST_MODEL_PROVIDER}/${TITLE_MODEL_ID}`;
+      await service.prompt(sessionRef("title-model-live-session"), "Please fix the login bug");
+      await vi.waitFor(() => { expect(fake.session.sessionName).toBe("Login bug"); });
+
+      expect(seen).toEqual([`${TEST_MODEL_PROVIDER}/${TITLE_MODEL_ID}`]);
+      await service.dispose();
+    });
+
+    it("logs and uses the session's model when the setting cannot be read", async () => {
+      const logger = { info: vi.fn() };
+      const seen: string[] = [];
+      const fake = fakeRuntime("title-model-unreadable-session", { model: testModel(), agent: { streamFunction: titleStreamFn(seen) } });
+      const service = new PiSessionService(new CapturingSessionEventHub(), {
+        agentDir: TEST_AGENT_DIR,
+        modelRuntime: testModelRuntime,
+        sessionTitleModel: () => { throw new Error("Forgerie config must be a JSON object"); },
+        logger,
+        createAgentRuntime: runtimeCreator(fake.runtime),
+        sessionManager: sessionGateway([sessionRecord("title-model-unreadable-session")]),
+        heartbeatIntervalMs: 60_000,
+      });
+
+      await service.prompt(sessionRef("title-model-unreadable-session"), "Please fix the login bug");
+      await vi.waitFor(() => { expect(fake.session.sessionName).toBe("Login bug"); });
+
+      expect(seen).toEqual([`${TEST_MODEL_PROVIDER}/${TEST_MODEL_ID}`]);
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "title-model-unreadable-session", outcome: "title_model_unreadable" }),
+        "session title model setting is unreadable; using the session's model",
       );
       await service.dispose();
     });

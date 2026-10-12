@@ -69,13 +69,16 @@ export function cycleTarget(favorites: readonly ResolvedFavorite[], currentKey: 
 /**
  * The lists a save writes. The default model and level are Pi's
  * `defaultProvider`/`defaultModel` and `defaultThinkingLevel`: what a new
- * session starts on. Absent: this change leaves them alone.
+ * session starts on. The title model is Forgerie's `sessionTitleModel`: what
+ * writes a new session's title, or `null` for each session's own model.
+ * Absent: this change leaves them alone.
  */
 export interface Lists {
   favorites: string[];
   visible: string[] | null;
   defaultModel?: string | null | undefined;
   defaultThinkingLevel?: string | null | undefined;
+  titleModel?: string | null | undefined;
 }
 
 /**
@@ -95,7 +98,9 @@ export type PrefsChange =
   | { type: "favorite"; key: string; on: boolean }
   | { type: "show"; keys: readonly string[]; on: boolean }
   | { type: "default"; key: string }
-  | { type: "defaultLevel"; level: string };
+  | { type: "defaultLevel"; level: string }
+  /** The title model is not on the lists: hiding or unstarring a model leaves it alone. */
+  | { type: "titleModel"; key: string | null };
 
 export function applyChange(prefs: Lists, change: PrefsChange, models: readonly ModelId[]): Lists {
   const favoriteKeysOf = (favorites: readonly string[]) => new Set(resolveFavorites(favorites, models).map((favorite) => favorite.key));
@@ -104,8 +109,9 @@ export function applyChange(prefs: Lists, change: PrefsChange, models: readonly 
     return !models.some((model) => keys.has(keyOf(model)) && favoriteMatches(entry, model));
   });
   const shownWith = (visible: string[] | null, key: string) => visible === null || visible.includes(key) ? visible : [...visible, key];
-  const kept = { defaultModel: prefs.defaultModel, defaultThinkingLevel: prefs.defaultThinkingLevel };
+  const kept = { defaultModel: prefs.defaultModel, defaultThinkingLevel: prefs.defaultThinkingLevel, titleModel: prefs.titleModel };
   if (change.type === "defaultLevel") return { ...prefs, favorites: [...prefs.favorites], defaultThinkingLevel: change.level };
+  if (change.type === "titleModel") return { ...prefs, favorites: [...prefs.favorites], titleModel: change.key };
   if (change.type === "default") {
     const favorites = prefs.favorites.length === 0 || favoriteKeysOf(prefs.favorites).has(change.key) ? [...prefs.favorites] : [...prefs.favorites, change.key];
     return { ...kept, favorites, visible: shownWith(prefs.visible, change.key), defaultModel: change.key };
@@ -128,6 +134,31 @@ export function applyChange(prefs: Lists, change: PrefsChange, models: readonly 
   const base = prefs.visible ?? [...models.map(keyOf), ...favoriteKeysOf(prefs.favorites)];
   return { ...kept, favorites, visible: [...new Set(base)].filter((key) => !keys.has(key)) };
 }
+
+/**
+ * Who writes a new session's title, by the session daemon's rule:
+ * - `unset`: no title model is chosen, so each session's own model writes it.
+ * - `unavailable`: no signed-in provider offers the chosen model, so each
+ *   session's own model writes it.
+ * - `chosen`: the chosen model writes it.
+ */
+export type TitleModelState = "unset" | "unavailable" | "chosen";
+
+export function titleModelState(titleModel: string | null | undefined, models: readonly ModelId[]): TitleModelState {
+  if (!titleModel) return "unset";
+  return models.some((model) => keyOf(model) === titleModel) ? "chosen" : "unavailable";
+}
+
+/** The words Settings → Models shows for the title model. */
+export const TITLE_MODEL_COPY = {
+  label: "Session titles",
+  empty: "Session's model",
+  clear: "Use the session's model",
+  unset: "Each session's own model writes its title from the first prompt. Choose a small, fast model to spend less on titles.",
+  /** Shown around the model's key, in code. */
+  unavailable: ["No signed-in provider offers ", ", so each session's own model writes its title."],
+  chosen: "Writes the title of each new session from its first prompt. A change applies to the next new session.",
+} as const;
 
 /** `provider/id` split at the first slash: a provider has none, an ID may. */
 export function splitKey(key: string): { provider: string; id: string } | undefined {

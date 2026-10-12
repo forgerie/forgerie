@@ -12,19 +12,20 @@ import type { Middleware } from "./routes.js";
  * API for the app's model lists. Favorites are Pi's `enabledModels`
  * in the active profile's `settings.json`, so terminal Pi with the same profile
  * sees the same favorites. Shown models are Forgerie's own list, beside
- * Forgerie's config.
+ * Forgerie's config. The title model is the `sessionTitleModel` key in
+ * Forgerie's config, which sessiond reads each time it writes a title.
  *
  *   GET /aui/model-prefs   both lists and their revision
- *   PUT /aui/model-prefs   { revision, favorites, visible } (409 if the revision moved)
+ *   PUT /aui/model-prefs   { revision, favorites, visible, defaultModel?, defaultThinkingLevel?, titleModel? } (409 if the revision moved)
  */
 export const MODEL_PREFS_PATH = "/aui/model-prefs";
 
-export interface ModelPrefsPaths { settings: string; visible: string }
+export interface ModelPrefsPaths { settings: string; visible: string; config: string }
 export class PrefsError extends SettingsHttpError {}
 
 export async function defaultPrefsPaths(gateway: Gateway): Promise<ModelPrefsPaths> {
   const profile = await activeForgerieProfile(gateway);
-  return { settings: join(profile.dir, "settings.json"), visible: join(dirname(profile.configPath), "visible-models.json") };
+  return { settings: join(profile.dir, "settings.json"), visible: join(dirname(profile.configPath), "visible-models.json"), config: profile.configPath };
 }
 
 const visibleFileSchema = z.object({ visible: z.array(z.string()) });
@@ -54,6 +55,20 @@ const defaultOf = (settings: Record<string, unknown>) => {
 };
 const revisionOf = (state: unknown) => createHash("sha256").update(JSON.stringify(state)).digest("hex").slice(0, 16);
 
+function parseConfig(text: string | undefined, path: string): Record<string, unknown> {
+  if (text === undefined) return {};
+  try { return settingsSchema.parse(JSON.parse(text)); }
+  catch { throw new PrefsError(500, `${path} is not a JSON object. Fix it before you change the title model.`); }
+}
+
+/** Writes a whole file through a temporary file, so a reader never sees half of it. */
+async function replaceFile(path: string, text: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const temp = `${path}.${String(process.pid)}.tmp`;
+  await writeFile(temp, text, "utf8");
+  await rename(temp, path);
+}
+
 async function readVisible(path: string): Promise<string[] | null> {
   const text = await readText(path);
   if (text === undefined) return null;
@@ -62,13 +77,14 @@ async function readVisible(path: string): Promise<string[] | null> {
 }
 
 export async function readPrefs(paths: ModelPrefsPaths): Promise<ModelPrefs> {
-  const [settingsText, visible] = await Promise.all([readText(paths.settings), readVisible(paths.visible)]);
+  const [settingsText, visible, configText] = await Promise.all([readText(paths.settings), readVisible(paths.visible), readText(paths.config)]);
   const settings = parseSettings(settingsText, paths.settings);
   const favorites = favoritesOf(settings);
   const defaultModel = defaultOf(settings);
   const defaultThinkingLevel = textOf(settings["defaultThinkingLevel"]);
-  return { revision: revisionOf({ favorites, visible, defaultModel, defaultThinkingLevel }), favorites, visible, defaultModel, defaultThinkingLevel,
-    favoritesPath: paths.settings, visiblePath: paths.visible, home: homedir() };
+  const titleModel = textOf(parseConfig(configText, paths.config)["sessionTitleModel"]);
+  return { revision: revisionOf({ favorites, visible, defaultModel, defaultThinkingLevel, titleModel }), favorites, visible, defaultModel, defaultThinkingLevel, titleModel,
+    favoritesPath: paths.settings, visiblePath: paths.visible, configPath: paths.config, home: homedir() };
 }
 
 /**
@@ -121,11 +137,14 @@ export async function savePrefs(paths: ModelPrefsPaths, save: ModelPrefsSave): P
       if (visible === null) {
         await unlink(paths.visible).catch((error: unknown) => { if (!isErrnoCode(error, "ENOENT")) throw error; });
       } else {
-        await mkdir(dirname(paths.visible), { recursive: true });
-        const temp = `${paths.visible}.${String(process.pid)}.tmp`;
-        await writeFile(temp, `${JSON.stringify({ visible }, null, 2)}\n`, "utf8");
-        await rename(temp, paths.visible);
+        await replaceFile(paths.visible, `${JSON.stringify({ visible }, null, 2)}\n`);
       }
+    }
+    if (save.titleModel !== undefined && save.titleModel !== current.titleModel) {
+      // Only this key changes. Every other key in Forgerie's config stays as it is.
+      const config = parseConfig(await readText(paths.config), paths.config);
+      if (save.titleModel === null) delete config["sessionTitleModel"]; else config["sessionTitleModel"] = save.titleModel;
+      await replaceFile(paths.config, `${JSON.stringify(config, null, 2)}\n`);
     }
     return readPrefs(paths);
   });

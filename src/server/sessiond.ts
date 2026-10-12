@@ -67,7 +67,7 @@ import { registerWorktreeCleanupRoutes } from "./workspaces/worktreeCleanupRoute
 import { sessiondSocketPath } from "../sessiond/config.js";
 import { getPiWebRuntimeComponent } from "./piWebStatus.js";
 import { SESSIOND_RUNTIME_CAPABILITIES } from "../shared/capabilities.js";
-import { agentSessionDirEnvKeys, effectivePiWebConfig, maxUploadBytes, offlineModeEnabled, piWebDataDir } from "../config.js";
+import { agentSessionDirEnvKeys, effectivePiWebConfig, loadPiWebConfig, maxUploadBytes, offlineModeEnabled, piWebDataDir } from "../config.js";
 import { createActiveAgentProfileDescriptor } from "../sessiond/activeAgentProfile.js";
 import { applyAgentHttpIdleTimeout } from "./sessiond/agentHttpDispatcher.js";
 import { sessionServiceDependencies } from "./sessiond/sessionServiceDependencies.js";
@@ -245,7 +245,8 @@ async function createSessionDaemonRuntime() {
     },
     pullRequestWatches: { isWatching: (id) => pullStore.isWatching(id), stop: (id, reason) => pulls.stop(id, reason) },
     extensionDialogsTimeoutMs: config.extensionDialogsTimeoutMs,
-    ...(config.sessionTitleModel === undefined ? {} : { sessionTitleModel: config.sessionTitleModel }),
+    // Settings > Models writes this key while the daemon runs, so read it for each title.
+    sessionTitleModel: () => loadPiWebConfig({ env: daemonEnvironment }).config.sessionTitleModel,
     notificationStore,
     unreadStore,
     catalogRefreshStatus: catalogRefresher,

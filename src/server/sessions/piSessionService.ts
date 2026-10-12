@@ -977,9 +977,11 @@ export interface PiSessionServiceDependencies {
   /**
    * `provider/model-id` of the model that writes session titles. A title is a
    * one-shot label, so a small fast model does it as well as the session's own
-   * model for a fraction of the cost. Omit to use the session's model.
+   * model for a fraction of the cost. Read once per title, so a change in
+   * Settings applies to the next new session without a restart. Omit, or
+   * return `undefined`, to use the session's model.
    */
-  sessionTitleModel?: string;
+  sessionTitleModel?: () => string | undefined;
   /** Optional transcript-backed question adapter for deterministic test fixtures. */
   sessionAsks?: SessionAsks;
   /** Daemon-lifetime open-dialog state; defaults to an in-memory store in tests. */
@@ -1091,7 +1093,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly spawnTargets: SpawnTargetResolver | undefined;
   private readonly projectWorkspaces: ProjectWorkspaceCwds | undefined;
   private readonly logger: PiSessionLogger;
-  private readonly sessionTitleModel: string | undefined;
+  private readonly sessionTitleModel: (() => string | undefined) | undefined;
   private readonly now: () => Date;
   private readonly notificationStore: SessionNotificationStore;
   private readonly notificationGenerationBySession = new WeakMap<PiAgentSession, SessionNotificationGeneration>();
@@ -4568,11 +4570,17 @@ export class PiSessionService implements SessionRouteService {
 
   /**
    * The configured title model when the runtime offers it with credentials,
-   * else the session's own model. A missing title model is logged, not fatal:
-   * the title then costs what it did before.
+   * else the session's own model. A missing or unreadable title model is
+   * logged, not fatal: the title then costs what it did before.
    */
   private titleModelFor(session: PiAgentSession): PiAgentSession["model"] {
-    const spec = this.sessionTitleModel;
+    let spec: string | undefined;
+    try {
+      spec = this.sessionTitleModel?.();
+    } catch (error: unknown) {
+      this.logger.info({ sessionId: session.sessionId, outcome: "title_model_unreadable", error: errorMessage(error) }, "session title model setting is unreadable; using the session's model");
+      return session.model;
+    }
     if (spec === undefined) return session.model;
     const parsed = parseModelSpec(spec);
     const configured = parsed === undefined

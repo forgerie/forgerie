@@ -332,7 +332,7 @@
   "ui/backlog/BacklogView.tsx: BacklogView, CloseButton, Mark, ItemRow, CopyLines, IgnoredWarning, Group, Problems, Empty, ListPage, Property, ItemPage",
   "ui/markdown/RichBlocks.tsx: CalloutQuote, Fragment, StepsBlock, CompareBlock, NoHeader",
   "ui/portalLayer.tsx: PortalLayer, PortalLayerProvider",
-  "ui/settings/ModelsView.tsx: ModelsView, DefaultModel, ModelPrefRow",
+  "ui/settings/ModelsView.tsx: ModelsView, DefaultModel, TitleModel, ModelPrefRow",
   "ui/settings/PluginsView.tsx: PluginsView, PluginList, PluginDetail",
   "ui/settings/PromptEditor.tsx: FormatMenu, PromptEditor",
   "ui/settings/SettingsView.tsx: AgentRow, SettingsView"

@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "r
 import { ChevronLeftIcon, SearchIcon, StarIcon, XIcon } from "lucide-react";
 import { modelsResponseSchema, type SessionModel } from "../../contracts";
 import { compactContextWindow, modelLabel, providerLabel } from "../../modelChoice";
-import { applyChange, keyOf, parseFavorite, resolveFavorites, splitKey, type Lists, type PrefsChange } from "../../models/modelPrefs";
+import { applyChange, keyOf, parseFavorite, resolveFavorites, splitKey, TITLE_MODEL_COPY, titleModelState, type Lists, type PrefsChange } from "../../models/modelPrefs";
 import { THINKING_LEVELS, type ModelPrefs, type ModelPrefsSave } from "@shared/modelPrefsContract";
 import { thinkingLevelsFor } from "../../newSession";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "../ModelPicker";
@@ -18,15 +18,16 @@ type Model = SessionModel & { provider: string; id: string };
 type Load = { type: "loading" } | { type: "failed"; message: string } | { type: "ready"; prefs: ModelPrefs; models: Model[] };
 type Phase = { type: "idle" } | { type: "saving" } | { type: "saved" } | { type: "failed"; message: string; conflict: boolean };
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
-const listsOf = (prefs: ModelPrefs): Lists => ({ favorites: prefs.favorites, visible: prefs.visible, defaultModel: prefs.defaultModel, defaultThinkingLevel: prefs.defaultThinkingLevel });
-const sameLists = (a: Lists, b: Lists) => JSON.stringify([a.favorites, a.visible, a.defaultModel ?? null, a.defaultThinkingLevel ?? null])
-  === JSON.stringify([b.favorites, b.visible, b.defaultModel ?? null, b.defaultThinkingLevel ?? null]);
+const listsOf = (prefs: ModelPrefs): Lists => ({ favorites: prefs.favorites, visible: prefs.visible, defaultModel: prefs.defaultModel, defaultThinkingLevel: prefs.defaultThinkingLevel, titleModel: prefs.titleModel });
+const sameLists = (a: Lists, b: Lists) => JSON.stringify([a.favorites, a.visible, a.defaultModel ?? null, a.defaultThinkingLevel ?? null, a.titleModel ?? null])
+  === JSON.stringify([b.favorites, b.visible, b.defaultModel ?? null, b.defaultThinkingLevel ?? null, b.titleModel ?? null]);
 const isLevel = (level: string | null | undefined): level is ModelPrefsSave["defaultThinkingLevel"] & string => (THINKING_LEVELS as readonly unknown[]).includes(level);
 /** A save sends the defaults only when they changed, so a value Pi wrote that this page does not know survives. */
 function saveOf(revision: string, want: Lists, held: ModelPrefs): ModelPrefsSave {
   return { revision, favorites: want.favorites, visible: want.visible,
     ...(want.defaultModel && want.defaultModel !== held.defaultModel ? { defaultModel: want.defaultModel } : {}),
-    ...(isLevel(want.defaultThinkingLevel) && want.defaultThinkingLevel !== held.defaultThinkingLevel ? { defaultThinkingLevel: want.defaultThinkingLevel } : {}) };
+    ...(isLevel(want.defaultThinkingLevel) && want.defaultThinkingLevel !== held.defaultThinkingLevel ? { defaultThinkingLevel: want.defaultThinkingLevel } : {}),
+    ...(want.titleModel !== undefined && want.titleModel !== held.titleModel ? { titleModel: want.titleModel } : {}) };
 }
 
 /**
@@ -152,7 +153,10 @@ export function ModelsView({ onBack, onClose, listModels = availableModels }: {
     <p className="settings-lede">New sessions start on the default model. The model menu offers the models you show here. Favorites come first in it, and Ctrl+P switches between them. These settings apply to every session.</p>
     {load.type === "loading" ? <p className="settings-hint" role="status">Reading models…</p> : null}
     {load.type === "ready" && view && lists ? <>
-      <DefaultModel lists={lists} models={models} locked={phase.type === "failed"} onChange={change} />
+      <div className="agent-properties models-default">
+        <DefaultModel lists={lists} models={models} locked={phase.type === "failed"} onChange={change} />
+        <TitleModel lists={lists} models={models} locked={phase.type === "failed"} onChange={change} />
+      </div>
       <div className="models-summary">
         <p>{lists.visible === null
           ? <>Every model is shown. Hide one, and from then on the menu offers only the models you show. Models a provider adds later stay hidden too.</>
@@ -188,7 +192,7 @@ export function ModelsView({ onBack, onClose, listModels = availableModels }: {
         </section>;
       })}
       {query.trim() && view.favorites.length === 0 && view.providers.length === 0 ? <p className="settings-hint">No model matches "{query.trim()}".</p> : null}
-      <p className="agent-group-where models-where">The default model, its thinking level, and favorites are Pi's own settings, so terminal Pi with this profile uses them too. They are saved in <code>{tildify(load.prefs.favoritesPath, home)}</code>. Shown models are saved in <code>{tildify(load.prefs.visiblePath, home)}</code>.
+      <p className="agent-group-where models-where">The default model, its thinking level, and favorites are Pi's own settings, so terminal Pi with this profile uses them too. They are saved in <code>{tildify(load.prefs.favoritesPath, home)}</code>. Shown models are saved in <code>{tildify(load.prefs.visiblePath, home)}</code>, and the title model in Forgerie's config, <code>{tildify(load.prefs.configPath, home)}</code>.
         Only models whose provider is signed in appear here.</p>
     </> : null}
   </SettingsFrame>;
@@ -219,11 +223,39 @@ function DefaultModel({ lists, models, locked, onChange }: {
     : start.reason === "notFavorite" ? <>{modelLabel(chosen)} is not a favorite, so new sessions start on {startName}.{" "}
       <button type="button" className="agent-text-button" disabled={locked} onClick={() => { if (lists.defaultModel) onChange({ type: "favorite", key: lists.defaultModel, on: true }); }}>Add it to favorites</button></>
     : <>A favorite saved with its own level, such as <code>:high</code>, starts at that level instead.</>;
-  return <div className="agent-properties models-default">
-    <SettingsField label="Default model" hint={hint}>
-      <div ref={anchor} className="agent-model"><ModelPicker binding={binding} anchor={anchor} open={open} onOpenChange={setOpen} /></div>
-    </SettingsField>
-  </div>;
+  return <SettingsField label="Default model" hint={hint}>
+    <div ref={anchor} className="agent-model"><ModelPicker binding={binding} anchor={anchor} open={open} onOpenChange={setOpen} /></div>
+  </SettingsField>;
+}
+
+/**
+ * Shape: the model that writes each new session's title from its first
+ * prompt. Without one, each session's own model writes it. A small, fast
+ * model costs less and answers sooner; the title has no thinking level.
+ */
+function TitleModel({ lists, models, locked, onChange }: {
+  lists: Lists; models: readonly Model[]; locked: boolean; onChange: (change: PrefsChange) => void;
+}) {
+  const anchor = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState<PickerOpen>();
+  const key = lists.titleModel ?? undefined;
+  const state = titleModelState(key, models);
+  const split = key ? splitKey(key) : undefined;
+  const chosen = models.find((model) => keyOf(model) === key) ?? (split ? { ...split, name: key } : undefined);
+  const binding: ModelBinding = {
+    model: chosen, disabled: locked, emptyLabel: TITLE_MODEL_COPY.empty, thinking: false,
+    listModels: async () => [...models], listThinkingLevels: async () => [],
+    onModel: async (provider, id) => { onChange({ type: "titleModel", key: `${provider}/${id}` }); },
+    onThinkingLevel: async () => undefined,
+  };
+  const [before, after] = TITLE_MODEL_COPY.unavailable;
+  const hint = state === "unavailable" ? <>{before}<code>{key}</code>{after}</> : TITLE_MODEL_COPY[state];
+  return <SettingsField label={TITLE_MODEL_COPY.label} hint={hint}>
+    <div ref={anchor} className="agent-model">
+      <ModelPicker binding={binding} anchor={anchor} open={open} onOpenChange={setOpen} />
+      {key && !locked ? <button type="button" className="agent-text-button" onClick={() => { onChange({ type: "titleModel", key: null }); }}>{TITLE_MODEL_COPY.clear}</button> : null}
+    </div>
+  </SettingsField>;
 }
 
 /** Shape: one model with its two choices. The star and the switch keep their size; the name wraps. The default cannot be hidden or unstarred. */

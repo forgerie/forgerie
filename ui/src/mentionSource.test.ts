@@ -23,7 +23,7 @@ async function service(routes: Record<string, unknown>, failures: Record<string,
 }
 const modelPath = "/api/sessions/s%2F1/models?cwd=%2Frepo%2Fwork+tree";
 const prefsPath = "/aui/model-prefs";
-const prefs = { revision: "r1", favorites: [], visible: null, defaultModel: null, defaultThinkingLevel: null,
+const prefs = { revision: "r1", favorites: [], visible: null, defaultModel: null, defaultThinkingLevel: null, titleModel: null, configPath: "/config/config.json",
   favoritesPath: "/agent/settings.json", visiblePath: "/config/visible-models.json", home: "/home/me" };
 const projects = [{ id: "p/1", path: "/repo" }, { id: "other", path: "/other" }];
 const workspacePath = "/api/projects/p%2F1/workspaces";

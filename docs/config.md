@@ -37,6 +37,7 @@ The inherited `PI_WEB_*` names remain supported. They do not enable upstream ins
 | `codemode` | Enable hosted scripts that call active tools. Defaults to `true`. Run-ending and session-making tools remain outside scripts. |
 | `durableChildren` | Enable children stored inside the parent session's Durable storage. Defaults to `false`. See [child agents](child-agents.md). |
 | `extensionDialogsTimeoutMs` | Default extension-dialog timeout, in milliseconds. Defaults to `300000`; `0` waits without a deadline. An extension's shorter timeout still wins. |
+| `sessionTitleModel` | The `provider/model-id` that writes a new session's title from its first prompt, for example a small fast model. Unset: each session's own model writes its title. Set it in **Settings → Models → Session titles**. The session daemon reads it for each title, so a change applies to the next new session without a restart. If no signed-in provider offers the model, the session's own model writes the title, and the daemon logs `title_model_unavailable`. |
 | `plugins` | Current browser-app plugin enablement and settings. See [plugins](plugins.md). |
 | `pathAccess.allowedPaths` | External filesystem roots that file APIs can expose outside a workspace. Workspace access remains subject to path validation. |
 | `uploads.defaultFolder` | Relative folder for saved uploads. Defaults to `.forgerie/uploads`. Absolute paths and parent traversal are rejected. |

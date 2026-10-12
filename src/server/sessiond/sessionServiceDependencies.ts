@@ -41,8 +41,8 @@ export interface SessionServiceDependencyInput {
   pullRequestWatches?: PiSessionServiceDependencies["pullRequestWatches"];
   /** Auto-cancel delay for extension dialogs whose extension set no timeout; `0` waits forever. */
   extensionDialogsTimeoutMs: number;
-  /** `provider/model-id` that writes session titles; omitted to use each session's model. */
-  sessionTitleModel?: string;
+  /** Reads the `provider/model-id` that writes session titles; `undefined` uses each session's model. */
+  sessionTitleModel?: () => string | undefined;
 }
 
 /**

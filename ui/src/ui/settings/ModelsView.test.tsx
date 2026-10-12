@@ -27,7 +27,7 @@ const names = (section: Element | undefined) => [...(section?.querySelectorAll("
 beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  stored = { revision: "r0", favorites: ["proxy/claude-opus-5-5:high", "proxy/*"], visible: null, defaultModel: "proxy/claude-opus-5-5", defaultThinkingLevel: "xhigh", favoritesPath: "/home/me/agent/settings.json", visiblePath: "/home/me/.config/forgerie/visible-models.json", home: "/home/me" };
+  stored = { revision: "r0", favorites: ["proxy/claude-opus-5-5:high", "proxy/*"], visible: null, defaultModel: "proxy/claude-opus-5-5", defaultThinkingLevel: "xhigh", titleModel: null, favoritesPath: "/home/me/agent/settings.json", visiblePath: "/home/me/.config/forgerie/visible-models.json", configPath: "/home/me/.config/forgerie/config.json", home: "/home/me" };
   saves = []; refuse = false; listeners.clear();
   source = {
     read: async () => { for (const listener of listeners) listener(stored); return stored; },
@@ -88,6 +88,34 @@ describe("Models settings", () => {
     expect(saves.at(-1)).toMatchObject({ defaultModel: "local/llama3:8b", favorites: ["proxy/claude-opus-5-5:high", "proxy/*", "local/llama3:8b"] });
     expect(saves.at(-1)?.defaultThinkingLevel).toBeUndefined();
     expect(names(group("Favorites"))).toEqual(["Claude Opus 5.5", "Llama 3 8B"]);
+  });
+
+  it("chooses the model that writes session titles, and hands titles back to each session's model", async () => {
+    const titleRow = () => [...document.querySelectorAll(".models-default .agent-field")].find((node) => node.querySelector(".agent-field-label")?.textContent === "Session titles")!;
+    expect(titleRow().querySelector(".model-trigger")?.textContent).toContain("Session's model");
+    expect(titleRow().textContent).toContain("Each session's own model writes its title");
+    await click(titleRow().querySelector<HTMLButtonElement>(".model-trigger")!);
+    expect(document.querySelector(".floating-panel .model-thinking")).toBeNull();
+    await click([...document.querySelectorAll<HTMLButtonElement>(".floating-panel .option-row")].find((node) => node.textContent?.includes("Claude Haiku 3.5"))!);
+    expect(saves.at(-1)).toEqual({ revision: "r0", favorites: stored.favorites, visible: null, titleModel: "proxy/claude-3-5-haiku-20241022" });
+    expect(titleRow().querySelector(".model-trigger")?.textContent).toContain("Claude Haiku 3.5");
+    expect(titleRow().textContent).toContain("A change applies to the next new session.");
+    // The title model is not a favorite and stays out of the default's lists.
+    expect(names(group("Favorites"))).toEqual(["Claude Opus 5.5"]);
+    await click([...titleRow().querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent === "Use the session's model")!);
+    expect(saves.at(-1)).toMatchObject({ titleModel: null });
+    expect(titleRow().querySelector(".model-trigger")?.textContent).toContain("Session's model");
+    expect(document.body.textContent).toContain("~/.config/forgerie/config.json");
+  });
+
+  it("says when no signed-in provider offers the title model", async () => {
+    stored = { ...stored, titleModel: "gone/small" };
+    act(() => root.unmount());
+    const host = document.createElement("div"); document.body.replaceChildren(host); root = createRoot(host);
+    await act(async () => root.render(<ModelPrefsContext.Provider value={source}>
+      <ModelsView onBack={() => {}} listModels={async () => models} /></ModelPrefsContext.Provider>));
+    await settle();
+    expect(document.querySelector(".models-default")?.textContent).toContain("No signed-in provider offers gone/small, so each session's own model writes its title.");
   });
 
   it("hides a whole provider, and brings every model back", async () => {
