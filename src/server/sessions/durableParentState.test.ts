@@ -5,16 +5,19 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
+import { fauxProvider, fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
 import { Harness, createRegistry, type Conversation, type Cursor } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { afterEach, describe, expect, it } from "vitest";
-import { ExtensionRunner, ModelRegistry, ModelRuntime, SessionManager, createAgentSessionServices } from "@earendil-works/pi-coding-agent";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ExtensionRunner, ModelRegistry, ModelRuntime, SessionManager, createAgentSessionServices, convertToLlm } from "@earendil-works/pi-coding-agent";
 import { durableJson } from "./durableJson.js";
 import { createDurableParentState } from "./durableParentState.js";
-import { askDeliveryExtension } from "./durableAskDelivery.js";
-import { ExtensionEntries, Labels, ParentAsks, ParentResponse, SessionName, initializeParentDocuments } from "./durableParentDocuments.js";
-import type { AskUserQuestion } from "../../shared/apiTypes.js";
+import { askDeliveryExtension, askAnswerRequestId } from "./durableAskDelivery.js";
+import { ExtensionEntries, Labels, ParentAsks, ParentResponse, Presentation, SessionName, initializeParentDocuments } from "./durableParentDocuments.js";
+import { ASK_USER_ANSWERS_CUSTOM_TYPE, type AskUserQuestion } from "../../shared/apiTypes.js";
+import { renderAskUserAnswersText } from "./sessionAsks.js";
+import { DurableSdkSessionView } from "./durableSdkSessionView.js";
+import { DurableParentReadModel } from "./durableParentReadModel.js";
 
 const questions: AskUserQuestion[] = [{ id: "q", question: "Which?", options: [{ value: "a", label: "A" }] }];
 const answers = { answers: [{ id: "q", values: ["a"] }] };
@@ -109,7 +112,7 @@ describe("committed Durable parent state", () => {
     await f.harness.close(context); // close was accepted, but the extension was absent: no delivery ran.
     const reopened = await f.open();
     // Admission succeeds first, then delivery retries from its checkpoint with the same ID.
-    const admitted = await reopened.conversation.submit({ type: "input", content: "receipt replay", requestId: receipt.delivery.requestId }, context);
+    const admitted = await reopened.conversation.submit({ type: "input", content: [{ type: "text", text: renderAskUserAnswersText(receipt.outcome) }], requestId: receipt.delivery.requestId }, context);
     await admitted.wait(context);
     reopened.registry.install(askDeliveryExtension());
     reopened.harness.resume();
@@ -121,6 +124,85 @@ describe("committed Durable parent state", () => {
     expect(f.provider.state.callCount).toBe(1);
     const page = await reopened.conversation.entries({ order: "ascending" }, 100, undefined, context);
     expect(page.items.filter(entry => entry.kind === "pi.user")).toHaveLength(1);
+    const entryId = (await admitted.status(context)).entry;
+    if (entryId === undefined) throw new Error("Expected replayed entry");
+    expect(await reopened.harness.snapshot(Presentation, reopened.conversation.id, String(entryId), context)).toMatchObject({ envelope: { customType: ASK_USER_ANSWERS_CUSTOM_TYPE, details: receipt.outcome } });
+  });
+
+  it.each(["submit", "cancel"] as const)("delivers a %s outcome in SDK custom-message form on the admitted input entry", async action => {
+    const f = await fixture();
+    const view = await DurableSdkSessionView.open({ address: { journalId: "journal", databasePath: f.databasePath, sessionId: "logical", conversationId: f.conversation.id }, harness: f.harness, conversation: f.conversation, release: () => Promise.resolve() }, context);
+    try {
+      const { ask } = await f.state.openAsk(questions, context);
+      const result = action === "submit" ? await f.state.submitAsk(ask.askId, answers, context) : await f.state.cancelAsk(ask.askId, context);
+      if (result.status !== "closed") throw new Error("Expected accepted outcome");
+      const marker = (await f.conversation.entries({}, 1, undefined, context)).items[0];
+      if (marker === undefined) throw new Error("Missing close marker");
+      expect(await f.harness.snapshot(Presentation, f.conversation.id, String(marker.id), context)).toBeUndefined();
+      const task = (await f.conversation.commit(tx => tx.scanTasks({ conversationId: f.conversation.id, kind: "forgerie.parent-ask-delivery" }, 100), context)).items[0];
+      if (task === undefined) throw new Error("Missing delivery task");
+      f.registry.install(askDeliveryExtension());
+      await f.harness.waitForTask(task.id, context);
+      await f.conversation.waitForIdle(context);
+      const receipt = (await f.harness.snapshot(ParentAsks, f.conversation.id, context))?.closed[ask.askId];
+      if (receipt?.delivery.kind !== "admitted") throw new Error("Missing admission receipt");
+      const requestId = receipt.delivery.requestId;
+      const admitted = await f.conversation.commit(tx => tx.submissionByRequest(f.conversation.id, requestId), context);
+      if (admitted?.entry === undefined) throw new Error("Missing admitted input entry");
+      const entry = (await f.conversation.entries({}, 100, undefined, context)).items.find(candidate => candidate.id === admitted.entry);
+      const model = entry?.model?.[0];
+      if (entry === undefined || model?.role !== "user") throw new Error("Missing model input");
+      const content = renderAskUserAnswersText(result.outcome);
+      expect(entry.model).toEqual(convertToLlm([{ role: "custom", customType: ASK_USER_ANSWERS_CUSTOM_TYPE, content, display: true, details: result.outcome, timestamp: model.timestamp }]));
+      expect(await f.harness.snapshot(Presentation, f.conversation.id, String(entry.id), context)).toMatchObject({ envelope: { type: "custom", customType: ASK_USER_ANSWERS_CUSTOM_TYPE, display: true, details: result.outcome } });
+      await view.refresh(context);
+      expect(view.projectEntry(marker)).toBeUndefined();
+      const reader = new DurableParentReadModel({ handle: { address: { journalId: "journal", databasePath: f.databasePath, sessionId: "logical", conversationId: f.conversation.id }, harness: f.harness, conversation: f.conversation, release: () => Promise.resolve() }, messageId: native => String(native.id), projectEntry: native => view.projectEntry(native) });
+      const messages = await reader.messages(context);
+      const notices = messages.filter(message => message.customType === ASK_USER_ANSWERS_CUSTOM_TYPE);
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toMatchObject({ id: String(entry.id), role: "custom", content: [{ type: "text", text: content }], details: result.outcome });
+      expect(messages.filter(message => message.role === "user")).toHaveLength(0);
+    } finally { view.close(); }
+  });
+
+  it("presents a queued answer on its input entry before the follow-up model answer finishes", async () => {
+    const f = await fixture(true);
+    let enterFirst!: () => void, releaseFirst!: () => void, enterSecond!: () => void, releaseSecond!: () => void;
+    const firstEntered = new Promise<void>(resolve => { enterFirst = resolve; });
+    const firstHeld = new Promise<void>(resolve => { releaseFirst = resolve; });
+    const secondEntered = new Promise<void>(resolve => { enterSecond = resolve; });
+    const secondHeld = new Promise<void>(resolve => { releaseSecond = resolve; });
+    f.provider.setResponses([
+      async () => { enterFirst(); await firstHeld; return fauxAssistantMessage("first finished"); },
+      async () => { enterSecond(); await secondHeld; return fauxAssistantMessage("follow-up finished"); },
+    ]);
+    const initial = await f.conversation.submit({ type: "input", content: "working" }, context);
+    try {
+      await firstEntered;
+      const { ask } = await f.state.openAsk(questions, context);
+      await f.state.submitAsk(ask.askId, answers, context);
+      const requestId = askAnswerRequestId(ask.askId);
+      await vi.waitFor(async () => {
+        expect((await f.conversation.commit(tx => tx.submissionByRequest(f.conversation.id, requestId), context))?.status).toBe("queued");
+      });
+      const task = (await f.conversation.commit(tx => tx.scanTasks({ conversationId: f.conversation.id, kind: "forgerie.parent-ask-delivery" }, 100), context)).items[0];
+      if (task === undefined) throw new Error("Missing queued delivery task");
+      releaseFirst();
+      await secondEntered;
+      await f.harness.waitForTask(task.id, context); // Must not wait for the provider's held follow-up answer.
+      const status = await f.conversation.commit(tx => tx.submissionByRequest(f.conversation.id, requestId), context);
+      expect(status?.status).toBe("placed");
+      if (status?.entry === undefined) throw new Error("Missing placed answer entry");
+      const receipt = (await f.harness.snapshot(ParentAsks, f.conversation.id, context))?.closed[ask.askId];
+      expect(receipt?.delivery.kind).toBe("admitted");
+      expect(await f.harness.snapshot(Presentation, f.conversation.id, String(status.entry), context)).toMatchObject({ envelope: { customType: ASK_USER_ANSWERS_CUSTOM_TYPE, details: receipt?.outcome } });
+      expect(f.provider.state.callCount).toBe(2);
+    } finally {
+      releaseFirst(); releaseSecond();
+      await initial.wait(context);
+      await f.conversation.waitForIdle(context);
+    }
   });
 
   it("keeps historical reply intent without an actionable form on a fork at the ask", async () => {

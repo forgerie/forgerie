@@ -206,8 +206,8 @@ class ParentState implements DurableParentState {
       const outcome = event.outcome;
       const deliver = outcome.reason === "submitted" || outcome.reason === "cancelled";
       asks.closed[outcome.askId] = { outcome, delivery: deliver ? { kind: "pending", requestId: askAnswerRequestId(outcome.askId) } : { kind: "none" } };
-      (await tx.doc(Presentation, id, String(marker.id), null)).envelope = { type: "custom", customType: ASK_USER_ANSWERS_CUSTOM_TYPE, display: true, details: copyJson(outcome) };
       if (deliver) await createAskDelivery(tx, id, outcome.askId);
+      else (await tx.doc(Presentation, id, String(marker.id), null)).envelope = { type: "custom", customType: ASK_USER_ANSWERS_CUSTOM_TYPE, display: true, details: copyJson(outcome) };
     }
   }
 }

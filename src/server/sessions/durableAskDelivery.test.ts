@@ -12,8 +12,11 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { expect, it } from "vitest";
 import { Check } from "typebox/value";
 import { Type } from "typebox";
-import { ParentAsks, initializeParentDocuments } from "./durableParentDocuments.js";
+import { ParentAsks, Presentation, initializeParentDocuments } from "./durableParentDocuments.js";
 import { askDeliveryExtension } from "./durableAskDelivery.js";
+import { convertToLlm } from "@earendil-works/pi-coding-agent";
+import { ASK_USER_ANSWERS_CUSTOM_TYPE } from "../../shared/apiTypes.js";
+import { renderAskUserAnswersText } from "./sessionAsks.js";
 
 // A cold tsx subprocess opens SQLite and imports the runtime. The 5-second unit budget is not a subprocess budget.
 it("delivers an accepted decision after SIGKILL between close and answer admission", async () => {
@@ -60,9 +63,17 @@ it("delivers an accepted decision after SIGKILL between close and answer admissi
     if (delivery === undefined) throw new Error("Missing durable answer task after crash");
     await harness.waitForTask(delivery.record.id, context);
     await conversation.waitForIdle(context);
-    expect((await harness.snapshot(ParentAsks, conversation.id, context))?.closed[ready.askId]?.delivery.kind).toBe("admitted");
+    const receipt = (await harness.snapshot(ParentAsks, conversation.id, context))?.closed[ready.askId];
+    expect(receipt?.delivery.kind).toBe("admitted");
     expect(provider.state.callCount).toBe(1);
-    expect((await conversation.entries({}, 100, undefined, context)).items.filter(entry => entry.kind === "pi.user")).toHaveLength(1);
+    const inputs = (await conversation.entries({}, 100, undefined, context)).items.filter(entry => entry.kind === "pi.user");
+    expect(inputs).toHaveLength(1);
+    const entry = inputs[0];
+    const model = entry?.model?.[0];
+    if (receipt === undefined || entry === undefined || model?.role !== "user") throw new Error("Missing delivered input");
+    expect(entry.model).toEqual(convertToLlm([{ role: "custom", customType: ASK_USER_ANSWERS_CUSTOM_TYPE,
+      content: renderAskUserAnswersText(receipt.outcome), display: true, details: receipt.outcome, timestamp: model.timestamp }]));
+    expect(await harness.snapshot(Presentation, conversation.id, String(entry.id), context)).toMatchObject({ envelope: { customType: ASK_USER_ANSWERS_CUSTOM_TYPE, details: receipt.outcome } });
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     await exited;
