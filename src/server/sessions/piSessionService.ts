@@ -29,6 +29,10 @@ import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult,
 import type { DurableSessionReader } from "./durableSessionReader.js";
 import type { DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import type { DurableBrowserAttachment } from "./durableParentReadModel.js";
+import { ParentAsks, ParentAsksSchema } from "./durableParentDocuments.js";
+import { Check } from "typebox/value";
+import { BACKGROUND_CONTEXT as durableContext } from "@earendil-works/chord/context";
+import { durableJson } from "./durableJson.js";
 import { DurableAgentSession } from "./durableAgentSession.js";
 import type { DurableChildHost } from "./durableChildHost.js";
 import { recoverDurableSessions, type DurableRecoveryReport } from "./durableSessionRecovery.js";
@@ -2170,6 +2174,20 @@ export class PiSessionService implements SessionRouteService {
     const outcomes = undeliveredAskAnswers(session.sessionManager.getBranch());
     if (outcomes.length === 0) return;
     void this.runSessionEntryMutation(session, "recover accepted question answers", async () => {
+      if (session instanceof DurableAgentSession) {
+        // Accepted SDK-only decisions are a compatibility import, not a second delivery path.
+        // Native receipt/tasks own delivery once the parent documents exist. Never emit the
+        // old triggerTurn notification as well as the deterministic Durable submission.
+        const asks = await session.journal.harness.snapshot(ParentAsks, session.journal.conversation.id, durableContext);
+        if (!Check(ParentAsksSchema, asks)) throw new Error("Invalid native accepted-answer receipts");
+        for (const outcome of outcomes) {
+          if (asks.closed[outcome.askId] !== undefined) continue;
+          await session.parentState.appendCustomEntry(SESSION_RESPONSE_CUSTOM_TYPE, durableJson({ version: 1, kind: "answered", outcome }), durableContext);
+        }
+        await session.flushDurableMutations();
+        session.journal.harness.resume();
+        return;
+      }
       for (const outcome of outcomes) {
         await session.sendCustomMessage(
           { customType: ASK_USER_ANSWERS_CUSTOM_TYPE, content: renderAskUserAnswersText(outcome), display: true, details: outcome },
