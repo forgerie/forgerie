@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import { bundledSubagentsPackagePath, preferBundledSubagents } from "./bundledSubagents.js";
+import { preferBundledExtensions } from "./bundledExtensions.js";
+import { bundledSubagentsPackagePath } from "./bundledSubagents.js";
 
 const tempRoots: string[] = [];
 
@@ -71,7 +72,7 @@ async function subagentsLoader(packages: string[] = [], existingRoot?: string): 
     cwd: root,
     agentDir,
     additionalExtensionPaths: [bundledSubagentsPackagePath()],
-    extensionsOverride: preferBundledSubagents,
+    extensionsOverride: preferBundledExtensions,
     noContextFiles: true,
   });
   await loader.reload();

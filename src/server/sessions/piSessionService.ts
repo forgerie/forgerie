@@ -101,7 +101,9 @@ import { bundledForgerieSkillsPackagePath, preferBundledForgerieSkills } from ".
 import { withReplyFormatGuide } from "../../shared/replyFormatGuide.js";
 import { bundledManagedProcessesPackagePath } from "./bundledManagedProcesses.js";
 import { bundledCliproxyProviderPackagePath, bundledCliproxyProviderResources } from "./bundledCliproxyProvider.js";
-import { bundledSubagentsPackagePath, preferBundledSubagents } from "./bundledSubagents.js";
+import { preferBundledExtensions } from "./bundledExtensions.js";
+import { bundledSubagentsPackagePath } from "./bundledSubagents.js";
+import { bundledWebAccessPackagePath } from "./bundledWebAccess.js";
 import { canonicalizeStoredCwd, cwdPathsEqual } from "../workingDirectory.js";
 import { readSessionHeaderSummary, type SessionHeaderSummary } from "./sessionFileHeader.js";
 import { countOutOfListingChildren, locateOutOfListingParents, type SessionHeaderReader } from "./parentSessionLocator.js";
@@ -856,10 +858,11 @@ function createDefaultRuntimeFactory(
         additionalExtensionPaths: [
           bundledManagedProcessesPackagePath(),
           bundledSubagentsPackagePath(),
+          bundledWebAccessPackagePath(),
           bundledForgerieSkillsPackagePath(),
           bundledCliproxyProviderPackagePath(),
         ],
-        extensionsOverride: (result) => providerResources.extensionsOverride(preferBundledSubagents(result)),
+        extensionsOverride: (result) => providerResources.extensionsOverride(preferBundledExtensions(result)),
         skillsOverride: preferBundledForgerieSkills,
         // Tells the agent which rich blocks the browser app renders.
         appendSystemPromptOverride: withReplyFormatGuide,

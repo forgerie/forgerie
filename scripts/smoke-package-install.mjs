@@ -64,6 +64,7 @@ try {
   const packageRoot = join(globalPrefix, "lib", "node_modules", "forgerie");
   await smokeInstalledManagedProcesses(packageRoot);
   await smokeInstalledSubagents(packageRoot);
+  await smokeInstalledWebAccess(packageRoot);
   await smokeInstalledCliproxyProvider(packageRoot);
   const cli = join(globalPrefix, "bin", "forgerie");
   const agentDir = join(root, "profile");
@@ -136,6 +137,43 @@ async function smokeInstalledSubagents(packageRoot) {
   const expected = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")).dependencies["pi-subagents"];
   if (manifest.version !== expected) {
     throw new Error(`Installed package bundles pi-subagents ${String(manifest.version)}, expected ${expected}`);
+  }
+}
+
+async function smokeInstalledWebAccess(packageRoot) {
+  const expected = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")).dependencies["pi-web-access"];
+  const bundle = join(packageRoot, "node_modules", "pi-web-access");
+  const manifest = JSON.parse(await readFile(join(bundle, "package.json"), "utf8"));
+  if (manifest.version !== expected || expected !== "0.39.0") {
+    throw new Error(`Installed package bundles pi-web-access ${String(manifest.version)}, expected 0.39.0`);
+  }
+  const { bundledWebAccessPackagePath } = await import(pathToFileURL(join(packageRoot, "dist", "server", "sessions", "bundledWebAccess.js")).href);
+  if (bundledWebAccessPackagePath() !== bundle) throw new Error("Installed web access resolver escaped the installed package");
+  const { preferBundledExtensions } = await import(pathToFileURL(join(packageRoot, "dist", "server", "sessions", "bundledExtensions.js")).href);
+  const sdkRoot = join(packageRoot, "node_modules", "@earendil-works", "pi-coding-agent");
+  const sdkManifest = JSON.parse(await readFile(join(sdkRoot, "package.json"), "utf8"));
+  const sdkEntry = sdkManifest.exports?.["."]?.import;
+  if (typeof sdkEntry !== "string") throw new Error("Installed Pi SDK does not expose an ESM entry point");
+  const { DefaultResourceLoader } = await import(pathToFileURL(join(sdkRoot, sdkEntry)).href);
+  const agentDir = await mkdtemp(join(root, "web-access-profile-"));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const loader = new DefaultResourceLoader({
+      cwd: agentDir, agentDir, additionalExtensionPaths: [bundle],
+      extensionsOverride: preferBundledExtensions, noContextFiles: true,
+    });
+    await loader.reload();
+    const loaded = loader.getExtensions();
+    const tools = new Set(loaded.extensions.flatMap((extension) => [...extension.tools.keys()]));
+    if (loaded.errors.length > 0 || !["web_search", "fetch_content", "get_search_content", "source_check"].every((name) => tools.has(name))) {
+      throw new Error("Installed pi-web-access did not register all four tools on a clean profile");
+    }
+    console.log("Installed pi-web-access 0.39.0: bundled path and all four tools passed on a clean profile.");
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+    await rm(agentDir, { recursive: true, force: true });
   }
 }
 

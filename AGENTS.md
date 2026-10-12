@@ -115,6 +115,14 @@ tracks `main` without a NixOS rebuild.
   dropped with a warning; point the profile at Forgerie's bundled path instead.
   Upgrade by bumping the exact version, then run `npm run verify` and the
   package smoke test.
+- Web research is built in: Forgerie bundles exact, unpatched `pi-web-access`
+  0.39.0 in every hosted session (`src/server/sessions/bundledWebAccess.ts`).
+  Its four tools are `web_search`, `fetch_content`, `get_search_content`, and
+  `source_check`. No config uses keyless Exa and `workflow: "none"` (no browser).
+  `web-search.json` in the Pi profile configures providers; Forgerie never writes
+  it. Profile copies are dropped with a warning. Other extensions lose only
+  conflicting web tools and keep their other tools. Upgrade the exact pin, then
+  run `npm run verify` and the package smoke test. See `docs/web-search.md`.
 - Durable child agents are the opt-in successor (`durableChildren`): the
   `child_agent` tool runs children inside the parent session's Durable
   storage, and the browser opens, steers, stops, and answers them without a

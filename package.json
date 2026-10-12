@@ -32,11 +32,13 @@
     "docs/deployment.md",
     "docs/session-worktrees.md",
     "docs/workflows.md",
+    "docs/web-search.md",
     "docs/fork-cleanup.md"
   ],
   "bundleDependencies": [
     "@aliou/pi-processes",
     "pi-subagents",
+    "pi-web-access",
     "@earendil-works/pi-coding-agent",
     "@router-for-me/pi-cliproxyapi-provider"
   ],
@@ -90,9 +92,10 @@
     "fastify": "^5.10.0",
     "html-to-text": "9.0.5",
     "pi-subagents": "0.76.1",
+    "pi-web-access": "0.39.0",
     "proper-lockfile": "^4.1.2",
     "typebox": "1.3.7",
-    "undici": "^8.5.0",
+    "undici": "^8.11.2",
     "ws": "^8.21.0",
     "zod": "^4.6.5"
   },
