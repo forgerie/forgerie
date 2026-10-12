@@ -32,7 +32,23 @@ describe("end_turn", () => {
     expect(() => tool.execute("end", { awaiting: "reply" }, undefined, undefined, context(["end"], before))).toThrow("no text");
     expect(declare).not.toHaveBeenCalled();
   });
-  const refusal = { type: "message", message: { role: "toolResult", toolName: "end_turn", isError: true, content: [{ type: "text", text: "The user sees no reply: this message has no text, and thinking is not shown. Write your reply as text, then call end_turn alone in the same message." }] } };
+  it("asks the corrective retry for plain text without another tool call", () => {
+    const tool = createEndTurnToolDefinition({ declare: vi.fn() });
+    expect(() => tool.execute("end", { awaiting: "reply" }, undefined, undefined, context(["end"], []))).toThrow(/plain text and call no tool/);
+  });
+  const refusalText = (() => {
+    // A silent ending throws before any promise exists.
+    try { void createEndTurnToolDefinition({ declare: vi.fn() }).execute("end", { awaiting: "nothing" }, undefined, undefined, context(["end"], [])); }
+    catch (cause) { if (cause instanceof Error) return cause.message; }
+    throw new Error("end_turn did not refuse a silent ending");
+  })();
+  const refusal = { type: "message", message: { role: "toolResult", toolName: "end_turn", isError: true, content: [{ type: "text", text: refusalText }] } };
+
+  it("counts a refusal written with the earlier wording as the spent retry", async () => {
+    const legacy = { type: "message", message: { role: "toolResult", toolName: "end_turn", isError: true, content: [{ type: "text", text: "The user sees no reply: this message has no text, and thinking is not shown. Write your reply as text, then call end_turn alone in the same message." }] } };
+    const result = await createEndTurnToolDefinition({ declare: vi.fn() }).execute("retry", { awaiting: "nothing" }, undefined, undefined, context(["retry"], [], [legacy]));
+    expect(result).toMatchObject({ isError: true, terminate: true });
+  });
 
   it("stops a second silent ending without claiming completion", async () => {
     const declare = vi.fn();

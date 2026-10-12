@@ -106,7 +106,14 @@ export function assertTerminalToolAlone(entries: readonly unknown[], toolCallId:
   if (calls.length !== 1 || calls[0]?.["id"] !== toolCallId) throw new Error("Call this turn-ending tool alone, after all other tools finish.");
 }
 
-const MISSING_REPLY_ERROR = "The user sees no reply: this message has no text, and thinking is not shown. Write your reply as text, then call end_turn alone in the same message.";
+/** Every refusal text, current and earlier, starts with this, so older transcripts keep their spent retry. */
+const MISSING_REPLY_PREFIX = "The user sees no reply:";
+/**
+ * The retry asks for text only. A model that left its answer in thinking once
+ * tends to repeat that while it still owes a tool call, so the retry removes
+ * the tool call: its text reply ends the run without a declaration.
+ */
+const MISSING_REPLY_ERROR = `${MISSING_REPLY_PREFIX} this message has no text, and thinking is not shown. Do not call end_turn again. Reply now with your full answer as plain text and call no tool. That text ends the run.`;
 
 /** Recovery is derived from the active transcript, so restart and branch navigation cannot reset it. */
 export function previousToolRefusedReply(entries: readonly unknown[], toolName: string): boolean {
@@ -120,7 +127,7 @@ export function previousToolRefusedReply(entries: readonly unknown[], toolName: 
     if (message?.["role"] !== "toolResult") continue;
     const content = message["content"];
     return message["toolName"] === toolName && message["isError"] === true && isUnknownArray(content)
-      && content.some((part) => record(part)?.["text"] === MISSING_REPLY_ERROR);
+      && content.some((part) => { const text = record(part)?.["text"]; return typeof text === "string" && text.startsWith(MISSING_REPLY_PREFIX); });
   }
   return false;
 }

@@ -109,6 +109,17 @@ describe("Hosted response declarations", () => {
     expect((await harness.service.status(harness.ref)).response).toEqual(awaiting === "reply" ? { kind: "needs-response", reason: "reply" } : { kind: "none" });
   });
 
+  it("shows the text-only reply after a silent declaration and marks the session as needing a response", async () => {
+    const harness = await hostedSession(true, () => [
+      fauxAssistantMessage([fauxToolCall("end_turn", { awaiting: "reply" }, { id: "silent" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Both problems have one cause. Which fix do you want?"),
+    ]);
+    await runPrompt(harness);
+    expect((await harness.service.status(harness.ref)).response).toEqual({ kind: "needs-response", reason: "undeclared" });
+    const visible = projectBrowserMessageResponse(await harness.service.messages(harness.ref)).messages;
+    expect(visible.at(-1)).toMatchObject({ role: "assistant", content: [{ type: "text", text: "Both problems have one cause. Which fix do you want?" }] });
+  });
+
   it("stops repeated silent declarations, exposes the errors, and keeps the response request after restart", async () => {
     const harness = await hostedSession(true, (seenTools) => Array.from({ length: 3 }, (_, index) => recordTools(seenTools,
       fauxAssistantMessage([fauxToolCall("end_turn", { awaiting: "nothing" }, { id: `silent-${String(index)}` })], { stopReason: "toolUse" }))));

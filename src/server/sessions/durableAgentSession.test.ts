@@ -81,6 +81,19 @@ describe("SDK-compatible Durable execution", () => {
     expect(provider.state.callCount).toBe(1);
     expect(session.messages.some((message) => message.role === "toolResult" && message.toolName === "end_turn")).toBe(true);
   });
+  it("ends the run with the text-only reply that follows a silent end_turn refusal", async () => {
+    const declare = vi.fn();
+    const { provider, session } = await fixture([createEndTurnToolDefinition({ declare })]);
+    provider.setResponses([
+      fauxAssistantMessage([{ type: "thinking", thinking: "The result is ready." }, fauxToolCall("end_turn", { awaiting: "reply" }, { id: "silent" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("The result is ready. Which fix do you want?"),
+    ]);
+    await session.prompt("Tell the user the result, then end the run.");
+    expect(provider.state.callCount).toBe(2);
+    expect(JSON.stringify(session.messages.find(message => message.role === "toolResult" && message.toolName === "end_turn"))).toContain("call no tool");
+    expect(session.messages.at(-1)).toMatchObject({ role: "assistant", content: [{ type: "text", text: "The result is ready. Which fix do you want?" }] });
+    expect(declare).not.toHaveBeenCalled();
+  });
   it("bounds silent end_turn retries through the production runtime without declaring completion", async () => {
     const declare = vi.fn();
     const { provider, session } = await fixture([createEndTurnToolDefinition({ declare })]);
