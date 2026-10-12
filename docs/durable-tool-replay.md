@@ -5,8 +5,8 @@ only when both its saved intent and its current registration say `safe`.
 Otherwise Durable returns an `interrupted` diagnostic to the model. Completed
 results are not rerun.
 
-Forgerie grants safety to a concrete, read-only, idempotent implementation, not
-to a name. `DurableSdkTools.refresh()` pairs each SDK factory with its decision.
+Forgerie grants safety to audited read-only implementations and Durable-native
+operations whose committed receipts make replay idempotent, not to a name. `DurableSdkTools.refresh()` pairs each SDK factory with its decision.
 SDK extensions and custom definitions have no Durable replay contract and default
 to `unsafe`. Replacing a definition removes the original implementation's safety,
 including a same-name `read` or `ls` override. Reload rebuilds those decisions.
@@ -35,10 +35,10 @@ The audit checked the installed source, not descriptions alone.
 | `end_turn` | unsafe | Records a response declaration and terminates the run. |
 | `spawn_session` | unsafe | Creates a session and delivers its first prompt. |
 | `handoff_session` | unsafe | Creates a continuation session and ends the source run. |
-| `child_agent` | unsafe | `durableChildAgents.ts`: spawn/send prepares worktrees and starts/steers children. Receipts do not make it read-only. |
-| `propose_workflow` | unsafe | `durableWorkflowRuns.ts`: persists a proposal and appends its card. |
-| `workflow_finish` | unsafe | Changes a workflow run's state. |
-| `workflow_stop` | unsafe | Changes stop state and appends a user decision card. |
+| `child_agent` | safe | `durableChildAgents.ts`: `reporters[taskId]` reuses spawn/send. `createForChild(parent, taskId)` reuses an isolated worktree even if the call stops before the child receipt commits. |
+| `propose_workflow` | safe | `durableWorkflowRuns.ts`: the proposal ID `p:${taskId}` reuses the proposal and its card atomically. |
+| `workflow_finish` | safe | The stored finished outcome/result is the receipt. Replaying the same result returns without changing state or its timestamp. A different result is refused. |
+| `workflow_stop` | safe | `stopReceipts[taskId]` commits with the stop/card. Replay returns its receipt even if the user approved or reopened the stop meanwhile. |
 | `codemode` | unsafe | SDK `extensions/codemode/tool.js`: scripts can call effectful tools, model APIs, and append entries. Safe nested reads do not make the script safe. |
 | bundled `process` | unsafe | `@aliou/pi-processes` `extensions/processes/tools/index.ts`: start/stop/stdin/update/clear effects share one tool. |
 | bundled `subagent` | unsafe | `pi-subagents` `src/extension/index.js`: delegates work and routes mutable management actions. |
@@ -87,23 +87,35 @@ changes can add more tools; they do not gain safety from a name.
 
 ## Cost and limits
 
-Read-looking tools with installation, token-minting, mixed actions, or other
-writes receive interruption rather than automatic recovery. This costs automatic
+Outside the receipt-backed native tools above, installation, token-minting,
+mixed actions, and other writes receive interruption rather than automatic recovery. This costs automatic
 progress; the model must decide whether to retry. An unsafe interruption does not
 undo effects from the first attempt. A safe read can observe newer filesystem
 content after a crash. Arbitrary extension hooks may also have effects: this
 policy certifies the selected tool implementation, not all user-supplied hooks.
 
-Crash tests use a real SQLite journal, a saved `pi.tool` execute checkpoint, and a
-new hosted session. They prove that SDK `read` reruns, while SDK `write` and a
-same-name custom `read` do not. They simulate committed crash state; they do not
-prove host power-loss durability.
+SDK crash tests use a real SQLite journal, a saved `pi.tool` execute checkpoint,
+and a new hosted session. They prove that SDK `read` reruns, while SDK `write`
+and a same-name custom `read` do not.
+
+Native replay tests pause the real invocation after it commits its effect, close
+the journal before settlement, and reopen it with the same task ID. They prove
+no additional spawn, send delivery, reporter, worktree, proposal card, stop card,
+or finish timestamp. Another test pauses before a child receipt commits and
+reuses the worktree allocation. Stop tests also apply a user's changes decision
+before replay: both a posted stop and an already-waiting call retain that decision.
+A waiting-state guard alone would ask again, so task-keyed stop receipts are
+necessary. These checks do not prove SIGKILL or host power-loss durability.
 
 ## Parent statistics
 
 `getSessionStats()` sums the parent conversation's committed `pi.usage` model
 and tool buckets. The journal initializes a synchronous read projection from
-`UsageDoc` and follows exact commit publications. Compaction, failed/aborted
+`UsageDoc` and follows exact commit publications. `DurableUsageStateSchema` is shared by
+parent and child accounting. Invalid usage snapshots/commits are reported; the
+listener keeps its last good value and never throws or prevents later listeners
+from receiving a committed frame. A failing diagnostic callback becomes a Node
+warning rather than a failed durable commit. Compaction, failed/aborted
 attempts, and spend whose messages no longer remain in context are not inferred
 from JSONL. Child conversation spend is not added. Transcript message and tool
 call counts keep their existing meaning and return shape.
@@ -117,7 +129,12 @@ Consumers checked:
   schema. The browser shows `/session` as command output, not a separate cost
   widget. Child work costs use child run ledgers and remain separate.
 
-Legacy transcript imports do not seed `pi.usage`; pre-Durable spend is not
-reconstructed by this change. Likewise, a fork's initial ledger follows Durable's
+Legacy transcript-to-ledger migration is handled separately by #43. A fork's
+initial ledger follows Durable's
 conversation-local usage semantics, not copied transcript totals. There is no
 fallback to transcript cost, which would reintroduce a second accounting source.
+
+
+Read-only landed/discarded worktree status still uses `savedTranscriptUsage()`
+in `piSessionService.ts`. Reading its ledger without resuming a session needs a
+separate non-executing storage path; this remains a follow-up.

@@ -32,7 +32,7 @@ export function workflowEntryText(kind: string, data: unknown): string {
   if (kind === WORKFLOW_PROPOSAL_KIND) return `Proposed workflow ${field("name")}: ${field("summary")}`;
   return `${field("workflow")} waits for you at ${field("stageName")}: ${field("summary")}`;
 }
-const Runs = defineDoc<{ active: string | null; records: Record<string, WorkflowRun & { requestedInputs: WorkflowInputs }>; receipts?: Record<string, boolean> }>({
+const Runs = defineDoc<{ active: string | null; records: Record<string, WorkflowRun & { requestedInputs: WorkflowInputs }>; receipts?: Record<string, boolean>; stopReceipts?: Record<string, string> }>({
   kind: WORKFLOW_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({ active: null, records: {} }),
 });
 
@@ -68,8 +68,8 @@ export function workflowExtension() {
     name: "propose_workflow",
     description: "When you understand a task that needs several workers, a review, or the user's check, design a workflow for this task, call propose_workflow, then end your turn. Not for small tasks. Never write a workflow file into the repository for a one-off workflow. Supply complete prompt-format text with workflow version 1 frontmatter and prose, and pre-fill its inputs. Only the user can start the proposal, ask for changes, or dismiss it.",
     parameters: WorkflowProposalToolSchema,
-    // Publishes or changes user-visible workflow state, so a crash must interrupt the call.
-    replay: "unsafe", executionMode: "sequential",
+    // The task-keyed proposal ID reuses the committed proposal and its card.
+    replay: "safe", executionMode: "sequential",
     execute: (args, api, context) => asTool(async () => {
       const id = `p:${String(api.taskId)}`;
       await api.commit((tx) => proposeWorkflow(tx, api.conversationId, id, args), context);
@@ -78,8 +78,8 @@ export function workflowExtension() {
   }), defineTool({
     name: "workflow_finish", description: "Explicitly finish a prose workflow run. All its child work and completion reports must settle first. An idle pause does not finish a run. A run with stops finishes as completed only after the user passes every stop.",
     parameters: Type.Object({ runId: Type.String(), outcome: WorkflowOutcomeSchema, result: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
-    // Publishes or changes user-visible workflow state, so a crash must interrupt the call.
-    replay: "unsafe", executionMode: "sequential",
+    // The stored terminal outcome is the receipt; replay with the same result is a no-op.
+    replay: "safe", executionMode: "sequential",
     execute: (args, api, context) => asTool(async () => {
       await api.commit((tx) => finishWorkflow(tx, api.conversationId, args.runId, args.outcome, args.result), context);
       return `Workflow ${args.runId} finished: ${args.outcome}.`;
@@ -92,27 +92,35 @@ export function workflowExtension() {
       stage: Type.String({ description: "The stop stage id from the route." }),
       summary: Type.String({ minLength: 1, maxLength: 4000, description: "What the user decides on, in a few sentences. Name files or branches when they matter." }),
     }, { additionalProperties: false }),
-    // Publishes or changes user-visible workflow state, so a crash must interrupt the call.
-    replay: "unsafe", executionMode: "sequential",
-    execute: (args, api, context) => asTool(() => api.commit((tx) => requestWorkflowStop(tx, api.conversationId, args.runId, args.stage, args.summary), context)),
+    // A task-keyed stop receipt prevents replay from asking again after a user decision.
+    replay: "safe", executionMode: "sequential",
+    execute: (args, api, context) => asTool(() => api.commit((tx) => requestWorkflowStop(tx, api.conversationId, args.runId, args.stage, args.summary, api.taskId), context)),
   })] });
 }
 
-export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId: string, stageId: string, summary: string): Promise<string> {
+export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId: string, stageId: string, summary: string, taskId?: TaskId): Promise<string> {
   const doc = await tx.doc(Runs, parent);
+  const key = taskId === undefined ? undefined : String(taskId);
+  const receipt = key === undefined ? undefined : doc.stopReceipts?.[key];
+  // The user may reopen/approve the stop before recovery. A waiting-state guard alone would ask again.
+  if (receipt !== undefined) return receipt;
+  const remember = (text: string): string => {
+    if (key !== undefined) doc.stopReceipts = { ...doc.stopReceipts, [key]: text };
+    return text;
+  };
   const run = doc.records[runId];
   if (run === undefined || doc.active !== runId) throw new WorkflowError(404, "No active workflow run with this id in this session");
   const stage = run.stages?.find((candidate) => candidate.id === stageId);
   const current = stopOf(run, stageId);
   // A replayed call, or a second ask for a stop already waiting, does not add another card.
-  if (stage !== undefined && current.state === "waiting") return `Already waiting for the user at "${stage.name}". End your turn.`;
+  if (stage !== undefined && current.state === "waiting") return remember(`Already waiting for the user at "${stage.name}". End your turn.`);
   await reconcileReportFailures(tx, parent, run);
   const problem = stopRequestProblem(run, stageId);
   if (problem !== undefined || stage?.stop === undefined) throw new WorkflowError(409, problem ?? "Not a stop");
   const round = current.round ?? 0;
   run.stops = { ...run.stops, [stageId]: { state: "waiting", summary, requestedAt: Date.now(), round } };
   await tx.appendEntry(parent, { kind: WORKFLOW_STOP_KIND, data: { runId, stage: stageId, stageName: stage.name, stop: stage.stop, summary, workflow: run.definition.name, round } });
-  return `Waiting for the user at "${stage.name}". End your turn now. Their decision arrives as a new message; do not start later stages until then.`;
+  return remember(`Waiting for the user at "${stage.name}". End your turn now. Their decision arrives as a new message; do not start later stages until then.`);
 }
 
 /**

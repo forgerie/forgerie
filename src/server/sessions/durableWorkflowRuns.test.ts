@@ -46,8 +46,8 @@ it("replays a proposal without another entry and commits Start's run and decisio
 });
 
 
-it("does not replay parent tools that publish cards, finish workflows, or start children", () => {
+it("declares replay safety for native tools with committed receipts", () => {
   const extensions = [workflowExtension(), ...durableChildExtensions().parent];
   const policies = Object.fromEntries(extensions.flatMap(extension => extension.tools ?? []).map(tool => [tool.name, tool.replay]));
-  expect(policies).toMatchObject({ propose_workflow: "unsafe", workflow_finish: "unsafe", workflow_stop: "unsafe", child_agent: "unsafe" });
+  expect(policies).toMatchObject({ propose_workflow: "safe", workflow_finish: "safe", workflow_stop: "safe", child_agent: "safe" });
 });

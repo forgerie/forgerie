@@ -223,8 +223,8 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
     }),
     // Tool calls serialize name allocation. Children themselves remain parallel background conversations.
     executionMode: "sequential",
-    // Spawn/send can prepare a worktree and start or steer a child. Receipts do not make these read-only.
-    replay: "unsafe",
+    // One task-keyed reporter receipt covers spawn/send; isolated worktrees use the same task key.
+    replay: "safe",
     execute: (args, api, context) => withChildAdmission(options.worktrees, async () => {
       const { action, name, message } = args;
       const before = await api.snapshot(Children, api.conversationId, context);
