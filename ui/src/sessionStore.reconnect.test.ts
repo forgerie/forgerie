@@ -33,6 +33,7 @@ async function recoveryServer() {
       response.writeHead(status, { "Content-Type": "application/json" });
       response.end(JSON.stringify(body));
     };
+    if (path === "/api/sessiond/runtime") { send({ component: "sessiond", label: "Session daemon", available: true, capabilities: ["session.prompt.requestIds"] }); return; }
     if (path.endsWith("/prompt")) { state.prompts++; send({ error: "Request outcome unknown" }, 503); return; }
     if (path === "/api/sessions/all") { send({ sessions: [{ id: "known", cwd: "/test", name: "Recovery test" }] }); return; }
     if (path.endsWith("/commands")) { send([]); return; }

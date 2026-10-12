@@ -3,9 +3,9 @@ import { effectivePiWebCapabilities, isPiWebCapability, PI_WEB_CAPABILITIES, SES
 
 describe("Forgerie capabilities", () => {
   it("advertises queued compaction only when web and sessiond both support it", () => {
-    expect(PI_WEB_CAPABILITIES).toEqual({ queuedCompaction: "session.queue.compact" });
+    expect(PI_WEB_CAPABILITIES).toEqual({ queuedCompaction: "session.queue.compact", promptRequestIds: "session.prompt.requestIds" });
     expect(WEB_RUNTIME_CAPABILITIES).toEqual(["session.queue.compact"]);
-    expect(SESSIOND_RUNTIME_CAPABILITIES).toEqual(["session.queue.compact"]);
+    expect(SESSIOND_RUNTIME_CAPABILITIES).toEqual(["session.queue.compact", "session.prompt.requestIds"]);
 
     expect(effectivePiWebCapabilities({
       web: { available: true, capabilities: ["session.queue.compact"] },
@@ -15,6 +15,13 @@ describe("Forgerie capabilities", () => {
       web: { available: true, capabilities: ["session.queue.compact"] },
       sessiond: { available: true, capabilities: [] },
     })).toEqual([]);
+  });
+
+  it("requires the daemon to advertise prompt request IDs, not the web proxy", () => {
+    expect(effectivePiWebCapabilities({ sessiond: { available: true, capabilities: [PI_WEB_CAPABILITIES.promptRequestIds] } }))
+      .toEqual([PI_WEB_CAPABILITIES.promptRequestIds]);
+    expect(effectivePiWebCapabilities({ web: { available: true, capabilities: [PI_WEB_CAPABILITIES.promptRequestIds] } })).toEqual([]);
+    expect(effectivePiWebCapabilities({ sessiond: { available: false, capabilities: [PI_WEB_CAPABILITIES.promptRequestIds] } })).toEqual([]);
   });
 
   it("keeps known capability strings when parsing runtime data", () => {

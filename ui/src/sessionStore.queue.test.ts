@@ -13,7 +13,7 @@ async function until(predicate: () => boolean) { await expect.poll(predicate, { 
 /** A Forgerie session API that queues like Pi: follow-ups and steers wait in status until the run ends. */
 async function queueServer(initial: SessionStatus) {
   const requests: { path: string; body: unknown }[] = [];
-  const state = { status: initial, seq: 0, dropAcknowledgment: false, droppedReceipts: 0 };
+  const state = { status: initial, seq: 0, dropAcknowledgment: false, droppedReceipts: 0, supportsRequestIds: true, promptFailureStatus: 0 };
   const ws = new WebSocketServer({ noServer: true });
   const http = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -22,9 +22,11 @@ async function queueServer(initial: SessionStatus) {
     const url = new URL(request.url ?? "/", "http://localhost");
     requests.push({ path: url.pathname, body });
     const send = (data: unknown, code = 200) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
-    if (url.pathname.endsWith("/messages")) send({ messages: [{ role: "user", content: "existing", timestamp: 1 }], start: 0, total: 1 });
+    if (url.pathname === "/api/sessiond/runtime") send({ component: "sessiond", label: "Session daemon", available: true, capabilities: state.supportsRequestIds ? ["session.prompt.requestIds"] : [] });
+    else if (url.pathname.endsWith("/messages")) send({ messages: [{ role: "user", content: "existing", timestamp: 1 }], start: 0, total: 1 });
     else if (url.pathname.endsWith("/stream-snapshot")) send({ seq: state.seq, partial: null });
     else if (url.pathname.endsWith("/prompt")) {
+      if (state.promptFailureStatus) { send({ error: "daemon socket failed" }, state.promptFailureStatus); return; }
       if (state.dropAcknowledgment || state.droppedReceipts > 0) { state.droppedReceipts--; response.destroy(); return; }
       send({ accepted: true });
     } else if (url.pathname.endsWith("/queue/clear")) {
@@ -62,6 +64,15 @@ async function queueServer(initial: SessionStatus) {
 }
 
 describe("sending while the session works", () => {
+  it.each([false, true])("retries a proxy 502 only when sessiond advertises request IDs: %s", async (supported) => {
+    const api = await queueServer(idle);
+    api.state.supportsRequestIds = supported;
+    api.state.promptFailureStatus = 502;
+    await expect(api.store.send("hello")).rejects.toThrow("daemon socket failed");
+    expect(api.prompts()).toHaveLength(supported ? 2 : 1);
+    if (supported) expect(api.prompts()[1]).toEqual(api.prompts()[0]);
+  });
+
   it("retries a dropped receipt with the same request ID, but gives the next send a new ID", async () => {
     const api = await queueServer(idle);
     api.state.droppedReceipts = 1;

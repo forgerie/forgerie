@@ -86,7 +86,11 @@ This result proves the checked mechanisms. It does not prove feature parity, del
 
 Browser chat sends and first prompts now allocate one opaque request ID per send.
 A transport retry reuses the serialized body and ID. It makes at most two
-attempts; other mutations are not retried. `/prompt` and
+attempts, with a 150 ms delay. The browser checks `/api/sessiond/runtime` before
+retrying and requires the daemon's `session.prompt.requestIds` capability. Missing,
+unavailable, or invalid runtime data disables automatic retries; an old daemon
+can ignore the ID without receiving a second automatic send. Other mutations
+are not retried. `/prompt` and
 `/prompt-resource-command` validate the optional ID and carry it into Durable's
 `conversation.submit`. Durable owns admitted request identity, including after
 reopen. The service holds only in-flight receipts, including when the caller's

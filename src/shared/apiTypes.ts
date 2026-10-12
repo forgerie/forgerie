@@ -10,6 +10,7 @@ export type { BacklogConfig, BacklogMetadata, BacklogProviderId, BacklogClaim, B
 /** Registry of features that require rolling-version compatibility gates. */
 export const PI_WEB_CAPABILITIES = {
   queuedCompaction: "session.queue.compact",
+  promptRequestIds: "session.prompt.requestIds",
 } as const;
 
 export type PiWebCapability = typeof PI_WEB_CAPABILITIES[keyof typeof PI_WEB_CAPABILITIES];

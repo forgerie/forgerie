@@ -9,10 +9,11 @@ const knownPiWebCapabilities: ReadonlySet<string> = new Set(KNOWN_PI_WEB_CAPABIL
 
 export const WEB_RUNTIME_CAPABILITIES = [PI_WEB_CAPABILITIES.queuedCompaction] as const satisfies readonly PiWebCapability[];
 
-export const SESSIOND_RUNTIME_CAPABILITIES = [PI_WEB_CAPABILITIES.queuedCompaction] as const satisfies readonly PiWebCapability[];
+export const SESSIOND_RUNTIME_CAPABILITIES = [PI_WEB_CAPABILITIES.queuedCompaction, PI_WEB_CAPABILITIES.promptRequestIds] as const satisfies readonly PiWebCapability[];
 
 const EFFECTIVE_CAPABILITY_REQUIREMENTS: Record<PiWebCapability, readonly PiWebServiceComponent[]> = {
   [PI_WEB_CAPABILITIES.queuedCompaction]: ["web", "sessiond"],
+  [PI_WEB_CAPABILITIES.promptRequestIds]: ["sessiond"],
 };
 
 export function isPiWebCapability(value: unknown): value is PiWebCapability {

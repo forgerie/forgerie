@@ -60,6 +60,7 @@ describe("starting a session", () => {
         send(200, { attachments: files.map((file) => ({ path: `.forgerie/attachments/${file.name}`, mimeType: file.mimeType, size: 5 })) });
         return;
       }
+      if (path === "/api/sessiond/runtime") { send(200, { component: "sessiond", label: "Session daemon", available: true, capabilities: ["session.prompt.requestIds"] }); return; }
       const outcome = path === "/api/sessions" ? behavior.start : behavior.prompt;
       if (outcome === "drop") { response.destroy(); return; }
       if (outcome !== undefined) { send(outcome, { error: path === "/api/sessions" && behavior.startError ? behavior.startError : `refused with ${outcome}` }); return; }
