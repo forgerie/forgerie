@@ -7,3 +7,6 @@
 .toggle-group-option:hover { background: var(--hover-surface); color: var(--foreground); }
 .toggle-group-option[aria-pressed="true"] { background: var(--active-surface); color: var(--foreground); }
 .toggle-group-count { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+/* As a form field: the label above, set like a text field's, and the same room before what follows. */
+.toggle-group-field { display: grid; gap: var(--space-1); min-inline-size: 0; margin-block-end: var(--space-5); }
+.toggle-group-label { color: var(--muted-foreground); font-size: var(--small-text); font-weight: 600; }

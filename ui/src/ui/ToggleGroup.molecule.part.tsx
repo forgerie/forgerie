@@ -15,3 +15,8 @@ export function ManyChoices() {
     options={[{ value: "default", label: "Default" }, { value: "no-tools", label: "No tools" }, { value: "user-only", label: "User only" },
       { value: "labeled", label: "Labeled only" }, { value: "all", label: "All" }]} />;
 }
+export function FormField() {
+  const [value, setValue] = useState("main");
+  return <ToggleGroup field label="Branch to land on" value={value} onChange={setValue}
+    options={[{ value: "main", label: "main" }, { value: "next", label: "next" }]} />;
+}

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ActionFooter } from "./ActionFooter";
+import { ReplyBox } from "./ReplyBox";
 
 export const name = "Action footer";
 export default function Decision() {
@@ -10,4 +11,9 @@ export default function Decision() {
 export function Blocked() {
   const [note, setNote] = useState("Resolve the changed files before applying.");
   return <ActionFooter note={note} actions={[{ label: "Apply", disabled: true, onPress: () => {} }, { label: "Continue working", onPress: () => setNote("Editor opened") }]} />;
+}
+export function WithInput() {
+  const [note, setNote] = useState("Say what should change. The rest stays as it is.");
+  return <ActionFooter note={note} actions={[]} input={<ReplyBox label="What should change?" placeholder="Say what to change" sendLabel="Send changes"
+    secondary={{ label: "Back", onPress: () => setNote("Back to the choices") }} onSend={async (text) => { setNote(`Sent: ${text}`); }} />} />;
 }

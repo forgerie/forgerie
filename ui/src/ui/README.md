@@ -8,7 +8,7 @@ here at its first call site, with its part and one line below.
 
 One line per component: the name in backticks, its layer, and what it decides.
 
-- `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions.
+- `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions; an input such as a reply box can take the actions' place under the reason.
 - `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays, and a refusal may offer one follow-up (such as Create) to confirm in place.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place.
@@ -26,7 +26,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `FileTree` (molecule): shows the files a change touched as a tree, marked added, changed or deleted, with single-child directories folded.
 - `FactList` (molecule): shows a few headline values from `Label: value` lines; cells share a row and wrap by container width.
 - `TreeItem` (atom): one row of an ARIA tree, indented by level, with a chevron on a branch or a toned mark on a leaf, a count, and a dot.
-- `ToggleGroup` (molecule): a few choices of one setting as quiet pressed buttons, each with an optional count and a control-sized hit area.
+- `ToggleGroup` (molecule): a few choices of one setting as quiet pressed buttons, each with an optional count and a control-sized hit area; as a form field it shows its label above them.
 - `FileTile` (atom): one file as a square: a picture fills it and any other file shows its type, the name under it, a note only for what the tile cannot show, and a corner remove.
 - `TileStrip` (molecule): one row of tiles that keeps its height and scrolls sideways, with each failure in full below.
 - `SplitButton` (molecule): an action and the one setting that changes what it does, in one chip; the second half shows the setting in effect and opens its choices, each explained, at window level.
