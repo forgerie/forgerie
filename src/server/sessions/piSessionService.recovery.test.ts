@@ -1,12 +1,16 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
+import { ExtensionRunner, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
+import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
+import { Harness, LiveDoc, createRegistry } from "@earendil-works/pi-durable";
+import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PiSessionService } from "./piSessionService.js";
 import { CapturingSessionEventHub, emptyArchiveStore } from "./piSessionService.testSupport.js";
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
+import { durableSessionPaths } from "./durableSessionJournal.js";
 
 const directories: string[] = [];
 const services: PiSessionService[] = [];
@@ -30,7 +34,7 @@ async function fixture() {
     services.push(service);
     return { service, hub };
   };
-  return { directory, provider, gateway, open };
+  return { directory, provider, gateway, models, open };
 }
 
 // Hold only this parent request. Cancellation closes the real provider call during daemon disposal.
@@ -55,6 +59,40 @@ const hasAnswer = (hub: CapturingSessionEventHub, answer: string) => hub.session
   event.type === "message.end" && JSON.stringify(event.message).includes(answer));
 
 describe("daemon-owned Durable recovery", () => {
+  it("opens and reports a missing run-input entry without losing status or subsequent events", async () => {
+    const { directory, provider, gateway, models, open } = await fixture();
+    const original = open();
+    const ref = { id: (await original.service.start(directory, { initialModel: provider.getModel() })).id, cwd: directory };
+    const entered = holdRequest(provider, "Input with missing metadata");
+    await original.service.prompt(ref, "Input with missing metadata");
+    await vi.waitFor(() => { expect(entered()).toBe(true); });
+    await original.service.dispose();
+    const stored = (await gateway.list(directory)).find((entry) => entry.id === ref.id);
+    if (stored === undefined) throw new Error("Session must persist");
+    const harness = await Harness.open(await openNodeSqliteStorage(durableSessionPaths(stored.path).database), { models, registry: createRegistry() }, context);
+    try {
+      const conversation = await harness.root(context);
+      await conversation.commit(async (tx) => {
+        const live = await tx.doc(LiveDoc, conversation.id);
+        if (live.run === undefined) throw new Error("Run must survive shutdown");
+        const input = await tx.createSubmission({ conversationId: conversation.id, type: "input", status: "unanswered", reason: "aborted" });
+        live.run.inputs = [input.id];
+      }, context);
+    } finally { await harness.close(context); }
+    const report = vi.spyOn(ExtensionRunner.prototype, "emitError");
+    try {
+      holdRequest(provider, "Input with missing metadata");
+      const restarted = open();
+      expect((await restarted.service.status(ref)).isStreaming).toBe(true);
+      expect(report.mock.calls.some(([error]) => error.error.includes("has no committed entry"))).toBe(true);
+      await restarted.service.abort(ref);
+      await vi.waitFor(() => {
+        expect(restarted.hub.sessionEvents.some(({ event }) => event.type === "agent.end")).toBe(true);
+      });
+      expect((await restarted.service.status(ref)).isStreaming).toBe(false);
+    } finally { report.mockRestore(); }
+  }, 20_000);
+
   it("recovers the committed run start immediately on attachment and keeps it in refresh snapshots", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime("2026-10-12T10:00:00.000Z");

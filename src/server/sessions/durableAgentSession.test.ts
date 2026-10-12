@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { ModelRuntime, SessionManager, createAgentSessionServices, createCodemodeExtension, defineTool } from "@earendil-works/pi-coding-agent";
 import { calculateCost } from "@earendil-works/pi-ai";
-import { AssistantEntry, ToolTask, UsageDoc } from "@earendil-works/pi-durable";
+import { AssistantEntry, LiveDoc, ToolTask, UsageDoc } from "@earendil-works/pi-durable";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { durableSessionPaths } from "./durableSessionJournal.js";
@@ -159,6 +159,34 @@ describe("SDK-compatible Durable execution", () => {
     expect(reopened.getSessionStats().tokens).toEqual(stats.tokens);
     expect(reopened.getSessionStats().cost).toBe(stats.cost);
   });
+  it("reports a run-start timestamp failure and continues watching later commits", async () => {
+    const { provider, session, errors, events } = await fixture();
+    let entered = false;
+    provider.setResponses([async (_request, options) => {
+      entered = true;
+      await new Promise<void>((resolve) => {
+        if (options?.signal?.aborted === true) resolve();
+        else options?.signal?.addEventListener("abort", () => { resolve(); }, { once: true });
+      });
+      return fauxAssistantMessage("Interrupted", { stopReason: "aborted" });
+    }]);
+    await session.journal.conversation.submit({ type: "input", content: "Held run" }, context);
+    await vi.waitFor(() => { expect(entered).toBe(true); });
+    await vi.waitFor(() => { expect(session.getActiveRunStartedAt()).toBeDefined(); });
+    await session.journal.conversation.commit(async (tx) => {
+      const live = await tx.doc(LiveDoc, session.journal.conversation.id);
+      if (live.run === undefined) throw new Error("Run must be active");
+      const input = await tx.createSubmission({ conversationId: session.journal.conversation.id, type: "input", status: "unanswered", reason: "aborted" });
+      live.run.inputs = [input.id];
+    }, context);
+    await vi.waitFor(() => { expect(errors.some((error) => error.includes("has no committed entry"))).toBe(true); });
+    expect(session.isStreaming).toBe(true);
+    expect(session.getActiveRunStartedAt()).toBeUndefined();
+    await session.journal.conversation.configure({ thinkingLevel: "low" }, context);
+    await vi.waitFor(() => { expect(events).toContainEqual(expect.objectContaining({ type: "agent_changed" })); });
+    await session.abort();
+  });
+
   it("executes the SDK read tool through Durable and saves the transcript", async () => {
     const { directory, provider, manager, session, errors } = await fixture();
     await writeFile(join(directory, "input.txt"), "journaled input");

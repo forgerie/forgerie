@@ -615,12 +615,17 @@ export class DurableAgentSession implements PiAgentSession {
       if (input !== undefined) {
         // Run inputs survive generation handovers and recovery. Steers append to them; follow-ups
         // start a new list. The first user entry is stamped at placement, not at queue admission.
-        const submission = await (await this.journal.harness.submission(input, context))?.status(context);
-        if (submission?.entry === undefined) throw new Error(`Durable run input ${String(input)} has no committed entry`);
-        const entries = await this.journal.conversation.entries({ minEntryId: submission.entry, maxEntryId: submission.entry }, 1, undefined, context);
-        const message = entries.items[0]?.model?.find((candidate) => candidate.role === "user");
-        if (message === undefined) throw new Error(`Durable run input ${String(input)} has no committed user message`);
-        this.runStartedAt = new Date(message.timestamp).toISOString();
+        try {
+          const submission = await (await this.journal.harness.submission(input, context))?.status(context);
+          if (submission?.entry === undefined) throw new Error(`Durable run input ${String(input)} has no committed entry`);
+          const entries = await this.journal.conversation.entries({ minEntryId: submission.entry, maxEntryId: submission.entry }, 1, undefined, context);
+          const message = entries.items[0]?.model?.find((candidate) => candidate.role === "user");
+          if (message === undefined) throw new Error(`Durable run input ${String(input)} has no committed user message`);
+          this.runStartedAt = new Date(message.timestamp).toISOString();
+        } catch (error) {
+          // Display-only recovery must not prevent attachment or terminate the event watch.
+          this.report(new Error(`Could not recover Durable run start for input ${String(input)}: ${String(error)}`, { cause: error }));
+        }
       }
     }
     switch (event.type) {
