@@ -134,21 +134,22 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
     if (!ready || readOnly || problems.length > 0 || save.type === "saving") return;
     setSave({ type: "saving" });
     const fileId = target.type === "new" ? fileIdFor(name) : target.file;
+    const scope = target.type === "home" ? "home" : "user";
     try {
-      const saved = await agentsApi.write(fileId, text, ready.baseMtimeMs);
+      const saved = await agentsApi.write(scope, fileId, text, ready.baseMtimeMs);
       agentDrafts.clear(key);
       setLoad({ type: "ready", value: { baseText: saved.text, baseMtimeMs: saved.mtimeMs, readOnly: false } });
       setSave({ type: "saved" });
       onSaved();
-      if (target.type !== "user") onOpen({ type: "user", file: fileId });
+      if (target.type !== scope) onOpen({ type: scope, file: fileId });
     } catch (error) {
       setSave({ type: "failed", message: error instanceof Error ? error.message : String(error), conflict: error instanceof AgentConflict });
     }
   }
   async function onDelete() {
-    if (!ready || target.type !== "user" || ready.baseMtimeMs === null) return;
+    if (!ready || (target.type !== "user" && target.type !== "home") || ready.baseMtimeMs === null) return;
     try {
-      await agentsApi.remove(target.file, ready.baseMtimeMs);
+      await agentsApi.remove(target.type, target.file, ready.baseMtimeMs);
       agentDrafts.clear(key);
       onSaved();
       onBack();
@@ -207,12 +208,12 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
       ? <button type="button" className="settings-primary" onClick={() => onOpen({ type: "customize", file: target.file })}>Customize</button>
       : <button type="button" className="settings-primary" disabled={!ready || !dirty || problems.length > 0 || save.type === "saving"}
         aria-keyshortcuts="Control+S" title="Save (Ctrl+S)" onClick={() => void onSave()}>{save.type === "saving" ? "Saving…" : "Save"}</button>}
-    {target.type === "user" || (dirty && !readOnly) ? <div className="settings-menu-anchor">
+    {target.type === "user" || target.type === "home" || (dirty && !readOnly) ? <div className="settings-menu-anchor">
       <button type="button" className="picker-icon" aria-label="More agent commands" aria-haspopup="menu" aria-expanded={menu !== "closed"}
         onClick={() => setMenu(menu === "closed" ? "open" : "closed")}><EllipsisIcon aria-hidden size={16} /></button>
       {menu !== "closed" ? <div className="picker-menu" role="menu" aria-label="Agent commands">
         {dirty && !readOnly ? <button role="menuitem" onClick={() => { setMenu("closed"); discard(); }}><XIcon aria-hidden />Discard changes</button> : null}
-        {target.type === "user" ? <button role="menuitem" data-tone="danger" onClick={() => { if (menu === "confirm") void onDelete(); else setMenu("confirm"); }}>
+        {target.type === "user" || target.type === "home" ? <button role="menuitem" data-tone="danger" onClick={() => { if (menu === "confirm") void onDelete(); else setMenu("confirm"); }}>
           <Trash2Icon aria-hidden />{menu === "confirm" ? "Delete for good?" : "Delete agent"}</button> : null}
       </div> : null}
     </div> : null}

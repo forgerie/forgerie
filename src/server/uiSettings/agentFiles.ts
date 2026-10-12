@@ -13,20 +13,25 @@ import { activeForgerieProfile, agentsInProfile, type Gateway } from "./forgerie
  * reads and writes their exact text, and pi-subagents reads them at session
  * start.
  *
- *   GET    /aui/agents                  every user and built-in agent, summarised
+ *   GET    /aui/agents                  every home, profile, and built-in agent, summarised
  *   GET    /aui/agents/<scope>/<file>   one file's exact text and its mtime
- *   PUT    /aui/agents/user/<file>      write { text, baseMtimeMs } (null base = create)
- *   DELETE /aui/agents/user/<file>?baseMtimeMs=
+ *   PUT    /aui/agents/<home|user>/<file>      write { text, baseMtimeMs } (null base = create)
+ *   DELETE /aui/agents/<home|user>/<file>?baseMtimeMs=
+ *
+ * `home` is `~/.agents`, which every Pi profile and both child runtimes read. Only its top level holds agent
+ * files; its `skills/` folder is not agents, so the home scope never reads or writes below the top level.
  */
 export const AGENTS_PREFIX = "/aui/agents";
-export type AgentScope = "user" | "builtin";
-export interface AgentDirs { user: string; builtin: string | undefined }
+export type AgentScope = "home" | "user" | "builtin";
+export interface AgentDirs { home?: string | undefined; user: string; builtin: string | undefined }
 
-/** The active profile's agents, and the built-in ones of the pi-subagents copy Forgerie ships. */
+/** `~/.agents`, the active profile's agents, and the built-in ones of the pi-subagents copy Forgerie ships. */
 export async function defaultAgentDirs(gateway: Gateway): Promise<AgentDirs> {
   const profile = await activeForgerieProfile(gateway);
-  return { user: agentsInProfile(profile), builtin: join(bundledSubagentsPackagePath(), "agents") };
+  return { home: join(homedir(), ".agents"), user: agentsInProfile(profile), builtin: join(bundledSubagentsPackagePath(), "agents") };
 }
+
+const WRITABLE: ReadonlySet<string> = new Set(["home", "user"]);
 
 const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 /** A file id is a relative path without `.md`, one or more safe segments. */
@@ -38,7 +43,7 @@ function filePath(dir: string, id: string): string {
   return path;
 }
 
-async function walk(dir: string): Promise<string[]> {
+async function walk(dir: string, deep: boolean): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true }).catch((error: unknown) => {
     if (isErrnoCode(error, "ENOENT")) return [];
     throw error;
@@ -46,7 +51,7 @@ async function walk(dir: string): Promise<string[]> {
   const files: string[] = [];
   for (const entry of entries) {
     const path = join(dir, entry.name);
-    if (entry.isDirectory() && !entry.name.startsWith(".")) files.push(...await walk(path));
+    if (deep && entry.isDirectory() && !entry.name.startsWith(".")) files.push(...await walk(path, deep));
     else if (entry.isFile() && entry.name.endsWith(".md")) files.push(path);
   }
   return files;
@@ -76,7 +81,7 @@ function summary(text: string): Record<string, string> {
 }
 
 async function list(dirs: AgentDirs) {
-  const read = async (scope: AgentScope, dir: string | undefined) => dir !== undefined && dir !== "" ? Promise.all((await walk(dir)).map(async (path) => {
+  const read = async (scope: AgentScope, dir: string | undefined) => dir !== undefined && dir !== "" ? Promise.all((await walk(dir, scope !== "home")).map(async (path) => {
     const [text, info] = await Promise.all([readFile(path, "utf8"), stat(path)]);
     const fields = summary(text);
     const file = relative(dir, path).slice(0, -".md".length).split(sep).join("/");
@@ -85,9 +90,10 @@ async function list(dirs: AgentDirs) {
       // pi-subagents refuses the whole file when it lists fallbacks.
       ...(fields["fallbackModels"] !== undefined ? { broken: "Lists fallbacks, so sessions cannot use it" } : {}) };
   })) : [];
-  const [user, builtin] = await Promise.all([read("user", dirs.user), read("builtin", dirs.builtin)]);
+  const [home, user, builtin] = await Promise.all([read("home", dirs.home), read("user", dirs.user), read("builtin", dirs.builtin)]);
   const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
-  return { home: homedir(), userDir: dirs.user, agents: [...user.sort(byName), ...builtin.sort(byName)] };
+  return { home: homedir(), ...(dirs.home === undefined ? {} : { homeDir: dirs.home }), userDir: dirs.user,
+    agents: [...home.sort(byName), ...user.sort(byName), ...builtin.sort(byName)] };
 }
 
 const putSchema = z.object({ text: z.unknown(), baseMtimeMs: z.unknown() }).partial().catch({});
@@ -111,9 +117,10 @@ async function handle(dirs: AgentDirs, request: IncomingMessage, response: Serve
   const slash = rest.indexOf("/");
   const scope = rest.slice(0, slash);
   const id = decodeURIComponent(rest.slice(slash + 1));
-  if (slash === -1 || (scope !== "user" && scope !== "builtin")) throw new HttpError(404, "No such agent scope.");
-  const dir = scope === "user" ? dirs.user : dirs.builtin;
-  if (dir === undefined) throw new HttpError(404, "Built-in agents are not available on this server.");
+  if (slash === -1 || (scope !== "home" && scope !== "user" && scope !== "builtin")) throw new HttpError(404, "No such agent scope.");
+  const dir = scope === "home" ? dirs.home : scope === "user" ? dirs.user : dirs.builtin;
+  if (dir === undefined) throw new HttpError(404, scope === "home" ? "The home agents folder is not available on this server." : "Built-in agents are not available on this server.");
+  if (scope === "home" && id.includes("/")) throw new HttpError(400, "Agent files in ~/.agents sit at its top level. Use a name without a slash.");
   const path = filePath(dir, id);
   if (request.method === "GET") {
     const mtimeMs = await mtimeOf(path);
@@ -121,7 +128,7 @@ async function handle(dirs: AgentDirs, request: IncomingMessage, response: Serve
     send(200, { scope, file: id, text: await readFile(path, "utf8"), mtimeMs });
     return;
   }
-  if (scope !== "user") throw new HttpError(403, "Built-in agents are read-only. Customize one to make your own copy.");
+  if (!WRITABLE.has(scope)) throw new HttpError(403, "Built-in agents are read-only. Customize one to make your own copy.");
   if (request.method === "PUT") {
     const input = putSchema.parse(await readJsonBody(request, { maxBytes: 1_000_000, tooLarge: "Agent files are limited to 1 MB." }));
     if (typeof input.text !== "string") throw new HttpError(400, "Send the file text.");

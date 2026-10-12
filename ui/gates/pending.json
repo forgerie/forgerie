@@ -648,7 +648,6 @@
   "ui/settings/PluginsView.tsx: \"This plugin is no longer listed. Go back to Plugins.\"",
   "ui/settings/SettingsView.tsx: \"Offered to sessions\"",
   "ui/settings/SettingsView.tsx: \"Reading agent files…\"",
-  "ui/settings/SettingsView.tsx: \"Replaced by yours\"",
   "ui/settings/SettingsView.tsx: \"You have no agents of your own yet. Create one, or open a built-in agent and customize it.\""
  ]
 }

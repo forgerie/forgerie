@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { BotIcon, ChevronLeftIcon, CpuIcon, FileTextIcon, FolderTreeIcon, PlusIcon, PuzzleIcon, XIcon } from "lucide-react";
-import { agentsApi, type AgentList, type AgentSummary } from "../../agents/agentsApi";
+import { agentsApi, replacedBy, SHARED_AGENTS, type AgentList, type AgentSummary } from "../../agents/agentsApi";
 import { agentDrafts } from "../../agents/agentDrafts";
 import { parseModelSpec, modelSpecText } from "../../agents/agentFile";
 import { draftKey, type SettingsPlace } from "../../agents/agentPlace";
@@ -46,11 +46,12 @@ const modelText = (agent: AgentSummary) => {
   return spec ? modelSpecText(spec) : "Session's model";
 };
 
-function AgentRow({ agent, replaced, onOpen }: { agent: AgentSummary; replaced: boolean; onOpen: () => void }) {
-  const unsaved = agent.scope === "user" && agentDrafts.has(draftKey({ type: "user", file: agent.file }));
+/** `replacedBy` names what replaces this agent in sessions, if anything. */
+function AgentRow({ agent, replacedBy, onOpen }: { agent: AgentSummary; replacedBy: string | undefined; onOpen: () => void }) {
+  const unsaved = agent.scope !== "builtin" && agentDrafts.has(draftKey({ type: agent.scope, file: agent.file }));
   return <SettingsRow name={agent.name} meta={modelText(agent)} description={agent.description || <em>No description</em>}
-    dimmed={replaced} onOpen={onOpen} flags={<>
-      {replaced ? <span>Replaced by yours</span> : agent.advertise ? <span data-on>Offered to sessions</span> : null}
+    dimmed={replacedBy !== undefined} onOpen={onOpen} flags={<>
+      {replacedBy !== undefined ? <span>{replacedBy}</span> : agent.advertise ? <span data-on>Offered to sessions</span> : null}
       {agent.disabled ? <span>Turned off</span> : null}
       {agent.broken ? <span data-tone="error">{agent.broken}</span> : null}
       {unsaved ? <span data-tone="draft">Unsaved changes</span> : null}
@@ -118,9 +119,10 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
   }
 
   const agents = load.type === "ready" ? load.value.agents : [];
+  const shared = agents.filter((agent) => agent.scope === "home");
   const yours = agents.filter((agent) => agent.scope === "user");
   const builtin = agents.filter((agent) => agent.scope === "builtin");
-  const yourNames = new Set(yours.map((agent) => agent.name));
+
   const add = <button type="button" className="settings-primary" onClick={() => onPlace({ section: "agents", agent: { type: "new" } })}>
     <PlusIcon aria-hidden size={14} />New agent</button>;
   return <SettingsFrame back={back} title="Agents" actions={<>{add}{close}</>}
@@ -129,16 +131,22 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
     <p className="settings-lede">A session hands work to an agent when the work matches the agent's description. Each agent runs on its own model, so a kind of work always goes to the model you chose for it. Changes apply to sessions started after you save.</p>
     {load.type === "loading" ? <p className="settings-hint" role="status">Reading agent files…</p> : null}
     {load.type === "ready" ? <>
+      {shared.length > 0 ? <section className="agent-group" aria-labelledby="agents-shared">
+        <h2 id="agents-shared" className="agent-group-label">{SHARED_AGENTS.title}</h2>
+        <ul className="agent-list">{shared.map((agent) => <AgentRow key={agent.file} agent={agent} replacedBy={replacedBy(agent, agents)}
+          onOpen={() => onPlace({ section: "agents", agent: { type: "home", file: agent.file } })} />)}</ul>
+        <p className="agent-group-where">Saved in <code>{load.value.homeDir}</code>. {SHARED_AGENTS.where}</p>
+      </section> : null}
       <section className="agent-group" aria-labelledby="agents-yours">
         <h2 id="agents-yours" className="agent-group-label">Yours</h2>
         {yours.length === 0 ? <p className="settings-hint">You have no agents of your own yet. Create one, or open a built-in agent and customize it.</p>
-          : <ul className="agent-list">{yours.map((agent) => <AgentRow key={agent.file} agent={agent} replaced={false}
+          : <ul className="agent-list">{yours.map((agent) => <AgentRow key={agent.file} agent={agent} replacedBy={replacedBy(agent, agents)}
             onOpen={() => onPlace({ section: "agents", agent: { type: "user", file: agent.file } })} />)}</ul>}
         <p className="agent-group-where">Saved in <code>{load.value.userDir}</code></p>
       </section>
       {builtin.length > 0 ? <section className="agent-group" aria-labelledby="agents-builtin">
         <h2 id="agents-builtin" className="agent-group-label">Built in</h2>
-        <ul className="agent-list">{builtin.map((agent) => <AgentRow key={agent.file} agent={agent} replaced={yourNames.has(agent.name)}
+        <ul className="agent-list">{builtin.map((agent) => <AgentRow key={agent.file} agent={agent} replacedBy={replacedBy(agent, agents)}
           onOpen={() => onPlace({ section: "agents", agent: { type: "builtin", file: agent.file } })} />)}</ul>
       </section> : null}
     </> : null}

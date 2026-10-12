@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const agentSummarySchema = z.object({
-  scope: z.enum(["user", "builtin"]),
+  scope: z.enum(["home", "user", "builtin"]),
   file: z.string(),
   name: z.string(),
   description: z.string(),
@@ -14,9 +14,25 @@ const agentSummarySchema = z.object({
 });
 export type AgentSummary = z.infer<typeof agentSummarySchema>;
 export type AgentScope = AgentSummary["scope"];
-const listSchema = z.object({ home: z.string(), userDir: z.string(), agents: z.array(agentSummarySchema) });
+/** The scopes a person can write: `home` is `~/.agents`, `user` is the profile's `agents`. */
+export type WritableAgentScope = Exclude<AgentScope, "builtin">;
+const listSchema = z.object({ home: z.string(), homeDir: z.string().optional(), userDir: z.string(), agents: z.array(agentSummarySchema) });
 export type AgentList = z.infer<typeof listSchema>;
-const fileSchema = z.object({ scope: z.enum(["user", "builtin"]), file: z.string(), text: z.string(), mtimeMs: z.number() });
+const fileSchema = z.object({ scope: z.enum(["home", "user", "builtin"]), file: z.string(), text: z.string(), mtimeMs: z.number() });
+
+/** The group of files in `~/.agents`, which every Pi profile and Pi in the terminal read. */
+export const SHARED_AGENTS = { title: "Shared with every profile", where: "Pi in the terminal reads these too." } as const;
+
+/**
+ * What replaces an agent, as sessions resolve names: `~/.agents` before the profile, both before built-in agents.
+ * Undefined when nothing does.
+ */
+export function replacedBy(agent: AgentSummary, agents: readonly AgentSummary[]): string | undefined {
+  if (agent.scope === "home") return undefined;
+  const named = (scope: AgentScope) => agents.some((other) => other.scope === scope && other.name === agent.name);
+  if (named("home")) return "Replaced by your shared agent";
+  return agent.scope === "builtin" && named("user") ? "Replaced by yours" : undefined;
+}
 
 /** A write the server refused because the file moved on. Reloading is the way out. */
 export class AgentConflict extends Error {}
@@ -36,8 +52,8 @@ export const agentsApi = {
   list: (signal?: AbortSignal) => call("/aui/agents", listSchema, signal ? { signal } : {}),
   read: (scope: AgentScope, file: string, signal?: AbortSignal) => call(path(scope, file), fileSchema, signal ? { signal } : {}),
   /** `baseMtimeMs: null` creates the file and fails if it exists. */
-  write: (file: string, text: string, baseMtimeMs: number | null) => call(path("user", file), fileSchema, {
+  write: (scope: WritableAgentScope, file: string, text: string, baseMtimeMs: number | null) => call(path(scope, file), fileSchema, {
     method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, baseMtimeMs }),
   }),
-  remove: (file: string, baseMtimeMs: number) => call(`${path("user", file)}?baseMtimeMs=${String(baseMtimeMs)}`, z.object({ deleted: z.string() }), { method: "DELETE" }),
+  remove: (scope: WritableAgentScope, file: string, baseMtimeMs: number) => call(`${path(scope, file)}?baseMtimeMs=${String(baseMtimeMs)}`, z.object({ deleted: z.string() }), { method: "DELETE" }),
 };

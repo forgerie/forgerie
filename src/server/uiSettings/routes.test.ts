@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { registerUiSettingsRoutes } from "./routes.js";
+import { defaultAgentDirs } from "./agentFiles.js";
 
 const apps: FastifyInstance[] = [];
 const roots: string[] = [];
@@ -15,8 +16,8 @@ afterEach(async () => {
 /** A Forgerie server whose own API reports `dir` as sessiond's profile and `global` as a stale config value. */
 async function settingsServer(options: { available?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "settings-http-")); roots.push(root);
-  const dir = join(root, "owned-profile"); const global = join(root, "terminal-profile");
-  await mkdir(join(dir, "agents"), { recursive: true }); await mkdir(global);
+  const dir = join(root, "owned-profile"); const global = join(root, "terminal-profile"); const home = join(root, "home", ".agents");
+  await mkdir(join(dir, "agents"), { recursive: true }); await mkdir(global); await mkdir(home, { recursive: true });
   await writeFile(join(global, "sentinel"), "unchanged");
   await writeFile(join(dir, "settings.json"), JSON.stringify({ packages: [], enabledModels: ["proxy/a"] }));
   const configPath = join(root, "config.json"); await writeFile(configPath, "{}");
@@ -25,10 +26,10 @@ async function settingsServer(options: { available?: boolean } = {}) {
   app.get("/api/config", () => ({ path: configPath, config: { agent: { dir: global } } }));
   app.get("/api/plugins", () => ({ plugins: [] }));
   const restarts: number[] = [];
-  await registerUiSettingsRoutes(app, { pluginServices: { read: () => Promise.resolve({ available: true, stamp: ["1", "1"] }), restart: () => { restarts.push(1); return Promise.resolve(); } } });
+  await registerUiSettingsRoutes(app, { agentDirs: async (gateway) => ({ ...await defaultAgentDirs(gateway), home }), pluginServices: { read: () => Promise.resolve({ available: true, stamp: ["1", "1"] }), restart: () => { restarts.push(1); return Promise.resolve(); } } });
   const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
     app.inject({ method: "POST", url, headers: { "content-type": "application/json", ...headers }, payload: JSON.stringify(body) });
-  return { app, dir, global, restarts, post };
+  return { app, dir, global, home, restarts, post };
 }
 
 describe("settings HTTP routes", () => {
@@ -51,6 +52,27 @@ describe("settings HTTP routes", () => {
     expect((await post("/aui/plugins", { revision: "stale", change: { type: "add", source: "/missing" } })).statusCode).toBe(409);
     expect((await post("/aui/plugins", { change: { type: "settings", id: "forgerie:quota", settings: [] } })).statusCode).toBe(400);
     expect((await post("/aui/plugins", "a".repeat(100_001))).statusCode).toBe(413);
+  });
+
+  it("lists, edits, and deletes the top-level agent files in ~/.agents, and never reaches below it", async () => {
+    const { app, home } = await settingsServer();
+    await writeFile(join(home, "researcher.md"), "---\nname: researcher\ndescription: Reads sources\n---\nRead.");
+    await mkdir(join(home, "skills", "research"), { recursive: true });
+    await writeFile(join(home, "skills", "research", "SKILL.md"), "---\nname: research\n---\nNot an agent.");
+    const list: { homeDir: string; agents: { scope: string; file: string; description: string }[] } = (await app.inject("/aui/agents")).json();
+    expect(list.homeDir).toBe(home);
+    expect(list.agents.filter((agent) => agent.scope === "home")).toEqual([expect.objectContaining({ file: "researcher", description: "Reads sources" })]);
+    const read: { text: string; mtimeMs: number } = (await app.inject("/aui/agents/home/researcher")).json();
+    expect(read.text).toContain("Read.");
+    const put = (url: string, body: unknown) => app.inject({ method: "PUT", url, headers: { "content-type": "application/json" }, payload: JSON.stringify(body) });
+    const saved = await put("/aui/agents/home/researcher", { text: "---\nname: researcher\n---\nRead more.", baseMtimeMs: read.mtimeMs });
+    expect(saved.statusCode).toBe(200);
+    expect(await readFile(join(home, "researcher.md"), "utf8")).toContain("Read more.");
+    expect((await app.inject("/aui/agents/home/skills%2Fresearch%2FSKILL")).statusCode).toBe(400);
+    expect((await put("/aui/agents/home/skills%2Fnew", { text: "x", baseMtimeMs: null })).statusCode).toBe(400);
+    const { mtimeMs }: { mtimeMs: number } = saved.json();
+    expect((await app.inject({ method: "DELETE", url: `/aui/agents/home/researcher?baseMtimeMs=${String(mtimeMs)}` })).statusCode).toBe(200);
+    expect(await readFile(join(home, "skills", "research", "SKILL.md"), "utf8")).toContain("Not an agent.");
   });
 
   it("tells the browser app which bundled plugins are on, with every setting resolved", async () => {
