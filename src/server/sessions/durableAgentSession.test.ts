@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { ModelRuntime, SessionManager, createAgentSessionServices, createCodemodeExtension, defineTool } from "@earendil-works/pi-coding-agent";
+import { calculateCost } from "@earendil-works/pi-ai";
+import { UsageDoc } from "@earendil-works/pi-durable";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +17,7 @@ afterEach(async () => {
   await Promise.all(sessions.splice(0).map((session) => session.close()));
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
-async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[], skillFile?: string, keepRecentTokens = 20_000) {
+async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[], skillFile?: string, keepRecentTokens = 20_000, priced = false) {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-session-"));
   directories.push(directory);
   if (skillFile !== undefined) {
@@ -23,8 +25,13 @@ async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[
     await writeFile(join(directory, "skills", "handoff", "SKILL.md"), skillFile);
   }
   const modelRuntime = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json") });
-  const provider = fauxProvider();
-  modelRuntime.registerNativeProvider(provider.provider);
+  const provider = fauxProvider({ models: [{ id: "faux-1", cost: { input: 1, output: 2, cacheRead: 0.5, cacheWrite: 1.5 } }] });
+  modelRuntime.registerNativeProvider(priced ? { ...provider.provider, streamSimple: (model, transcript, options) => {
+    const stream = provider.provider.streamSimple(model, transcript, options);
+    const result = stream.result.bind(stream);
+    stream.result = async () => { const message = await result(); calculateCost(model, message.usage); return message; };
+    return stream;
+  } } : provider.provider);
   const model = modelRuntime.getModel("faux", "faux-1");
   if (model === undefined) throw new Error("Configured provider must have a model");
   const services = await createAgentSessionServices({ cwd: directory, agentDir: join(directory, "agent"), modelRuntime,
@@ -123,6 +130,32 @@ describe("SDK-compatible Durable execution", () => {
     } finally { release(); await compacting; }
   });
 
+  it("includes compaction spend while keeping transcript message counts, including after reopen", async () => {
+    const { provider, session, manager, services } = await fixture([], false, undefined, undefined, 100, true);
+    provider.setResponses([fauxAssistantMessage("A long answer. ".repeat(400)), fauxAssistantMessage("A second answer."), fauxAssistantMessage("The summary of prior work.")]);
+    await session.prompt("Remember these details. ".repeat(400));
+    await session.prompt("What next?");
+    const before = session.getSessionStats();
+    expect(before.cost).toBeGreaterThan(0);
+    await session.compact();
+    expect(provider.state.callCount).toBe(3);
+    const ledger = await session.journal.harness.snapshot(UsageDoc, session.journal.conversation.id, context);
+    const usage = ledger?.models["faux/faux-1"];
+    if (usage === undefined) throw new Error("Compaction must record model usage");
+    expect(usage.cost.total).toBeGreaterThan(before.cost);
+    const stats = session.getSessionStats();
+    expect(stats).toMatchObject({ cost: usage.cost.total, tokens: { input: usage.input, output: usage.output,
+      cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite, total: usage.totalTokens },
+      totalMessages: session.messages.length, userMessages: session.messages.filter(message => message.role === "user").length,
+      assistantMessages: session.messages.filter(message => message.role === "assistant").length, toolCalls: 0 });
+    const file = manager.getSessionFile();
+    if (file === undefined) throw new Error("Fixture must persist");
+    await session.close();
+    const reopened = await DurableAgentSession.open({ services, sessionManager: SessionManager.open(file) });
+    sessions.push(reopened);
+    expect(reopened.getSessionStats().tokens).toEqual(stats.tokens);
+    expect(reopened.getSessionStats().cost).toBe(stats.cost);
+  });
   it("executes the SDK read tool through Durable and saves the transcript", async () => {
     const { directory, provider, manager, session, errors } = await fixture();
     await writeFile(join(directory, "input.txt"), "journaled input");
@@ -348,6 +381,20 @@ describe("SDK-compatible Durable execution", () => {
     await session.prompt("after the command");
     await vi.waitFor(() => { expect(ends(events).filter((message) => message.role === "assistant")).toHaveLength(2); });
     expect(ends(events).filter((message) => JSON.stringify(message.content).includes("marker-output"))).toEqual([]);
+  });
+  it("reads every parent ledger bucket without adding child spend or changing message counts", async () => {
+    const { session } = await fixture();
+    const usage = { input: 3, output: 5, cacheRead: 7, cacheWrite: 11, totalTokens: 26,
+      cost: { input: 0.1, output: 0.2, cacheRead: 0.3, cacheWrite: 0.4, total: 1 } };
+    await session.journal.conversation.commit(async tx => {
+      const ledger = await tx.doc(UsageDoc, session.journal.conversation.id);
+      ledger.models = { "provider/one": usage, "provider/two": usage };
+      ledger.tools = { metered: usage };
+    }, context);
+    const child = await session.journal.harness.createConversation({ ownership: { kind: "ownerless" } }, context);
+    await child.commit(async tx => { (await tx.doc(UsageDoc, child.id)).models = { "provider/child": usage }; }, context);
+    expect(session.getSessionStats()).toEqual({ sessionId: session.sessionId, totalMessages: 0, userMessages: 0, assistantMessages: 0,
+      toolCalls: 0, tokens: { input: 9, output: 15, cacheRead: 21, cacheWrite: 33, total: 78 }, cost: 3 });
   });
   it("does not grant replay safety to an extension that overrides read", async () => {
     const override = defineTool({ name: "read", label: "Effect", description: "A custom read with a write", parameters: Type.Object({}),

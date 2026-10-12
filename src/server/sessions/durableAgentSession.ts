@@ -532,9 +532,11 @@ export class DurableAgentSession implements PiAgentSession {
     const messages = this.messages;
     const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
     let cost = 0;
-    for (const message of messages) if (message.role === "assistant") {
-      tokens.input += message.usage.input; tokens.output += message.usage.output; tokens.cacheRead += message.usage.cacheRead; tokens.cacheWrite += message.usage.cacheWrite;
-      tokens.total += message.usage.totalTokens; cost += message.usage.cost.total;
+    // Compaction and failed/aborted attempts need not have transcript messages. pi.usage owns spend.
+    const usage = this.journal.usage;
+    for (const value of [...Object.values(usage.models), ...Object.values(usage.tools)]) {
+      tokens.input += value.input; tokens.output += value.output; tokens.cacheRead += value.cacheRead; tokens.cacheWrite += value.cacheWrite;
+      tokens.total += value.totalTokens; cost += value.cost.total;
     }
     return { sessionId: this.sessionId, totalMessages: messages.length, userMessages: messages.filter((message) => message.role === "user").length,
       assistantMessages: messages.filter((message) => message.role === "assistant").length,

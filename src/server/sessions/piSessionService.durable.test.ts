@@ -6,6 +6,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { calculateCost } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionUiEvent } from "../types.js";
@@ -71,8 +72,13 @@ describe("Forgerie default Durable runtime", () => {
     const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-service-"));
     const agentDir = join(directory, "agent");
     const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-    const provider = fauxProvider();
-    models.registerNativeProvider(provider.provider);
+    const provider = fauxProvider({ models: [{ id: "faux-1", cost: { input: 1000, output: 2000, cacheRead: 500, cacheWrite: 1500 } }] });
+    models.registerNativeProvider({ ...provider.provider, streamSimple: (model, transcript, options) => {
+      const stream = provider.provider.streamSimple(model, transcript, options);
+      const result = stream.result.bind(stream);
+      stream.result = async () => { const message = await result(); calculateCost(model, message.usage); return message; };
+      return stream;
+    } });
     // Title generation shares this provider with the parent. Both paths use configured responses.
     provider.setResponses([fauxAssistantMessage("durable service answer"), fauxAssistantMessage("durable service answer"), fauxAssistantMessage("durable service answer")]);
     const hub = new CompletionSessionEventHub();
@@ -112,6 +118,16 @@ describe("Forgerie default Durable runtime", () => {
       expect(hub.sessionEvents.filter(({ event }) => event.type === "agent.start")).toHaveLength(1);
       expect(hub.sessionEvents.filter(({ event }) => event.type === "message.append")).toHaveLength(1);
       expect((await service.messages(ref)).messages.filter((message) => typeof message === "object" && message !== null && "role" in message && message.role === "user")).toHaveLength(1);
+      expect(provider.state.callCount).toBeGreaterThanOrEqual(1);
+      const status = await service.status(ref);
+      expect(status.isStreaming).toBe(false);
+      expect(status.cost).toBeGreaterThan(0);
+      expect(status.tokens.total).toBeGreaterThan(0);
+      const command = await service.runCommand(ref, "/session");
+      expect(command.type).toBe("done");
+      if (command.type !== "done") throw new Error("Session statistics command must complete");
+      expect(command.message).toContain(`Tokens: ↑${String(status.tokens.input)} ↓${String(status.tokens.output)} total ${String(status.tokens.total)}`);
+      expect(command.message).toContain(`Cost: $${status.cost.toFixed(4)}`);
       const listed = await gateway.list(directory);
       const stored = listed.find((entry) => entry.id === session.id);
       if (stored === undefined) throw new Error("Native session must remain discoverable");

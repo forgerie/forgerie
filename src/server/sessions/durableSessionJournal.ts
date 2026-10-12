@@ -5,10 +5,12 @@ import { dirname, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models, Message } from "@earendil-works/pi-ai";
 import { convertToLlm, type SessionManager } from "@earendil-works/pi-coding-agent";
-import { Harness, defineDoc, type AgentChange, type Conversation, type Cursor, type EntryRecord, type Harness as DurableHarness, type HarnessOptions, type HarnessSettings, type Registry, type Storage, type SubmissionRecord, type UserInput } from "@earendil-works/pi-durable";
+import { Harness, UsageDoc, defineDoc, type UsageState, type AgentChange, type Conversation, type Cursor, type EntryRecord, type Harness as DurableHarness, type HarnessOptions, type HarnessSettings, type Registry, type Storage, type SubmissionRecord, type UserInput } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { MemoryStorage } from "@earendil-works/pi-durable/storage/memory";
 import { acquireDurableOwnership, type DurableOwnership } from "./durableOwnership.js";
+import { Check } from "typebox/value";
+import { ChildRunUsageStateSchema } from "../../shared/childRuns.js";
 import { durableJson } from "./durableJson.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 
@@ -55,6 +57,10 @@ export class DurableSessionJournal {
   private scanned: EntryRecord["id"] | undefined;
   private readonly customInputEntries = new Set<EntryRecord["id"]>();
   private readonly unsubscribe: () => void;
+  private usageValue: UsageState = { models: {}, tools: {} };
+
+  /** Synchronous readers see only the latest committed parent ledger, never child spend. */
+  get usage(): Readonly<UsageState> { return this.usageValue; }
 
   private constructor(
     harness: DurableHarness,
@@ -66,7 +72,13 @@ export class DurableSessionJournal {
     this.conversation = conversation;
     this.ownerSessionId = manager.getSessionId();
     this.unsubscribe = harness.subscribeCommits((publication) => {
-      for (const change of publication.changes) if (change.type === "submission") this.noteCustomInput(change.value);
+      for (const change of publication.changes) {
+        if (change.type === "submission") this.noteCustomInput(change.value);
+        if (change.type === "document" && change.conversationId === conversation.id && change.record.kind === "pi.usage") {
+          if (!Check(ChildRunUsageStateSchema, change.value)) throw new Error("Invalid parent pi.usage document");
+          this.usageValue = change.value;
+        }
+      }
     });
     for (const entry of manager.getEntries()) {
       // Projected child entries carry their stamp in details.
@@ -129,6 +141,7 @@ export class DurableSessionJournal {
         imported.complete = true;
       }, BACKGROUND_CONTEXT);
       const journal = new DurableSessionJournal(harness, conversation, options.manager, ownership);
+      journal.usageValue = await harness.snapshot(UsageDoc, conversation.id, BACKGROUND_CONTEXT) ?? { models: {}, tools: {} };
       // Submission identity survives restart; content matching would hide genuine user messages with the same text.
       let cursor: Cursor | undefined;
       do {
