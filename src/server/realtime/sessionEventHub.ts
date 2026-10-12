@@ -17,6 +17,7 @@ const DURABLE_SOCKET_SEND_TIMEOUT_MS = 10_000;
 
 export class SessionEventHub {
   private readonly socketsBySession = new Map<string, Set<RealtimeSocket>>();
+  private readonly nativeSockets = new WeakSet<RealtimeSocket>();
   private readonly globalSockets = new Set<RealtimeSocket>();
   private readonly seqBySession = new Map<string, number>();
 
@@ -30,6 +31,11 @@ export class SessionEventHub {
     socket.on("close", () => {
       sockets.delete(socket);
     });
+  }
+
+  addDurable(sessionId: string, socket: RealtimeSocket): void {
+    this.nativeSockets.add(socket);
+    this.add(sessionId, socket);
   }
 
   addGlobal(socket: RealtimeSocket): void {
@@ -67,7 +73,7 @@ export class SessionEventHub {
     const seq = (this.seqBySession.get(sessionId) ?? 0) + 1;
     this.seqBySession.set(sessionId, seq);
     const payload = JSON.stringify({ ...projectBrowserSessionEvent(event), seq });
-    this.sendToSockets(this.socketsBySession.get(sessionId), payload);
+    this.sendToSockets(this.socketsBySession.get(sessionId), payload, event.type.startsWith("shell.") || event.type === "command.output" || event.type.startsWith("dialog.") || event.type === "session.error");
   }
 
   /**
@@ -94,11 +100,16 @@ export class SessionEventHub {
     this.sendToSockets(this.globalSockets, payload);
   }
 
-  private sendToSockets(sockets: Set<RealtimeSocket> | undefined, payload: string): void {
+  private sendToSockets(sockets: Set<RealtimeSocket> | undefined, payload: string, nativeAllowed = true): void {
     if (sockets === undefined) return;
     for (const socket of sockets) {
-      if (socket.readyState !== socket.OPEN) continue;
+      if (socket.readyState !== socket.OPEN || this.nativeSockets.has(socket) && !nativeAllowed) continue;
       try {
+        // Ephemeral shell/dialog events share the same bounded socket, but never become
+        // a second transcript authority. Their producer does not have a Durable watch.
+        if (this.nativeSockets.has(socket) && ((socket.bufferedAmount ?? DURABLE_SOCKET_MAX_BYTES) + Buffer.byteLength(payload) > DURABLE_SOCKET_MAX_BYTES)) {
+          socket.terminate(); sockets.delete(socket); continue;
+        }
         socket.send(payload);
       } catch {
         sockets.delete(socket);

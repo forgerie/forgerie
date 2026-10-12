@@ -1,6 +1,6 @@
 import type { ReadTracker } from "./readReceipt";
 import { z } from "zod";
-import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, dialogCloseResponseSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, modelsResponseSchema, parseEvent, snapshotSchema, statusSchema, thinkingLevelsResponseSchema, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
+import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, dialogCloseResponseSchema, durableBrowserSnapshotSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, modelsResponseSchema, parseEvent, snapshotSchema, statusSchema, thinkingLevelsResponseSchema, type DurableBrowserSnapshot, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
 import { deliverPrompt, promptDelivery } from "./promptDelivery";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
 import { carryUnsavedShellRows, fromHistory, hasRunningShell, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
@@ -41,6 +41,8 @@ export interface SessionState {
 export interface SessionTransport {
   request: (path: string, init: RequestInit) => Promise<Response>;
   connect: (path: string) => WebSocket;
+  /** Enable only after the daemon composes native locators and parent app-document watches. */
+  nativeReadModel?: boolean;
   watchRecovery?: (recover: () => void) => () => void;
 }
 export const browserTransport: SessionTransport = {
@@ -81,6 +83,8 @@ interface Join {
   operationBuffered: OperationEvent[];
   seeding: boolean;
   seq: number;
+  nativeSnapshot?: DurableBrowserSnapshot;
+  nativeReady?: () => void;
 }
 class ReadFailure extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -237,6 +241,33 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (current(attempt)) recover();
     }
   }
+  function withNativeSnapshot(previous: SessionState, frame: DurableBrowserSnapshot): SessionState {
+    const running = frame.isStreaming || frame.isCompacting;
+    const seed = seedTranscript(frame.history.messages, frame.partial, -1, running, [], previous.status?.isBashRunning);
+    // The normalizer records the raw source position. Replace timestamp keys with the
+    // journal's stable presentation IDs before reconciling disclosures, including equal timestamps.
+    let transcript: Transcript = { ...seed, messages: seed.messages.map((message) => {
+      const source = message.position === undefined ? undefined : frame.history.messages[message.position];
+      return source?.id === undefined ? message : { ...message, key: source.id };
+    }) };
+    for (const tool of frame.tools) {
+      if (tool.status === "done") continue; // Completed results are already in committed history.
+      transcript = reduceEvent(transcript, { type: "tool.start", toolCallId: tool.toolCallId, toolName: tool.toolName, args: undefined });
+      transcript = reduceEvent(transcript, { type: "tool.update", toolCallId: tool.toolCallId, toolName: tool.toolName, text: tool.output });
+    }
+    // Shell output is not transcript authority yet. Keep it through replacements while it runs.
+    const oldRunning = previous.transcript.messages.filter((message) => message.role === "shell" && message.parts.some((part) => part.type === "shell" && part.run.result.type === "running"));
+    const carried = carryUnsavedShellRows(previous.transcript, transcript);
+    const ids = new Set(carried.messages.map((message) => message.id));
+    const merged = { ...carried, messages: [...carried.messages, ...oldRunning.filter((message) => !ids.has(message.id))] };
+    const status: SessionStatus = { ...(previous.status ?? { isBashRunning: false }), isStreaming: frame.isStreaming, isCompacting: frame.isCompacting,
+      queuedMessages: frame.queuedMessages, ...(frame.app === undefined ? {} : { pendingAsk: frame.app.pendingAsk }) };
+    const next = withStatus({ ...previous, transcript: reconcileTranscriptIdentity(previous.transcript, merged),
+      ask: frame.app === undefined ? previous.ask : resyncAsk(previous.ask, frame.app.pendingAsk),
+      ...(previous.session === undefined || frame.app === undefined ? {} : { session: { ...previous.session, name: frame.app.sessionName } }) }, status);
+    return next;
+  }
+
   async function connect() {
     if (lifetime.signal.aborted) return;
     const attempt: Join = { controller: new AbortController(), buffered: [], askBuffered: [], operationBuffered: [], seeding: true, seq: -1 };
@@ -251,7 +282,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         if (!session) { stop(new Error(`Session ${id} was not found. Check the session ID in the URL.`)); return; }
         update({ ...state, session });
       }
-      const socket = transport.connect(`${root}/events`);
+      const socket = transport.connect(`${root}/events${transport.nativeReadModel ? `?${new URLSearchParams({ cwd: session.cwd, native: "1" })}` : ""}`);
       attempt.socket = socket;
       // Decode synchronously: the proxy forwards binary frames and Blob awaits
       // can reorder deltas and completed messages.
@@ -263,10 +294,21 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
             : event.data instanceof ArrayBuffer ? new TextDecoder().decode(event.data) : undefined;
           if (payload === undefined) throw new Error("Unsupported WebSocket payload.");
           const raw: unknown = JSON.parse(payload);
+          if (typeof raw === "object" && raw !== null && "type" in raw && raw.type === "session.snapshot") {
+            const frame = durableBrowserSnapshotSchema.parse(raw);
+            const old = attempt.nativeSnapshot;
+            if (old !== undefined && frame.epoch !== old.epoch) throw new Error("Native connection epoch changed; reconnect to resync.");
+            if (old !== undefined && frame.revision <= old.revision) return;
+            attempt.nativeSnapshot = frame;
+            if (attempt.seeding) attempt.nativeReady?.();
+            else update(withNativeSnapshot(state, frame));
+            return;
+          }
           if (onPiEvent && typeof raw === "object" && raw !== null && "type" in raw && raw.type === "pi.event"
             && "eventType" in raw && typeof raw.eventType === "string") onPiEvent(raw.eventType);
           const parsed = parseEvent(raw);
           if (!parsed || parsed.seq !== undefined && parsed.seq <= attempt.seq) return;
+          if (transport.nativeReadModel && parsed.type !== "command.output" && parsed.type !== "session.error" && !parsed.type.startsWith("shell.")) return;
           if (parsed.seq !== undefined) attempt.seq = parsed.seq;
           if (isAskEvent(parsed)) {
             if (attempt.seeding) attempt.askBuffered.push(parsed);
@@ -298,6 +340,27 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       // Capture the read boundary BEFORE loading history. Never acknowledge a newer unseen completion.
       const receipt = await reads?.capture(session, attempt.controller.signal).catch((error: unknown) => { if (!attempt.controller.signal.aborted) console.warn("Could not capture the read boundary.", error); return undefined; });
       if (!current(attempt)) return;
+      if (transport.nativeReadModel) {
+        await new Promise<void>((resolve, reject) => {
+          if (attempt.nativeSnapshot !== undefined) { resolve(); return; }
+          const finish = () => { clearTimeout(timer); attempt.controller.signal.removeEventListener("abort", abort); attempt.nativeReady = undefined; resolve(); };
+          const abort = () => { clearTimeout(timer); attempt.nativeReady = undefined; reject(new Error("Native connection attempt ended.")); };
+          const timer = setTimeout(() => { attempt.nativeReady = undefined; reject(new Error("Native Durable seed timed out.")); }, timing.openTimeoutMs ?? 15_000);
+          attempt.nativeReady = finish;
+          attempt.controller.signal.addEventListener("abort", abort, { once: true });
+        });
+        if (!current(attempt) || attempt.nativeSnapshot === undefined) return;
+        let joined = withNativeSnapshot(state, attempt.nativeSnapshot);
+        // Only unsaved shell/control output is replayed. SDK transcript and ask events are not authority.
+        for (const event of attempt.buffered) if (event.type.startsWith("shell.")) joined = { ...joined, transcript: reduceEvent(joined.transcript, event) };
+        for (const event of attempt.operationBuffered) if (event.type === "command.output") joined = withOperation(joined, event);
+        attempt.seeding = false; attempt.buffered.length = 0; attempt.askBuffered.length = 0; attempt.operationBuffered.length = 0;
+        retryDelay = initialDelay; attempts = 0;
+        update({ ...joined, connection: { type: "ready" }, lastReadyAt: now() });
+        if (receipt && reads) void reads.acknowledge(receipt, attempt.controller.signal).catch((error: unknown) => { if (!attempt.controller.signal.aborted) console.warn("Could not mark the visible session read.", error); });
+        void loadCommands();
+        return;
+      }
       const history = await read(readPath("messages", session), historySchema);
       if (!current(attempt)) return;
       const snapshot = await read(readPath("stream-snapshot", session), snapshotSchema);

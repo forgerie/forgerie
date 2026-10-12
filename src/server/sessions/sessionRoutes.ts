@@ -581,6 +581,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
       try {
         if (request.query.cwd === undefined || sessions.attachDurableBrowser === undefined) throw new Error("Native Durable events require cwd and a configured reader");
         const ref = { id: request.params.sessionId, cwd: normalizeRequestCwd(request.query.cwd) };
+        eventHub.addDurable(request.params.sessionId, socket);
         void sessions.attachDurableBrowser(ref, (snapshot) => eventHub.sendDurableSnapshot(socket, snapshot), fail).then(async (attached) => {
           attachment = attached;
           if (closed) await attached.stop();

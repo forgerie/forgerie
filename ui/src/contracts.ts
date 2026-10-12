@@ -1,4 +1,7 @@
 import { z } from "zod";
+// This shared module is the sole schema source for native replacement frames.
+export { durableBrowserSnapshotSchema } from "@shared/durableBrowserSnapshot";
+export type { DurableBrowserSnapshot } from "@shared/durableBrowserSnapshot";
 import { worktreeInfoSchema } from "./worktrees/worktreeApi";
 
 // Only the consumed fields are specified. Pi's other parts remain server-owned.
@@ -16,6 +19,7 @@ export type SessionModel = z.infer<typeof sessionModelSchema>;
 export const modelsResponseSchema = z.object({ models: z.array(sessionModelSchema) });
 export const thinkingLevelsResponseSchema = z.object({ levels: z.array(z.string()) });
 export const piMessageSchema = z.object({
+  id: z.string().optional(),
   role: z.string(),
   content: z.union([z.string(), z.array(z.unknown())]).optional(),
   timestamp: z.number().optional(),
