@@ -34,6 +34,8 @@ import { Check } from "typebox/value";
 import { BACKGROUND_CONTEXT as durableContext } from "@earendil-works/chord/context";
 import { durableJson } from "./durableJson.js";
 import { DurableAgentSession } from "./durableAgentSession.js";
+import { readSessionBindings } from "./durableSessionBindings.js";
+import type { Harness, ConversationId } from "@earendil-works/pi-durable";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import type { DurableChildHost } from "./durableChildHost.js";
 import { recoverDurableSessions, type DurableRecoveryReport } from "./durableSessionRecovery.js";
@@ -855,6 +857,7 @@ function createDefaultRuntimeFactory(
   projectTools?: ProjectToolDeps,
   durableChildAgents?: DurableChildHost,
   workspaceServices?: WorkspaceServices,
+  beforeResume?: (session: DurableAgentSession) => Promise<boolean>,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
     const processBridgeSlot = createProcessBridgeSlot();
@@ -900,6 +903,7 @@ function createDefaultRuntimeFactory(
     }, projectTools, workspaceServices);
     const session = await DurableAgentSession.open({
       ...(handle === undefined ? {} : { handle }),
+      ...(beforeResume === undefined ? {} : { beforeResume }),
       services,
       sessionManager,
       customTools,
@@ -1103,6 +1107,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly pullRequestWatches: PiSessionServiceDependencies["pullRequestWatches"];
   private readonly sessionManager: PiSessionManagerGateway;
   private readonly durableReader: DurableSessionReader | undefined;
+  private readonly preparingFamilies = new WeakMap<Harness, Promise<void>>();
   private readonly sessionWorktrees: SessionWorktrees | undefined;
   private readonly createRuntime: PiWebCreateAgentSessionRuntimeFactory;
   private readonly createAgentRuntime: CreateAgentRuntime;
@@ -1183,6 +1188,7 @@ export class PiSessionService implements SessionRouteService {
       deps.projectTools,
       deps.durableChildAgents,
       deps.workspaceServices,
+      (session) => this.prepareDurableFamily(session),
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;
@@ -2075,6 +2081,44 @@ export class PiSessionService implements SessionRouteService {
     return model;
   }
 
+  private async prepareDurableFamily(session: DurableAgentSession): Promise<boolean> {
+    const harness = session.journal.harness;
+    const pending = this.preparingFamilies.get(harness);
+    if (pending !== undefined) {
+      // A sibling bind is nested under the first parent's preparation. It must return without
+      // resuming; the outer bind waits for every sibling, then resumes the family once.
+      if (this.startupSessions.get(session.sessionId) === session) return false;
+      await pending;
+      return true;
+    }
+    const preparation = Promise.resolve().then(async () => {
+      const inspection = await harness.inspect(durableContext);
+      const bindings = await readSessionBindings(harness, durableContext);
+      const required = new Set<number>();
+      const ids = [...inspection.tasks.map((task) => task.record.conversationId), ...inspection.submissions.map((submission) => submission.conversationId)];
+      await harness.commit(async (tx) => {
+        for (const id of ids) {
+          let current = id;
+          const seen = new Set<ConversationId>();
+          while (!seen.has(current)) {
+            seen.add(current);
+            const record = await tx.conversation(current);
+            if (record === undefined) throw new Error("Pending work has no conversation");
+            if (record.owner === undefined) { required.add(current); break; }
+            current = record.owner.conversationId;
+          }
+        }
+      }, durableContext);
+      for (const [id, binding] of Object.entries(bindings.sessions)) {
+        if (id === session.sessionId || !binding.retained.some((conversationId) => required.has(conversationId))) continue;
+        await this.getOrOpen({ id, cwd: session.sessionManager.getCwd() });
+      }
+    });
+    this.preparingFamilies.set(harness, preparation);
+    try { await preparation; return true; }
+    finally { this.preparingFamilies.delete(harness); }
+  }
+
   private responseSession(sessionId: string): PiAgentSession {
     const session = this.active.get(sessionId)?.runtime.session ?? this.startupSessions.get(sessionId);
     if (session === undefined) throw new Error(`Session ${sessionId} has no runtime for a transcript mutation`);
@@ -2147,6 +2191,7 @@ export class PiSessionService implements SessionRouteService {
     // Checked before the store closes the ask so a refused delivery cannot
     // discard answers the user already submitted.
     this.assertTreeNavigationInactive(session, "answer questions");
+    if (session instanceof DurableAgentSession) await this.prepareDurableFamily(session);
     const result = session instanceof DurableAgentSession ? await session.parentState.submitAsk(askId, submission, durableContext)
       : this.sessionAsks.submit(session.sessionId, askId, submission);
     if (session instanceof DurableAgentSession) await session.refreshParentAppState();
@@ -2163,6 +2208,7 @@ export class PiSessionService implements SessionRouteService {
     const session = await this.getOrOpen(ref);
     this.assertHandoffDestinationAcceptsInput(session);
     this.assertTreeNavigationInactive(session, "dismiss questions");
+    if (session instanceof DurableAgentSession) await this.prepareDurableFamily(session);
     const result = session instanceof DurableAgentSession ? await session.parentState.cancelAsk(askId, durableContext)
       : this.sessionAsks.cancel(session.sessionId, askId);
     if (session instanceof DurableAgentSession) await session.refreshParentAppState();
@@ -2203,6 +2249,7 @@ export class PiSessionService implements SessionRouteService {
           await session.parentState.appendCustomEntry(SESSION_RESPONSE_CUSTOM_TYPE, durableJson({ version: 1, kind: "answered", outcome }), durableContext);
         }
         await session.flushDurableMutations();
+        await this.prepareDurableFamily(session);
         session.journal.harness.resume();
         return;
       }

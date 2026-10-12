@@ -123,6 +123,31 @@ describe("daemon-owned Durable recovery", () => {
     expect(await activity(restarted.service)).toMatchObject({ activeSince: start });
   }, 20_000);
 
+  it("opens a pending sibling's adapter before resuming the shared family after restart", async () => {
+    const { directory, provider, open } = await fixture();
+    provider.setResponses(Array.from({ length: 8 }, () => fauxAssistantMessage("seed answer")));
+    const original = open();
+    const parent = { id: (await original.service.start(directory, { initialModel: provider.getModel() })).id, cwd: directory };
+    await original.service.prompt(parent, "seed family");
+    await vi.waitFor(() => { expect(hasAnswer(original.hub, "seed answer")).toBe(true); });
+    const clone = await original.service.runCommand(parent, "/clone pending sibling");
+    if (clone.type !== "done" || clone.session === undefined) throw new Error(`Clone failed: ${JSON.stringify(clone)}`);
+    const sibling = { id: clone.session.id, cwd: directory };
+    const entered = holdRequest(provider, "unfinished sibling");
+    await original.service.prompt(sibling, "unfinished sibling");
+    await vi.waitFor(() => { expect(entered()).toBe(true); });
+    await original.service.dispose();
+    provider.setResponses(Array.from({ length: 8 }, () => fauxAssistantMessage("recovered sibling answer")));
+    const restarted = open();
+    // Only open the idle parent. Its resume must bind the interrupted sibling first.
+    await restarted.service.status(parent);
+    await vi.waitFor(() => { expect(hasAnswer(restarted.hub, "recovered sibling answer")).toBe(true); });
+    expect(restarted.service.activeCount()).toBe(2);
+    expect(restarted.hub.sessionEvents.filter(({ sessionId, event }) => sessionId === sibling.id && event.type === "session.error")).toEqual([]);
+    const messages = (await restarted.service.messages(sibling)).messages;
+    expect(messages.filter((message) => typeof message === "object" && message !== null && "role" in message && message.role === "user" && "content" in message && message.content === "unfinished sibling")).toHaveLength(1);
+  }, 20_000);
+
   it("keeps the run start through tools and steering, then uses follow-up placement time for the next run", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime("2026-10-12T11:00:00.000Z");

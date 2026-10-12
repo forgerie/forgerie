@@ -44,6 +44,8 @@ export interface DurableAgentSessionOptions {
   sessionStartEvent?: SessionStartEvent;
   /** Durable-native child agents. Omitted: the session has no child_agent tool. */
   childAgents?: DurableChildHost;
+  /** Family resumption must bind every pending logical parent, not only this adapter. */
+  beforeResume?: (session: DurableAgentSession) => Promise<boolean>;
 }
 
 /** SDK resources and extension hooks around a Durable execution engine. No AgentSession is constructed. */
@@ -479,7 +481,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
 
   subscribe(listener: (event: unknown) => void): () => void {
     this.listeners.add(listener);
-    if (this.bound) this.journal.harness.resume();
+    if (this.bound) void this.resumeFamily().catch((error: unknown) => { this.report(error); });
     return () => { this.listeners.delete(listener); };
   }
   private emit(event: unknown): void { for (const listener of this.listeners) listener(event); }
@@ -490,7 +492,12 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (bindings.onError !== undefined) this.extensionRunner.onError(bindings.onError);
     await this.extensionRunner.emit(this.options.sessionStartEvent ?? { type: "session_start", reason: "startup" });
     this.bound = true;
-    if (this.listeners.size > 0) this.journal.harness.resume();
+    if (this.listeners.size > 0) await this.resumeFamily();
+  }
+
+  private async resumeFamily(): Promise<void> {
+    const ready = await this.options.beforeResume?.(this);
+    if (!this.closed && ready !== false) this.journal.harness.resume();
   }
 
   private bindCore(): void {
