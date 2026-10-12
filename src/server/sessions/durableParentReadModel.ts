@@ -94,7 +94,7 @@ export class DurableParentReadModel {
     onFailure: (error: Error) => void,
     context: Context,
   ): Promise<DurableBrowserAttachment> {
-    const watch = await this.options.handle.conversation.watch(context);
+    let watch = await this.options.handle.conversation.watch(context);
     let appWatch: WatchHandle<DurableBrowserAppState> | undefined;
     try { appWatch = await this.options.appWatch?.(context); }
     catch (error) { await watch.stop(); throw error; }
@@ -112,24 +112,58 @@ export class DurableParentReadModel {
       });
       return line;
     };
-    try {
-      // Both watches are attached before publishing. Changes during the seed remain buffered.
-      await publish();
-      watch.start(async (value) => { current = value; await publish(); });
-      appWatch?.start(async (value) => { app = value; await publish(); });
-    } catch (error) {
-      await Promise.all([watch.stop(), appWatch?.stop()]);
-      throw error;
-    }
-    const stop = async () => { stopped = true; await Promise.all([watch.stop(), appWatch?.stop()]); };
-    const closed = Promise.race(appWatch === undefined ? [watch.closed] : [watch.closed, appWatch.closed]).then(async (end) => {
+    const isStopped = () => stopped;
+    let stopping: Promise<void> | undefined;
+    const stop = () => {
+      stopped = true;
+      stopping ??= Promise.all([watch.stop(), appWatch?.stop()]).then(() => undefined);
+      return stopping;
+    };
+    let resolveClosed!: (end: WatchEnd) => void;
+    const closed = new Promise<WatchEnd>((resolve) => { resolveClosed = resolve; });
+    const finish = async (end: WatchEnd) => {
       if (!stopped) {
         if (end.reason === "listener_error") onFailure(end.error);
         else if (end.reason !== "stopped" && end.reason !== "cancelled") onFailure(new Error(`Durable browser watch ended: ${end.reason}`));
       }
       await stop();
-      return end;
-    });
+      resolveClosed(end);
+    };
+    const observe = (observed: typeof watch) => {
+      void observed.closed.then(async (end) => { if (observed === watch) await finish(end); });
+    };
+    observe(watch);
+    if (appWatch !== undefined) void appWatch.closed.then(finish);
+    const deliver: Parameters<typeof watch.start>[0] = async (value, ops) => {
+      if (isStopped()) return;
+      if (ops.some((op) => op[0] === "r")) {
+        // Overflow can be followed by queued incremental frames. Attach at the latest commit
+        // before dropping that backlog, so one replacement covers the whole stalled interval.
+        const replacement = await this.options.handle.conversation.watch(context);
+        if (isStopped()) { await replacement.stop(); return; }
+        const outgoing = watch;
+        watch = replacement;
+        observe(watch);
+        try {
+          await outgoing.stop();
+          current = watch.value;
+          await publish();
+          if (!isStopped()) watch.start(deliver);
+        } catch (error) {
+          // The outgoing watch is already stopped, so it cannot report a new send failure.
+          await finish({ reason: "listener_error", error: error instanceof Error ? error : new Error(String(error)) });
+        }
+      } else {
+        current = value;
+        await publish();
+      }
+    };
+    try {
+      // Both watches are attached before publishing. Changes during the seed remain buffered.
+      await publish();
+      watch.start(deliver);
+      appWatch?.start(async (value) => { app = value; await publish(); });
+    } catch (error) { await stop(); throw error; }
     return { closed, stop };
   }
 

@@ -6,9 +6,10 @@ import websocket from "@fastify/websocket";
 import { WebSocket } from "ws";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
-import { Harness, LiveDoc, UserEntry, createRegistry, type EntryRecord } from "@earendil-works/pi-durable";
+import { fauxAssistantMessage, fauxToolCall, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
+import { Harness, LiveDoc, UserEntry, createRegistry, defineExtension, defineTool, type EntryRecord } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { durableBrowserSnapshotSchema, type DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import { SessionEventHub, type RealtimeSocket } from "../realtime/sessionEventHub.js";
@@ -23,14 +24,15 @@ import { registerSessionRoutes } from "./sessionRoutes.js";
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 
-async function fixture() {
+async function fixture(hub = new SessionEventHub()) {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-native-routes-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const databasePath = join(directory, "state.sqlite");
   const models = createModels();
   const provider = fauxProvider();
   models.setProvider(provider.provider);
-  let harness = await Harness.open(await openNodeSqliteStorage(databasePath), { models, registry: createRegistry() }, context);
+  const registry = createRegistry();
+  let harness = await Harness.open(await openNodeSqliteStorage(databasePath), { models, registry }, context);
   let conversation = await harness.root(context);
   let leased = 0;
   let acquired = 0;
@@ -52,7 +54,6 @@ async function fixture() {
   let reader = new DurableSessionReader(readerOptions);
   const user = (text: string) => conversation.commit((tx) => tx.appendEntry(UserEntry, conversation.id, { model: [{ role: "user", content: text, timestamp: 1 }] }), context);
   const gateway = createPiSessionManagerGateway({ agentDir: directory, env: {}, sessionDirEnvKeys: [] });
-  const hub = new SessionEventHub();
   let app: FastifyInstance | undefined;
   let service: PiSessionService | undefined;
   async function start() {
@@ -73,7 +74,7 @@ async function fixture() {
     reader = new DurableSessionReader(readerOptions);
     return start();
   };
-  return { directory, reader, user, provider, start, restart, hub, conversation: () => conversation, scheduling: async () => (await harness.inspect(context)).scheduling,
+  return { directory, reader, user, provider, start, restart, hub, registry, harness: () => harness, conversation: () => conversation, scheduling: async () => (await harness.inspect(context)).scheduling,
     leased: () => leased, acquired: () => acquired, failAcquire: (error: Error) => { acquireError = error; }, useLegacy: () => { legacy = true; } };
 }
 
@@ -98,6 +99,20 @@ class ControlledWebSocketTransport implements RealtimeSocket {
   send(payload: string, callback?: (error?: Error | null) => void): void { this.socket.send(payload, (error) => { if (this.behavior.complete) callback?.(error); }); }
   terminate(): void { this.socket.terminate(); }
   on(event: "close", listener: () => void) { return this.socket.on(event, listener); }
+}
+
+/** Hold one real send's completion so the watch, not a host queue, owns pending commits. */
+class CompletionGateSessionEventHub extends SessionEventHub {
+  constructor(private readonly failReplacement = false) { super(); }
+  private releaseSend!: () => void;
+  private readonly gate = new Promise<void>((resolve) => { this.releaseSend = resolve; });
+  private held = false;
+  release(): void { this.releaseSend(); }
+  override async sendDurableSnapshot(socket: RealtimeSocket, snapshot: DurableBrowserSnapshot): Promise<void> {
+    if (this.failReplacement && snapshot.revision > 0) throw new Error("replacement transport failed");
+    await super.sendDurableSnapshot(socket, snapshot);
+    if (!this.held) { this.held = true; await this.gate; }
+  }
 }
 
 describe("native read-model HTTP and WebSocket paths", () => {
@@ -135,6 +150,72 @@ describe("native read-model HTTP and WebSocket paths", () => {
     expect(second.frames[0]?.history.messages[0]?.id).toBe(old?.history.messages[0]?.id);
     expect(await f.scheduling()).toBe("paused");
     expect(f.provider.state.callCount).toBe(0);
+  });
+
+  it("sends one replacement to a real client blocked more than 100 commits, with no duplicate append", async () => {
+    const hub = new CompletionGateSessionEventHub();
+    const f = await fixture(hub);
+    const base = await f.start();
+    const connection = client(base, f.directory);
+    await vi.waitFor(() => { expect(connection.frames).toHaveLength(1); });
+    try {
+      for (let index = 0; index < 103; index++) await f.user(`commit ${String(index)}`);
+      expect(connection.frames).toHaveLength(1);
+    } finally { hub.release(); }
+    await vi.waitFor(() => { expect(connection.frames).toHaveLength(2); });
+    const replacement = connection.frames[1];
+    expect(replacement?.type).toBe("session.snapshot");
+    expect(replacement?.history.total).toBe(103);
+    expect(replacement?.history.start).toBe(3);
+    expect(replacement?.history.messages).toHaveLength(100);
+    expect(new Set(replacement?.history.messages.map((message) => message.id)).size).toBe(100);
+    const response = await fetch(`${base}/sessions/logical/messages?${new URLSearchParams({ cwd: f.directory, limit: "500" })}`);
+    expect(response.status).toBe(200);
+    const history = durableBrowserSnapshotSchema.shape.history.parse(await response.json());
+    expect(history.messages).toHaveLength(103);
+    expect(history.messages.slice(3)).toEqual(replacement?.history.messages);
+    expect(replacement?.revision).toBe(1);
+    expect(replacement?.epoch).toBe(connection.frames[0]?.epoch);
+    expect(replacement?.history.messages.at(-1)?.content).toBe("commit 102");
+  });
+
+  it("closes the client and releases its lease when an overflow replacement cannot be sent", async () => {
+    const hub = new CompletionGateSessionEventHub(true);
+    const f = await fixture(hub);
+    const connection = client(await f.start(), f.directory);
+    await vi.waitFor(() => { expect(connection.frames).toHaveLength(1); });
+    try { for (let index = 0; index < 103; index++) await f.user(`commit ${String(index)}`); }
+    finally { hub.release(); }
+    await vi.waitFor(() => { expect(connection.socket.readyState).toBe(WebSocket.CLOSED); expect(f.leased()).toBe(0); });
+  });
+
+  it("late-joins during a real native tool invocation and replaces live output with its committed result", async () => {
+    const f = await fixture();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    f.registry.install(defineExtension({ name: "held-output", tools: [defineTool({ name: "held_output", description: "Produce held output", parameters: Type.Object({}), replay: "unsafe",
+      execute: async (_args, api) => { api.output("running output"); await held; return { content: [{ type: "text", text: "finished output" }] }; } })] }));
+    const model = f.provider.getModel();
+    await f.conversation().configure({ model: { provider: model.provider, modelId: model.id } }, context);
+    f.provider.setResponses([fauxAssistantMessage([fauxToolCall("held_output", {})], { stopReason: "toolUse" }), fauxAssistantMessage("complete")]);
+    f.harness().resume();
+    const submission = await f.conversation().submit({ type: "input", content: "run the output tool" }, context);
+    try {
+      await vi.waitFor(async () => { expect((await f.harness().snapshot(LiveDoc, f.conversation().id, context))?.tools?.[0]?.output).toBe("running output"); });
+      const base = await f.start();
+      const connection = client(base, f.directory);
+      await vi.waitFor(() => { expect(connection.frames[0]?.tools[0]?.output).toBe("running output"); });
+      expect(connection.frames[0]?.isStreaming).toBe(true);
+      release();
+      await submission.wait(context);
+      await f.conversation().waitForIdle(context);
+      await vi.waitFor(() => { expect(connection.frames.at(-1)?.isStreaming).toBe(false); });
+      const final = connection.frames.at(-1);
+      expect(final?.tools).toEqual([]);
+      expect(final?.history.messages.filter((message) => message.role === "toolResult")).toHaveLength(1);
+      expect(final?.history.messages.find((message) => message.role === "toolResult")?.content).toEqual([{ type: "text", text: "finished output" }]);
+      expect(f.provider.state.callCount).toBe(2);
+    } finally { release(); await f.conversation().waitForIdle(context); }
   });
 
   it("never falls back to JSONL when a native locator's journal fails", async () => {
