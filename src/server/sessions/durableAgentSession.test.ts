@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { ModelRuntime, SessionManager, createAgentSessionServices, createCodemodeExtension, defineTool } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SessionManager, createAgentSessionServices, createCodemodeExtension, defineTool, type SessionBeforeTreeEvent, type SessionBeforeTreeResult } from "@earendil-works/pi-coding-agent";
 import { calculateCost } from "@earendil-works/pi-ai";
 import { AssistantEntry, LiveDoc, ToolTask, UsageDoc } from "@earendil-works/pi-durable";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
@@ -19,7 +19,7 @@ afterEach(async () => {
   await Promise.all(sessions.splice(0).map((session) => session.close()));
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
-async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[], skillFile?: string, keepRecentTokens = 20_000, priced = false, extensionTools: NonNullable<Parameters<typeof DurableAgentSession.open>[0]["customTools"]> = [], contextAppendix?: string) {
+async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[], skillFile?: string, keepRecentTokens = 20_000, priced = false, extensionTools: NonNullable<Parameters<typeof DurableAgentSession.open>[0]["customTools"]> = [], contextAppendix?: string, treeHandler?: (event: SessionBeforeTreeEvent) => SessionBeforeTreeResult | Promise<SessionBeforeTreeResult>) {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-session-"));
   directories.push(directory);
   if (skillFile !== undefined) {
@@ -43,6 +43,7 @@ async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[
       extensionFactories: [...(codemode ? [{ name: "codemode", factory: createCodemodeExtension() }] : []),
         { name: "registered-test-tools", factory(pi) {
           for (const tool of extensionTools) pi.registerTool(tool);
+          pi.on("session_before_tree", (event) => treeHandler?.(event));
           pi.on("context", (event) => {
             contextCalls++;
             if (contextAppendix !== undefined) return { messages: [...event.messages, { role: "user", content: contextAppendix, timestamp: 1 }] };
@@ -73,6 +74,110 @@ function messagesOfType(events: readonly unknown[], type: "message_start" | "mes
 }
 
 describe("SDK-compatible Durable execution", () => {
+  it("dispatches a shared-journal fork's tools and context hooks to the fork, even after its parent closes", async () => {
+    const tool = defineTool({ name: "where_am_i", label: "Where", description: "Report logical session", parameters: Type.Object({}),
+      execute: (_id, _args, _signal, _update, ctx) => Promise.resolve({ content: [{ type: "text" as const, text: ctx.sessionManager.getSessionId() }], details: undefined }) });
+    const { session: parent, provider, services, directory, contextCalls } = await fixture([tool]);
+    provider.setResponses([fauxAssistantMessage("parent answer")]);
+    await parent.prompt("parent input");
+    const leaf = (await parent.getDurableTree()).activeLeafId;
+    if (leaf === null) throw new Error("Missing parent tip");
+    const manager = SessionManager.create(directory, join(directory, "sessions"));
+    const forked = await parent.nativeHistory.fork(leaf, "at", manager.getSessionId(), context);
+    let forkContextCalls = 0;
+    const forkServices = await createAgentSessionServices({ cwd: directory, agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime,
+      resourceLoaderOptions: { noExtensions: true, noSkills: true, noContextFiles: true, noPromptTemplates: true,
+        extensionFactories: [{ name: "fork-context", factory(pi) { pi.on("context", () => { forkContextCalls++; }); } }] } });
+    forkServices.settingsManager.applyOverrides({ compaction: { enabled: false } });
+    const fork = await DurableAgentSession.open({ handle: forked.handle, services: forkServices, sessionManager: manager, customTools: [tool] });
+    sessions.push(fork);
+    await fork.bindExtensions({});
+    expect(fork.journal.harness).toBe(parent.journal.harness);
+    const parentContextCalls = contextCalls();
+    await parent.close();
+    provider.setResponses([fauxAssistantMessage([fauxToolCall("where_am_i", {})], { stopReason: "toolUse" }), fauxAssistantMessage("fork answer")]);
+    await fork.prompt("fork input");
+    expect(fork.messages.find((message) => message.role === "toolResult")?.content).toEqual([{ type: "text", text: fork.sessionId }]);
+    expect(contextCalls()).toBe(parentContextCalls);
+    expect(forkContextCalls).toBe(2);
+    expect((await parent.journal.conversation.entries({ order: "ascending" }, 100, undefined, context)).items.flatMap((entry) => entry.model ?? []).some((message) => message.role === "toolResult")).toBe(false);
+    const address = fork.durableAddress;
+    const file = fork.sessionFile;
+    if (file === undefined) throw new Error("Fork export must exist");
+    await fork.close();
+    const reopened = await DurableAgentSession.open({ services: forkServices, sessionManager: SessionManager.open(file), customTools: [tool] });
+    sessions.push(reopened);
+    expect(reopened.durableAddress).toEqual(address);
+    expect(reopened.messages.some((message) => message.role === "toolResult")).toBe(true);
+  });
+
+  it("selects native continuations without appending their inherited prefix again", async () => {
+    const { session, provider } = await fixture();
+    provider.setResponses([fauxAssistantMessage("first answer"), fauxAssistantMessage("abandoned answer"), fauxAssistantMessage("new branch answer")]);
+    await session.prompt("first input");
+    const firstTree = await session.getDurableTree();
+    const firstLeaf = firstTree.activeLeafId;
+    if (firstLeaf === null) throw new Error("Missing first tip");
+    await session.prompt("abandoned input");
+    const original = session.journal.conversation;
+    const before = (await original.entries({ order: "ascending" }, 100, undefined, context)).items;
+    await session.navigateTree(firstLeaf);
+    const selected = session.journal.conversation;
+    expect(selected.id).not.toBe(original.id);
+    const prefix = (await selected.entries({ order: "ascending" }, 100, undefined, context)).items;
+    const cut = prefix.at(-1);
+    if (cut === undefined) throw new Error("Selected prefix must retain its origin");
+    expect(prefix.map((entry) => entry.id)).toEqual(before.filter((entry) => entry.id <= cut.id).map((entry) => entry.id));
+    expect(prefix.every((entry) => entry.conversationId !== selected.id)).toBe(true);
+    await session.prompt("new branch input");
+    const after = (await selected.entries({ order: "ascending" }, 100, undefined, context)).items;
+    expect(after.flatMap((entry) => entry.model ?? []).filter((message) => message.role === "user" && message.content === "first input")).toHaveLength(1);
+    expect(after.flatMap((entry) => entry.model ?? []).some((message) => message.role === "user" && message.content === "abandoned input")).toBe(false);
+    expect(session.messages.some((message) => message.role === "user" && message.content === "abandoned input")).toBe(false);
+    expect((await original.entries({ order: "ascending" }, 100, undefined, context)).items).toEqual(before);
+  });
+
+  it.each(["provider", "extension"] as const)("appends a successful %s branch summary only to the selected continuation", async (source) => {
+    let treeHooks = 0;
+    const { session, provider } = await fixture([], false, undefined, undefined, undefined, false, [], undefined, (event) => {
+      treeHooks++;
+      expect(event.preparation.entriesToSummarize.some((entry) => entry.type === "message" && entry.message.role === "user" && entry.message.content === "abandoned input")).toBe(true);
+      return source === "extension" ? { summary: { summary: "abandoned branch summary" } } : {};
+    });
+    provider.setResponses([fauxAssistantMessage("first answer"), fauxAssistantMessage("abandoned answer"), fauxAssistantMessage("abandoned branch summary")]);
+    await session.prompt("first input");
+    const target = (await session.getDurableTree()).activeLeafId;
+    if (target === null) throw new Error("Missing first tip");
+    await session.prompt("abandoned input");
+    const original = session.journal.conversation;
+    const originalEntries = (await original.entries({ order: "ascending" }, 100, undefined, context)).items;
+    await session.navigateTree(target, { summarize: true, customInstructions: "keep the findings" });
+    expect(treeHooks).toBe(1);
+    expect(provider.state.callCount).toBe(source === "provider" ? 3 : 2);
+    expect((await original.entries({ order: "ascending" }, 100, undefined, context)).items).toEqual(originalEntries);
+    const summaries = (await session.journal.conversation.entries({ order: "ascending" }, 100, undefined, context)).items.filter((entry) => entry.kind === "forgerie.branch-summary");
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.data).toBe(source === "extension" ? "abandoned branch summary"
+      : "The user explored a different conversation branch before returning here.\nSummary of that exploration:\n\nabandoned branch summary");
+    expect(summaries[0]?.conversationId).toBe(session.journal.conversation.id);
+    expect(session.sessionManager.getBranch().filter((entry) => entry.type === "branch_summary")).toHaveLength(1);
+  });
+
+  it("leaves the native selection and entries unchanged when a branch summary hook cancels", async () => {
+    const { session, provider } = await fixture([], false, undefined, undefined, undefined, false, [], undefined, () => ({ cancel: true }));
+    provider.setResponses([fauxAssistantMessage("first answer"), fauxAssistantMessage("second answer")]);
+    await session.prompt("first input");
+    const target = (await session.getDurableTree()).activeLeafId;
+    if (target === null) throw new Error("Missing first tip");
+    await session.prompt("second input");
+    const original = session.journal.conversation;
+    const entries = (await original.entries({ order: "ascending" }, 100, undefined, context)).items;
+    expect(await session.navigateTree(target, { summarize: true })).toEqual({ cancelled: true });
+    expect(session.journal.conversation.id).toBe(original.id);
+    expect((await original.entries({ order: "ascending" }, 100, undefined, context)).items).toEqual(entries);
+    expect(provider.state.callCount).toBe(2);
+  });
+
   it("reuses an idle prompt after its receipt is lost, including after reopen", async () => {
     const { provider, session, services, manager, events } = await fixture();
     provider.setResponses([fauxAssistantMessage("one answer"), fauxAssistantMessage("duplicate answer")]);

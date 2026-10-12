@@ -14,6 +14,7 @@ import { PiSessionService } from "./piSessionService.js";
 import { CapturingSessionEventHub, emptyArchiveStore } from "./piSessionService.testSupport.js";
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import { durableSessionPaths } from "./durableSessionJournal.js";
+import { readDurableSessionLocator } from "./durableSessionLocator.js";
 
 class CompletionSessionEventHub extends CapturingSessionEventHub {
   readonly completed: Promise<void>;
@@ -133,6 +134,36 @@ describe("Forgerie default Durable runtime", () => {
       if (stored === undefined) throw new Error("Native session must remain discoverable");
       expect(await readFile(stored.path, "utf8")).toContain("forgerieDurableSessionId");
       expect((await readFile(durableSessionPaths(stored.path).database)).subarray(0, 16).toString()).toBe("SQLite format 3\u0000");
+      const parentLocator = await readDurableSessionLocator(durableSessionPaths(stored.path).directory);
+      if (parentLocator === undefined) throw new Error("Parent locator is missing");
+      const clone = await service.runCommand(ref, "/clone native copy");
+      if (clone.type !== "done" || clone.session === undefined) throw new Error(`Clone failed: ${JSON.stringify(clone)}`);
+      const cloneRef = { id: clone.session.id, cwd: directory };
+      expect(cloneRef.id).not.toBe(ref.id);
+      const cloneStored = (await gateway.list(directory)).find((entry) => entry.id === cloneRef.id);
+      if (cloneStored === undefined) throw new Error("Clone export is missing");
+      const cloneLocator = await readDurableSessionLocator(durableSessionPaths(cloneStored.path).directory);
+      expect(cloneLocator?.databasePath).toBe(parentLocator.databasePath);
+      expect(cloneLocator?.conversationId).not.toBe(parentLocator.conversationId);
+      await service.stop(cloneRef);
+      await service.status(cloneRef);
+      const cloneTree = (await service.tree(cloneRef)).tree;
+      const user = cloneTree.nodes.find((node) => node.kind === "user");
+      if (user === undefined) throw new Error("Clone did not inherit the user entry");
+      const navigate = await fetch(`${origin}/sessions/${cloneRef.id}/tree/navigate`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: directory, targetId: user.id, expectedLeafId: cloneTree.activeLeafId, summary: { mode: "none" } }) });
+      expect(navigate.status).toBe(200);
+      expect(await navigate.json()).toEqual({ cancelled: false, editorText: body.text });
+      expect((await service.messages(cloneRef)).messages).toHaveLength(0);
+      expect((await service.messages(ref)).messages.filter((message) => typeof message === "object" && message !== null && "role" in message && message.role === "user")).toHaveLength(1);
+      const selector = await service.runCommand(ref, "/fork");
+      if (selector.type !== "select") throw new Error(`Fork selector failed: ${JSON.stringify(selector)}`);
+      const option = selector.options[0];
+      if (option === undefined) throw new Error("Missing user fork option");
+      const fork = await service.respondToCommand(ref, selector.requestId, option.value);
+      if (fork.type !== "done" || fork.session === undefined) throw new Error(`Fork failed: ${JSON.stringify(fork)}`);
+      expect(fork.session.id).not.toBe(ref.id);
+      expect((await service.messages({ id: fork.session.id, cwd: directory })).messages).toHaveLength(0);
     } finally {
       await app.close();
       await service.dispose();

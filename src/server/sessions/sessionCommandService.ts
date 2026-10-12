@@ -58,7 +58,7 @@ export interface SessionCommandLifecycle<TSession extends CommandSession = Comma
   runWorkflow?: (session: TSession, name: string, inputs: WorkflowInputs, requestId: string) => Promise<WorkflowRun>;
   workflowRuns?: (session: TSession) => Promise<WorkflowRun[]>;
   copyWorkflow?: (session: TSession, name: string, destination: string) => Promise<{ kind: string; message?: string; path?: string }>;
-  getSessionTree?: (session: TSession) => ClientSessionTreeSnapshot | undefined;
+  getSessionTree?: (session: TSession) => ClientSessionTreeSnapshot | undefined | Promise<ClientSessionTreeSnapshot | undefined>;
   hasActiveWork?: (session: TSession) => boolean;
   isTreeNavigationActive?: (session: TSession) => boolean;
   runSessionReplacement?: <T>(session: TSession, operation: () => Promise<T>) => Promise<T>;
@@ -194,12 +194,13 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     if (this.hasActiveWork(active.runtime.session)) return forkActiveUnsupported("fork");
     const result = await this.runSessionReplacement(active.runtime, async () => {
       const session = active.runtime.session;
-      if (options !== undefined && session.sessionManager.getLeafId() !== options.expectedLeafId) {
+      const leafId = (await this.lifecycle.getSessionTree?.(session))?.activeLeafId ?? session.sessionManager.getLeafId();
+      if (options !== undefined && leafId !== options.expectedLeafId) {
         throw new Error("The session changed since /tree was opened. Reopen /tree and try again.");
       }
       // Resolve the entry kind from the session state protected by the same
       // replacement boundary as the fork, not Pi's text-only /fork selector.
-      const position = this.forkPosition(session, entryId);
+      const position = await this.forkPosition(session, entryId);
       const forkResult = await active.runtime.fork(entryId, { position });
       if (!forkResult.cancelled) {
         this.tryNameRelatedSession(active.runtime.session, relatedName);
@@ -281,17 +282,17 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
 
   private async clone(active: CommandActiveSession<TSession>, requestedName: string): Promise<ClientCommandResult> {
     if (this.hasActiveWork(active.runtime.session)) return forkActiveUnsupported("clone");
-    const initialLeafId = active.runtime.session.sessionManager.getLeafId();
+    const initialLeafId = (await this.lifecycle.getSessionTree?.(active.runtime.session))?.activeLeafId ?? active.runtime.session.sessionManager.getLeafId();
     if (initialLeafId === null || initialLeafId === "") return { type: "unsupported", message: "Cannot clone: no current session entry" };
     const cloneName = requestedName === "" ? await this.nextRelatedSessionName(active, "copy") : requestedName;
     if (this.lifecycle.isTreeNavigationActive?.(active.runtime.session) === true) return treeNavigationActiveUnsupported();
     if (this.hasActiveWork(active.runtime.session)) return forkActiveUnsupported("clone");
     // The active leaf may have changed while related-session names were loaded.
     // Clone the position that is current when the serialized replacement begins.
-    const leafId = active.runtime.session.sessionManager.getLeafId();
+    const leafId = (await this.lifecycle.getSessionTree?.(active.runtime.session))?.activeLeafId ?? active.runtime.session.sessionManager.getLeafId();
     if (leafId === null || leafId === "") return { type: "unsupported", message: "Cannot clone: no current session entry" };
     const result = await this.runSessionReplacement(active.runtime, async () => {
-      const admittedLeafId = active.runtime.session.sessionManager.getLeafId();
+      const admittedLeafId = (await this.lifecycle.getSessionTree?.(active.runtime.session))?.activeLeafId ?? active.runtime.session.sessionManager.getLeafId();
       if (admittedLeafId === null || admittedLeafId === "") throw new Error("Cannot clone: no current session entry");
       const cloneResult = await active.runtime.fork(admittedLeafId, { position: "at" });
       if (!cloneResult.cancelled) {
@@ -318,14 +319,14 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     };
   }
 
-  private tree(session: TSession): ClientCommandResult {
+  private async tree(session: TSession): Promise<ClientCommandResult> {
     if (this.hasActiveWork(session)) {
       return { type: "unsupported", message: "Cannot open the session tree while the session is active. Stop current activity and try /tree again." };
     }
     if (this.lifecycle.getSessionTree === undefined) return treeUnavailableUnsupported();
 
     try {
-      const tree = this.lifecycle.getSessionTree(session);
+      const tree = await this.lifecycle.getSessionTree(session);
       if (tree === undefined) return treeUnavailableUnsupported();
       if (tree.nodes.length === 0) return { type: "unsupported", message: "Cannot navigate an empty session tree." };
       return { type: "tree", tree };
@@ -339,8 +340,8 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     return sessionHasActiveWork(session) || this.lifecycle.hasActiveWork?.(session) === true;
   }
 
-  private forkPosition(session: TSession, entryId: string): "before" | "at" {
-    const treeNode = this.lifecycle.getSessionTree?.(session)?.nodes.find((node) => node.id === entryId);
+  private async forkPosition(session: TSession, entryId: string): Promise<"before" | "at"> {
+    const treeNode = (await this.lifecycle.getSessionTree?.(session))?.nodes.find((node) => node.id === entryId);
     if (treeNode !== undefined) return treeNode.kind === "user" ? "before" : "at";
     return session.getUserMessagesForForking().some((message) => message.entryId === entryId) ? "before" : "at";
   }

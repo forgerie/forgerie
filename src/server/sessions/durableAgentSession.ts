@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { clampThinkingLevel, getSupportedThinkingLevels, type AssistantMessage, type ImageContent, type Message } from "@earendil-works/pi-ai";
-import { ExtensionRunner, ModelRegistry, convertToLlm, createLocalBashOperations, createSyntheticSourceInfo, estimateTokens, type AgentSessionServices, type BuildSystemPromptOptions, type ExtensionUIContext, type PromptOptions, type SessionManager, type SessionStartEvent, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult, type Submission } from "@earendil-works/pi-durable";
+import { ExtensionRunner, ModelRegistry, collectEntriesForBranchSummary, generateBranchSummary, convertToLlm, createLocalBashOperations, createSyntheticSourceInfo, estimateTokens, type AgentSessionServices, type BuildSystemPromptOptions, type ExtensionUIContext, type PromptOptions, type SessionManager, type SessionStartEvent, type ToolDefinition, type SessionBeforeTreeEvent } from "@earendil-works/pi-coding-agent";
+import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult, type Submission, type Harness, type ConversationId, type Conversation, type EntryId, type Registry } from "@earendil-works/pi-durable";
 import type { DurableSessionAddress, DurableSessionHandle } from "./durableSessionAddress.js";
 import type { DurableNativeHistory } from "./durableNativeHistory.js";
 import { createDurableParentState, type DurableParentState } from "./durableParentState.js";
@@ -46,6 +46,30 @@ export interface DurableAgentSessionOptions {
 
 /** SDK resources and extension hooks around a Durable execution engine. No AgentSession is constructed. */
 export class DurableAgentSession implements PiAgentSession, DurableParentReader, DurableParentMutations {
+  private static readonly registries = new WeakMap<Harness, Registry>();
+  private static readonly adapters = new WeakMap<Harness, Map<ConversationId, DurableAgentSession>>();
+
+  private dispatch(conversationId: ConversationId): DurableAgentSession {
+    const adapter = DurableAgentSession.adapters.get(this.journal.harness)?.get(conversationId);
+    if (adapter === undefined || adapter.closed) throw new Error(`No SDK adapter bound for conversation ${String(conversationId)}`);
+    return adapter;
+  }
+
+  private bindConversation(): void {
+    const harness = this.journal.harness;
+    let adapters = DurableAgentSession.adapters.get(harness);
+    if (adapters === undefined) { adapters = new Map(); DurableAgentSession.adapters.set(harness, adapters); }
+    const existing = adapters.get(this.journal.conversation.id);
+    if (existing !== undefined && existing !== this) throw new Error("Conversation already has an SDK adapter");
+    adapters.set(this.journal.conversation.id, this);
+  }
+
+  private unbindConversation(): void {
+    if (this.journalValue === undefined) return;
+    const adapters = DurableAgentSession.adapters.get(this.journal.harness);
+    if (adapters?.get(this.journal.conversation.id) === this) adapters.delete(this.journal.conversation.id);
+  }
+
   readonly modelRuntime;
   readonly settingsManager;
   readonly resourceLoader;
@@ -55,7 +79,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   readonly agent;
   model: PiAgentSession["model"];
   thinkingLevel: PiAgentSession["thinkingLevel"];
-  private readonly registry = createRegistry();
+  private registry = createRegistry();
   private tools: DurableSdkTools;
   private errorListener: ((error: { extensionPath: string; event: string; error: string; stack?: string }) => void) | undefined;
   private journalValue: DurableSessionJournal | undefined;
@@ -72,6 +96,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private compacting = false;
   private bashController: AbortController | undefined;
   private compactionTask: TaskId<CompactionResult> | undefined;
+  private branchSummaryController: AbortController | undefined;
+  private branchTargetId: string | undefined;
   private queued: readonly InboxItem[] = [];
   private mutation: Promise<void> = Promise.resolve();
   private systemPrompt = "";
@@ -91,6 +117,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
 
   private constructor(private readonly options: DurableAgentSessionOptions) {
     const { services, sessionManager } = options;
+    if (options.handle !== undefined) {
+      this.registry = DurableAgentSession.registries.get(options.handle.harness) ?? this.registry;
+    }
     this.modelRuntime = services.modelRuntime;
     this.settingsManager = services.settingsManager;
     this.resourceLoader = services.resourceLoader;
@@ -126,6 +155,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       await session.stream?.stop();
       await session.parentAppWatch?.stop();
       session.sdkView?.close();
+      session.unbindConversation();
       await session.journalValue?.close();
       await session.childRunRecords?.close();
       session.extensionRunner.invalidate("Durable session initialization failed");
@@ -168,22 +198,23 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
 
   private async initialize(): Promise<void> {
     this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
-    this.registry.install(this.tools.extension());
+    this.registry.install(this.tools.extension((id) => this.dispatch(id).tools));
     // Register delivery before a family can schedule a persisted accepted answer.
     this.registry.install(askDeliveryExtension());
-    this.registry.install(defineExtension({ name: "forgerie.sdk-context", sections: [section("forgerie", () => this.systemPrompt, { tag: false })],
+    this.registry.install(defineExtension({ name: "forgerie.sdk-context", sections: [section("forgerie", (input) => this.dispatch(input.conversationId).systemPrompt, { tag: false })],
       hooks: [hook(GenerationTask, {
-        beforeRequest: async (request) => {
-          await this.mutation;
-          this.journal.assertOwned();
-          await this.journal.project();
-          const messages = convertToLlm(await this.extensionRunner.emitContext([...request.messages]));
+        beforeRequest: async (request, api) => {
+          const adapter = this.dispatch(api.conversationId);
+          await adapter.mutation;
+          adapter.journal.assertOwned();
+          await adapter.journal.project();
+          const messages = convertToLlm(await adapter.extensionRunner.emitContext([...request.messages]));
           // This existing boundary runs emitContext exactly once, including context supplied by extensions.
-          this.preparedContextTokens = messages.reduce((total, message) => total + estimateTokens(message), 0);
+          adapter.preparedContextTokens = messages.reduce((total, message) => total + estimateTokens(message), 0);
           return { messages };
         },
-        afterResponse: async (message) => {
-          const replaced = await this.extensionRunner.emitMessageEnd({ type: "message_end", message });
+        afterResponse: async (message, api) => {
+          const replaced = await this.dispatch(api.conversationId).extensionRunner.emitMessageEnd({ type: "message_end", message });
           if (replaced?.role === "assistant") Object.assign(message, replaced);
         },
       })],
@@ -191,6 +222,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.journalValue = await DurableSessionJournal.open({
       ...(this.options.handle === undefined ? {} : { handle: this.options.handle }),
       initializeParentDocuments: createDurableParentInitializer(this.sessionManager),
+      summarize: (source, cut, instructions) => this.summarizeBranch(source, cut, instructions),
       manager: this.sessionManager, models: this.modelRuntime, registry: this.registry,
       agent: { ...(this.model === undefined ? {} : { model: { provider: this.model.provider, modelId: this.model.id } }), thinkingLevel: this.thinkingLevel, cwd: this.options.services.cwd },
       settings: { contextRetentionMs: 0, steeringMode: this.settingsManager.getSteeringMode(), followUpMode: this.settingsManager.getFollowUpMode(),
@@ -202,10 +234,18 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
         return new NodeExecutionEnv({ cwd: cwd ?? this.options.services.cwd, ...(shellPath === undefined ? {} : { shellPath }) });
       } }),
     });
+    const sharedRegistry = DurableAgentSession.registries.get(this.journal.harness);
+    if (sharedRegistry === undefined) DurableAgentSession.registries.set(this.journal.harness, this.registry);
+    else this.registry = sharedRegistry;
+    this.bindConversation();
     await this.journal.conversation.commit((tx) => createDurableParentInitializer(this.sessionManager)(tx, { id: this.journal.conversation.id }), context);
     await this.rebindDurableParentState();
     await this.restoreAgentSelection();
     await this.startChildAgents();
+    await this.startEventStream();
+  }
+
+  private async startEventStream(): Promise<void> {
     this.stream = await watchEvents(this.journal.harness, this.journal.conversation.id, context);
     await this.applyEvent(this.stream.snapshot);
     this.stream.start(async (events) => {
@@ -406,8 +446,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
         ...(tool.promptGuidelines === undefined ? {} : { promptGuidelines: tool.promptGuidelines }), ...(tool.namespace === undefined ? {} : { namespace: tool.namespace }),
         ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }) })),
       getSettings: () => this.settingsManager.getSettings(),
-      setActiveTools: (names) => { this.tools.setActive(names); this.registry.install(this.tools.extension()); },
-      refreshTools: () => { this.tools.refresh(); this.registry.install(this.tools.extension()); this.refreshChildExtensions(); },
+      setActiveTools: (names) => { this.tools.setActive(names); this.registry.install(this.tools.extension((id) => this.dispatch(id).tools)); },
+      refreshTools: () => { this.tools.refresh(); this.registry.install(this.tools.extension((id) => this.dispatch(id).tools)); this.refreshChildExtensions(); },
       getCommands: () => this.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, description: command.description ?? "", source: "extension" as const, sourceInfo: command.sourceInfo })),
       setModel: async (model) => { await this.setModel(model); return true; },
       getThinkingLevel: () => this.thinkingLevel, setThinkingLevel: (level) => { this.setThinkingLevel(level); },
@@ -473,7 +513,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.basePrompt = this.promptOptions();
     const before = await this.extensionRunner.emitBeforeAgentStart(text, images, this.basePrompt);
     this.tools.setActive(before.systemPromptOptions.selectedTools);
-    this.registry.install(this.tools.extension());
+    this.registry.install(this.tools.extension((id) => this.dispatch(id).tools));
     this.systemPrompt = await buildSdkSystemPrompt(before.systemPromptOptions);
     for (const message of before.messages) await this.sendCustomMessage(message);
     const content = images === undefined || images.length === 0 ? text : [{ type: "text" as const, text }, ...images];
@@ -548,7 +588,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     return { summary, tokensBefore, firstKeptEntryId };
   }
   abortCompaction(): void { if (this.compactionTask !== undefined) void this.journal.harness.abortTask(this.compactionTask, context).catch((error: unknown) => { this.report(error); }); }
-  abortBranchSummary(): void { this.abortCompaction(); }
+  abortBranchSummary(): void { this.branchSummaryController?.abort(); }
   async abort(): Promise<void> { this.bashController?.abort(); await this.mutation; await this.journal.conversation.abort(context); }
 
   clearQueue(): { steering: string[]; followUp: string[] } {
@@ -625,21 +665,65 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       estimate: prepared ? "prepared-request" as const : "next-request" as const };
   }
 
+  private async summarizeBranch(_source: Conversation, cut: EntryId, instructions: string | undefined): Promise<{ cancelled: boolean; summary?: string }> {
+    if (this.model === undefined) throw new Error("No model available for branch summarization");
+    const entry = await this.journal.harness.commit((tx) => tx.entry(cut), context);
+    const targetId = entry === undefined ? undefined : this.journal.sdkEntryId(entry);
+    const oldLeafId = this.sessionManager.getLeafId();
+    const collected = targetId === undefined ? { entries: this.sessionManager.getBranch(), commonAncestorId: null }
+      : collectEntriesForBranchSummary(this.sessionManager, oldLeafId, targetId);
+    const controller = new AbortController();
+    this.branchSummaryController = controller;
+    const aborted = () => controller.signal.aborted;
+    try {
+      const before = await this.extensionRunner.emit<SessionBeforeTreeEvent>({ type: "session_before_tree", signal: controller.signal,
+        preparation: { targetId: this.branchTargetId ?? targetId ?? "", oldLeafId, commonAncestorId: collected.commonAncestorId,
+          entriesToSummarize: collected.entries, userWantsSummary: true, ...(instructions === undefined ? {} : { customInstructions: instructions }) } });
+      if (before?.cancel === true || aborted()) return { cancelled: true };
+      if (before?.summary !== undefined) return { cancelled: false, summary: before.summary.summary };
+      const customInstructions = before?.customInstructions ?? instructions;
+      const result = await generateBranchSummary(collected.entries, { model: this.model, signal: controller.signal,
+        ...(customInstructions === undefined ? {} : { customInstructions }),
+        ...(before?.replaceInstructions === undefined ? {} : { replaceInstructions: before.replaceInstructions }),
+        reserveTokens: this.settingsManager.getBranchSummarySettings().reserveTokens,
+        streamFn: this.agent.streamFunction, retry: this.settingsManager.getRetrySettings() });
+      if (result.aborted === true || aborted()) return { cancelled: true };
+      if (result.error !== undefined) throw new Error(result.error);
+      if (result.summary === undefined) throw new Error("Branch summary did not provide a summary");
+      return { cancelled: false, summary: result.summary };
+    } finally { this.branchSummaryController = undefined; }
+  }
+
   async navigateTree(targetId: string, options?: { summarize?: boolean; customInstructions?: string }) {
-    await this.journal.conversation.waitForIdle(context);
-    const entry = this.sessionManager.getEntry(targetId);
-    if (entry === undefined) throw new Error("Tree entry does not exist");
-    const editorText = entry.type === "message" && entry.message.role === "user"
-      ? typeof entry.message.content === "string" ? entry.message.content : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") : undefined;
-    const leaf = editorText === undefined ? entry.id : entry.parentId;
-    if (options?.summarize === true) {
-      const result = await this.compact(options.customInstructions);
-      this.sessionManager.branchWithSummary(leaf, result.summary);
-    } else if (leaf === null) this.sessionManager.resetLeaf();
-    else this.sessionManager.branch(leaf);
-    await this.journal.selectBranch();
-    await this.rebindDurableParentState();
-    return { cancelled: false, ...(editorText === undefined ? {} : { editorText }) };
+    await this.flushDurableMutations();
+    const oldLeafId = this.sessionManager.getLeafId();
+    if (options?.summarize !== true) {
+      const before = await this.extensionRunner.emit({ type: "session_before_tree", signal: new AbortController().signal,
+        preparation: { targetId, oldLeafId, commonAncestorId: null, entriesToSummarize: [], userWantsSummary: false } });
+      if (before?.cancel === true) return { cancelled: true };
+    }
+    this.branchTargetId = targetId;
+    let selected;
+    try { selected = await this.nativeHistory.select(targetId, options ?? {}, context); }
+    finally { this.branchTargetId = undefined; }
+    if (selected.cancelled) return { cancelled: true };
+    await this.stream?.stop();
+    await this.childWatch?.stop();
+    await this.childRunRecords?.close();
+    this.childRunRecords = undefined;
+    this.unbindConversation();
+    try {
+      await this.journal.selectHandle(selected.handle);
+      this.bindConversation();
+      await this.rebindDurableParentState();
+      await this.restoreAgentSelection();
+      await this.startChildAgents();
+      await this.startEventStream();
+    } catch (error) { this.bindConversation(); throw error; }
+    this.preparedContextTokens = undefined;
+    await this.extensionRunner.emit({ type: "session_tree", newLeafId: this.sessionManager.getLeafId(), oldLeafId });
+    this.emit({ type: "durable_parent_state_changed" });
+    return { cancelled: false, ...(selected.editorText === undefined ? {} : { editorText: selected.editorText }) };
   }
   async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
     if (this.isStreaming) throw new Error("Cannot reload an active session");
@@ -658,7 +742,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.tools = new DurableSdkTools({ cwd: this.options.services.cwd, settings: this.settingsManager, runner, customTools: this.options.customTools ?? [],
       beforeCall: () => this.journal.project(), emit: (event) => { this.emit(event); } });
     this.bindCore();
-    this.registry.install(this.tools.extension());
+    this.registry.install(this.tools.extension((id) => this.dispatch(id).tools));
     this.basePrompt = this.promptOptions();
     this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
     if (this.options.childAgents !== undefined) {
@@ -674,10 +758,12 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (this.closed) return;
     this.closed = true;
     this.bashController?.abort();
+    this.branchSummaryController?.abort();
     await this.childWatch?.stop();
     await this.parentAppWatch?.stop();
     this.sdkView?.close();
     await this.flushDurableMutations();
+    this.unbindConversation();
     await this.journal.close();
     await this.childRunRecords?.close();
     await this.stream?.stop();

@@ -34,6 +34,7 @@ import { Check } from "typebox/value";
 import { BACKGROUND_CONTEXT as durableContext } from "@earendil-works/chord/context";
 import { durableJson } from "./durableJson.js";
 import { DurableAgentSession } from "./durableAgentSession.js";
+import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import type { DurableChildHost } from "./durableChildHost.js";
 import { recoverDurableSessions, type DurableRecoveryReport } from "./durableSessionRecovery.js";
 import { DurableSessionRuntime, type DurableRuntimeFactory, type DurableRuntimeResult } from "./durableSessionRuntime.js";
@@ -759,6 +760,7 @@ interface CreateAgentRuntimeOptions {
 }
 
 type PiWebRuntimeFactoryOptions = Parameters<CreateAgentSessionRuntimeFactory>[0] & {
+  handle?: DurableSessionHandle;
   delegationToolsEnabled?: boolean;
   scopedModels?: readonly ScopedAgentModel[];
   initialModel?: AgentModel;
@@ -778,6 +780,7 @@ function defaultCreateAgentRuntime(createRuntime: PiWebCreateAgentSessionRuntime
     cwd: options.cwd,
     agentDir: options.agentDir,
     sessionManager: options.sessionManager,
+    nativeForks: true,
   });
 }
 
@@ -853,7 +856,7 @@ function createDefaultRuntimeFactory(
   durableChildAgents?: DurableChildHost,
   workspaceServices?: WorkspaceServices,
 ): PiWebCreateAgentSessionRuntimeFactory {
-  return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels }) => {
+  return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
     const processBridgeSlot = createProcessBridgeSlot();
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
     const workspaceServicesObserver = workspaceServices === undefined ? undefined : createWorkspaceServicesObserver(cwd, workspaceServices);
@@ -900,6 +903,7 @@ function createDefaultRuntimeFactory(
       },
     }, projectTools, workspaceServices);
     const session = await DurableAgentSession.open({
+      ...(handle === undefined ? {} : { handle }),
       services,
       sessionManager,
       customTools,
@@ -1210,6 +1214,7 @@ export class PiSessionService implements SessionRouteService {
         },
         reloadSession: (session) => this.reloadSessionRuntime(session),
         getSessionTree: (session) => {
+          if (session instanceof DurableAgentSession) return session.getDurableTree();
           if (typeof session.sessionManager.getTree !== "function" || typeof session.navigateTree !== "function") return undefined;
           return projectSessionTree(session.sessionManager.getTree(), session.sessionManager.getLeafId());
         },
@@ -2561,6 +2566,8 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async tree(ref: PiSessionRef): Promise<SessionTreeResponse> {
+    const active = this.activeForRef(ref)?.runtime.session;
+    if (active instanceof DurableAgentSession) return { tree: await active.getDurableTree() };
     const native = await this.durableReader?.tree(ref);
     if (native !== undefined) return { tree: native };
     const manager = await this.historySessionManager(ref, (path) => {
@@ -3014,7 +3021,8 @@ export class PiSessionService implements SessionRouteService {
     // may enter this runtime until Pi's potentially asynchronous summary settles.
     this.treeNavigations.add(session);
     try {
-      if (session.sessionManager.getLeafId() !== request.expectedLeafId) {
+      const leafId = session instanceof DurableAgentSession ? (await session.getDurableTree()).activeLeafId : session.sessionManager.getLeafId();
+      if (leafId !== request.expectedLeafId) {
         throw new Error("The session changed since /tree was opened. Reopen /tree and try again.");
       }
 

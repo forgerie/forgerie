@@ -233,9 +233,10 @@ describe("Durable session journal", () => {
     journals.push(journal);
     const user = options.manager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user");
     if (user === undefined) throw new Error("Fixture must contain a user entry");
-    options.manager.branch(user.id);
-    await journal.selectBranch();
-    expect((await journal.conversation.context(context)).messages).toEqual([{ role: "user", content: "old input", timestamp: 1 }]);
+    const selected = await journal.nativeHistory.select(user.id, {}, context);
+    await journal.selectHandle(selected.handle);
+    expect(selected.editorText).toBe("old input");
+    expect((await journal.conversation.context(context)).messages).toEqual([]);
     expect(options.provider.state.callCount).toBe(0);
   });
 });

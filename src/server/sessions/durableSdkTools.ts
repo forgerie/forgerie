@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentTool, AgentToolCallOutcome, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { defineTool as sdkDefineTool, createReadToolDefinition, createBashToolDefinition, createEditToolDefinition, createWriteToolDefinition, createGrepToolDefinition, createFindToolDefinition, createLsToolDefinition, wrapRegisteredTool, createSyntheticSourceInfo, type ExtensionRunner, type SettingsManager, type ToolDefinition, type ExecuteToolOptions } from "@earendil-works/pi-coding-agent";
-import { defineExtension, defineTool, type Extension, type ToolRegistration } from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, type ConversationId, type Extension, type ToolRegistration } from "@earendil-works/pi-durable";
 import { Value } from "typebox/value";
 import { durableJson } from "./durableJson.js";
 import { isChildNativeTool } from "./durableChildRuntime.js";
@@ -93,7 +93,7 @@ export class DurableSdkTools {
     });
   }
 
-  extension(): Extension {
+  extension(dispatch?: (conversationId: ConversationId) => DurableSdkTools): Extension {
     const declared = this.active.flatMap((name) => { const tool = this.callable.get(name); return tool === undefined ? [] : [tool]; });
     const hidden = new Set<string>();
     const descriptions = new Map<string, string>();
@@ -120,7 +120,8 @@ export class DurableSdkTools {
         // A custom override named read is not automatically safe. Safety belongs to the implementation.
         replay: this.replaySafe.has(name) ? "safe" : "unsafe",
         execute: async (args, api, context) => {
-          const outcome = await this.execute(api.callId, name, args, context.abortSignal, undefined, async (partial) => {
+          const target = dispatch?.(api.conversationId) ?? this;
+          const outcome = await target.execute(api.callId, name, args, context.abortSignal, undefined, async (partial) => {
             await api.details(durableJson(partial), context);
           });
           return {

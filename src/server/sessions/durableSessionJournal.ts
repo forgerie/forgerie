@@ -5,15 +5,15 @@ import { dirname, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models, Message } from "@earendil-works/pi-ai";
 import { type SessionManager } from "@earendil-works/pi-coding-agent";
-import { UsageDoc, type UsageState, type AgentChange, type Conversation, type Cursor, type EntryId, type EntryRecord, type HarnessOptions, type HarnessSettings, type Registry, type SubmissionRecord, type UserInput } from "@earendil-works/pi-durable";
+import { UsageDoc, type UsageState, type AgentChange, type Conversation, type Cursor, type EntryRecord, type HarnessOptions, type HarnessSettings, type Registry, type SubmissionRecord, type UserInput } from "@earendil-works/pi-durable";
 import { Check } from "typebox/value";
 import { DurableUsageStateSchema } from "../../shared/durableUsage.js";
+import { readDurableSessionLocator, writeDurableSessionLocator } from "./durableSessionLocator.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import { DurableJournalPool, type InitializeParentDocuments } from "./durableJournalPool.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { createDurableNativeHistory, NativeEntryAliases } from "./durableNativeHistory.js";
-import { importDurableLegacyTree, LegacyTree, LegacyMigration } from "./durableLegacyImport.js";
-import { bindSession, boundConversationId } from "./durableSessionBindings.js";
+import { importDurableLegacyTree, LegacyMigration } from "./durableLegacyImport.js";
 
 const DURABLE_ENTRY_PROPERTY = "forgerieDurableEntryId";
 const DURABLE_SESSION_PROPERTY = "forgerieDurableSessionId";
@@ -51,6 +51,7 @@ export interface DurableJournalOptions {
   initializeParentDocuments?: InitializeParentDocuments;
   /** Composition supplies one conversation-aware router for the whole family. */
   familyOptions?: HarnessOptions;
+  summarize?: Parameters<typeof createDurableNativeHistory>[1]["summarize"];
 }
 
 /** Owns checkpoints. SDK JSONL remains a recoverable presentation projection and legacy-data store. */
@@ -63,6 +64,7 @@ export class DurableSessionJournal {
     return createDurableNativeHistory(this.handle, {
       acquire: (address, context) => this.pool.acquireCandidate(address, this.harnessOptions, context),
       ...(this.initializeParentDocuments === undefined ? {} : { initializeParentDocuments: this.initializeParentDocuments }),
+      ...(this.summarize === undefined ? {} : { summarize: this.summarize }),
     });
   }
   private readonly projected = new Map<string, string>();
@@ -85,6 +87,7 @@ export class DurableSessionJournal {
     private readonly harnessOptions: HarnessOptions,
     private readonly initializeParentDocuments: InitializeParentDocuments | undefined,
     private readonly onReport: DurableJournalOptions["onReport"],
+    private readonly summarize: DurableJournalOptions["summarize"],
   ) {
     this.ownerSessionId = manager.getSessionId();
     this.unsubscribe = this.harness.subscribeCommits((publication) => {
@@ -96,7 +99,7 @@ export class DurableSessionJournal {
       }
     });
     for (const entry of manager.getEntries()) {
-      const stamp = entry.type === "message" ? entry.message : entry.type === "custom_message" ? entry.details : undefined;
+      const stamp = entry.type === "message" ? entry.message : entry.type === "custom_message" || entry.type === "branch_summary" ? entry.details : undefined;
       if (typeof stamp !== "object" || stamp === null || !(DURABLE_JOURNAL_PROPERTY in stamp) || stamp[DURABLE_JOURNAL_PROPERTY] !== this.handle.address.journalId
         || !(DURABLE_ENTRY_PROPERTY in stamp) || typeof stamp[DURABLE_ENTRY_PROPERTY] !== "number"
         || !(DURABLE_CONVERSATION_PROPERTY in stamp) || typeof stamp[DURABLE_CONVERSATION_PROPERTY] !== "number"
@@ -116,6 +119,13 @@ export class DurableSessionJournal {
     };
     let handle = options.handle;
     try {
+      if (handle === undefined && sessionFile !== undefined) {
+        const locator = await readDurableSessionLocator(durableSessionPaths(sessionFile).directory);
+        if (locator !== undefined) {
+          if (locator.sessionId !== options.manager.getSessionId()) throw new Error("Foreign logical session locator");
+          handle = await pool.acquire(locator, harnessOptions, BACKGROUND_CONTEXT);
+        }
+      }
       if (handle === undefined) {
         handle = sessionFile === undefined
           ? await pool.openMemory(options.manager.getSessionId(), harnessOptions, options.agent, BACKGROUND_CONTEXT, options.initializeParentDocuments)
@@ -132,9 +142,10 @@ export class DurableSessionJournal {
         await handle.release(BACKGROUND_CONTEXT);
         handle = selected;
       }
-      const journal = new DurableSessionJournal(handle, options.manager, pool, harnessOptions, options.initializeParentDocuments, options.onReport);
+      const journal = new DurableSessionJournal(handle, options.manager, pool, harnessOptions, options.initializeParentDocuments, options.onReport, options.summarize);
       journal.adoptUsage(await handle.harness.snapshot(UsageDoc, handle.conversation.id, BACKGROUND_CONTEXT) ?? { models: {}, tools: {} });
       for (const submission of await pool.submissions(handle.address, BACKGROUND_CONTEXT)) journal.noteCustomInput(submission);
+      if (sessionFile !== undefined) await writeDurableSessionLocator(durableSessionPaths(sessionFile).directory, handle.address);
       await journal.project();
       return journal;
     } catch (error) { await handle?.release(BACKGROUND_CONTEXT); throw error; }
@@ -207,6 +218,15 @@ export class DurableSessionJournal {
     const projectedKey = (index: number) => `${String(entry.conversationId)}:${String(entry.id)}:${String(index)}`;
     const stamp = (index: number) => ({ [DURABLE_SESSION_PROPERTY]: this.ownerSessionId, [DURABLE_ENTRY_PROPERTY]: entry.id,
       [DURABLE_JOURNAL_PROPERTY]: this.handle.address.journalId, [DURABLE_CONVERSATION_PROPERTY]: entry.conversationId, [DURABLE_MESSAGE_PROPERTY]: index });
+    if (entry.kind === "forgerie.branch-summary") {
+      let id = this.projected.get(projectedKey(0));
+      if (id === undefined) {
+        if (typeof entry.data !== "string") throw new Error("Invalid native branch summary");
+        id = this.manager.branchWithSummary(this.manager.getLeafId(), entry.data, stamp(0));
+        this.projected.set(projectedKey(0), id);
+      }
+      return [{ id, entry, index: 0 }];
+    }
     if (!this.projected.has(projectedKey(0)) && isHostEntryKind(entry.kind)) {
       const data = typeof entry.data === "object" && entry.data !== null && !Array.isArray(entry.data) ? entry.data : {};
       const id = this.manager.appendCustomMessageEntry(entry.kind, hostEntryText(entry.kind, entry.data), true, { ...data, ...stamp(0) });
@@ -250,37 +270,35 @@ export class DurableSessionJournal {
     await this.conversation.submit({ type: "write", entry: { kind: "forgerie.message", model: [message] } }, BACKGROUND_CONTEXT);
   }
 
-  /** Legacy facade bridge: select a native cut, never append the selected prefix. */
-  async selectBranch(): Promise<void> {
+  /** Derived SDK IDs are compatibility aliases, not native mutation targets. */
+  sdkEntryId(entry: EntryRecord, index = Math.max(0, (entry.model?.length ?? 1) - 1)): string | undefined {
+    const sdk = typeof entry.data === "object" && entry.data !== null && !Array.isArray(entry.data) ? entry.data["sdkEntryId"] : undefined;
+    return typeof sdk === "string" ? sdk : this.projected.get(`${String(entry.conversationId)}:${String(entry.id)}:${String(index)}`);
+  }
+
+  /** Adopt the committed selection and move only the export's leaf. Never write a prefix back to Durable. */
+  async selectHandle(handle: DurableSessionHandle): Promise<void> {
     this.assertOwned();
-    const leaf = this.manager.getLeafId();
-    const imported = await this.harness.snapshot(LegacyTree, BACKGROUND_CONTEXT);
-    const mapped = leaf === null ? undefined : imported?.aliases[leaf];
-    let source = this.conversation;
-    let cut = mapped?.entryId;
-    if (mapped !== undefined) {
-      const conversation = await this.harness.conversation(boundConversationId(mapped.conversationId), BACKGROUND_CONTEXT);
-      if (conversation === undefined) throw new Error("Missing imported branch");
-      source = conversation;
-    } else if (leaf === null) {
-      const origin = (await source.entries({ order: "ascending" }, 1, undefined, BACKGROUND_CONTEXT)).items[0];
-      if (origin?.kind !== "forgerie.origin") throw new Error("Missing empty historical anchor");
-      cut = origin.id;
-    }
-    if (cut === undefined) throw new Error("SDK branch target has no native alias");
-    const entry = (await source.entries({}, 1, undefined, BACKGROUND_CONTEXT)).items[0];
-    if (entry === undefined) throw new Error("Imported source is empty");
-    const nativeCut = await source.commit((tx) => tx.entry(entry.id === cut ? entry.id : importedEntryId(cut)), BACKGROUND_CONTEXT);
-    if (nativeCut === undefined) throw new Error("Missing native branch cut");
-    const candidate = await source.fork(nativeCut.id, { ownership: { kind: "ownerless" }, init: async (tx, id) => {
-      await this.initializeParentDocuments?.(tx, { id, parent: { conversationId: source.id, at: nativeCut.id } });
-      await bindSession(tx, this.handle.address.journalId, this.handle.address.sessionId, id);
-    } }, BACKGROUND_CONTEXT);
-    const acquired = await this.pool.acquire({ ...this.handle.address, conversationId: candidate.id }, this.harnessOptions, BACKGROUND_CONTEXT);
+    if (handle.harness !== this.harness || handle.address.sessionId !== this.handle.address.sessionId) throw new Error("Foreign selected handle");
+    await this.projection;
+    const entries: EntryRecord[] = [];
+    let cursor: Cursor | undefined;
+    do {
+      const page = await handle.conversation.entries({ order: "ascending" }, 256, cursor, BACKGROUND_CONTEXT);
+      entries.push(...page.items); cursor = page.next;
+    } while (cursor !== undefined);
+    const leaf = entries.slice().reverse().map((entry) => this.sdkEntryId(entry)).find((id) => id !== undefined);
+    if (leaf === undefined) this.manager.resetLeaf();
+    else this.manager.branch(leaf);
     const outgoing = this.handleValue;
-    this.handleValue = acquired;
+    this.handleValue = handle;
     this.scanned = undefined;
+    this.customInputEntries.clear();
+    for (const submission of await this.pool.submissions(handle.address, BACKGROUND_CONTEXT)) this.noteCustomInput(submission);
     this.adoptUsage(await this.harness.snapshot(UsageDoc, this.conversation.id, BACKGROUND_CONTEXT) ?? { models: {}, tools: {} });
+    const file = this.manager.getSessionFile();
+    if (file !== undefined) await writeDurableSessionLocator(durableSessionPaths(file).directory, handle.address);
+    await this.project();
     await outgoing.release(BACKGROUND_CONTEXT);
   }
 
@@ -301,10 +319,4 @@ export class DurableSessionJournal {
 
 function isFsError(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
-}
-
-function importedEntryId(value: number): EntryId {
-  if (!Number.isSafeInteger(value) || value < 0) throw new Error("Invalid imported entry ID");
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-  return value as EntryId;
 }
