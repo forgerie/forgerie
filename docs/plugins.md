@@ -21,7 +21,7 @@ Package and extension changes can need a daemon restart. Settings keeps the rest
 
 Restarting stops running agents. Use an approved idle window. The restart action asks for confirmation. If host-side restart is unavailable, follow [deployment](deployment.md).
 
-Forgerie ships pinned `pi-subagents`, pinned `pi-web-access` 0.39.0, and its patched `pi-processes` package. Their hosted tools remain available without installing another browser plugin. Web search uses keyless Exa with no profile configuration. See [web search](web-search.md). Durable children are separate and opt-in. See [child agents](child-agents.md).
+Forgerie ships pinned `pi-subagents`, pinned `pi-web-access` 0.39.0, and its patched `pi-processes` package. Their hosted tools remain available without installing another browser plugin. Web search uses keyless Exa with no profile configuration. See [web search](web-search.md). Durable children are separate and opt-in. See [child agents](child-agents.md). Hosted sessions also load Pi's built-in MCP extension; see [MCP servers](mcp.md).
 
 ## Current browser-app plugins
 

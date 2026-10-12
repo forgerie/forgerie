@@ -106,6 +106,7 @@ import { promptRequestOptionsSchema, type PromptRequestOptions } from "../../sha
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { CODEMODE_TOOL_NAME, codemodeScriptSummary } from "../../shared/codemodeScript.js";
 import { codemodeDefaultTools, hostedCodemodeExtension, isNestedToolEvent } from "./codemode.js";
+import { hostedMcpExtension } from "./mcp.js";
 import { createProcessBridgeExtension, createProcessBridgeSlot, type ProcessBridgeSlot } from "./processBridge.js";
 import { createSessionTitleBridgeExtension, createSessionTitleBridgeSlot, type SessionTitleBridgeEvent, type SessionTitleBridgeSlot } from "./sessionTitleBridge.js";
 import { bundledForgerieSkillsPackagePath, preferBundledForgerieSkills } from "./bundledForgerieSkills.js";
@@ -885,6 +886,7 @@ function createDefaultRuntimeFactory(
           createProcessBridgeExtension(processBridgeSlot),
           createSessionTitleBridgeExtension(sessionTitleBridgeSlot),
           hostedCodemodeExtension(),
+          hostedMcpExtension(),
           ...(workspaceServicesObserver === undefined ? [] : [workspaceServicesObserver.extension]),
         ],
       },
