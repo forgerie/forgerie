@@ -16,7 +16,7 @@ type LegacyTreeState = { entries: JsonValue[]; aliases: Record<string, ImportedT
 export const LegacyTree = defineDoc({ kind: "forgerie.legacy-tree", version: 1, scope: "session", initial: (): LegacyTreeState => ({ entries: [], aliases: {} }) });
 // Version the original native import receipt. App-state owns forgerie.migration.
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
-type ImportReceipt = { sourceHash: string; count: number; complete: boolean; legacyProjectionComplete: boolean; originConversationId?: number; originEntryId?: number; keepOriginalSelection?: boolean };
+type ImportReceipt = { sourceHash: string; count: number; complete: boolean; legacyProjectionComplete: boolean; originConversationId?: number; originEntryId?: number; keepOriginalSelection?: boolean; failure?: string };
 export const LegacyMigration = defineDoc({ kind: "forgerie.import", version: 2, scope: "session",
   initial: (): ImportReceipt => ({ sourceHash: "", count: 0, complete: false, legacyProjectionComplete: false }),
   migrate: (value, fromVersion): ImportReceipt => {
@@ -25,16 +25,21 @@ export const LegacyMigration = defineDoc({ kind: "forgerie.import", version: 2, 
   },
 });
 
+/** A rejected legacy source is not a damaged native storage or ownership failure. */
+export class LegacyImportError extends Error {
+  override readonly name = "LegacyImportError";
+}
+
 /** Whole graph import. Passive commits never submit input, start tasks, or run a provider. */
 export async function importDurableLegacyTree(handle: DurableSessionHandle, manager: SessionManager, context: Context, initializeParentDocuments?: InitializeParentDocuments): Promise<void> {
-  const entries = manager.getEntries().filter((entry) => !isNativeProjection(entry, manager.getSessionId()));
+  const entries = legacyEntries(manager.getEntries(), manager.getSessionId());
   const sourceHash = createHash("sha256").update(JSON.stringify(durableJson(entries))).digest("hex");
   const receipt = await handle.harness.snapshot(LegacyMigration, context);
   if (receipt?.complete === true) {
-    if (receipt.sourceHash !== sourceHash) throw new Error("Legacy source changed after verified import; stop cutover and reconcile metadata");
+    if (receipt.sourceHash !== sourceHash) throw new LegacyImportError("Legacy source changed after verified import; stop cutover and reconcile metadata");
     return;
   }
-  if (receipt !== undefined && receipt.sourceHash !== "" && receipt.sourceHash !== sourceHash) throw new Error("Legacy import source conflicts with saved progress");
+  if (receipt !== undefined && receipt.sourceHash !== "" && receipt.sourceHash !== sourceHash) throw new LegacyImportError("Legacy import source conflicts with saved progress");
   const ordered = topological(entries);
   const bindings = await readSessionBindings(handle.harness, context);
   const existingEntries = await scanEntries(handle.conversation, context);
@@ -96,14 +101,14 @@ export async function importDurableLegacyTree(handle: DurableSessionHandle, mana
       if (source.type === "model_change") await configure(tx, conversation.id, { model: { provider: source.provider, modelId: source.modelId } });
       if (source.type === "thinking_level_change") {
         const level = source.thinkingLevel;
-        if (level !== "off" && level !== "minimal" && level !== "low" && level !== "medium" && level !== "high" && level !== "xhigh" && level !== "max") throw new Error("Unsupported legacy thinking level");
+        if (level !== "off" && level !== "minimal" && level !== "low" && level !== "medium" && level !== "high" && level !== "xhigh" && level !== "max") throw new LegacyImportError("Unsupported legacy thinking level");
         await configure(tx, conversation.id, { thinkingLevel: level });
       }
       const model = convertToLlm(sessionEntryToContextMessages(source));
       const kept = source.type === "compaction" ? imported.get(source.firstKeptEntryId)?.entry.id : undefined;
-      if (source.type === "compaction" && kept === undefined) throw new Error("Unsupported legacy compaction cut");
+      if (source.type === "compaction" && kept === undefined) throw new LegacyImportError("Unsupported legacy compaction cut");
       const edited = source.type === "context_edit" ? imported.get(source.targetId)?.entry : undefined;
-      if (source.type === "context_edit" && edited === undefined) throw new Error("Unsupported legacy context edit target");
+      if (source.type === "context_edit" && edited === undefined) throw new LegacyImportError("Unsupported legacy context edit target");
       const projection = source.type === "context_edit" ? buildSessionProjection(entries, source.id).entries.find((item) => item.sourceEntry.id === source.targetId) : undefined;
       const edits: ContextEdit[] = edited === undefined ? [] : [source.type === "context_edit" && source.replacement === null ? { target: edited.id, action: "omit" } : { target: edited.id, action: "replace", messages: convertToLlm(projection?.messages ?? []) }];
       const native = await tx.appendEntry(conversation.id, {
@@ -136,18 +141,40 @@ export async function importDurableLegacyTree(handle: DurableSessionHandle, mana
     const progress = await tx.doc(LegacyMigration);
     if (progress.count !== entries.length) throw new Error("Legacy import count mismatch");
     progress.complete = true;
+    delete progress.failure;
   }, context);
+}
+
+function legacyEntries(entries: SessionEntry[], sessionId: string): SessionEntry[] {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  if (byId.size !== entries.length) throw new LegacyImportError("Duplicate legacy SDK entry IDs");
+  const kept = entries.filter((entry) => !isNativeProjection(entry, sessionId));
+  const ids = new Set(kept.map((entry) => entry.id));
+  return kept.map((entry) => {
+    let parentId = entry.parentId;
+    const visited = new Set([entry.id]);
+    while (parentId !== null && !ids.has(parentId)) {
+      if (visited.has(parentId)) throw new LegacyImportError("Legacy graph has a cycle or missing parent");
+      visited.add(parentId);
+      const ancestor = byId.get(parentId);
+      if (ancestor === undefined) throw new LegacyImportError("Legacy graph has a cycle or missing parent");
+      parentId = ancestor.parentId;
+    }
+    // SDK metadata and envelopes can follow native projection records. Remove only
+    // the projection nodes, not the graph edge to their nearest retained ancestor.
+    return { ...entry, parentId };
+  });
 }
 
 function topological(entries: SessionEntry[]): SessionEntry[] {
   const pending = new Map(entries.map((entry) => [entry.id, entry]));
-  if (pending.size !== entries.length) throw new Error("Duplicate legacy SDK entry IDs");
+  if (pending.size !== entries.length) throw new LegacyImportError("Duplicate legacy SDK entry IDs");
   const result: SessionEntry[] = [];
   const seen = new Set<string>();
   while (pending.size > 0) {
     const size = pending.size;
     for (const [id, entry] of pending) if (entry.parentId === null || seen.has(entry.parentId)) { result.push(entry); seen.add(id); pending.delete(id); }
-    if (size === pending.size) throw new Error("Legacy graph has a cycle or missing parent");
+    if (size === pending.size) throw new LegacyImportError("Legacy graph has a cycle or missing parent");
   }
   return result;
 }
@@ -181,5 +208,5 @@ function completeToolRound(messages: ReturnType<typeof convertToLlm>): boolean {
 async function compareContext(conversation: Conversation, native: EntryRecord, entries: SessionEntry[], sourceId: string, context: Context): Promise<void> {
   const expected = convertToLlm(buildSessionProjection(entries, sourceId).entries.flatMap((entry) => entry.messages));
   const actual = (await conversation.context(context, { at: native.id })).messages;
-  if (completeToolRound(expected) && !isDeepStrictEqual(actual, expected)) throw new Error(`Legacy context comparison failed at ${sourceId}; keep this session on legacy reads`);
+  if (completeToolRound(expected) && !isDeepStrictEqual(actual, expected)) throw new LegacyImportError(`Legacy context comparison failed at ${sourceId}; keep this session on legacy reads`);
 }

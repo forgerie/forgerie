@@ -13,7 +13,7 @@ import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import { DurableJournalPool, type InitializeParentDocuments } from "./durableJournalPool.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { createDurableNativeHistory, NativeEntryAliases } from "./durableNativeHistory.js";
-import { importDurableLegacyTree, LegacyMigration, LegacyTree } from "./durableLegacyImport.js";
+import { importDurableLegacyTree, LegacyImportError, LegacyMigration, LegacyTree } from "./durableLegacyImport.js";
 
 const DURABLE_ENTRY_PROPERTY = "forgerieDurableEntryId";
 const DURABLE_SESSION_PROPERTY = "forgerieDurableSessionId";
@@ -88,6 +88,7 @@ export class DurableSessionJournal {
     private readonly initializeParentDocuments: InitializeParentDocuments | undefined,
     private readonly onReport: DurableJournalOptions["onReport"],
     private readonly summarize: DurableJournalOptions["summarize"],
+    readonly legacyImportError: LegacyImportError | undefined,
   ) {
     this.ownerSessionId = manager.getSessionId();
     this.unsubscribe = this.harness.subscribeCommits((publication) => {
@@ -118,6 +119,7 @@ export class DurableSessionJournal {
       ...(options.env === undefined ? {} : { env: options.env }),
     };
     let handle = options.handle;
+    let legacyImportError: LegacyImportError | undefined;
     try {
       if (handle === undefined && sessionFile !== undefined) {
         const locator = await readDurableSessionLocator(durableSessionPaths(sessionFile).directory);
@@ -136,18 +138,27 @@ export class DurableSessionJournal {
             if (!isFsError(error, "ENOENT") && !isFsError(error, "EEXIST")) throw error;
           });
         }
-        if ((await handle.harness.snapshot(LegacyMigration, BACKGROUND_CONTEXT))?.complete !== true) await importDurableLegacyTree(handle, options.manager, BACKGROUND_CONTEXT, options.initializeParentDocuments);
+        try {
+          if ((await handle.harness.snapshot(LegacyMigration, BACKGROUND_CONTEXT))?.complete !== true) await importDurableLegacyTree(handle, options.manager, BACKGROUND_CONTEXT, options.initializeParentDocuments);
+        } catch (error) {
+          if (!(error instanceof LegacyImportError)) throw error;
+          legacyImportError = error;
+          await handle.harness.commit(async (tx) => { (await tx.doc(LegacyMigration)).failure = error.message; }, BACKGROUND_CONTEXT);
+          options.onReport?.(error);
+        }
         // Import may select a historical continuation. Never reopen the reserved root instead.
         const selected = await pool.acquire({ databasePath: handle.address.databasePath, sessionId: handle.address.sessionId }, harnessOptions, BACKGROUND_CONTEXT);
         await handle.release(BACKGROUND_CONTEXT);
         handle = selected;
       }
-      const journal = new DurableSessionJournal(handle, options.manager, pool, harnessOptions, options.initializeParentDocuments, options.onReport, options.summarize);
+      const journal = new DurableSessionJournal(handle, options.manager, pool, harnessOptions, options.initializeParentDocuments, options.onReport, options.summarize, legacyImportError);
       journal.adoptUsage(await handle.harness.snapshot(UsageDoc, handle.conversation.id, BACKGROUND_CONTEXT) ?? { models: {}, tools: {} });
       for (const submission of await pool.submissions(handle.address, BACKGROUND_CONTEXT)) journal.noteCustomInput(submission);
-      if (sessionFile !== undefined) await writeDurableSessionLocator(durableSessionPaths(sessionFile).directory, handle.address);
-      await journal.project();
-      await journal.restoreExportLeaf();
+      if (sessionFile !== undefined && legacyImportError === undefined) await writeDurableSessionLocator(durableSessionPaths(sessionFile).directory, handle.address);
+      if (legacyImportError === undefined) {
+        await journal.project();
+        await journal.restoreExportLeaf();
+      }
       return journal;
     } catch (error) { await handle?.release(BACKGROUND_CONTEXT); throw error; }
   }
@@ -165,6 +176,7 @@ export class DurableSessionJournal {
   }
 
   assertOwned(): void {
+    if (this.legacyImportError !== undefined) throw new Error(`Session remains on legacy reads: ${this.legacyImportError.message}`);
     if (this.closing !== undefined) throw new Error("Durable journal is closed");
     this.pool.assertOwned(this.handle.address);
   }
@@ -190,6 +202,7 @@ export class DurableSessionJournal {
 
   /** Called before tools and after committed events, so extension hooks see committed assistant calls. */
   project(): Promise<void> {
+    if (this.legacyImportError !== undefined) return Promise.resolve();
     if (this.closing !== undefined) return this.projection;
     this.projection = this.projection.then(async () => {
       if (this.isClosing()) return;
