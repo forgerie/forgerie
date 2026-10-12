@@ -13,7 +13,7 @@ import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import { DurableJournalPool, type InitializeParentDocuments } from "./durableJournalPool.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { createDurableNativeHistory, NativeEntryAliases } from "./durableNativeHistory.js";
-import { importDurableLegacyTree, LegacyMigration } from "./durableLegacyImport.js";
+import { importDurableLegacyTree, LegacyMigration, LegacyTree } from "./durableLegacyImport.js";
 
 const DURABLE_ENTRY_PROPERTY = "forgerieDurableEntryId";
 const DURABLE_SESSION_PROPERTY = "forgerieDurableSessionId";
@@ -147,6 +147,7 @@ export class DurableSessionJournal {
       for (const submission of await pool.submissions(handle.address, BACKGROUND_CONTEXT)) journal.noteCustomInput(submission);
       if (sessionFile !== undefined) await writeDurableSessionLocator(durableSessionPaths(sessionFile).directory, handle.address);
       await journal.project();
+      await journal.restoreExportLeaf();
       return journal;
     } catch (error) { await handle?.release(BACKGROUND_CONTEXT); throw error; }
   }
@@ -274,6 +275,32 @@ export class DurableSessionJournal {
   sdkEntryId(entry: EntryRecord, index = Math.max(0, (entry.model?.length ?? 1) - 1)): string | undefined {
     const sdk = typeof entry.data === "object" && entry.data !== null && !Array.isArray(entry.data) ? entry.data["sdkEntryId"] : undefined;
     return typeof sdk === "string" ? sdk : this.projected.get(`${String(entry.conversationId)}:${String(entry.id)}:${String(index)}`);
+  }
+
+  /** JSONL has no durable leaf selector. Restore it from the selected native history, not the file tail. */
+  private async restoreExportLeaf(): Promise<void> {
+    const visible = new Set<string>();
+    let leaf: string | undefined;
+    let cursor: Cursor | undefined;
+    do {
+      const page = await this.conversation.entries({ order: "ascending" }, 256, cursor, BACKGROUND_CONTEXT);
+      for (const entry of page.items) {
+        for (let index = 0; index < Math.max(1, entry.model?.length ?? 0); index++) {
+          const id = this.sdkEntryId(entry, index);
+          if (id !== undefined) { visible.add(id); leaf = id; }
+        }
+      }
+      cursor = page.next;
+    } while (cursor !== undefined);
+    const branch = this.manager.getBranch();
+    const imported = await this.harness.snapshot(LegacyTree, BACKGROUND_CONTEXT);
+    const known = new Set([...this.projected.values(), ...Object.keys(imported?.aliases ?? {})]);
+    const content = branch.slice().reverse().find((entry) => known.has(entry.id));
+    // Keep export-only envelopes and extension records after a selected native alias.
+    // An abandoned native alias in the file tail must never select the branch.
+    if ((content === undefined || visible.has(content.id)) && (leaf === undefined || branch.some((entry) => entry.id === leaf))) return;
+    if (leaf === undefined) this.manager.resetLeaf();
+    else this.manager.branch(leaf);
   }
 
   /** Adopt the committed selection and move only the export's leaf. Never write a prefix back to Durable. */

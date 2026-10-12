@@ -137,6 +137,25 @@ describe("SDK-compatible Durable execution", () => {
     expect((await original.entries({ order: "ascending" }, 100, undefined, context)).items).toEqual(before);
   });
 
+  it("reopens an idle selected continuation without restoring the abandoned export leaf", async () => {
+    const { session, provider, services } = await fixture();
+    provider.setResponses([fauxAssistantMessage("first answer"), fauxAssistantMessage("abandoned answer")]);
+    await session.prompt("first input");
+    const target = (await session.getDurableTree()).activeLeafId;
+    if (target === null) throw new Error("Missing first tip");
+    await session.prompt("abandoned input");
+    await session.navigateTree(target);
+    const address = session.durableAddress;
+    const file = session.sessionFile;
+    if (file === undefined) throw new Error("Export must exist");
+    await session.close();
+    const reopened = await DurableAgentSession.open({ services, sessionManager: SessionManager.open(file) });
+    sessions.push(reopened);
+    expect(reopened.durableAddress).toEqual(address);
+    expect(reopened.messages.filter((message) => message.role === "user").map((message) => message.content)).toEqual(["first input"]);
+    expect(provider.state.callCount).toBe(2);
+  });
+
   it.each(["provider", "extension"] as const)("appends a successful %s branch summary only to the selected continuation", async (source) => {
     let treeHooks = 0;
     const { session, provider } = await fixture([], false, undefined, undefined, undefined, false, [], undefined, (event) => {
