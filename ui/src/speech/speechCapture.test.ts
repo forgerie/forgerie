@@ -347,7 +347,7 @@ describe("speech capture browser lifecycle", () => {
     expect([...terminals[0]?.samples ?? []]).toEqual([1, 2]);
   });
 
-  it("tracks ended as a terminal failure and clears retained audio", async () => {
+  it("returns captured audio to the owner when the microphone is interrupted", async () => {
     const host = fakeHost();
     const terminals: SpeechCaptureTerminal[] = [];
     const session = await createSpeechCaptureSession({ host, onTerminal: (terminal) => { terminals.push(terminal); } });
@@ -362,7 +362,55 @@ describe("speech capture browser lifecycle", () => {
     expect(host.audioContextClosed).toBe(true);
     expect(terminals).toHaveLength(1);
     expect(terminals[0]).toMatchObject({ kind: "failed", error: { kind: "track_ended" } });
-    expect([...terminals[0]?.samples ?? []]).toEqual([]);
+    expect([...terminals[0]?.samples ?? []]).toEqual([1, 2]);
+    await session.abort();
+    expect(terminals).toHaveLength(1);
+  });
+
+  it.each(["stop", "abort", "track ended", "limit", "setup failure"])("owns a screen wake lock through %s", async (terminal) => {
+    const host = fakeHost();
+    const page = Object.assign(new EventTarget(), { visibilityState: "visible" });
+    const release = vi.fn(async () => {});
+    const lock = Object.assign(new EventTarget(), { released: false, release });
+    const request = vi.fn(async () => lock);
+    const onUnavailable = vi.fn();
+    const wakeHost = Object.assign(host, { screenWakeLock: { page, wakeLock: { request }, onUnavailable } });
+    if (terminal === "setup failure") {
+      host.failWorklet = true;
+      await expect(createSpeechCaptureSession({ host: wakeHost })).rejects.toMatchObject({ kind: "worklet_load_failed" });
+    } else {
+      const session = await createSpeechCaptureSession({ host: wakeHost });
+      expect(request).toHaveBeenCalledExactlyOnceWith("screen");
+      expect(release).not.toHaveBeenCalled();
+      if (terminal === "stop") {
+        host.worklet.onPostMessage = (message) => host.emitWorkletMessage({ kind: "flushed", requestId: message.requestId, totalSamples: 0 });
+        await session.stopAndFinalize();
+      } else if (terminal === "abort") await session.abort();
+      else {
+        if (terminal === "track ended") host.endTrack();
+        else host.emitWorkletMessage({ kind: "limit", totalSamples: 0 });
+        await session.abort();
+      }
+    }
+    expect(request).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
+    expect(onUnavailable).not.toHaveBeenCalled();
+    page.dispatchEvent(new Event("visibilitychange"));
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it("continues recording when power policy denies a screen wake lock", async () => {
+    const host = fakeHost();
+    const onUnavailable = vi.fn();
+    const wakeHost = Object.assign(host, { screenWakeLock: {
+      page: Object.assign(new EventTarget(), { visibilityState: "visible" }),
+      wakeLock: { request: async (): Promise<never> => { throw new DOMException("Power saving", "NotAllowedError"); } },
+      onUnavailable,
+    } });
+    const session = await createSpeechCaptureSession({ host: wakeHost });
+    expect(session.failure).toBeUndefined();
+    expect(onUnavailable).toHaveBeenCalledOnce();
+    await session.abort();
   });
 
   it("shares one in-flight cleanup promise across concurrent aborts", async () => {

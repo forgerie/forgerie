@@ -1,4 +1,5 @@
 import speechCaptureWorkletUrl from "./speechCaptureWorklet.ts?worker&url";
+import { keepSpeechScreenAwake, type SpeechWakeLockHost } from "./speechWakeLock";
 import { SPEECH_POLICY, type SpeechRuntimePolicy } from "@shared/speechPolicy";
 
 export type SpeechCaptureFailureKind = "unsupported" | "permission_denied" | "device_unavailable" | "worklet_load_failed" | "context_failed" | "startup_stalled" | "track_ended" | "limit_reached" | "worklet_failed" | "cancelled";
@@ -53,6 +54,7 @@ export interface SpeechCaptureSession {
 }
 
 export interface SpeechCaptureBrowserHost {
+  readonly screenWakeLock?: SpeechWakeLockHost;
   readonly mediaDevices?: { getUserMedia(constraints: MediaStreamConstraints): Promise<SpeechMediaStreamLike> };
   readonly workletUrl?: string;
   createAudioContext(options: AudioContextOptions): SpeechAudioContextLike;
@@ -276,11 +278,13 @@ async function createSpeechCaptureAttempt(options: SpeechCaptureOptions, host: S
   let worklet: SpeechAudioWorkletNodeLike | undefined;
   let gain: SpeechGainNodeLike | undefined;
   let session: SpeechCaptureSessionImpl | undefined;
+  let releaseWakeLock: (() => void) | undefined;
   try {
     stream = await host.mediaDevices.getUserMedia(microphoneConstraints()).catch((error: unknown) => {
       throw mapSpeechCaptureFailure(error);
     });
     throwIfCaptureAborted(signal);
+    if (host.screenWakeLock !== undefined) releaseWakeLock = keepSpeechScreenAwake(host.screenWakeLock);
     context = host.createAudioContext({ sampleRate: policy.audio.sampleRateHz });
     if (context.sampleRate < policy.audio.sampleRateHz) throw new SpeechCaptureError("context_failed", "Speech capture requires an audio input rate of at least 16 kHz.");
     await ensureAudioContextRunning(context);
@@ -314,7 +318,7 @@ async function createSpeechCaptureAttempt(options: SpeechCaptureOptions, host: S
     worklet.connect(gain);
     gain.connect(context.destination);
     throwIfCaptureAborted(signal);
-    session = new SpeechCaptureSessionImpl({ policy, stream, context, source, filter, worklet, gain, signal, onPauseCandidate: options.onPauseCandidate, onSpeechActivity: options.onSpeechActivity, onLevel: options.onLevel, onTerminal: options.onTerminal });
+    session = new SpeechCaptureSessionImpl({ policy, stream, context, source, filter, worklet, gain, signal, releaseWakeLock, onPauseCandidate: options.onPauseCandidate, onSpeechActivity: options.onSpeechActivity, onLevel: options.onLevel, onTerminal: options.onTerminal });
     session.start();
     await session.waitUntilLive(options.startupTimeoutMs ?? policy.timing.captureStartupTimeoutMs);
     session.confirmStartup();
@@ -322,6 +326,7 @@ async function createSpeechCaptureAttempt(options: SpeechCaptureOptions, host: S
   } catch (error) {
     if (session !== undefined) await session.abandonStartup();
     else {
+      releaseWakeLock?.();
       cleanupSetup({ stream, context, source, filter, worklet, gain });
       if (context !== undefined) await context.close().catch(() => undefined);
     }
@@ -391,7 +396,7 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
     if (candidate !== undefined) this.options.onPauseCandidate?.({ endSample: candidate.endSample, samples: this.endpointWindow() });
   };
   private readonly onTrackEnded = (): void => {
-    void this.failTerminal(new SpeechCaptureError("track_ended", "The microphone track ended."), { clearSamples: true, notifySamples: new Float32Array() });
+    void this.failTerminal(new SpeechCaptureError("track_ended", "The microphone track ended."), { clearSamples: true, notifySamples: this.snapshotAndClear() });
   };
 
   public constructor(private readonly options: {
@@ -403,6 +408,7 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
     readonly worklet: SpeechAudioWorkletNodeLike;
     readonly gain: SpeechGainNodeLike;
     readonly signal: AbortSignal | undefined;
+    readonly releaseWakeLock: (() => void) | undefined;
     readonly onPauseCandidate: SpeechCaptureOptions["onPauseCandidate"];
     readonly onSpeechActivity: SpeechCaptureOptions["onSpeechActivity"];
     readonly onLevel: SpeechCaptureOptions["onLevel"];
@@ -582,6 +588,7 @@ class SpeechCaptureSessionImpl implements SpeechCaptureSession {
   private cleanup(options: { readonly clearSamples: boolean }): Promise<void> {
     this.cleanupPromise ??= (async () => {
       this.acceptingMessages = false;
+      this.options.releaseWakeLock?.();
       this.pendingFlush = undefined;
       const startupWaiter = this.startupWaiter;
       this.startupWaiter = undefined;
@@ -623,6 +630,11 @@ function microphoneConstraints(): MediaStreamConstraints {
 
 function defaultSpeechCaptureBrowserHost(): SpeechCaptureBrowserHost {
   return {
+    screenWakeLock: {
+      page: document,
+      wakeLock: navigator.wakeLock,
+      onUnavailable: (error) => { console.warn("Forgerie cannot keep the screen awake during microphone capture.", error); },
+    },
     mediaDevices: navigator.mediaDevices,
     createAudioContext: (options) => new AudioContext(options),
     createAudioWorkletNode: (context, name, options) => {

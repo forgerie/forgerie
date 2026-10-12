@@ -51,11 +51,14 @@ export class ForgerieDictationAdapter implements DictationAdapter {
     const end = new Set<(result: DictationAdapter.Result) => void>();
     let capture: SpeechCaptureSession | undefined;
     let stopTask: Promise<void> | undefined;
+    let interruptedSamples: Float32Array | undefined;
+    let interruptionMessage: string | undefined;
     let ended = false;
     const current = () => !ended && this.active === session;
     const finish = (reason: "stopped" | "cancelled" | "error", message?: string) => {
       if (!current()) return;
       ended = true;
+      interruptedSamples = undefined;
       controller.abort();
       session.status = { type: "ended", reason };
       this.active = undefined;
@@ -82,13 +85,14 @@ export class ForgerieDictationAdapter implements DictationAdapter {
           await startup;
           if (!current() || !capture) return;
           this.publish({ type: "transcribing" });
-          const pcm = await capture.stopAndFinalize();
+          const pcm = interruptedSamples ?? await capture.stopAndFinalize();
+          interruptedSamples = undefined;
           if (!current()) return;
           if (pcm.length < SPEECH_POLICY.audio.minRequestSamples) throw new Error("Recording is too short. Speak for at least 0.1 seconds.");
           const { text } = await this.dependencies.transcribe(pcm, controller.signal);
           if (!current()) return;
           for (const callback of speech) callback({ transcript: text, isFinal: true });
-          finish("stopped");
+          finish("stopped", interruptionMessage);
         })().catch(fail);
         return stopTask;
       },
@@ -107,7 +111,14 @@ export class ForgerieDictationAdapter implements DictationAdapter {
       await this.dependencies.ready(controller.signal);
       if (!current()) return;
       const opened = await this.dependencies.capture({ signal: controller.signal, onTerminal: (terminal) => {
-        if (terminal.kind === "failed") fail(terminal.error);
+        if (terminal.kind !== "failed" || !current()) return;
+        if ((terminal.error.kind === "track_ended" || terminal.error.kind === "limit_reached") && terminal.samples.length >= SPEECH_POLICY.audio.minRequestSamples) {
+          interruptedSamples = terminal.samples;
+          interruptionMessage = terminal.error.kind === "track_ended"
+            ? "Microphone interrupted. Captured speech was added to your draft."
+            : "Recording limit reached. Captured speech was added to your draft.";
+          void session.stop();
+        } else fail(terminal.error);
       } });
       if (!current()) { await opened.abort(); return; }
       capture = opened;

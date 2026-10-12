@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ForgerieDictationAdapter, type DictationDependencies } from "./ForgerieDictationAdapter";
-import type { SpeechCaptureOptions, SpeechCaptureSession } from "./speechCapture";
+import { SpeechCaptureError, type SpeechCaptureOptions, type SpeechCaptureSession } from "./speechCapture";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -126,6 +126,41 @@ describe("Forgerie dictation contract", () => {
     const session = adapter.listen(); await started(adapter); await session.stop();
     expect(adapter.getSnapshot().type).toBe("failed");
     expect(dependencies.transcribe).not.toHaveBeenCalled();
+  });
+
+  it("transcribes interrupted audio once without asking the stopped capture to finalize again", async () => {
+    const { adapter, dependencies, capture } = fixture();
+    let options: SpeechCaptureOptions | undefined;
+    dependencies.capture = async (value) => { options = value; return capture; };
+    const session = adapter.listen();
+    const speech = vi.fn(); const end = vi.fn();
+    session.onSpeech(speech); session.onSpeechEnd(end);
+    await started(adapter);
+    const samples = new Float32Array(1_600);
+    options?.onTerminal?.({ kind: "failed", samples, error: new SpeechCaptureError("track_ended", "The microphone track ended.") });
+    await session.stop();
+    expect(dependencies.transcribe).toHaveBeenCalledExactlyOnceWith(samples, expect.any(AbortSignal));
+    expect(capture.stopAndFinalize).not.toHaveBeenCalled();
+    expect(speech).toHaveBeenCalledExactlyOnceWith({ transcript: "spoken words", isFinal: true });
+    expect(end).toHaveBeenCalledOnce();
+    expect(adapter.getSnapshot()).toEqual({ type: "failed", message: "Microphone interrupted. Captured speech was added to your draft." });
+  });
+
+  it("ignores a late interrupted-audio transcription after cancellation", async () => {
+    const { adapter, dependencies, capture } = fixture();
+    let options: SpeechCaptureOptions | undefined;
+    dependencies.capture = async (value) => { options = value; return capture; };
+    const pending = deferred<{ text: string }>();
+    dependencies.transcribe = vi.fn(() => pending.promise);
+    const session = adapter.listen(); const speech = vi.fn(); session.onSpeech(speech);
+    await started(adapter);
+    options?.onTerminal?.({ kind: "failed", samples: new Float32Array(1_600), error: new SpeechCaptureError("track_ended", "The microphone track ended.") });
+    await vi.waitFor(() => expect(dependencies.transcribe).toHaveBeenCalledOnce());
+    session.cancel();
+    pending.resolve({ text: "late partial speech" });
+    await session.stop();
+    expect(speech).not.toHaveBeenCalled();
+    expect(adapter.getSnapshot()).toEqual({ type: "idle" });
   });
 
   it("releases subscribers and handles a capture terminal failure", async () => {

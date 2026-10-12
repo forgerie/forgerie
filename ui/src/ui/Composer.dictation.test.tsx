@@ -5,6 +5,7 @@ import { AssistantRuntimeProvider, useExternalStoreRuntime } from "@assistant-ui
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ForgerieDictationAdapter, type DictationDependencies } from "../speech/ForgerieDictationAdapter";
 import { DictationProvider } from "../DictationProvider";
+import { SpeechCaptureError, type SpeechCaptureOptions } from "../speech/speechCapture";
 import type { PendingAsk, PendingDialog } from "../contracts";
 import { useThreadMessages } from "../useThreadMessages";
 import { Composer } from "./Composer";
@@ -105,6 +106,18 @@ describe("SDK dictation controls in the one composer", () => {
     expect(input().value).toBe("existing draft spoken words");
     expect(input().disabled).toBe(false);
     expect(button("Voice input")).not.toBeNull();
+  });
+  it("appends recovered microphone speech to the existing draft and reports the interruption", async () => {
+    const capture = await dependencies.capture({});
+    let options: SpeechCaptureOptions | undefined;
+    dependencies.capture = async (value) => { options = value; return capture; };
+    await render(); await type("keep this draft"); await click("Voice input");
+    await act(async () => {
+      options?.onTerminal?.({ kind: "failed", samples: new Float32Array(1_600), error: new SpeechCaptureError("track_ended", "The microphone track ended.") });
+    });
+    expect(input().value).toBe("keep this draft spoken words");
+    expect(input().disabled).toBe(false);
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe("Microphone interrupted. Captured speech was added to your draft.");
   });
   it("shows an error and restores typing after permission failure", async () => {
     dependencies.capture = async () => { throw new Error("Microphone permission was denied."); };
