@@ -23,7 +23,13 @@ The names are `forgerie-web.service` and `forgerie-sessiond.service`. For a sour
 
 ## Update an existing checkout
 
-A sessiond restart stops active agents. Dependency replacement can also affect code loaded by those agents. Confirm that the operator approves an idle deployment window before installing, building, or restarting the deployed checkout.
+A sessiond restart pauses active agents. At startup, sessiond scans the session catalog and inspects saved Durable tasks, submissions, and active workflows. It reopens unfinished work without a browser connection or another prompt. Completed and explicitly stopped runs do not restart. Archived and read-only sessions stay idle. Background children can still resume after the parent run was stopped. Workflows waiting for a user decision remain waiting.
+
+Recovery opens at most four sessions at once. Discovery uses Durable's public storage API under the execution ownership lock. It does not parse full transcripts or import legacy sessions. The child live index is not the recovery authority. Unfinished child-run records also trigger reopening to repair accounting when a completion was already saved in Durable. Discovery adds disk reads, and recovered runtimes use memory. Interrupted tools still follow their replay policy; external commands are not guaranteed to survive or repeat safely.
+
+Read the sessiond journal for `durable session startup recovery finished`, which lists resumed sessions and per-session failures. A missing journal leaves a legacy session idle. Corrupt or locked journals produce failures without blocking recovery of other sessions. Recovery stops opening sessions when shutdown starts.
+
+Dependency replacement can affect code loaded by active agents. Confirm that the operator approves an idle deployment window before installing, building, or restarting the deployed checkout.
 
 ```bash
 nix shell nixpkgs#nodejs_24 -c npm ci

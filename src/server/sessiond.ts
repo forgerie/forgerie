@@ -347,23 +347,21 @@ async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pu
   childRuns.start((error) => { app.log.error({ err: error }, "child run retention failed"); });
   let shuttingDown = false;
   const startCleanup = () => { if (!shuttingDown) worktreeCleanup.start(); };
-  // Children run only while their parent session is open. Reopen the sessions that had live children at shutdown.
-  if (liveChildren !== undefined) {
-    void Promise.all([liveChildren.list(), childRuns.pending()]).then(([live, pending]) => {
-      const refs = new Map([...live, ...pending.map(({ run }) => run.session)].map((ref) => [ref.id, ref]));
-      return sessions.resumeDurableChildren([...refs.values()]);
-    }).then(async (report) => {
-      for (const failure of report.failed) {
-        app.log.warn(failure, "could not resume a session with durable children");
-        if (/session not found/i.test(failure.error)) {
-          const ref = (await liveChildren.list()).find((candidate) => candidate.id === failure.id);
-          if (ref !== undefined) await liveChildren.set(ref, false);
-        }
+  // Discover live work from Durable journals, not browser attachment or the best-effort child index.
+  // Accounting repair also reopens sessions whose child completed before its external record was saved.
+  void (liveChildren === undefined ? Promise.resolve([]) : childRuns.pending()).then((pending) =>
+    sessions.resumeDurableSessions(pending.map(({ run }) => run.session), () => shuttingDown),
+  ).then(async (report) => {
+    for (const failure of report.failed) {
+      app.log.warn(failure, "could not recover a durable session");
+      if (liveChildren !== undefined && /session not found/i.test(failure.error)) {
+        const ref = (await liveChildren.list()).find((candidate) => candidate.id === failure.id);
+        if (ref !== undefined) await liveChildren.set(ref, false);
       }
-      if (report.resumed.length > 0) app.log.info({ resumed: report.resumed }, "resumed sessions with durable children");
-      startCleanup();
-    }).catch((error: unknown) => { app.log.warn({ err: error }, "durable child resume failed"); startCleanup(); });
-  } else startCleanup();
+    }
+    app.log.info(report, "durable session startup recovery finished");
+    startCleanup();
+  }).catch((error: unknown) => { app.log.error({ err: error }, "durable session startup recovery failed"); startCleanup(); });
   async function shutdown(signal: NodeJS.Signals): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;

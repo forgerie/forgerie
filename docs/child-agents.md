@@ -51,7 +51,7 @@ Each `send` from the parent reads the child's agent file again and applies the c
 
 ## Restarts
 
-Children live in the parent's Durable storage, and they run only while the daemon has the parent session open. The daemon records sessions with live child work in `$PI_WEB_DATA_DIR/durable-children-live.json` and reopens them at startup, so a restart pauses a child and does not lose it. A tool call that was interrupted reruns only when the tool is replay-safe; otherwise the child is told that the call was interrupted.
+Children live in the parent's Durable storage, and they run only while the daemon has the parent session open. At startup, the daemon discovers unfinished work from saved Durable journals and reopens its parent without a browser request. It also repairs unfinished child-run records. `$PI_WEB_DATA_DIR/durable-children-live.json` remains an index for worktree protection, not the recovery authority. A missing index does not prevent child recovery. A tool call that was interrupted reruns only when the tool is replay-safe; otherwise the child is told that the call was interrupted. See [startup recovery](deployment.md#update-an-existing-checkout) for costs and diagnostics.
 
 ## Limits
 

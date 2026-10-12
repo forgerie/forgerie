@@ -27,7 +27,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientNewSessionModelSelection, ClientSession, ClientSessionCleanupExecuteResponse, ClientSessionCleanupPreviewResponse, ClientSessionModel, ClientSessionStatus, ClientSessionTreeForkRequest, ClientSessionTreeForkResult, ClientSessionTreeNavigateRequest, ClientSessionTreeNavigateResult, ClientThinkingLevel, SessionStreamSnapshot, SessionUiEvent } from "../types.js";
 import { DurableAgentSession } from "./durableAgentSession.js";
-import type { DurableChildHost, DurableChildSessionRef } from "./durableChildHost.js";
+import type { DurableChildHost } from "./durableChildHost.js";
+import { recoverDurableSessions, type DurableRecoveryReport } from "./durableSessionRecovery.js";
 import { DurableSessionRuntime, type DurableRuntimeFactory, type DurableRuntimeResult } from "./durableSessionRuntime.js";
 import { projectBrowserMessage, projectBrowserMessageResponse } from "../browserMessageProjection.js";
 import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
@@ -1021,6 +1022,7 @@ interface CachedSessionHeader {
 export class PiSessionService implements SessionRouteService {
   private readonly active = new Map<string, ActiveSession<PiSessionRuntime>>();
   private readonly pendingSessionOpens = new Map<string, PendingSessionOpen>();
+  private stopping = false;
   /**
    * Sessions whose extension binding is still in flight. A `session_start`
    * dialog parks that window before the session ever becomes active, so this
@@ -1339,6 +1341,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async dispose(): Promise<void> {
+    this.stopping = true;
     this.unreadPublicationStopped = true;
     this.clearUnreadPublicationRetry();
     clearInterval(this.heartbeat);
@@ -2463,22 +2466,20 @@ export class PiSessionService implements SessionRouteService {
     return session;
   }
 
-  /**
-   * Reopen sessions that had live child work when the daemon stopped. A child runs only while its parent session is
-   * open, so without this a restart pauses every child until someone opens its parent.
-   */
-  async resumeDurableChildren(refs: readonly DurableChildSessionRef[]): Promise<{ resumed: string[]; failed: { id: string; error: string }[] }> {
-    const resumed: string[] = [];
-    const failed: { id: string; error: string }[] = [];
-    for (const ref of refs) {
-      try {
-        await this.getActive(ref);
-        resumed.push(ref.id);
-      } catch (error) {
-        failed.push({ id: ref.id, error: error instanceof Error ? error.message : String(error) });
-      }
-    }
-    return { resumed, failed };
+  /** Reopen unfinished parent, child and workflow work from Durable state before cleanup, without browser requests. */
+  resumeDurableSessions(repair: readonly PiSessionRef[] = [], stopped: () => boolean = () => false): Promise<DurableRecoveryReport> {
+    return recoverDurableSessions({
+      catalog: () => this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll(),
+      repair,
+      stopped: () => this.stopping || stopped(),
+      available: async (ref) => this.activeForRef(ref) === undefined
+        && await this.getArchived(ref) === undefined
+        && await this.sessionWorktrees?.store.readOnly(ref) === undefined,
+      reopen: async (ref) => {
+        await this.assertWritable(ref);
+        if (!this.stopping && !stopped()) await this.getActive(ref, {}, stopped);
+      },
+    });
   }
 
   async searchMessagePositions(ref: PiSessionRef): Promise<ReadonlyMap<string, number>> {
@@ -3903,13 +3904,19 @@ export class PiSessionService implements SessionRouteService {
     return open(match.path);
   }
 
-  private async getActive(ref: PiSessionRef, options: Pick<CreateSessionRuntimeOptions, "notificationGeneration"> = {}): Promise<ActiveSession<PiSessionRuntime>> {
+  private assertSessionOpenAllowed(stopped: () => boolean): void {
+    if (this.stopping || stopped()) throw new Error("Session service is shutting down");
+  }
+
+  private async getActive(ref: PiSessionRef, options: Pick<CreateSessionRuntimeOptions, "notificationGeneration"> = {}, stopped: () => boolean = () => false): Promise<ActiveSession<PiSessionRuntime>> {
+    this.assertSessionOpenAllowed(stopped);
     await this.sessionWorktrees?.store.assertWritable(ref);
     const active = this.activeForRef(ref);
     if (active !== undefined) return active;
 
     const archived = await this.getArchived(ref);
     if (archived?.archivePath !== undefined) {
+      this.assertSessionOpenAllowed(stopped);
       const { archivePath } = archived;
       return this.openExistingSession(
         archived.sessionId,
@@ -3923,6 +3930,7 @@ export class PiSessionService implements SessionRouteService {
     // must not pay for a full transcript listing of its whole workspace.
     const match = await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader);
     if (!match) throw new Error("Session not found");
+    this.assertSessionOpenAllowed(stopped);
     return this.openExistingSession(match.id, match.cwd, () => this.sessionManager.open(match.path), options);
   }
 
@@ -3932,6 +3940,7 @@ export class PiSessionService implements SessionRouteService {
     openSessionManager: () => PiSessionManager,
     options: Pick<CreateSessionRuntimeOptions, "notificationGeneration" | "notifications"> = {},
   ): Promise<ActiveSession<PiSessionRuntime>> {
+    if (this.stopping) return Promise.reject(new Error("Session service is shutting down"));
     const active = this.activeForRef({ id: sessionId, cwd });
     if (active !== undefined) return Promise.resolve(active);
 

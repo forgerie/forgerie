@@ -16,13 +16,13 @@ export interface DurableChildHost {
   worktrees?: SessionWorktrees;
   runRecords?: ChildRunStore;
   runRecordError?: (error: unknown) => void;
-  /** Called when a session gains or loses live child work, so a restarted daemon can resume it. */
+  /** Called when a session gains or loses live child work, so worktree cleanup can protect its owner. */
   liveChanged(ref: DurableChildSessionRef, live: boolean): void;
 }
 
 /**
- * Sessions with live child work. A child runs only while its parent session is open, and sessiond opens sessions on
- * demand. After a restart, sessiond reopens every session listed here.
+ * Best-effort index of sessions with live child work, used to protect worktrees during cleanup. Startup recovery
+ * discovers unfinished work from Durable journals, so a missed index write cannot strand a child.
  */
 export class LiveChildSessionIndex {
   private refs = new Map<string, DurableChildSessionRef>();

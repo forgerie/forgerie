@@ -172,7 +172,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       await service.dispose();
       service = openService();
       server = app();
-      const recovery = await service.resumeDurableChildren(await new LiveChildSessionIndex(join(agentDir, "live.json")).list());
+      const recovery = await service.resumeDurableSessions();
       expect(recovery.resumed).toContain(ref.id);
       expect(recovery.failed).toEqual([]);
       expect(runBody((await server.inject({ method: "POST", url, payload })).json()).id).toBe(first.id);
@@ -361,6 +361,26 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       expect(finished.state).toMatchObject({ outcome: "completed", result: "STAGED-DONE" });
     } finally { await server.close(); }
   }, 30000);
+
+  it("recovers a workflow waiting at a user stop without the live index or starting later work", async () => {
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+    await service.runWorkflow(ref, "staged", {}, "recover-stop");
+    const waiting = await until(async () => {
+      const run = (await service.workflowRuns(ref))[0];
+      return run?.stops?.["contract"]?.state === "waiting" && !(await service.status(ref)).isStreaming ? run : false;
+    });
+    await service.dispose();
+    await rm(join(agentDir, "live.json"));
+    service = openService();
+    expect(service.activeCount()).toBe(0);
+    expect(await service.resumeDurableSessions()).toEqual({ resumed: [ref.id], failed: [] });
+    expect(service.activeCount()).toBe(1);
+    expect((await service.workflowRuns(ref))[0]?.stops).toEqual(waiting.stops);
+    expect((await service.status(ref)).waitingOnYou).toBe(1);
+    expect(started).toBe(0);
+    expect((await service.workflowRuns(ref))[0]?.children).toEqual([]);
+  }, 20_000);
 
   it("rejects a route it cannot enforce", async () => {
     const ref = { id: (await service.start(root)).id, cwd: root };

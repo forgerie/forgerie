@@ -8,10 +8,10 @@ import { admitChild, completionProblem, declaredWorker, stageForChild, stopOf, s
 import { assertProseOnly, WorkflowError, workflowInputs, workflowPrompt, type WorkflowLibrary } from "../resources/workflowLibrary.js";
 
 export const WORKFLOW_DOC_KIND = "forgerie.workflow-runs";
-const activeSchema = Type.Object({ active: Type.Union([Type.String(), Type.Null()]) });
+export const WorkflowActiveSchema = Type.Object({ active: Type.Union([Type.String(), Type.Null()]) });
 export function workflowActiveFromCommit(publication: CommitPublication, parent: ConversationId): { active: string | null } | undefined {
   for (const change of publication.changes) {
-    if (change.type === "document" && change.conversationId === parent && change.record.kind === WORKFLOW_DOC_KIND && Check(activeSchema, change.value)) {
+    if (change.type === "document" && change.conversationId === parent && change.record.kind === WORKFLOW_DOC_KIND && Check(WorkflowActiveSchema, change.value)) {
       return { active: change.value.active };
     }
   }

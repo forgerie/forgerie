@@ -407,7 +407,7 @@ describe("Durable-native child agents in a Forgerie session", () => {
     await expect(service.answerDurableChildQuestion(ref, questionId, "Again")).rejects.toThrow("is not open");
   }, 30_000);
 
-  it("records live child work, and a restarted daemon resumes it from the index", async () => {
+  it("recovers live child work from journals after the external child index is lost", async () => {
     const ref = { id: (await service.start(directory)).id, cwd: directory };
     await service.prompt(ref, "Start a child named runner: run work 5 times");
     const runner = await child(ref, "runner");
@@ -417,12 +417,14 @@ describe("Durable-native child agents in a Forgerie session", () => {
     expect(before?.state.kind).toBe("running");
     await service.dispose();
     const stepsAtStop = ended(runner.conversationId).length;
+    await rm(join(directory, "live-children.json"));
     runRecords = new ChildRunStore(join(agentDir, "child-runs.json"));
     index = new LiveChildSessionIndex(join(directory, "live-children.json"));
     service = openService();
     await sleep(800);
     expect(ended(runner.conversationId).length).toBe(stepsAtStop);
-    expect(await service.resumeDurableChildren(await index.list())).toEqual({ resumed: [ref.id], failed: [] });
+    expect(await index.list()).toEqual([]);
+    expect(await service.resumeDurableSessions()).toEqual({ resumed: [ref.id], failed: [] });
     await until("runner report after resume", async () => (await reports(ref, "runner")).length === 1, 20_000);
     expect([...new Set(ended(runner.conversationId).map((a) => a.step))].sort()).toEqual([1, 2, 3, 4, 5]);
     expect(await service.durableChildren(ref)).toHaveLength(1);
@@ -452,7 +454,7 @@ describe("Durable-native child agents in a Forgerie session", () => {
     service = openService();
     const refs = (await runRecords.pending()).map(({ run }) => run.session);
     expect(refs).toEqual([ref]);
-    expect(await service.resumeDurableChildren(refs)).toEqual({ resumed: [ref.id], failed: [] });
+    expect(await service.resumeDurableSessions(refs)).toEqual({ resumed: [ref.id], failed: [] });
     const recovered = (await runRecords.list({ session: ref.id }))[0];
     expect(recovered).toMatchObject({ id: original.id, startedAt: original.startedAt, turns: 3, usage: original.usage, state: { kind: "finished", outcome: "answered", timing: "recovered" } });
     if (original.state.kind === "finished" && recovered?.state.kind === "finished") expect(recovered.state.finishedAt).toBe(original.state.finishedAt);
@@ -477,7 +479,7 @@ describe("Durable-native child agents in a Forgerie session", () => {
     await service.dispose();
     index = new LiveChildSessionIndex(join(directory, "live-children.json"));
     service = openService();
-    expect(await service.resumeDurableChildren(await index.list())).toEqual({ resumed: [ref.id], failed: [] });
+    expect(await service.resumeDurableSessions(await index.list())).toEqual({ resumed: [ref.id], failed: [] });
     await until("one report per child", async () => (await Promise.all(initial.map((item) => reports(ref, item.name)))).every((items) => items.length === 1), 20_000);
     await until("all children idle", async () => (await service.durableChildren(ref)).every((item) => !item.busy));
     expect((await service.durableChildren(ref)).map((item) => [item.name, item.conversationId])).toEqual(initial.map((item) => [item.name, item.conversationId]));
@@ -604,7 +606,7 @@ describe("Durable-native child agents in a Forgerie session", () => {
     const question = await until("question", async () => (await transcript(ref)).find((m) => m.customType === CHILD_QUESTION_KIND));
     await service.dispose();
     service = openService();
-    await service.resumeDurableChildren([ref]);
+    await service.resumeDurableSessions([ref]);
     await sleep(800);
     expect((await transcript(ref)).filter((m) => m.customType === CHILD_QUESTION_KIND)).toHaveLength(1);
     await service.answerDurableChildQuestion(ref, String(question.details?.questionId), "Amber");
