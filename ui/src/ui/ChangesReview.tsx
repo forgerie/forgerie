@@ -20,7 +20,6 @@ import type { DiffBlock } from "./DiffEditor";
 import { shellLayout, type ShellLayout } from "./AppShell";
 import { useSheetDrag } from "./useSheetDrag";
 import { MARKDOWN_WORDS, useMarkdownView, type MarkdownView } from "./useMarkdownView";
-import { markdownView } from "./markdownKit";
 
 // CodeMirror and its language parsers are about 325 kB. They load when a review first shows a diff.
 const DiffEditor = lazy(() => import("./DiffEditor").then((module) => ({ default: module.DiffEditor })));
@@ -43,6 +42,9 @@ export interface ChangesBinding {
   onEdit: (id: string, comment: string) => void;
   onRemove: (id: string) => void;
   onClose: () => void;
+  /** Rich or Source for Markdown files: the reader's last choice, which the caller keeps on the device. */
+  markdownView: MarkdownView;
+  onMarkdownView: (view: MarkdownView) => void;
 }
 
 /** Header control. The count says notes wait, so the reader knows the review holds something unsent. */
@@ -103,7 +105,7 @@ const splitPath = (path: string) => {
  * right brings it in, and choosing a file puts it away. Either way the open
  * file, its scroll, and any note being written stay as they are.
  */
-function Review({ source, files: filesSource, notes, focusNoteId, openPath, onAdd, onEdit, onRemove, onClose }: ChangesBinding) {
+function Review({ source, files: filesSource, notes, focusNoteId, openPath, onAdd, onEdit, onRemove, onClose, markdownView, onMarkdownView }: ChangesBinding) {
   const titleId = useId();
   const filesId = useId();
   const barId = useId();
@@ -126,9 +128,6 @@ function Review({ source, files: filesSource, notes, focusNoteId, openPath, onAd
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selection, setSelection] = useState<{ key: string; rows: RowSelection }>();
   const [draft, setDraft] = useState<Draft>();
-  // Rich or Source for Markdown, remembered on this device for every Markdown file.
-  const [preferredView, setPreferredView] = useState<MarkdownView>(() => markdownView.read());
-  const preferView = useCallback((view: MarkdownView) => { markdownView.write(view); setPreferredView(view); }, []);
   const [opener] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
   const loads = useRef(new Map<string, AbortController>());
   const lifetime = useRef<AbortController>(undefined);
@@ -371,7 +370,7 @@ function Review({ source, files: filesSource, notes, focusNoteId, openPath, onAd
   const editingOpen = editingBuffer?.type === "open" ? editingBuffer : undefined;
   // Decided for the file on screen once it is read; each read of it checks again.
   const view = useMarkdownView({ path: editing !== undefined && editingOpen ? editing : "", document: `${editing ?? ""}#${String(editingOpen?.opened ?? 0)}`,
-    text: editingOpen?.text ?? "", preferred: preferredView, onPrefer: preferView });
+    text: editingOpen?.text ?? "", preferred: markdownView, onPrefer: onMarkdownView });
   const fileRowFocus = [fileCursor, editing && fileKey(editing)].find((key) => key !== undefined && fileRows.some((row) => row.key === key)) ?? fileRows[0]?.key;
   const fileNotes = entry ? notesOn(entry.key) : [];
   // A file's working tree side comes after its staged side, so it wins: that is the side an edit changes.

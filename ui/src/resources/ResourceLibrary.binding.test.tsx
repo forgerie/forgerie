@@ -143,3 +143,15 @@ it("opens a file too large to format in Source, with Rich off and the reason sho
   expect(button("Rich")?.disabled).toBe(true);
   expect(document.body.textContent).toContain("Too large for the rich view.");
 });
+
+it("saves every edit typed since the last draw, not only the first", async () => {
+  await act(async () => root.render(<ResourceLens api={api} sessionId="two-edits" cwd="/home/ada/code/acme" onClose={() => undefined} />));
+  await flush();
+  await act(async () => button("testing-guideRepository-specific testing guide.")?.click());
+  await flush();
+  await type("First rule.\n");
+  await type("Second rule.\n");
+  await act(async () => button("Save")?.click());
+  await flush();
+  expect(saves.at(-1)?.text).toBe(`${testingGuideFile.text}First rule.\nSecond rule.\n`);
+});

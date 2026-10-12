@@ -77,11 +77,14 @@ function useResourceLibrary(api: ResourceApi, target: ResourceTarget, openId: st
   };
   const discard = () => { if (openId) { drafts.delete(draftKey(openId)); setReport(undefined); void readFile(openId); } };
   const save = async () => {
-    if (!ready || !dirty || saving || ready.resource.edit.kind === "read-only" || draft === undefined) return;
+    // Read the draft now: the page does not draw again for each keystroke, so the one it last drew may be older.
+    const current = ready ? drafts.get(draftKey(ready.resource.id)) : undefined;
+    if (!ready || current === undefined || current === ready.text || saving || ready.resource.edit.kind === "read-only") return;
     setSaving(true);
     try {
-      const result = await api.save(latestTarget.current, ready.resource.id, draft, ready.revision);
-      drafts.delete(draftKey(ready.resource.id));
+      const result = await api.save(latestTarget.current, ready.resource.id, current, ready.revision);
+      // Keystrokes made while the save was on its way stay a draft.
+      if (drafts.get(draftKey(ready.resource.id)) === current) drafts.delete(draftKey(ready.resource.id));
       setFile({ type: "ready", value: result.file });
       setReport({ kind: "saved", message: savedMessage(result.effect) });
       void refresh();

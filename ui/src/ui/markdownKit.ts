@@ -30,5 +30,3 @@ export function useMarkdownKit(load = true): MarkdownKit | undefined {
  * deciding whether a file has two views never loads Tiptap.
  */
 export const isMarkdownPath = (path: string): boolean => /\.(md|markdown)$/i.test(path);
-
-export { markdownView } from "../markdown/markdownView";

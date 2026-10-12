@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ChangesReview } from "../ui/ChangesReview";
+import { markdownView } from "../markdown/markdownView";
+import type { MarkdownView } from "../ui/useMarkdownView";
 import { SessionMenu, WorktreeDialog, type SessionMenuSection, type WorktreeCommand } from "../ui/WorktreeActions";
 import { createWorktreeApi, type WorktreeInfo } from "../worktrees/worktreeApi";
 import { createChangesSource } from "../changes/changesSource";
@@ -29,6 +31,9 @@ export function RelatedWorkspaces({ api, request, source, busy, links, onAsk, ow
 }) {
   const [related, setRelated] = useState<WorktreeInfo[]>([]);
   const [panel, setPanel] = useState<Panel>();
+  // Rich or Source for Markdown in the review, remembered on this device for every Markdown file.
+  const [reviewView, setReviewView] = useState<MarkdownView>(() => markdownView.read());
+  const chooseReviewView = useCallback((view: MarkdownView) => { markdownView.write(view); setReviewView(view); }, []);
   const [retrying, setRetrying] = useState(false);
   const [failures, setFailures] = useState<Record<string, string>>({});
   // Note counts are read from the trays on each draw; this redraws after notes leave a tray.
@@ -78,7 +83,8 @@ export function RelatedWorkspaces({ api, request, source, busy, links, onAsk, ow
     <SessionMenu info={own?.info} onCommand={own?.onCommand} busy={busy} commands={commands}
       sections={relatedSections(related, { busy: busy || retrying, notes: counts, failures, onAction: act })} />
     {panel?.kind === "changes" && changes && reviewTray && <ChangesReview source={changes.source} files={changes.files} notes={reviewNotes}
-      onAdd={reviewTray.add} onEdit={reviewTray.edit} onRemove={reviewTray.remove} onClose={() => setPanel(undefined)} />}
+      onAdd={reviewTray.add} onEdit={reviewTray.edit} onRemove={reviewTray.remove} onClose={() => setPanel(undefined)}
+      markdownView={reviewView} onMarkdownView={chooseReviewView} />}
     {panel?.kind === "pulls" && <RelatedPulls request={request} target={{ id: ref.id, cwd: panel.info.path }} links={links} onClose={() => setPanel(undefined)} onAsk={onAsk} />}
     {panel?.kind === "command" && <WorktreeDialog command={panel.command} info={panel.info} api={worktrees} onClose={() => setPanel(undefined)}
       onDone={() => { void refresh(); }} onAsk={async (text) => { onAsk(`In related checkout ${panel.info.path}:\n${text}`); setPanel(undefined); }} />}

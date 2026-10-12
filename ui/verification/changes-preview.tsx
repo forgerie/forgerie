@@ -22,15 +22,13 @@ import { existingFiles } from "../src/changes/existingFiles";
 import { linesOf, type DiffNote } from "../src/changes/diffNotes";
 import { parseUnifiedDiff, type CodeRow } from "../src/changes/unifiedDiff";
 import { diffDocument } from "../src/changes/diffDocument";
-import { markdownView } from "../src/markdown/markdownView";
+import type { MarkdownView } from "../src/ui/useMarkdownView";
 import "../src/ui/theme.css";
 import loginFormDiff from "./changes-fixtures/LoginForm.tsx.diff?raw";
 import sessionDiff from "./changes-fixtures/session.ts.diff?raw";
 import decomposition from "../docs/decomposition.md?raw";
 
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "changes";
-// Each capture starts from the default view. The device remembers a switch to Source, and a posture capture reloads the page.
-markdownView.write("rich");
 
 // Full-context diffs, as the server sends them for `/git/diff?context=full`.
 const DIFFS: Record<string, string> = {
@@ -140,6 +138,8 @@ const messages: TranscriptMessage[] = [
 function Preview() {
   const [tray] = useState(() => { const created = createNoteTray(); for (const item of seeded) created.add(item); return created; });
   const notes = useSyncExternalStore(tray.subscribe, tray.notes);
+  // The view lives in the preview's own state, so every capture starts in Rich.
+  const [view, setView] = useState<MarkdownView>("rich");
   const [open, setOpen] = useState<{ focusNoteId?: string; path?: string } | undefined>(scenario === "changes-tray" || scenario.startsWith("reply-") ? undefined
     : scenario === "md-lossy" ? { path: "docs/decomposition.md" } : scenario === "md-large" ? { path: "CHANGELOG.md" } : scenario.startsWith("md-") ? { path: "docs/guide.md" } : {});
   // A word typed into the formatted guide, then, for md-switch, the switch to its source.
@@ -250,7 +250,8 @@ function Preview() {
     </>}>
       <Thread fileLinks={fileLinks} notes={{ notes, onRemove: tray.remove, onOpen: (focusNoteId) => setOpen({ focusNoteId }), onSendAlone: async () => {} }} />
       {open && <ChangesReview source={source} files={files} notes={notes} focusNoteId={open.focusNoteId} openPath={open.path}
-        onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setOpen(undefined)} />}
+        onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setOpen(undefined)}
+        markdownView={view} onMarkdownView={setView} />}
     </SessionFrame>
   </AssistantRuntimeProvider>;
 }

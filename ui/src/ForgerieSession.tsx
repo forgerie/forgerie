@@ -50,6 +50,8 @@ import type { FileLinks } from "./ui/FileTree";
 import { createFilesSource, type FilesSource } from "./changes/filesSource";
 import { DOCUMENT_PREVIEW_MIME_TYPES } from "@shared/workspacePreviewMime";
 import { ChangesOpener, ChangesReview } from "./ui/ChangesReview";
+import { markdownView } from "./markdown/markdownView";
+import type { MarkdownView } from "./ui/useMarkdownView";
 import type { NotesBinding } from "./ui/NoteTray";
 import type { WorktreeApi, WorktreeInfo } from "./worktrees/worktreeApi";
 import { useSessionWorktree } from "./worktrees/useSessionWorktree";
@@ -160,6 +162,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const [tray] = useState(() => createNoteTray(saved));
   const notes = useSyncExternalStore(tray.subscribe, tray.notes);
   const [review, setReview] = useState<{ focusNoteId?: string; path?: string }>();
+  // Rich or Source for Markdown in the review, remembered on this device for every Markdown file.
+  const [reviewView, setReviewView] = useState<MarkdownView>(() => markdownView.read());
+  const chooseReviewView = useCallback((view: MarkdownView) => { markdownView.write(view); setReviewView(view); }, []);
   const changes = useMemo(() => cwd ? { source: createChangesSource(cwd, browserTransport.request), files: createFilesSource(cwd, browserTransport.request) } : undefined, [cwd]);
   const filesSource = changes?.files;
   const [resolvedFileBase, setResolvedFileBase] = useState<{ source: FilesSource; result: { type: "ready"; base: string } | { type: "failed"; error: string } }>();
@@ -460,7 +465,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onFork={(entryId) => { void store.forkTree(entryId).then(applyTree); }}
         onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}
       {review && changes && <ChangesReview source={changes.source} files={changes.files} notes={notes} focusNoteId={review.focusNoteId} openPath={review.path}
-        onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setReview(undefined)} />}
+        onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setReview(undefined)}
+        markdownView={reviewView} onMarkdownView={chooseReviewView} />}
       {resourcesOpen && sessionId && cwd && resourceLens?.({ id: sessionId, cwd, onClose: () => setResourcesOpen(false) })}
       {childrenOpen && <ChildAgentsPanel children={children.children} openId={children.open?.conversationId}
         transcript={children.open?.transcript} error={children.error ?? children.open?.error}
