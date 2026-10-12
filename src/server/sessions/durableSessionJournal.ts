@@ -10,7 +10,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { MemoryStorage } from "@earendil-works/pi-durable/storage/memory";
 import { acquireDurableOwnership, type DurableOwnership } from "./durableOwnership.js";
 import { Check } from "typebox/value";
-import { ChildRunUsageStateSchema } from "../../shared/childRuns.js";
+import { DurableUsageStateSchema } from "../../shared/durableUsage.js";
 import { durableJson } from "./durableJson.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 
@@ -67,6 +67,7 @@ export class DurableSessionJournal {
     conversation: Conversation,
     private readonly manager: SessionManager,
     private readonly ownership: DurableOwnership | undefined,
+    private readonly onReport: DurableJournalOptions["onReport"],
   ) {
     this.harness = harness;
     this.conversation = conversation;
@@ -75,8 +76,7 @@ export class DurableSessionJournal {
       for (const change of publication.changes) {
         if (change.type === "submission") this.noteCustomInput(change.value);
         if (change.type === "document" && change.conversationId === conversation.id && change.record.kind === "pi.usage") {
-          if (!Check(ChildRunUsageStateSchema, change.value)) throw new Error("Invalid parent pi.usage document");
-          this.usageValue = change.value;
+          this.adoptUsage(change.value);
         }
       }
     });
@@ -140,8 +140,8 @@ export class DurableSessionJournal {
         }
         imported.complete = true;
       }, BACKGROUND_CONTEXT);
-      const journal = new DurableSessionJournal(harness, conversation, options.manager, ownership);
-      journal.usageValue = await harness.snapshot(UsageDoc, conversation.id, BACKGROUND_CONTEXT) ?? { models: {}, tools: {} };
+      const journal = new DurableSessionJournal(harness, conversation, options.manager, ownership, options.onReport);
+      journal.adoptUsage(await harness.snapshot(UsageDoc, conversation.id, BACKGROUND_CONTEXT) ?? { models: {}, tools: {} });
       // Submission identity survives restart; content matching would hide genuine user messages with the same text.
       let cursor: Cursor | undefined;
       do {
@@ -156,6 +156,18 @@ export class DurableSessionJournal {
       else await storage.close(BACKGROUND_CONTEXT);
       await ownership?.release();
       throw error;
+    }
+  }
+
+  private adoptUsage(value: unknown): void {
+    if (Check(DurableUsageStateSchema, value)) { this.usageValue = value; return; }
+    const error = new Error(`Invalid parent pi.usage document for conversation ${String(this.conversation.id)}; keeping last good usage`);
+    // A post-adoption listener cannot reject a commit that is already durable or stop later observers.
+    try {
+      if (this.onReport === undefined) process.emitWarning(error);
+      else this.onReport(error);
+    } catch (cause) {
+      process.emitWarning(new Error(`${error.message}; usage reporter failed`, { cause }));
     }
   }
 

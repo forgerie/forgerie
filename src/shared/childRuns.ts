@@ -1,18 +1,13 @@
 import { Type, type Static } from "typebox";
+import { DurableUsageSchema, DurableUsageStateSchema } from "./durableUsage.js";
 
 export const CHILD_RUN_RETENTION_DAYS = 90;
 const text = Type.String({ minLength: 1 });
 const count = Type.Integer({ minimum: 0 });
-const amount = Type.Number({ minimum: 0 });
 const model = Type.Object({ provider: text, modelId: text });
-export const ChildRunUsageSchema = Type.Object({
-  input: count, output: count, cacheRead: count, cacheWrite: count, totalTokens: count,
-  cacheWrite1h: Type.Optional(count), reasoning: Type.Optional(count),
-  cost: Type.Object({ input: amount, output: amount, cacheRead: amount, cacheWrite: amount, total: amount }),
-});
-export const ChildRunUsageStateSchema = Type.Object({
-  models: Type.Record(Type.String(), ChildRunUsageSchema), tools: Type.Record(Type.String(), ChildRunUsageSchema),
-});
+// Keep the public child-run schema names; parent and child accounting share a neutral definition.
+export const ChildRunUsageSchema = DurableUsageSchema;
+export const ChildRunUsageStateSchema = DurableUsageStateSchema;
 export const ChildRunSchema = Type.Object({
   id: text,
   workflowRunId: Type.Optional(text),

@@ -5,8 +5,8 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { createRegistry } from "@earendil-works/pi-durable";
-import { afterEach, describe, expect, it } from "vitest";
+import { createRegistry, UsageDoc, watchEvents } from "@earendil-works/pi-durable";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DurableSessionJournal, durableSessionPaths } from "./durableSessionJournal.js";
 
 const directories: string[] = [];
@@ -29,7 +29,82 @@ async function fixture() {
   return { manager, models, registry: createRegistry(), agent: { model: { provider: "faux", modelId: "faux-1" } }, provider };
 }
 
+function expectReport(reports: readonly unknown[], message = "Invalid parent pi.usage"): void {
+  expect(reports).toHaveLength(1);
+  const report = reports[0];
+  expect(report).toBeInstanceOf(Error);
+  if (!(report instanceof Error)) throw new Error("Diagnostic must be an Error");
+  expect(report.message).toContain(message);
+}
+
 describe("Durable session journal", () => {
+  it.each(["fractional tokens", "negative cost"])("reports %s without losing the committed frame or last good usage", async malformed => {
+    const options = await fixture();
+    const reports: unknown[] = [];
+    const journal = await DurableSessionJournal.open({ ...options, onReport: error => { reports.push(error); } });
+    journals.push(journal);
+    const good = { input: 2, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 5,
+      cost: { input: 0.2, output: 0.3, cacheRead: 0, cacheWrite: 0, total: 0.5 } };
+    await journal.conversation.commit(async tx => { (await tx.doc(UsageDoc, journal.conversation.id)).models = { paid: good }; }, context);
+    const baseline = structuredClone(journal.usage);
+    const laterFrames: unknown[] = [];
+    const unsubscribe = journal.harness.subscribeCommits(frame => { laterFrames.push(frame); });
+    const stream = await watchEvents(journal.harness, journal.conversation.id, context);
+    const usages: unknown[] = [];
+    stream.start(events => { for (const event of events) if (event.type === "usage_changed") usages.push(event.usage); return Promise.resolve(); });
+    try {
+      await expect(journal.conversation.commit(async tx => {
+        const ledger = await tx.doc(UsageDoc, journal.conversation.id);
+        const paid = ledger.models["paid"];
+        if (paid === undefined) throw new Error("Fixture must contain paid usage");
+        if (malformed === "fractional tokens") paid.input = 0.5;
+        else paid.cost.total = -1;
+      }, context)).resolves.toBeUndefined();
+      expect(laterFrames).toHaveLength(1);
+      await vi.waitFor(() => { expect(usages).toHaveLength(1); });
+      expectReport(reports);
+      expect(journal.usage).toEqual(baseline);
+      // A later valid revision resumes accounting; invalid data remains in Durable rather than being rewritten.
+      await journal.conversation.commit(async tx => { (await tx.doc(UsageDoc, journal.conversation.id)).models = { next: good }; }, context);
+      expect(journal.usage).toEqual({ models: { next: good }, tools: {} });
+    } finally { unsubscribe(); await stream.stop(); }
+  });
+  it("does not let a failing diagnostic callback reject a durable commit", async () => {
+    const options = await fixture();
+    const journal = await DurableSessionJournal.open({ ...options, onReport: () => { throw new Error("Reporter failure"); } });
+    journals.push(journal);
+    let frames = 0;
+    const unsubscribe = journal.harness.subscribeCommits(() => { frames++; });
+    const warning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    try {
+      await expect(journal.conversation.commit(async tx => {
+        (await tx.doc(UsageDoc, journal.conversation.id)).models = { invalid: { input: -1, output: 0, cacheRead: 0, cacheWrite: 0,
+          totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+      }, context)).resolves.toBeUndefined();
+      expect(frames).toBe(1);
+      expectReport(warning.mock.calls.map(([error]) => error), "usage reporter failed");
+      expect(journal.usage).toEqual({ models: {}, tools: {} });
+    } finally { warning.mockRestore(); unsubscribe(); }
+  });
+  it("validates a malformed usage snapshot on reopen", async () => {
+    const options = await fixture();
+    const initialReports: unknown[] = [];
+    const journal = await DurableSessionJournal.open({ ...options, onReport: error => { initialReports.push(error); } });
+    journals.push(journal);
+    await journal.conversation.commit(async tx => {
+      (await tx.doc(UsageDoc, journal.conversation.id)).models = { invalid: { input: -1, output: 0, cacheRead: 0, cacheWrite: 0,
+        totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+    }, context);
+    expect(initialReports).toHaveLength(1);
+    await journal.close();
+    const file = options.manager.getSessionFile();
+    if (file === undefined) throw new Error("Fixture must persist");
+    const reports: unknown[] = [];
+    const reopened = await DurableSessionJournal.open({ ...options, manager: SessionManager.open(file), onReport: error => { reports.push(error); } });
+    journals.push(reopened);
+    expect(reopened.usage).toEqual({ models: {}, tools: {} });
+    expectReport(reports);
+  });
   it("imports history without executing it, preserves the original, and projects new messages once", async () => {
     const options = await fixture();
     const sessionFile = options.manager.getSessionFile();
