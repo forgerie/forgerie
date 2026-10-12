@@ -893,13 +893,9 @@ function createDefaultRuntimeFactory(
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
     const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, askUser, handoff, github, {
-      declare: (awaiting) => {
-        sessionManager.appendCustomEntry(SESSION_RESPONSE_CUSTOM_TYPE, { version: 1, kind: "declared", awaiting });
-        writeResponseCheckpoint(
-          (type, data) => { sessionManager.appendCustomEntry(type, data); },
-          responseFromBranch(sessionManager.getBranch()).response,
-          (error) => { console.warn("Could not persist the derived response checkpoint.", error); },
-        );
+      declare: async (awaiting) => {
+        await session.parentState.declareResponse(awaiting, durableContext);
+        await session.refreshParentAppState();
       },
     }, projectTools, workspaceServices);
     const session = await DurableAgentSession.open({
@@ -1254,7 +1250,7 @@ export class PiSessionService implements SessionRouteService {
     }
 
     const sessions = [...reachableSessions.values()].flatMap((session) => {
-      const pendingAsk = this.sessionAsks.pendingAsk(session.sessionId);
+      const pendingAsk = session instanceof DurableAgentSession ? session.parentResponseProjection.pendingAsk : this.sessionAsks.pendingAsk(session.sessionId);
       const pendingDialogs = this.pendingExtensionDialogStore.pendingDialogs(session.sessionId);
       if (pendingAsk === undefined && pendingDialogs.length === 0) return [];
       return [{
@@ -2086,6 +2082,12 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private appendResponseEvent(session: PiAgentSession, event: SessionResponseEvent): void {
+    if (session instanceof DurableAgentSession) {
+      void session.parentState.appendCustomEntry(SESSION_RESPONSE_CUSTOM_TYPE, durableJson(event), durableContext)
+        .then(async () => { await session.refreshParentAppState(); this.checkpointResponse(session); this.publishStatus(session); })
+        .catch((error: unknown) => { this.logger.info({ sessionId: session.sessionId, error }, "Could not commit the parent response event"); });
+      return;
+    }
     if (session.sessionManager.appendCustomEntry === undefined) throw new Error("Session runtime cannot persist response declarations");
     session.sessionManager.appendCustomEntry(SESSION_RESPONSE_CUSTOM_TYPE, event);
     this.checkpointResponse(session);
@@ -2093,6 +2095,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private responseProjection(session: PiAgentSession): ResponseProjection {
+    if (session instanceof DurableAgentSession) return session.parentResponseProjection;
     const manager = session.sessionManager;
     const leafId = manager.getLeafId();
     const cached = this.responseMemo.get(manager);
@@ -2103,6 +2106,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private checkpointResponse(session: PiAgentSession): void {
+    // The JSONL checkpoint is a catalog cache of committed native state, never delivery evidence.
     writeResponseCheckpoint(
       (type, data) => { session.sessionManager.appendCustomEntry?.(type, data); },
       this.responseProjection(session).response,
@@ -2112,12 +2116,14 @@ export class PiSessionService implements SessionRouteService {
   }
 
   /** Persist a validated question set before publishing it. The tool then ends the run. */
-  // eslint-disable-next-line @typescript-eslint/require-await -- tool-facing promise rejection for validation errors.
   async openAsk(input: AskUserInvocation): Promise<PendingAskOpenResult> {
     if (this.preparingHandoffDestinations.has(input.sessionId)) {
       throw new Error("Handoff destination cannot ask questions while preparing context.");
     }
-    const result = this.sessionAsks.open(input);
+    const session = this.active.get(input.sessionId)?.runtime.session ?? this.startupSessions.get(input.sessionId);
+    const result = session instanceof DurableAgentSession ? await session.parentState.openAsk(input.questions, durableContext) : this.sessionAsks.open(input);
+    if (session instanceof DurableAgentSession) await session.refreshParentAppState();
+    if (session !== undefined) this.checkpointResponse(session);
     // A supersede closes the earlier ask, so the browsers watching it must hear
     // that before they hear about its replacement.
     if (result.superseded !== undefined) this.publishAskClosed(input.sessionId, result.superseded);
@@ -2141,7 +2147,10 @@ export class PiSessionService implements SessionRouteService {
     // Checked before the store closes the ask so a refused delivery cannot
     // discard answers the user already submitted.
     this.assertTreeNavigationInactive(session, "answer questions");
-    return this.closeAsk(session, this.sessionAsks.submit(session.sessionId, askId, submission));
+    const result = session instanceof DurableAgentSession ? await session.parentState.submitAsk(askId, submission, durableContext)
+      : this.sessionAsks.submit(session.sessionId, askId, submission);
+    if (session instanceof DurableAgentSession) await session.refreshParentAppState();
+    return this.closeAsk(session, result);
   }
 
   /**
@@ -2154,7 +2163,10 @@ export class PiSessionService implements SessionRouteService {
     const session = await this.getOrOpen(ref);
     this.assertHandoffDestinationAcceptsInput(session);
     this.assertTreeNavigationInactive(session, "dismiss questions");
-    return this.closeAsk(session, this.sessionAsks.cancel(session.sessionId, askId));
+    const result = session instanceof DurableAgentSession ? await session.parentState.cancelAsk(askId, durableContext)
+      : this.sessionAsks.cancel(session.sessionId, askId);
+    if (session instanceof DurableAgentSession) await session.refreshParentAppState();
+    return this.closeAsk(session, result);
   }
 
   /**
@@ -2167,7 +2179,8 @@ export class PiSessionService implements SessionRouteService {
     if (result.status === "stale") return { result: "stale", sessionStatus: this.statusFromSession(session) };
     const { outcome } = result;
     this.publishAskClosed(session.sessionId, outcome);
-    await this.runSessionEntryMutation(session, "deliver answers to your questions", () => session.sendCustomMessage(
+    // Durable commits the receipt and its Delivery task together. Only legacy runtimes need a notification.
+    if (!(session instanceof DurableAgentSession)) await this.runSessionEntryMutation(session, "deliver answers to your questions", () => session.sendCustomMessage(
       { customType: ASK_USER_ANSWERS_CUSTOM_TYPE, content: renderAskUserAnswersText(outcome), display: true, details: outcome },
       { triggerTurn: true, deliverAs: "followUp" },
     ));
@@ -2216,10 +2229,12 @@ export class PiSessionService implements SessionRouteService {
    * than becoming a turn of its own.
    */
   private async voidOpenAskForUserMessage(session: PiAgentSession): Promise<void> {
-    const outcome = this.sessionAsks.voidForChatReply(session.sessionId);
+    const outcome = session instanceof DurableAgentSession ? await session.parentState.voidForChatReply(durableContext)
+      : this.sessionAsks.voidForChatReply(session.sessionId);
+    if (session instanceof DurableAgentSession) await session.refreshParentAppState();
     if (outcome === undefined) return;
     this.publishAskClosed(session.sessionId, outcome);
-    await this.runSessionEntryMutation(session, "void the open questions", () => session.sendCustomMessage(
+    if (!(session instanceof DurableAgentSession)) await this.runSessionEntryMutation(session, "void the open questions", () => session.sendCustomMessage(
       { customType: ASK_USER_ANSWERS_CUSTOM_TYPE, content: renderAskUserAnswersText(outcome), display: true, details: outcome },
       { triggerTurn: false, deliverAs: "followUp" },
     ));
@@ -2593,7 +2608,7 @@ export class PiSessionService implements SessionRouteService {
       };
     }
     const session = await this.sessionForStatusOrDialogClose(ref);
-    if (session instanceof DurableAgentSession) await session.refreshDurableReads();
+    if (session instanceof DurableAgentSession) { await session.refreshDurableReads(); await session.refreshParentAppState(); }
     const status = this.statusFromSession(session);
     const worktree = await this.sessionWorktrees?.store.forSession(ref);
     return worktree === undefined || worktrees === undefined ? status : { ...status, worktree: await worktrees.info(worktree, status.sessionId) };
@@ -4545,6 +4560,7 @@ export class PiSessionService implements SessionRouteService {
         this.rememberSessionName(session);
         this.publishSessionName(session);
       }
+      if (eventType === "durable_parent_state_changed") this.checkpointResponse(session);
       if (eventType === "agent_end") {
         this.checkpointResponse(session);
         this.abortRunScopedExtensionDialogs(session.sessionId);
@@ -5075,7 +5091,7 @@ export class PiSessionService implements SessionRouteService {
     const model = session.model === undefined ? undefined : modelToClientModel(session.model);
     const contextUsage = session.getContextUsage();
     const warnings = this.warningsForSession(session);
-    const pendingAsk = this.sessionAsks.pendingAsk(session.sessionId);
+    const pendingAsk = session instanceof DurableAgentSession ? session.parentResponseProjection.pendingAsk : this.sessionAsks.pendingAsk(session.sessionId);
     const pendingDialogs = this.pendingExtensionDialogStore.pendingDialogs(session.sessionId);
     return {
       sessionId: session.sessionId,

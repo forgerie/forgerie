@@ -9,12 +9,14 @@ import { createDurableParentState, type DurableParentState } from "./durablePare
 import { askDeliveryExtension } from "./durableAskDelivery.js";
 import { createDurableParentInitializer, DurableSdkSessionView } from "./durableSdkSessionView.js";
 import type { DurableParentReader, DurableParentMutations } from "./durableParentContracts.js";
-import type { SessionTreeSnapshot } from "../../shared/apiTypes.js";
+import { ASK_USER_ANSWERS_CUSTOM_TYPE, type SessionTreeSnapshot } from "../../shared/apiTypes.js";
 import type { PromptRequestOptions } from "../../shared/promptRequest.js";
 import type { PiAgentSession } from "./piSessionService.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { durableUsageTotals, DurableParentReadModel } from "./durableParentReadModel.js";
 import { durableEntryPresentationId } from "./durableNativeHistory.js";
+import { Check } from "typebox/value";
+import { PendingParentAskSchema, type ResponseProjection } from "./sessionResponse.js";
 import type { DurableBrowserAppState } from "../../shared/durableBrowserSnapshot.js";
 import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
@@ -178,11 +180,24 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (this.parentAppValue === undefined) throw new Error("Durable parent app snapshot has not bound");
     return this.parentAppValue;
   }
+  get parentResponseProjection(): ResponseProjection {
+    const app = this.parentAppSnapshot;
+    const pendingAsk = app.pendingAsk;
+    if (pendingAsk !== undefined && !Check(PendingParentAskSchema, pendingAsk)) throw new Error("Invalid committed pending ask");
+    return { protocol: true, response: app.response, ...(pendingAsk === undefined ? {} : { pendingAsk }) };
+  }
   get parentReadModel(): DurableParentReadModel {
     if (this.readModelValue === undefined) throw new Error("Durable parent read model has not bound");
     return this.readModelValue;
   }
   async flushDurableMutations(): Promise<void> { await this.mutation; await this.parentStateValue?.flush(context); }
+  async refreshParentAppState(): Promise<void> {
+    const pendingAsk = await this.parentState.pendingAsk(context);
+    const response = await this.parentState.response(context);
+    const sessionName = this.parentAppSnapshot.sessionName;
+    this.parentAppValue = { response, ...(pendingAsk === undefined ? {} : { pendingAsk }), ...(sessionName === undefined ? {} : { sessionName }) };
+  }
+
   getDurableTree(): Promise<SessionTreeSnapshot> { return this.nativeHistory.tree(context); }
   get sessionId(): string { return this.sessionManager.getSessionId(); }
   get sessionFile(): string | undefined { return this.sessionManager.getSessionFile(); }
@@ -537,6 +552,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   async sendCustomMessage(message: { customType: string; content: string | ({ type: "text"; text: string } | ImageContent)[]; display: boolean; details?: unknown }, options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void> {
     await this.mutation;
     if (this.closed) throw new Error("Session is closed");
+    if (message.customType === ASK_USER_ANSWERS_CUSTOM_TYPE) throw new Error("Durable ask answers must use the committed parent delivery receipt");
     this.sessionManager.appendCustomMessageEntry(message.customType, message.content, message.display, message.details);
     const customMessage = { role: "custom" as const, ...message, timestamp: Date.now() };
     this.emit({ type: "message_end", message: customMessage });

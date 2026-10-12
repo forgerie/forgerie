@@ -54,3 +54,113 @@ it("recovers an accepted SDK decision only through its Durable receipt, not an a
     expect(hosted.messages.filter((message) => message.role === "custom" && message.customType === "pi-web.ask.answers")).toHaveLength(0);
   } finally { await service.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
+
+async function liveAskFixture(holdResume = false) {
+  const directory = await mkdtemp(join(tmpdir(), "forgerie-live-durable-ask-"));
+  const modelRuntime = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json") });
+  const provider = fauxProvider(); modelRuntime.registerNativeProvider(provider.provider);
+  const gateway = createPiSessionManagerGateway({ agentDir: directory, env: {}, sessionDirEnvKeys: [] });
+  const manager = gateway.create(directory);
+  if (!(manager instanceof SessionManager)) throw new Error("Concrete SDK manager required");
+  manager.appendModelChange("faux", "faux-1");
+  manager.appendMessage({ role: "user", content: "seed", timestamp: 1 });
+  manager.appendMessage(fauxAssistantMessage("ready"));
+  const ref = { id: manager.getSessionId(), cwd: directory };
+  let hosted: DurableAgentSession | undefined;
+  const openService = () => new PiSessionService(new SessionEventHub(), { agentDir: directory, modelRuntime, sessionManager: gateway, heartbeatIntervalMs: 60_000,
+    createAgentRuntime: async (_create, options) => {
+      if (!(options.sessionManager instanceof SessionManager)) throw new Error("Concrete SDK manager required");
+      const services = await createAgentSessionServices({ cwd: directory, agentDir: directory, modelRuntime,
+        resourceLoaderOptions: { noExtensions: true, noSkills: true, noContextFiles: true, noPromptTemplates: true } });
+      services.settingsManager.applyOverrides({ compaction: { enabled: false } });
+      const session = await DurableAgentSession.open({ services, sessionManager: options.sessionManager, initialModel: provider.getModel() });
+      hosted = session;
+      if (holdResume) vi.spyOn(session.journal.harness, "resume").mockImplementation(() => undefined);
+      return { cwd: directory, session, setRebindSession() { /* No replacements in these ask tests. */ },
+        fork: () => Promise.reject(new Error("Must not fork")), dispose: () => session.close() };
+    },
+  });
+  let service = openService();
+  return { ref, provider, service: () => service, session: () => { if (hosted === undefined) throw new Error("Session not opened"); return hosted; },
+    restart: async () => { await service.dispose(); holdResume = false; service = openService(); },
+    close: async () => { await service.dispose(); vi.restoreAllMocks(); await rm(directory, { recursive: true, force: true }); } };
+}
+
+it("commits a live answer before delivery and recovers it exactly once after a crash", async () => {
+  const f = await liveAskFixture(true);
+  const { BACKGROUND_CONTEXT: context } = await import("@earendil-works/chord/context");
+  const { ParentAsks } = await import("./durableParentDocuments.js");
+  try {
+    await f.service().status(f.ref);
+    const opened = await f.service().openAsk({ sessionId: f.ref.id, questions: [{ id: "q", question: "Choose", options: [{ value: "one", label: "One" }] }] });
+    const submitting = f.service().submitAsk(f.ref, opened.ask.askId, { answers: [{ id: "q", values: ["one"] }] });
+    void submitting.catch(() => undefined);
+    await vi.waitFor(async () => {
+      const receipt = (await f.session().journal.harness.snapshot(ParentAsks, f.session().journal.conversation.id, context))?.closed[opened.ask.askId];
+      expect(receipt?.delivery.kind).toBe("pending");
+    });
+    expect((await submitting).result).toBe("closed");
+    expect(f.provider.state.callCount).toBe(0);
+    expect(f.session().sessionManager.getBranch().filter((entry) => entry.type === "custom_message" && entry.customType === "pi-web.ask.answers")).toHaveLength(0);
+    await f.restart();
+    await f.service().status(f.ref);
+    await vi.waitFor(() => { expect(f.provider.state.callCount).toBe(1); });
+    await f.session().journal.conversation.waitForIdle(context);
+    expect(f.provider.state.callCount).toBe(1);
+    expect((await f.session().journal.conversation.context(context)).messages.filter((message) => message.role === "user" && (typeof message.content === "string" ? message.content : message.content.filter(part => part.type === "text").map(part => part.text).join("\n")).includes("The user submitted answers"))).toHaveLength(1);
+    expect((await f.service().submitAsk(f.ref, opened.ask.askId, { answers: [{ id: "q", values: ["one"] }] })).result).toBe("stale");
+    expect(f.provider.state.callCount).toBe(1);
+  } finally { await f.close(); }
+});
+
+it("answers the native pending form after reconnect without requiring its JSONL event", async () => {
+  const f = await liveAskFixture();
+  const { BACKGROUND_CONTEXT: context } = await import("@earendil-works/chord/context");
+  try {
+    await f.service().status(f.ref);
+    const opened = await f.service().openAsk({ sessionId: f.ref.id, questions: [{ id: "q", question: "Choose", options: [{ value: "one", label: "One" }] }] });
+    await f.restart();
+    expect((await f.service().status(f.ref)).pendingAsk?.askId).toBe(opened.ask.askId);
+    expect((await f.service().submitAsk(f.ref, opened.ask.askId, { answers: [{ id: "q", values: ["one"] }] })).result).toBe("closed");
+    await vi.waitFor(() => { expect(f.provider.state.callCount).toBe(1); });
+    await f.session().journal.conversation.waitForIdle(context);
+    expect((await f.service().status(f.ref)).pendingAsk).toBeUndefined();
+    expect(f.provider.state.callCount).toBe(1);
+  } finally { await f.close(); }
+});
+
+it("commits native cancel and chat-reply transitions without a legacy custom delivery", async () => {
+  const f = await liveAskFixture(true);
+  const { BACKGROUND_CONTEXT: context } = await import("@earendil-works/chord/context");
+  const { ParentAsks } = await import("./durableParentDocuments.js");
+  try {
+    await f.service().status(f.ref);
+    const questions = [{ id: "q", question: "Choose", options: [{ value: "one", label: "One" }] }];
+    const first = await f.service().openAsk({ sessionId: f.ref.id, questions });
+    expect((await f.service().cancelAsk(f.ref, first.ask.askId)).result).toBe("closed");
+    expect((await f.session().journal.harness.snapshot(ParentAsks, f.session().journal.conversation.id, context))?.closed[first.ask.askId]?.delivery.kind).toBe("pending");
+    const second = await f.service().openAsk({ sessionId: f.ref.id, questions });
+    await f.service().prompt(f.ref, "answer in chat");
+    const receipt = (await f.session().journal.harness.snapshot(ParentAsks, f.session().journal.conversation.id, context))?.closed[second.ask.askId];
+    expect(receipt?.outcome.reason).toBe("answered-in-chat");
+    expect(receipt?.delivery.kind).toBe("none");
+    expect((await f.service().status(f.ref)).pendingAsk).toBeUndefined();
+    expect(f.session().sessionManager.getBranch().filter((entry) => entry.type === "custom_message" && entry.customType === "pi-web.ask.answers")).toHaveLength(0);
+  } finally { await f.close(); }
+});
+
+it("commits the production end_turn declaration to the native parent response", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "forgerie-native-declare-"));
+  const modelRuntime = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json") });
+  const provider = fauxProvider(); modelRuntime.registerNativeProvider(provider.provider);
+  const { fauxToolCall } = await import("@earendil-works/pi-ai/providers/faux");
+  provider.setResponses([fauxAssistantMessage([{ type: "text", text: "The result is ready." }, fauxToolCall("end_turn", { awaiting: "nothing" })], { stopReason: "toolUse" })]);
+  const gateway = createPiSessionManagerGateway({ agentDir: directory, env: {}, sessionDirEnvKeys: [] });
+  const service = new PiSessionService(new SessionEventHub(), { agentDir: directory, modelRuntime, sessionManager: gateway, heartbeatIntervalMs: 60_000 });
+  try {
+    const started = await service.start(directory, { initialModelSpec: "faux/faux-1" });
+    const ref = { id: started.id, cwd: directory };
+    await service.prompt(ref, "Finish this work");
+    await vi.waitFor(async () => { const status = await service.status(ref); expect(status.isStreaming).toBe(false); expect(status.response).toEqual({ kind: "none" }); });
+  } finally { await service.dispose(); await rm(directory, { recursive: true, force: true }); }
+});
