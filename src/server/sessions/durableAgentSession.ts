@@ -15,7 +15,7 @@ import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import { workflowExtension, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops } from "./durableWorkflowRuns.js";
+import { workflowExtension, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops, workflowProposals, startWorkflowProposal, decideWorkflowProposal, openWorkflowProposals } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
 import type { WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
@@ -64,7 +64,7 @@ export class DurableAgentSession implements PiAgentSession {
   private childrenLive: boolean | undefined;
   private childWorktrees: DurableChildWorktrees | undefined;
   private childCount = 0;
-  /** Child questions and workflow stops that wait for the user. */
+  /** Child questions, workflow stops, and workflow proposals that wait for the user. */
   private waitingCount = 0;
   private childRunRecords: DurableChildRunRecords | undefined;
 
@@ -177,6 +177,16 @@ export class DurableAgentSession implements PiAgentSession {
     if (!this.hostsDurableChildren) throw new Error("Workflow launches require durableChildren");
     return launchWorkflow(this.journal.harness, this.journal.conversation, new WorkflowLibrary(this.options.services.agentDir), this.options.services.cwd, this.sessionId, name, inputs, requestId, context);
   }
+  workflowProposals() { return workflowProposals(this.journal.harness, this.journal.conversation.id, context); }
+  startWorkflowProposal(id: string, inputs: WorkflowInputs, requestId: string) {
+    return startWorkflowProposal(this.journal.harness, this.journal.conversation, this.options.services.cwd, this.sessionId, id, inputs, requestId, context);
+  }
+  changeWorkflowProposal(id: string, note: string) {
+    return decideWorkflowProposal(this.journal.harness, this.journal.conversation, id, "changes", note, context);
+  }
+  dismissWorkflowProposal(id: string) {
+    return decideWorkflowProposal(this.journal.harness, this.journal.conversation, id, "dismissed", undefined, context);
+  }
   workflowRuns() { return workflowRuns(this.journal.harness, this.journal.conversation.id, context); }
   finishWorkflow(runId: string, outcome: WorkflowOutcome, result: string) {
     return this.journal.conversation.commit((tx) => finishWorkflow(tx, this.journal.conversation.id, runId, outcome, result), context);
@@ -249,9 +259,9 @@ export class DurableAgentSession implements PiAgentSession {
       host.liveChanged(ref, live);
     };
     const parent = this.journal.conversation.id;
-    // A child's question and a workflow stop both wait on the user; the status counts them so the session list can say so.
+    // Child questions, workflow stops, and open proposals wait on the user; the status counts them so the session list can say so.
     const recountWaiting = async () => {
-      const waiting = await openChildQuestions(this.journal.harness, parent, context) + await waitingWorkflowStops(this.journal.harness, parent, context);
+      const waiting = await openChildQuestions(this.journal.harness, parent, context) + await waitingWorkflowStops(this.journal.harness, parent, context) + await openWorkflowProposals(this.journal.harness, parent, context);
       if (waiting === this.waitingCount) return;
       this.waitingCount = waiting;
       this.emit({ type: "durable_children_changed" });

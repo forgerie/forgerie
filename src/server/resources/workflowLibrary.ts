@@ -18,7 +18,7 @@ export interface ProseWorkflow {
 }
 export interface WorkflowInventory { workflows: ProseWorkflow[]; diagnostics: { name: string; path: string; error: string }[] }
 
-/** Prompt files remain the single authoring system. Invalid project overrides never fall back to a profile file. */
+/** Saved workflows use prompt files. Invalid project overrides never fall back to a profile file. */
 export class WorkflowLibrary {
   constructor(private readonly agentDir: string) {}
   async list(cwd: string): Promise<WorkflowInventory> {

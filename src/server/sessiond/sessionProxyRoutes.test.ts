@@ -50,6 +50,25 @@ describe("machine-scoped session proxy routes", () => {
     ]);
   });
 
+  it("forwards workflow proposal history and all decisions, including conflict reasons", async () => {
+    const start = { cwd: "/repo", inputs: { task: "edited" }, requestId: "start-1" };
+    const changes = { cwd: "/repo", note: "Add review." };
+    const base = "/api/machines/local/sessions/s1/workflow-proposals";
+    expect((await app.inject({ url: `${base}?cwd=%2Frepo` })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `${base}/p1/start`, payload: start })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `${base}/p1/changes`, payload: changes })).statusCode).toBe(200);
+    daemon.respondWith({ statusCode: 409, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "This workflow proposal is not open" }) });
+    const dismissed = await app.inject({ method: "POST", url: `${base}/p1/dismiss`, payload: { cwd: "/repo" } });
+    expect(dismissed.statusCode).toBe(409);
+    expect(dismissed.json()).toEqual({ error: "This workflow proposal is not open" });
+    expect(daemon.requests).toEqual([
+      { method: "GET", path: "/sessions/s1/workflow-proposals?cwd=%2Frepo", body: undefined },
+      { method: "POST", path: "/sessions/s1/workflow-proposals/p1/start", body: start },
+      { method: "POST", path: "/sessions/s1/workflow-proposals/p1/changes", body: changes },
+      { method: "POST", path: "/sessions/s1/workflow-proposals/p1/dismiss", body: { cwd: "/repo" } },
+    ]);
+  });
+
   it("forwards issue-proposal decisions and saved outcomes through the session wildcard", async () => {
     const outcome = { state: "created", number: 38, title: "Fix", url: "https://github.com/o/r/issues/38" };
     daemon.respondWith({ statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(outcome) });

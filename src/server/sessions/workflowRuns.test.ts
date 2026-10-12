@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import Fastify from "fastify";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { Type } from "@earendil-works/pi-ai";
+import { Type, type JsonObject } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
 import { defineTool } from "@earendil-works/pi-durable";
 import { Check } from "typebox/value";
@@ -20,9 +20,11 @@ import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
 import { SessionWorktreeStore } from "../workspaces/sessionWorktreeStore.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
+import { WorkflowLibrary } from "../resources/workflowLibrary.js";
 import { AgentDirPromptLibrary } from "../resources/promptLibrary.js";
 import { ResourceEditorService } from "../resources/resourceEditorService.js";
 import { registerPromptLibraryRoutes } from "../resources/promptLibraryRoutes.js";
+import { WorkflowProposalSchema, type WorkflowProposal } from "../../shared/workflowProposals.js";
 import { WorkflowRunSchema, type WorkflowRun } from "../../shared/workflowRuns.js";
 
 const definition = `---
@@ -55,12 +57,19 @@ let root = "";
 let agentDir = "";
 let service: PiSessionService;
 let models: ModelRuntime;
+let hub: CapturingSessionEventHub;
 let store: ChildRunStore;
 let autoComplete = false;
 let worktrees: SessionWorktrees | undefined;
 let isolate = false;
 let started = 0;
 let sequence = 0;
+let proposalText = staged;
+let proposalChanges = 0;
+let proposalInputs: Record<string, string | boolean | number> = {};
+let proposalName = "task-plan";
+let proposalSummary = "Build and review this task.";
+const proposalErrors: string[] = [];
 const errors: unknown[] = [];
 const app = () => {
   const server = Fastify();
@@ -77,11 +86,17 @@ const work = defineTool({ name: "work", description: "Do a bounded work step", p
 const route: FauxResponseFactory = (context) => {
   const last = [...context.messages].reverse().find((message) => message.role !== "system");
   const said = textOf(last?.content);
-  const call = (name: string, args: Record<string, string>) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
+  const call = (name: string, args: JsonObject) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
   const answer = (text: string) => fauxAssistantMessage([fauxText(text)]);
   const workflow = [...context.messages].reverse().find((message) => message.role === "user" && textOf(message.content).startsWith("Workflow run "));
   const runId = /^Workflow run ([a-f0-9]+)/u.exec(textOf(workflow?.content))?.[1];
   const isStaged = textOf(workflow?.content).includes("WORKFLOW-STAGED");
+  if (last?.role === "user" && (said === "PROPOSE" || said.includes("asked for changes to the proposal"))) {
+    if (said.includes("asked for changes to the proposal")) proposalChanges++;
+    return call("propose_workflow", { name: proposalName, summary: proposalSummary, text: proposalText, inputs: proposalInputs });
+  }
+  if (last?.role === "user" && said === "BUSY") return call("bash", { command: "sleep 1" });
+  if (last?.role === "toolResult" && last.isError && context.messages.some((message) => message.role === "user" && textOf(message.content) === "PROPOSE")) proposalErrors.push(said);
   const commits = context.messages.some((message) => message.role === "user" && textOf(message.content).startsWith("CHILD-COMMIT"));
   const spawnAlpha = () => call("child_agent", { action: "spawn", name: "alpha", message: "CHILD-COMMIT", isolation: "worktree" });
   if (isStaged && runId !== undefined) {
@@ -109,10 +124,11 @@ const route: FauxResponseFactory = (context) => {
   }
   return answer("Session title");
 };
-function openService(): PiSessionService {
-  return new PiSessionService(new CapturingSessionEventHub(), { agentDir, modelRuntime: models,
+function openService(hostsWorkflows = true): PiSessionService {
+  hub = new CapturingSessionEventHub();
+  return new PiSessionService(hub, { agentDir, modelRuntime: models,
     sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] }), archiveStore: emptyArchiveStore(), heartbeatIntervalMs: 60000,
-    durableChildAgents: createDurableChildHost({ extraTools: [work], index: new LiveChildSessionIndex(join(agentDir, "live.json")), runRecords: store, onRunRecordError: (error) => { errors.push(error); }, ...(worktrees === undefined ? {} : { worktrees }) }),
+    ...(hostsWorkflows ? { durableChildAgents: createDurableChildHost({ extraTools: [work], index: new LiveChildSessionIndex(join(agentDir, "live.json")), runRecords: store, onRunRecordError: (error) => { errors.push(error); }, ...(worktrees === undefined ? {} : { worktrees }) }) } : {}),
   });
 }
 async function until<T>(check: () => Promise<T | false | undefined>): Promise<T> {
@@ -129,6 +145,7 @@ function runBody(value: unknown): WorkflowRun {
   return value;
 }
 beforeEach(async () => {
+  proposalText = staged; proposalChanges = 0; proposalErrors.length = 0; proposalInputs = {}; proposalName = "task-plan"; proposalSummary = "Build and review this task.";
   errors.length = 0; started = 0; sequence = 0; autoComplete = false; worktrees = undefined; isolate = false;
   root = await mkdtemp(join(tmpdir(), "forgerie-workflow-runs-"));
   agentDir = join(root, "agent");
@@ -426,4 +443,170 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     expect((await service.durableChildren(ref)).some((child) => child.name === "alpha")).toBe(true);
     await service.finishWorkflow(ref, current.id, "completed", "Final experiment");
   }, 30000);
+});
+
+
+describe("temporary workflow proposals through Durable sessions and HTTP", () => {
+  const propose = async (ref: { id: string; cwd: string }): Promise<WorkflowProposal> => {
+    const previous = new Set((await service.workflowProposals(ref)).map((item) => item.id));
+    await service.prompt(ref, "PROPOSE");
+    return until(async () => {
+      const proposals = await service.workflowProposals(ref);
+      const proposal = proposals.find((item) => item.state.kind === "open" && !previous.has(item.id));
+      return proposal !== undefined && !(await service.status(ref)).isStreaming ? proposal : false;
+    });
+  };
+
+  it("proposes, counts waiting, replaces, freezes a start, retries, and holds at the first stop without a file", async () => {
+    const server = app();
+    try {
+      const ref = { id: (await service.start(root)).id, cwd: root };
+      const first = await propose(ref);
+      expect(Check(WorkflowProposalSchema, first)).toBe(true);
+      expect(first).toMatchObject({ name: "task-plan", summary: "Build and review this task.", text: staged, inputs: {}, state: { kind: "open" } });
+      await until(async () => (await service.status(ref)).waitingOnYou === 1);
+      const entry = (await service.messages(ref)).messages.find((message) => Check(Type.Object({ customType: Type.Literal("forgerie.workflow-proposal") }), message));
+      expect(entry).toMatchObject({ role: "custom", customType: "forgerie.workflow-proposal", details: { proposalId: first.id, name: first.name, summary: first.summary, stages: first.definition.stages } });
+      expect(hub.sessionEvents.some(({ event }) => event.type === "pi.event" && event.eventType === "workflow_runs_changed")).toBe(true);
+      const second = await propose(ref);
+      const list = await server.inject({ url: `/sessions/${ref.id}/workflow-proposals?cwd=${encodeURIComponent(root)}` });
+      expect(list.statusCode).toBe(200);
+      expect(list.json()).toMatchObject([{ id: second.id }, { id: first.id, state: { kind: "replaced", by: second.id } }]);
+      const url = `/sessions/${ref.id}/workflow-proposals/${second.id}/start`;
+      const payload = { cwd: root, inputs: {}, requestId: "proposal-start" };
+      const [response, retry] = await Promise.all([server.inject({ method: "POST", url, payload }), server.inject({ method: "POST", url, payload })]);
+      expect(response.statusCode).toBe(200);
+      expect(retry.statusCode).toBe(200);
+      const run = runBody(response.json());
+      expect(runBody(retry.json()).id).toBe(run.id);
+      expect(run.definition).toMatchObject({ name: second.name, path: `proposal:${second.id}`, text: staged, sha256: second.sha256 });
+      expect((await service.workflowProposals(ref))[0]?.state).toMatchObject({ kind: "started", runId: run.id });
+      expect((await server.inject({ method: "POST", url, payload: { ...payload, requestId: "other" } })).statusCode).toBe(409);
+      expect((await server.inject({ method: "POST", url, payload: { ...payload, inputs: { extra: 1 } } })).statusCode).toBe(409);
+      expect((await server.inject({ method: "POST", url: `/sessions/${ref.id}/workflow-proposals/${first.id}/start`, payload })).statusCode).toBe(409);
+      await until(async () => (await service.workflowRuns(ref))[0]?.stops?.["contract"]?.state === "waiting");
+      await service.prompt(ref, "PROPOSE");
+      await until(async () => !(await service.status(ref)).isStreaming && proposalErrors.some((error) => error.includes("active workflow")));
+      expect(proposalErrors).toContainEqual(expect.stringContaining("active workflow"));
+      expect((await new WorkflowLibrary(agentDir).list(root)).workflows).toEqual([]);
+    } finally { await server.close(); }
+  });
+
+  it("delivers a changes note once, closes dismissal without waking, and validates decisions and session ownership", async () => {
+    const server = app();
+    try {
+      const ref = { id: (await service.start(root)).id, cwd: root };
+      const first = await propose(ref);
+      const url = `/sessions/${ref.id}/workflow-proposals/${first.id}`;
+      expect((await server.inject({ method: "POST", url: `${url}/changes`, payload: { cwd: root, note: " " } })).statusCode).toBe(400);
+      expect((await server.inject({ method: "POST", url: `${url}/dismiss`, payload: { cwd: root, unexpected: true } })).statusCode).toBe(400);
+      const foreign = { id: (await service.start(root)).id, cwd: root };
+      expect((await server.inject({ method: "POST", url: `/sessions/${foreign.id}/workflow-proposals/${first.id}/dismiss`, payload: { cwd: root } })).statusCode).toBe(404);
+      const changes = await server.inject({ method: "POST", url: `${url}/changes`, payload: { cwd: root, note: " Name the columns. " } });
+      expect(changes.statusCode).toBe(200);
+      expect(changes.json()).toMatchObject({ state: { kind: "changes", note: "Name the columns." } });
+      expect((await server.inject({ method: "POST", url: `${url}/changes`, payload: { cwd: root, note: "Name the columns." } })).statusCode).toBe(409);
+      const second = await until(async () => (await service.workflowProposals(ref)).find((item) => item.state.kind === "open"));
+      await until(async () => !(await service.status(ref)).isStreaming);
+      expect(proposalChanges).toBe(1);
+      const messages = (await service.messages(ref)).messages;
+      expect(messages.filter((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content).includes("asked for changes to the proposal: Name the columns."))).toHaveLength(1);
+      const dismissed = await server.inject({ method: "POST", url: `/sessions/${ref.id}/workflow-proposals/${second.id}/dismiss`, payload: { cwd: root } });
+      expect(dismissed.statusCode).toBe(200);
+      expect(dismissed.json()).toMatchObject({ state: { kind: "dismissed" } });
+      await until(async () => ((await service.status(ref)).waitingOnYou ?? 0) === 0);
+      expect((await service.status(ref)).isStreaming).toBe(false);
+      expect(proposalChanges).toBe(1);
+      expect((await server.inject({ method: "POST", url: `/sessions/${ref.id}/workflow-proposals/${second.id}/dismiss`, payload: { cwd: root } })).statusCode).toBe(409);
+    } finally { await server.close(); }
+  });
+
+  it("lists no proposals for a session without Durable workflow hosting while POST still refuses", async () => {
+    await service.dispose(); service = openService(false);
+    const server = app();
+    try {
+      const ref = { id: (await service.start(root)).id, cwd: root };
+      const url = `/sessions/${ref.id}/workflow-proposals`;
+      const response = await server.inject({ url: `${url}?cwd=${encodeURIComponent(root)}` });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual([]);
+      expect((await server.inject({ method: "POST", url: `${url}/p1/start`, payload: { cwd: root, inputs: {}, requestId: "unsupported" } })).statusCode).toBe(404);
+      expect((await server.inject({ method: "POST", url: `${url}/p1/changes`, payload: { cwd: root, note: "Revise." } })).statusCode).toBe(404);
+      expect((await server.inject({ method: "POST", url: `${url}/p1/dismiss`, payload: { cwd: root } })).statusCode).toBe(404);
+    } finally { await server.close(); }
+  });
+
+  it("restores an idle open proposal and its waiting count when the session reopens", async () => {
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    const proposal = await propose(ref);
+    const before = await service.messages(ref);
+    await service.dispose(); service = openService();
+    expect(await service.workflowProposals(ref)).toEqual([proposal]);
+    expect((await service.status(ref)).waitingOnYou).toBe(1);
+    expect((await service.status(ref)).isStreaming).toBe(false);
+    expect(await service.messages(ref)).toEqual(before);
+  });
+
+  it.each([
+    { text: "No workflow frontmatter", problem: "frontmatter" },
+    { text: "---\nworkflow: [broken\n---\nProse", problem: "Flow sequence" },
+    { text: `${staged}\n\x60\x60\x60js workflow\nthrow Error('no');\n\x60\x60\x60`, problem: "scripts" },
+    { text: definition, inputs: { task: true }, problem: "requires string" },
+    { text: staged, inputs: { extra: 1 }, problem: "Unknown workflow input" },
+    { text: staged, name: "INVALID", problem: "Validation failed" },
+    { text: staged, summary: "x".repeat(281), problem: "Validation failed" },
+  ])("returns a tool error for invalid proposal $problem without saving it", async ({ text, inputs, name, summary, problem }) => {
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    proposalText = text;
+    proposalInputs = inputs ?? {};
+    proposalName = name ?? "task-plan";
+    proposalSummary = summary ?? "Valid overview";
+    await service.prompt(ref, "PROPOSE");
+    await until(async () => !(await service.status(ref)).isStreaming && proposalErrors.length > 0);
+    expect(proposalErrors[0]).toContain(problem);
+    expect(await service.workflowProposals(ref)).toEqual([]);
+    expect((await service.status(ref)).waitingOnYou ?? 0).toBe(0);
+  });
+
+  it("prefills and validates editable inputs, rejects busy and active parents, and recovers frozen provenance", async () => {
+    const server = app();
+    try {
+      const ref = { id: (await service.start(root)).id, cwd: root };
+      proposalText = staged.replace("  version: 1", "  version: 1\n  inputs:\n    task: { type: string }\n    review: { type: boolean, default: true }");
+      proposalInputs = { task: "Agent's brief" };
+      const proposal = await propose(ref);
+      expect(proposal.inputs).toEqual({ task: "Agent's brief", review: true });
+      const url = `/sessions/${ref.id}/workflow-proposals/${proposal.id}/start`;
+      const payload = { cwd: root, inputs: { task: "User's edited brief", review: false }, requestId: "edited" };
+      expect((await server.inject({ method: "POST", url, payload: { ...payload, extra: true } })).statusCode).toBe(400);
+      expect((await server.inject({ method: "POST", url, payload: { ...payload, inputs: { task: 1 } } })).statusCode).toBe(400);
+      expect((await server.inject({ url: `/sessions/${ref.id}/workflow-proposals` })).statusCode).toBe(400);
+      const foreign = { id: (await service.start(root)).id, cwd: root };
+      expect((await server.inject({ method: "POST", url: `/sessions/${foreign.id}/workflow-proposals/${proposal.id}/start`, payload })).statusCode).toBe(404);
+      await service.prompt(ref, "BUSY");
+      await until(() => Promise.resolve(hub.sessionEvents.some(({ event }) => event.type === "tool.start" && event.toolName === "bash")));
+      const busy = await server.inject({ method: "POST", url, payload });
+      expect(busy.statusCode).toBe(409);
+      expect(busy.json<{ error: string }>().error).toContain("idle");
+      await until(async () => !(await service.status(ref)).isStreaming);
+      await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+      const active = await service.runWorkflow(ref, "staged", {}, "saved-first");
+      const blocked = await server.inject({ method: "POST", url, payload });
+      expect(blocked.statusCode).toBe(409);
+      expect(blocked.json<{ error: string }>().error).toContain("active workflow");
+      expect((await service.workflowProposals(ref))[0]?.state.kind).toBe("open");
+      await until(async () => (await service.workflowRuns(ref))[0]?.stops?.["contract"]?.state === "waiting" && !(await service.status(ref)).isStreaming);
+      await service.finishWorkflow(ref, active.id, "stopped", "Switch to the task proposal");
+      const response = await server.inject({ method: "POST", url, payload });
+      expect(response.statusCode).toBe(200);
+      const run = runBody(response.json());
+      expect(run.inputs).toEqual(payload.inputs);
+      expect(run.definition.text).toBe(proposalText);
+      await until(async () => (await service.workflowRuns(ref)).find((item) => item.id === run.id)?.stops?.["contract"]?.state === "waiting" && !(await service.status(ref)).isStreaming);
+      await service.dispose(); service = openService();
+      expect((await service.workflowProposals(ref))[0]?.state).toMatchObject({ kind: "started", runId: run.id });
+      expect((await service.startWorkflowProposal(ref, proposal.id, payload.inputs, payload.requestId)).id).toBe(run.id);
+      expect((await service.workflowRuns(ref)).find((item) => item.id === run.id)?.definition).toEqual(run.definition);
+    } finally { await server.close(); }
+  }, 15000);
 });

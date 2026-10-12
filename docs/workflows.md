@@ -1,6 +1,6 @@
-# Saved prose workflows
+# Prose workflows
 
-A workflow is a prompt file with declared inputs and a saved record of each launch. You can copy a workflow, change its prose, and compare the resulting runs. A workflow can also declare its route: stages in order, the workers each stage expects, and stops where you decide. Forgerie enforces only the stops. The agent decides how to run the stages between them.
+A saved workflow is a prompt file with declared inputs and a saved record of each launch. A temporary workflow proposal keeps its instructions in the session instead of a file. You can copy a workflow, change its prose, and compare the resulting runs. A workflow can also declare its route: stages in order, the workers each stage expects, and stops where you decide. Forgerie enforces only the stops. The agent decides how to run the stages between them.
 
 This first path requires `durableChildren`. Enable it in the Forgerie config and restart sessiond when no agents are running. pi-subagents remains installed beside Durable children.
 
@@ -52,6 +52,22 @@ The workflow button in the session header lists the saved workflows. A file that
 
 While the run is active, a strip above the composer shows its stages as bars. Parallel workers are stacked bars, and a count shows stops that wait on you. Press the strip to see the live route. Each started worker opens its child.
 
+## Temporary workflow proposals
+
+For a task that needs several workers, a review, or your check, the agent can call `propose_workflow({name, summary, text, inputs?})`, then end its turn. Small tasks do not need a proposal. A one-off workflow must not become a file in the repository.
+
+The **Proposed workflow** card shows the name, overview, stages, workers, and stops. An open proposal counts as **Needs your response**. Review it and change the pre-filled inputs before choosing:
+
+| Action | Result |
+| --- | --- |
+| **Start workflow** | Starts from the proposal's frozen instructions and your inputs. The proposal closes as **Started**. Another active workflow or a busy parent blocks Start with a reason. |
+| **Ask for changes** | Requires a note. Closes the proposal and delivers the note to the agent once. The agent revises and proposes again. |
+| **Dismiss** | Closes the proposal without waking the agent. |
+
+A new proposal closes every earlier open proposal as **Replaced**. The tool validates the same frontmatter, prose, route, and inputs as a saved workflow. It refuses scripted workflows and proposals during an active run. Only the user starts the run.
+
+The proposal lives in a Durable document. Start records the run and the proposal's decision in one commit. The run's source path is `proposal:<proposalId>`, not a filesystem path. Retrying Start with the same request ID and inputs returns the accepted run. No prompt file is read or written. There is no action to save a proposal to the library or edit its text in the browser. Proposal records have no automatic expiry; they remain in the session's storage and add to its size. Reopening a session restores its open proposals and waiting count without a model turn. Startup recovery currently selects unfinished runs, not idle sessions that have only an open proposal.
+
 ## Stages and stops
 
 Declare the route in the same `workflow` frontmatter:
@@ -88,7 +104,7 @@ Forgerie draws agent stages from their children, so the drawing can drift from w
 
 Workflow discovery reads `<cwd>/.pi/prompts/*.md`, then `<agentDir>/prompts/*.md`. The first file with a name wins. On this host, `agentDir` is `~/.local/share/forgerie/agent`. An invalid project override blocks the profile file rather than falling back silently. Package-contributed and extra configured prompt folders are not workflow sources in this first path.
 
-A workflow keeps the normal prompt format. Add `workflow: {version: 1}` for a workflow without inputs. Other prompt frontmatter remains intact. Inside `workflow`, only `version` and `inputs` are supported. Names use the prompt library's lowercase letters, digits, and dashes, with at most 64 characters.
+A workflow keeps the normal prompt format. Add `workflow: {version: 1}` for a workflow without inputs. Other prompt frontmatter remains intact. Inside `workflow`, `version`, `inputs`, and `stages` are supported. Names use the prompt library's lowercase letters, digits, and dashes, with at most 64 characters.
 
 Input names start with a lowercase letter and contain letters, digits, or underscores. Each input declares `type: string`, `boolean`, or `number`. An optional `choices` list must contain that type. An optional `default` must meet the type and choices. Without a default, the input is required. Extra inputs and type coercion are rejected.
 
@@ -140,6 +156,15 @@ Browser URLs use `/api` before these paths. Requests identify the parent's `cwd`
 | `POST /sessions/:id/workflow-runs/:runId/finish` | Exactly `{cwd, outcome, result}`. | `{ok: true}`. This is a human recovery operation with the same settlement checks as the coordinator tool. |
 | `POST /sessions/:id/workflow-runs/:runId/stops/:stage` | `{cwd, decision, note?}`. `decision` is `approve`, `changes` (needs a note), or `land`. | The updated `WorkflowRun`. 409 when the stop is not waiting, when the decision does not fit the stop, or when a branch cannot land. |
 
+| Proposal method and path | Request | Response |
+| --- | --- | --- |
+| `GET /sessions/:id/workflow-proposals` | Only query `cwd`. | `WorkflowProposal[]`, newest first. Sessions without Durable workflow hosting return `[]` (200). |
+| `POST /sessions/:id/workflow-proposals/:pid/start` | Exactly `{cwd, inputs, requestId}`. | A `WorkflowRun` with the proposal's exact text and SHA-256 hash. |
+| `POST /sessions/:id/workflow-proposals/:pid/changes` | Exactly `{cwd, note}`. A nonblank note, at most 8000 characters. | The closed `WorkflowProposal`; one Durable task delivers the note. |
+| `POST /sessions/:id/workflow-proposals/:pid/dismiss` | Exactly `{cwd}`. | The closed `WorkflowProposal`; no agent input is delivered. |
+
+`WorkflowProposal` is defined in `src/shared/workflowProposals.ts`. Its summary contains at most 280 characters. Decisions on a closed proposal return 409, except an identical Start retry. Foreign proposal IDs return 404. Invalid bodies and inputs return 400. A proposal document change emits `workflow_runs_changed`, like a run document change; clients read both lists again.
+
 `requestId` contains 1 to 128 letters, digits, or hyphens. Use a new ID for an intentional rerun. An expired receipt cannot be reused. Results must contain 1 to 65536 characters and cannot be blank.
 
 `WorkflowRun` is defined once in `src/shared/workflowRuns.ts`. It contains the session, launch ID, request ID, start time, definition snapshot, resolved inputs, explicit run state, the frozen stages, the state of each stop, and child requests with their stage. The stop rules are pure functions in `src/shared/workflowStops.ts`, shared by the server and the browser. Each child request identifies its conversation and reporter, with working or settled state. Settled state contains its outcome, result, delivery flag, and optional delivery error. Child requests are not unique child conversations; multiple sends can share one child's answer.
@@ -148,7 +173,7 @@ Invalid requests and input definitions return 400. Missing workflows and foreign
 
 ## Verification
 
-`src/server/resources/workflowLibrary.test.ts` checks discovery, precedence, input validation, exact text, and script refusal. `src/server/sessions/workflowRuns.test.ts` uses temporary files, real HTTP handlers, the production Durable factory, and a configured scripted provider. It checks file effects, restart recovery, launch retries, frozen provenance, explicit completion, copied variations, parallel children, stopped and failed results, and retention. A staged run checks the refused spawn before the first stop, a change request and a second round, approval, the refused early completion, and a real Git landing of the child branch. `src/shared/workflowStops.test.ts` covers the stop rules; `ui/src/workflows/` tests cover the transcript entries, the cards, and the route drawing. These tests do not establish real-model or physical-device acceptance.
+`src/server/resources/workflowLibrary.test.ts` checks discovery, precedence, input validation, exact text, and script refusal. `src/server/sessions/durableWorkflowRuns.test.ts` checks proposal replay and the single commit for Start. The HTTP tests also check proposal validation, replacement, editable inputs, blocked starts, changes delivered once, dismissal, waiting status, and reopening. `src/server/sessions/workflowRuns.test.ts` uses temporary files, real HTTP handlers, the production Durable factory, and a configured scripted provider. It checks file effects, restart recovery, launch retries, frozen provenance, explicit completion, copied variations, parallel children, stopped and failed results, and retention. A staged run checks the refused spawn before the first stop, a change request and a second round, approval, the refused early completion, and a real Git landing of the child branch. `src/shared/workflowStops.test.ts` covers the stop rules; `ui/src/workflows/` tests cover the transcript entries, the cards, and the route drawing. These tests do not establish real-model or physical-device acceptance.
 
 The opt-in `scripts/workflow-real.ts` check uses a real CLIProxyAPI model. It saves and launches a workflow, checks the child's file output, copies a variation, and checks explicit completion and both child-run links. It owns a temporary profile and workspace. It copies the live CLIProxyAPI credential into a private temporary file and removes that file on normal exit or SIGTERM. It does not restart the live daemon. Model calls incur provider costs.
 
@@ -159,3 +184,5 @@ WORKFLOW_REAL=1 ./scripts/workflow-real.ts
 `WORKFLOW_REAL=1 ./scripts/workflow-stops-real.ts` runs a staged workflow the same way, in a temporary Git workspace. It checks that the plan stop holds the child, that approval releases it, that the land stop refuses an early completion, that **Land all** lands the child's real branch, and that the agent finishes the run.
 
 Set `WORKFLOW_MODEL` to change the model. Set `WORKFLOW_SERVE=1` to keep the isolated HTTP server on `127.0.0.1:8544` for browser acceptance, then stop it with SIGTERM. If it is killed with SIGKILL, remove the temporary `agent/models.json` credential file yourself.
+
+`WORKFLOW_REAL=1 ./scripts/workflow-proposal-real.ts` uses a separate temporary profile, Git workspace, and in-process daemon. The real model proposes a workflow; the script starts it through the HTTP route and waits at its first stop. It verifies that `git status --porcelain` in the workspace did not change. It does not restart or deploy the live daemon. Model calls incur provider costs.

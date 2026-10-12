@@ -4,8 +4,9 @@ import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { Check } from "typebox/value";
 import { WorkflowOutcomeSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowInputs, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
+import { WorkflowProposalSchema, WorkflowProposalToolSchema, type WorkflowProposal, type WorkflowProposalTool } from "../../shared/workflowProposals.js";
 import { admitChild, completionProblem, declaredWorker, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
-import { assertProseOnly, WorkflowError, workflowInputs, workflowPrompt, type WorkflowLibrary } from "../resources/workflowLibrary.js";
+import { assertProseOnly, parseWorkflow, WorkflowError, workflowInputs, workflowPrompt, type ProseWorkflow, type WorkflowLibrary } from "../resources/workflowLibrary.js";
 
 export const WORKFLOW_DOC_KIND = "forgerie.workflow-runs";
 export const WorkflowActiveSchema = Type.Object({ active: Type.Union([Type.String(), Type.Null()]) });
@@ -19,18 +20,25 @@ export function workflowActiveFromCommit(publication: CommitPublication, parent:
 }
 /** Whether a commit changed this parent's workflow records, so the browser refetches them. */
 export function workflowRunsChanged(publication: CommitPublication, parent: ConversationId): boolean {
-  return publication.changes.some((change) => change.type === "document" && change.conversationId === parent && change.record.kind === WORKFLOW_DOC_KIND);
+  return publication.changes.some((change) => change.type === "document" && change.conversationId === parent && (change.record.kind === WORKFLOW_DOC_KIND || change.record.kind === WORKFLOW_PROPOSALS_DOC_KIND));
 }
 /** The agent asked the user to decide at a stop. The transcript shows it as a card; the model does not see it. */
 export const WORKFLOW_STOP_KIND = "forgerie.workflow-stop";
-export const isWorkflowEntryKind = (kind: string): boolean => kind === WORKFLOW_STOP_KIND;
-export function workflowEntryText(data: unknown): string {
+export const WORKFLOW_PROPOSAL_KIND = "forgerie.workflow-proposal";
+export const isWorkflowEntryKind = (kind: string): boolean => kind === WORKFLOW_STOP_KIND || kind === WORKFLOW_PROPOSAL_KIND;
+export function workflowEntryText(kind: string, data: unknown): string {
   const record: Record<string, unknown> = typeof data === "object" && data !== null ? Object.fromEntries(Object.entries(data)) : {};
   const field = (key: string): string => { const value = record[key]; return typeof value === "string" ? value : ""; };
+  if (kind === WORKFLOW_PROPOSAL_KIND) return `Proposed workflow ${field("name")}: ${field("summary")}`;
   return `${field("workflow")} waits for you at ${field("stageName")}: ${field("summary")}`;
 }
 const Runs = defineDoc<{ active: string | null; records: Record<string, WorkflowRun & { requestedInputs: WorkflowInputs }>; receipts?: Record<string, boolean> }>({
   kind: WORKFLOW_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({ active: null, records: {} }),
+});
+
+export const WORKFLOW_PROPOSALS_DOC_KIND = "forgerie.workflow-proposals";
+const Proposals = defineDoc<{ records: Record<string, WorkflowProposal> }>({
+  kind: WORKFLOW_PROPOSALS_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({ records: {} }),
 });
 
 // A launch record and its delivery task commit together. Delivery retries use one Durable submission receipt.
@@ -57,6 +65,16 @@ async function asTool(action: () => Promise<string>) {
 
 export function workflowExtension() {
   return defineExtension({ name: "forgerie.workflows", tasks: [Launch], tools: [defineTool({
+    name: "propose_workflow",
+    description: "When you understand a task that needs several workers, a review, or the user's check, design a workflow for this task, call propose_workflow, then end your turn. Not for small tasks. Never write a workflow file into the repository for a one-off workflow. Supply complete prompt-format text with workflow version 1 frontmatter and prose, and pre-fill its inputs. Only the user can start the proposal, ask for changes, or dismiss it.",
+    parameters: WorkflowProposalToolSchema,
+    replay: "safe", executionMode: "sequential",
+    execute: (args, api, context) => asTool(async () => {
+      const id = `p:${String(api.taskId)}`;
+      await api.commit((tx) => proposeWorkflow(tx, api.conversationId, id, args), context);
+      return `Proposed workflow "${args.name}". End your turn now. The user starts it, asks for changes, or dismisses it; do not start it yourself or write a workflow file.`;
+    }),
+  }), defineTool({
     name: "workflow_finish", description: "Explicitly finish a prose workflow run. All its child work and completion reports must settle first. An idle pause does not finish a run. A run with stops finishes as completed only after the user passes every stop.",
     parameters: Type.Object({ runId: Type.String(), outcome: WorkflowOutcomeSchema, result: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
     replay: "safe", executionMode: "sequential",
@@ -141,37 +159,123 @@ export async function decideWorkflowStop(harness: Harness, parent: Conversation,
   return run.record;
 }
 
+export async function proposeWorkflow(tx: Tx, parent: ConversationId, id: string, args: WorkflowProposalTool): Promise<WorkflowProposal> {
+  const doc = await tx.doc(Proposals, parent);
+  // A retried Durable tool task must not replace its own card or append another entry.
+  const existing = doc.records[id];
+  if (existing !== undefined) return publicProposal(existing);
+  if (!Check(WorkflowProposalToolSchema, args) || args.summary.trim() === "") throw new WorkflowError(400, "Invalid workflow proposal");
+  const runs = await tx.doc(Runs, parent);
+  if (runs.active !== null) throw new WorkflowError(409, "Finish the active workflow before proposing another in this session");
+  let resolved: ProseWorkflow;
+  try { resolved = parseWorkflow(args.name, `proposal:${id}`, args.text); }
+  catch (error) { throw error instanceof WorkflowError ? error : new WorkflowError(400, error instanceof Error ? error.message : String(error)); }
+  assertProseOnly(resolved);
+  const inputs = workflowInputs(resolved.definition, args.inputs ?? {});
+  const createdAt = Date.now();
+  const proposal: WorkflowProposal = { id, name: args.name, summary: args.summary.trim(), text: resolved.text, sha256: resolved.sha256,
+    createdAt, definition: resolved.definition, inputs, state: { kind: "open" } };
+  for (const earlier of Object.values(doc.records)) if (earlier.state.kind === "open") earlier.state = { kind: "replaced", by: id, decidedAt: createdAt };
+  doc.records[id] = proposal;
+  await tx.appendEntry(parent, { kind: WORKFLOW_PROPOSAL_KIND, data: { proposalId: id, name: proposal.name, summary: proposal.summary, stages: proposal.definition.stages ?? [] } });
+  return proposal;
+}
+
+export async function workflowProposals(harness: Harness, parent: ConversationId, context: Context): Promise<WorkflowProposal[]> {
+  const doc = await harness.snapshot(Proposals, parent, context);
+  return Object.values(doc?.records ?? {}).map(publicProposal).sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+}
+export async function openWorkflowProposals(harness: Harness, parent: ConversationId, context: Context): Promise<number> {
+  const doc = await harness.snapshot(Proposals, parent, context);
+  return Object.values(doc?.records ?? {}).filter((proposal) => proposal.state.kind === "open").length;
+}
+
+export async function decideWorkflowProposal(harness: Harness, parent: Conversation, id: string, decision: "changes" | "dismissed",
+  note: string | undefined, context: Context): Promise<WorkflowProposal> {
+  const trimmed = note?.trim() ?? "";
+  if (decision === "changes" && trimmed === "") throw new WorkflowError(400, "Say what to change");
+  const proposal = await parent.commit(async (tx) => {
+    const doc = await tx.doc(Proposals, parent.id);
+    const record = requireOpenProposal(doc.records[id]);
+    const decidedAt = Date.now();
+    record.state = decision === "changes" ? { kind: "changes", note: trimmed, decidedAt } : { kind: "dismissed", decidedAt };
+    if (decision === "changes") {
+      const prompt = `[workflow ${record.name}] The user asked for changes to the proposal: ${trimmed}\nRevise it, then call propose_workflow again.`;
+      await tx.createTask(Launch, { runId: id, prompt, requestId: `workflow-proposal:${id}:changes` }, { ownership: { kind: "conversation" }, background: true });
+    }
+    return publicProposal(record);
+  }, context);
+  if (decision === "changes") harness.resume();
+  return proposal;
+}
+
+export async function startWorkflowProposal(harness: Harness, parent: Conversation, cwd: string, sessionId: string, id: string,
+  supplied: WorkflowInputs, requestId: string, context: Context): Promise<WorkflowRun> {
+  const proposal = (await harness.snapshot(Proposals, parent.id, context))?.records[id];
+  if (proposal === undefined) throw new WorkflowError(404, "Workflow proposal not found in this session");
+  // This is a storage read, never a library or filesystem read. The original bytes are the run's source.
+  const definition = parseWorkflow(proposal.name, `proposal:${id}`, proposal.text);
+  return launchResolvedWorkflow(harness, parent, definition, cwd, sessionId, supplied, requestId, context, id);
+}
+
+function requireOpenProposal(proposal: WorkflowProposal | undefined): WorkflowProposal {
+  if (proposal === undefined) throw new WorkflowError(404, "Workflow proposal not found in this session");
+  if (proposal.state.kind !== "open") throw new WorkflowError(409, "This workflow proposal is not open");
+  return proposal;
+}
+function publicProposal(proposal: WorkflowProposal): WorkflowProposal {
+  const plain: unknown = JSON.parse(JSON.stringify(proposal));
+  if (!Check(WorkflowProposalSchema, plain)) throw new Error("Invalid workflow proposal record");
+  return plain;
+}
+function launchId(sessionId: string, parent: ConversationId, requestId: string): string {
+  return createHash("sha256").update(`${sessionId}/${String(parent)}/${requestId}`).digest("hex");
+}
+function sameLaunch(run: WorkflowRun & { requestedInputs: WorkflowInputs }, name: string, supplied: WorkflowInputs, path?: string): WorkflowRun {
+  if (run.definition.name !== name || (path !== undefined && run.definition.path !== path) || !sameInputs(run.requestedInputs, supplied)) {
+    throw new WorkflowError(409, "This workflow request ID already names another launch");
+  }
+  return publicRun(run);
+}
+
 export async function launchWorkflow(harness: Harness, parent: Conversation, library: WorkflowLibrary, cwd: string, sessionId: string,
   name: string, supplied: WorkflowInputs, requestId: string, context: Context): Promise<WorkflowRun> {
-  const id = createHash("sha256").update(`${sessionId}/${String(parent.id)}/${requestId}`).digest("hex");
+  const id = launchId(sessionId, parent.id, requestId);
   const stored = await harness.snapshot(Runs, parent.id, context);
   const existing = stored?.records[id];
-  const sameRequest = (run: WorkflowRun & { requestedInputs: WorkflowInputs }) => {
-    if (run.definition.name !== name || !sameInputs(run.requestedInputs, supplied)) throw new WorkflowError(409, "This workflow request ID already names another launch");
-    return publicRun(run);
-  };
   // A retry uses the accepted bytes and defaults, even if the file changed or was removed afterward.
-  if (existing !== undefined) return sameRequest(existing);
+  if (existing !== undefined) {
+    if (existing.definition.path.startsWith("proposal:")) throw new WorkflowError(409, "This workflow request ID already names another launch");
+    return sameLaunch(existing, name, supplied);
+  }
   if (stored?.receipts?.[id] === true) throw new WorkflowError(409, "This workflow receipt expired; launch with a new requestId");
-  const definition = await library.read(cwd, name);
-  assertProseOnly(definition);
-  const inputs = workflowInputs(definition.definition, supplied);
+  return launchResolvedWorkflow(harness, parent, await library.read(cwd, name), cwd, sessionId, supplied, requestId, context);
+}
+
+async function launchResolvedWorkflow(harness: Harness, parent: Conversation, definition: ProseWorkflow, cwd: string, sessionId: string,
+  supplied: WorkflowInputs, requestId: string, context: Context, proposalId?: string): Promise<WorkflowRun> {
+  const id = launchId(sessionId, parent.id, requestId);
   const run = await parent.commit(async (tx) => {
     const doc = await tx.doc(Runs, parent.id);
     const found = doc.records[id];
-    if (found !== undefined) return sameRequest(found);
+    if (found !== undefined) return sameLaunch(found, definition.name, supplied, definition.path);
     if (doc.receipts?.[id] === true) throw new WorkflowError(409, "This workflow receipt expired; launch with a new requestId");
+    const proposal = proposalId === undefined ? undefined : requireOpenProposal((await tx.doc(Proposals, parent.id)).records[proposalId]);
+    assertProseOnly(definition);
+    const inputs = workflowInputs(definition.definition, supplied);
     if (doc.active !== null) throw new WorkflowError(409, "Finish the active workflow before launching another in this session");
     await assertChildWorkSettled(tx, parent.id);
     const live = await tx.doc(LiveDoc, parent.id);
     const inbox = await tx.doc(InboxDoc, parent.id);
     if (live.run !== undefined || inbox.items.length > 0) throw new WorkflowError(409, "Wait for the parent to become idle before launching a workflow");
     const stages = definition.definition.stages;
-    const run: WorkflowRun = { id, requestId, session: { id: sessionId, cwd }, startedAt: Date.now(), definition: { name, path: definition.path, text: definition.text, sha256: definition.sha256 }, inputs, state: { kind: "running" }, children: [],
+    const run: WorkflowRun = { id, requestId, session: { id: sessionId, cwd }, startedAt: Date.now(),
+      definition: { name: definition.name, path: definition.path, text: definition.text, sha256: definition.sha256 }, inputs, state: { kind: "running" }, children: [],
       ...(stages === undefined ? {} : { stages, stops: Object.fromEntries(stages.flatMap((stage) => stage.stop === undefined ? [] : [[stage.id, { state: "open" as const, round: 0 }]])) }) };
     doc.records[id] = { ...run, requestedInputs: supplied };
     doc.receipts = { ...doc.receipts, [id]: true };
     doc.active = id;
+    if (proposal !== undefined) proposal.state = { kind: "started", runId: id, decidedAt: run.startedAt };
     await tx.createTask(Launch, { runId: id, prompt: workflowPrompt(id, definition, inputs) }, { ownership: { kind: "conversation" }, background: true });
     return run;
   }, context);
