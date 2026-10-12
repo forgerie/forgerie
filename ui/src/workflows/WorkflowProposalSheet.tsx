@@ -8,7 +8,7 @@ import { ReplyBox } from "../ui/ReplyBox";
 import { RouteMap } from "../ui/RouteMap";
 import { SheetDialog } from "../ui/SheetDialog";
 import { WorkflowInputFields } from "./WorkflowInputFields";
-import { launchInputs, proposalInputs, proposalOutcome, proseOf, routeSteps, type ProposalAction, type ProposalEntry, type WorkflowInputs, type WorkflowProposal } from "./workflowsModel";
+import { proposalInputs, proposalLaunchInputs, proposalOutcome, proseOf, routeSteps, type ProposalAction, type ProposalEntry, type WorkflowInputs, type WorkflowProposal } from "./workflowsModel";
 
 const PENDING: Record<ProposalAction, string> = { start: "Starting…", changes: "Sending…", dismiss: "Dismissing…" };
 
@@ -42,15 +42,17 @@ export function WorkflowProposalSheet({ entry, proposal, readError, blocked, pen
   // The agent's values arrive with the record; the reader's edits win from then on.
   const [typed, setTyped] = useState<Record<string, string>>();
   const values = typed ?? fields?.values ?? {};
+  /** Inputs the reader edited. With the agent's, they are the given values, sent even when empty. */
+  const [edited, setEdited] = useState<ReadonlySet<string>>(new Set());
   const [problem, setProblem] = useState<string>();
   const [changing, setChanging] = useState(false);
   const stages = proposal?.definition.stages ?? entry.stages;
   const closed = proposal !== undefined && proposal.state.kind !== "open" ? proposalOutcome(proposal) : undefined;
   const busy = pending !== undefined;
-  const set = (name: string, value: string) => { setTyped({ ...values, [name]: value }); setProblem(undefined); };
+  const set = (name: string, value: string) => { setTyped({ ...values, [name]: value }); setEdited(new Set([...edited, name])); setProblem(undefined); };
   const start = () => {
-    if (fields === undefined) return;
-    const result = launchInputs({ definition: { inputs: Object.fromEntries(fields.inputs) } }, values);
+    if (proposal === undefined || fields === undefined) return;
+    const result = proposalLaunchInputs(fields.inputs, values, new Set([...Object.keys(proposal.inputs), ...edited]));
     if ("problem" in result) setProblem(result.problem);
     else onStart(result.inputs);
   };

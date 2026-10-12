@@ -59,13 +59,37 @@ describe("a proposed workflow's sheet", () => {
     expect(handlers.onStart).toHaveBeenCalledWith({ task: "Port only the API.", base: "next", rounds: 3 });
   });
 
-  it("refuses to start without a task, and says so", async () => {
-    const { element, handlers } = sheet();
+  it("asks for an input with no value and no default before it starts", async () => {
+    const { element, handlers } = sheet({ proposal: { ...PROPOSAL, inputs: {} } });
     await act(async () => root.render(element));
-    await type(fieldLabelled("Task"), "  ");
     await press("Start workflow");
     expect(handlers.onStart).not.toHaveBeenCalled();
     expect(note()).toBe("Fill in task.");
+  });
+
+  it("sends an empty string the agent filled, though the input has no default", async () => {
+    const { element, handlers } = sheet({ proposal: { ...PROPOSAL, definition: { version: 1, inputs: { suffix: { type: "string" } } }, inputs: { suffix: "" } } });
+    await act(async () => root.render(element));
+    await press("Start workflow");
+    expect(handlers.onStart).toHaveBeenCalledWith({ suffix: "" });
+  });
+
+  it("sends an input the reader cleared as empty, not as its default", async () => {
+    const proposal = { ...PROPOSAL, definition: { version: 1 as const, inputs: { task: { type: "string" as const }, suffix: { type: "string" as const, default: ".ts" } } },
+      inputs: { task: "Rename the files." } };
+    const { element, handlers } = sheet({ proposal });
+    await act(async () => root.render(element));
+    // Untouched, the default is left to the server.
+    await press("Start workflow");
+    expect(handlers.onStart).toHaveBeenLastCalledWith({ task: "Rename the files." });
+    expect(fieldLabelled("suffix")?.value).toBe(".ts");
+    await type(fieldLabelled("suffix"), "");
+    await press("Start workflow");
+    expect(handlers.onStart).toHaveBeenLastCalledWith({ task: "Rename the files.", suffix: "" });
+    // A task the reader cleared is sent as it stands too.
+    await type(fieldLabelled("Task"), "");
+    await press("Start workflow");
+    expect(handlers.onStart).toHaveBeenLastCalledWith({ task: "", suffix: "" });
   });
 
   it("asks for changes only with a note", async () => {

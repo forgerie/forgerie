@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { launchInputs, proposalGlance, proposalInputs, proposalIsOpen, proposalOutcome, proseOf, workflowEntryOf, workflowProposalsSchema } from "./workflowsModel";
+import { proposalGlance, proposalLaunchInputs, proposalInputs, proposalIsOpen, proposalOutcome, proseOf, workflowEntryOf, workflowProposalsSchema } from "./workflowsModel";
 import { CHANGES_PROPOSAL, DISMISSED_PROPOSAL, PROPOSAL, PROPOSAL_STAGES, PROSE_PROPOSAL, REPLACED_PROPOSAL, STARTED_PROPOSAL } from "./fixtures/proposals";
 import { STAGES } from "./fixtures/runs";
 
@@ -66,7 +66,24 @@ describe("a proposal's inputs", () => {
     const { inputs, values } = proposalInputs({ definition: { version: 1 }, inputs: { careful: true, task: "Find the flake." } });
     expect(inputs).toEqual([["task", { type: "string" }], ["careful", { type: "boolean" }]]);
     expect(values).toEqual({ task: "Find the flake.", careful: "true" });
-    expect(launchInputs({ definition: { inputs: Object.fromEntries(inputs) } }, { ...values, careful: "false" })).toEqual({ inputs: { task: "Find the flake.", careful: false } });
+    expect(proposalLaunchInputs(inputs, { ...values, careful: "false" }, new Set(["task", "careful"]))).toEqual({ inputs: { task: "Find the flake.", careful: false } });
+  });
+});
+
+describe("the inputs a proposal starts with", () => {
+  const SUFFIX = ["suffix", { type: "string" }] as const;
+  const WITH_DEFAULT = ["suffix", { type: "string", default: ".ts" }] as const;
+  it("sends an empty string the agent filled, though the input has no default", () => {
+    expect(proposalLaunchInputs([SUFFIX], { suffix: "" }, new Set(["suffix"]))).toEqual({ inputs: { suffix: "" } });
+  });
+  it("sends an empty string the reader left in place of a default, and leaves an untouched input to its default", () => {
+    expect(proposalLaunchInputs([WITH_DEFAULT], { suffix: "" }, new Set(["suffix"]))).toEqual({ inputs: { suffix: "" } });
+    expect(proposalLaunchInputs([WITH_DEFAULT], { suffix: ".ts" }, new Set())).toEqual({ inputs: {} });
+  });
+  it("asks for an input with no value and no default, and refuses a number that is not one", () => {
+    expect(proposalLaunchInputs([SUFFIX], { suffix: "" }, new Set())).toEqual({ problem: "Fill in suffix." });
+    expect(proposalLaunchInputs([["rounds", { type: "number", default: 2 }]], { rounds: "" }, new Set(["rounds"]))).toEqual({ problem: "rounds must be a number." });
+    expect(proposalLaunchInputs([["rounds", { type: "number" }]], { rounds: "3" }, new Set(["rounds"]))).toEqual({ inputs: { rounds: 3 } });
   });
 });
 

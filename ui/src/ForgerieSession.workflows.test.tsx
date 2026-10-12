@@ -79,7 +79,7 @@ describe("a workflow the agent proposes", () => {
     await until(() => document.querySelector("dialog[open]")?.textContent?.includes("Full instructions") === true);
     await act(async () => { button("Start workflow")?.click(); });
     expect(api.posts).toEqual([{ path: `/api/sessions/test/workflow-proposals/${PROPOSAL.id}/start`,
-      body: { cwd: "/work", inputs: { task: PROPOSAL.inputs["task"], base: "main", rounds: 2 }, requestId: expect.any(String) } }]);
+      body: { cwd: "/work", inputs: { task: PROPOSAL.inputs["task"], rounds: 2 }, requestId: expect.any(String) } }]);
     await until(() => document.querySelector("dialog[open]") === null);
     await until(() => document.querySelector(".stage-strip")?.getAttribute("aria-label")?.startsWith(`Open the ${PROPOSAL.name} run`) === true);
     expect(document.querySelector(".pinned-dock")).toBeNull();

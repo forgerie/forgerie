@@ -162,8 +162,7 @@ export function runStatus(run: WorkflowRun): string {
 }
 
 /** Inputs a launch needs, from the workflow's declared defaults and what the reader typed. */
-export function launchInputs(workflow: { definition: { inputs?: Record<string, WorkflowInput> | undefined } },
-  typed: Readonly<Record<string, string>>): { inputs: WorkflowInputs } | { problem: string } {
+export function launchInputs(workflow: SavedWorkflow, typed: Readonly<Record<string, string>>): { inputs: WorkflowInputs } | { problem: string } {
   const inputs: WorkflowInputs = {};
   for (const [name, input] of Object.entries(workflow.definition.inputs ?? {})) {
     const raw = typed[name];
@@ -269,6 +268,29 @@ export function proposalInputs(proposal: Pick<WorkflowProposal, "definition" | "
     return [name, value === undefined ? "" : String(value)];
   }));
   return { inputs, values };
+}
+
+/**
+ * The inputs a proposal starts with. A value counts as given when the agent filled it or the reader edited it, and a
+ * given value is sent as it stands, an empty string too. An input with no given value is left out, so the server
+ * applies its default; one with no default must be filled in. The saved-workflow plan uses `launchInputs` instead.
+ */
+export function proposalLaunchInputs(inputs: readonly (readonly [string, WorkflowInput])[], values: Readonly<Record<string, string>>,
+  given: ReadonlySet<string>): { inputs: WorkflowInputs } | { problem: string } {
+  const result: WorkflowInputs = {};
+  for (const [name, input] of inputs) {
+    if (!given.has(name)) {
+      if (input.default === undefined) return { problem: `Fill in ${name}.` };
+      continue;
+    }
+    const raw = values[name] ?? "";
+    if (input.type === "number") {
+      const value = Number(raw);
+      if (raw.trim() === "" || !Number.isFinite(value)) return { problem: `${name} must be a number.` };
+      result[name] = value;
+    } else result[name] = input.type === "boolean" ? raw === "true" : raw;
+  }
+  return { inputs: result };
 }
 
 /** A workflow file's prose: its text without the frontmatter, which the route already shows. */
