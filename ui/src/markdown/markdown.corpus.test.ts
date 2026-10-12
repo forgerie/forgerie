@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Editor } from "@tiptap/core";
 import { diffLines } from "diff";
 import { afterAll, expect, test } from "vitest";
-import { isMarkdownPath, joinFrontMatter, markdownExtensions, richEditability, splitFrontMatter } from "./markdown";
+import { frameMarkdownBody, isMarkdownPath, joinFrontMatter, markdownExtensions, richEditability, splitFrontMatter } from "./markdown";
 
 const repo = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 const paths = execFileSync("git", ["ls-files", "-z"], { cwd: repo, encoding: "utf8" }).split("\0").filter(isMarkdownPath);
@@ -25,7 +25,7 @@ test.each(paths)("%s never throws, and round-trips byte for byte if editable", (
   const parts = splitFrontMatter(text);
   const editor = new Editor({ element: null, extensions: markdownExtensions(), content: parts.body, contentType: "markdown" });
   try {
-    const markdown = editor.getMarkdown();
+    const markdown = frameMarkdownBody(parts.body, editor.getMarkdown());
     if (result.kind === "editable") {
       expect(joinFrontMatter({ ...parts, body: markdown })).toBe(text);
       return;
@@ -36,7 +36,6 @@ test.each(paths)("%s never throws, and round-trips byte for byte if editable", (
     // Diagnostic categories can overlap. Counts are files affected, not changed lines.
     const changedLines = diff.filter((part) => part.added || part.removed).flatMap((part) => part.value.split("\n"));
     const found = new Set<string>();
-    if (parts.body.endsWith("\n") && !markdown.endsWith("\n")) found.add("final newline removed");
     if (changedLines.some((line) => /^\s*([-+*] |\d+[.)] )/.test(line))) found.add("list formatting or list content");
     if (changedLines.some((line) => /^\s*\|/.test(line))) found.add("table formatting or table content");
     if (changedLines.some((line) => /^\s*$/.test(line)) && diff.some((part) => (part.added || part.removed) && /\n\n/.test(part.value))) found.add("blank-line normalization");

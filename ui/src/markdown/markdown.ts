@@ -45,7 +45,19 @@ export function joinFrontMatter(parts: { frontMatter: string | null; body: strin
 }
 
 /**
- * File fidelity is stricter than framePromptBody: even one final newline matters.
+ * Like framePromptBody, restore the body's frame after serialization, but keep
+ * its exact ending instead of imposing one newline. Internal whitespace stays
+ * untouched. For whitespace-only bodies, the leading and trailing runs must
+ * not overlap, or framing would duplicate bytes.
+ */
+export function frameMarkdownBody(original: string, markdown: string): string {
+  const leading = /^(?:\r\n|\n|\r)*/.exec(original)?.[0] ?? "";
+  const trailing = /\s*$/.exec(original.slice(leading.length))?.[0] ?? "";
+  return leading + markdown.replace(/^(?:\r\n|\n|\r)+/, "").replace(/\s+$/, "") + trailing;
+}
+
+/**
+ * Compare the serialized body with its original byte-exact frame restored.
  * Added and removed lines both count; replacing one line counts as two changes.
  * The caller owns the text buffer. This check never writes or normalizes it.
  */
@@ -54,7 +66,7 @@ export function richEditability(text: string): { kind: "editable" } | { kind: "l
   const { body } = splitFrontMatter(text);
   const editor = new Editor({ element: null, extensions: markdownExtensions(), content: body, contentType: "markdown" });
   try {
-    const markdown = editor.getMarkdown();
+    const markdown = frameMarkdownBody(body, editor.getMarkdown());
     if (body === markdown) return { kind: "editable" };
     const changes = diffLines(body, markdown).reduce((total, part) => total + (part.added || part.removed ? part.count : 0), 0);
     return { kind: "lossy", changes };

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { Editor } from "@tiptap/core";
 import { describe, expect, test } from "vitest";
-import { isMarkdownPath, joinFrontMatter, markdownExtensions, richEditability, splitFrontMatter } from "./markdown";
+import { frameMarkdownBody, isMarkdownPath, joinFrontMatter, markdownExtensions, richEditability, splitFrontMatter } from "./markdown";
 
 describe("Markdown paths", () => {
   test.each(["README.md", "docs/Guide.MARKDOWN", "note.Md"])("recognizes %s", (path) => {
@@ -33,12 +33,39 @@ describe("front matter", () => {
   });
 });
 
+describe("Markdown body framing", () => {
+  test.each([
+    ["final newline", "Old text\n", "New text", "New text\n"],
+    ["no final newline", "Old text", "New text\n", "New text"],
+    ["CRLF ending", "Old text\r\n", "New text\n", "New text\r\n"],
+    ["several trailing blank lines", "Old text\n\n\n", "New text\n", "New text\n\n\n"],
+    ["trailing spaces and tabs", "Old text \t\r\n\r\n", "New text \n\n", "New text \t\r\n\r\n"],
+    ["leading newlines", "\n\nOld text\n", "\nNew text\n\n", "\n\nNew text\n"],
+    ["leading CRLF newlines", "\r\n\r\nOld text\r\n", "\nNew text\n", "\r\n\r\nNew text\r\n"],
+    ["internal blank lines", "Old text\n", "first\n\n\nsecond", "first\n\n\nsecond\n"],
+    ["empty file", "", "\n", ""],
+    ["only newlines", "\n\n\n", "", "\n\n\n"],
+    ["only whitespace", "\r\n \t\r\n", "", "\r\n \t\r\n"],
+  ])("preserves the original %s", (_name, original, markdown, expected) => {
+    expect(frameMarkdownBody(original!, markdown!)).toBe(expected);
+  });
+});
+
 describe("rich editability", () => {
   test.each(["", "Plain text", "# Title", "**bold** and *italic*", "> Quote", "se_atomic_commit && other_value", "---\nname: demo\n---\nPlain text"])("allows exact Markdown: %j", (text) => {
     expect(richEditability(text)).toEqual({ kind: "editable" });
   });
-  test("treats even a final newline difference as lossy", () => {
-    expect(richEditability("Plain text\n")).toEqual({ kind: "lossy", changes: 2 });
+  test.each(["Plain text\n", "Plain text", "Plain text\r\n", "Plain text\n\n\n", "\n\nPlain text \t\r\n", "\n\n\n", "\r\n \t\r\n"])("allows framing-only differences without changing bytes: %j", (body) => {
+    expect(richEditability(body)).toEqual({ kind: "editable" });
+    const editor = new Editor({ element: null, extensions: markdownExtensions(), contentType: "markdown", content: body });
+    try {
+      expect(frameMarkdownBody(body, editor.getMarkdown())).toBe(body);
+    } finally {
+      editor.destroy();
+    }
+  });
+  test.each(["first\n\n\nsecond\n", "| A | B |\n| --- | --- |\n| c | d |\n"])("keeps internal blank-line and table rewrites lossy: %j", (body) => {
+    expect(richEditability(body)).toMatchObject({ kind: "lossy" });
   });
   test("counts added and removed lines, including syntax normalization", () => {
     expect(richEditability("Title\n=====\n\nbody")).toEqual({ kind: "lossy", changes: 3 });
