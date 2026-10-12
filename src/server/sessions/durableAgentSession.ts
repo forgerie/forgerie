@@ -22,7 +22,7 @@ import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { answerChildQuestion, CHILD_QUESTIONS_DOC_KIND, openChildQuestions, childMessages, reviewChildWorktree, continueChild, childWorkIsLive, childWorktreeAction, workingChildCount, listChildren, messageChild, stopChild, type DurableChildExtensions } from "./durableChildAgents.js";
+import { routeDurableChildExtensions, type DurableChildExtensions, answerChildQuestion, CHILD_QUESTIONS_DOC_KIND, openChildQuestions, childMessages, reviewChildWorktree, continueChild, childWorkIsLive, childWorktreeAction, workingChildCount, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
 import type { DurableChildHost } from "./durableChildHost.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { DurableChildRunRecords } from "./durableChildRunRecords.js";
@@ -211,9 +211,25 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   get isBashRunning(): boolean { return this.bashController !== undefined; }
   get pendingMessageCount(): number { return this.queued.filter((item) => item.mode !== "write").length; }
 
+  private installSdkTools(): void {
+    const name = `forgerie.sdk-tools:${this.sessionId}`;
+    const extension = this.tools.extension((id) => this.dispatch(id).tools, name);
+    this.registry.install(extension);
+    if (this.journalValue === undefined) return;
+    const journal = this.journal;
+    this.mutation = this.mutation.then(async () => {
+      const agent = await journal.conversation.agent(context);
+      // A fork inherits its parent's extension names. Select only this adapter's SDK declarations;
+      // registry installation must not change a sibling's schema, descriptions, or replay policy.
+      const extensions = agent.extensions.filter((item) => item.name !== "forgerie.sdk-tools" && !item.name.startsWith("forgerie.sdk-tools:")
+        && (!item.name.startsWith("forgerie.child-agents:") || item.name === `forgerie.child-agents:${this.sessionId}`));
+      await journal.conversation.configure({ extensions: [...extensions, extension], tools: null }, context);
+    });
+  }
+
   private async initialize(): Promise<void> {
     this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
-    this.registry.install(this.tools.extension((id) => this.dispatch(id).tools));
+    this.installSdkTools();
     // Register delivery before a family can schedule a persisted accepted answer.
     this.registry.install(askDeliveryExtension());
     this.registry.install(defineExtension({ name: "forgerie.sdk-context", sections: [section("forgerie", (input) => this.dispatch(input.conversationId).systemPrompt, { tag: false })],
@@ -253,6 +269,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (sharedRegistry === undefined) DurableAgentSession.registries.set(this.journal.harness, this.registry);
     else this.registry = sharedRegistry;
     this.bindConversation();
+    this.installSdkTools();
+    await this.mutation;
     await this.journal.conversation.commit((tx) => createDurableParentInitializer(this.sessionManager)(tx, { id: this.journal.conversation.id }), context);
     await this.rebindDurableParentState();
     await this.restoreAgentSelection();
@@ -352,14 +370,32 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   stopDurableChild(conversationId: number) { return stopChild(this.journal.harness, this.journal.conversation, conversationId, context, this.childWorktrees); }
   answerDurableChildQuestion(questionId: string, answer: string) { return answerChildQuestion(this.journal.conversation, questionId, answer, context); }
 
+  private async childOwnerExtensions(id: ConversationId): Promise<DurableChildExtensions> {
+    const owner = await this.journal.harness.commit(async (tx) => {
+      const seen = new Set<ConversationId>();
+      let current = id;
+      while (!seen.has(current)) {
+        seen.add(current);
+        const record = await tx.conversation(current);
+        if (record === undefined) throw new Error("Missing child owner conversation");
+        if (record.owner === undefined) return current;
+        current = record.owner.conversationId;
+      }
+      throw new Error("Cyclic child ownership");
+    }, context);
+    const extensions = this.dispatch(owner).childExtensions;
+    if (extensions === undefined) throw new Error("Child owner has no bound host");
+    return extensions;
+  }
+
   private async startChildAgents(): Promise<void> {
     const host = this.options.childAgents;
     if (host === undefined) return;
     const ref = { id: this.sessionId, cwd: this.options.services.cwd };
     this.childWorktrees = host.worktrees === undefined ? undefined : new DurableChildWorktrees(host.worktrees, ref);
-    const extensions = await this.installChildExtensions();
+    const { extensions, workflow } = await this.installChildExtensions();
     // Children select these explicitly. The parent must not, or ask_human and the coding tools join its loadout.
-    await this.journal.conversation.configure({ extensions: { remove: [...extensions.childOnly] } }, context);
+    await this.journal.conversation.configure({ extensions: { add: [...extensions.parent, workflow], remove: [...extensions.childOnly] } }, context);
     if (host.runRecords !== undefined) {
       this.childRunRecords = await DurableChildRunRecords.open(this.journal.harness, this.journal.conversation.id, ref, host.runRecords, context,
         (error) => { if (host.runRecordError === undefined) this.report(error); else host.runRecordError(error); });
@@ -374,20 +410,33 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     // Children resolve their agent files' skills against the skills this session sees.
     const sessionSkills = this.resourceLoader.getSkills().skills.filter((skill) => !skill.disableModelInvocation)
       .map((skill) => ({ name: skill.name, description: skill.description, path: skill.filePath }));
-    const extensions = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext, sessionSkills, sessionTools: () => this.tools,
+    const source = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext, sessionSkills, sessionTools: () => this.tools,
       ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
       ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
-    this.registry.install(workflowExtension());
-    this.childExtensions = extensions;
+    const workflow = workflowExtension();
+    this.registry.install(workflow);
+    return { extensions: this.installRoutedChildExtensions(source), workflow };
+  }
+
+  /** Install child extensions whose callbacks resolve the owning parent, under names scoped to this session. */
+  private installRoutedChildExtensions(source: DurableChildExtensions): DurableChildExtensions {
+    this.childExtensions = source;
+    const routed = routeDurableChildExtensions(source, (id) => this.childOwnerExtensions(id));
+    const extensions = { ...routed, parent: routed.parent.map((extension) => {
+      const { tasks, ...owned } = extension;
+      // Task names are family-wide. Their routed callbacks must be installed once by name;
+      // tool descriptions and agent catalogs remain selected separately for each logical parent.
+      this.registry.install(defineExtension({ name: extension.name, tasks: tasks ?? [] }));
+      return { ...owned, name: `${extension.name}:${this.sessionId}` };
+    }) };
     for (const extension of [...extensions.parent, ...extensions.childOnly]) this.registry.install(extension);
     return extensions;
   }
 
   private refreshChildExtensions(): void {
-    const extensions = this.childExtensions?.refresh();
-    if (extensions === undefined) return;
-    this.childExtensions = extensions;
-    for (const extension of [...extensions.parent, ...extensions.childOnly]) this.registry.install(extension);
+    const source = this.childExtensions?.refresh();
+    if (source === undefined) return;
+    this.installRoutedChildExtensions(source);
   }
 
   private async watchChildAgents(host: DurableChildHost, ref: { id: string; cwd: string }): Promise<void> {
@@ -461,8 +510,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
         ...(tool.promptGuidelines === undefined ? {} : { promptGuidelines: tool.promptGuidelines }), ...(tool.namespace === undefined ? {} : { namespace: tool.namespace }),
         ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }) })),
       getSettings: () => this.settingsManager.getSettings(),
-      setActiveTools: (names) => { this.tools.setActive(names); this.registry.install(this.tools.extension((id) => this.dispatch(id).tools)); },
-      refreshTools: () => { this.tools.refresh(); this.registry.install(this.tools.extension((id) => this.dispatch(id).tools)); this.refreshChildExtensions(); },
+      setActiveTools: (names) => { this.tools.setActive(names); this.installSdkTools(); },
+      refreshTools: () => { this.tools.refresh(); this.installSdkTools(); this.refreshChildExtensions(); },
       getCommands: () => this.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, description: command.description ?? "", source: "extension" as const, sourceInfo: command.sourceInfo })),
       setModel: async (model) => { await this.setModel(model); return true; },
       getThinkingLevel: () => this.thinkingLevel, setThinkingLevel: (level) => { this.setThinkingLevel(level); },
@@ -528,7 +577,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.basePrompt = this.promptOptions();
     const before = await this.extensionRunner.emitBeforeAgentStart(text, images, this.basePrompt);
     this.tools.setActive(before.systemPromptOptions.selectedTools);
-    this.registry.install(this.tools.extension((id) => this.dispatch(id).tools));
+    this.installSdkTools();
+    await this.mutation;
     this.systemPrompt = await buildSdkSystemPrompt(before.systemPromptOptions);
     for (const message of before.messages) await this.sendCustomMessage(message);
     const content = images === undefined || images.length === 0 ? text : [{ type: "text" as const, text }, ...images];
@@ -731,6 +781,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     try {
       await this.journal.selectHandle(selected.handle);
       this.bindConversation();
+      this.installSdkTools();
+      await this.mutation;
       await this.rebindDurableParentState();
       await this.restoreAgentSelection();
       await this.startChildAgents();
@@ -758,12 +810,13 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.tools = new DurableSdkTools({ cwd: this.options.services.cwd, settings: this.settingsManager, runner, customTools: this.options.customTools ?? [],
       beforeCall: () => this.journal.project(), emit: (event) => { this.emit(event); } });
     this.bindCore();
-    this.registry.install(this.tools.extension((id) => this.dispatch(id).tools));
+    this.installSdkTools();
+    await this.mutation;
     this.basePrompt = this.promptOptions();
     this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
     if (this.options.childAgents !== undefined) {
-      const children = await this.installChildExtensions();
-      await this.journal.conversation.configure({ extensions: { remove: [...children.childOnly] } }, context);
+      const { extensions, workflow } = await this.installChildExtensions();
+      await this.journal.conversation.configure({ extensions: { add: [...extensions.parent, workflow], remove: [...extensions.childOnly] } }, context);
     }
     old.invalidate("Durable extensions reloaded");
     await options?.beforeSessionStart?.();

@@ -93,7 +93,7 @@ export class DurableSdkTools {
     });
   }
 
-  extension(dispatch?: (conversationId: ConversationId) => DurableSdkTools): Extension {
+  extension(dispatch?: (conversationId: ConversationId) => DurableSdkTools, extensionName = "forgerie.sdk-tools"): Extension {
     const declared = this.active.flatMap((name) => { const tool = this.callable.get(name); return tool === undefined ? [] : [tool]; });
     const hidden = new Set<string>();
     const descriptions = new Map<string, string>();
@@ -134,7 +134,7 @@ export class DurableSdkTools {
         },
       });
     });
-    return defineExtension({ name: "forgerie.sdk-tools", tools });
+    return defineExtension({ name: extensionName, tools });
   }
 
   /** Snapshot declarations, but resolve and check the live session registry again for every call (including reload). */
@@ -177,6 +177,7 @@ export class DurableSdkTools {
     const toolCall = { type: "toolCall" as const, id: callId, name, arguments: input };
     const error = (text: string): AgentToolCallOutcome => ({ toolCall, result: { content: [{ type: "text", text }], details: undefined }, isError: true });
     if (tool === undefined || definition === undefined) return error(`Unknown tool: ${name}`);
+    if (parentToolCallId === undefined && !this.active.includes(name)) return error(`Tool ${name} is not active for this conversation.`);
     if (parentToolCallId !== undefined && !this.getCallable().some((candidate) => candidate.name === name)) return error(`Tool ${name} is not callable from codemode.`);
     if (!Value.Check(tool.parameters, args)) return error(`Invalid arguments for tool ${name}`);
     await this.options.beforeCall();

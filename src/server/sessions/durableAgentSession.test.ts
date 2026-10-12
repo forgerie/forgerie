@@ -111,6 +111,35 @@ describe("SDK-compatible Durable execution", () => {
     expect(reopened.messages.some((message) => message.role === "toolResult")).toBe(true);
   });
 
+  it("keeps a parent's and fork's active tool declarations, descriptions and replay policies separate", async () => {
+    const { session: parent, provider, services, directory } = await fixture([], false, ["read"]);
+    await parent.prompt("seed the parent");
+    const tip = (await parent.getDurableTree()).activeLeafId;
+    if (tip === null) throw new Error("Missing tip");
+    const manager = SessionManager.create(directory, join(directory, "sessions"));
+    const candidate = await parent.nativeHistory.fork(tip, "at", manager.getSessionId(), context);
+    const forkServices = await createAgentSessionServices({ cwd: directory, agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime,
+      resourceLoaderOptions: { noExtensions: true, noSkills: true, noContextFiles: true, noPromptTemplates: true } });
+    forkServices.settingsManager.applyOverrides({ defaultTools: ["bash"], compaction: { enabled: false } });
+    const override = defineTool({ name: "read", label: "Fork read", description: "Fork-only read override", defaultActive: false, parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [{ type: "text" as const, text: "must remain inactive" }], details: undefined }) });
+    const fork = await DurableAgentSession.open({ handle: candidate.handle, services: forkServices, sessionManager: manager, customTools: [override] });
+    sessions.push(fork);
+    await fork.bindExtensions({});
+    const parentAgent = await parent.journal.conversation.agent(context);
+    const forkAgent = await fork.journal.conversation.agent(context);
+    expect(parentAgent.tools.map((tool) => tool.name)).toEqual(["read"]);
+    expect(forkAgent.tools.map((tool) => tool.name)).toEqual(["bash"]);
+    expect(parentAgent.tools[0]?.description).not.toBe("Fork-only read override");
+    expect(parentAgent.tools[0]?.replay).toBe("safe");
+    provider.setResponses([fauxAssistantMessage([fauxToolCall("read", {})], { stopReason: "toolUse" }), fauxAssistantMessage("inactive read rejected")]);
+    await fork.prompt("try an inactive read");
+    expect(fork.messages.find((message) => message.role === "toolResult")?.isError).toBe(true);
+    expect((await parent.journal.conversation.agent(context)).tools[0]?.replay).toBe("safe");
+    await parent.reload();
+    expect((await fork.journal.conversation.agent(context)).tools.map((tool) => tool.name)).toEqual(["bash"]);
+  });
+
   it("selects native continuations without appending their inherited prefix again", async () => {
     const { session, provider } = await fixture();
     provider.setResponses([fauxAssistantMessage("first answer"), fauxAssistantMessage("abandoned answer"), fauxAssistantMessage("new branch answer")]);

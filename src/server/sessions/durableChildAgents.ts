@@ -65,7 +65,7 @@ const Anchor = defineTask<null, { phase: "done" }, null>({
 });
 
 const REPORTER_KIND = "forgerie.child-reporter";
-function childReporter(worktrees: DurableChildWorktrees | undefined, flushRunRecords?: () => Promise<void>) {
+function childReporter(resolve: (conversationId: ConversationId, context: Context) => Promise<DurableChildExtensionOptions>) {
   return defineTask<ReporterInput, ReporterState, null>({
   name: REPORTER_KIND, version: 1, initial: () => ({ phase: "deliver" }),
   phases: {
@@ -74,12 +74,13 @@ function childReporter(worktrees: DurableChildWorktrees | undefined, flushRunRec
       const child = await runtime.conversation(conversationId, context);
       if (child === undefined) throw new Error(`Child conversation ${String(conversationId)} is missing`);
       const submission = await child.submit({ type: "input", content: message, whenBusy: followUp ? "followUp" : "steer", requestId: `child:${String(reporter.id)}` }, context);
-      await flushRunRecords?.();
+      const selected = await resolve(runtime.conversationId, context);
+      await selected.flushRunRecords?.();
       const settled = await submission.wait(context);
       // Ancillary accounting/reporting must not replace the child's durable submission outcome.
       await runtime.commit(async (tx) => { await settleWorkflowChild(tx, runtime.conversationId, reporter.id, settled); }, context);
       const worktreeReport = settled.status !== "unanswered" && reporter.input.worktreeId !== undefined
-        ? await requireWorktrees(worktrees).report(reporter.input.worktreeId) : undefined;
+        ? await requireWorktrees(selected.worktrees).report(reporter.input.worktreeId) : undefined;
       await runtime.commit(async (tx) => {
         const next = (report?: string): { status: "running"; checkpoint: ReporterState } => ({ status: "running", checkpoint: report === undefined ? { phase: "report" } : { phase: "report", report } });
         if (settled.status === "unanswered") {
@@ -181,24 +182,39 @@ export interface DurableChildExtensionOptions {
   childToolsDeny?: readonly string[];
   worktrees?: DurableChildWorktrees;
   flushRunRecords?: () => Promise<void>;
+  /** Composition resolves the owning adapter for tools, reporter tasks, and child hooks. */
+  resolveOptions?: (conversationId: ConversationId, context: Context) => Promise<DurableChildExtensionOptions>;
+}
+
+const extensionOptions = new WeakMap<DurableChildExtensions, DurableChildExtensionOptions>();
+export function routeDurableChildExtensions(source: DurableChildExtensions, resolve: (conversationId: ConversationId, context: Context) => Promise<DurableChildExtensions>): DurableChildExtensions {
+  const options = extensionOptions.get(source);
+  if (options === undefined) return source;
+  return durableChildExtensions({ ...options, resolveOptions: async (id, ctx) => {
+    const selected = extensionOptions.get(await resolve(id, ctx));
+    if (selected === undefined) throw new Error("Child owner has no extension configuration");
+    return selected;
+  } });
 }
 
 export function durableChildExtensions(options: DurableChildExtensionOptions = {}): DurableChildExtensions {
   const extraTools = options.extraTools ?? [];
+  const resolve = (id: ConversationId, context: Context) => options.resolveOptions?.(id, context) ?? Promise.resolve(options);
   const sessionTools = options.sessionTools;
   const sharedTools = sessionTools === undefined ? [] : sessionTools().childTools(sessionTools, options.childToolsDeny ?? []);
-  const availableNames = () => {
-    const current = sessionTools === undefined ? [] : sessionTools().childTools(sessionTools, options.childToolsDeny ?? []);
-    return [...extraTools.map((tool) => tool.name), ...current.filter((tool) => sharedTools.some((installed) => installed.name === tool.name)).map((tool) => tool.name)];
+  // A spawn may name only shared tools this extension declared, as the selected parent currently offers them.
+  const availableNames = (selected: DurableChildExtensionOptions) => {
+    const current = selected.sessionTools === undefined ? [] : selected.sessionTools().childTools(selected.sessionTools, selected.childToolsDeny ?? []);
+    return [...(selected.extraTools ?? []).map((tool) => tool.name), ...current.filter((tool) => sharedTools.some((installed) => installed.name === tool.name)).map((tool) => tool.name)];
   };
-  const Reporter = childReporter(options.worktrees, options.flushRunRecords);
+  const Reporter = childReporter(resolve);
   const ChildTools = defineExtension({
     name: "forgerie.child-tools",
     // Save the accounting boundary before any generation or compaction can spend money.
-    ...(options.flushRunRecords === undefined ? {} : { hooks: [
-      hook(GenerationTask, { beforeRequest: async () => { await options.flushRunRecords?.(); return undefined; } }),
-      hook(CompactionTask, { beforeCompact: async () => { await options.flushRunRecords?.(); return undefined; } }),
-    ] }),
+    hooks: [
+      hook(GenerationTask, { beforeRequest: async (_request, api, ctx) => { await (await resolve(api.conversationId, ctx)).flushRunRecords?.(); return undefined; } }),
+      hook(CompactionTask, { beforeCompact: async (_request, api, ctx) => { await (await resolve(api.conversationId, ctx)).flushRunRecords?.(); return undefined; } }),
+    ],
     tools: [askHumanTool, ...codingTools, watchdogDiffTool, ...extraTools, ...sharedTools],
     ...(readTool === undefined ? {} : { wraps: [readsImages(readTool)] }),
     sections: [section("environment", (input) => input.env === undefined ? undefined : `Working directory: ${input.env.cwd}`)],
@@ -225,84 +241,91 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
     executionMode: "sequential",
     // One task-keyed reporter receipt covers spawn/send; isolated worktrees use the same task key.
     replay: "safe",
-    execute: (args, api, context) => withChildAdmission(options.worktrees, async () => {
-      const { action, name, message } = args;
-      const before = await api.snapshot(Children, api.conversationId, context);
-      const existing = before !== undefined && Object.hasOwn(before.agents, name) ? before.agents[name] : undefined;
-      if (before?.reporters[String(api.taskId)] !== undefined) {
-        return { content: [{ type: "text" as const, text: action === "spawn" ? `Started ${name}.` : `Sent to ${name}.` }],
-          ...(existing === undefined ? {} : { details: { name, conversationId: Number(existing.conversationId) } }) };
-      }
-      if (action === "spawn" && existing !== undefined) return { content: [{ type: "text" as const, text: `${name} already exists; use send.` }] };
-      if (action === "send" && existing === undefined) return { content: [{ type: "text" as const, text: `No child named ${name}.` }] };
-      // A workflow stop holds work that belongs after it. Ask before preparing a worktree, and again in the commit.
-      const held = await api.commit((tx) => workflowChildRefusal(tx, api.conversationId, name), context);
-      if (held !== undefined) return { content: [{ type: "text" as const, text: held }], isError: true };
-      // A model the workflow declares for this worker is the user's choice: it wins over the agent's argument.
-      const declared = action === "spawn" ? await api.commit((tx) => workflowWorkerModel(tx, api.conversationId, name), context) : undefined;
-      const spec = declared ?? (action === "spawn" ? args.model : undefined);
-      const model = spec === undefined ? undefined : modelChoice(spec);
-      if (model === null) return { content: [{ type: "text" as const, text: `Write model as provider/model-id, optionally with :thinking-level. Got ${spec ?? ""}${declared === undefined ? "" : " from the workflow file"}.` }], isError: true };
-      if (existing?.worktreeId !== undefined) await requireWorktrees(options.worktrees).assertWritable(existing.worktreeId);
-      const profile = action === "spawn" && args.agent !== undefined ? await options.catalog?.find(args.agent) : undefined;
-      if (action === "spawn" && args.agent !== undefined && profile === undefined) {
-        return { content: [{ type: "text" as const, text: `No agent named ${args.agent}.${agentList === "" ? "" : ` Choose one of:\n${agentList}`}` }], isError: true };
-      }
-      // A send re-reads the child's agent file, so a child spawned under an older runtime or file gets the current one.
-      const sentProfile = action === "send" && existing?.agent != null ? await options.catalog?.find(existing.agent) : undefined;
-      const refresh = action === "send" && (existing?.agent == null || sentProfile !== undefined);
-      const runtime = action === "spawn" || refresh
-        ? planChildRuntime(action === "spawn" ? profile : sentProfile, availableNames(), options.sessionSkills ?? []) : undefined;
-      const checkout = action === "spawn" && args.isolation === "worktree"
-        ? await requireWorktrees(options.worktrees).prepare(String(api.taskId)) : undefined;
-      const result = await api.commit(async (tx) => {
-        const refusal = await workflowChildRefusal(tx, api.conversationId, name);
-        if (refusal !== undefined) return refusal;
-        const state = await tx.doc(Children, api.conversationId);
-        const background = { ownership: { kind: "conversation" }, background: true } as const;
-        if (action === "spawn") {
-          if (Object.hasOwn(state.agents, name)) return `${name} already exists; use send.`;
-          const anchor = await tx.createTask(Anchor, null, background);
-          const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
-          const chosenModel = model?.model ?? profile?.model;
-          const chosenThinking = model?.thinkingLevel ?? profile?.thinkingLevel;
-          const plan = runtime ?? planChildRuntime(profile, availableNames(), []);
-          await configure(tx, child.id, {
-            ...(checkout === undefined ? {} : { cwd: checkout.path }),
-            extensions: [ChildTools],
-            tools: childToolsFor(plan, extraTools, sharedTools),
-            ...(chosenModel === undefined ? {} : { model: chosenModel }),
-            ...(chosenThinking === undefined ? {} : { thinkingLevel: chosenThinking }),
-            instructions: childInstructions(name, profile, plan, options.projectContext),
-          });
-          state.agents[name] = { conversationId: child.id, reported: [], agent: profile?.name ?? null, createdAt: Date.now(),
-            ...(profile === undefined ? {} : { agentFile: profile.source }),
-            ...(checkout === undefined ? {} : { worktreeId: checkout.id }) };
-        } else if (!Object.hasOwn(state.agents, name)) return `No child named ${name}.`;
-        const agent = state.agents[name];
-        if (agent === undefined) return `No child named ${name}.`;
-        if (refresh && runtime !== undefined) {
-          // Tools, skills, and instructions follow the current runtime and agent file. The model stays as spawned:
-          // a workflow or the agent may have chosen it for this child.
-          await configure(tx, agent.conversationId, { extensions: [ChildTools], tools: childToolsFor(runtime, extraTools, sharedTools),
-            instructions: childInstructions(name, sentProfile, runtime, options.projectContext) });
-          if (sentProfile !== undefined) agent.agentFile = sentProfile.source;
+    execute: async (args, api, context) => {
+      const selected = await resolve(api.conversationId, context);
+      const extraTools = selected.extraTools ?? [];
+      const agentList = (selected.agents ?? []).map((agent) => `- ${agent.name}: ${agent.description}`).join("\n");
+      return withChildAdmission(selected.worktrees, async () => {
+        const { action, name, message } = args;
+        const before = await api.snapshot(Children, api.conversationId, context);
+        const existing = before !== undefined && Object.hasOwn(before.agents, name) ? before.agents[name] : undefined;
+        if (before?.reporters[String(api.taskId)] !== undefined) {
+          return { content: [{ type: "text" as const, text: action === "spawn" ? `Started ${name}.` : `Sent to ${name}.` }],
+            ...(existing === undefined ? {} : { details: { name, conversationId: Number(existing.conversationId) } }) };
         }
-        const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
-        state.reporters[String(api.taskId)] = reporter;
-        await associateWorkflowChild(tx, api.conversationId, agent.conversationId, reporter, name);
-        if (action === "send") return refresh ? `Sent to ${name}.` : `Sent to ${name}. Its agent file ${String(agent.agent)} is gone, so it keeps the tools it was started with.`;
-        return `Started ${name}${profile === undefined ? "" : ` (${profile.name})`}.${runtime === undefined ? "" : runtimeGaps(runtime)}`;
-      }, context);
-      const current = (await api.snapshot(Children, api.conversationId, context))?.agents[name];
-      return { content: [{ type: "text" as const, text: result }], ...(current === undefined ? {} : { details: { name, conversationId: Number(current.conversationId) } }) };
-    }),
+        if (action === "spawn" && existing !== undefined) return { content: [{ type: "text" as const, text: `${name} already exists; use send.` }] };
+        if (action === "send" && existing === undefined) return { content: [{ type: "text" as const, text: `No child named ${name}.` }] };
+        // A workflow stop holds work that belongs after it. Ask before preparing a worktree, and again in the commit.
+        const held = await api.commit((tx) => workflowChildRefusal(tx, api.conversationId, name), context);
+        if (held !== undefined) return { content: [{ type: "text" as const, text: held }], isError: true };
+        // A model the workflow declares for this worker is the user's choice: it wins over the agent's argument.
+        const declared = action === "spawn" ? await api.commit((tx) => workflowWorkerModel(tx, api.conversationId, name), context) : undefined;
+        const spec = declared ?? (action === "spawn" ? args.model : undefined);
+        const model = spec === undefined ? undefined : modelChoice(spec);
+        if (model === null) return { content: [{ type: "text" as const, text: `Write model as provider/model-id, optionally with :thinking-level. Got ${spec ?? ""}${declared === undefined ? "" : " from the workflow file"}.` }], isError: true };
+        if (existing?.worktreeId !== undefined) await requireWorktrees(selected.worktrees).assertWritable(existing.worktreeId);
+        const profile = action === "spawn" && args.agent !== undefined ? await selected.catalog?.find(args.agent) : undefined;
+        if (action === "spawn" && args.agent !== undefined && profile === undefined) {
+          return { content: [{ type: "text" as const, text: `No agent named ${args.agent}.${agentList === "" ? "" : ` Choose one of:\n${agentList}`}` }], isError: true };
+        }
+        // A send re-reads the child's agent file, so a child spawned under an older runtime or file gets the current one.
+        const sentProfile = action === "send" && existing?.agent != null ? await selected.catalog?.find(existing.agent) : undefined;
+        const refresh = action === "send" && (existing?.agent == null || sentProfile !== undefined);
+        const runtime = action === "spawn" || refresh
+          ? planChildRuntime(action === "spawn" ? profile : sentProfile, availableNames(selected), selected.sessionSkills ?? []) : undefined;
+        const checkout = action === "spawn" && args.isolation === "worktree"
+          ? await requireWorktrees(selected.worktrees).prepare(String(api.taskId)) : undefined;
+        const result = await api.commit(async (tx) => {
+          const refusal = await workflowChildRefusal(tx, api.conversationId, name);
+          if (refusal !== undefined) return refusal;
+          const state = await tx.doc(Children, api.conversationId);
+          const background = { ownership: { kind: "conversation" }, background: true } as const;
+          if (action === "spawn") {
+            if (Object.hasOwn(state.agents, name)) return `${name} already exists; use send.`;
+            const anchor = await tx.createTask(Anchor, null, background);
+            const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
+            const chosenModel = model?.model ?? profile?.model;
+            const chosenThinking = model?.thinkingLevel ?? profile?.thinkingLevel;
+            const plan = runtime ?? planChildRuntime(profile, availableNames(selected), []);
+            await configure(tx, child.id, {
+              ...(checkout === undefined ? {} : { cwd: checkout.path }),
+              extensions: [ChildTools],
+              tools: childToolsFor(plan, extraTools, sharedTools),
+              ...(chosenModel === undefined ? {} : { model: chosenModel }),
+              ...(chosenThinking === undefined ? {} : { thinkingLevel: chosenThinking }),
+              instructions: childInstructions(name, profile, plan, selected.projectContext),
+            });
+            state.agents[name] = { conversationId: child.id, reported: [], agent: profile?.name ?? null, createdAt: Date.now(),
+              ...(profile === undefined ? {} : { agentFile: profile.source }),
+              ...(checkout === undefined ? {} : { worktreeId: checkout.id }) };
+          } else if (!Object.hasOwn(state.agents, name)) return `No child named ${name}.`;
+          const agent = state.agents[name];
+          if (agent === undefined) return `No child named ${name}.`;
+          if (refresh && runtime !== undefined) {
+            // Tools, skills, and instructions follow the current runtime and agent file. The model stays as spawned:
+            // a workflow or the agent may have chosen it for this child.
+            await configure(tx, agent.conversationId, { extensions: [ChildTools], tools: childToolsFor(runtime, extraTools, sharedTools),
+              instructions: childInstructions(name, sentProfile, runtime, selected.projectContext) });
+            if (sentProfile !== undefined) agent.agentFile = sentProfile.source;
+          }
+          const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
+          state.reporters[String(api.taskId)] = reporter;
+          await associateWorkflowChild(tx, api.conversationId, agent.conversationId, reporter, name);
+          if (action === "send") return refresh ? `Sent to ${name}.` : `Sent to ${name}. Its agent file ${String(agent.agent)} is gone, so it keeps the tools it was started with.`;
+          return `Started ${name}${profile === undefined ? "" : ` (${profile.name})`}.${runtime === undefined ? "" : runtimeGaps(runtime)}`;
+        }, context);
+        const current = (await api.snapshot(Children, api.conversationId, context))?.agents[name];
+        return { content: [{ type: "text" as const, text: result }], ...(current === undefined ? {} : { details: { name, conversationId: Number(current.conversationId) } }) };
+      });
+    },
   });
-  return {
+  const extensions = {
     parent: [defineExtension({ name: "forgerie.child-agents", tasks: [Anchor, Reporter], tools: [childTool] })],
     childOnly: [ChildTools],
     refresh: () => durableChildExtensions(options),
   };
+  extensionOptions.set(extensions, options);
+  return extensions;
 }
 
 type Thinking = NonNullable<ChildAgentProfile["thinkingLevel"]>;
@@ -474,7 +497,7 @@ export async function continueChild(harness: Harness, parent: Conversation, conv
       const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
       Object.assign(await tx.doc(AgentDoc, child.id), structuredClone(settings ?? {}), { cwd: checkout.path });
       state.agents[name] = { ...source, conversationId: child.id, createdAt: Date.now(), reported: [], worktreeId: checkout.id };
-      const reporter = await tx.createTask(childReporter(lifecycle), { name, conversationId: child.id, message: text, followUp: false, worktreeId: checkout.id }, background);
+      const reporter = await tx.createTask(childReporter(() => Promise.resolve({ worktrees: lifecycle })), { name, conversationId: child.id, message: text, followUp: false, worktreeId: checkout.id }, background);
       state.reporters[`continue:${requestId}`] = reporter;
       await associateWorkflowChild(tx, parent.id, child.id, reporter, name);
       // Draft assignments clone their input. Replace the map rather than mutating an assigned plain object.

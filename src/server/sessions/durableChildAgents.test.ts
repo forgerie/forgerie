@@ -240,6 +240,41 @@ describe("Durable-native child agents in a Forgerie session", () => {
     expect(await runRecords.list({ session: ref.id })).toEqual(rows);
   }, 30_000);
 
+  it("keeps child worktree owners and inherited project context with both parent and fork open", async () => {
+    const workspace = await gitWorkspace();
+    await writeFile(join(directory, "AGENTS.md"), "PROFILE-PARENT-CONTEXT");
+    const parent = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(parent, "seed the family");
+    await until("parent turn complete", () => Promise.resolve(hub.sessionEvents.some(({ sessionId, event }) => sessionId === parent.id && event.type === "agent.end")));
+    const clone = await service.runCommand(parent, "/clone sibling");
+    if (clone.type !== "done" || clone.session === undefined) throw new Error(`Native clone failed: ${JSON.stringify(clone)}`);
+    const fork = { id: clone.session.id, cwd: directory };
+    await service.status(parent);
+    await writeFile(join(directory, "AGENTS.md"), "PROFILE-FORK-CONTEXT");
+    await service.stop(fork);
+    await service.status(fork); // Install the fork last while the original parent is still open.
+    await service.prompt(parent, "Start a child named original isolated: PROFILE ORIGINAL");
+    await until("parent child complete", async () => (await reports(parent, "original")).length === 1);
+    const original = await child(parent, "original");
+    await service.prompt(fork, "Start a child named sibling isolated: PROFILE SIBLING");
+    await until("fork child complete", async () => (await reports(fork, "sibling")).length === 1);
+    const sibling = await child(fork, "sibling");
+    const records = await workspace.store.list();
+    expect(records.find((record) => record.path === original.worktree?.path)?.childOwner).toEqual(parent);
+    expect(records.find((record) => record.path === sibling.worktree?.path)?.childOwner).toEqual(fork);
+    const parentRequests = systemSeen.filter((request) => request.includes('"content":"PROFILE ORIGINAL"'));
+    const forkRequests = systemSeen.filter((request) => request.includes('"content":"PROFILE SIBLING"'));
+    expect(parentRequests.some((request) => request.includes("PROFILE-PARENT-CONTEXT"))).toBe(true);
+    expect(parentRequests.every((request) => !request.includes("PROFILE-FORK-CONTEXT"))).toBe(true);
+    expect(forkRequests.some((request) => request.includes("PROFILE-FORK-CONTEXT"))).toBe(true);
+    const parentRuns = await runRecords.list({ session: parent.id });
+    const forkRuns = await runRecords.list({ session: fork.id });
+    expect(parentRuns).toHaveLength(1);
+    expect(forkRuns).toHaveLength(1);
+    expect(parentRuns[0]?.child.name).toBe("original");
+    expect(forkRuns[0]?.child.name).toBe("sibling");
+  }, 30_000);
+
   it("records a model failure without claiming an answer", async () => {
     const ref = { id: (await service.start(directory)).id, cwd: directory };
     await service.prompt(ref, "Start a child named failure: FAIL");
