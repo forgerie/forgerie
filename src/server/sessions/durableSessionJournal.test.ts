@@ -201,6 +201,32 @@ describe("Durable session journal", () => {
     journals.push(reopened);
     expect(reopenedManager.buildSessionContext().messages.filter((message) => message.role === "assistant")).toHaveLength(2);
   });
+  it("repairs an interrupted multi-message export by full family identity and message index", async () => {
+    const options = await fixture();
+    const journal = await DurableSessionJournal.open(options);
+    journals.push(journal);
+    const native = await journal.conversation.commit((tx) => tx.appendEntry(journal.conversation.id, {
+      kind: "pi.user", model: [{ role: "user", content: "first contribution", timestamp: 2 }, { role: "user", content: "second contribution", timestamp: 3 }],
+    }), context);
+    await journal.project();
+    const exported = options.manager.getEntries().filter((entry) => entry.type === "message" && "forgerieDurableEntryId" in entry.message && entry.message.forgerieDurableEntryId === native.id);
+    expect(exported).toHaveLength(2);
+    const first = exported[0];
+    const second = exported[1];
+    if (first === undefined || second === undefined) throw new Error("Missing exported contributions");
+    await journal.close();
+    const file = options.manager.getSessionFile();
+    if (file === undefined) throw new Error("Fixture must persist");
+    await writeFile(file, [options.manager.getHeader(), ...options.manager.getEntries().filter((entry) => entry.id !== second.id)].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+    const manager = SessionManager.open(file);
+    const reopened = await DurableSessionJournal.open({ ...options, manager });
+    journals.push(reopened);
+    expect(manager.getEntries().some((entry) => entry.id === first.id)).toBe(true);
+    expect(manager.getEntries().filter((entry) => entry.type === "message" && "forgerieDurableEntryId" in entry.message && entry.message.forgerieDurableEntryId === native.id)).toHaveLength(2);
+    expect(await reopened.nativeHistory.resolve(first.id, context)).toMatchObject({ entryId: native.id, messageIndex: 0 });
+    expect(await reopened.nativeHistory.resolve(second.id, context)).toMatchObject({ entryId: native.id, messageIndex: 1 });
+    expect(options.provider.state.callCount).toBe(0);
+  });
   it("selects another legacy tree branch without replaying its tools", async () => {
     const options = await fixture();
     const journal = await DurableSessionJournal.open(options);
