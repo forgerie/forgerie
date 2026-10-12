@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { CodeEditor } from "./CodeEditor";
 import { MarkdownEditor } from "./MarkdownEditor";
-import { richEditability } from "./markdownFile";
+import { richEditability } from "./markdownDocument";
 import { loadMarkdownKit } from "./markdownKit";
 import { MARKDOWN_WORDS } from "./useMarkdownView";
 

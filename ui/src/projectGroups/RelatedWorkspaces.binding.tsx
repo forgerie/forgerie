@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ChangesReview } from "../ui/ChangesReview";
-import { markdownView } from "../markdown/markdownView";
+import { markdownView } from "../ui/markdownView";
 import type { MarkdownView } from "../ui/useMarkdownView";
 import { SessionMenu, WorktreeDialog, type SessionMenuSection, type WorktreeCommand } from "../ui/WorktreeActions";
 import { createWorktreeApi, type WorktreeInfo } from "../worktrees/worktreeApi";

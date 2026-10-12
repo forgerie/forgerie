@@ -7,7 +7,7 @@ import { ResourceLens, ResourceSettings } from "./ResourceLibrary.binding";
 import { ResourceRequestError, type ResourceApi, type ResourceFile, type ResourceTarget } from "./resourceApi";
 import type { Editor } from "@tiptap/core";
 import { largeContextFile, mobbinFile, decompositionFile, sessionInventory, settingsInventory, testingGuideFile } from "./fixtures/resources";
-import { markdownView } from "../markdown/markdownView";
+import { markdownView } from "../ui/markdownView";
 import { loadMarkdownKit } from "../ui/markdownKit";
 
 // The rich view loads Tiptap on first use; here it is ready before any file opens.

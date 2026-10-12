@@ -465,7 +465,6 @@
   "ui/backlog/BacklogView.tsx -> ../../backlog/backlogModel",
   "ui/backlog/BacklogView.tsx -> ../../backlog/useGitHubApp",
   "ui/backlog/BacklogView.tsx -> ../../clipboard",
-  "ui/markdownFile.ts -> ../markdown/markdown",
   "ui/settings/AgentEditor.tsx -> ../../agents/agentDrafts",
   "ui/settings/AgentEditor.tsx -> ../../agents/agentFile",
   "ui/settings/AgentEditor.tsx -> ../../agents/agentPlace",

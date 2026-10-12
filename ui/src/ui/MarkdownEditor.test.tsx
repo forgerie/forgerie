@@ -5,8 +5,6 @@ import type { Editor } from "@tiptap/core";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { loadMarkdownKit } from "./markdownKit";
-import { isMarkdownPath } from "../markdown/markdown";
-import { isMarkdownPath as quickMarkdownPath } from "./markdownKit";
 
 let root: Root;
 beforeAll(async () => { await loadMarkdownKit(); });
@@ -81,10 +79,4 @@ it("never follows a link", async () => {
 it("invites writing in an empty file", async () => {
   await render({ text: "" });
   expect(textbox().querySelector("[data-placeholder]")?.getAttribute("data-placeholder")).toBe("Empty file. Start writing.");
-});
-
-it("decides Markdown paths without Tiptap exactly as the Markdown module does", () => {
-  for (const path of ["README.md", "docs/Guide.MARKDOWN", "note.Md", "README.mdx", "md", "note.md.ts", "directory.md/file", "a.markdown.bak"]) {
-    expect(quickMarkdownPath(path)).toBe(isMarkdownPath(path));
-  }
 });

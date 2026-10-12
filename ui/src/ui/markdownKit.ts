@@ -1,14 +1,25 @@
 import { useEffect, useState } from "react";
 
-/** The rich view's Tiptap half, loaded on first use. */
-export type MarkdownKit = typeof import("./markdownFile");
+/**
+ * The rich view's Tiptap half: the Markdown extensions, the fidelity check,
+ * and the editor itself. It loads on its own the first time a file is shown
+ * formatted, so the app's first load does not carry an editor most visits
+ * never show.
+ */
+const importKit = async () => {
+  const [document, core, placeholder] = await Promise.all([
+    import("./markdownDocument"), import("@tiptap/core"), import("@tiptap/extension-placeholder"),
+  ]);
+  return { ...document, Editor: core.Editor, Extension: core.Extension, Placeholder: placeholder.default };
+};
+export type MarkdownKit = Awaited<ReturnType<typeof importKit>>;
 
 let kit: MarkdownKit | undefined;
 let loading: Promise<MarkdownKit> | undefined;
 
-/** Load the rich view's Tiptap half once; every later call gets the same module. */
+/** Load the rich view's Tiptap half once; every later call gets the same kit. */
 export function loadMarkdownKit(): Promise<MarkdownKit> {
-  loading ??= import("./markdownFile").then((module) => (kit = module));
+  loading ??= importKit().then((loaded) => (kit = loaded));
   return loading;
 }
 
@@ -18,15 +29,8 @@ export function useMarkdownKit(load = true): MarkdownKit | undefined {
   useEffect(() => {
     if (value || !load) return;
     let alive = true;
-    void loadMarkdownKit().then((module) => { if (alive) setValue(module); });
+    void loadMarkdownKit().then((loaded) => { if (alive) setValue(loaded); });
     return () => { alive = false; };
   }, [value, load]);
   return value ?? kit;
 }
-
-/**
- * Whether a path is Markdown. The same test as `isMarkdownPath` in the
- * Markdown module (markdownKit.test.ts holds them together), here so that
- * deciding whether a file has two views never loads Tiptap.
- */
-export const isMarkdownPath = (path: string): boolean => /\.(md|markdown)$/i.test(path);

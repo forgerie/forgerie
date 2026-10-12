@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
-import { isMarkdownPath, useMarkdownKit, type MarkdownKit } from "./markdownKit";
+import { useMarkdownKit, type MarkdownKit } from "./markdownKit";
+import { isMarkdownPath } from "./markdownText";
 import type { ToggleOption } from "./ToggleGroup";
 
 export type MarkdownView = "rich" | "source";

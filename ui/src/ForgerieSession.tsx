@@ -50,7 +50,7 @@ import type { FileLinks } from "./ui/FileTree";
 import { createFilesSource, type FilesSource } from "./changes/filesSource";
 import { DOCUMENT_PREVIEW_MIME_TYPES } from "@shared/workspacePreviewMime";
 import { ChangesOpener, ChangesReview } from "./ui/ChangesReview";
-import { markdownView } from "./markdown/markdownView";
+import { markdownView } from "./ui/markdownView";
 import type { MarkdownView } from "./ui/useMarkdownView";
 import type { NotesBinding } from "./ui/NoteTray";
 import type { WorktreeApi, WorktreeInfo } from "./worktrees/worktreeApi";

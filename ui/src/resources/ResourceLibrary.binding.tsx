@@ -9,7 +9,7 @@ import { ResourceList } from "./ResourceList";
 import { ResourceDocument, type SaveReport } from "./ResourceDocument";
 import { ResourceRequestError, type ResourceApi, type ResourceFile, type ResourceInventory, type ResourceKind, type ResourceTarget } from "./resourceApi";
 import { checkoutName, hides, refusalAdvice, savedMessage } from "./resourceModel";
-import { markdownView } from "../markdown/markdownView";
+import { markdownView } from "../ui/markdownView";
 import type { MarkdownView } from "../ui/useMarkdownView";
 
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);

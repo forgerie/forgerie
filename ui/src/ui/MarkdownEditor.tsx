@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FileLockIcon, PencilOffIcon } from "lucide-react";
 import { useMarkdownKit, type MarkdownKit } from "./markdownKit";
+import { frameMarkdownBody, joinFrontMatter, splitFrontMatter } from "./markdownText";
 import "./MarkdownEditor.css";
 
 /** Something the reader must know before they edit, with the one action that resolves it. */
@@ -48,11 +49,11 @@ export function MarkdownEditor({ label, text, readOnly = false, notice, placehol
   const editor = useRef<InstanceType<MarkdownKit["Editor"]>>(undefined);
   const latest = useRef({ onChange, onSave });
   latest.current = { onChange, onSave };
-  // Tiptap loads with the first Markdown file shown formatted; until then the frame holds its place.
+  // Tiptap loads with the first Markdown file shown formatted; until then the front matter shows and the body holds its place.
   const kit = useMarkdownKit();
   // The file as it opened: its front matter stays as it is, and the body is what the editor edits.
   const [initial] = useState(() => ({ text, readOnly, placeholder: readOnly ? emptyReadOnly : placeholder }));
-  const opened = useMemo(() => kit ? { text: initial.text, ...kit.splitFrontMatter(initial.text) } : undefined, [kit, initial]);
+  const [opened] = useState(() => ({ text: initial.text, ...splitFrontMatter(initial.text) }));
   const described = notice !== undefined;
   const editorProps = useMemo(() => ({
     attributes: {
@@ -67,7 +68,7 @@ export function MarkdownEditor({ label, text, readOnly = false, notice, placehol
 
   useLayoutEffect(() => {
     const element = host.current;
-    if (!kit || !opened || !element) return;
+    if (!kit || !element) return;
     // The body as the editor first writes it back, before any edit.
     let serialized: string | undefined;
     const created = new kit.Editor({
@@ -90,7 +91,7 @@ export function MarkdownEditor({ label, text, readOnly = false, notice, placehol
         // Back where it started, the file is its own bytes again, so undoing every edit leaves nothing to save.
         // Otherwise the body keeps the blank lines before it and the newlines after it, which Tiptap does not write.
         latest.current.onChange(markdown === serialized ? opened.text
-          : kit.joinFrontMatter({ frontMatter: opened.frontMatter, body: kit.frameMarkdownBody(opened.body, markdown) }));
+          : joinFrontMatter({ frontMatter: opened.frontMatter, body: frameMarkdownBody(opened.body, markdown) }));
       },
     });
     editor.current = created;
@@ -107,7 +108,7 @@ export function MarkdownEditor({ label, text, readOnly = false, notice, placehol
       <p className="markdown-editor-notice-text">{notice.message}</p>
       {notice.action ? <button type="button" className="markdown-editor-notice-action" onClick={notice.action.onPress}>{notice.action.label}</button> : null}
     </div> : null}
-    {opened && opened.frontMatter !== null ? <figure className="markdown-editor-front">
+    {opened.frontMatter !== null ? <figure className="markdown-editor-front">
       <figcaption className="markdown-editor-front-label"><FileLockIcon aria-hidden size={14} />{frontMatterLabel}</figcaption>
       <pre className="markdown-editor-front-code"><code>{opened.frontMatter.replace(/\r?\n$/u, "")}</code></pre>
     </figure> : null}
