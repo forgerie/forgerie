@@ -83,4 +83,58 @@ describe("a session's workflow proposals", () => {
     expect(await first).toBe(false);
     expect(store.getSnapshot()).toMatchObject({ error: START_REFUSED, proposing: undefined });
   });
+
+  it("ignores a read that answers after a newer one, so a decided proposal never opens again", async () => {
+    // Every GET waits until the test answers it, in the order the test chooses.
+    const held: { path: string; answer: (response: Response) => void }[] = [];
+    const request: Request = (path, init) => init.method === "POST"
+      ? Promise.resolve(path.endsWith("/dismiss") ? json(200, DISMISSED_PROPOSAL) : json(200, []))
+      : new Promise((resolve) => { held.push({ path, answer: resolve }); });
+    const store = createWorkflowsStore(request, () => SESSION, () => "req-1", 0);
+    const proposalReads = () => held.filter((read) => read.path.includes("workflow-proposals"));
+    store.refresh();
+    await settle();
+    // The old read is still out when the reader dismisses.
+    const old = proposalReads()[0]!;
+    expect(await store.dismissProposal(PROPOSAL.id)).toBe(true);
+    expect(store.getSnapshot().proposals).toEqual([DISMISSED_PROPOSAL]);
+    // The read after the decision answers first, then the old one, which still says open.
+    const after = proposalReads()[1]!;
+    after.answer(json(200, [DISMISSED_PROPOSAL]));
+    await settle();
+    old.answer(json(200, [PROPOSAL]));
+    await settle();
+    expect(store.getSnapshot().proposals).toEqual([DISMISSED_PROPOSAL]);
+  });
+
+  it("drops a read that started before an accepted decision, even when it answers before the next read", async () => {
+    const held: { path: string; answer: (response: Response) => void }[] = [];
+    const request: Request = (path, init) => init.method === "POST" ? Promise.resolve(json(200, PROPOSAL_RUN))
+      : new Promise((resolve) => { held.push({ path, answer: resolve }); });
+    const store = createWorkflowsStore(request, () => SESSION, () => "req-1", 0);
+    store.refresh();
+    await settle();
+    const [oldRuns, oldProposals] = [held.find((read) => read.path.includes("workflow-runs"))!, held.find((read) => read.path.includes("workflow-proposals"))!];
+    expect(await store.startProposal(PROPOSAL.id, { task: "Port it." })).toBe(true);
+    oldRuns.answer(json(200, []));
+    oldProposals.answer(json(200, [PROPOSAL]));
+    await settle();
+    // The run strip keeps its run; the old answers came from before the start.
+    expect(store.getSnapshot().runs).toEqual([PROPOSAL_RUN]);
+    expect(store.getSnapshot().proposals).toBeUndefined();
+  });
+
+  it("drops the failure of a read that a newer read replaced", async () => {
+    const held: ((response: Response) => void)[] = [];
+    const request: Request = (path) => path.includes("workflow-proposals") ? new Promise((resolve) => { held.push(resolve); }) : Promise.resolve(json(200, []));
+    const store = createWorkflowsStore(request, () => SESSION, () => "req-1", 0);
+    store.refresh();
+    await settle();
+    void store.retryProposals();
+    held[1]!(json(200, [PROPOSAL]));
+    await settle();
+    held[0]!(json(500, { error: "Old failure." }));
+    await settle();
+    expect(store.getSnapshot()).toMatchObject({ proposals: [PROPOSAL], proposalsError: undefined });
+  });
 });

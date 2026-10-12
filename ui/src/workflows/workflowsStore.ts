@@ -55,21 +55,34 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
   }
   const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
+  // Reads can answer out of order. Each read takes the next number, and only the newest read's answer counts.
+  // A decision the server accepted retires every read that started before it, since those reads predate it.
+  const generation = { runs: 0, proposals: 0 };
+  const retireReads = (records: { runs: boolean; proposals: boolean }) => {
+    if (records.runs) generation.runs += 1;
+    if (records.proposals) generation.proposals += 1;
+  };
+
   async function readRuns() {
     const session = ref();
     if (!session) return;
+    const mine = ++generation.runs;
     // Await before spreading: the runs and the proposals are read side by side, and each must keep the other's answer.
-    try { const runs = await call(url(session, "workflow-runs", true), workflowRunsSchema); update({ ...state, runs }); }
+    try { const runs = await call(url(session, "workflow-runs", true), workflowRunsSchema); if (mine === generation.runs) update({ ...state, runs }); }
     // A session without Durable children has no workflow records; it shows no strip.
-    catch { update({ ...state, runs: [] }); }
+    catch { if (mine === generation.runs) update({ ...state, runs: [] }); }
   }
 
   async function readProposals() {
     const session = ref();
     if (!session) return;
-    try { const proposals = await call(url(session, "workflow-proposals", true), workflowProposalsSchema); update({ ...state, proposals, proposalsError: undefined }); }
+    const mine = ++generation.proposals;
+    try {
+      const proposals = await call(url(session, "workflow-proposals", true), workflowProposalsSchema);
+      if (mine === generation.proposals) update({ ...state, proposals, proposalsError: undefined });
+    }
     // Keep what was read before: a card that was open stays open while the read is retried.
-    catch (error) { update({ ...state, proposalsError: message(error) }); }
+    catch (error) { if (mine === generation.proposals) update({ ...state, proposalsError: message(error) }); }
   }
 
   /** Sends one decision on a proposal. Any failure is the reader's to see; the records are read again, since another tab may have decided. */
@@ -79,6 +92,7 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
     update({ ...state, proposing: { id, action }, error: undefined });
     try {
       const answer = await call(url(session, `workflow-proposals/${encodeURIComponent(id)}/${action}`), schema, { cwd: session.cwd, ...body });
+      retireReads({ runs: action === "start", proposals: true });
       update({ ...state, proposing: undefined, ...apply(answer) });
       void readProposals();
       return true;
@@ -125,6 +139,7 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
       update({ ...state, launching: true, error: undefined });
       try {
         const run = await call(url(session, "workflow-runs"), workflowRunSchema, { cwd: session.cwd, name, inputs, requestId: newRequestId() });
+        retireReads({ runs: true, proposals: false });
         update({ ...state, launching: false, runs: [run, ...state.runs.filter((candidate) => candidate.id !== run.id)] });
         return true;
       } catch (error) { update({ ...state, launching: false, error: message(error) }); return false; }
@@ -136,6 +151,7 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
       try {
         const run = await call(url(session, `workflow-runs/${encodeURIComponent(runId)}/stops/${encodeURIComponent(stage)}`), workflowRunSchema,
           { cwd: session.cwd, decision, ...(note === undefined || note.trim() === "" ? {} : { note }) });
+        retireReads({ runs: true, proposals: false });
         update({ ...state, deciding: undefined, runs: state.runs.map((candidate) => candidate.id === run.id ? run : candidate) });
         return true;
       } catch (error) {
