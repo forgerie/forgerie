@@ -241,6 +241,26 @@ describe("SDK-compatible Durable execution", () => {
     } finally { release(); await running; }
   });
 
+  it("binds committed parent capabilities and a native tree without using the export as read authority", async () => {
+    const { session, provider, manager } = await fixture();
+    provider.setResponses([fauxAssistantMessage("native answer")]);
+    await session.prompt("native input");
+    const address = session.durableAddress;
+    expect(address.sessionId).toBe(manager.getSessionId());
+    expect(address.conversationId).toBe(session.journal.conversation.id);
+    const file = manager.getSessionFile();
+    if (file === undefined) throw new Error("Fixture must persist");
+    await rm(file);
+    const tree = await session.getDurableTree();
+    expect(tree.nodes.some((node) => node.kind === "user" && node.summary.includes("native input"))).toBe(true);
+    const history = await session.parentReadModel.history(undefined, context);
+    expect(JSON.stringify(history)).toContain("native answer");
+    await session.parentState.setSessionName("Committed native title", context);
+    await session.flushDurableMutations();
+    await vi.waitFor(() => { expect(session.parentAppSnapshot.sessionName).toBe("Committed native title"); });
+    expect(provider.state.callCount).toBe(1);
+  });
+
   it("executes the SDK read tool through Durable and saves the transcript", async () => {
     const { directory, provider, manager, session, errors } = await fixture();
     await writeFile(join(directory, "input.txt"), "journaled input");

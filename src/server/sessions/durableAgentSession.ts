@@ -5,13 +5,17 @@ import { ExtensionRunner, ModelRegistry, convertToLlm, createLocalBashOperations
 import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult, type Submission } from "@earendil-works/pi-durable";
 import type { DurableSessionAddress, DurableSessionHandle } from "./durableSessionAddress.js";
 import type { DurableNativeHistory } from "./durableNativeHistory.js";
-import type { DurableParentState } from "./durableParentState.js";
+import { createDurableParentState, type DurableParentState } from "./durableParentState.js";
+import { askDeliveryExtension } from "./durableAskDelivery.js";
+import { createDurableParentInitializer, DurableSdkSessionView } from "./durableSdkSessionView.js";
 import type { DurableParentReader, DurableParentMutations } from "./durableParentContracts.js";
 import type { SessionTreeSnapshot } from "../../shared/apiTypes.js";
 import type { PromptRequestOptions } from "../../shared/promptRequest.js";
 import type { PiAgentSession } from "./piSessionService.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
-import { durableUsageTotals } from "./durableParentReadModel.js";
+import { durableUsageTotals, DurableParentReadModel } from "./durableParentReadModel.js";
+import { durableEntryPresentationId } from "./durableNativeHistory.js";
+import type { DurableBrowserAppState } from "../../shared/durableBrowserSnapshot.js";
 import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
@@ -56,6 +60,11 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private errorListener: ((error: { extensionPath: string; event: string; error: string; stack?: string }) => void) | undefined;
   private journalValue: DurableSessionJournal | undefined;
   private stream: AgentEventStream | undefined;
+  private parentStateValue: DurableParentState | undefined;
+  private sdkView: DurableSdkSessionView | undefined;
+  private parentAppWatch: Awaited<ReturnType<DurableSdkSessionView["appWatch"]>> | undefined;
+  private parentAppValue: DurableBrowserAppState | undefined;
+  private readModelValue: DurableParentReadModel | undefined;
   private readonly listeners = new Set<(event: unknown) => void>();
   private partial: AssistantMessage | undefined;
   private streaming = false;
@@ -115,6 +124,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       return session;
     } catch (error) {
       await session.stream?.stop();
+      await session.parentAppWatch?.stop();
+      session.sdkView?.close();
       await session.journalValue?.close();
       await session.childRunRecords?.close();
       session.extensionRunner.invalidate("Durable session initialization failed");
@@ -127,13 +138,21 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (this.journalValue === undefined) throw new Error("Durable session has not opened");
     return this.journalValue;
   }
-  get durableAddress(): DurableSessionAddress {
-    if (this.options.handle !== undefined) return this.options.handle.address;
-    throw new Error("Durable session address is not implemented");
+  get durableAddress(): DurableSessionAddress { return this.journal.handle.address; }
+  get nativeHistory(): DurableNativeHistory { return this.journal.nativeHistory; }
+  get parentState(): DurableParentState {
+    if (this.parentStateValue === undefined) throw new Error("Durable parent state has not bound");
+    return this.parentStateValue;
   }
-  get nativeHistory(): DurableNativeHistory { throw new Error("Durable native history is not implemented"); }
-  get parentState(): DurableParentState { throw new Error("Durable parent state is not implemented"); }
-  async flushDurableMutations(): Promise<void> { await this.mutation; }
+  get parentAppSnapshot(): DurableBrowserAppState {
+    if (this.parentAppValue === undefined) throw new Error("Durable parent app snapshot has not bound");
+    return this.parentAppValue;
+  }
+  get parentReadModel(): DurableParentReadModel {
+    if (this.readModelValue === undefined) throw new Error("Durable parent read model has not bound");
+    return this.readModelValue;
+  }
+  async flushDurableMutations(): Promise<void> { await this.mutation; await this.parentStateValue?.flush(context); }
   getDurableTree(): Promise<SessionTreeSnapshot> { return this.nativeHistory.tree(context); }
   get sessionId(): string { return this.sessionManager.getSessionId(); }
   get sessionFile(): string | undefined { return this.sessionManager.getSessionFile(); }
@@ -150,6 +169,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private async initialize(): Promise<void> {
     this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
     this.registry.install(this.tools.extension());
+    // Register delivery before a family can schedule a persisted accepted answer.
+    this.registry.install(askDeliveryExtension());
     this.registry.install(defineExtension({ name: "forgerie.sdk-context", sections: [section("forgerie", () => this.systemPrompt, { tag: false })],
       hooks: [hook(GenerationTask, {
         beforeRequest: async (request) => {
@@ -167,7 +188,10 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
         },
       })],
     }));
-    this.journalValue = await DurableSessionJournal.open({ manager: this.sessionManager, models: this.modelRuntime, registry: this.registry,
+    this.journalValue = await DurableSessionJournal.open({
+      ...(this.options.handle === undefined ? {} : { handle: this.options.handle }),
+      initializeParentDocuments: createDurableParentInitializer(this.sessionManager),
+      manager: this.sessionManager, models: this.modelRuntime, registry: this.registry,
       agent: { ...(this.model === undefined ? {} : { model: { provider: this.model.provider, modelId: this.model.id } }), thinkingLevel: this.thinkingLevel, cwd: this.options.services.cwd },
       settings: { contextRetentionMs: 0, steeringMode: this.settingsManager.getSteeringMode(), followUpMode: this.settingsManager.getFollowUpMode(),
         compaction: { enabled: this.settingsManager.getCompactionEnabled(), reserveTokens: this.settingsManager.getCompactionReserveTokens(this.model), keepRecentTokens: this.settingsManager.getCompactionKeepRecentTokens(this.model) } },
@@ -178,6 +202,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
         return new NodeExecutionEnv({ cwd: cwd ?? this.options.services.cwd, ...(shellPath === undefined ? {} : { shellPath }) });
       } }),
     });
+    await this.journal.conversation.commit((tx) => createDurableParentInitializer(this.sessionManager)(tx, { id: this.journal.conversation.id }), context);
+    await this.rebindDurableParentState();
     await this.restoreAgentSelection();
     await this.startChildAgents();
     this.stream = await watchEvents(this.journal.harness, this.journal.conversation.id, context);
@@ -191,6 +217,27 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
         await this.applyEvent(event);
       }
     });
+  }
+
+  /** Recreate derived caches and the metadata mutation line after a selected-handle change. */
+  async rebindDurableParentState(): Promise<void> {
+    await this.parentAppWatch?.stop();
+    this.sdkView?.close();
+    this.parentStateValue = createDurableParentState(this.journal.handle, this.nativeHistory);
+    this.sdkView = await DurableSdkSessionView.open(this.journal.handle, context);
+    const view = this.sdkView;
+    this.readModelValue = new DurableParentReadModel({ handle: this.journal.handle,
+      messageId: (entry, index) => durableEntryPresentationId(this.durableAddress.journalId, entry, index),
+      projectEntry: (entry) => view.projectEntry(entry), appWatch: (ctx) => view.appWatch(ctx) });
+    const watch = await view.appWatch(context);
+    this.parentAppWatch = watch;
+    this.parentAppValue = watch.value;
+    watch.start((snapshot) => {
+      this.parentAppValue = snapshot;
+      this.emit({ type: "durable_parent_state_changed" });
+      return Promise.resolve();
+    });
+    void watch.closed.then((end) => { if (end.reason === "listener_error") this.report(end.error); });
   }
 
   // ─── Host operations on Durable children. None of them starts a parent turn. ───
@@ -591,6 +638,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     } else if (leaf === null) this.sessionManager.resetLeaf();
     else this.sessionManager.branch(leaf);
     await this.journal.selectBranch();
+    await this.rebindDurableParentState();
     return { cancelled: false, ...(editorText === undefined ? {} : { editorText }) };
   }
   async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
@@ -627,6 +675,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.closed = true;
     this.bashController?.abort();
     await this.childWatch?.stop();
+    await this.parentAppWatch?.stop();
+    this.sdkView?.close();
+    await this.flushDurableMutations();
     await this.journal.close();
     await this.childRunRecords?.close();
     await this.stream?.stop();
