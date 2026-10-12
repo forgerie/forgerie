@@ -1060,6 +1060,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly sessionTitleGenerationControllers = new WeakMap<PiAgentSession, AbortController>();
   private readonly compactionQueue = new SessionCompactionQueue();
   private readonly pendingPromptRequests = new WeakMap<PiAgentSession, Map<string, Promise<void>>>();
+  private readonly compactionDrains = new WeakSet<PiAgentSession>();
   private readonly compactionDrainTimers = new Map<string, NodeJS.Timeout>();
   private readonly queuedCompactionTimers = new Map<string, NodeJS.Timeout>();
   private readonly compactionStartGates = new Map<string, CompactionStartGate>();
@@ -2775,12 +2776,12 @@ export class PiSessionService implements SessionRouteService {
     });
   }
 
-  private async withPromptRequest(session: PiAgentSession, requestId: string | undefined, deliver: () => Promise<void>): Promise<void> {
+  private async withPromptRequest(session: PiAgentSession, requestId: string | undefined, deliver: () => Promise<void>, receiptTimeoutMs: number | null = this.promptPreflightTimeoutMs): Promise<void> {
     if (requestId === undefined) { await deliver(); return; }
     let pending = this.pendingPromptRequests.get(session);
     if (pending === undefined) { pending = new Map(); this.pendingPromptRequests.set(session, pending); }
     const existing = pending.get(requestId);
-    if (existing !== undefined) { await this.waitForPromptRequestReceipt(existing); return; }
+    if (existing !== undefined) { await this.waitForPromptRequestReceipt(existing, receiptTimeoutMs); return; }
     // Only in-flight receipts live here. Durable and the compaction queue own
     // admitted input; no completed request cache can drift from their state.
     const receipt = (async () => {
@@ -2789,14 +2790,15 @@ export class PiSessionService implements SessionRouteService {
     })();
     pending.set(requestId, receipt);
     void receipt.then(() => { pending.delete(requestId); }, () => { pending.delete(requestId); });
-    await this.waitForPromptRequestReceipt(receipt);
+    await this.waitForPromptRequestReceipt(receipt, receiptTimeoutMs);
   }
 
-  private async waitForPromptRequestReceipt(receipt: Promise<void>): Promise<void> {
+  private async waitForPromptRequestReceipt(receipt: Promise<void>, timeoutMs: number | null): Promise<void> {
+    if (timeoutMs === null) { await receipt; return; }
     let timeout: NodeJS.Timeout | undefined;
     try {
       await Promise.race([receipt, new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => { reject(new Error("Prompt preflight receipt timed out.")); }, this.promptPreflightTimeoutMs);
+        timeout = setTimeout(() => { reject(new Error("Prompt preflight receipt timed out.")); }, timeoutMs);
       })]);
     } finally { if (timeout !== undefined) clearTimeout(timeout); }
   }
@@ -4596,6 +4598,7 @@ export class PiSessionService implements SessionRouteService {
     const active = this.active.get(sessionId);
     if (active === undefined) return;
     const { session } = active.runtime;
+    if (this.compactionDrains.has(session)) return;
     if (session.isCompacting) {
       this.scheduleCompactionQueueDrain(sessionId, 100);
       return;
@@ -4605,28 +4608,45 @@ export class PiSessionService implements SessionRouteService {
       const queued = this.compactionQueue.takeReadyPrompts(sessionId);
       if (queued.length === 0) return;
       this.publishStatus(session);
-      for (const prompt of queued) this.submitCompactionPrompt(session, prompt, prompt.kind);
+      this.compactionDrains.add(session);
+      // Admission must finish in queue order, including request-ID lookups.
+      // Another drain must not overtake this batch while admission awaits I/O.
+      void (async () => {
+        try { for (const prompt of queued) await this.submitCompactionPrompt(session, prompt, prompt.kind); }
+        finally { this.compactionDrains.delete(session); this.scheduleCompactionQueueDrain(sessionId); }
+      })();
       return;
     }
 
     const prompt = this.compactionQueue.shiftReadyPrompt(sessionId);
     if (prompt === undefined) return;
     this.publishStatus(session);
-    this.submitCompactionPrompt(session, prompt, undefined, () => { this.scheduleCompactionQueueDrain(sessionId); });
+    const onCompletion = () => { this.scheduleCompactionQueueDrain(sessionId); };
+    if (prompt.requestId === undefined) {
+      void this.submitCompactionPrompt(session, prompt, undefined, onCompletion);
+    } else {
+      this.compactionDrains.add(session);
+      void this.submitCompactionPrompt(session, prompt, undefined, onCompletion).finally(() => {
+        this.compactionDrains.delete(session);
+        this.scheduleCompactionQueueDrain(sessionId);
+      });
+    }
   }
 
-  private submitCompactionPrompt(session: PiAgentSession, prompt: QueuedPrompt, behavior: QueuedPromptKind | undefined, onCompletion?: () => void): void {
+  private async submitCompactionPrompt(session: PiAgentSession, prompt: QueuedPrompt, behavior: QueuedPromptKind | undefined, onCompletion?: () => void): Promise<void> {
     if (prompt.requestId === undefined) {
-      void this.submitPrompt(session, prompt.text, behavior, prompt.images, prompt.echoUserMessage ?? true,
+      await this.submitPrompt(session, prompt.text, behavior, prompt.images, prompt.echoUserMessage ?? true,
         prompt.expandPromptTemplates ?? true, undefined, onCompletion);
       return;
     }
-    void this.withPromptRequest(session, prompt.requestId, async () => {
-      await this.submitPromptUntilPreflight(session, prompt.text, behavior, prompt.images, prompt.echoUserMessage ?? true,
-        prompt.expandPromptTemplates ?? true, onCompletion, prompt.requestId);
-    }).catch((error: unknown) => {
+    try {
+      await this.withPromptRequest(session, prompt.requestId, async () => {
+        await this.submitPromptUntilPreflight(session, prompt.text, behavior, prompt.images, prompt.echoUserMessage ?? true,
+          prompt.expandPromptTemplates ?? true, onCompletion, prompt.requestId);
+      }, null);
+    } catch (error) {
       this.events.publish(session.sessionId, { type: "session.error", message: error instanceof Error ? error.message : String(error) });
-    });
+    }
   }
 
   private clearDeferredCompactionWork(sessionId: string): void {

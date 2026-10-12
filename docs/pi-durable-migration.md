@@ -111,6 +111,9 @@ summary provider response, submits an input, and observes its user entry and
 answer before releasing the summary. This differs from Forgerie's existing
 hold-until-compaction-finishes contract. The service's compaction-held queue
 now retains and checks request IDs and passes them to Durable when draining.
+Mixed ID and no-ID inputs drain in admission order, not in lookup-completion
+order. A browser preflight timeout cannot let the next queued input overtake
+an admission that is still pending.
 This queue remains in memory: input acknowledged behind compaction is still
 not crash-durable until it reaches Durable. Removing this limit needs a separate
 persisted ordering-boundary design, not deletion of the queue.

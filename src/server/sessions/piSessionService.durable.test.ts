@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SessionUiEvent } from "../types.js";
 import { PiSessionService } from "./piSessionService.js";
 import { CapturingSessionEventHub, emptyArchiveStore } from "./piSessionService.testSupport.js";
@@ -34,6 +34,39 @@ class CompletionSessionEventHub extends CapturingSessionEventHub {
 }
 
 describe("Forgerie default Durable runtime", () => {
+  it("retries an idle-sent prompt while its native run still streams with one run and echo", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-streaming-retry-"));
+    const agentDir = join(directory, "agent");
+    const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
+    const provider = fauxProvider();
+    models.registerNativeProvider(provider.provider);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let entered = false;
+    provider.setResponses([async () => { entered = true; await held; return fauxAssistantMessage("durable service answer"); }]);
+    const hub = new CapturingSessionEventHub();
+    const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: directory }, sessionDirEnvKeys: [] });
+    const service = new PiSessionService(hub, { agentDir, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore(), heartbeatIntervalMs: 60_000 });
+    try {
+      const session = await service.start(directory);
+      const ref = { id: session.id, cwd: directory };
+      await service.runCommand(ref, "/name Streaming retry test");
+      expect((await service.status(ref)).isStreaming).toBe(false);
+      await service.prompt(ref, "complete the streaming integration request", undefined, undefined, { requestId: "streaming-http-receipt" });
+      await vi.waitFor(() => { expect(entered).toBe(true); });
+      expect((await service.status(ref)).isStreaming).toBe(true);
+      await service.prompt(ref, "complete the streaming integration request", undefined, undefined, { requestId: "streaming-http-receipt" });
+      expect(hub.sessionEvents.filter(({ event }) => event.type === "agent.start")).toHaveLength(1);
+      expect(hub.sessionEvents.filter(({ event }) => event.type === "message.append")).toHaveLength(1);
+      release();
+      await vi.waitFor(async () => { expect((await service.status(ref)).isStreaming).toBe(false); });
+      expect(provider.state.callCount).toBe(1);
+      expect(hub.sessionEvents.filter(({ event }) => event.type === "agent.start")).toHaveLength(1);
+      expect(hub.sessionEvents.filter(({ event }) => event.type === "message.append")).toHaveLength(1);
+      expect((await service.messages(ref)).messages.filter((message) => typeof message === "object" && message !== null && "role" in message && message.role === "user")).toHaveLength(1);
+    } finally { release(); await service.dispose(); await rm(directory, { recursive: true, force: true }); }
+  }, 20_000);
+
   it("retries a dropped idle HTTP receipt with one run, user entry, and native journal", async () => {
     const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-service-"));
     const agentDir = join(directory, "agent");

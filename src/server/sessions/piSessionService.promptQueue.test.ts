@@ -102,6 +102,29 @@ describe("PiSessionService prompt, queue, and auth warnings", () => {
     } finally { await service.dispose(); }
   });
 
+  it("drains A(id) before B(no id) while the session streams", async () => {
+    const runtime = fakeRuntime("mixed-compaction-session", { isCompacting: true, isStreaming: true });
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR, modelRuntime: testModelRuntime, createAgentRuntime: runtimeCreator(runtime.runtime),
+      sessionManager: sessionGateway([sessionRecord("mixed-compaction-session")]), heartbeatIntervalMs: 60_000,
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const ref = sessionRef("mixed-compaction-session");
+    try {
+      await service.prompt(ref, "A", "followUp", undefined, { requestId: "mixed-A" });
+      await service.prompt(ref, "B", "followUp");
+      let lookedUp = false;
+      runtime.session.hasPromptRequest = async () => { lookedUp = true; await held; return false; };
+      runtime.session.isCompacting = false;
+      runtime.emit({ type: "compaction_end" });
+      await vi.waitFor(() => { expect(lookedUp).toBe(true); });
+      expect(runtime.calls.prompt).toEqual([]);
+      release();
+      await vi.waitFor(() => { expect(runtime.calls.prompt.map(({ text }) => text)).toEqual(["A", "B"]); });
+    } finally { release(); await service.dispose(); }
+  });
+
   it("sends prompts to an injected runtime without touching the SDK runtime", async () => {
     const fake = fakeRuntime("prompt-session");
     const service = new PiSessionService(new CapturingSessionEventHub(), {
