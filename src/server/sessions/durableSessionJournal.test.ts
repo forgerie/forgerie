@@ -174,6 +174,26 @@ describe("Durable session journal", () => {
     expect(await readFile(file, "utf8")).toBe(original);
     expect(() => { journal.assertOwned(); }).toThrow("legacy reads");
   });
+  it("opens forks and clones of imported history without branching to the parent's SDK IDs", async () => {
+    const options = await fixture();
+    const parent = await DurableSessionJournal.open(options);
+    journals.push(parent);
+    const imported = options.manager.getEntries();
+    const assistant = imported.find((entry) => entry.type === "message" && entry.message.role === "assistant");
+    const user = imported.find((entry) => entry.type === "message" && entry.message.role === "user");
+    const tip = imported.at(-1);
+    if (assistant === undefined || user === undefined || tip === undefined) throw new Error("Missing imported entries");
+    for (const target of [assistant, tip, user]) {
+      const manager = SessionManager.create(options.manager.getCwd(), options.manager.getSessionDir());
+      const fork = await parent.nativeHistory.fork(target.id, target === user ? "before" : "at", manager.getSessionId(), context);
+      const candidate = await DurableSessionJournal.open({ ...options, manager, handle: fork.handle });
+      journals.push(candidate);
+      expect(manager.getEntry(target.id)).toBeUndefined();
+      expect(manager.getLeafId()).toBeNull();
+      expect((await candidate.conversation.context(context)).messages).toHaveLength(target === user ? 0 : 2);
+    }
+    expect(options.provider.state.callCount).toBe(0);
+  });
   it("imports history without executing it, preserves the original, and projects new messages once", async () => {
     const options = await fixture();
     const sessionFile = options.manager.getSessionFile();

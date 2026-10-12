@@ -286,8 +286,17 @@ export class DurableSessionJournal {
 
   /** Derived SDK IDs are compatibility aliases, not native mutation targets. */
   sdkEntryId(entry: EntryRecord, index = Math.max(0, (entry.model?.length ?? 1) - 1)): string | undefined {
+    const key = `${String(entry.conversationId)}:${String(entry.id)}:${String(index)}`;
+    const projected = this.projected.get(key);
+    if (projected !== undefined) return projected;
     const sdk = typeof entry.data === "object" && entry.data !== null && !Array.isArray(entry.data) ? entry.data["sdkEntryId"] : undefined;
-    return typeof sdk === "string" ? sdk : this.projected.get(`${String(entry.conversationId)}:${String(entry.id)}:${String(index)}`);
+    // An imported bookmark belongs to the parent graph. It is an export alias
+    // only when this manager actually contains it; a fresh fork does not.
+    if (index === 0 && typeof sdk === "string" && this.manager.getEntry(sdk) !== undefined) {
+      this.projected.set(key, sdk);
+      return sdk;
+    }
+    return undefined;
   }
 
   /** JSONL has no durable leaf selector. Restore it from the selected native history, not the file tail. */
