@@ -7,6 +7,7 @@ import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/provid
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { createRegistry } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
+import { durableChildExtensions } from "./durableChildAgents.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { proposeWorkflow, startWorkflowProposal, workflowExtension, workflowProposals, workflowRuns, WORKFLOW_DOC_KIND, WORKFLOW_PROPOSALS_DOC_KIND } from "./durableWorkflowRuns.js";
 
@@ -42,4 +43,11 @@ it("replays a proposal without another entry and commits Start's run and decisio
       expect((await workflowRuns(journal.harness, journal.conversation.id, context))[0]?.definition).toEqual({ name: first.name, path: `proposal:${first.id}`, text: first.text, sha256: first.sha256 });
     } finally { unsubscribe(); }
   } finally { await journal.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+
+it("does not replay parent tools that publish cards, finish workflows, or start children", () => {
+  const extensions = [workflowExtension(), ...durableChildExtensions().parent];
+  const policies = Object.fromEntries(extensions.flatMap(extension => extension.tools ?? []).map(tool => [tool.name, tool.replay]));
+  expect(policies).toMatchObject({ propose_workflow: "unsafe", workflow_finish: "unsafe", workflow_stop: "unsafe", child_agent: "unsafe" });
 });

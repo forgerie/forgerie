@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { ModelRuntime, SessionManager, createAgentSessionServices, createCodemodeExtension, defineTool } from "@earendil-works/pi-coding-agent";
 import { calculateCost } from "@earendil-works/pi-ai";
-import { UsageDoc } from "@earendil-works/pi-durable";
+import { AssistantEntry, ToolTask, UsageDoc } from "@earendil-works/pi-durable";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { durableSessionPaths } from "./durableSessionJournal.js";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DurableAgentSession } from "./durableAgentSession.js";
@@ -17,7 +19,7 @@ afterEach(async () => {
   await Promise.all(sessions.splice(0).map((session) => session.close()));
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
-async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[], skillFile?: string, keepRecentTokens = 20_000, priced = false) {
+async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[], skillFile?: string, keepRecentTokens = 20_000, priced = false, extensionTools: NonNullable<Parameters<typeof DurableAgentSession.open>[0]["customTools"]> = []) {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-session-"));
   directories.push(directory);
   if (skillFile !== undefined) {
@@ -37,7 +39,8 @@ async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[
   const services = await createAgentSessionServices({ cwd: directory, agentDir: join(directory, "agent"), modelRuntime,
     resourceLoaderOptions: { noExtensions: true, noSkills: true, noContextFiles: true, noPromptTemplates: true,
       ...(skillFile === undefined ? {} : { additionalSkillPaths: [join(directory, "skills", "handoff", "SKILL.md")] }),
-      ...(codemode ? { extensionFactories: [{ name: "codemode", factory: createCodemodeExtension() }] } : {}) } });
+      extensionFactories: [...(codemode ? [{ name: "codemode", factory: createCodemodeExtension() }] : []),
+        { name: "registered-test-tools", factory(pi) { for (const tool of extensionTools) pi.registerTool(tool); } }], } });
   services.settingsManager.applyOverrides({ compaction: { enabled: false, keepRecentTokens }, ...(defaultTools === undefined ? codemode ? { defaultTools: ["read", "bash", "edit", "write", "+codemode"] } : {} : { defaultTools }) });
   const manager = SessionManager.create(directory, join(directory, "sessions"));
   const session = await DurableAgentSession.open({ services, sessionManager: manager, initialModel: model, customTools });
@@ -396,7 +399,65 @@ describe("SDK-compatible Durable execution", () => {
     expect(session.getSessionStats()).toEqual({ sessionId: session.sessionId, totalMessages: 0, userMessages: 0, assistantMessages: 0,
       toolCalls: 0, tokens: { input: 9, output: 15, cacheRead: 21, cacheWrite: 33, total: 78 }, cost: 3 });
   });
-  it("does not grant replay safety to an extension that overrides read", async () => {
+  it("audits SDK implementations, not tool names", async () => {
+    const { session } = await fixture([], true, ["read", "ls", "grep", "find", "bash", "edit", "write", "+codemode"]);
+    const tools = (await session.journal.conversation.agent(context)).tools;
+    expect(Object.fromEntries(tools.map(tool => [tool.name, tool.replay]))).toMatchObject({
+      read: "safe", ls: "safe", grep: "unsafe", find: "unsafe", bash: "unsafe", edit: "unsafe", write: "unsafe", codemode: "unsafe",
+    });
+  });
+  it.each(["read", "write", "override"] as const)("recovers a saved %s intent according to its replay policy", async (kind) => {
+    let effects = 0;
+    const override = defineTool({ name: "read", label: "Override", description: "Effectful override", parameters: Type.Object({ path: Type.String() }),
+      execute: () => { effects++; return Promise.resolve({ content: [{ type: "text" as const, text: "effect" }], details: undefined }); } });
+    const customTools = kind === "override" ? [override] : [];
+    const { session, manager, directory, services } = await fixture(customTools);
+    const name = kind === "write" ? "write" : "read";
+    const args = kind === "write" ? { path: "output.txt", content: "must not be written" } : { path: "input.txt" };
+    const policy = (await session.journal.conversation.agent(context)).tools.find(tool => tool.name === name)?.replay ?? "unsafe";
+    // Persist a call and task while scheduling is disabled. Replace its initial phase with the
+    // exact durable intent that a process crash leaves behind, using the public Storage contract.
+    const taskId = await session.journal.conversation.commit(async tx => {
+      const entry = await tx.appendEntry(AssistantEntry, session.journal.conversation.id, {
+        model: [fauxAssistantMessage([fauxToolCall(name, args, { id: "crashed-call" })], { stopReason: "toolUse" })],
+      });
+      return tx.createTask(ToolTask, { assistant: entry.id, callId: "crashed-call" }, { ownership: { kind: "conversation" } });
+    }, context);
+    const file = manager.getSessionFile();
+    if (file === undefined) throw new Error("Fixture must persist");
+    await session.close();
+    const storage = await openNodeSqliteStorage(durableSessionPaths(file).database);
+    try {
+      const task = await storage.task(taskId, context);
+      if (task === undefined) throw new Error("Intent task missing");
+      await storage.commit([{ type: "task", value: { ...task, memos: {}, state: { status: "running",
+        checkpoint: { phase: "execute", arguments: args, replay: policy } } } }], context);
+    } finally { await storage.close(context); }
+    // A safe read must obtain the post-crash contents, not a saved result.
+    await writeFile(join(directory, "input.txt"), "available after crash");
+    const recovered = await DurableAgentSession.open({ services, sessionManager: SessionManager.open(file), customTools });
+    sessions.push(recovered);
+    await recovered.journal.harness.waitForTask(taskId, context);
+    await recovered.journal.project();
+    const result = recovered.messages.find(message => message.role === "toolResult" && message.toolCallId === "crashed-call");
+    expect(result?.role).toBe("toolResult");
+    if (kind === "read") expect(result).toMatchObject({ isError: false, content: [{ type: "text", text: "available after crash" }] });
+    else {
+      expect(result).toMatchObject({ isError: true });
+      expect(JSON.stringify(result)).toContain("interrupted");
+      expect(effects).toBe(0);
+      await expect(readFile(join(directory, "output.txt"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    }
+  });
+  it.each(["read", "ls"])("keeps a registered extension override of %s unsafe, including after reload", async name => {
+    const override = defineTool({ name, label: "Override", description: "Registered override", parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [{ type: "text" as const, text: "custom" }], details: undefined }) });
+    const { session } = await fixture([], false, undefined, undefined, undefined, false, [override]);
+    expect((await session.journal.conversation.agent(context)).tools.find(tool => tool.name === name)?.replay).toBe("unsafe");
+    await session.reload();
+    expect((await session.journal.conversation.agent(context)).tools.find(tool => tool.name === name)?.replay).toBe("unsafe");
+  });
+  it("does not grant replay safety to a custom tool that overrides read", async () => {
     const override = defineTool({ name: "read", label: "Effect", description: "A custom read with a write", parameters: Type.Object({}),
       execute: () => Promise.resolve({ content: [{ type: "text" as const, text: "custom" }], details: undefined }) });
     const { session } = await fixture([override]);

@@ -40,19 +40,26 @@ export class DurableSdkTools {
     const { cwd, settings, runner } = this.options;
     const commandPrefix = settings.getShellCommandPrefix();
     const shellPath = settings.getShellPath();
-    const base = [
-      sdkDefineTool(createReadToolDefinition(cwd, { autoResizeImages: settings.getImageAutoResize() })),
-      sdkDefineTool(createBashToolDefinition(cwd, { ...(commandPrefix === undefined ? {} : { commandPrefix }), ...(shellPath === undefined ? {} : { shellPath }) })),
-      sdkDefineTool(createEditToolDefinition(cwd)), sdkDefineTool(createWriteToolDefinition(cwd)),
-      sdkDefineTool(createGrepToolDefinition(cwd)), sdkDefineTool(createFindToolDefinition(cwd)), sdkDefineTool(createLsToolDefinition(cwd)),
+    // Replay policy is paired with the concrete factory. Names do not establish safety.
+    const base: { definition: ToolDefinition; replay: "safe" | "unsafe" }[] = [
+      { definition: sdkDefineTool(createReadToolDefinition(cwd, { autoResizeImages: settings.getImageAutoResize() })), replay: "safe" }, // Reads files; image transforms stay in memory.
+      { definition: sdkDefineTool(createBashToolDefinition(cwd, { ...(commandPrefix === undefined ? {} : { commandPrefix }), ...(shellPath === undefined ? {} : { shellPath }) })), replay: "unsafe" }, // Arbitrary commands.
+      { definition: sdkDefineTool(createEditToolDefinition(cwd)), replay: "unsafe" }, // Writes files.
+      { definition: sdkDefineTool(createWriteToolDefinition(cwd)), replay: "unsafe" }, // Writes files.
+      // Both call ensureTool(), which can download and install executables in the Pi profile.
+      { definition: sdkDefineTool(createGrepToolDefinition(cwd)), replay: "unsafe" },
+      { definition: sdkDefineTool(createFindToolDefinition(cwd)), replay: "unsafe" },
+      { definition: sdkDefineTool(createLsToolDefinition(cwd)), replay: "safe" }, // Only filesystem existence/stat/readdir.
     ];
     const previouslyActive = this.active;
     this.definitions.clear();
     this.replaySafe.clear();
-    for (const definition of base) {
+    for (const { definition, replay } of base) {
       this.definitions.set(definition.name, definition);
-      if (["read", "grep", "find", "ls"].includes(definition.name)) this.replaySafe.add(definition.name);
+      if (replay === "safe") this.replaySafe.add(definition.name);
     }
+    // The SDK has no replay contract for extensions/custom tools. Unreviewed tools and
+    // same-name overrides fail closed, including codemode, which can call effectful tools.
     for (const tool of runner.getAllRegisteredTools()) { this.definitions.set(tool.definition.name, tool.definition); this.replaySafe.delete(tool.definition.name); }
     for (const definition of this.options.customTools) { this.definitions.set(definition.name, definition); this.replaySafe.delete(definition.name); }
     this.definitions.delete("question");

@@ -68,7 +68,8 @@ export function workflowExtension() {
     name: "propose_workflow",
     description: "When you understand a task that needs several workers, a review, or the user's check, design a workflow for this task, call propose_workflow, then end your turn. Not for small tasks. Never write a workflow file into the repository for a one-off workflow. Supply complete prompt-format text with workflow version 1 frontmatter and prose, and pre-fill its inputs. Only the user can start the proposal, ask for changes, or dismiss it.",
     parameters: WorkflowProposalToolSchema,
-    replay: "safe", executionMode: "sequential",
+    // Publishes or changes user-visible workflow state, so a crash must interrupt the call.
+    replay: "unsafe", executionMode: "sequential",
     execute: (args, api, context) => asTool(async () => {
       const id = `p:${String(api.taskId)}`;
       await api.commit((tx) => proposeWorkflow(tx, api.conversationId, id, args), context);
@@ -77,7 +78,8 @@ export function workflowExtension() {
   }), defineTool({
     name: "workflow_finish", description: "Explicitly finish a prose workflow run. All its child work and completion reports must settle first. An idle pause does not finish a run. A run with stops finishes as completed only after the user passes every stop.",
     parameters: Type.Object({ runId: Type.String(), outcome: WorkflowOutcomeSchema, result: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
-    replay: "safe", executionMode: "sequential",
+    // Publishes or changes user-visible workflow state, so a crash must interrupt the call.
+    replay: "unsafe", executionMode: "sequential",
     execute: (args, api, context) => asTool(async () => {
       await api.commit((tx) => finishWorkflow(tx, api.conversationId, args.runId, args.outcome, args.result), context);
       return `Workflow ${args.runId} finished: ${args.outcome}.`;
@@ -90,7 +92,8 @@ export function workflowExtension() {
       stage: Type.String({ description: "The stop stage id from the route." }),
       summary: Type.String({ minLength: 1, maxLength: 4000, description: "What the user decides on, in a few sentences. Name files or branches when they matter." }),
     }, { additionalProperties: false }),
-    replay: "safe", executionMode: "sequential",
+    // Publishes or changes user-visible workflow state, so a crash must interrupt the call.
+    replay: "unsafe", executionMode: "sequential",
     execute: (args, api, context) => asTool(() => api.commit((tx) => requestWorkflowStop(tx, api.conversationId, args.runId, args.stage, args.summary), context)),
   })] });
 }
