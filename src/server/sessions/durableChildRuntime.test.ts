@@ -79,7 +79,7 @@ describe("a pi-subagents agent file in a Durable child", () => {
 
 describe("Forgerie's own agent files", () => {
   it("serve the reviewer before pi-subagents' copy, with every tool it names and nothing that contradicts this runtime", async () => {
-    const catalog = ChildAgentCatalog.forSession(root, join(root, "profile"), [bundledForgerieAgentsPath(), bundled]);
+    const catalog = ChildAgentCatalog.forSession(root, join(root, "profile"), { builtin: [bundledForgerieAgentsPath(), bundled] });
     const reviewer = await catalog.find("reviewer");
     expect(reviewer?.source.path).toBe(join(bundledForgerieAgentsPath(), "reviewer.md"));
     const plan = planChildRuntime(reviewer, [], []);

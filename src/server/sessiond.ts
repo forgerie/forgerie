@@ -2,6 +2,7 @@
 import { SessionSearchService } from "./sessions/sessionSearchService.js";
 import { registerSessionSearchRoutes } from "./sessions/sessionSearchRoutes.js";
 import { mkdir, rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import Fastify from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
@@ -228,6 +229,8 @@ async function createSessionDaemonRuntime() {
     codemodeEnabled: config.codemode,
     ...(liveChildren === undefined ? {} : { durableChildAgents: createDurableChildHost({
       childToolsDeny: config.childToolsDeny,
+      // The user's own agent files, which pi-subagents also reads, so one file serves both runtimes.
+      homeAgentsDir: join(homedir(), ".agents"),
       // Forgerie's own agent files first, then pi-subagents' built-in agents (worker, scout), which run as Durable children too.
       builtinAgentsDirs: [bundledForgerieAgentsPath(), join(bundledSubagentsPackagePath(), "agents")],
       index: liveChildren,

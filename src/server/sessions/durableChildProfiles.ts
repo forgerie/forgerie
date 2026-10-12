@@ -36,9 +36,12 @@ const isThinking = (value: string): value is Thinking => THINKING.has(value);
 export class ChildAgentCatalog {
   constructor(private readonly dirs: readonly string[]) {}
 
-  /** Project `.pi/agents`, then the profile's `agents`, then the built-in folders in order. */
-  static forSession(cwd: string, agentDir: string, builtinDirs: readonly string[] = []): ChildAgentCatalog {
-    return new ChildAgentCatalog([join(cwd, ".pi", "agents"), join(agentDir, "agents"), ...builtinDirs]);
+  /**
+   * Project `.pi/agents`, then the user's home agents folder (`~/.agents`), then the profile's `agents`, then the
+   * built-in folders in order. pi-subagents ranks the home folder above the profile folder the same way.
+   */
+  static forSession(cwd: string, agentDir: string, dirs: { home?: string; builtin?: readonly string[] } = {}): ChildAgentCatalog {
+    return new ChildAgentCatalog([join(cwd, ".pi", "agents"), ...(dirs.home === undefined ? [] : [dirs.home]), join(agentDir, "agents"), ...(dirs.builtin ?? [])]);
   }
 
   async list(): Promise<ChildAgentProfile[]> {

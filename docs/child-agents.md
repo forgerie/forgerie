@@ -28,7 +28,7 @@ Esc in the parent does not stop its children.
 
 ## Agent files
 
-`child_agent` may name an agent file with `agent`. Forgerie reads the same files as pi-subagents, in this order: the project's `.pi/agents/`, the profile's `agents/`, Forgerie's own `agents/`, then the bundled pi-subagents agents. The first file with the name wins.
+`child_agent` may name an agent file with `agent`. Forgerie reads the same files as pi-subagents, in this order: the project's `.pi/agents/`, your home folder's `~/.agents/`, the profile's `agents/`, Forgerie's own `agents/`, then the bundled pi-subagents agents. The first file with the name wins. Keep agents you own in `~/.agents/`: both runtimes and every Pi profile read them there. Forgerie reads only the top level of `~/.agents/`, so its `skills/` folder is not read as agents.
 
 Forgerie's `agents/reviewer.md` replaces pi-subagents' reviewer for Durable children. The pi-subagents file says `watchdog_diff` cannot read committed ranges and forbids shell commands, which is true there and false here; a real-model check showed reviewers following it and asking the user for diffs instead of reviewing. Forgerie's reviewer reads committed ranges, runs read-only commands and requested tests, and still never changes the repository: it names a scratch merge as work for the parent. `REVIEWER_REAL=1 ./scripts/reviewer-real.ts` repeats the check; `REVIEWER_AGENTS=bundled` uses only pi-subagents' files.
 
