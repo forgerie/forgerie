@@ -1,6 +1,6 @@
 # Pi Durable migration
 
-Status: partial migration. Parent execution and shutdown pass the audited gates. Durable children, workflows, and startup recovery have focused tests. pi-subagents still creates legacy children. The user authorized production deployment before all gates pass. This is not a completed migration.
+Status: partial migration. Parent paths and shutdown pass their audited checks. Durable children, workflows, and startup recovery have focused tests. pi-subagents still creates legacy children. The user authorized production deployment before all gates pass. This is not a completed migration.
 
 ## Accepted scope
 
@@ -9,6 +9,8 @@ The user selected Durable execution with SDK helpers retained. Forgerie must use
 Implement in `.worktree/pi-durable-migration`, created from `main` at `9fcdf56e`. Leave the unrelated `new-ui-mvp` worktree unchanged. The user subsequently requested immediate deployment of the partial implementation. Preserve rollback data, wait for active runs to finish, and verify the running build. The outstanding feature and recovery gates remain open.
 
 ## Implementation
+
+Test counts in this table were checked at `0fce4220`.
 
 | File | Responsibility | Verified scope |
 | --- | --- | --- |
@@ -37,7 +39,7 @@ Projection stamps contain both `forgerieDurableSessionId` and `forgerieDurableEn
 
 The journal saves a user-only JSONL projection before the first provider request. SDK persistence normally waits for an assistant. Waiting would hide an interrupted first request from session discovery.
 
-Only original SDK read, grep, find, and ls implementations receive safe replay through the SDK adapter. An override named read is unsafe. Codemode and tools with external effects remain unsafe. Durable child spawn and send use replay-safe task receipts. This prevents duplicate launches on replay, not duplicates from new model requests.
+Parent replay is safe only for the original SDK `read` and `ls`, and for `child_agent`, `propose_workflow`, `workflow_finish`, and `workflow_stop`. The native tools use tested receipts to prevent duplicate effects on replay. SDK `grep` and `find` are unsafe because they can install binaries. All other parent tools and SDK overrides are unsafe. See [Parent tool replay](durable-tool-replay.md) for the policy and receipt tests (`abffd137`). These receipts do not prevent duplicates from new model requests.
 
 ## Cost and limits
 
@@ -61,15 +63,15 @@ An in-memory SDK manager uses in-memory native storage. This has no restart reco
 
 ## Required acceptance before cutover
 
-Audit date: 2026-10-12, at `57105685`. The audit now includes request-ID changes from `0fce4220` (#48). Verified means the required mechanism has a named passing check. Partial means only part of the gate has evidence. Pending means the audit has no acceptance check for that gate. A partial gate is not permission to cut over.
+Audit date: 2026-10-12, at `57105685`. The audit now includes request-ID changes from #48 and the final replay policy from `abffd137` (#47). Verified means the required mechanism has a named passing check. Partial means only part of the gate has evidence. Pending means the audit has no acceptance check for that gate. A partial gate is not permission to cut over.
 
 Test paths below are under `src/server/sessions/`, unless stated otherwise.
 
 | Area | Required check | Status | Evidence and remaining checks |
 | --- | --- | --- | --- |
-| Parent execution | Replace `defaultCreateAgentRuntime` and every production legacy execution path. | Verified. | `piSessionService.ts` uses `DurableSessionRuntime.open` and `DurableAgentSession.open` (`2698b35d`). `piSessionService.durable.test.ts`: “retries a dropped idle HTTP receipt with one run, user entry, and native journal” passes (`0fce4220`). Source inspection found no execution construction of `AgentSession` or `Agent` in `src/` or `extensions/`. The package-owned delegated path is covered below. |
+| Parent execution | Replace `defaultCreateAgentRuntime` and every production legacy execution path. | Verified for parent paths. | `piSessionService.ts` uses `DurableSessionRuntime.open` and `DurableAgentSession.open` (`2698b35d`). `piSessionService.durable.test.ts`: “retries a dropped idle HTTP receipt with one run, user entry, and native journal” passes (`0fce4220`). Source inspection found no execution construction of `AgentSession` or `Agent` in `src/` or `extensions/`. Bundled pi-subagents still constructs SDK sessions in production. The all-execution requirement remains unmet; see Delegated execution below. |
 | Delegated execution | Inject Durable factories into unpatched pi-subagents, including detached runners and fork context. Prove no fallback creates legacy children. | Partial. The required no-legacy check fails source inspection. | `durableChildAgents.test.ts`: “runs a child from a project agent file with its prompt and only its tools” passes (`f68f796d`). `piSessionService.ts` still loads pi-subagents. Its default foreground and detached factories call SDK `createAgentSession`. No Durable factory injection exists. The opt-in successor does not satisfy this gate. |
-| Delegated recovery | Recover children and their output without duplicate launches, worktrees, or external effects. Restore parent ownership and completion delivery. | Partial. | `durableChildAgents.test.ts`: “runs three children in parallel and resumes each with one report after restart” (`e02d7e8e`), “recovers live child work from journals after the external child index is lost”, and “recovers a lost completion write from an unfinished checkpoint after the live index clears” (`29d69350`) pass. `durableChildAgents.ts` uses task IDs for launch receipts and report request IDs. Crash-window worktree allocation, external-effect checks, and legacy recovery remain. |
+| Delegated recovery | Recover children and their output without duplicate launches, worktrees, or external effects. Restore parent ownership and completion delivery. | Partial. | `durableChildAgents.test.ts`: “runs three children in parallel and resumes each with one report after restart” (`e02d7e8e`), “recovers live child work from journals after the external child index is lost”, and “recovers a lost completion write from an unfinished checkpoint after the live index clears” (`29d69350`) pass. `child_agent` uses task-keyed spawn/send receipts and worktree allocation. `propose_workflow` and `workflow_stop` use task-keyed receipts; `workflow_finish` reuses its stored outcome. `durableParentToolReplay.test.ts`: “replays a spawn interrupted after worktree creation but before its child receipt” passes (`abffd137`). See [Parent tool replay](durable-tool-replay.md) for the receipt checks. They use journal close/reopen, not SIGKILL. Kill-window allocation, broader external-effect checks, and legacy recovery remain. |
 | SDK compatibility | Run real bundled and configured extensions. Verify provider hooks, input, prompts, tools, nested calls, loadout restrictions, lifecycle, and resources. | Partial. | `durableAgentSession.test.ts`: “runs real QuickJS codemode through the same tool registry” passes. `piSessionService.codemode.acceptance.test.ts`: “offers codemode to the model and runs a script's calls as one transcript step” passes (`2698b35d`). Real configured extension/reload checks pass in `piSessionService.questionTools.acceptance.test.ts`. Provider, boundary, settle, tree, and compaction hook parity remains unverified. |
 | Dialogs | Verify ask_user, browser extension dialogs, answering after reconnect, pending forms, and interruption between state declaration and tool-result commitment. | Partial. | `piSessionService.codemode.acceptance.test.ts`: “rebuilds an unanswered browser form after constructing a new daemon service” passes. `piSessionService.questionTools.acceptance.test.ts`: “preserves plugin confirmations and delivers their answers” passes. `durableChildAgents.test.ts`: “keeps one question across a restart, and an answer after it reaches the child” passes (`f68f796d`). Declaration/commit interruption and real browser reconnect remain. Extension dialogs close on daemon disposal; they are not Durable waits. |
 | History | Verify model context, branches, fork IDs, labels, custom entries, compaction, archive, and deletion. Preserve original files. | Partial. | `durableSessionJournal.test.ts`: “imports history without executing it, preserves the original, and projects new messages once”, “does not let an inherited parent stamp hide a new fork message with the same native ID”, and “selects another legacy tree branch without replaying its tools” pass (`2698b35d`). Notification projection checks also pass (`9701a183`). Durable compaction, labels, full fork lifecycle, archive, and deletion checks remain. Tree/service tests with fake runtimes are not facade acceptance. |
@@ -98,6 +100,13 @@ After rebasing onto `0fce4220`, the audit repeated these checks on Node 24:
 | --- | --- |
 | `durableAgentSession.test.ts`, `piSessionService.durable.test.ts`, `piSessionService.promptQueue.test.ts` | 72 tests passed across three files in 2.73 seconds. |
 | `npm run verify` | Passed. Root: 2,060 tests passed, five skipped. UI: 1,565 tests passed, one skipped. Static checks and UI build also passed. |
+
+After rebasing onto `abffd137`, the audit repeated these checks on Node 24:
+
+| Check | Result |
+| --- | --- |
+| `durableParentToolReplay.test.ts`, `durableAgentSession.test.ts`, `durableSessionJournal.test.ts` | 48 tests passed across three files in 4.03 seconds. |
+| `npm run verify` | Passed. Root: 2,084 tests passed, five skipped. UI: 1,572 tests passed, one skipped. Static checks and UI build also passed. |
 
 The seven original focused service files were `piSessionService.durable.test.ts`, `piSessionService.recovery.test.ts`, `piSessionService.codemode.acceptance.test.ts`, `piSessionService.questionTools.acceptance.test.ts`, `piSessionService.extensionDialogs.test.ts`, `piSessionService.lifecycle.test.ts`, and `piSessionService.tree.test.ts`. The last three use fake runtimes for service behavior. They do not establish Durable facade parity.
 
