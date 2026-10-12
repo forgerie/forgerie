@@ -1,6 +1,6 @@
 # Pi Durable migration
 
-Status: partial migration. The user authorized production deployment before the remaining migration gates pass. This is not a completed migration.
+Status: partial migration. Parent execution and shutdown pass the audited gates. Durable children, workflows, and startup recovery have focused tests. pi-subagents still creates legacy children. The user authorized production deployment before all gates pass. This is not a completed migration.
 
 ## Accepted scope
 
@@ -12,15 +12,22 @@ Implement in `.worktree/pi-durable-migration`, created from `main` at `9fcdf56e`
 
 | File | Responsibility | Verified scope |
 | --- | --- | --- |
-| `src/server/sessions/durableOwnership.ts` | Hold a nonblocking kernel lock before opening SQLite. Resolve directory and file symlinks. Reject hard-link aliases. Never unlink the lock file. | Ownership exclusion, release, reopen, and aliases pass. |
-| `src/server/sessions/durableJson.ts` | Convert SDK values to strict JSON. Preserve prototype keys as data. Reject unsupported values and cycles. | Six focused tests pass. |
-| `src/server/sessions/durableSessionJournal.ts` | Import legacy context without executing it. Preserve an existing legacy file. Project native messages into SDK JSONL. | Five focused tests pass. |
-| `src/server/sessions/durableSdkTools.ts` | Use the same registry for direct and codemode calls. Forward SDK tool hooks and turn termination. | Read, QuickJS codemode, termination, tool selection, and override safety pass through the facade. |
-| `src/server/sessions/durableSdkPresentation.ts` | Use SDK prompt, template, and bash helpers without a legacy execution loop. | Prompt construction is exercised by facade tests. Upgrade and bash cases remain. |
-| `src/server/sessions/durableAgentSession.ts` | Adapt Durable execution to Forgerie's session interface and SDK extension contexts. | Seven focused tests pass. Full compatibility remains unverified. |
-| `src/server/sessions/durableSessionRuntime.ts` | Replace sessions and close outgoing journals without explicit cancellation. | Draft. Typecheck passes. Replacement, fork, and rollback tests remain. |
+| `src/server/sessions/durableOwnership.ts` | Hold a nonblocking kernel lock before opening SQLite. Resolve directory and file symlinks. Reject hard-link aliases. Never unlink the lock file. | Three tests in `durableOwnership.test.ts` pass. They check exclusion, release, reopen, and aliases. |
+| `src/server/sessions/durableJson.ts` | Convert SDK values to strict JSON. Preserve prototype keys as data. Reject unsupported values and cycles. | Six tests in `durableJson.test.ts` pass. |
+| `src/server/sessions/durableSessionJournal.ts` | Import legacy context without executing it. Preserve an existing legacy file. Project native messages into SDK JSONL. | Six tests in `durableSessionJournal.test.ts` pass. They include projection repair, notifications, fork stamps, and branch selection. |
+| `src/server/sessions/durableSdkTools.ts` | Use the same registry for direct and codemode calls. Forward SDK tool hooks and turn termination. | Read, QuickJS codemode, termination, tool selection, and override safety pass through the facade. Hosted codemode checks also pass. |
+| `src/server/sessions/durableSdkPresentation.ts` | Use SDK prompt, template, and bash helpers without a legacy execution loop. | Facade tests exercise prompts and user bash. Upgrade checks remain. |
+| `src/server/sessions/durableAgentSession.ts` | Adapt Durable execution to Forgerie's session interface and SDK extension contexts. | 22 tests in `durableAgentSession.test.ts` and nine in `durableAgentSession.thinking.test.ts` pass. Full compatibility remains unverified. |
+| `src/server/sessions/durableSessionRuntime.ts` | Fork sessions and close outgoing journals without explicit cancellation. Construct a fork candidate before closing the outgoing session. | Default-runtime and interruption/reopen tests pass. Durable runtime fork and failed-candidate rollback tests remain. |
+| `src/server/sessions/durableChildAgents.ts`, `durableChildRuntime.ts`, `durableChildHost.ts` | Host opt-in Durable children in the parent's storage. Apply agent files, tools, questions, worktrees, and completion reports. | 21 tests in `durableChildAgents.test.ts` pass. They include parallel recovery, lost-index recovery, accounting repair, and questions after restart. |
+| `src/server/sessions/durableWorkflowRuns.ts` | Save workflow inputs, child results, user stops, and temporary proposals in Durable. | 21 tests in `workflowRuns.test.ts` and one in `durableWorkflowRuns.test.ts` pass. |
+| `src/server/sessions/durableSessionRecovery.ts` | Discover unfinished tasks, submissions, and workflows at daemon startup. Reopen their parent sessions with at most four concurrent opens. | 14 discovery/orchestration tests and five production-service recovery tests pass. |
 
-The migration branch now wires `defaultCreateAgentRuntime` to the Durable facade and runtime. One service integration test uses the real default factory, runs a configured provider, observes browser events, and verifies its SQLite journal. Production remains unchanged. Delegated factories still need migration, so this branch does not yet meet the all-execution requirement.
+`defaultCreateAgentRuntime` uses the Durable facade and runtime in `src/server/sessions/piSessionService.ts`. This shipped in `2698b35d`. The production-factory integration test runs a configured provider, observes browser events, and checks its SQLite journal.
+
+Durable children are opt-in through `durableChildren` (`f68f796d`). Workflows use the same storage (`e4e841ce`). Sessiond now starts recovery without a browser request (`29d69350`).
+
+The default resource loader still loads unpatched pi-subagents `0.76.1`. Forgerie does not set its foreground or detached child factories. The installed package's `src/runs/shared/child-session.js` calls SDK `createAgentSession`. Its `src/runs/background/runner-child-sessions.js` uses that default when no factory module is set. Thus `subagent` still creates non-Durable children, even when `child_agent` is available. The all-execution requirement remains unmet.
 
 Persistent data lives beside the session file at `.durable/<session-filename>/state.sqlite`. Before first import, the journal copies an existing file to `original.jsonl` with exclusive creation. A new Durable session has no legacy file to copy.
 
@@ -30,7 +37,7 @@ Projection stamps contain both `forgerieDurableSessionId` and `forgerieDurableEn
 
 The journal saves a user-only JSONL projection before the first provider request. SDK persistence normally waits for an assistant. Waiting would hide an interrupted first request from session discovery.
 
-Only original SDK read, grep, find, and ls implementations receive safe replay. An override named read is unsafe. Codemode and tools with external effects remain unsafe. This prevents automatic replay, not duplicates from new model requests.
+Only original SDK read, grep, find, and ls implementations receive safe replay through the SDK adapter. An override named read is unsafe. Codemode and tools with external effects remain unsafe. Durable child spawn and send use replay-safe task receipts. This prevents duplicate launches on replay, not duplicates from new model requests.
 
 ## Cost and limits
 
@@ -38,49 +45,85 @@ SDK JSONL remains necessary for extension state, history, tree operations, and e
 
 The presentation adapter imports private SDK helpers. Pi packages are pinned to `1.1.0`. Upgrades must exercise those imports and all adapter checks. Durable's API is experimental.
 
-Ownership uses `flock` and `cat`. Knip lists flock as an external host binary, not an npm dependency. On this host both commands resolve under `/run/current-system/sw/bin`, which the local units include in PATH. When deploying, add `nixpkgs#util-linux` and `nixpkgs#coreutils` to the session daemon's existing `nix shell` inputs so the dependency does not rely on host packages. Add those inputs during the user-authorized partial cutover. Keep the old unit with the rollback files. The lock does not provide multi-machine ownership or preserve external processes after a crash.
+Ownership uses `flock` and `cat`. Knip lists flock as an external host binary, not an npm dependency. The active local sessiond unit now includes `nixpkgs#util-linux` and `nixpkgs#coreutils` in its `nix shell` inputs. This was checked with `systemctl --user show` on 2026-10-12. Other deployments must supply both commands. Keep the old unit with the rollback files. The lock does not provide multi-machine ownership or preserve external processes after a crash.
 
 The current facade does not yet preserve the full SDK lifecycle. In particular, `agent_before_settle`, boundary drafts, complete provider hooks, tree hooks, and compaction hooks need implementations and tests. Message-end hook timing also needs verification against committed history.
 
-Native automatic compaction is not yet projected into SDK context. Model and thinking state need reopen checks. Streaming snapshots, partial argument changes, event ordering, and slow-consumer replacement need integration checks.
+Manual compaction still needs `SessionCompactionQueue` to hold browser input. That queue saves request IDs in memory, not in Durable, until it drains. A crash can lose acknowledged held input. See Browser prompt request identity below.
+
+Native automatic compaction is not yet projected into SDK context. Model and thinking selections now have reopen tests (`871d715f`). The hosted codemode test checks final progress ordering. Streaming snapshots, partial argument changes, broader event ordering, and slow-consumer replacement still need Durable integration checks. Service tests that inject fake runtimes do not prove this adapter behavior.
 
 Durable coalesces rapid tool progress updates into the terminal commit. The SDK event adapter emits the committed result as a final progress update before tool completion. This prevents stale codemode progress. It adds one browser event per completed tool, without an extra database write. The hosted codemode test checks completed nested calls, event order, and history projection.
 
-Extension command-context actions for new session, switch, and fork currently reject requests. They need host-owned implementations. Runtime replacement must keep the outgoing session usable when candidate construction fails.
+Extension command-context actions for new session, switch, and fork currently reject requests. They need host-owned implementations. Durable runtime fork now constructs its candidate before closing the outgoing session. Failed-candidate rollback still needs a Durable runtime test.
 
-An in-memory SDK manager currently uses in-memory native storage. This has no restart recovery. Production parent and delegated persistence must be checked explicitly.
+An in-memory SDK manager uses in-memory native storage. This has no restart recovery. Persisted parents and Durable children now have production-service recovery tests. Startup scans journals and unfinished child-run records, not the child live index. Discovery adds disk reads. Recovered runtimes use memory and can start provider requests without a browser connection. The concurrency bound limits opens, not the total number of recovered runtimes. Legacy pi-subagents recovery is not covered by this mechanism.
 
 ## Required acceptance before cutover
 
-| Area | Required check | Status |
-| --- | --- | --- |
-| Parent execution | Replace `defaultCreateAgentRuntime` and every production legacy execution path. | Default parent factory switched. One integration test passes. Remaining execution paths need an audit. |
-| Delegated execution | Inject Durable factories into unpatched pi-subagents, including detached runners and fork context. Prove no fallback creates legacy children. | Pending. |
-| Delegated recovery | Recover children and their output without duplicate launches, worktrees, or external effects. Restore parent ownership and completion delivery. | Pending. |
-| SDK compatibility | Run real bundled and configured extensions. Verify provider hooks, input, prompts, tools, nested calls, loadout restrictions, lifecycle, and resources. | Partial focused checks only. |
-| Dialogs | Verify ask_user, browser extension dialogs, answering after reconnect, pending forms, and interruption between state declaration and tool-result commitment. | Pending. |
-| History | Verify model context, branches, fork IDs, labels, custom entries, compaction, archive, and deletion. Preserve original files. | Import and basic projection checks pass. Full lifecycle pending. |
-| Reopen | Verify saved model, thinking, selected branch, custom state, and unfinished execution. | Journal reopen and projection repair pass. Service recovery pending. |
-| Shutdown | Replace daemon shutdown abort with native close. Retain abort for explicit Stop. | Service disposal now closes runtimes without calling abort. Lifecycle tests pass. Integrated interruption and reopen remain pending. |
-| Crash | Kill the integrated daemon during generation, safe and unsafe tools, codemode, dialogs, and delegation. Verify deduplication and receipts. | Earlier standalone feasibility checks are not integration acceptance. |
-| Deployment | Audit active legacy work, preserve rollback data, build, and verify the running build. | User authorized partial cutover. Production build passes. Backup, restart, and live verification pending. |
-| Browser | Test reconnect and the four Galaxy Z Fold 8 postures in both color schemes. Read every capture. | Pending. |
+Audit date: 2026-10-12, at `57105685`. The audit now includes request-ID changes from `0fce4220` (#48). Verified means the required mechanism has a named passing check. Partial means only part of the gate has evidence. Pending means the audit has no acceptance check for that gate. A partial gate is not permission to cut over.
+
+Test paths below are under `src/server/sessions/`, unless stated otherwise.
+
+| Area | Required check | Status | Evidence and remaining checks |
+| --- | --- | --- | --- |
+| Parent execution | Replace `defaultCreateAgentRuntime` and every production legacy execution path. | Verified. | `piSessionService.ts` uses `DurableSessionRuntime.open` and `DurableAgentSession.open` (`2698b35d`). `piSessionService.durable.test.ts`: “retries a dropped idle HTTP receipt with one run, user entry, and native journal” passes (`0fce4220`). Source inspection found no execution construction of `AgentSession` or `Agent` in `src/` or `extensions/`. The package-owned delegated path is covered below. |
+| Delegated execution | Inject Durable factories into unpatched pi-subagents, including detached runners and fork context. Prove no fallback creates legacy children. | Partial. The required no-legacy check fails source inspection. | `durableChildAgents.test.ts`: “runs a child from a project agent file with its prompt and only its tools” passes (`f68f796d`). `piSessionService.ts` still loads pi-subagents. Its default foreground and detached factories call SDK `createAgentSession`. No Durable factory injection exists. The opt-in successor does not satisfy this gate. |
+| Delegated recovery | Recover children and their output without duplicate launches, worktrees, or external effects. Restore parent ownership and completion delivery. | Partial. | `durableChildAgents.test.ts`: “runs three children in parallel and resumes each with one report after restart” (`e02d7e8e`), “recovers live child work from journals after the external child index is lost”, and “recovers a lost completion write from an unfinished checkpoint after the live index clears” (`29d69350`) pass. `durableChildAgents.ts` uses task IDs for launch receipts and report request IDs. Crash-window worktree allocation, external-effect checks, and legacy recovery remain. |
+| SDK compatibility | Run real bundled and configured extensions. Verify provider hooks, input, prompts, tools, nested calls, loadout restrictions, lifecycle, and resources. | Partial. | `durableAgentSession.test.ts`: “runs real QuickJS codemode through the same tool registry” passes. `piSessionService.codemode.acceptance.test.ts`: “offers codemode to the model and runs a script's calls as one transcript step” passes (`2698b35d`). Real configured extension/reload checks pass in `piSessionService.questionTools.acceptance.test.ts`. Provider, boundary, settle, tree, and compaction hook parity remains unverified. |
+| Dialogs | Verify ask_user, browser extension dialogs, answering after reconnect, pending forms, and interruption between state declaration and tool-result commitment. | Partial. | `piSessionService.codemode.acceptance.test.ts`: “rebuilds an unanswered browser form after constructing a new daemon service” passes. `piSessionService.questionTools.acceptance.test.ts`: “preserves plugin confirmations and delivers their answers” passes. `durableChildAgents.test.ts`: “keeps one question across a restart, and an answer after it reaches the child” passes (`f68f796d`). Declaration/commit interruption and real browser reconnect remain. Extension dialogs close on daemon disposal; they are not Durable waits. |
+| History | Verify model context, branches, fork IDs, labels, custom entries, compaction, archive, and deletion. Preserve original files. | Partial. | `durableSessionJournal.test.ts`: “imports history without executing it, preserves the original, and projects new messages once”, “does not let an inherited parent stamp hide a new fork message with the same native ID”, and “selects another legacy tree branch without replaying its tools” pass (`2698b35d`). Notification projection checks also pass (`9701a183`). Durable compaction, labels, full fork lifecycle, archive, and deletion checks remain. Tree/service tests with fake runtimes are not facade acceptance. |
+| Reopen | Verify saved model, thinking, selected branch, custom state, and unfinished execution. | Partial. | `durableAgentSession.thinking.test.ts`: “saves initial HIGH thinking and preserves it across repeated reopens and a model change” passes (`871d715f`). `piSessionService.recovery.test.ts`: “resumes an interrupted parent without a browser request, another prompt, or a child index” passes (`29d69350`). Journal tests check custom entries and projection repair. `workflowRuns.test.ts`: “recovers a workflow waiting at a user stop without the live index or starting later work” passes. `durableAgentSession.test.ts`: “reuses an idle prompt after its receipt is lost, including after reopen” passes (`0fce4220`). Selected-branch reopen and full extension custom-state checks remain. |
+| Shutdown | Replace daemon shutdown abort with native close. Retain abort for explicit Stop. | Verified. | `src/server/sessiond.ts` calls service disposal. `piSessionService.ts` disposes runtimes; `durableSessionRuntime.ts` closes the journal (`2698b35d`). `piSessionService.recovery.test.ts` checks interrupted-parent recovery and “keeps completed and explicitly stopped runs lazy after restart” (`29d69350`). Both pass. `durableChildAgents.test.ts` also checks child recovery after service disposal. This verifies native close versus explicit abort, not every signal/tool interruption window. |
+| Crash | Kill the integrated daemon during generation, safe and unsafe tools, codemode, dialogs, and delegation. Verify deduplication and receipts. | Partial. Historical integrated child check only. | At `e02d7e8e`, `prototypes/durable-child-spike/sessiond-real.mjs` kills sessiond with SIGKILL during child bash. `sessiond-real-results.json` records “SIGKILL and automatic startup resume” as passing. Assertions check one child, the same conversation ID, one report, and one start-marker write. These files were removed in `8373535b`. This audit did not rerun that check. The current full crash matrix remains pending. Graceful-close tests are not kill tests. |
+| Deployment | Audit active legacy work, preserve rollback data, build, and verify the running build. | Partial. | The audit's `npm run build` passes on Node 24. Read-only `systemctl --user show` checks found both local units active and the required lock packages in sessiond's command. `curl http://127.0.0.1:8504/` returned HTTP 200. Active legacy work, rollback data, and the running build identity were not checked. No restart or deployment was done in this audit. |
+| Browser | Test reconnect and the four Galaxy Z Fold 8 postures in both color schemes. Read every capture. | Pending. | Request-ID retry tests now cover dropped receipts (`0fce4220`), not real browser reconnect or posture acceptance. No migration-specific reconnect/posture check was run in this audit. UI unit tests do not prove the eight captures. |
 
 Archive ownership repair is a separate task. Do not run the repair script while developing this migration.
 
 ## Current verification
 
-Full verification passes: typecheck, lint, knip, and 5,171 tests across 506 files. Four tests are skipped. Managed run `durable-migration-verify-5` (`proc_0681`) exited with code 0 after 137 seconds.
+At `57105685`, the 2026-10-12 audit ran focused checks on Node 24:
 
-The earlier full test run failed one codemode progress test. Both nested tools completed, but the last progress update stayed stale. The adapter now emits the committed final progress before tool completion. The acceptance test verifies completed nested calls, event order, and history projection.
+| Check | Result |
+| --- | --- |
+| The 11 `durable*.test.ts` files and seven service files listed below | 205 tests passed across 18 files in 28.37 seconds. |
+| `src/server/sessions/workflowRuns.test.ts` | 21 tests passed in 23.31 seconds. |
+| `npm run verify` | Passed. Root: 2,046 tests passed, five skipped, across 223 files. UI: 1,565 tests passed, one skipped, across 164 files. Typecheck, lint, root/UI knip, UI gates, and UI build passed. |
+| `npm run build` | Passed. The UI build reported large-chunk warnings. |
 
-Repeat full verification with:
+After rebasing onto `0fce4220`, the audit repeated these checks on Node 24:
+
+| Check | Result |
+| --- | --- |
+| `durableAgentSession.test.ts`, `piSessionService.durable.test.ts`, `piSessionService.promptQueue.test.ts` | 72 tests passed across three files in 2.73 seconds. |
+| `npm run verify` | Passed. Root: 2,060 tests passed, five skipped. UI: 1,565 tests passed, one skipped. Static checks and UI build also passed. |
+
+The seven original focused service files were `piSessionService.durable.test.ts`, `piSessionService.recovery.test.ts`, `piSessionService.codemode.acceptance.test.ts`, `piSessionService.questionTools.acceptance.test.ts`, `piSessionService.extensionDialogs.test.ts`, `piSessionService.lifecycle.test.ts`, and `piSessionService.tree.test.ts`. The last three use fake runtimes for service behavior. They do not establish Durable facade parity.
+
+Repeat the focused checks with:
+
+```bash
+nix shell nixpkgs#nodejs_24 -c npx vitest run \
+  src/server/sessions/durable*.test.ts \
+  src/server/sessions/piSessionService.durable.test.ts \
+  src/server/sessions/piSessionService.recovery.test.ts \
+  src/server/sessions/piSessionService.codemode.acceptance.test.ts \
+  src/server/sessions/piSessionService.questionTools.acceptance.test.ts \
+  src/server/sessions/piSessionService.extensionDialogs.test.ts \
+  src/server/sessions/piSessionService.lifecycle.test.ts \
+  src/server/sessions/piSessionService.tree.test.ts
+nix shell nixpkgs#nodejs_24 -c npx vitest run src/server/sessions/workflowRuns.test.ts
+```
+
+Repeat full verification and build with:
 
 ```bash
 nix shell nixpkgs#nodejs_24 -c npm run verify
+nix shell nixpkgs#nodejs_24 -c npm run build
 ```
 
-This result proves the checked mechanisms. It does not prove feature parity, delegated execution, integrated restart recovery, or production readiness.
+These results prove the checked mechanisms. They do not prove all-Durable delegation, full SDK parity, the integrated crash matrix, running-build identity, or browser posture acceptance.
 
 ## Browser prompt request identity (#48)
 
@@ -106,7 +149,8 @@ no-retry policy.
 
 Keep `SessionCompactionQueue`. In pi-durable 1.1.0, manual compaction summarizes
 in the background while the conversation keeps working. The test
-`Durable starts input while manual compaction is still summarizing` holds the
+`Durable starts input while manual compaction is still summarizing` in
+`src/server/sessions/durableAgentSession.test.ts` holds the
 summary provider response, submits an input, and observes its user entry and
 answer before releasing the summary. This differs from Forgerie's existing
 hold-until-compaction-finishes contract. The service's compaction-held queue
