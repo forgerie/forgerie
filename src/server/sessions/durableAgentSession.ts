@@ -3,6 +3,11 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { clampThinkingLevel, getSupportedThinkingLevels, type AssistantMessage, type ImageContent } from "@earendil-works/pi-ai";
 import { ExtensionRunner, ModelRegistry, convertToLlm, createLocalBashOperations, createSyntheticSourceInfo, estimateTokens, type AgentSessionServices, type BuildSystemPromptOptions, type ExtensionUIContext, type PromptOptions, type SessionManager, type SessionStartEvent, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult, type Submission } from "@earendil-works/pi-durable";
+import type { DurableSessionAddress, DurableSessionHandle } from "./durableSessionAddress.js";
+import type { DurableNativeHistory } from "./durableNativeHistory.js";
+import type { DurableParentState } from "./durableParentState.js";
+import type { DurableParentReader, DurableParentMutations } from "./durableParentContracts.js";
+import type { SessionTreeSnapshot } from "../../shared/apiTypes.js";
 import type { PromptRequestOptions } from "../../shared/promptRequest.js";
 import type { PiAgentSession } from "./piSessionService.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
@@ -22,6 +27,7 @@ import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
 import type { WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 
 export interface DurableAgentSessionOptions {
+  handle?: DurableSessionHandle;
   services: AgentSessionServices;
   sessionManager: SessionManager;
   customTools?: readonly ToolDefinition[];
@@ -34,7 +40,7 @@ export interface DurableAgentSessionOptions {
 }
 
 /** SDK resources and extension hooks around a Durable execution engine. No AgentSession is constructed. */
-export class DurableAgentSession implements PiAgentSession {
+export class DurableAgentSession implements PiAgentSession, DurableParentReader, DurableParentMutations {
   readonly modelRuntime;
   readonly settingsManager;
   readonly resourceLoader;
@@ -118,6 +124,14 @@ export class DurableAgentSession implements PiAgentSession {
     if (this.journalValue === undefined) throw new Error("Durable session has not opened");
     return this.journalValue;
   }
+  get durableAddress(): DurableSessionAddress {
+    if (this.options.handle !== undefined) return this.options.handle.address;
+    throw new Error("Durable session address is not implemented");
+  }
+  get nativeHistory(): DurableNativeHistory { throw new Error("Durable native history is not implemented"); }
+  get parentState(): DurableParentState { throw new Error("Durable parent state is not implemented"); }
+  async flushDurableMutations(): Promise<void> { await this.mutation; }
+  getDurableTree(): Promise<SessionTreeSnapshot> { return this.nativeHistory.tree(context); }
   get sessionId(): string { return this.sessionManager.getSessionId(); }
   get sessionFile(): string | undefined { return this.sessionManager.getSessionFile(); }
   get sessionName(): string | undefined { return this.sessionManager.getSessionName(); }

@@ -1,9 +1,11 @@
+import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { dirname } from "node:path";
 import { SessionManager, type SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import type { PiAgentSession, PiSessionRuntime } from "./piSessionService.js";
 import { DurableAgentSession } from "./durableAgentSession.js";
 
 export interface DurableRuntimeOptions {
+  handle?: DurableSessionHandle;
   cwd: string;
   agentDir: string;
   sessionManager: SessionManager;
