@@ -154,7 +154,7 @@ export class DurableSdkTools {
         const id = `child:${String(api.conversationId)}:${String(api.taskId)}:${api.callId}`;
         const outcome = await tools.execute(id, definition.name, args, context.abortSignal, undefined, async (partial) => {
           await api.details(durableJson(partial), context);
-        });
+        }, "child");
         return { content: outcome.result.content, isError: outcome.isError,
           ...(outcome.result.details === undefined ? {} : { details: durableJson(outcome.result.details) }),
           ...(outcome.result.usage === undefined ? {} : { usage: outcome.result.usage }),
@@ -169,7 +169,8 @@ export class DurableSdkTools {
     return this.execute(`${parentId}/${String(index)}`, name, args, options.signal, parentId, options.onUpdate);
   }
 
-  private async execute(callId: string, name: string, args: unknown, signal?: AbortSignal, parentToolCallId?: string, onUpdate?: (partial: AgentToolResult<unknown>) => void | Promise<void>): Promise<AgentToolCallOutcome> {
+  /** `caller: "child"` runs a shared session tool for a child: `childTools` has already checked it against the deny list, and it need not be active for the parent. */
+  private async execute(callId: string, name: string, args: unknown, signal?: AbortSignal, parentToolCallId?: string, onUpdate?: (partial: AgentToolResult<unknown>) => void | Promise<void>, caller: "parent" | "child" = "parent"): Promise<AgentToolCallOutcome> {
     const tool = this.callable.get(name);
     const definition = this.definitions.get(name);
     const json = durableJson(args);
@@ -177,7 +178,7 @@ export class DurableSdkTools {
     const toolCall = { type: "toolCall" as const, id: callId, name, arguments: input };
     const error = (text: string): AgentToolCallOutcome => ({ toolCall, result: { content: [{ type: "text", text }], details: undefined }, isError: true });
     if (tool === undefined || definition === undefined) return error(`Unknown tool: ${name}`);
-    if (parentToolCallId === undefined && !this.active.includes(name)) return error(`Tool ${name} is not active for this conversation.`);
+    if (caller === "parent" && parentToolCallId === undefined && !this.active.includes(name)) return error(`Tool ${name} is not active for this conversation.`);
     if (parentToolCallId !== undefined && !this.getCallable().some((candidate) => candidate.name === name)) return error(`Tool ${name} is not callable from codemode.`);
     if (!Value.Check(tool.parameters, args)) return error(`Invalid arguments for tool ${name}`);
     await this.options.beforeCall();
