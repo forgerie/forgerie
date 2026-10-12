@@ -20,7 +20,7 @@ const STATE_READ = /^(useContext|useSyncExternalStore|fetch|localStorage|session
 /**
  * assistant-ui's runtime context: its hooks, its conditional and its primitives.
  *
- * Decision A (2026-10-08, ui/docs/decomposition.md): the chat views in src/chat/
+ * Decision A (2026-10-08): the chat views in src/chat/
  * keep reading this one context. Their binding builds the runtime from plain
  * data, and each chat part builds the same runtime from fixtures. Everywhere
  * else, including the shared space, it is a state read like any other.

@@ -4,7 +4,7 @@
 // files-closing (closing with unsaved edits), reply-files (a reply's files block, review closed),
 // reply-file-open (a file in that block tapped, so the review opens at it in the editor).
 // Markdown: md-rich (docs/guide.md formatted), md-edit (a word typed there), md-switch (then Source, edits kept),
-// md-lossy (ui/docs/decomposition.md, whose tables the rich view would rewrite), md-large (CHANGELOG.md, past the rich view's limit).
+// md-lossy (a page whose table the rich view would rewrite), md-large (CHANGELOG.md, past the rich view's limit).
 // Notes and files live in local state only. Nothing reaches Pi, git, or the disk.
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
@@ -27,7 +27,7 @@ import type { MarkdownView } from "../src/ui/useMarkdownView";
 import "../src/ui/theme.css";
 import loginFormDiff from "./changes-fixtures/LoginForm.tsx.diff?raw";
 import sessionDiff from "./changes-fixtures/session.ts.diff?raw";
-import decomposition from "../docs/decomposition.md?raw";
+import { decompositionFile } from "../src/resources/fixtures/resources";
 
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "changes";
 
@@ -68,7 +68,7 @@ const disk = new Map<string, string>([
   ["src/ui/Button.tsx", "export function Button(props: { label: string }) {\n  return <button type=\"submit\">{props.label}</button>;\n}\n"],
   ["docs/sso.md", "# SSO\n\nThe callback calls `validPassword` directly.\n"],
   // A real file of this repository, with tables the rich view would pad differently.
-  ["docs/decomposition.md", decomposition],
+  ["docs/decomposition.md", decompositionFile.text],
   ["docs/guide.md", [
     "---", "title: Contributing to Acme sign-in", "owners: auth-team", "---", "",
     "# Contributing", "", "Keep the form and the SSO callback on **one validator**. Read the SSO notes before you change it.", "",

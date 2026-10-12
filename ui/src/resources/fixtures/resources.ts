@@ -1,5 +1,4 @@
 import type { ResourceEntry, ResourceFile, ResourceInventory } from "../resourceApi";
-import decomposition from "../../../docs/decomposition.md?raw";
 
 const hex = (seed: string) => seed.padEnd(64, "0").slice(0, 64);
 const PROFILE = "/home/ada/.local/share/forgerie/agent";
@@ -67,7 +66,16 @@ export const largeContextFile: ResourceFile = { resource: entries.find((item) =>
   "# Acme agent rules", "",
   ...Array.from({ length: 2400 }, (_, index) => `${String(index + 1)}. Keep rule ${String(index + 1)} in mind: run the narrowest test that proves the change, then the suite, before every commit.\n`),
 ].join("\n") };
-/** A real file of this repository, ui/docs/decomposition.md, as a project prompt: its tables are what the rich view would rewrite. */
-export const decompositionFile: ResourceFile = { revision: hex("r5"), text: decomposition, resource: entry("g1", { kind: "prompt", name: "decomposition",
+/** A project prompt whose table and wrapped lines the rich view would rewrite. */
+export const decompositionFile: ResourceFile = { revision: hex("r5"), text: [
+  "# Where a file lives", "",
+  "Every source file is exactly one kind. The path and the name decide",
+  "the kind.", "",
+  "| Kind | Path | May read state |",
+  "|---|---|---|",
+  "| Component | `src/ui/<Name>.tsx` | No |",
+  "| Binding | `src/<feature>/<Screen>.binding.tsx` | Yes |",
+  "| Fixture | `src/<feature>/fixtures/*.ts` | No |", "",
+].join("\n"), resource: entry("g1", { kind: "prompt", name: "decomposition",
   description: "Where a file lives in the browser app.", path: `${CHECKOUT}/ui/docs/decomposition.md`,
   origin: { kind: "project", source: "local", scope: "project", root: `${CHECKOUT}/ui/docs` }, edit: { kind: "writable", saveEffect: "uncommitted" } }) };

@@ -34,7 +34,7 @@ The React app has its own dependencies, tests, and gates under `ui/`. Follow nea
 
 Use fixture APIs and the same production component in tests and previews. Do not copy its renderer, intercept requests, or replace global fetch to make a preview work. A binding owns data access; its component receives fixture data through that same boundary.
 
-For a component's CSS or layout, follow `frontend-design`, `intrinsic-design`, `caliper-render`, and `ui/docs/decomposition.md`. Read every capture. State which components, states, and emulated viewports you checked. A captured PNG is not physical-device acceptance.
+For a component's CSS or layout, follow `frontend-design`, `intrinsic-design`, and `caliper-render`. Read every capture. State which components, states, and emulated viewports you checked. A captured PNG is not physical-device acceptance.
 
 ## Verification and failures
 

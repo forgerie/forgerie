@@ -1,5 +1,5 @@
 /**
- * Not a gate: a report for the CSS split (ui/docs/decomposition.md, "Tokens and CSS").
+ * Not a gate: a report for the CSS split.
  * Run with CSS_OWNERS=1. It writes, for every class a stylesheet defines, the components
  * that render it, to /tmp/css-owners.json. Without the variable it does nothing.
  */

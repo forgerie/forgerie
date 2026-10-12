@@ -1,6 +1,6 @@
 #!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium --command node
 // Capture every main screen of the browser app at the four Fold 8 postures, in both colour schemes.
-// The decomposition compares these before and after each step (ui/docs/decomposition.md).
+// Compare these before and after each decomposition step.
 //
 //   ui/scripts/capture-screens.mjs --url http://localhost:5173/ --out /tmp/shots/before
 //   ui/scripts/capture-screens.mjs --url ... --out ... --only session,changes

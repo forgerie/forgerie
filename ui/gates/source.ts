@@ -1,5 +1,5 @@
 /**
- * Shared reading for the decomposition gates (ui/docs/decomposition.md).
+ * Shared reading for the decomposition gates.
  *
  * The gates read the source without running it, the way Caliper does. Each file
  * under src/ is one kind. The kind comes from its path and name, so a gate and a

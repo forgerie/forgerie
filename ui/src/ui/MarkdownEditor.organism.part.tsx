@@ -107,7 +107,7 @@ const DECOMPOSITION = [
   "",
 ].join("\n");
 
-/** The opening of a real file of this repository, ui/docs/decomposition.md: Tiptap pads its table and rewraps its lines, so the rich view shows it read-only and offers its source. */
+/** A page with a table: Tiptap pads its table and rewraps its lines, so the rich view shows it read-only and offers its source. */
 export function Lossy() {
   const [source, setSource] = useState(false);
   const check = richEditability(DECOMPOSITION);

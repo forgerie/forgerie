@@ -50,7 +50,7 @@ The browser reads the router directly. The router must allow this app's origin (
 
 ## Where the code lives
 
-It follows [the decomposition](../docs/decomposition.md):
+It follows the decomposition that `ui/gates/` enforces:
 
 | File | Kind | Job |
 |---|---|---|

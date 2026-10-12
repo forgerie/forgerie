@@ -49,7 +49,7 @@ These checks prove API and runtime behavior. They do not prove browser controls 
 
 The browser suite uses happy-dom for DOM behavior. It does not prove layout, clipping, scroll geometry, or real device behavior.
 
-Use the UI's production components and fixture APIs for previews. Do not intercept network requests or replace a production renderer with a copied mockup. `ui/gates/` checks component ownership, parts, tokens, and decomposition. Remove a pending entry when its offence disappears; never add an entry to hide a new offence. See [UI decomposition](../ui/docs/decomposition.md).
+Use the UI's production components and fixture APIs for previews. Do not intercept network requests or replace a production renderer with a copied mockup. `ui/gates/` checks component ownership, parts, tokens, and decomposition. Remove a pending entry when its offence disappears; never add an entry to hide a new offence.
 
 For posture captures, start an isolated browser-app dev server. Use the repository's CDP posture runner, not Chromium window sizing:
 
