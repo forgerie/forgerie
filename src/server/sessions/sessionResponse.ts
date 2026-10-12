@@ -18,19 +18,19 @@ export interface ResponseProjection {
 }
 export const EMPTY_RESPONSE: ResponseProjection = { response: { kind: "none" } };
 const Option = Type.Object({ value: Type.String(), label: Type.String(), detail: Type.Optional(Type.String()) });
-const Question = Type.Object({ id: Type.String(), question: Type.String(), detail: Type.Optional(Type.String()), options: Type.Array(Option), multiple: Type.Optional(Type.Boolean()) });
-const Ask = Type.Object({ askId: Type.String(), askedAt: Type.String(), questions: Type.Array(Question, { minItems: 1 }) });
-const Outcome = Type.Object({
+export const ParentAskQuestionSchema = Type.Object({ id: Type.String(), question: Type.String(), detail: Type.Optional(Type.String()), options: Type.Array(Option), multiple: Type.Optional(Type.Boolean()) });
+export const PendingParentAskSchema = Type.Object({ askId: Type.String(), askedAt: Type.String(), questions: Type.Array(ParentAskQuestionSchema, { minItems: 1 }) });
+export const ParentAskOutcomeSchema = Type.Object({
   askId: Type.String(), reason: Type.Union([Type.Literal("submitted"), Type.Literal("cancelled"), Type.Literal("superseded"), Type.Literal("answered-in-chat")]),
   askedAt: Type.String(), closedAt: Type.String(),
-  questions: Type.Array(Type.Object({ question: Question, answered: Type.Boolean(), values: Type.Array(Type.String()), otherText: Type.Optional(Type.String()) })),
+  questions: Type.Array(Type.Object({ question: ParentAskQuestionSchema, answered: Type.Boolean(), values: Type.Array(Type.String()), otherText: Type.Optional(Type.String()) })),
   answeredCount: Type.Number(), unansweredIds: Type.Array(Type.String()), summary: Type.String(),
 });
 export const SessionResponseEventSchema = Type.Union([
   Type.Object({ version: Type.Literal(1), kind: Type.Literal("started") }),
   Type.Object({ version: Type.Literal(1), kind: Type.Literal("declared"), awaiting: Type.Union([Type.Literal("nothing"), Type.Literal("reply")]) }),
-  Type.Object({ version: Type.Literal(1), kind: Type.Literal("asked"), ask: Ask, superseded: Type.Optional(Outcome) }),
-  Type.Object({ version: Type.Literal(1), kind: Type.Literal("answered"), outcome: Outcome }),
+  Type.Object({ version: Type.Literal(1), kind: Type.Literal("asked"), ask: PendingParentAskSchema, superseded: Type.Optional(ParentAskOutcomeSchema) }),
+  Type.Object({ version: Type.Literal(1), kind: Type.Literal("answered"), outcome: ParentAskOutcomeSchema }),
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,7 +74,7 @@ export function responseAfterEntry(current: ResponseProjection, raw: unknown): R
       if (current.protocol === true) return current;
       const details = record(message["details"]);
       const ask = details?.["ask"];
-      if (Check(Ask, ask)) return { response: { kind: "needs-response", reason: "questions" }, pendingAsk: ask };
+      if (Check(PendingParentAskSchema, ask)) return { response: { kind: "needs-response", reason: "questions" }, pendingAsk: ask };
     }
   }
   if (entry["type"] === "custom_message" && entry["customType"] === ASK_USER_ANSWERS_CUSTOM_TYPE) {
