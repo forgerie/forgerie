@@ -1,4 +1,6 @@
-import type { SessionTreeSnapshot } from "../../shared/apiTypes.js";
+import type { DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
+import type { DurableBrowserAttachment } from "./durableParentReadModel.js";
+import type { SessionRef, SessionTreeSnapshot } from "../../shared/apiTypes.js";
 import type { DurableSessionAddress } from "./durableSessionAddress.js";
 import type { DurableNativeHistory } from "./durableNativeHistory.js";
 import type { DurableParentState } from "./durableParentState.js";
@@ -14,4 +16,9 @@ export interface DurableParentReader {
 export interface DurableParentMutations {
   readonly parentState: DurableParentState;
   flushDurableMutations(): Promise<void>;
+}
+
+/** Opt-in transport capability while the mixed-store reader is composed at daemon startup. */
+export interface DurableBrowserSessionService {
+  attachDurableBrowser(ref: SessionRef, send: (snapshot: DurableBrowserSnapshot) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment>;
 }

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { clampThinkingLevel, getSupportedThinkingLevels, type AssistantMessage, type ImageContent } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, getSupportedThinkingLevels, type AssistantMessage, type ImageContent, type Message } from "@earendil-works/pi-ai";
 import { ExtensionRunner, ModelRegistry, convertToLlm, createLocalBashOperations, createSyntheticSourceInfo, estimateTokens, type AgentSessionServices, type BuildSystemPromptOptions, type ExtensionUIContext, type PromptOptions, type SessionManager, type SessionStartEvent, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult, type Submission } from "@earendil-works/pi-durable";
 import type { DurableSessionAddress, DurableSessionHandle } from "./durableSessionAddress.js";
@@ -11,6 +11,7 @@ import type { SessionTreeSnapshot } from "../../shared/apiTypes.js";
 import type { PromptRequestOptions } from "../../shared/promptRequest.js";
 import type { PiAgentSession } from "./piSessionService.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
+import { durableUsageTotals } from "./durableParentReadModel.js";
 import { DurableSdkTools } from "./durableSdkTools.js";
 import { formatSkillInvocation } from "./commandCatalog.js";
 import { buildSdkSystemPrompt, executeSdkBash, expandSdkPrompt } from "./durableSdkPresentation.js";
@@ -65,6 +66,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private queued: readonly InboxItem[] = [];
   private mutation: Promise<void> = Promise.resolve();
   private systemPrompt = "";
+  private modelContext: readonly Message[] | undefined;
+  private preparedContextTokens: number | undefined;
   private basePrompt: BuildSystemPromptOptions;
   private closed = false;
   private bound = false;
@@ -153,7 +156,10 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
           await this.mutation;
           this.journal.assertOwned();
           await this.journal.project();
-          return { messages: convertToLlm(await this.extensionRunner.emitContext([...request.messages])) };
+          const messages = convertToLlm(await this.extensionRunner.emitContext([...request.messages]));
+          // This existing boundary runs emitContext exactly once, including context supplied by extensions.
+          this.preparedContextTokens = messages.reduce((total, message) => total + estimateTokens(message), 0);
+          return { messages };
         },
         afterResponse: async (message) => {
           const replaced = await this.extensionRunner.emitMessageEnd({ type: "message_end", message });
@@ -438,6 +444,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (state.status === "queued") { this.queued = (await this.journal.harness.snapshot(InboxDoc, this.journal.conversation.id, context))?.items ?? []; return; }
     await submission.wait(context);
     await this.journal.project();
+    await this.refreshDurableReads();
   }
 
   async sendCustomMessage(message: { customType: string; content: string | ({ type: "text"; text: string } | ImageContent)[]; display: boolean; details?: unknown }, options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void> {
@@ -488,6 +495,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (id !== undefined) await (await this.journal.harness.submission(id, context))?.wait(context);
     const view = await this.journal.conversation.context(context);
     const summary = view.head?.model?.flatMap((message) => message.role === "user" ? typeof message.content === "string" ? [message.content] : message.content.flatMap((part) => part.type === "text" ? [part.text] : []) : []).join("\n") ?? "";
+    await this.refreshDurableReads();
+    this.preparedContextTokens = undefined;
     const firstKeptEntryId = this.sessionManager.appendCompaction(summary, this.sessionManager.getLeafId(), tokensBefore);
     return { summary, tokensBefore, firstKeptEntryId };
   }
@@ -546,22 +555,27 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   }
   getSessionStats(): ReturnType<PiAgentSession["getSessionStats"]> {
     const messages = this.messages;
-    const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
-    let cost = 0;
     // Compaction and failed/aborted attempts need not have transcript messages. pi.usage owns spend.
-    const usage = this.journal.usage;
-    for (const value of [...Object.values(usage.models), ...Object.values(usage.tools)]) {
-      tokens.input += value.input; tokens.output += value.output; tokens.cacheRead += value.cacheRead; tokens.cacheWrite += value.cacheWrite;
-      tokens.total += value.totalTokens; cost += value.cost.total;
-    }
+    const { tokens, cost } = durableUsageTotals(this.journal.usage);
     return { sessionId: this.sessionId, totalMessages: messages.length, userMessages: messages.filter((message) => message.role === "user").length,
       assistantMessages: messages.filter((message) => message.role === "assistant").length,
       toolCalls: messages.reduce((count, message) => count + (message.role === "assistant" ? message.content.filter((part) => part.type === "toolCall").length : 0), 0), tokens, cost };
   }
+  async refreshDurableReads(): Promise<void> {
+    this.modelContext = (await this.journal.conversation.context(context)).messages;
+  }
   getContextUsage() {
-    if (this.model === undefined) return undefined;
-    const tokens = this.messages.reduce((total, message) => total + estimateTokens(message), 0);
-    return { tokens, contextWindow: this.model.contextWindow, percent: this.model.contextWindow === 0 ? null : tokens / this.model.contextWindow * 100 };
+    if (this.model === undefined || this.modelContext === undefined) return undefined;
+    const preparedTokens = this.isStreaming ? this.preparedContextTokens : undefined;
+    const prepared = preparedTokens !== undefined;
+    // Reset/compaction may remove every positional system entry. Request preparation adds the
+    // current prompt and tools again; include those known inputs without rerunning emitContext.
+    const active = new Set(this.tools.getActive());
+    const tools = this.tools.getDefinitions().filter((tool) => active.has(tool.name)).map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }));
+    const promptTokens = this.modelContext.some((message) => message.role === "system") ? 0 : Math.ceil((this.systemPrompt.length + JSON.stringify(tools).length) / 4);
+    const tokens = preparedTokens ?? this.modelContext.reduce((total, message) => total + estimateTokens(message), promptTokens);
+    return { tokens, contextWindow: this.model.contextWindow, percent: this.model.contextWindow === 0 ? null : tokens / this.model.contextWindow * 100,
+      estimate: prepared ? "prepared-request" as const : "next-request" as const };
   }
 
   async navigateTree(targetId: string, options?: { summarize?: boolean; customInstructions?: string }) {
@@ -618,11 +632,13 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     await this.stream?.stop();
     await this.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     this.extensionRunner.invalidate("Durable session closed");
+    this.modelContext = undefined; this.preparedContextTokens = undefined;
     this.listeners.clear();
   }
 
   private async applyEvent(event: AgentEvent): Promise<void> {
     await this.journal.project();
+    await this.refreshDurableReads();
     if (event.type === "snapshot" || event.type === "run_start") {
       const input = (event.type === "snapshot" ? event.run?.inputs : event.inputs)?.[0];
       this.runStartedAt = undefined;
@@ -651,7 +667,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
         break;
       case "run_start": this.streaming = true; this.emit({ type: "agent_start" }); await this.extensionRunner.emit({ type: "agent_start" }); break;
       case "run_end":
-        this.streaming = false; this.runStartedAt = undefined; this.partial = undefined;
+        this.streaming = false; this.runStartedAt = undefined; this.partial = undefined; this.preparedContextTokens = undefined;
         this.emit({ type: "agent_end", messages: this.messages, willRetry: false });
         await this.extensionRunner.emit({ type: "agent_end", messages: this.messages });
         this.emit({ type: "agent_settled", aborted: false }); await this.extensionRunner.emit({ type: "agent_settled", aborted: false });

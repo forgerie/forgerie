@@ -1,3 +1,5 @@
+import type { DurableBrowserSessionService } from "./durableParentContracts.js";
+import type { DurableBrowserAttachment } from "./durableParentReadModel.js";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { parseUserSessionStart, type UserSessionWorktrees } from "../workspaces/sessionWorktreeRoutes.js";
 import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, SESSION_TABS_PER_SESSION_LIMIT, SESSION_TABS_TOOL_ID_MAX_LENGTH, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type AskUserAnswer, type AskUserSubmission, type ExtensionDialogAnswerRequest, type ExtensionDialogCancelRequest, type PromptResourceCommandIdentity, type SessionBulkMutationRequest, type SessionBulkMutationRef, type SessionCleanupRequest, type SessionTreeForkRequest, type SessionTreeNavigateRequest, type SessionTreeSummaryChoice, type SessionUnreadAcknowledgeRequest } from "../../shared/apiTypes.js";
@@ -12,6 +14,7 @@ import { composeDiffAnnotationPrompt } from "./promptDiffAnnotations.js";
 
 interface SessionQuery {
   cwd?: string;
+  native?: string;
 }
 
 interface MessageQuery extends SessionQuery {
@@ -47,7 +50,7 @@ const MAX_NOTIFICATION_CWD_LENGTH = 32 * 1024;
 const MAX_NOTIFICATION_DAEMON_ID_LENGTH = 512;
 const MAX_NOTIFICATION_ID_LENGTH = 1024;
 
-export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRouteService, eventHub: SessionEventHub, prefix = "", userSessions?: UserSessionWorktrees): void {
+export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRouteService & Partial<DurableBrowserSessionService>, eventHub: SessionEventHub, prefix = "", userSessions?: UserSessionWorktrees): void {
   app.get<{ Querystring: SessionQuery }>(`${prefix}/sessions`, async (request, reply) => {
     if (request.query.cwd === undefined || request.query.cwd === "") return reply.code(400).send({ error: "cwd query parameter is required" });
     try {
@@ -567,6 +570,24 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
   });
 
   app.get<{ Params: { sessionId: string }; Querystring: SessionQuery }>(`${prefix}/sessions/:sessionId/events`, { websocket: true }, (socket, request) => {
+    if (request.query.native === "1") {
+      let attachment: DurableBrowserAttachment | undefined;
+      let closed = false;
+      const fail = (error: Error) => { request.log.error({ err: error }, "Native Durable browser attachment failed"); socket.terminate(); };
+      socket.on("close", () => {
+        closed = true;
+        void attachment?.stop().catch((error: unknown) => { request.log.error({ err: error }, "Native Durable browser detach failed"); });
+      });
+      try {
+        if (request.query.cwd === undefined || sessions.attachDurableBrowser === undefined) throw new Error("Native Durable events require cwd and a configured reader");
+        const ref = { id: request.params.sessionId, cwd: normalizeRequestCwd(request.query.cwd) };
+        void sessions.attachDurableBrowser(ref, (snapshot) => eventHub.sendDurableSnapshot(socket, snapshot), fail).then(async (attached) => {
+          attachment = attached;
+          if (closed) await attached.stop();
+        }).catch((error: unknown) => { fail(error instanceof Error ? error : new Error(String(error))); });
+      } catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
+      return;
+    }
     // Only the id matters for event subscription; cwd is intentionally ignored
     // so a malformed value cannot throw inside the websocket handler.
     eventHub.add(request.params.sessionId, socket);

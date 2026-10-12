@@ -19,7 +19,7 @@ afterEach(async () => {
   await Promise.all(sessions.splice(0).map((session) => session.close()));
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
-async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[], skillFile?: string, keepRecentTokens = 20_000, priced = false, extensionTools: NonNullable<Parameters<typeof DurableAgentSession.open>[0]["customTools"]> = []) {
+async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[0]["customTools"] = [], codemode = false, defaultTools?: string[], skillFile?: string, keepRecentTokens = 20_000, priced = false, extensionTools: NonNullable<Parameters<typeof DurableAgentSession.open>[0]["customTools"]> = [], contextAppendix?: string) {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-session-"));
   directories.push(directory);
   if (skillFile !== undefined) {
@@ -36,11 +36,19 @@ async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[
   } } : provider.provider);
   const model = modelRuntime.getModel("faux", "faux-1");
   if (model === undefined) throw new Error("Configured provider must have a model");
+  let contextCalls = 0;
   const services = await createAgentSessionServices({ cwd: directory, agentDir: join(directory, "agent"), modelRuntime,
     resourceLoaderOptions: { noExtensions: true, noSkills: true, noContextFiles: true, noPromptTemplates: true,
       ...(skillFile === undefined ? {} : { additionalSkillPaths: [join(directory, "skills", "handoff", "SKILL.md")] }),
       extensionFactories: [...(codemode ? [{ name: "codemode", factory: createCodemodeExtension() }] : []),
-        { name: "registered-test-tools", factory(pi) { for (const tool of extensionTools) pi.registerTool(tool); } }], } });
+        { name: "registered-test-tools", factory(pi) {
+          for (const tool of extensionTools) pi.registerTool(tool);
+          pi.on("context", (event) => {
+            contextCalls++;
+            if (contextAppendix !== undefined) return { messages: [...event.messages, { role: "user", content: contextAppendix, timestamp: 1 }] };
+            return undefined;
+          });
+        } }], } });
   services.settingsManager.applyOverrides({ compaction: { enabled: false, keepRecentTokens }, ...(defaultTools === undefined ? codemode ? { defaultTools: ["read", "bash", "edit", "write", "+codemode"] } : {} : { defaultTools }) });
   const manager = SessionManager.create(directory, join(directory, "sessions"));
   const session = await DurableAgentSession.open({ services, sessionManager: manager, initialModel: model, customTools });
@@ -49,7 +57,7 @@ async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[
   const errors: string[] = [];
   session.subscribe((event) => events.push(event));
   await session.bindExtensions({ onError: (error) => errors.push(error.error) });
-  return { directory, provider, manager, session, events, errors, services };
+  return { directory, provider, manager, session, events, errors, services, contextCalls: () => contextCalls };
 }
 
 function ends(events: readonly unknown[]): { role: unknown; content: unknown }[] {
@@ -185,6 +193,52 @@ describe("SDK-compatible Durable execution", () => {
     await session.journal.conversation.configure({ thinkingLevel: "low" }, context);
     await vi.waitFor(() => { expect(events).toContainEqual(expect.objectContaining({ type: "agent_changed" })); });
     await session.abort();
+  });
+
+  it("estimates committed model context after compaction rather than the full display history", async () => {
+    const { provider, session } = await fixture([], false, undefined, undefined, 100);
+    provider.setResponses([fauxAssistantMessage("A long answer. ".repeat(400)), fauxAssistantMessage("A second answer."), fauxAssistantMessage("A short summary.")]);
+    await session.prompt("Remember these details. ".repeat(400));
+    await session.prompt("What next?");
+    const before = session.getContextUsage();
+    await session.compact();
+    const { estimateTokens } = await import("@earendil-works/pi-coding-agent");
+    const native = await session.journal.conversation.context(context);
+    const tools = (await session.journal.conversation.agent(context)).tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }));
+    const prompt = session.extensionRunner.createCommandContext().getSystemPrompt();
+    const promptTokens = native.messages.some((message) => message.role === "system") ? 0 : Math.ceil((prompt.length + JSON.stringify(tools).length) / 4);
+    const expected = native.messages.reduce((total, message) => total + estimateTokens(message), promptTokens);
+    expect(session.getContextUsage()).toMatchObject({ tokens: expected, estimate: "next-request" });
+    expect(expected).toBeLessThan(before?.tokens ?? 0);
+    // A status read must not prepare a request or call the provider again.
+    session.getContextUsage(); session.getContextUsage();
+    expect(provider.state.callCount).toBe(3);
+  });
+
+  it("records the prepared extension-adjusted estimate without running context hooks during status reads", async () => {
+    const { session, provider, contextCalls } = await fixture([], false, undefined, undefined, undefined, false, [], "Injected context. ".repeat(1000));
+    expect(session.getContextUsage()).toMatchObject({ estimate: "next-request" });
+    expect(session.getContextUsage()?.tokens).toBeGreaterThan(0);
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    provider.setResponses([async () => { enter(); await held; return fauxAssistantMessage("done"); }]);
+    const running = session.prompt("start");
+    try {
+      await entered;
+      await vi.waitFor(() => { expect(session.isStreaming).toBe(true); });
+      await session.refreshDurableReads();
+      const { estimateTokens } = await import("@earendil-works/pi-coding-agent");
+      const native = await session.journal.conversation.context(context);
+      const nativeTokens = native.messages.reduce((total, message) => total + estimateTokens(message), 0);
+      const usage = session.getContextUsage();
+      expect(usage).toMatchObject({ estimate: "prepared-request" });
+      expect(usage?.tokens).toBeGreaterThan(nativeTokens);
+      session.getContextUsage(); session.getContextUsage();
+      expect(contextCalls()).toBe(1);
+      expect(provider.state.callCount).toBe(1);
+    } finally { release(); await running; }
   });
 
   it("executes the SDK read tool through Durable and saves the transcript", async () => {

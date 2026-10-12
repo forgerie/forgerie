@@ -26,6 +26,9 @@ import {
   type ResourceDiagnostic,
 } from "@earendil-works/pi-coding-agent";
 import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientNewSessionModelSelection, ClientSession, ClientSessionCleanupExecuteResponse, ClientSessionCleanupPreviewResponse, ClientSessionModel, ClientSessionStatus, ClientSessionTreeForkRequest, ClientSessionTreeForkResult, ClientSessionTreeNavigateRequest, ClientSessionTreeNavigateResult, ClientThinkingLevel, SessionStreamSnapshot, SessionUiEvent } from "../types.js";
+import type { DurableSessionReader } from "./durableSessionReader.js";
+import type { DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
+import type { DurableBrowserAttachment } from "./durableParentReadModel.js";
 import { DurableAgentSession } from "./durableAgentSession.js";
 import type { DurableChildHost } from "./durableChildHost.js";
 import { recoverDurableSessions, type DurableRecoveryReport } from "./durableSessionRecovery.js";
@@ -932,6 +935,7 @@ function createPiWebEditToolDefinition(cwd: string) {
 }
 
 export interface PiSessionServiceDependencies {
+  durableReader?: DurableSessionReader;
   agentDir: string;
   sessionSearch?: Pick<SessionSearchService, "refreshFile" | "scan">;
   sessionManager: PiSessionManagerGateway;
@@ -1094,6 +1098,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly sessionSearch: PiSessionServiceDependencies["sessionSearch"];
   private readonly pullRequestWatches: PiSessionServiceDependencies["pullRequestWatches"];
   private readonly sessionManager: PiSessionManagerGateway;
+  private readonly durableReader: DurableSessionReader | undefined;
   private readonly sessionWorktrees: SessionWorktrees | undefined;
   private readonly createRuntime: PiWebCreateAgentSessionRuntimeFactory;
   private readonly createAgentRuntime: CreateAgentRuntime;
@@ -1127,6 +1132,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly issueProposals: IssueProposals | undefined;
 
   constructor(private readonly events: SessionEventHub, deps: PiSessionServiceDependencies) {
+    this.durableReader = deps.durableReader;
     const prepare = deps.github?.prepareIssue;
     const create = deps.github?.createIssue;
     this.issueProposals = prepare === undefined || create === undefined ? undefined : new IssueProposals({ prepare, create });
@@ -1349,6 +1355,7 @@ export class PiSessionService implements SessionRouteService {
 
   async dispose(): Promise<void> {
     this.stopping = true;
+    await this.durableReader?.close();
     this.unreadPublicationStopped = true;
     this.clearUnreadPublicationRetry();
     clearInterval(this.heartbeat);
@@ -2523,12 +2530,21 @@ export class PiSessionService implements SessionRouteService {
     return positions;
   }
 
+  async attachDurableBrowser(ref: PiSessionRef, send: (snapshot: DurableBrowserSnapshot) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment> {
+    if (this.durableReader === undefined) throw new Error("Native Durable browser reads are not configured");
+    return this.durableReader.attach(ref, send, onFailure);
+  }
+
   async messages(ref: PiSessionRef, page?: { before?: number; limit?: number }): Promise<ClientMessagePage> {
+    const native = await this.durableReader?.messages(ref, page);
+    if (native !== undefined) return native;
     const sessionManager = await this.historySessionManager(ref);
     return pageMessagesAtSafeBoundary(historyMessages(sessionManager), page);
   }
 
   async tree(ref: PiSessionRef): Promise<SessionTreeResponse> {
+    const native = await this.durableReader?.tree(ref);
+    if (native !== undefined) return { tree: native };
     const manager = await this.historySessionManager(ref, (path) => {
       if (this.sessionManager.openReadOnly === undefined) throw new Error("Read-only session loading is not available with this Pi runtime");
       return this.sessionManager.openReadOnly(path);
@@ -2551,7 +2567,9 @@ export class PiSessionService implements SessionRouteService {
         ...savedTranscriptUsage(messages),
       };
     }
-    const status = this.statusFromSession(await this.sessionForStatusOrDialogClose(ref));
+    const session = await this.sessionForStatusOrDialogClose(ref);
+    if (session instanceof DurableAgentSession) await session.refreshDurableReads();
+    const status = this.statusFromSession(session);
     const worktree = await this.sessionWorktrees?.store.forSession(ref);
     return worktree === undefined || worktrees === undefined ? status : { ...status, worktree: await worktrees.info(worktree, status.sessionId) };
   }
