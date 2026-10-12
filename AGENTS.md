@@ -118,7 +118,8 @@ tracks `main` without a NixOS rebuild.
 - Web research is built in: Forgerie bundles exact, unpatched `pi-web-access`
   0.39.0 in every hosted session (`src/server/sessions/bundledWebAccess.ts`).
   Its four tools are `web_search`, `fetch_content`, `get_search_content`, and
-  `source_check`. No config uses keyless Exa and `workflow: "none"` (no browser).
+  `source_check`. Without a `web-search.json`, search uses keyless Exa and
+  `workflow: "none"` (no browser).
   `web-search.json` in the Pi profile configures providers; Forgerie never writes
   it. Profile copies are dropped with a warning. Other extensions lose only
   conflicting web tools and keep their other tools. Upgrade the exact pin, then

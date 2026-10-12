@@ -23,7 +23,7 @@ Search queries go to external search providers. Fetched pages and results are ca
 
 The default workflow is `"none"`: searches return results without opening a browser or starting the curator. `"auto-summary"` also avoids the browser, but summary generation can use model credentials.
 
-`/curator off` keeps this default. `/curator on` selects `"summary-review"`. `/websearch` explicitly opens the separate curator, even when the default workflow is `"none"`. These commands are not unsupported by the package on remote hosts: `curatorRemote` can publish a manual URL instead of calling `xdg-open` on the server.
+`/curator off` keeps this default. `/curator on` selects `"summary-review"`. `/websearch` explicitly opens the separate curator, even when the default workflow is `"none"`. The remote curator works through `curatorRemote`, but it is untested from a real Tailscale client.
 
 For remote use, configure an actual server Tailscale IP and its matching hostname in the profile:
 
