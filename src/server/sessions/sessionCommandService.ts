@@ -291,7 +291,9 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     const leafId = active.runtime.session.sessionManager.getLeafId();
     if (leafId === null || leafId === "") return { type: "unsupported", message: "Cannot clone: no current session entry" };
     const result = await this.runSessionReplacement(active.runtime, async () => {
-      const cloneResult = await active.runtime.fork(leafId, { position: "at" });
+      const admittedLeafId = active.runtime.session.sessionManager.getLeafId();
+      if (admittedLeafId === null || admittedLeafId === "") throw new Error("Cannot clone: no current session entry");
+      const cloneResult = await active.runtime.fork(admittedLeafId, { position: "at" });
       if (!cloneResult.cancelled) {
         this.tryNameRelatedSession(active.runtime.session, cloneName);
         await this.lifecycle.onUserFork?.(active.runtime.session);

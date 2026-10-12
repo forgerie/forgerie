@@ -3,7 +3,7 @@ import type { Conversation, ConversationId, EntryId, Harness } from "@earendil-w
 import { isAbsolute } from "node:path";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
-import { boundConversationId } from "./durableSessionBindings.js";
+import { boundConversationId, readSessionBindings } from "./durableSessionBindings.js";
 
 export const DurableSessionAddressSchema = Type.Object({
   journalId: Type.String({ minLength: 1 }),
@@ -37,6 +37,16 @@ export type DurableEntryTarget = {
   entryId: EntryId;
   messageIndex: number;
 };
+
+/** Rebuild a missed catalog publication from committed family bindings. Never schedule work. */
+export async function durableFamilyAddresses(handle: DurableSessionHandle, context: Context): Promise<DurableSessionAddress[]> {
+  const state = await readSessionBindings(handle.harness, context);
+  if (state.journalId !== handle.address.journalId) throw new Error("Foreign Durable journal identity");
+  return Object.entries(state.sessions).map(([sessionId, binding]) => ({
+    databasePath: handle.address.databasePath, journalId: state.journalId, sessionId,
+    conversationId: boundConversationId(binding.conversationId),
+  }));
+}
 
 export interface DurableSessionHandle {
   readonly address: DurableSessionAddress;

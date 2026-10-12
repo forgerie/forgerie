@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, ProviderDoc, UsageDoc } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { DurableJournalPool } from "./durableJournalPool.js";
 import { acquireDurableOwnership } from "./durableOwnership.js";
 import { SessionBindings } from "./durableSessionBindings.js";
+import { createDurableNativeHistory, durableEntryPresentationId } from "./durableNativeHistory.js";
 
 it("shares one owner across logical sessions, releases leases independently, and reopens bindings", async () => {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-family-"));
@@ -40,5 +42,39 @@ it("shares one owner across logical sessions, releases leases independently, and
     expect(await reopenedParent.conversation.agent(context)).toMatchObject({ instructions: "historical" });
     await reopenedParent.release(context);
     await reopenedSibling.release(context);
+  } finally { await pool.close(context); await rm(directory, { recursive: true, force: true }); }
+});
+
+it("keeps a sibling's provider run alive when the parent lease closes and never charges inherited spend", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "forgerie-family-running-"));
+  const pool = new DurableJournalPool();
+  const provider = fauxProvider();
+  const models = createModels();
+  models.setProvider(provider.provider);
+  const options = { models, registry: createRegistry() };
+  let finish: (value: ReturnType<typeof fauxAssistantMessage>) => void = () => { throw new Error("Provider has not started"); };
+  let started: () => void = () => { throw new Error("Missing provider gate"); };
+  const running = new Promise<void>((resolve) => { started = resolve; });
+  provider.setResponses([fauxAssistantMessage("paid parent answer"), () => new Promise((resolve) => { finish = resolve; started(); })]);
+  try {
+    const parent = await pool.acquire({ databasePath: join(directory, "state.sqlite"), sessionId: "parent", create: { model: { provider: "faux", modelId: "faux-1" } } }, options, context);
+    await (await parent.conversation.submit({ type: "input", content: "parent turn" }, context)).wait(context);
+    const tip = (await parent.conversation.entries({}, 1, undefined, context)).items[0];
+    if (tip === undefined) throw new Error("Missing parent tip");
+    const parentUsage = await parent.harness.snapshot(UsageDoc, parent.conversation.id, context);
+    expect(Object.keys(parentUsage?.models ?? {})).not.toHaveLength(0);
+    const history = createDurableNativeHistory(parent, { acquire: (address, ctx) => pool.acquireCandidate(address, options, ctx) });
+    const fork = (await history.fork(durableEntryPresentationId(parent.address.journalId, tip, 0), "at", "fork", context)).handle;
+    expect(await fork.harness.snapshot(UsageDoc, fork.conversation.id, context)).toEqual({ models: {}, tools: {} });
+    const answer = await fork.conversation.submit({ type: "input", content: "sibling turn" }, context);
+    await running;
+    await parent.release(context);
+    finish(fauxAssistantMessage("sibling survived"));
+    expect((await answer.wait(context)).status).toBe("done");
+    expect(provider.state.callCount).toBe(2);
+    await fork.release(context);
+    const reopened = await pool.acquire(fork.address, options, context);
+    expect((await reopened.conversation.context(context)).messages.at(-1)).toMatchObject({ role: "assistant", content: [{ type: "text", text: "sibling survived" }] });
+    await reopened.release(context);
   } finally { await pool.close(context); await rm(directory, { recursive: true, force: true }); }
 });

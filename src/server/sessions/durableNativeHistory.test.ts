@@ -1,0 +1,53 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
+import { createModels } from "@earendil-works/pi-ai/models";
+import { createRegistry, ProviderDoc, UsageDoc } from "@earendil-works/pi-durable";
+import { expect, it } from "vitest";
+import { DurableJournalPool } from "./durableJournalPool.js";
+import { createDurableNativeHistory, durableEntryPresentationId } from "./durableNativeHistory.js";
+import { readSessionBindings } from "./durableSessionBindings.js";
+
+it("forks native boundaries, keeps historical agents and identities, rejects invalid and mid-entry cuts", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "forgerie-native-fork-"));
+  const pool = new DurableJournalPool();
+  const options = { models: createModels(), registry: createRegistry() };
+  try {
+    const parent = await pool.acquire({ databasePath: join(directory, "state.sqlite"), sessionId: "parent", create: { instructions: "old agent" } }, options, context);
+    const first = await parent.conversation.commit((tx) => tx.appendEntry(parent.conversation.id, { kind: "pi.user", model: [{ role: "user", content: "draft", timestamp: 1 }] }), context);
+    await parent.conversation.configure({ instructions: "new agent" }, context);
+    const multiple = await parent.conversation.commit((tx) => tx.appendEntry(parent.conversation.id, { kind: "test.multi", model: [{ role: "user", content: "one", timestamp: 2 }, { role: "user", content: "two", timestamp: 3 }] }), context);
+    const history = createDurableNativeHistory(parent, { acquire: (address, ctx) => pool.acquireCandidate(address, options, ctx) });
+    const firstId = durableEntryPresentationId(parent.address.journalId, first, 0);
+    await expect(history.resolve("unknown", context)).rejects.toThrow();
+    const empty = await history.fork(firstId, "before", "empty", context);
+    expect(empty.selectedText).toBe("draft");
+    expect((await empty.handle.conversation.context(context)).messages).toEqual([]);
+    expect((await empty.handle.conversation.agent(context)).instructions).toBe("old agent");
+    const at = await history.fork(firstId, "at", "at", context);
+    expect((await at.handle.conversation.context(context)).messages).toHaveLength(1);
+    expect((await at.handle.conversation.agent(context)).instructions).toBe("old agent");
+    expect(await at.handle.harness.snapshot(UsageDoc, at.handle.conversation.id, context)).toEqual({ models: {}, tools: {} });
+    expect(await at.handle.harness.snapshot(ProviderDoc, at.handle.conversation.id, context)).not.toEqual(await parent.harness.snapshot(ProviderDoc, parent.conversation.id, context));
+    const inherited = createDurableNativeHistory(at.handle, { acquire: (address, ctx) => pool.acquireCandidate(address, options, ctx) });
+    expect(await inherited.resolve(firstId, context)).toMatchObject({ conversationId: first.conversationId, entryId: first.id });
+    await expect(inherited.resolve(durableEntryPresentationId(parent.address.journalId, multiple, 0), context)).rejects.toThrow();
+    await expect(history.fork(durableEntryPresentationId(parent.address.journalId, multiple, 1), "before", "middle", context)).rejects.toThrow("mid-entry");
+    const clone = await history.fork(durableEntryPresentationId(parent.address.journalId, multiple, 1), "at", "clone", context);
+    expect((await clone.handle.conversation.context(context)).messages).toHaveLength(3);
+    expect((await clone.handle.conversation.agent(context)).instructions).toBe("new agent");
+    const before = await readSessionBindings(parent.harness, context);
+    const cancelled = createDurableNativeHistory(parent, { acquire: (address, ctx) => pool.acquireCandidate(address, options, ctx), summarize: () => Promise.resolve({ cancelled: true }) });
+    expect((await cancelled.select(firstId, { summarize: true }, context)).cancelled).toBe(true);
+    expect(await readSessionBindings(parent.harness, context)).toEqual(before);
+    const failed = createDurableNativeHistory(parent, { acquire: (address, ctx) => pool.acquireCandidate(address, options, ctx), validateCandidate: () => Promise.reject(new Error("candidate failed")) });
+    await expect(failed.select(firstId, {}, context)).rejects.toThrow("candidate failed");
+    expect((await readSessionBindings(parent.harness, context)).sessions["parent"]?.conversationId).toBe(parent.conversation.id);
+    const selected = await history.select(firstId, {}, context);
+    expect(selected.cancelled).toBe(false);
+    expect((await selected.handle.conversation.context(context)).messages).toEqual([]);
+    expect((await history.tree(context)).nodes.some((node) => node.id === firstId)).toBe(true);
+    await Promise.all([empty.handle, at.handle, clone.handle, selected.handle, parent].map((handle) => handle.release(context)));
+  } finally { await pool.close(context); await rm(directory, { recursive: true, force: true }); }
+});

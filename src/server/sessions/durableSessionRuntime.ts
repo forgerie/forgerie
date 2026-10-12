@@ -1,11 +1,17 @@
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { Context } from "@earendil-works/chord";
+import type { DurableNativeHistory } from "./durableNativeHistory.js";
 import { SessionManager, type SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import type { PiAgentSession, PiSessionRuntime } from "./piSessionService.js";
 import { DurableAgentSession } from "./durableAgentSession.js";
 
 export interface DurableRuntimeOptions {
   handle?: DurableSessionHandle;
+  /** Cohort cutover gate. Enable after conversation-specific SDK dispatch and cache binding are wired. */
+  nativeForks?: true;
   cwd: string;
   agentDir: string;
   sessionManager: SessionManager;
@@ -40,6 +46,7 @@ export class DurableSessionRuntime implements PiSessionRuntime {
     const position = options?.position ?? "before";
     const before = await this.session.extensionRunner.emit({ type: "session_before_fork", entryId, position });
     if (before?.cancel === true) return { cancelled: true };
+    if (this.options.nativeForks === true || this.options.handle !== undefined) return this.forkNative(entryId, position);
     const manager = this.session.sessionManager;
     const entry = manager.getEntry(entryId);
     if (entry === undefined) throw new Error("Invalid entry ID for forking");
@@ -68,6 +75,34 @@ export class DurableSessionRuntime implements PiSessionRuntime {
     await this.rebind?.(this.session);
     return { cancelled: false, ...(selectedText === undefined ? {} : { selectedText }) };
   }
+  private async forkNative(entryId: string, position: "before" | "at"): Promise<{ cancelled: boolean; selectedText?: string }> {
+    const outgoing = this.result;
+    const previousSessionFile = outgoing.session.sessionFile;
+    const native = await createNativeForkCandidate(outgoing.session.journal.nativeHistory, entryId, position, randomUUID(), BACKGROUND_CONTEXT, async (handle) => {
+      const manager = SessionManager.create(this.cwd, outgoing.session.sessionManager.getSessionDir(), { id: handle.address.sessionId });
+      const candidate = await this.create({ ...this.options, handle, nativeForks: true, sessionManager: manager,
+        sessionStartEvent: { type: "session_start", reason: "fork", ...(previousSessionFile === undefined ? {} : { previousSessionFile }) } });
+      if (candidate.session.journal.handle.conversation.id !== handle.conversation.id || candidate.session.journal.harness !== handle.harness) {
+        await this.closeResult(candidate);
+        throw new Error("Runtime factory did not bind the native candidate handle");
+      }
+      return candidate;
+    });
+    try {
+      // Rebind while the outgoing lease still exists. Failed candidate construction or
+      // rebind cannot invalidate the original session or stop a sibling Harness.
+      this.result = native.candidate;
+      await this.rebind?.(this.session);
+    } catch (error) {
+      this.result = outgoing;
+      try { await this.closeResult(native.candidate); }
+      finally { await native.handle.release(BACKGROUND_CONTEXT); }
+      throw error;
+    }
+    await this.closeResult(outgoing);
+    return { cancelled: false, ...(native.selectedText === undefined ? {} : { selectedText: native.selectedText }) };
+  }
+
   async dispose(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
@@ -78,4 +113,12 @@ export class DurableSessionRuntime implements PiSessionRuntime {
     result.services.workspaceServicesObserver?.dispose();
     await result.session.close();
   }
+}
+
+/** Candidate construction owns the acquired lease until the new runtime takes it. */
+export async function createNativeForkCandidate<T>(history: DurableNativeHistory, entryId: string, position: "before" | "at", newSessionId: string,
+  context: Context, create: (handle: DurableSessionHandle) => Promise<T>): Promise<{ candidate: T; handle: DurableSessionHandle; selectedText?: string }> {
+  const forked = await history.fork(entryId, position, newSessionId, context);
+  try { return { candidate: await create(forked.handle), ...forked }; }
+  catch (error) { await forked.handle.release(BACKGROUND_CONTEXT); throw error; }
 }

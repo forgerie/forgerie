@@ -12,6 +12,8 @@ import { durableSessionNeedsRecovery, recoverDurableSessions } from "./durableSe
 import { DurableSessionJournal, durableSessionPaths } from "./durableSessionJournal.js";
 import { acquireDurableOwnership } from "./durableOwnership.js";
 import { WORKFLOW_DOC_KIND } from "./durableWorkflowRuns.js";
+import { DurableJournalPool } from "./durableJournalPool.js";
+import { createDurableNativeHistory, durableEntryPresentationId } from "./durableNativeHistory.js";
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -75,6 +77,30 @@ describe("Durable recovery discovery", () => {
   it("discovers a workflow at a user stop without a live task or an external index", async () => {
     const { file } = await fixture(true);
     expect(await durableSessionNeedsRecovery(file)).toBe(true);
+  });
+  it("follows selected and retained bindings to workflows outside the reserved root", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "forgerie-recovery-fork-"));
+    directories.push(directory);
+    const pool = new DurableJournalPool();
+    const options = { models: createModels(), registry: createRegistry() };
+    const workflow = defineDoc({ kind: WORKFLOW_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial", initial: (): { active: string | null } => ({ active: null }) });
+    try {
+      const parent = await pool.acquire({ databasePath: join(directory, "state.sqlite"), sessionId: "parent", create: {} }, options, context);
+      const anchor = (await parent.conversation.entries({}, 1, undefined, context)).items[0];
+      if (anchor === undefined) throw new Error("Missing origin");
+      const history = createDurableNativeHistory(parent, { acquire: (address, ctx) => pool.acquireCandidate(address, options, ctx) });
+      const fork = (await history.fork(durableEntryPresentationId(parent.address.journalId, anchor, 0), "at", "fork", context)).handle;
+      await fork.conversation.commit(async (tx) => { (await tx.doc(workflow, fork.conversation.id)).active = "waiting-at-stop"; }, context);
+      await parent.release(context);
+      await fork.release(context);
+      expect(await durableSessionNeedsRecovery(fork.address)).toBe(true);
+      expect(await durableSessionNeedsRecovery(parent.address)).toBe(false);
+      const report = await recoverDurableSessions({
+        catalog: () => Promise.resolve([{ id: "parent", cwd: directory, path: "unused", address: parent.address }, { id: "fork", cwd: directory, path: "unused", address: fork.address }]),
+        available: () => Promise.resolve(true), stopped: () => false, reopen: () => Promise.resolve(),
+      });
+      expect(report).toEqual({ resumed: ["fork"], failed: [] });
+    } finally { await pool.close(context); }
   });
   it("reports ownership conflicts instead of opening another owner's journal", async () => {
     const { file, database } = await fixture();

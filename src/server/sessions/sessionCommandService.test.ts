@@ -430,6 +430,18 @@ describe("SessionCommandService", () => {
     expect(active.runtime.fork).toHaveBeenCalledWith("leaf-after-navigation", { position: "at" });
   });
 
+  it("clones the current leaf inside mutation admission, not the leaf before waiting for that admission", async () => {
+    let leaf = "before-admission";
+    const active = activeSession({ sessionManager: { getLeafId: () => leaf } });
+    const forks: string[] = [];
+    active.runtime.fork = (id) => { forks.push(id); return Promise.resolve({ cancelled: false }); };
+    const service = new SessionCommandService(() => getActive(active), promptAccepted, eventPublisher(), {
+      runSessionReplacement: (_session, operation) => { leaf = "inside-admission"; return operation(); },
+    });
+    await expect(service.run("s1", "/clone Name")).resolves.toMatchObject({ type: "done" });
+    expect(forks).toEqual(["inside-admission"]);
+  });
+
   it("rejects fork and clone while the session has active work", async () => {
     const active = activeSession({ isStreaming: true });
     const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher());
