@@ -17,7 +17,8 @@ import { ChangesOpener, ChangesReview } from "../src/ui/ChangesReview";
 import { TreeOpener } from "../src/ui/SessionTreeNavigator";
 import { createNoteTray } from "../src/changes/noteTray";
 import { entriesOf, type ChangesSource } from "../src/changes/changesSource";
-import type { FilesSource, Folder } from "../src/changes/filesSource";
+import type { FilesSource } from "../src/changes/filesSource";
+import type { Folder } from "../src/ui/lazyTree";
 import { existingFiles } from "../src/changes/existingFiles";
 import { linesOf, type DiffNote } from "../src/changes/diffNotes";
 import { parseUnifiedDiff, type CodeRow } from "../src/changes/unifiedDiff";
@@ -92,6 +93,8 @@ function listing(path: string): Folder {
   return { entries, truncated: false };
 }
 const files: FilesSource = {
+  // The preview serves no rendered files; links resolve against its own page.
+  linkBase: async () => "/",
   folder: async (path) => listing(path),
   read: async (path) => {
     if (BINARY.has(path)) return { type: "locked", path, reason: "binary", size: 4_812 };

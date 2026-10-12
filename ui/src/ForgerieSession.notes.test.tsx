@@ -8,6 +8,8 @@ import { browserTransport } from "./sessionStore";
 import { createDraftStore } from "./draftStore";
 import type { PiMessage, SessionStatus } from "./contracts";
 import type { ComposerInputElement } from "./ui/ComposerEditor";
+import { markdownView } from "./ui/markdownView";
+import { loadMarkdownKit } from "./ui/markdownKit";
 
 let root: Root;
 let server: WebSocketServer | undefined;
@@ -28,7 +30,7 @@ const click = (node: HTMLElement | undefined) => act(async () => { node!.click()
 const numbers = (line: number) => document.querySelector<HTMLElement>(`.cm-diff-numbers [data-line="${String(line)}"]`) ?? undefined;
 const chips = () => [...document.querySelectorAll(".note-chip-where")].map((node) => node.textContent);
 // The review loads its editor on demand. Loading it once here keeps that cold import out of each test's time limit.
-beforeAll(async () => { await import("./ui/DiffEditor"); }, 30_000);
+beforeAll(async () => { await Promise.all([import("./ui/DiffEditor"), import("./ui/CodeEditor"), import("./ui/MarkdownEditor"), loadMarkdownKit()]); }, 30_000);
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
@@ -40,7 +42,7 @@ afterEach(async () => {
     await new Promise<void>((resolve) => server!.close(() => resolve()));
     server = undefined;
   }
-  document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+  document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear();
 });
 
 const DIFF = ["diff --git a/src/retry.ts b/src/retry.ts", "--- a/src/retry.ts", "+++ b/src/retry.ts",
@@ -122,6 +124,29 @@ describe("notes on changes", () => {
     await click(links[0]);
     await until(() => api.requests.some((request) => request.path === "/api/projects/p/workspaces/w/file?path=docs%2Freport.md"));
     expect(document.querySelector('dialog.changes-dialog .change-path')?.textContent).toBe("docs/report.md");
+  });
+
+  it("opens a Markdown file in the view chosen on this device since the session mounted", async () => {
+    markdownView.write("rich");
+    await sessionWithChanges({ messages: [{ role: "assistant", content: [{ type: "text", text: "Read [the report](docs/report.md)." }] }] });
+    await until(() => document.querySelectorAll(".message-assistant a").length === 1);
+    const pressed = () => [...document.querySelectorAll<HTMLButtonElement>('dialog.changes-dialog [role="group"][aria-label="View"] button')]
+      .find((node) => node.getAttribute("aria-pressed") === "true")?.textContent;
+    const open = async () => {
+      await click(document.querySelector<HTMLAnchorElement>(".message-assistant a")!);
+      await until(() => pressed() !== undefined && document.querySelector(".changes-body .change-message") === null);
+    };
+    // Another view, such as a skill file, switches to Source after this session mounted.
+    markdownView.write("source");
+    await open();
+    expect(pressed()).toBe("Source");
+    expect(document.querySelector(".changes-body .cm-content")).not.toBeNull();
+    await click(button("Close changes"));
+    await until(() => !document.querySelector("dialog.changes-dialog"));
+    markdownView.write("rich");
+    await open();
+    expect(pressed()).toBe("Rich");
+    expect(document.querySelector('.changes-body [role="textbox"] h1')?.textContent).toBe("Workspace report");
   });
 
   it("turns selected diff lines into a note that goes with the next message as structured annotations, then leaves the tray", async () => {

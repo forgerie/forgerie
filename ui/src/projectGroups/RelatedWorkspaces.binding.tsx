@@ -30,9 +30,14 @@ export function RelatedWorkspaces({ api, request, source, busy, links, onAsk, ow
   commands?: SessionMenuSection["commands"] | undefined;
 }) {
   const [related, setRelated] = useState<WorktreeInfo[]>([]);
-  const [panel, setPanel] = useState<Panel>();
+  const [panel, setPanelState] = useState<Panel>();
   // Rich or Source for Markdown in the review, remembered on this device for every Markdown file.
+  // Each opening reads it again, so a choice made in another view since this one mounted holds here too.
   const [reviewView, setReviewView] = useState<MarkdownView>(() => markdownView.read());
+  const setPanel = useCallback((next: Panel | undefined) => {
+    if (next?.kind === "changes") setReviewView(markdownView.read());
+    setPanelState(next);
+  }, []);
   const chooseReviewView = useCallback((view: MarkdownView) => { markdownView.write(view); setReviewView(view); }, []);
   const [retrying, setRetrying] = useState(false);
   const [failures, setFailures] = useState<Record<string, string>>({});

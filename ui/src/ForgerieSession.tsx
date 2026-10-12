@@ -161,9 +161,14 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   // Notes on diff lines wait here, saved with the drafts, until a chat message carries them.
   const [tray] = useState(() => createNoteTray(saved));
   const notes = useSyncExternalStore(tray.subscribe, tray.notes);
-  const [review, setReview] = useState<{ focusNoteId?: string; path?: string }>();
+  const [review, setReviewState] = useState<{ focusNoteId?: string; path?: string }>();
   // Rich or Source for Markdown in the review, remembered on this device for every Markdown file.
+  // Each opening reads it again, so a choice made in another view since this one mounted holds here too.
   const [reviewView, setReviewView] = useState<MarkdownView>(() => markdownView.read());
+  const setReview = useCallback((next: { focusNoteId?: string; path?: string } | undefined) => {
+    if (next) setReviewView(markdownView.read());
+    setReviewState(next);
+  }, []);
   const chooseReviewView = useCallback((view: MarkdownView) => { markdownView.write(view); setReviewView(view); }, []);
   const changes = useMemo(() => cwd ? { source: createChangesSource(cwd, browserTransport.request), files: createFilesSource(cwd, browserTransport.request) } : undefined, [cwd]);
   const filesSource = changes?.files;
