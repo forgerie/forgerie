@@ -28,3 +28,9 @@ export function Closed() {
     <p>The endpoint is GET /sessions/:id/child-runs.csv. Columns follow the run history sheet.</p>
   </DecisionCard>;
 }
+export function OneAction() {
+  return <DecisionCard icon={<FileTextIcon />} title="settings-store-port" meta="Proposed workflow" open action={{ label: "Review", onPress: () => {} }}
+    footer={<ActionFooter note="4 stages · 3 workers · 2 stops" actions={[]} />}>
+    <p>Port the settings page to the shared store: agree the shape, move the API and the page in parallel, then a fresh review.</p>
+  </DecisionCard>;
+}

@@ -24,6 +24,8 @@ describe("a proposed workflow in the thread", () => {
     expect(text()).toContain("agree the shape");
     expect(text()).toContain("4 stages · 3 workers · 2 stops");
     expect(document.querySelector(".decision-card")?.hasAttribute("data-open")).toBe(true);
+    // Review is the card's one action, which a short container moves to the title line.
+    expect(document.querySelector(".decision-card-action")?.textContent).toBe("Review");
     await act(async () => { button("Review")?.click(); });
     expect(onReview).toHaveBeenCalledOnce();
   });

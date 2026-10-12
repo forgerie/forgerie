@@ -25,3 +25,15 @@
   color: var(--ink-live); font-weight: 500; text-decoration: underline; text-decoration-color: var(--live-edge); text-underline-offset: 0.2em; }
 .decision-card-link:hover { text-decoration-color: currentColor; }
 .decision-card-link-mark { flex: none; inline-size: 0.875rem; block-size: 1lh; }
+/* The card's one action: a filled button under the footer. */
+.decision-card-action { justify-self: start; min-block-size: var(--control-size); padding-inline: var(--space-3); border: var(--hairline) solid transparent;
+  border-radius: var(--radius-control); background: var(--primary); color: var(--primary-foreground); font-size: var(--small-text); font-weight: 500; }
+/* A short container, such as a phone on its side, gives a pinned card little height. A card with one action compacts
+   to its title line with the action at its end, so the action shows without a scroll; the body and footer yield. */
+@container (block-size < 30rem) {
+  .decision-card[data-open]:has(> .decision-card-action) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-3);
+    padding-block: var(--space-2); }
+  .decision-card[data-open]:has(> .decision-card-action) > :is(.decision-card-body, .decision-card-foot) { display: none; }
+  .decision-card[data-open]:has(> .decision-card-action) > .decision-card-problem { grid-column: 1 / -1; }
+  .decision-card[data-open] > .decision-card-action { grid-row: 1; grid-column: 2; }
+}

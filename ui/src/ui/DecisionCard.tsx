@@ -10,8 +10,14 @@ import "./DecisionCard.css";
  * reason grows the card upward, so the choices stay where the reader pressed
  * them. Once decided it goes quiet and says what was decided in one line,
  * where the choices stood; that line can open what the decision made.
+ *
+ * A card whose decision is made elsewhere, such as in a sheet it opens, has
+ * one `action` instead. It sits under the footer while the container has
+ * room. In a short container (under 30rem tall, as a phone on its side) the
+ * card compacts: the action moves to the end of the title line and the body
+ * and footer yield, so the action is in view without a scroll.
  */
-export function DecisionCard({ icon, title, meta, open, closed, closedHref, problem, focusClosed = false, children, footer }: {
+export function DecisionCard({ icon, title, meta, open, closed, closedHref, problem, focusClosed = false, children, footer, action }: {
   icon: ReactNode;
   title: string;
   /** A short fact about the subject, such as the file it concerns: at the end of the title line, or under the title when they do not fit together. */
@@ -32,6 +38,8 @@ export function DecisionCard({ icon, title, meta, open, closed, closedHref, prob
   children?: ReactNode;
   /** The choices, shown while the card is open. */
   footer?: ReactNode;
+  /** The card's one action while open, which opens where the decision is made. It stays in view in a short container. */
+  action?: { label: string; onPress: () => void } | undefined;
 }) {
   const card = useRef<HTMLElement>(null);
   const choices = useRef<HTMLDivElement>(null);
@@ -80,12 +88,13 @@ export function DecisionCard({ icon, title, meta, open, closed, closedHref, prob
     {shown !== undefined && <p className="decision-card-problem" role="alert">
       <CircleAlertIcon className="decision-card-problem-mark" aria-hidden />{shown}
     </p>}
-    {open ? footer !== undefined && footer !== null && footer !== false && <div ref={choices}>{footer}</div>
+    {open ? footer !== undefined && footer !== null && footer !== false && <div className="decision-card-foot" ref={choices}>{footer}</div>
       : closed !== undefined && <p className="decision-card-closed" ref={closedHref === undefined ? holdClosed : undefined}
         tabIndex={closedHref === undefined && focusClosed ? -1 : undefined}>
         {closedHref === undefined ? closed : <a className="decision-card-link" ref={holdClosed} href={closedHref} target="_blank" rel="noreferrer">
           {closed}<ExternalLinkIcon className="decision-card-link-mark" aria-hidden />
         </a>}
       </p>}
+    {open && action !== undefined && <button type="button" className="decision-card-action" onClick={action.onPress}>{action.label}</button>}
   </section>;
 }
