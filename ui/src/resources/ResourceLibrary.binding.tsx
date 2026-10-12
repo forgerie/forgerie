@@ -9,6 +9,8 @@ import { ResourceList } from "./ResourceList";
 import { ResourceDocument, type SaveReport } from "./ResourceDocument";
 import { ResourceRequestError, type ResourceApi, type ResourceFile, type ResourceInventory, type ResourceKind, type ResourceTarget } from "./resourceApi";
 import { checkoutName, hides, refusalAdvice, savedMessage } from "./resourceModel";
+import { markdownView } from "../markdown/markdownView";
+import type { MarkdownView } from "../ui/useMarkdownView";
 
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 type Load<T> = { type: "loading" } | { type: "failed"; message: string } | { type: "ready"; value: T };
@@ -27,6 +29,9 @@ function useResourceLibrary(api: ResourceApi, target: ResourceTarget, openId: st
   const [file, setFile] = useState<Load<ResourceFile>>({ type: "loading" });
   const [report, setReport] = useState<SaveReport>();
   const [saving, setSaving] = useState(false);
+  // Rich or Source for Markdown, remembered on this device for every Markdown file.
+  const [view, setView] = useState<MarkdownView>(() => markdownView.read());
+  const chooseView = useCallback((next: MarkdownView) => { markdownView.write(next); setView(next); }, []);
   const [, redraw] = useState(0);
   const latestTarget = useRef(target);
   latestTarget.current = target;
@@ -88,7 +93,7 @@ function useResourceLibrary(api: ResourceApi, target: ResourceTarget, openId: st
     } finally { setSaving(false); }
   };
   const unsaved = useCallback((id: string) => drafts.has(`${key}:${id}`), [key]);
-  return { inventory, file, ready, draft, dirty, saving, report, refresh, change, save, discard, unsaved };
+  return { inventory, file, ready, draft, dirty, saving, report, view, chooseView, refresh, change, save, discard, unsaved };
 }
 type Library = ReturnType<typeof useResourceLibrary>;
 
@@ -115,7 +120,7 @@ function Body({ library, choices, scope, openId, onOpen, intro }: {
     const winner = current.activation.kind === "shadowed" ? entries.find((entry) => current.activation.kind === "shadowed" && entry.id === current.activation.winnerId) : undefined;
     return <ResourceDocument key={`${ready.resource.id}:${ready.revision}`} entry={current} hiddenBy={winner} hides={hides(current, entries)}
       scope={inventory.type === "ready" ? inventory.value.scope : scope.kind === "settings" ? { kind: "settings" } : undefined}
-      text={draft ?? ready.text} report={report} onChange={library.change} onSave={() => void library.save()} />;
+      text={draft ?? ready.text} report={report} view={library.view} onView={library.chooseView} onChange={library.change} onSave={() => void library.save()} />;
   }
   if (inventory.type === "failed") return <Lede>Could not list the files: {inventory.message}</Lede>;
   if (inventory.type === "loading") return <Lede>Reading the files…</Lede>;

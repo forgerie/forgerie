@@ -20,3 +20,8 @@ export function FormField() {
   return <ToggleGroup field label="Branch to land on" value={value} onChange={setValue}
     options={[{ value: "main", label: "main" }, { value: "next", label: "next" }]} />;
 }
+export function OneUnavailable() {
+  const [value, setValue] = useState<"rich" | "source">("source");
+  return <ToggleGroup label="View" value={value} onChange={setValue}
+    options={[{ value: "rich", label: "Rich", disabled: true, title: "Too large for the rich view." }, { value: "source", label: "Source" }]} />;
+}

@@ -26,12 +26,13 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `FileTree` (molecule): shows the files a change touched as a tree, marked added, changed or deleted, with single-child directories folded.
 - `FactList` (molecule): shows a few headline values from `Label: value` lines; cells share a row and wrap by container width.
 - `TreeItem` (atom): one row of an ARIA tree, indented by level, with a chevron on a branch or a toned mark on a leaf, a count, and a dot.
-- `ToggleGroup` (molecule): a few choices of one setting as quiet pressed buttons, each with an optional count and a control-sized hit area; as a form field it shows its label above them.
+- `ToggleGroup` (molecule): a few choices of one setting as quiet pressed buttons, each with an optional count, a control-sized hit area, and an optional disabled state; as a form field it shows its label above them.
 - `FileTile` (atom): one file as a square: a picture fills it and any other file shows its type, the name under it, a note only for what the tile cannot show, and a corner remove.
 - `TileStrip` (molecule): one row of tiles that keeps its height and scrolls sideways, with each failure in full below.
 - `SplitButton` (molecule): an action and the one setting that changes what it does, in one chip; the second half shows the setting in effect and opens its choices, each explained, at window level.
 - `NoticeBar` (molecule): a full-width bar that stops the reader until they choose: a message and its actions, in a plain or alert tone.
 - `CodeEditor` (molecule): an editable CodeMirror editor with line numbers, undo, Tab to indent, Ctrl/Cmd+S, and syntax colour from the file name; read-only, it still selects and copies.
+- `MarkdownEditor` (organism): a Markdown file formatted like a transcript reply and edited in place with Tiptap, front matter as a read-only block above it, Ctrl/Cmd+S, and an optional notice with one action. `useMarkdownView` picks Rich or Source for a file and says when Rich is read-only or off.
 - `Diagram` (molecule): draws Mermaid source once it stops changing, keeps a readable scale by scrolling, and shows the source when it cannot draw.
 - `ClaimList` (molecule): shows findings tagged verified, inferred, opinion or unknown, with a text label and evidence under each.
 - `Disclosure` (molecule): hides supporting material behind a one-line summary, closed by default and uncontrolled so it stays open while text streams.
@@ -69,7 +70,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `ResultList` (molecule): a search's answers scrolling in the room they get: skeleton rows before the first answer, a busy sweep over old rows, a progress line with a meter, an inline failure with retry, an empty text, a foot control for more; arrow keys move between rows.
 - `FindBar` (molecule): a slim bar for stepping through found places ("2 of 7", previous, next, close; arrows and Escape), or one note about a found place with an optional action.
 - `ListTools` (molecule): the controls that choose what a list shows, such as a switch and a search box, stacked and set apart from the list.
-- `FileFrame` (organism): one file to read or edit: facts and notices above it, then the file on a framed surface that grows with its text.
+- `FileFrame` (organism): one file to read or edit: facts and notices above it, then the file on a framed surface that grows with its text, with an optional bar of tools along its top.
 - `StatusChip` (molecule): a header's one status word as a toned pill, announced while it is quiet and hidden; with a panel it is a button that opens the long story under the header at the window's end, with a count that rides along and a ring for each new arrival.
 - `RouteMap` (molecule): a process as steps on one rail, oldest first: the reader's own steps are rings, finished steps are checked, and each step's workers are tracks that sit side by side while there is room and can open their worker.
 - `StageStrip` (molecule): a whole process as one row of bars above an input, with a title, a status, and a count of what waits on the reader; parallel work is stacked bars, and a narrow strip drops the title first.

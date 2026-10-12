@@ -7,6 +7,8 @@ export interface ToggleOption<T extends string> {
   /** A number after the label, such as how many items the choice holds. */
   count?: number | undefined;
   title?: string | undefined;
+  /** Shown but not choosable now; say why in `title` and somewhere the reader can see it. */
+  disabled?: boolean | undefined;
 }
 
 /**
@@ -26,7 +28,7 @@ export function ToggleGroup<T extends string>({ label, options, value, onChange,
   const id = useId();
   const group = <div className="toggle-group" role="group" aria-label={field ? undefined : label} aria-labelledby={field ? id : undefined}>
     {options.map((option) => <button key={option.value} type="button" className="toggle-group-option" title={option.title}
-      aria-pressed={option.value === value} onClick={() => onChange(option.value)}>
+      disabled={option.disabled} aria-pressed={option.value === value} onClick={() => onChange(option.value)}>
       {option.label}
       {option.count !== undefined && option.count > 0 && <span className="toggle-group-count">{option.count}</span>}
     </button>)}

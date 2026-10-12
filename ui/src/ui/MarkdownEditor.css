@@ -1,0 +1,65 @@
+/* A Markdown file set the way a reply reads in the transcript (the global .markdown
+   rules), in one reading column that starts where its bar's title starts. The
+   editor fills the space it is given, so a short file still takes a tap anywhere
+   below its last line. */
+.markdown-editor { display: flex; flex-direction: column; min-block-size: 100%; }
+.markdown-editor-body { flex: 1 0 auto; display: flex; flex-direction: column; padding-inline: var(--tree-pad, var(--space-4)); }
+.markdown-editor-body > div { flex: 1 0 auto; display: flex; flex-direction: column; }
+.markdown-editor-body [role="textbox"] { flex: 1 0 auto; inline-size: 100%; max-inline-size: var(--thread-max-width); min-block-size: 8rem;
+  padding-block: var(--space-3) var(--space-8); font-size: var(--text-size); overflow-wrap: anywhere; outline: none; caret-color: var(--foreground); }
+.markdown-editor-body [role="textbox"] > :first-child { margin-block-start: 0; }
+/* Tiptap wraps each list item and quote line in a paragraph; they keep the transcript's tight rhythm. */
+.markdown-editor-body li > p, .markdown-editor-body blockquote > p { margin-block: 0; }
+.markdown-editor-body li > p + p, .markdown-editor-body blockquote > p + p { margin-block-start: var(--space-2); }
+/* Writing marks the column's edge, as the agent's prompt editor does; a read-only file shows no caret. */
+.markdown-editor-body:has([role="textbox"]:focus) { box-shadow: inset calc(var(--hairline) * 2) 0 0 var(--line-focus); }
+.markdown-editor[data-readonly] [role="textbox"] { caret-color: transparent; }
+.markdown-editor-body [role="textbox"] p[data-placeholder]:first-child::before { content: attr(data-placeholder); float: inline-start; block-size: 0;
+  color: var(--faint-foreground); pointer-events: none; }
+
+/* Code keeps its own lines and scrolls sideways inside its block, never the page. */
+.markdown-editor-body pre { margin: var(--space-3) 0; overflow-x: auto; padding: var(--space-3) 0.875rem; border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-document); background: var(--code-surface); font-family: var(--code-font); font-size: var(--code-size); line-height: 1.65; tab-size: 2; }
+.markdown-editor-body pre code { white-space: pre; background: none; padding: 0; font-size: inherit; }
+
+/* A table scrolls inside its frame when its columns need more than the column has. */
+.markdown-editor-body [role="textbox"] > div:has(> table) { overflow-x: auto; max-inline-size: 100%; margin-block: var(--space-3);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-document); }
+.markdown-editor-body :is(th, td) { vertical-align: top; overflow-wrap: normal; }
+.markdown-editor-body :is(th, td) > p { margin: 0; }
+
+/* A task stands its box where a bullet would be, drawn as the transcript's checkboxes are. */
+.markdown-editor-body ul[data-type="taskList"] { padding-inline-start: 0; list-style: none; }
+.markdown-editor-body ul[data-type="taskList"] ul[data-type="taskList"] { padding-inline-start: var(--space-5); }
+.markdown-editor-body li[data-checked] { display: flex; align-items: flex-start; gap: var(--space-2); }
+.markdown-editor-body li[data-checked] > label { flex: none; display: grid; place-items: center; block-size: calc(var(--line-height) * 1em); user-select: none; }
+.markdown-editor-body li[data-checked] > div { flex: 1; min-inline-size: 0; }
+.markdown-editor-body li[data-checked] > div > p { margin: 0; }
+.markdown-editor-body li[data-checked="true"] > div { color: var(--muted-foreground); }
+.markdown-editor-body li[data-checked] input { appearance: none; display: grid; place-items: center; inline-size: 1rem; block-size: 1rem; margin: 0;
+  border: var(--hairline) solid var(--line-focus); border-radius: 0.3125rem; background: var(--background); cursor: pointer; }
+.markdown-editor-body li[data-checked] input:checked { border-color: var(--foreground); background: var(--foreground); }
+.markdown-editor-body li[data-checked] input:checked::after { content: ""; inline-size: 0.28rem; block-size: 0.5rem; border: solid var(--background);
+  border-width: 0 calc(var(--hairline) * 2) calc(var(--hairline) * 2) 0; translate: 0 calc(-1 * var(--hairline)); rotate: 45deg; }
+.markdown-editor[data-readonly] li[data-checked] input { cursor: default; }
+
+/* Front matter: the file's settings, shown as they are written, above the body. Long values wrap: nothing here is typed, so nothing needs its own line kept. */
+.markdown-editor-front { inline-size: auto; max-inline-size: var(--thread-max-width); margin: var(--space-3) var(--tree-pad, var(--space-4)) var(--space-2);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-document); background: var(--code-surface); overflow: hidden; }
+.markdown-editor-front-label { display: flex; align-items: center; gap: var(--space-2); min-block-size: 2rem; padding-inline: 0.875rem;
+  border-block-end: var(--hairline) solid var(--line); background: var(--tint-surface); color: var(--muted-foreground); font-size: var(--label-text); }
+.markdown-editor-front-label svg { flex: none; }
+.markdown-editor-front-code { margin: 0; overflow-x: auto; padding: var(--space-2) 0.875rem; color: var(--quiet-foreground);
+  font-family: var(--code-font); font-size: var(--code-size); line-height: 1.65; tab-size: 2; }
+.markdown-editor-front-code code { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-variant-ligatures: none; }
+
+/* Why the file is read-only here, and the way to edit it anyway. The action wraps under the words when the column is narrow. */
+.markdown-editor-notice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-2) var(--tree-pad, var(--space-4));
+  border-block-end: var(--hairline) solid var(--line); background: var(--consequence-surface); font-size: var(--small-text); line-height: 1.45; }
+.markdown-editor-notice-icon { flex: none; color: var(--muted-foreground); }
+.markdown-editor-notice-text { flex: 1 1 14rem; min-inline-size: 0; margin: 0; overflow-wrap: anywhere; }
+.markdown-editor-notice-action { position: relative; flex: none; min-block-size: 2.25rem; padding-inline: var(--space-4); border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-control); background: var(--background); font-size: var(--small-text); font-weight: 500; }
+/* Drawn shorter than a control; this keeps a control-sized target for a finger. */
+.markdown-editor-notice-action::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
+.markdown-editor-notice-action:hover { border-color: var(--line-focus); }

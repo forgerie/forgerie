@@ -19,11 +19,15 @@ import { NoticeBar, type NoticeAction } from "./NoticeBar";
 import type { DiffBlock } from "./DiffEditor";
 import { shellLayout, type ShellLayout } from "./AppShell";
 import { useSheetDrag } from "./useSheetDrag";
+import { MARKDOWN_WORDS, useMarkdownView, type MarkdownView } from "./useMarkdownView";
+import { markdownView } from "./markdownKit";
 
 // CodeMirror and its language parsers are about 325 kB. They load when a review first shows a diff.
 const DiffEditor = lazy(() => import("./DiffEditor").then((module) => ({ default: module.DiffEditor })));
 // The editor loads with the first file opened to edit.
 const CodeEditor = lazy(() => import("./CodeEditor").then((module) => ({ default: module.CodeEditor })));
+// Tiptap loads with the first Markdown file shown formatted.
+const MarkdownEditor = lazy(() => import("./MarkdownEditor").then((module) => ({ default: module.MarkdownEditor })));
 
 export interface ChangesBinding {
   source: ChangesSource;
@@ -122,6 +126,9 @@ function Review({ source, files: filesSource, notes, focusNoteId, openPath, onAd
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selection, setSelection] = useState<{ key: string; rows: RowSelection }>();
   const [draft, setDraft] = useState<Draft>();
+  // Rich or Source for Markdown, remembered on this device for every Markdown file.
+  const [preferredView, setPreferredView] = useState<MarkdownView>(() => markdownView.read());
+  const preferView = useCallback((view: MarkdownView) => { markdownView.write(view); setPreferredView(view); }, []);
   const [opener] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
   const loads = useRef(new Map<string, AbortController>());
   const lifetime = useRef<AbortController>(undefined);
@@ -360,6 +367,11 @@ function Review({ source, files: filesSource, notes, focusNoteId, openPath, onAd
   const next = position >= 0 ? order[position + 1] : undefined;
   const rowFocus = cursor !== undefined && rows.some((row) => row.node.key === cursor) ? cursor : current ?? rows[0]?.node.key;
   const editing = pane?.type === "file" ? pane.path : undefined;
+  const editingBuffer = editing === undefined ? undefined : files.buffers[editing];
+  const editingOpen = editingBuffer?.type === "open" ? editingBuffer : undefined;
+  // Decided for the file on screen once it is read; each read of it checks again.
+  const view = useMarkdownView({ path: editing !== undefined && editingOpen ? editing : "", document: `${editing ?? ""}#${String(editingOpen?.opened ?? 0)}`,
+    text: editingOpen?.text ?? "", preferred: preferredView, onPrefer: preferView });
   const fileRowFocus = [fileCursor, editing && fileKey(editing)].find((key) => key !== undefined && fileRows.some((row) => row.key === key)) ?? fileRows[0]?.key;
   const fileNotes = entry ? notesOn(entry.key) : [];
   // A file's working tree side comes after its staged side, so it wins: that is the side an edit changes.
@@ -401,9 +413,11 @@ function Review({ source, files: filesSource, notes, focusNoteId, openPath, onAd
           </h3>
           <p className="change-facts">
             {change && <span>{STATE_LABEL[change.state]}{change.staged ? ", staged" : ""}</span>}
+            {open && view.tooLarge && <span>{MARKDOWN_WORDS.tooLarge}</span>}
             <span role="status" className={dirty ? "change-unsaved" : undefined}>{status}</span>
           </p>
         </div>
+        {open && view.markdown && <ToggleGroup label={MARKDOWN_WORDS.switchLabel} options={view.options} value={view.view} onChange={view.choose} />}
         {change && <button type="button" className="icon-button quiet-button" aria-label="Show changes" title="Show this file's changes"
           onClick={() => openFile(change)}><FileDiffIcon aria-hidden size={18} /></button>}
         {open && <button type="button" className="primary change-save" disabled={!dirty || save?.type === "saving" || save?.type === "conflict"}
@@ -416,8 +430,12 @@ function Review({ source, files: filesSource, notes, focusNoteId, openPath, onAd
           <button type="button" onClick={() => files.reload(path)}>Try again</button></div>}
         {buffer?.type === "locked" && <p className="change-message">{LOCKED[buffer.reason]}</p>}
         {open && <Suspense fallback={<p className="change-message" role="status">{READING_FILE}</p>}>
-          <CodeEditor key={`${path}#${String(open.opened)}`} label={`Edit ${path}`} fileName={name} text={open.text}
-            onChange={(text) => files.edit(path, text)} onSave={() => files.save(path)} />
+          {view.pending ? <p className="change-message" role="status">{READING_FILE}</p> : view.view === "rich"
+            ? <MarkdownEditor key={`${path}#${String(open.opened)}#rich`} label={`Edit ${path}`} text={open.text} readOnly={view.lossy !== undefined}
+              notice={view.lossy === undefined ? undefined : { message: MARKDOWN_WORDS.lossy(view.lossy), action: { label: MARKDOWN_WORDS.editSource, onPress: view.editSource } }}
+              onChange={(text) => files.edit(path, text)} onSave={() => files.save(path)} />
+            : <CodeEditor key={`${path}#${String(open.opened)}#source`} label={`Edit ${path}`} fileName={name} text={open.text}
+              onChange={(text) => files.edit(path, text)} onSave={() => files.save(path)} />}
         </Suspense>}
       </div>
     </>;

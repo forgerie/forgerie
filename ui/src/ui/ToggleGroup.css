@@ -4,8 +4,9 @@
   border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; }
 /* The drawn button is 2rem tall; this keeps a control-sized target for a finger. */
 .toggle-group-option::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
-.toggle-group-option:hover { background: var(--hover-surface); color: var(--foreground); }
+.toggle-group-option:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
 .toggle-group-option[aria-pressed="true"] { background: var(--active-surface); color: var(--foreground); }
+.toggle-group-option:disabled { opacity: 0.5; cursor: not-allowed; }
 .toggle-group-count { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* As a form field: the label above, set like a text field's, and the same room before what follows. */
 .toggle-group-field { display: grid; gap: var(--space-1); min-inline-size: 0; margin-block-end: var(--space-5); }

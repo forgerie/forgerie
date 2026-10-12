@@ -3,6 +3,8 @@
 // files (All files, opened at the file on screen), files-edit (README.md with unsaved edits), files-conflict (that save meets a change on disk),
 // files-closing (closing with unsaved edits), reply-files (a reply's files block, review closed),
 // reply-file-open (a file in that block tapped, so the review opens at it in the editor).
+// Markdown: md-rich (docs/guide.md formatted), md-edit (a word typed there), md-switch (then Source, edits kept),
+// md-lossy (ui/docs/decomposition.md, whose tables the rich view would rewrite), md-large (CHANGELOG.md, past the rich view's limit).
 // Notes and files live in local state only. Nothing reaches Pi, git, or the disk.
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
@@ -20,11 +22,15 @@ import { existingFiles } from "../src/changes/existingFiles";
 import { linesOf, type DiffNote } from "../src/changes/diffNotes";
 import { parseUnifiedDiff, type CodeRow } from "../src/changes/unifiedDiff";
 import { diffDocument } from "../src/changes/diffDocument";
+import { markdownView } from "../src/markdown/markdownView";
 import "../src/ui/theme.css";
 import loginFormDiff from "./changes-fixtures/LoginForm.tsx.diff?raw";
 import sessionDiff from "./changes-fixtures/session.ts.diff?raw";
+import decomposition from "../docs/decomposition.md?raw";
 
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "changes";
+// Each capture starts from the default view. The device remembers a switch to Source, and a posture capture reloads the page.
+markdownView.write("rich");
 
 // Full-context diffs, as the server sends them for `/git/diff?context=full`.
 const DIFFS: Record<string, string> = {
@@ -62,6 +68,15 @@ const disk = new Map<string, string>([
   ["src/auth/validate.ts", "export function validPassword(password: string): boolean {\n  return password.length > 0;\n}\n"],
   ["src/ui/Button.tsx", "export function Button(props: { label: string }) {\n  return <button type=\"submit\">{props.label}</button>;\n}\n"],
   ["docs/sso.md", "# SSO\n\nThe callback calls `validPassword` directly.\n"],
+  // A real file of this repository, with tables the rich view would pad differently.
+  ["docs/decomposition.md", decomposition],
+  ["docs/guide.md", [
+    "---", "title: Contributing to Acme sign-in", "owners: auth-team", "---", "",
+    "# Contributing", "", "Keep the form and the SSO callback on **one validator**. Read the SSO notes before you change it.", "",
+    "## Before you open a pull request", "", "- [x] Run the form tests", "- [ ] Run the SSO tests against staging", "",
+    "## Commands", "", "```sh", "npm test -- src/auth", "```", "", "> Never trim a password before you send it.", "",
+  ].join("\n")],
+  ["CHANGELOG.md", ["# Changelog", "", ...Array.from({ length: 3000 }, (_, index) => `- ${String(3000 - index)}: Refuse an empty password at the form, and keep the SSO callback on the shared validator.\n`)].join("\n")],
 ]);
 const BINARY = new Set(["public/logo.png"]);
 const version = (text: string) => `v${String(text.length)}:${text.slice(0, 8)}`;
@@ -125,7 +140,37 @@ const messages: TranscriptMessage[] = [
 function Preview() {
   const [tray] = useState(() => { const created = createNoteTray(); for (const item of seeded) created.add(item); return created; });
   const notes = useSyncExternalStore(tray.subscribe, tray.notes);
-  const [open, setOpen] = useState<{ focusNoteId?: string; path?: string } | undefined>(scenario === "changes-tray" || scenario.startsWith("reply-") ? undefined : {});
+  const [open, setOpen] = useState<{ focusNoteId?: string; path?: string } | undefined>(scenario === "changes-tray" || scenario.startsWith("reply-") ? undefined
+    : scenario === "md-lossy" ? { path: "docs/decomposition.md" } : scenario === "md-large" ? { path: "CHANGELOG.md" } : scenario.startsWith("md-") ? { path: "docs/guide.md" } : {});
+  // A word typed into the formatted guide, then, for md-switch, the switch to its source.
+  useEffect(() => {
+    if (scenario !== "md-edit" && scenario !== "md-switch") return;
+    let stopped = false;
+    void (async () => {
+      let paragraph: Element | null | undefined;
+      for (let tries = 0; tries < 100 && !stopped && !paragraph; tries++) {
+        paragraph = document.querySelector('.changes-body [role="textbox"] > p');
+        if (!paragraph) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (!paragraph) return;
+      // The editor settles a moment after it first draws.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      paragraph = document.querySelector('.changes-body [role="textbox"] > p');
+      if (!paragraph) return;
+      (paragraph.closest('[role="textbox"]') as HTMLElement).focus();
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      range.collapse(false);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(range);
+      document.execCommand("insertText", false, " Ask the auth team first.");
+      if (scenario === "md-switch") {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        [...document.querySelectorAll<HTMLButtonElement>(".toggle-group-option")].find((button) => button.textContent === "Source")?.click();
+      }
+    })();
+    return () => { stopped = true; };
+  }, []);
   useEffect(() => {
     if (scenario !== "reply-file-open") return;
     const timer = setTimeout(() => document.querySelector<HTMLElement>(".path-tree-open")?.click(), 800);
@@ -152,8 +197,9 @@ function Preview() {
       await click(".toggle-group-option:last-child");
       if (scenario === "files") return;
       await click('.tree-item[data-row="file:README.md"]');
-      const content = await found(".code-editor .cm-content");
-      const line = content?.querySelectorAll(".cm-line")[2];
+      // README.md opens formatted; its first paragraph is the third line of its source.
+      const content = await found('.changes-body [role="textbox"], .code-editor .cm-content');
+      const line = content?.matches(".cm-content") ? content.querySelectorAll(".cm-line")[2] : content?.querySelector(":scope > p");
       if (!content || !line) return;
       // Typing at the end of the third line, the way a keyboard would: CodeMirror reads the DOM's input.
       content.focus();
