@@ -40,8 +40,14 @@ export async function importDurableLegacyTree(handle: DurableSessionHandle, mana
   const existingEntries = await scanEntries(handle.conversation, context);
   let originConversation = handle.conversation;
   let origin = existingEntries.find((entry) => entry.kind === "forgerie.origin");
-  const hadNativeHistory = existingEntries.some((entry) => entry.kind !== "forgerie.origin");
-  if (origin === undefined || hadNativeHistory) {
+  const hadNativeHistory = receipt?.keepOriginalSelection ?? existingEntries.some((entry) => entry.kind !== "forgerie.origin");
+  if (receipt?.originConversationId !== undefined && receipt.originEntryId !== undefined) {
+    const savedOrigin = await handle.harness.conversation(nativeConversationId(receipt.originConversationId), context);
+    if (savedOrigin === undefined) throw new Error("Missing checkpointed import origin");
+    originConversation = savedOrigin;
+    origin = (await scanEntries(savedOrigin, context)).find((entry) => entry.id === receipt.originEntryId);
+    if (origin?.kind !== "forgerie.origin") throw new Error("Invalid checkpointed import origin");
+  } else if (origin === undefined || hadNativeHistory) {
     // Preserve the old selected conversation, children, workflows, tasks, and immutable entries.
     originConversation = await handle.harness.createConversation({ ownership: { kind: "ownerless" }, agent: { cwd: manager.getCwd() }, init: async (tx, id) => {
       await initializeParentDocuments?.(tx, { id });
@@ -56,6 +62,9 @@ export async function importDurableLegacyTree(handle: DurableSessionHandle, mana
   await handle.harness.commit(async (tx) => {
     const progress = await tx.doc(LegacyMigration);
     progress.sourceHash = sourceHash;
+    progress.originConversationId = originConversation.id;
+    progress.originEntryId = origin.id;
+    progress.keepOriginalSelection = hadNativeHistory;
     (await tx.doc(LegacyTree)).entries = entries.map(durableJson);
   }, context);
   const imported = new Map<string, { conversation: Conversation; entry: EntryRecord }>();
@@ -70,6 +79,7 @@ export async function importDurableLegacyTree(handle: DurableSessionHandle, mana
       const previous = await handle.harness.conversation(nativeConversationId(checkpoint.conversationId), context);
       const native = previous === undefined ? undefined : (await scanEntries(previous, context)).find((entry) => entry.id === checkpoint.entryId);
       if (previous === undefined || native === undefined) throw new Error("Invalid legacy import checkpoint");
+      await compareContext(previous, native, entries, source.id, context);
       imported.set(source.id, { conversation: previous, entry: native });
       tips.set(previous.id, native.id);
       continue;
@@ -110,9 +120,7 @@ export async function importDurableLegacyTree(handle: DurableSessionHandle, mana
     }, context);
     imported.set(source.id, { conversation, entry: native });
     tips.set(conversation.id, native.id);
-    const expected = convertToLlm(buildSessionProjection(entries, source.id).entries.flatMap((entry) => entry.messages));
-    const actual = (await conversation.context(context, { at: native.id })).messages;
-    if (completeToolRound(expected) && !isDeepStrictEqual(actual, expected)) throw new Error(`Legacy context comparison failed at ${source.id}; keep this session on legacy reads`);
+    await compareContext(conversation, native, entries, source.id, context);
   }
   const selected = manager.getLeafId() === null ? undefined : imported.get(manager.getLeafId() ?? "");
   // A tip selected before its last child needs an exact historical continuation.
@@ -168,4 +176,10 @@ function completeToolRound(messages: ReturnType<typeof convertToLlm>): boolean {
   // Native context supplies interrupted results at historical cuts into a tool round.
   // Compare exact SDK messages only at safe round boundaries, never claim a mid-round match.
   return calls.size === 0;
+}
+
+async function compareContext(conversation: Conversation, native: EntryRecord, entries: SessionEntry[], sourceId: string, context: Context): Promise<void> {
+  const expected = convertToLlm(buildSessionProjection(entries, sourceId).entries.flatMap((entry) => entry.messages));
+  const actual = (await conversation.context(context, { at: native.id })).messages;
+  if (completeToolRound(expected) && !isDeepStrictEqual(actual, expected)) throw new Error(`Legacy context comparison failed at ${sourceId}; keep this session on legacy reads`);
 }
