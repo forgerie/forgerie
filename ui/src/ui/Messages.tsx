@@ -8,6 +8,7 @@ import { ShellRun } from "./ShellRun";
 import { MarkdownText } from "./MarkdownText";
 import type { FileLinks } from "./FileTree";
 import { CopyButton } from "./CopyButton";
+import { createLatest, useLatest, type Latest } from "./latest";
 import { ChainOfThoughtGroup, SkillLoad, SkillLoadGroup, stepIdOf, ToolCall, TraceLine, useToolSteps, WorkingLine, type ToolStepView } from "./Trace";
 import { TallyRow } from "./TallyRow";
 import { RailSection } from "./RailSection";
@@ -201,10 +202,12 @@ function HistorySummary({ kind }: { kind: HistorySummaryKind }) {
  */
 export type SystemArtifactView = (custom: Record<string, unknown> | undefined) => ReactNode | undefined;
 
+const NO_ARTIFACT_VIEW = createLatest<SystemArtifactView | undefined>(undefined);
+
 /** System messages carry Pi system text, a history summary, or a user's `!` command; each selects its own view. */
-export function SystemMessage({ artifact }: { artifact?: SystemArtifactView | undefined }) {
+export function SystemMessage({ artifact = NO_ARTIFACT_VIEW }: { artifact?: Latest<SystemArtifactView | undefined> | undefined }) {
   const custom = useAuiState((s) => s.message.metadata.custom);
-  const view = artifact?.(custom);
+  const view = useLatest(artifact)?.(custom);
   if (view !== undefined) return <MessagePrimitive.Root className="message message-event" data-role="system">{view}</MessagePrimitive.Root>;
   if (isShellArtifact(custom)) return <MessagePrimitive.Root className="message message-shell" data-role="shell">
     <ShellRun run={custom.shell} />

@@ -1,7 +1,8 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AuiIf, ThreadPrimitive } from "@assistant-ui/react";
 import { ArrowDownIcon } from "lucide-react";
+import { createLatest } from "./latest";
 import { Composer, type ShellBinding } from "./Composer";
 import type { AskBinding } from "./useAskMode";
 import type { MentionSource } from "../mentionSource";
@@ -46,10 +47,15 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
   readOnly?: ReactNode;
   /** A readout on the input bar's action row, such as the session's branch. */
   inputContext?: ReactNode; mentions?: MentionSource | undefined; commands?: CommandBinding; commandResult?: CommandResultBinding; compaction?: CompactionBinding; shell?: ShellBinding; sessionKeys?: ComposerSessionKeys | undefined; queue?: QueueBinding; working?: WorkingSend; model?: ModelBinding; chatDraft?: ChatDraft }) {
+  // The artifact view changes whenever the binding's data does. System rows read the current one, so they keep
+  // their identity and their local state (a decision in flight, its error) across those changes.
+  const [artifactView] = useState(() => createLatest(systemArtifact));
+  useLayoutEffect(() => { artifactView.set(systemArtifact); }, [artifactView, systemArtifact]);
+  const hasArtifact = systemArtifact !== undefined;
   // One component identity per view function, so messages do not remount on each render.
   const components = useMemo(() => ({ UserMessage,
     AssistantMessage: fileLinks ? () => <AssistantMessage fileLinks={fileLinks} /> : AssistantMessage,
-    SystemMessage: systemArtifact ? () => <SystemMessage artifact={systemArtifact} /> : SystemMessage }), [systemArtifact, fileLinks]);
+    SystemMessage: hasArtifact ? () => <SystemMessage artifact={artifactView} /> : SystemMessage }), [hasArtifact, artifactView, fileLinks]);
   const linkScope = useMemo(() => linkBase === undefined ? undefined : { base: linkBase, error: linkError, openFile: onOpenFile }, [linkBase, linkError, onOpenFile]);
   const column = useRef<HTMLDivElement>(null);
   // The first reveal lands as the thread opens; a later key is a step from one marked message to the next.
