@@ -8,7 +8,7 @@ export const END_TURN_TOOL_NAME = "end_turn";
 const Parameters = Type.Object({ awaiting: Type.Union([Type.Literal("nothing"), Type.Literal("reply")], { description: "reply when you need any response from the user; nothing when this is only a result or completion report." }) });
 
 /** The declaration is durable before the run ends. No sidebar state is written. */
-export interface EndTurnToolDeps { declare(awaiting: "nothing" | "reply"): void }
+export interface EndTurnToolDeps { declare(awaiting: "nothing" | "reply"): void | Promise<void> }
 export function createEndTurnToolDefinition(deps: EndTurnToolDeps) {
   return defineTool({
     name: END_TURN_TOOL_NAME,
@@ -28,8 +28,7 @@ export function createEndTurnToolDefinition(deps: EndTurnToolDeps) {
         return Promise.resolve({ content: [{ type: "text", text: "The run stopped after two failed attempts to end without a visible reply. No completion was recorded. Send another message to continue." }], details: { reason: "missing-reply", recovery: "exhausted" }, isError: true, terminate: true });
       }
       if (responseFromBranch(branch).pendingAsk !== undefined) throw new Error("An unanswered ask_user form is already waiting for the user. Do not replace it with end_turn.");
-      deps.declare(params.awaiting);
-      return Promise.resolve({ content: [{ type: "text", text: params.awaiting === "reply" ? "Needs your response." : "No response requested." }], details: { awaiting: params.awaiting }, terminate: true });
+      return Promise.resolve(deps.declare(params.awaiting)).then(() => ({ content: [{ type: "text" as const, text: params.awaiting === "reply" ? "Needs your response." : "No response requested." }], details: { awaiting: params.awaiting }, terminate: true }));
     },
   });
 }

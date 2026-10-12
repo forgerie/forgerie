@@ -89,6 +89,22 @@ describe("end_turn", () => {
     expect(() => tool.execute("end", { awaiting: "nothing" }, undefined, undefined, context(["work", "end"], [], [refusal]))).toThrow("alone");
   });
 
+  it("waits for an asynchronous declaration commit before terminating", async () => {
+    let release: (() => void) | undefined;
+    const commit = new Promise<void>(resolve => { release = resolve; });
+    const tool = createEndTurnToolDefinition({ declare: () => commit });
+    let settled = false;
+    const result = tool.execute("end", { awaiting: "nothing" }, undefined, undefined, context(["end"])).then(value => { settled = true; return value; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    if (release === undefined) throw new Error("Expected commit barrier");
+    release();
+    expect((await result).terminate).toBe(true);
+  });
+  it("propagates an asynchronous declaration commit failure", async () => {
+    const tool = createEndTurnToolDefinition({ declare: () => Promise.reject(new Error("SQLite commit failed")) });
+    await expect(tool.execute("end", { awaiting: "nothing" }, undefined, undefined, context(["end"]))).rejects.toThrow("SQLite commit failed");
+  });
   it("does not report a declaration if persistence fails", () => {
     const tool = createEndTurnToolDefinition({ declare: () => { throw new Error("disk full"); } });
     expect(() => tool.execute("end", { awaiting: "nothing" }, undefined, undefined, context(["end"]))).toThrow("disk full");
