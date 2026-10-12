@@ -1,8 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, type FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
+import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PiSessionService } from "./piSessionService.js";
 import { CapturingSessionEventHub, emptyArchiveStore } from "./piSessionService.testSupport.js";
@@ -13,6 +13,7 @@ const services: PiSessionService[] = [];
 afterEach(async () => {
   await Promise.all(services.splice(0).map((service) => service.dispose()));
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  vi.useRealTimers();
 });
 
 async function fixture() {
@@ -54,6 +55,102 @@ const hasAnswer = (hub: CapturingSessionEventHub, answer: string) => hub.session
   event.type === "message.end" && JSON.stringify(event.message).includes(answer));
 
 describe("daemon-owned Durable recovery", () => {
+  it("recovers the committed run start immediately on attachment and keeps it in refresh snapshots", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime("2026-10-12T10:00:00.000Z");
+    const { directory, provider, gateway, open } = await fixture();
+    const original = open();
+    const ref = { id: (await original.service.start(directory, { initialModel: provider.getModel() })).id, cwd: directory };
+    const entered = holdRequest(provider, "Keep working");
+    await original.service.prompt(ref, "Keep working");
+    await vi.waitFor(() => { expect(entered()).toBe(true); });
+    const stored = (await gateway.list(directory)).find((entry) => entry.id === ref.id);
+    if (stored === undefined) throw new Error("Session must persist");
+    const user = SessionManager.open(stored.path).buildSessionContext().messages.find((message) => message.role === "user");
+    if (user === undefined) throw new Error("Run input must persist");
+    const start = new Date(user.timestamp).toISOString();
+    expect(start).toBe("2026-10-12T10:00:00.000Z");
+    const activity = async (service: PiSessionService) => (await service.machineListing()).activities.find((item) => item.sessionId === ref.id);
+    await vi.waitFor(async () => { expect(await activity(original.service)).toMatchObject({ activeSince: start }); });
+    await original.service.dispose();
+    vi.setSystemTime("2026-10-12T10:05:00.000Z");
+    holdRequest(provider, "Keep working");
+    const restarted = open();
+    // status() attaches the existing runtime. No event or heartbeat is needed to establish its start.
+    expect((await restarted.service.status(ref)).isStreaming).toBe(true);
+    expect(await activity(restarted.service)).toMatchObject({ activeSince: start });
+    await restarted.service.streamSnapshot(ref);
+    expect(await activity(restarted.service)).toMatchObject({ activeSince: start });
+    vi.setSystemTime("2026-10-12T10:06:00.000Z");
+    expect(await activity(restarted.service)).toMatchObject({ activeSince: start });
+  }, 20_000);
+
+  it("keeps the run start through tools and steering, then uses follow-up placement time for the next run", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime("2026-10-12T11:00:00.000Z");
+    const { directory, provider, gateway, open } = await fixture();
+    const { service, hub } = open();
+    const ref = { id: (await service.start(directory, { initialModel: provider.getModel() })).id, cwd: directory };
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let firstHeld = false;
+    let followUpHeld = false;
+    let sawTool = false;
+    const response: FauxResponseFactory = async (request, options) => {
+      const user = [...request.messages].reverse().find((message) => message.role === "user");
+      const text = typeof user?.content === "string" ? user.content : "";
+      if (text === "First turn" && !sawTool) {
+        sawTool = true;
+        return fauxAssistantMessage([fauxToolCall("read", { path: "missing-test-file" })], { stopReason: "toolUse" });
+      }
+      if (text === "First turn") {
+        firstHeld = true;
+        await released;
+        return fauxAssistantMessage([fauxToolCall("read", { path: "another-missing-file" })], { stopReason: "toolUse" });
+      }
+      if (text === "Steer this turn") return fauxAssistantMessage("Steered done");
+      if (text === "Follow-up turn") {
+        followUpHeld = true;
+        await new Promise<void>((resolve) => {
+          if (options?.signal?.aborted === true) resolve();
+          else options?.signal?.addEventListener("abort", () => { resolve(); }, { once: true });
+        });
+        return fauxAssistantMessage("Interrupted", { stopReason: "aborted" });
+      }
+      return fauxAssistantMessage("Test session");
+    };
+    provider.setResponses(Array.from({ length: 12 }, () => response));
+    await service.prompt(ref, "First turn");
+    try {
+      await vi.waitFor(() => { expect(firstHeld).toBe(true); });
+      const toolActivities = hub.globalEvents.flatMap((event) => event.type === "activity.update" && event.activity.detail === "read" ? [event.activity] : []);
+      expect(toolActivities.map((item) => item.label)).toEqual(["running tool", "tool failed"]);
+      expect(toolActivities.every((item) => item.activeSince === "2026-10-12T11:00:00.000Z")).toBe(true);
+      vi.setSystemTime("2026-10-12T11:01:00.000Z");
+      await service.prompt(ref, "Steer this turn", "steer");
+      await service.prompt(ref, "Follow-up turn", "followUp");
+      expect((await service.machineListing()).activities.find((item) => item.sessionId === ref.id)?.activeSince).toBe("2026-10-12T11:00:00.000Z");
+      vi.setSystemTime("2026-10-12T11:02:00.000Z");
+    } finally { release(); }
+    await vi.waitFor(() => { expect(followUpHeld).toBe(true); });
+    const stored = (await gateway.list(directory)).find((entry) => entry.id === ref.id);
+    if (stored === undefined) throw new Error("Session must persist");
+    const user = SessionManager.open(stored.path).buildSessionContext().messages.find((message) => message.role === "user" && message.content === "Follow-up turn");
+    if (user === undefined) throw new Error("Follow-up input must persist");
+    const followUpStart = new Date(user.timestamp).toISOString();
+    expect(user.timestamp).toBeGreaterThanOrEqual(Date.parse("2026-10-12T11:02:00.000Z"));
+    expect(followUpStart).not.toBe("2026-10-12T11:01:00.000Z");
+    await vi.waitFor(async () => {
+      expect((await service.machineListing()).activities.find((item) => item.sessionId === ref.id)?.activeSince).toBe(followUpStart);
+    });
+    const toolActivities = hub.globalEvents.flatMap((event) => event.type === "activity.update" && event.activity.detail === "read" ? [event.activity] : []);
+    expect(toolActivities).toHaveLength(4);
+    expect(toolActivities.every((item) => item.activeSince === "2026-10-12T11:00:00.000Z")).toBe(true);
+    const steered = hub.globalEvents.flatMap((event) => event.type === "activity.update" && event.activity.at === "2026-10-12T11:01:00.000Z" ? [event.activity] : []);
+    expect(steered.length).toBeGreaterThan(0);
+    expect(steered.every((item) => item.activeSince === "2026-10-12T11:00:00.000Z")).toBe(true);
+  }, 20_000);
+
   it("resumes an interrupted parent without a browser request, another prompt, or a child index", async () => {
     const { directory, provider, open } = await fixture();
     const original = open();

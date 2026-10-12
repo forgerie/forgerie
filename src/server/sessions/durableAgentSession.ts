@@ -52,6 +52,7 @@ export class DurableAgentSession implements PiAgentSession {
   private readonly listeners = new Set<(event: unknown) => void>();
   private partial: AssistantMessage | undefined;
   private streaming = false;
+  private runStartedAt: string | undefined;
   private compacting = false;
   private bashController: AbortController | undefined;
   private compactionTask: TaskId<CompactionResult> | undefined;
@@ -124,6 +125,7 @@ export class DurableAgentSession implements PiAgentSession {
   get promptTemplates() { return this.resourceLoader.getPrompts().prompts; }
   get state(): { streamingMessage?: AssistantMessage } { return this.partial === undefined ? {} : { streamingMessage: this.partial }; }
   get isStreaming(): boolean { return this.streaming; }
+  getActiveRunStartedAt(): string | undefined { return this.runStartedAt; }
   get isCompacting(): boolean { return this.compacting; }
   get isBashRunning(): boolean { return this.bashController !== undefined; }
   get pendingMessageCount(): number { return this.queued.filter((item) => item.mode !== "write").length; }
@@ -607,6 +609,20 @@ export class DurableAgentSession implements PiAgentSession {
 
   private async applyEvent(event: AgentEvent): Promise<void> {
     await this.journal.project();
+    if (event.type === "snapshot" || event.type === "run_start") {
+      const input = (event.type === "snapshot" ? event.run?.inputs : event.inputs)?.[0];
+      this.runStartedAt = undefined;
+      if (input !== undefined) {
+        // Run inputs survive generation handovers and recovery. Steers append to them; follow-ups
+        // start a new list. The first user entry is stamped at placement, not at queue admission.
+        const submission = await (await this.journal.harness.submission(input, context))?.status(context);
+        if (submission?.entry === undefined) throw new Error(`Durable run input ${String(input)} has no committed entry`);
+        const entries = await this.journal.conversation.entries({ minEntryId: submission.entry, maxEntryId: submission.entry }, 1, undefined, context);
+        const message = entries.items[0]?.model?.find((candidate) => candidate.role === "user");
+        if (message === undefined) throw new Error(`Durable run input ${String(input)} has no committed user message`);
+        this.runStartedAt = new Date(message.timestamp).toISOString();
+      }
+    }
     switch (event.type) {
       case "snapshot":
         this.streaming = event.run !== undefined;
@@ -616,7 +632,7 @@ export class DurableAgentSession implements PiAgentSession {
         break;
       case "run_start": this.streaming = true; this.emit({ type: "agent_start" }); await this.extensionRunner.emit({ type: "agent_start" }); break;
       case "run_end":
-        this.streaming = false; this.partial = undefined;
+        this.streaming = false; this.runStartedAt = undefined; this.partial = undefined;
         this.emit({ type: "agent_end", messages: this.messages, willRetry: false });
         await this.extensionRunner.emit({ type: "agent_end", messages: this.messages });
         this.emit({ type: "agent_settled", aborted: false }); await this.extensionRunner.emit({ type: "agent_settled", aborted: false });

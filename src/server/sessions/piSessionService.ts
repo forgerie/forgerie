@@ -4975,7 +4975,8 @@ export class PiSessionService implements SessionRouteService {
     // still streaming. Keep one start across those internal phase changes so a
     // Working runtime measures the user's whole wait, not the current tool.
     const stillWorking = phase === "active" || this.hasActiveWork(session);
-    const activeSince = stillWorking ? previous?.activeSince ?? at : undefined;
+    const runStartedAt = session instanceof DurableAgentSession ? session.getActiveRunStartedAt() : undefined;
+    const activeSince = stillWorking ? runStartedAt ?? previous?.activeSince ?? at : undefined;
     const stored = {
       phase,
       label,
@@ -4993,6 +4994,12 @@ export class PiSessionService implements SessionRouteService {
 
   private publishStatus(session: PiAgentSession): void {
     const status = this.statusFromSession(session);
+    // Attachment can start with a running snapshot and no agent_start event. Seed activity now,
+    // rather than waiting for a provider update or the first heartbeat after daemon startup.
+    const runStartedAt = session instanceof DurableAgentSession ? session.getActiveRunStartedAt() : undefined;
+    if (runStartedAt !== undefined && this.activities.get(session.sessionId)?.activeSince !== runStartedAt) {
+      this.publishActivity(session, this.activityLabelFromStatus(session), "active");
+    }
     this.clearStaleActiveActivity(session);
     this.workspaceActivity?.applySessionStatus(session.sessionManager.getCwd(), status);
     this.events.publish(session.sessionId, { type: "status.update", status });
