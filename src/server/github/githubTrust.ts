@@ -15,14 +15,20 @@ const PermissionSchema = Type.Object({ permission: Type.String() });
 /** Who wrote a piece of text on GitHub, as GitHub reports it. */
 export interface GitHubAuthor { login: string | undefined; association: string }
 
-export interface GitHubAuthorTrustDependencies { fetch: Fetch; now?: () => number }
+export interface GitHubAuthorTrustDependencies {
+  fetch: Fetch;
+  now?: () => number;
+  /** The login of Forgerie's own GitHub App, read on each call so a new app is trusted without a restart. */
+  ownLogin?: () => string | undefined;
+}
 
 /**
  * Decides whether text an author wrote on a repo may reach an agent. Owners, members, and collaborators
  * are trusted. GitHub hides private organization membership from an app, so a member can arrive marked
  * `CONTRIBUTOR` or `NONE`; for those, GitHub is asked what the author may do in the repo, and write access or more
- * counts. A failed check leaves the author untrusted: hiding trusted text is recoverable, showing
- * untrusted text is not.
+ * counts. Forgerie's own app writes as `<slug>[bot]` and GitHub marks it `NONE`; it is trusted because a
+ * person installed it and only Forgerie holds its key. No one can sign up with a `[bot]` login. A failed check
+ * leaves the author untrusted: hiding trusted text is recoverable, showing untrusted text is not.
  */
 export class GitHubAuthorTrust {
   private readonly permissions = new Map<string, { trusted: boolean; checkedAt: number }>();
@@ -31,7 +37,9 @@ export class GitHubAuthorTrust {
 
   /** A predicate that answers for each of `authors`, after at most one lookup per unknown author. */
   async judge(slug: string, token: string, authors: readonly GitHubAuthor[]): Promise<(author: GitHubAuthor) => boolean> {
-    const unknown = [...new Set(authors.filter((author) => (author.association === "CONTRIBUTOR" || author.association === "NONE") && author.login !== undefined)
+    const own = this.deps.ownLogin?.()?.toLowerCase();
+    const isOwn = (author: GitHubAuthor) => own !== undefined && author.login?.toLowerCase() === own;
+    const unknown = [...new Set(authors.filter((author) => (author.association === "CONTRIBUTOR" || author.association === "NONE") && author.login !== undefined && !isOwn(author))
       .map((author) => author.login ?? ""))];
     let checks = 0;
     for (const login of unknown) {
@@ -46,7 +54,7 @@ export class GitHubAuthorTrust {
         if (response.ok || response.status === 404) this.permissions.set(key, { trusted, checkedAt: this.now() });
       } catch { /* Unreachable: the author stays untrusted until the next call. */ }
     }
-    return (author) => TRUSTED_ASSOCIATIONS.has(author.association)
+    return (author) => TRUSTED_ASSOCIATIONS.has(author.association) || isOwn(author)
       || (author.login !== undefined && this.permissions.get(this.key(slug, author.login))?.trusted === true);
   }
 

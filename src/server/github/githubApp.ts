@@ -179,6 +179,11 @@ export class GitHubApp {
   private forget(): void { this.installations.clear(); this.tokens.clear(); this.minting.clear(); }
 }
 
+/** The login GitHub gives a configured app's own account, such as `forgerie-zao[bot]`. */
+export function appBotLogin(status: GitHubAppStatus): string | undefined {
+  return status.state === "configured" ? `${status.app.slug}[bot]` : undefined;
+}
+
 export function installUrl(slug: string): string { return `${GITHUB_WEB}/apps/${slug}/installations/new`; }
 export function baseHeaders(): Record<string, string> {
   return { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": GITHUB_API_VERSION };

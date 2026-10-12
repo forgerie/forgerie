@@ -22,7 +22,7 @@ import { createGitHubBacklogProvider } from "./backlog/githubBacklog.js";
 import { createAzureDevopsBacklogProvider } from "./backlog/azureDevopsBacklog.js";
 import { AzureDevopsClient } from "./azureDevops/azureDevopsClient.js";
 import { AzureDevopsPatStore } from "./azureDevops/azureDevopsPat.js";
-import { GitHubApp } from "./github/githubApp.js";
+import { appBotLogin, GitHubApp } from "./github/githubApp.js";
 import { GitHubAppStore } from "./github/githubAppStore.js";
 import { GitHubIssueClient } from "./github/githubIssues.js";
 import { GitHubAgent } from "./github/githubAgent.js";
@@ -136,7 +136,7 @@ async function createSessionDaemonRuntime() {
   await githubStore.initialize();
   const fetchGitHub = (input: string, init?: RequestInit) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000) });
   const github = new GitHubApp({ store: githubStore, fetch: fetchGitHub });
-  const githubTrust = new GitHubAuthorTrust({ fetch: fetchGitHub });
+  const githubTrust = new GitHubAuthorTrust({ fetch: fetchGitHub, ownLogin: () => appBotLogin(github.status()) });
   const githubIssues = new GitHubIssueClient({ app: github, fetch: fetchGitHub, trust: githubTrust });
   const pullStore = new PullRequestStore(join(piWebDataDir(daemonEnvironment), "pull-requests.json"));
   await pullStore.initialize();
