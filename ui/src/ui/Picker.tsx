@@ -1,4 +1,4 @@
-import { ArchiveIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+import { ArchiveIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, HashIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -66,7 +66,7 @@ export interface PickerFilter {
 const PIN = <PinIcon className="picker-pin" aria-hidden />;
 // The homepage's row menu icons (thread-list-item.tsx), one per command.
 const COMMAND_ICONS: Record<RowCommandKind, LucideIcon> = {
-  pin: PinIcon, unpin: PinOffIcon, archive: ArchiveIcon, restore: ArchiveRestoreIcon, delete: Trash2Icon, copyPath: CopyIcon,
+  pin: PinIcon, unpin: PinOffIcon, archive: ArchiveIcon, restore: ArchiveRestoreIcon, delete: Trash2Icon, copyPath: CopyIcon, copyId: HashIcon,
 };
 // Same drawings as the Lit client's tabIcons.ts, so one concept has one picture.
 const AGENTS = <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2.5" /><circle cx="19" cy="6" r="2.5" /><circle cx="19" cy="18" r="2.5" /><path d="M7.5 11 16.5 6.8" /><path d="M7.5 13 16.5 17.2" /></svg>;

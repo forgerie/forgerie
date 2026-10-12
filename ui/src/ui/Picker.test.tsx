@@ -251,7 +251,7 @@ describe("row commands", () => {
   it("opens the row menu on right click without opening the session", () => {
     const { onSelect } = renderCommands(view([S("a")]));
     rightClick("a");
-    expect(labels()).toEqual(["Pin to top", "ArchiveE", "Copy workspace path"]);
+    expect(labels()).toEqual(["Pin to top", "ArchiveE", "Copy workspace path", "Copy session ID"]);
     expect(onSelect).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(items()[0]);
   });
@@ -275,7 +275,7 @@ describe("row commands", () => {
   it("asks twice, in place, before a permanent delete", () => {
     const { onCommand } = renderCommands(view([S("x", { archived: true })], { showArchived: true }));
     rightClick("x");
-    expect(labels()).toEqual(["Restore", "Delete permanently", "Copy workspace path"]);
+    expect(labels()).toEqual(["Restore", "Delete permanently", "Copy workspace path", "Copy session ID"]);
     const del = () => items().find((item) => item.dataset["command"] === "delete");
     act(() => del()?.click());
     expect(onCommand).not.toHaveBeenCalled();

@@ -14,9 +14,9 @@ function writes(failWith?: Error) {
   const api: SessionWrites = { setPinned: act("pin"), setArchived: act("archive"), deleteArchived: act("delete") };
   return { api, calls };
 }
-function actions(options: { failWith?: Error; copy?: boolean; onDeleted?: (id: string) => void } = {}) {
+function actions(options: { failWith?: Error; copy?: boolean; onCopy?: (text: string) => void; onDeleted?: (id: string) => void } = {}) {
   const w = writes(options.failWith);
-  const store = createRowActions({ writes: w.api, copy: () => Promise.resolve(options.copy ?? true), ...(options.onDeleted ? { onDeleted: options.onDeleted } : {}) });
+  const store = createRowActions({ writes: w.api, copy: (text) => { options.onCopy?.(text); return Promise.resolve(options.copy ?? true); }, ...(options.onDeleted ? { onDeleted: options.onDeleted } : {}) });
   return { store, calls: w.calls };
 }
 
@@ -123,5 +123,16 @@ describe("row actions", () => {
     expect(refused.store.getSnapshot().toast).toEqual({ type: "error", text: "Could not copy. The path is /code/forgerie" });
     vi.advanceTimersByTime(10000);
     expect(refused.store.getSnapshot().toast?.type).toBe("error");
+  });
+
+  it("copies the session ID, and gives the ID when the clipboard refuses", async () => {
+    const copied: string[] = [];
+    const ok = actions({ onCopy: (text: string) => copied.push(text) });
+    await ok.store.run("copyId", target);
+    expect(ok.store.getSnapshot().toast).toEqual({ type: "info", text: "Copied session ID" });
+    expect(copied).toEqual([target.id]);
+    const refused = actions({ copy: false });
+    await refused.store.run("copyId", target);
+    expect(refused.store.getSnapshot().toast).toEqual({ type: "error", text: `Could not copy. The session ID is ${target.id}` });
   });
 });

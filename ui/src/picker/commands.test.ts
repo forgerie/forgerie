@@ -17,7 +17,7 @@ const kinds = (list: ReturnType<typeof rowCommands>) => list.map((command) => co
 
 describe("row commands", () => {
   it("offers pin, archive, and copy on an open session", () => {
-    expect(kinds(rowCommands(row({})))).toEqual(["pin", "archive", "copyPath"]);
+    expect(kinds(rowCommands(row({})))).toEqual(["pin", "archive", "copyPath", "copyId"]);
     expect(rowCommands(row({})).find((command) => command.kind === "archive")?.disabled).toBeUndefined();
   });
 
@@ -34,12 +34,12 @@ describe("row commands", () => {
   });
 
   it("offers only unpin and copy on a pinned session, as the server refuses to archive a pin", () => {
-    expect(kinds(rowCommands(row({ pinned: true })))).toEqual(["unpin", "copyPath"]);
+    expect(kinds(rowCommands(row({ pinned: true })))).toEqual(["unpin", "copyPath", "copyId"]);
   });
 
   it("offers restore and a dangerous delete on an archived session", () => {
     const list = rowCommands(row({ archived: true }));
-    expect(kinds(list)).toEqual(["restore", "delete", "copyPath"]);
+    expect(kinds(list)).toEqual(["restore", "delete", "copyPath", "copyId"]);
     expect(list.find((command) => command.kind === "delete")?.danger).toBe(true);
   });
 

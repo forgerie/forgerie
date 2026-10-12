@@ -105,6 +105,11 @@ export function createRowActions(deps: {
             // The clipboard can refuse (plain HTTP, permissions). Give the path so it can be copied by hand.
             : { type: "error", text: `Could not copy. The path is ${target.cwd}` });
           return;
+        case "copyId":
+          show(await deps.copy(target.id).catch(() => false)
+            ? { type: "info", text: "Copied session ID" }
+            : { type: "error", text: `Could not copy. The session ID is ${target.id}` });
+          return;
       }
     },
     async undo(): Promise<void> {

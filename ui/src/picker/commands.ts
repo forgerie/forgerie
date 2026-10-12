@@ -3,7 +3,7 @@
 // "row menu" frames) and the server's refusals in piSessionService.ts.
 import type { Row } from "./board";
 
-export type RowCommandKind = "pin" | "unpin" | "archive" | "restore" | "delete" | "copyPath";
+export type RowCommandKind = "pin" | "unpin" | "archive" | "restore" | "delete" | "copyPath" | "copyId";
 export interface RowCommand {
   kind: RowCommandKind;
   label: string;
@@ -21,20 +21,20 @@ export interface RowCommand {
  * - Otherwise: pin, or archive. Archive is shown disabled while the session
  *   runs, because the server refuses it; the old client's "Archive anyway?"
  *   confirm could only end in that error.
- * Copy workspace path is on every row.
+ * Copy workspace path and Copy session ID are on every row.
  */
 export function rowCommands(row: Row): RowCommand[] {
   // A start still in flight has no server session to pin, archive, or copy.
   if (row.session.starting === true) return [];
-  const copy: RowCommand = { kind: "copyPath", label: "Copy workspace path" };
+  const copy: RowCommand[] = [{ kind: "copyPath", label: "Copy workspace path" }, { kind: "copyId", label: "Copy session ID" }];
   if (row.state === "archived") {
-    return [{ kind: "restore", label: "Restore" }, { kind: "delete", label: "Delete permanently", danger: true }, copy];
+    return [{ kind: "restore", label: "Restore" }, { kind: "delete", label: "Delete permanently", danger: true }, ...copy];
   }
-  if (row.session.pinned === true) return [{ kind: "unpin", label: "Unpin" }, copy];
+  if (row.session.pinned === true) return [{ kind: "unpin", label: "Unpin" }, ...copy];
   return [
     { kind: "pin", label: "Pin to top" },
     { kind: "archive", label: "Archive", key: "E", ...(row.busy ? { disabled: "Stop the run first" } : {}) },
-    copy,
+    ...copy,
   ];
 }
 

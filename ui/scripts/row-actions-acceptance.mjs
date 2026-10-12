@@ -99,7 +99,7 @@ try {
       await rightClick(cdp);
       await ready(cdp, `!!document.getElementById("picker-menu-${id}")`, `${posture.name}: menu by right click`);
       const labels = await menuLabels(cdp);
-      assert.deepEqual(labels, ["Pin to top", "ArchiveE", "Copy workspace path"], `${posture.name} menu`);
+      assert.deepEqual(labels, ["Pin to top", "ArchiveE", "Copy workspace path", "Copy session ID"], `${posture.name} menu`);
       const selectedAfterRightClick = await evaluate(cdp, `new URLSearchParams(location.search).get("session")`);
       assert.equal(selectedAfterRightClick, null, "right click must not open the session");
       await shot(cdp, `${posture.name}-${colorScheme}-menu`);
@@ -139,7 +139,7 @@ try {
   await scrollToRow(cdp);
   await rightClick(cdp);
   await ready(cdp, `!!document.getElementById("picker-menu-${id}")`, "pinned menu");
-  assert.deepEqual(await menuLabels(cdp), ["Unpin", "Copy workspace path"], "pinned menu");
+  assert.deepEqual(await menuLabels(cdp), ["Unpin", "Copy workspace path", "Copy session ID"], "pinned menu");
   await shot(cdp, "folded-portrait-dark-pinned-menu");
   await clickItem(cdp, "unpin");
   await ready(cdp, `!!${row} && !document.querySelector('[data-kind="pinned"] [data-session="${id}"]')`, "row leaves Pinned");
@@ -179,7 +179,7 @@ try {
   await scrollToRow(cdp);
   await rightClick(cdp);
   await ready(cdp, `!!document.getElementById("picker-menu-${id}")`, "archived menu");
-  assert.deepEqual(await menuLabels(cdp), ["Restore", "Delete permanently", "Copy workspace path"], "archived menu");
+  assert.deepEqual(await menuLabels(cdp), ["Restore", "Delete permanently", "Copy workspace path", "Copy session ID"], "archived menu");
   await clickItem(cdp, "restore");
   await ready(cdp, `!!${row} && !document.querySelector('[data-kind="archived"] [data-session="${id}"]')`, "restored row");
   assert.notEqual((await listed(id))?.archived, true, "server restored");
