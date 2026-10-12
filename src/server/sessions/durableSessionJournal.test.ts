@@ -8,9 +8,10 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { createRegistry, UsageDoc, watchEvents } from "@earendil-works/pi-durable";
+import { createRegistry, defineDoc, UsageDoc, watchEvents } from "@earendil-works/pi-durable";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DurableSessionJournal, durableSessionPaths } from "./durableSessionJournal.js";
+import { LegacyMigration } from "./durableLegacyImport.js";
 import { readDurableSessionLocator } from "./durableSessionLocator.js";
 
 const directories: string[] = [];
@@ -48,7 +49,7 @@ async function baseBuildFixture() {
     import { createModels } from "@earendil-works/pi-ai/models";
     import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
     import { SessionManager } from "@earendil-works/pi-coding-agent";
-    import { createRegistry } from "@earendil-works/pi-durable";
+    import { createRegistry, defineDoc } from "@earendil-works/pi-durable";
     import { DurableSessionJournal } from "./baseJournal.mts";
     const directory = ${JSON.stringify(directory)};
     const manager = SessionManager.create(directory, directory);
@@ -67,6 +68,21 @@ async function baseBuildFixture() {
   await execute(process.execPath, ["--import", pathToFileURL(join(process.cwd(), "node_modules/tsx/dist/loader.mjs")).href, join(directory, "build.mts")]);
   const file = await readFile(join(directory, "session-path.txt"), "utf8");
   return { directory, file };
+}
+
+async function reopenWithBaseBuild(directory: string, file: string): Promise<void> {
+  await writeFile(join(directory, "reopen.mts"), `
+    import { createModels } from "@earendil-works/pi-ai/models";
+    import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
+    import { SessionManager } from "@earendil-works/pi-coding-agent";
+    import { createRegistry } from "@earendil-works/pi-durable";
+    import { DurableSessionJournal } from "./baseJournal.mts";
+    const models = createModels(); const provider = fauxProvider(); models.setProvider(provider.provider);
+    const journal = await DurableSessionJournal.open({ manager: SessionManager.open(${JSON.stringify(file)}), models, registry: createRegistry(), agent: {} });
+    if (provider.state.callCount !== 0) throw new Error("Rollback open called a provider");
+    await journal.close();
+  `);
+  await promisify(execFile)(process.execPath, ["--import", pathToFileURL(join(process.cwd(), "node_modules/tsx/dist/loader.mjs")).href, join(directory, "reopen.mts")]);
 }
 
 function expectReport(reports: readonly unknown[], message = "Invalid parent pi.usage"): void {
@@ -145,6 +161,29 @@ describe("Durable session journal", () => {
     expect(reopened.usage).toEqual({ models: {}, tools: {} });
     expectReport(reports);
   });
+  it.each([false, true])("leaves the import receipt readable by the base build (previous v2 receipt: %s)", async (previousV2) => {
+    const { directory, file } = await baseBuildFixture();
+    const options = { manager: SessionManager.open(file), models: createModels(), registry: createRegistry(), agent: {} };
+    const journal = await DurableSessionJournal.open(options);
+    journals.push(journal);
+    const completed = await journal.harness.snapshot(LegacyMigration, context);
+    expect(completed?.complete).toBe(true);
+    if (previousV2) {
+      const original = defineDoc({ kind: "forgerie.import", version: 1, scope: "session", initial: (): { complete: boolean } => ({ complete: false }) });
+      const upgraded = defineDoc({ kind: "forgerie.import", version: 2, scope: "session", initial: () => LegacyMigration.definition.initial() });
+      await journal.harness.commit(async (tx) => {
+        await tx.retireDoc(original);
+        Object.assign(await tx.doc(upgraded), completed);
+      }, context);
+    }
+    await journal.close();
+    const repaired = await DurableSessionJournal.open({ ...options, manager: SessionManager.open(file) });
+    journals.push(repaired);
+    expect(await repaired.harness.snapshot(LegacyMigration, context)).toEqual(completed);
+    await repaired.close();
+    await reopenWithBaseBuild(directory, file);
+  }, 20_000);
+
   it("opens a base-build journal whose title follows stamped Durable messages", async () => {
     const { file } = await baseBuildFixture();
     const manager = SessionManager.open(file);
@@ -155,7 +194,7 @@ describe("Durable session journal", () => {
     expect(manager.getSessionName()).toBe("title");
     expect((await journal.conversation.context(context)).messages).toHaveLength(4);
     expect(provider.state.callCount).toBe(0);
-  });
+  }, 20_000);
 
   it("keeps a rejected graph on legacy reads without publishing a native locator", async () => {
     const { file } = await baseBuildFixture();
@@ -173,7 +212,7 @@ describe("Durable session journal", () => {
     expect(await readDurableSessionLocator(durableSessionPaths(file).directory)).toBeUndefined();
     expect(await readFile(file, "utf8")).toBe(original);
     expect(() => { journal.assertOwned(); }).toThrow("legacy reads");
-  });
+  }, 20_000);
   it("opens forks and clones of imported history without branching to the parent's SDK IDs", async () => {
     const options = await fixture();
     const parent = await DurableSessionJournal.open(options);

@@ -13,7 +13,7 @@ import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import { DurableJournalPool, type InitializeParentDocuments } from "./durableJournalPool.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { createDurableNativeHistory, NativeEntryAliases } from "./durableNativeHistory.js";
-import { importDurableLegacyTree, LegacyImportError, LegacyMigration, LegacyTree } from "./durableLegacyImport.js";
+import { importDurableLegacyTree, prepareLegacyImportReceipt, LegacyImportError, LegacyMigration, LegacyTree } from "./durableLegacyImport.js";
 
 const DURABLE_ENTRY_PROPERTY = "forgerieDurableEntryId";
 const DURABLE_SESSION_PROPERTY = "forgerieDurableSessionId";
@@ -138,6 +138,7 @@ export class DurableSessionJournal {
             if (!isFsError(error, "ENOENT") && !isFsError(error, "EEXIST")) throw error;
           });
         }
+        await prepareLegacyImportReceipt(handle, pool, BACKGROUND_CONTEXT);
         try {
           if ((await handle.harness.snapshot(LegacyMigration, BACKGROUND_CONTEXT))?.complete !== true) await importDurableLegacyTree(handle, options.manager, BACKGROUND_CONTEXT, options.initializeParentDocuments);
         } catch (error) {
@@ -151,6 +152,7 @@ export class DurableSessionJournal {
         await handle.release(BACKGROUND_CONTEXT);
         handle = selected;
       }
+      await prepareLegacyImportReceipt(handle, pool, BACKGROUND_CONTEXT);
       const journal = new DurableSessionJournal(handle, options.manager, pool, harnessOptions, options.initializeParentDocuments, options.onReport, options.summarize, legacyImportError);
       journal.adoptUsage(await handle.harness.snapshot(UsageDoc, handle.conversation.id, BACKGROUND_CONTEXT) ?? { models: {}, tools: {} });
       for (const submission of await pool.submissions(handle.address, BACKGROUND_CONTEXT)) journal.noteCustomInput(submission);

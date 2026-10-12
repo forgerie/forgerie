@@ -4,9 +4,11 @@ import type { Context, JsonValue } from "@earendil-works/chord";
 import { buildSessionProjection, convertToLlm, sessionEntryToContextMessages, type SessionEntry, type SessionManager } from "@earendil-works/pi-coding-agent";
 import { configure, defineDoc, type Conversation, type Cursor, type EntryId, type EntryRecord, type ContextEdit } from "@earendil-works/pi-durable";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
-import type { InitializeParentDocuments } from "./durableJournalPool.js";
+import type { DurableJournalPool, InitializeParentDocuments } from "./durableJournalPool.js";
 import { bindSession, readSessionBindings, SessionBindings } from "./durableSessionBindings.js";
 import { durableJson } from "./durableJson.js";
+import { Type, type Static } from "typebox";
+import { Check } from "typebox/value";
 
 // Structural aliases keep document values assignable to strict JsonValue.
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
@@ -14,16 +16,38 @@ type ImportedTarget = { conversationId: number; entryId: number; messageIndex: n
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
 type LegacyTreeState = { entries: JsonValue[]; aliases: Record<string, ImportedTarget> }
 export const LegacyTree = defineDoc({ kind: "forgerie.legacy-tree", version: 1, scope: "session", initial: (): LegacyTreeState => ({ entries: [], aliases: {} }) });
-// Version the original native import receipt. App-state owns forgerie.migration.
-// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
-type ImportReceipt = { sourceHash: string; count: number; complete: boolean; legacyProjectionComplete: boolean; originConversationId?: number; originEntryId?: number; keepOriginalSelection?: boolean; failure?: string };
-export const LegacyMigration = defineDoc({ kind: "forgerie.import", version: 2, scope: "session",
-  initial: (): ImportReceipt => ({ sourceHash: "", count: 0, complete: false, legacyProjectionComplete: false }),
-  migrate: (value, fromVersion): ImportReceipt => {
-    if (fromVersion !== 1 || typeof value["complete"] !== "boolean") throw new Error("Unsupported original import receipt");
-    return { sourceHash: "", count: 0, complete: false, legacyProjectionComplete: value["complete"] };
-  },
-});
+// Keep the base build's receipt readable. Graph progress has its own document;
+// it does not change what forgerie.import.complete means to the base adapter.
+const OriginalImport = defineDoc({ kind: "forgerie.import", version: 1, scope: "session", initial: (): { complete: boolean } => ({ complete: false }) });
+const ImportReceiptSchema = Type.Object({
+  sourceHash: Type.String(), count: Type.Integer({ minimum: 0 }), complete: Type.Boolean(), legacyProjectionComplete: Type.Boolean(),
+  originConversationId: Type.Optional(Type.Integer({ minimum: 0 })), originEntryId: Type.Optional(Type.Integer({ minimum: 0 })),
+  keepOriginalSelection: Type.Optional(Type.Boolean()), failure: Type.Optional(Type.String()),
+}, { additionalProperties: false });
+type ImportReceipt = Static<typeof ImportReceiptSchema>;
+const initialReceipt = (): ImportReceipt => ({ sourceHash: "", count: 0, complete: false, legacyProjectionComplete: false });
+export const LegacyMigration = defineDoc({ kind: "forgerie.legacy-import", version: 1, scope: "session", initial: initialReceipt });
+const PreviousGraphReceipt = defineDoc({ kind: "forgerie.import", version: 2, scope: "session", initial: initialReceipt });
+
+/** Repair journals opened by the core build without discarding its verified graph receipt. */
+export async function prepareLegacyImportReceipt(handle: DurableSessionHandle, pool: DurableJournalPool, context: Context): Promise<void> {
+  const found = await pool.inspectStorage(handle.address.databasePath, async (storage) => {
+    const record = await storage.findDocument({ kind: "forgerie.import", scope: { kind: "session" } }, "current", context);
+    return record === undefined ? undefined : storage.document(record.id, "current", context);
+  }, context);
+  if (!found.found) throw new Error("Import receipt has no leased journal owner");
+  const previous = found.value;
+  if (previous === undefined || previous.version === 1) return;
+  if (previous.version !== 2 || !Check(ImportReceiptSchema, previous.value)) throw new Error("Unsupported original import receipt");
+  const saved = previous.value;
+  await handle.harness.commit(async (tx) => {
+    const progress = await tx.doc(LegacyMigration);
+    if (progress.sourceHash !== "" && progress.sourceHash !== saved.sourceHash) throw new Error("Conflicting graph import receipts");
+    Object.assign(progress, saved);
+    await tx.retireDoc(PreviousGraphReceipt);
+    (await tx.doc(OriginalImport)).complete = saved.legacyProjectionComplete || saved.complete;
+  }, context);
+}
 
 /** A rejected legacy source is not a damaged native storage or ownership failure. */
 export class LegacyImportError extends Error {
@@ -35,6 +59,7 @@ export async function importDurableLegacyTree(handle: DurableSessionHandle, mana
   const entries = legacyEntries(manager.getEntries(), manager.getSessionId());
   const sourceHash = createHash("sha256").update(JSON.stringify(durableJson(entries))).digest("hex");
   const receipt = await handle.harness.snapshot(LegacyMigration, context);
+  const originalComplete = (await handle.harness.snapshot(OriginalImport, context))?.complete === true;
   if (receipt?.complete === true) {
     if (receipt.sourceHash !== sourceHash) throw new LegacyImportError("Legacy source changed after verified import; stop cutover and reconcile metadata");
     return;
@@ -67,6 +92,7 @@ export async function importDurableLegacyTree(handle: DurableSessionHandle, mana
   await handle.harness.commit(async (tx) => {
     const progress = await tx.doc(LegacyMigration);
     progress.sourceHash = sourceHash;
+    progress.legacyProjectionComplete = progress.legacyProjectionComplete || originalComplete;
     progress.originConversationId = originConversation.id;
     progress.originEntryId = origin.id;
     progress.keepOriginalSelection = hadNativeHistory;
@@ -142,6 +168,7 @@ export async function importDurableLegacyTree(handle: DurableSessionHandle, mana
     if (progress.count !== entries.length) throw new Error("Legacy import count mismatch");
     progress.complete = true;
     delete progress.failure;
+    (await tx.doc(OriginalImport)).complete = true;
   }, context);
 }
 
