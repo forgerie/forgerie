@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { Editor } from "@tiptap/core";
 import { diffLines } from "diff";
 import { afterAll, expect, test } from "vitest";
-import { frameMarkdownBody, isMarkdownPath, joinFrontMatter, markdownExtensions, richEditability, splitFrontMatter } from "./markdown";
+import { markdownExtensions, richEditability } from "./markdownDocument";
+import { frameMarkdownBody, isMarkdownPath, joinFrontMatter, splitFrontMatter } from "./markdownText";
 
 const repo = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 const paths = execFileSync("git", ["ls-files", "-z"], { cwd: repo, encoding: "utf8" }).split("\0").filter(isMarkdownPath);

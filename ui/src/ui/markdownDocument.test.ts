@@ -1,7 +1,11 @@
 // @vitest-environment happy-dom
 import { Editor } from "@tiptap/core";
+import { Markdown } from "@tiptap/markdown";
+import StarterKit from "@tiptap/starter-kit";
 import { describe, expect, test } from "vitest";
-import { frameMarkdownBody, isMarkdownPath, joinFrontMatter, markdownExtensions, richEditability, splitFrontMatter } from "./markdown";
+import { markdownExtensions, richEditability } from "./markdownDocument";
+import { frameMarkdownBody, isMarkdownPath, joinFrontMatter, splitFrontMatter } from "./markdownText";
+import { escapePromptText, keepPromptTextLiteral } from "./markdownLiteral";
 
 describe("Markdown paths", () => {
   test.each(["README.md", "docs/Guide.MARKDOWN", "note.Md"])("recognizes %s", (path) => {
@@ -13,6 +17,23 @@ describe("Markdown paths", () => {
 });
 
 describe("front matter", () => {
+  test.each(["\n", "\r\n"])("inserts the %j separator when a body is typed, then preserves original bytes on undo", (separator) => {
+    const original = `---${separator}name: demo${separator}---`;
+    const parts = splitFrontMatter(original);
+    const editor = new Editor({ extensions: markdownExtensions(), contentType: "markdown", content: parts.body });
+    const save = () => joinFrontMatter({ ...parts, body: frameMarkdownBody(parts.body, editor.getMarkdown()) });
+    try {
+      expect(save()).toBe(original);
+      editor.commands.insertContent("Body");
+      const saved = save();
+      expect(saved).toBe(`${original}${separator}Body`);
+      expect(splitFrontMatter(saved).body).toBe("Body");
+      expect(editor.commands.undo()).toBe(true);
+      expect(save()).toBe(original);
+    } finally {
+      editor.destroy();
+    }
+  });
   test.each([
     ["", null, ""],
     ["# Title\n", null, "# Title\n"],
@@ -79,6 +100,44 @@ describe("rich editability", () => {
     expect(richEditability("é".repeat(131072))).toEqual({ kind: "editable" });
     expect(richEditability("é".repeat(131073))).toEqual({ kind: "too-large" });
     expect(richEditability(`---\n${"x".repeat(262144)}\n---\n`)).toEqual({ kind: "too-large" });
+  });
+});
+
+describe("the shared literal-text encoder", () => {
+  test.each([
+    ["se_atomic_commit", "se_atomic_commit"],
+    ["a && b", "a && b"],
+    ["2 * 3", "2 * 3"],
+    ["<input> && &", "<input> && &"],
+    ["中文_名称", "中文_名称"],
+    ["*literal*", "\\*literal\\*"],
+    ["__word__", "\\_\\_word\\_\\_"],
+    ["`ticks` [brackets] ~tilde~", "\\`ticks\\` \\[brackets\\] \\~tilde\\~"],
+  ])("keeps the existing prompt encoding of %j", (text, expected) => {
+    expect(escapePromptText(text!)).toBe(expected);
+  });
+  test("the encoder swap preserves both inline and block code verbatim", () => {
+    const code = "[brackets] _code_ *stars* ~tildes~ `ticks` && \\slashes";
+    const editor = new Editor({
+      element: null,
+      extensions: [StarterKit, Markdown],
+      content: {
+        type: "doc",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "se_atomic_commit && b_value" }] },
+          { type: "paragraph", content: [{ type: "text", text: code, marks: [{ type: "code" }] }] },
+          { type: "codeBlock", content: [{ type: "text", text: code }] },
+        ],
+      },
+    });
+    try {
+      keepPromptTextLiteral(editor);
+      const markdown = editor.getMarkdown();
+      expect(markdown).toContain("se_atomic_commit && b_value");
+      expect(markdown.split(code)).toHaveLength(3);
+    } finally {
+      editor.destroy();
+    }
   });
 });
 
