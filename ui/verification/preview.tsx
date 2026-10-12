@@ -1,8 +1,8 @@
 // Separate dev-only entry point. This preview has no transport or network data.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ToastRegion } from "../src/ui/ToastRegion";
-import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime, type ThreadMessage } from "@assistant-ui/react";
 import type { QueuedMessage } from "../src/queue";
 import type { ToolState, TranscriptMessage, TranscriptPart } from "../src/transcript";
 import { useThreadMessages } from "../src/useThreadMessages";
@@ -42,7 +42,7 @@ import { PinnedDock } from "../src/ui/PinnedDock";
 import { EventLine } from "../src/ui/EventLine";
 import { CHILDREN, STREAMING, TRANSCRIPT } from "../src/childAgents/fixtures/children";
 import { IssueProposalEntry, type IssueRequest } from "../src/issues/IssueProposalEntry";
-import type { IssueProposal } from "../src/issues/issueProposal";
+import type { IssueProposal, IssueProposalArtifact } from "../src/issues/issueProposal";
 import { CREATED, DISMISSED, GITHUB_FAILED, LONG, NO_LABELS, SHORT } from "../src/issues/fixtures/proposals";
 import type { ComposerInputElement } from "../src/ui/ComposerEditor";
 
@@ -464,11 +464,17 @@ const childMessages = (): TranscriptMessage[] => [...foldChildEntries(fromHistor
   { role: "custom", customType: CHILD_QUESTION_TYPE, content: "", details: { questionId: "q:40", child: 21, childName: "ui", question: "Should the empty state show the last run, or stay blank?" } },
   ...longer,
 ]).messages)];
-// Issue proposals: cards the reader creates or dismisses. The server's transcript rows are not on this branch,
-// so the proposal rides in a system row's child-entry slot, which the thread passes through as custom metadata.
+// Issue proposals: cards the reader creates or dismisses. Each proposal row is a system row whose metadata
+// carries an IssueProposalArtifact, as the session's transcript sets it; the preview adds the metadata after conversion.
 const issuePreview = scenario.startsWith("issue");
-const proposalRow = (id: string, proposal: IssueProposal): TranscriptMessage =>
-  ({ id, role: "system", parts: [{ type: "text", text: "" }], childEntry: proposal as unknown as ChildEntry });
+const proposals = new Map<string, IssueProposal>();
+const proposalRow = (id: string, proposal: IssueProposal): TranscriptMessage => { proposals.set(id, proposal); return say(id, "system", ""); };
+/** Gives each proposal row its artifact, the way the transcript does for a real session. */
+const withProposals = (messages: readonly ThreadMessage[]): ThreadMessage[] => messages.map((message) => {
+  const proposal = proposals.get(message.id);
+  return proposal === undefined || message.role !== "system" ? message
+    : { ...message, metadata: { ...message.metadata, custom: { issueProposal: proposal } satisfies IssueProposalArtifact } };
+});
 const issueJson = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 let issueCalls = 0;
 /** A stand-in for the issue routes: the long proposal fails once on GitHub, then succeeds. */
@@ -479,14 +485,16 @@ const issueRequest: IssueRequest = (path) => new Promise((resolve) => {
     : issueJson(200, { ...CREATED, title: path.includes(LONG.proposalId) ? LONG.title : SHORT.title });
   setTimeout(() => resolve(response), 1_200);
 });
-const issueMessages = (proposals: readonly IssueProposal[]): TranscriptMessage[] => [
+/** Row ids carry the scenario name: every scenario is built up front, and each must keep its own proposals. */
+const issueMessages = (name: string, list: readonly IssueProposal[]): TranscriptMessage[] => [
   say("issue-q", "user", "File the draft-loss bug, and the card idea we discussed."),
   say("issue-a", "assistant", "I drafted both. Check them before they go to GitHub."),
-  ...proposals.map((proposal, index) => proposalRow(`issue-${String(index)}`, proposal)),
+  ...list.map((proposal, index) => proposalRow(`${name}-${String(index)}`, proposal)),
 ];
 const scenarios: Record<string, TranscriptMessage[]> = {
-  issue: issueMessages([SHORT, LONG]), "issue-long": issueMessages([LONG]), "issue-readonly": issueMessages([NO_LABELS, LONG]),
-  "issue-decided": issueMessages([{ ...SHORT, outcome: CREATED }, { ...NO_LABELS, outcome: DISMISSED }, { ...LONG, outcome: { ...CREATED, number: 1204, title: LONG.title, url: "https://github.com/forgerie/forgerie/issues/1204" } }]),
+  issue: issueMessages("issue", [SHORT, LONG]), "issue-long": issueMessages("issue-long", [LONG]),
+  "issue-readonly": issueMessages("issue-readonly", [NO_LABELS, LONG]),
+  "issue-decided": issueMessages("issue-decided", [{ ...SHORT, outcome: CREATED }, { ...NO_LABELS, outcome: DISMISSED }, { ...LONG, outcome: { ...CREATED, number: 1204, title: LONG.title, url: "https://github.com/forgerie/forgerie/issues/1204" } }]),
   ...childrenPreview ? { [scenario]: childMessages() } : {},
   summary: summaryMessages, "summary-open": summaryMessages,
   shell: shellMessages(false), "shell-running": shellMessages(true), "shell-blocked": shellMessages(true),
@@ -666,7 +674,8 @@ function Preview() {
     setMessages((current) => [...current, say(`user-${current.length}`, "user", text),
       say(`reply-${current.length}`, "assistant", "This is a local preview. No prompt was sent to Pi.")]);
   }
-  const threadMessages = useThreadMessages(messages, running);
+  const converted = useThreadMessages(messages, running);
+  const threadMessages = useMemo(() => issuePreview ? withProposals(converted) : converted, [converted]);
   const runtimeRef = useRef<AssistantRuntime | null>(null);
   // Stop returns queued work to the draft in delivery order, ahead of what is typed.
   async function onCancel() {
@@ -757,7 +766,7 @@ function Preview() {
           ? <ChildEntryView key={item.id} entry={item.entry} onAnswer={async () => {}} onOpen={() => setChildView({ open: true, id: 21 })} /> : null)}</PinnedDock> : undefined;
       })() : undefined} commandResult={commandResult && { result: commandResult, disabled: false, onClose: () => setCommandResult(undefined),
         onChoose: (_requestId, value) => setCommandResult({ type: "done", presentation: "toast", message: `Forked from ${value}` }) }} systemArtifact={issuePreview ? (custom) => {
-        const proposal = (custom as { childEntry?: IssueProposal } | undefined)?.childEntry;
+        const proposal = (custom as Partial<IssueProposalArtifact> | undefined)?.issueProposal;
         return proposal && <IssueProposalEntry proposal={proposal} sessionId="preview" cwd={previewCwd} readOnly={scenario === "issue-readonly"} request={issueRequest} />;
       } : childrenPreview ? (custom) => {
         const entry = (custom as { childEntry?: ChildEntry } | undefined)?.childEntry;
