@@ -41,7 +41,7 @@ export async function importParentEntry(tx: Tx, conversation: ConversationRecord
       if (Check(ParentAskOutcomeSchema, outcome) && asks.closed[outcome.askId] === undefined) {
         const deliver = outcome.reason === "submitted" || outcome.reason === "cancelled";
         asks.closed[outcome.askId] = { outcome, delivery: deliver ? { kind: "pending", requestId: askAnswerRequestId(outcome.askId) } : { kind: "none" } };
-        if (deliver) await createAskDelivery(tx, outcome.askId);
+        if (deliver) await createAskDelivery(tx, id, outcome.askId);
       }
     }
   }

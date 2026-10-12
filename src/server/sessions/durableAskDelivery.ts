@@ -1,4 +1,4 @@
-import { defineExtension, defineTask, type Submission, type Tx } from "@earendil-works/pi-durable";
+import { defineExtension, defineTask, type ConversationId, type Submission, type Tx } from "@earendil-works/pi-durable";
 import { ParentAsks } from "./durableParentDocuments.js";
 import { renderAskUserAnswersText } from "./sessionAsks.js";
 
@@ -41,6 +41,6 @@ const Delivery = defineTask<{ askId: string }, { phase: "deliver"; attempt: numb
 
 /** Must be installed before resuming a family. Forks do not clone these conversation-owned tasks. */
 export function askDeliveryExtension() { return defineExtension({ name: "forgerie.parent-asks", tasks: [Delivery] }); }
-export async function createAskDelivery(tx: Tx, askId: string): Promise<void> {
-  await tx.createTask(Delivery, { askId }, { ownership: { kind: "conversation" }, background: true });
+export async function createAskDelivery(tx: Tx, conversationId: ConversationId, askId: string): Promise<void> {
+  await tx.createTask(Delivery, { askId }, { ownership: { kind: "conversation" }, conversationId, background: true });
 }

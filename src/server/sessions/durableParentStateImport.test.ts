@@ -10,7 +10,29 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { expect, it } from "vitest";
 import { importParentEntry } from "./durableParentStateImport.js";
 import { ExtensionEntries, ImportedUsage, ParentAsks, ParentResponse, SessionName, initializeParentDocuments } from "./durableParentDocuments.js";
-import { SESSION_RESPONSE_CUSTOM_TYPE } from "./sessionResponse.js";
+import { SESSION_RESPONSE_CUSTOM_TYPE, responseFromBranch } from "./sessionResponse.js";
+import { SessionAsks } from "./sessionAsks.js";
+
+it("binds imported answer delivery to its conversation in an unbound family commit", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "forgerie-parent-answer-import-"));
+  const harness = await Harness.open(await openNodeSqliteStorage(join(directory, "state.sqlite")), { models: createModels(), registry: createRegistry(), conversationCreated: initializeParentDocuments }, context);
+  try {
+    await harness.root(context);
+    const sibling = await harness.createConversation({ ownership: { kind: "ownerless" } }, context);
+    const manager = SessionManager.inMemory(directory);
+    const asks = new SessionAsks({ readResponse: () => responseFromBranch(manager.getBranch()), appendEvent: (_id, event) => { manager.appendCustomEntry(SESSION_RESPONSE_CUSTOM_TYPE, event); } });
+    const { ask } = asks.open({ sessionId: manager.getSessionId(), questions: [{ id: "q", question: "Continue?", options: [] }] });
+    asks.submit(manager.getSessionId(), ask.askId, { answers: [{ id: "q", values: [], otherText: "Yes" }] });
+    for (const entry of manager.getEntries()) {
+      await harness.commit(async tx => {
+        const marker = await tx.appendEntry(sibling.id, { kind: "forgerie.import-marker", data: { sdkEntryId: entry.id } });
+        await importParentEntry(tx, { id: sibling.id }, marker.id, entry);
+      }, context);
+    }
+    expect((await harness.snapshot(ParentAsks, sibling.id, context))?.closed[ask.askId]).toMatchObject({ outcome: { answeredCount: 1 }, delivery: { kind: "pending" } });
+    expect((await harness.inspect(context)).tasks.map(task => task.record.conversationId)).toEqual([sibling.id]);
+  } finally { await harness.close(context); await rm(directory, { recursive: true, force: true }); }
+});
 
 it("seeds legacy spend once, excludes stamped native responses, and backfills metadata at marker cuts", async () => {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-parent-import-"));
