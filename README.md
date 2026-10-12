@@ -32,4 +32,4 @@ Forgerie retains `PI_WEB_*` environment names and some `pi-web` API and storage 
 
 ## License and origin
 
-MIT. The upstream copyright remains in [LICENSE](LICENSE). `upstream.lock` records the last reviewed upstream commit.
+MIT. The upstream copyright remains in [LICENSE](LICENSE).

@@ -1,8 +1,0 @@
-{
-  "upstream": "https://github.com/jmfederico/pi-web",
-  "branch": "main",
-  "reviewedCommit": "1e626e1d72524ef14c6c9b19088fbd0ef1b13fe3",
-  "reviewedDescribe": "v1.202608.0-38-g1e626e1",
-  "reviewedAt": "2026-08-07",
-  "note": "Fork point. Everything up to this commit is adopted wholesale; reviews start from here."
-}

@@ -10,7 +10,7 @@ export function Sequence() {
   return <Diagram code={"sequenceDiagram\n  participant B as Browser\n  participant S as Sessiond\n  participant M as Model\n  B->>S: prompt\n  S->>M: system prompt + guide\n  M-->>S: streamed reply\n  S-->>B: events"} />;
 }
 export function Wide() {
-  return <Diagram code={"flowchart LR\n  A[Read upstream.lock] --> B[Fetch upstream] --> C[Diff from cursor] --> D[Digest by relevance] --> E[Port adopted changes] --> F[Record the review] --> G[Advance the cursor]"} />;
+  return <Diagram code={"flowchart LR\n  A[Bump version] --> B[Build] --> C[Run tests] --> D[Write notes] --> E[Tag release] --> F[Publish] --> G[Announce]"} />;
 }
 export function Invalid() {
   return <Diagram code={"flowchart LR\n  A --> \n  this is not mermaid ((("} />;

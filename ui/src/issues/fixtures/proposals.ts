@@ -42,8 +42,8 @@ A closing line that only a reader who opened the body will see.`,
 export const NO_LABELS: IssueProposal = {
   proposalId: "prop-plain",
   repo: "simonwjackson/a-repository-with-a-rather-long-name-for-its-owner",
-  title: "Document the upstream review ritual",
-  body: "Write down the steps from AGENTS.md as a checklist.",
+  title: "Document the release checklist",
+  body: "Write down the release steps as a checklist.",
   labels: [],
 };
 

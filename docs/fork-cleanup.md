@@ -1,6 +1,6 @@
 # Fork cleanup
 
-This cleanup removes unused upstream features from the local Forgerie product. It does not merge upstream code, move `upstream.lock`, or remove MIT attribution.
+This cleanup removes unused upstream features from the local Forgerie product. It does not merge upstream code or remove MIT attribution.
 
 ## Retired features
 
