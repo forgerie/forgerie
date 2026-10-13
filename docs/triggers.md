@@ -49,7 +49,7 @@ Create example:
 
 The action accepts optional `model` (`provider/model-id`) and `thinkingLevel`. Omit them to use new-session defaults. The workspace, workflow, prose-only rule, and workflow inputs are checked at create, update, and fire time.
 
-A manual request ID has 1–64 letters, digits, or hyphens. The server prefixes it as `trigger-<id>-run-<requestId>`. Reuse the same ID on a retry: it starts nothing new, including after restart. A new ID requests a new paid run.
+A manual request ID has 1–64 letters, digits, or hyphens. The server encodes it as `trigger-<id-length>-<id>-run-<requestId>`. The ID length makes this encoding unambiguous; the maximum encoded length is 128 characters. Durable admission receipts use the tuple of trigger incarnation and client request ID. Reuse the same ID on a retry: it starts nothing new, including after restart. A new ID requests a new paid run.
 
 Each trigger keeps `createdBy`: `{kind:"user"}` for HTTP creates, or `{kind:"agent",sessionId,cwd}` for tool creates. Its revision starts at 1 and increases with edits, state changes, acknowledgement, and fire start and completion. Every document change emits the global event `{type:"triggers.changed"}`; clients read the list again.
 

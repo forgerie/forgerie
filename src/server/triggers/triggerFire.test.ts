@@ -1,3 +1,4 @@
+import { triggerManualRequestId } from "../../shared/triggers.js";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -84,3 +85,9 @@ it.each(["session", "workflow"])("SIGKILL after %s and a fresh process leave exa
     expect(transcript).toContain(header.id);
   } finally { for (const process of children) await stop(process); await rm(root, { recursive: true, force: true }); }
 }, 60_000);
+
+
+it("gives the formerly colliding manual tuples different session IDs at the same occurrence", () => {
+  const occurrence = Date.parse("2026-10-13T03:00:00Z");
+  expect(triggerSessionId(triggerManualRequestId("alpha", "beta-run-gamma"), occurrence)).not.toBe(triggerSessionId(triggerManualRequestId("alpha-run-beta", "gamma"), occurrence));
+});

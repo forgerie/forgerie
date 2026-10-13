@@ -152,5 +152,5 @@ export function triggerRequestId(triggerId: string, occurrence: number): string 
 
 /** One request ID per manual run. The client picks `runRequestId`; repeating it starts nothing new. */
 export function triggerManualRequestId(triggerId: string, runRequestId: string): string {
-  return `trigger-${triggerId}-run-${runRequestId}`;
+  return `trigger-${String(triggerId.length)}-${triggerId}-run-${runRequestId}`;
 }

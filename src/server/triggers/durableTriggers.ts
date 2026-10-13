@@ -13,7 +13,7 @@ export const TRIGGER_TASK_KIND = "forgerie.trigger";
 
 /** Session-scoped: one document holds every trigger of the storage that hosts them. */
 type StoredTrigger = Trigger & { readonly incarnation: string };
-const Triggers = defineDoc<{ records: Record<string, StoredTrigger>; nextGeneration: number; manualRequests: Record<string, string> }>({
+const Triggers = defineDoc<{ records: Record<string, StoredTrigger>; nextGeneration: number; manualRequests: Record<string, { triggerId: string; incarnation: string }> }>({
   kind: TRIGGERS_DOC_KIND, version: 1, scope: "session", initial: () => ({ records: {}, nextGeneration: 1, manualRequests: {} }),
 });
 
@@ -263,8 +263,9 @@ export function durableTriggers(options: DurableTriggerOptions) {
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
       assertProject(record.action, scope);
       const requestId = triggerManualRequestId(id, clientRequestId);
-      if (doc.manualRequests[requestId] === undefined) {
-        doc.manualRequests[requestId] = id;
+      const receiptKey = JSON.stringify([record.incarnation, clientRequestId]);
+      if (doc.manualRequests[receiptKey] === undefined) {
+        doc.manualRequests[receiptKey] = { triggerId: id, incarnation: record.incarnation };
         await tx.createTask(manualTask, { incarnation: record.incarnation, request: { triggerId: id, name: record.name, timezone: record.schedule.timezone, action: publicAction(record.action), occurrence: now(), requestId } }, { ownership: { kind: "conversation" }, conversationId: anchor, background: true });
       }
       return { requestId };
@@ -278,7 +279,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
       assertProject(record.action, scope);
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Records are keyed by trigger ID.
       delete doc.records[id];
-      for (const [requestId, triggerId] of Object.entries(doc.manualRequests)) if (triggerId === id) {
+      for (const [requestId, receipt] of Object.entries(doc.manualRequests)) if (receipt.triggerId === id && receipt.incarnation === record.incarnation) {
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Receipts are keyed by request ID.
         delete doc.manualRequests[requestId];
       }

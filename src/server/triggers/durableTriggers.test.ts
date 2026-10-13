@@ -347,3 +347,17 @@ it("writes no stale completion into a replacement trigger", async () => {
   expect(replacement?.history).toEqual([]);
   expect(replacement?.revision).toBe(1);
 });
+
+
+it("accepts both manual runs whose trigger/client tuples formerly collided", async () => {
+  const clock = shiftedClock("2026-10-12T12:00:00Z");
+  const host = recordingFire({ kind: "start" });
+  const { harness, anchor, triggers } = await openHost(clock, host.fire);
+  await triggers.create(harness, anchor, { ...nightly, id: "alpha" }, context);
+  await triggers.create(harness, anchor, { ...nightly, id: "alpha-run-beta" }, context);
+  const first = await triggers.run(harness, anchor, "alpha", "beta-run-gamma", context);
+  const second = await triggers.run(harness, anchor, "alpha-run-beta", "gamma", context);
+  expect(first.requestId).not.toBe(second.requestId);
+  await until(harness, (records) => records.every((record) => record.history[0]?.outcome.kind === "started"));
+  expect(host.requests).toHaveLength(2);
+});

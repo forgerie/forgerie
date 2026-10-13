@@ -1,7 +1,7 @@
 import { Check } from "typebox/value";
 import { expect, it } from "vitest";
 import { KNOWN_THINKING_LEVELS } from "./thinkingLevels.js";
-import { TriggerActionSchema, type TriggerAction } from "./triggers.js";
+import { TriggerActionSchema, triggerManualRequestId, type TriggerAction } from "./triggers.js";
 
 type KnownLevel = (typeof KNOWN_THINKING_LEVELS)[number];
 type ActionLevel = NonNullable<TriggerAction["thinkingLevel"]>;
@@ -20,4 +20,14 @@ it("keeps thinking optional and rejects unknown levels", () => {
   const action: TriggerAction = workflow;
   expect(Check(TriggerActionSchema, action)).toBe(true);
   expect(Check(TriggerActionSchema, { ...workflow, thinkingLevel: "ultra" })).toBe(false);
+});
+
+
+it("separates manual request tuples that previously had the same joined string", () => {
+  const first = triggerManualRequestId("alpha", "beta-run-gamma");
+  const second = triggerManualRequestId("alpha-run-beta", "gamma");
+  expect(first).not.toBe(second);
+  expect(first).toMatch(/^[a-zA-Z0-9-]{1,128}$/u);
+  expect(second).toMatch(/^[a-zA-Z0-9-]{1,128}$/u);
+  expect(triggerManualRequestId("a".repeat(48), "b".repeat(64))).toMatch(/^[a-zA-Z0-9-]{1,128}$/u);
 });
