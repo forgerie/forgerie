@@ -213,11 +213,6 @@ export function nextIfResumed(trigger: Trigger, now: number): number | undefined
   try { return nextOccurrence(trigger.schedule, now); } catch { return undefined; }
 }
 
-/** The instant the trigger runs next: its armed time, or for a paused one, the time it would run if resumed now. */
-export function nextRun(trigger: Trigger, now: number): number | undefined {
-  return trigger.state.kind === "active" ? trigger.state.nextFireAt : nextIfResumed(trigger, now);
-}
-
 /** The row's accessible name: the strip in words. */
 export function rowLabel(trigger: Trigger, clock: WordClock): string {
   const next = trigger.state.kind === "active" ? `Next run ${relativeLong(trigger.state.nextFireAt, clock.now)}.` : "Paused.";
