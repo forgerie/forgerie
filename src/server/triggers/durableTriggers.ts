@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
 import { defineDoc, defineExtension, defineTask, type ConversationId, type Harness, type Tx, type TaskRuntime } from "@earendil-works/pi-durable";
 import { Check } from "typebox/value";
+import { Type } from "typebox";
 import { nextOccurrence, parseTriggerSchedule } from "../../shared/triggerSchedules.js";
 import {
   DEFAULT_MISSED_GRACE_MINUTES, TRIGGER_HISTORY_LIMIT, TriggerCreateSchema, triggerRequestId,
@@ -49,9 +50,18 @@ export interface DurableTriggerOptions {
 
 interface TriggerTaskInput { readonly incarnation: string; readonly triggerId: string; readonly generation: number; readonly firstOccurrence: number }
 interface ManualTaskInput { readonly request: TriggerFireRequest; readonly incarnation: string }
+type FireAdmission = boolean | "legacy";
+interface ManualCheckpoint { readonly phase: "fire"; readonly admitted: FireAdmission }
 type TriggerCheckpoint =
   | { readonly phase: "wait"; readonly occurrence: number; readonly skippedBefore: number }
-  | { readonly phase: "fire"; readonly occurrence: number; readonly skippedBefore: number; readonly request: TriggerFireRequest };
+  | { readonly phase: "fire"; readonly occurrence: number; readonly skippedBefore: number; readonly request: TriggerFireRequest; readonly admitted: FireAdmission };
+
+const RequestSchema = Type.Object({ triggerId: Type.String(), name: Type.String(), action: TriggerActionSchema, occurrence: Type.Number(), requestId: Type.String(), timezone: Type.String() }, { additionalProperties: false });
+const ScheduledInputSchema = Type.Object({ incarnation: Type.String(), triggerId: Type.String(), generation: Type.Integer(), firstOccurrence: Type.Number() }, { additionalProperties: false });
+const ManualInputSchema = Type.Object({ request: RequestSchema, incarnation: Type.String() }, { additionalProperties: false });
+const WaitCheckpointSchema = Type.Object({ phase: Type.Literal("wait"), occurrence: Type.Number(), skippedBefore: Type.Integer() }, { additionalProperties: false });
+const VersionOneCheckpointSchema = Type.Union([WaitCheckpointSchema, Type.Object({ phase: Type.Literal("fire"), occurrence: Type.Number(), skippedBefore: Type.Integer(), request: RequestSchema }, { additionalProperties: false })]);
+const VersionOneManualCheckpointSchema = Type.Object({ phase: Type.Literal("fire") }, { additionalProperties: false });
 
 const MINUTE = 60_000;
 const ON_TIME_TOLERANCE_MS = 60_000;
@@ -98,19 +108,29 @@ function recordFire(record: Trigger, fire: TriggerFire): void {
 export function durableTriggers(options: DurableTriggerOptions) {
   const { fire, now } = options;
 
-  async function executeFire<I, S>(runtime: TaskRuntime<I, S, null, object>, request: TriggerFireRequest, incarnation: string, cause: TriggerFire["cause"], skippedBefore: number, context: Context, scheduled?: TriggerTaskInput): Promise<TriggerFire["outcome"] | undefined> {
-    await options.beforeAdmission?.(request, context);
+  async function executeFire<I, S>(runtime: TaskRuntime<I, S, null, object>, request: TriggerFireRequest, incarnation: string, cause: TriggerFire["cause"], skippedBefore: number, context: Context, persistedAdmission: { readonly state: FireAdmission; readonly checkpoint: S }, scheduled?: TriggerTaskInput): Promise<TriggerFire["outcome"] | undefined> {
+    if (persistedAdmission.state !== true) await options.beforeAdmission?.(request, context);
     const admission = { accepted: false };
     await runtime.commit(async (tx) => {
       const record = recordAt((await tx.doc(Triggers)).records, request.triggerId);
       if (record?.incarnation !== incarnation) return stop;
-      const previous = record.history.find((entry) => entry.requestId === request.requestId);
-      if (previous === undefined) {
-        if (scheduled !== undefined && !armedFor(record, scheduled)) return stop;
-        recordFire(record, { occurrence: request.occurrence, requestId: request.requestId, cause, recordedAt: now(), skippedBefore, outcome: { kind: "running", startedAt: now() } });
-      } else if (previous.outcome.kind !== "running") return stop;
+      if (persistedAdmission.state === true) {
+        admission.accepted = true;
+        return undefined;
+      }
+      // Version 1 did not save admission in its checkpoint. Read its old evidence once, during upgrade only.
+      const legacy = persistedAdmission.state === "legacy";
+      const previous = legacy ? record.history.find((entry) => entry.requestId === request.requestId) : undefined;
+      if (previous !== undefined && previous.outcome.kind !== "running") return stop;
+      if (previous === undefined && scheduled !== undefined && !armedFor(record, scheduled)) {
+        if (legacy) recordFire(record, { occurrence: request.occurrence, requestId: request.requestId, cause, recordedAt: now(), skippedBefore,
+          outcome: { kind: "failed", error: "Cannot recover version-1 fire admission: its evidence is missing and the trigger is paused or superseded. Use Run now to retry." } });
+        return stop;
+      }
+      if (previous === undefined) recordFire(record, { occurrence: request.occurrence, requestId: request.requestId, cause, recordedAt: now(), skippedBefore, outcome: { kind: "running", startedAt: now() } });
       admission.accepted = true;
-      return undefined;
+      // The task owns this receipt. Trimming display history cannot remove it.
+      return { status: "running", checkpoint: persistedAdmission.checkpoint };
     }, context);
     if (!admission.accepted) return undefined;
     try { return { kind: "started", ...await fire(request, context) }; }
@@ -120,11 +140,15 @@ export function durableTriggers(options: DurableTriggerOptions) {
     }
   }
 
-  const manualTask = defineTask<ManualTaskInput, { phase: "fire" }, null>({
-    name: "forgerie.trigger.manual", version: 1, initial: () => ({ phase: "fire" }),
+  const manualTask = defineTask<ManualTaskInput, ManualCheckpoint, null>({
+    name: "forgerie.trigger.manual", version: 2, initial: () => ({ phase: "fire", admitted: false }),
+    migrate: (input, checkpoint, fromVersion) => {
+      if (fromVersion !== 1 || !Check(ManualInputSchema, input) || !Check(VersionOneManualCheckpointSchema, checkpoint)) throw new Error("Unsupported manual trigger task migration");
+      return { input, checkpoint: { phase: "fire", admitted: "legacy" } };
+    },
     phases: { fire: async (running, runtime, context) => {
       const { request, incarnation } = running.input;
-      const outcome = await executeFire(runtime, request, incarnation, "manual", 0, context);
+      const outcome = await executeFire(runtime, request, incarnation, "manual", 0, context, { state: running.state.checkpoint.admitted, checkpoint: { ...running.state.checkpoint, admitted: true } });
       if (outcome === undefined) return;
       await runtime.commit(async (tx) => {
         const record = recordAt((await tx.doc(Triggers)).records, request.triggerId);
@@ -136,7 +160,11 @@ export function durableTriggers(options: DurableTriggerOptions) {
   });
 
   const task = defineTask<TriggerTaskInput, TriggerCheckpoint, null>({
-    name: TRIGGER_TASK_KIND, version: 1,
+    name: TRIGGER_TASK_KIND, version: 2,
+    migrate: (input, checkpoint, fromVersion) => {
+      if (fromVersion !== 1 || !Check(ScheduledInputSchema, input) || !Check(VersionOneCheckpointSchema, checkpoint)) throw new Error("Unsupported scheduled trigger task migration");
+      return { input, checkpoint: checkpoint.phase === "wait" ? checkpoint : { ...checkpoint, admitted: "legacy" } };
+    },
     initial: (input) => ({ phase: "wait", occurrence: input.firstOccurrence, skippedBefore: 0 }),
     phases: {
       wait: async (running, runtime, context) => {
@@ -152,7 +180,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
             skippedBefore += 1;
           }
           // Timer jitter counts as on time even when the user refuses late runs. It does not extend a longer grace window.
-          if (at - occurrence <= Math.max(ON_TIME_TOLERANCE_MS, record.missedGraceMinutes * MINUTE)) return { status: "running", checkpoint: { phase: "fire", occurrence, skippedBefore, request: { triggerId: record.id, name: record.name, timezone: record.schedule.timezone, action: publicAction(record.action), occurrence, requestId: triggerRequestId(record.id, occurrence) } } };
+          if (at - occurrence <= Math.max(ON_TIME_TOLERANCE_MS, record.missedGraceMinutes * MINUTE)) return { status: "running", checkpoint: { phase: "fire", admitted: false, occurrence, skippedBefore, request: { triggerId: record.id, name: record.name, timezone: record.schedule.timezone, action: publicAction(record.action), occurrence, requestId: triggerRequestId(record.id, occurrence) } } };
           recordFire(record, { occurrence, requestId: triggerRequestId(record.id, occurrence), cause: "schedule", recordedAt: at, skippedBefore, outcome: { kind: "missed" } });
           const nextFireAt = nextOccurrence(record.schedule, at);
           record.state = { kind: "active", nextFireAt };
@@ -163,7 +191,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
         const { occurrence, skippedBefore } = running.state.checkpoint;
         const { triggerId } = running.input;
         const requestId = triggerRequestId(triggerId, occurrence);
-        const outcome = await executeFire(runtime, running.state.checkpoint.request, running.input.incarnation, "schedule", skippedBefore, context, running.input);
+        const outcome = await executeFire(runtime, running.state.checkpoint.request, running.input.incarnation, "schedule", skippedBefore, context, { state: running.state.checkpoint.admitted, checkpoint: { ...running.state.checkpoint, admitted: true } }, running.input);
         if (outcome === undefined) return;
         await runtime.commit(async (tx) => {
           const live = recordAt((await tx.doc(Triggers)).records, triggerId);

@@ -1,3 +1,5 @@
+import { Type } from "typebox";
+import { Check } from "typebox/value";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,8 +8,8 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, Harness } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { afterEach, beforeEach, expect, it } from "vitest";
-import type { Trigger } from "../../shared/triggers.js";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { TriggerFireSchema, type Trigger } from "../../shared/triggers.js";
 import { durableTriggers, listTriggers, TriggerError, type TriggerFireReceipt, type TriggerFireRequest, type DurableTriggerOptions } from "./durableTriggers.js";
 
 const at = (value: string) => Date.parse(value);
@@ -376,4 +378,146 @@ it("separates recreated manual runs even at an identical request time", async ()
   expect(second.requestId).not.toBe(first.requestId);
   await until(harness, fired(1));
   expect(host.requests).toHaveLength(2);
+});
+
+
+it.each(["pause", "edit"])("finishes an admitted scheduled fire after history trimming, %s, and restart", async (change) => {
+  const clock = shiftedClock("2026-10-13T02:59:59.950Z");
+  const held = recordingFire({ kind: "hold-until-cancelled" });
+  const manual = recordingFire({ kind: "start" });
+  const scheduledRequestId = `trigger-nightly-${String(at("2026-10-13T03:00:00Z"))}`;
+  const first = await openHost(clock, (request, signal) => request.requestId === scheduledRequestId ? held.fire(request, signal) : manual.fire(request, signal));
+  clock.set(JUST_BEFORE_THREE);
+  await first.triggers.create(first.harness, first.anchor, nightly, context);
+  await until(first.harness, () => held.requests.length === 1);
+  const original = (await first.harness.commit((tx) => tx.scanTasks({ kind: "forgerie.trigger" }, 100), context)).items[0];
+  if (original === undefined) throw new Error("Scheduled task missing");
+  if (change === "pause") await first.triggers.pause(first.harness, nightly.id, context);
+  else {
+    const [record] = await listTriggers(first.harness, context);
+    await first.triggers.update(first.harness, first.anchor, nightly.id, { baseRevision: record?.revision, name: "Edited", action: { ...nightly.action, workflow: "edited" } }, context);
+  }
+  for (let index = 0; index < 50; index++) {
+    const accepted = await first.triggers.run(first.harness, first.anchor, nightly.id, `trim-${String(index)}`, context);
+    await until(first.harness, (records) => records[0]?.history[0]?.requestId === accepted.requestId && records[0].history[0].outcome.kind === "started");
+  }
+  const [beforeCrash] = await listTriggers(first.harness, context);
+  expect(beforeCrash?.history).toHaveLength(50);
+  expect(beforeCrash?.history.some((entry) => entry.requestId === scheduledRequestId)).toBe(false);
+  await closeHost(first.harness);
+
+  const started = recordingFire({ kind: "start" });
+  const second = await openHost(clock, started.fire);
+  await vi.waitFor(async () => {
+    const task = await second.harness.commit((tx) => tx.task(original.id), context);
+    expect(task?.state.status).toBe("terminal");
+  });
+  expect(started.requests).toEqual(held.requests);
+  const [after] = await listTriggers(second.harness, context);
+  expect(after?.history).toHaveLength(50);
+  expect(after?.history[0]).toMatchObject({ requestId: scheduledRequestId, cause: "schedule", outcome: { kind: "started" } });
+  expect(after?.state).toEqual(beforeCrash?.state);
+  expect(after?.revision).toBe((beforeCrash?.revision ?? 0) + 1);
+});
+
+/** Seed the immediately preceding persisted protocol through Storage, with no live Harness writing it. */
+async function saveAsVersionOne(kind: string): Promise<void> {
+  const storage = await openNodeSqliteStorage(join(directory, "triggers.sqlite"));
+  try {
+    for (const task of (await storage.scanTasks({ kind }, 100, undefined, context)).items) {
+      if (task.state.status === "terminal" || task.state.status === "completing") continue;
+      const checkpoint = task.state.checkpoint;
+      if (checkpoint === null || typeof checkpoint !== "object" || Array.isArray(checkpoint)) throw new Error("Invalid checkpoint fixture");
+      const legacy = Object.fromEntries(Object.entries(checkpoint).filter(([key]) => key !== "admitted"));
+      await storage.commit([{ type: "task", value: { ...task, version: 1, state: { status: "pending", checkpoint: legacy } } }], context);
+    }
+  } finally { await storage.close(context); }
+}
+
+it("migrates a version-1 sleeping task and admits its next scheduled occurrence", async () => {
+  const clock = shiftedClock("2026-10-12T12:00:00Z");
+  const first = await openHost(clock, recordingFire({ kind: "start" }).fire);
+  await first.triggers.create(first.harness, first.anchor, nightly, context);
+  await closeHost(first.harness);
+  await saveAsVersionOne("forgerie.trigger");
+  clock.set("2026-10-13T03:00:30Z");
+  const started = recordingFire({ kind: "start" });
+  const second = await openHost(clock, started.fire);
+  await until(second.harness, fired(1));
+  expect(started.requests).toHaveLength(1);
+  const tasks = await second.harness.commit((tx) => tx.scanTasks({ kind: "forgerie.trigger" }, 100), context);
+  expect(tasks.items[0]?.version).toBe(2);
+});
+
+it.each(["schedule", "manual"])("migrates a version-1 admitted %s task while paused without recording another start", async (cause) => {
+  const clock = shiftedClock(cause === "schedule" ? "2026-10-13T02:59:59.950Z" : "2026-10-12T12:00:00Z");
+  const held = recordingFire({ kind: "hold-until-cancelled" });
+  const first = await openHost(clock, held.fire);
+  if (cause === "schedule") clock.set(JUST_BEFORE_THREE);
+  await first.triggers.create(first.harness, first.anchor, nightly, context);
+  if (cause === "manual") await first.triggers.run(first.harness, first.anchor, nightly.id, "migrate", context);
+  await until(first.harness, () => held.requests.length === 1);
+  const paused = await first.triggers.pause(first.harness, nightly.id, context);
+  await closeHost(first.harness);
+  const kind = cause === "schedule" ? "forgerie.trigger" : "forgerie.trigger.manual";
+  await saveAsVersionOne(kind);
+  const started = recordingFire({ kind: "start" });
+  const second = await openHost(clock, started.fire);
+  const [finished] = await until(second.harness, fired(1));
+  expect(started.requests).toEqual(held.requests);
+  expect(finished?.history).toHaveLength(1);
+  expect(finished?.state.kind).toBe("paused");
+  expect(finished?.revision).toBe(paused.revision + 1);
+  const tasks = await second.harness.commit((tx) => tx.scanTasks({ kind }, 100), context);
+  expect(tasks.items[0]?.version).toBe(2);
+});
+
+it("fails closed with attention when version-1 admission evidence was already lost", async () => {
+  const clock = shiftedClock("2026-10-13T02:59:59.950Z");
+  const held = recordingFire({ kind: "hold-until-cancelled" });
+  const manual = recordingFire({ kind: "start" });
+  const requestId = `trigger-nightly-${String(at("2026-10-13T03:00:00Z"))}`;
+  const first = await openHost(clock, (request, signal) => request.requestId === requestId ? held.fire(request, signal) : manual.fire(request, signal));
+  clock.set(JUST_BEFORE_THREE);
+  await first.triggers.create(first.harness, first.anchor, nightly, context);
+  await until(first.harness, () => held.requests.length === 1);
+  await first.triggers.pause(first.harness, nightly.id, context);
+  for (let index = 0; index < 50; index++) {
+    const accepted = await first.triggers.run(first.harness, first.anchor, nightly.id, `legacy-${String(index)}`, context);
+    await until(first.harness, (records) => records[0]?.history[0]?.requestId === accepted.requestId && records[0].history[0].outcome.kind === "started");
+  }
+  await closeHost(first.harness);
+  await saveAsVersionOne("forgerie.trigger");
+  const started = recordingFire({ kind: "start" });
+  const second = await openHost(clock, started.fire);
+  const [failed] = await until(second.harness, (records) => records[0]?.history[0]?.outcome.kind === "failed");
+  expect(started.requests).toEqual([]);
+  expect(failed?.history[0]).toMatchObject({ requestId, outcome: { kind: "failed" } });
+  expect(JSON.stringify(failed?.history[0])).toContain("Use Run now to retry");
+  expect(failed?.attention).not.toBeNull();
+  expect(failed?.state.kind).toBe("paused");
+});
+
+
+it("commits the task admission receipt and running history entry atomically", async () => {
+  const clock = shiftedClock("2026-10-13T02:59:59.950Z");
+  const host = recordingFire({ kind: "start" });
+  const { harness, anchor, triggers } = await openHost(clock, host.fire);
+  const witnessed: boolean[] = [];
+  const admissionSchema = Type.Object({ phase: Type.Literal("fire"), admitted: Type.Literal(true) });
+  const historySchema = Type.Object({ records: Type.Record(Type.String(), Type.Object({ history: Type.Array(TriggerFireSchema) })) });
+  const unsubscribe = harness.subscribeCommits((publication) => {
+    const admitted = publication.changes.some((change) => change.type === "task" && change.value.kind === "forgerie.trigger"
+      && change.value.state.status !== "terminal" && change.value.state.status !== "completing" && Check(admissionSchema, change.value.state.checkpoint));
+    if (!admitted) return;
+    const document = publication.changes.find((change) => change.type === "document" && change.record.kind === "forgerie.triggers");
+    witnessed.push(document?.type === "document" && Check(historySchema, document.value)
+      && document.value.records[nightly.id]?.history[0]?.outcome.kind === "running");
+  });
+  try {
+    clock.set(JUST_BEFORE_THREE);
+    await triggers.create(harness, anchor, nightly, context);
+    await until(harness, fired(1));
+    expect(witnessed).toEqual([true]);
+  } finally { unsubscribe(); }
 });
