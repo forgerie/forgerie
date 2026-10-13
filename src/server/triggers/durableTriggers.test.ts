@@ -8,7 +8,7 @@ import { createRegistry, Harness } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import type { Trigger } from "../../shared/triggers.js";
-import { durableTriggers, listTriggers, TriggerError, type TriggerFireReceipt, type TriggerFireRequest } from "./durableTriggers.js";
+import { durableTriggers, listTriggers, TriggerError, type TriggerFireReceipt, type TriggerFireRequest, type DurableTriggerOptions } from "./durableTriggers.js";
 
 const at = (value: string) => Date.parse(value);
 const nightly = {
@@ -51,8 +51,8 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
-async function openHost(clock: ReturnType<typeof shiftedClock>, fire: ReturnType<typeof recordingFire>["fire"]) {
-  const triggers = durableTriggers({ fire, now: clock.now });
+async function openHost(clock: ReturnType<typeof shiftedClock>, fire: ReturnType<typeof recordingFire>["fire"], beforeAdmission?: DurableTriggerOptions["beforeAdmission"]) {
+  const triggers = durableTriggers({ fire, now: clock.now, ...(beforeAdmission === undefined ? {} : { beforeAdmission }) });
   const registry = createRegistry();
   registry.install(triggers.extension);
   const harness = await Harness.open(await openNodeSqliteStorage(join(directory, "triggers.sqlite")), { models: createModels(), registry, now: clock.now }, context);
@@ -279,4 +279,71 @@ it.each([
   expect(host.requests).toHaveLength(outcome === "started" ? 1 : 0);
   expect(trigger?.state).toEqual({ kind: "active", nextFireAt: at("2026-10-14T03:00:00Z") });
   expect(trigger?.attention === null).toBe(outcome === "started");
+});
+
+it.each(["pause", "edit", "delete"])("does not admit a scheduled fire when %s wins before admission", async (operation) => {
+  const clock = shiftedClock("2026-10-13T02:59:59.950Z");
+  const host = recordingFire({ kind: "start" });
+  let enter!: () => void; let release!: () => void;
+  const entered = new Promise<void>((resolve) => { enter = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const first = await openHost(clock, host.fire, async () => { enter(); await held; });
+  clock.set(JUST_BEFORE_THREE);
+  await first.triggers.create(first.harness, first.anchor, nightly, context);
+  await entered;
+  if (operation === "pause") await first.triggers.pause(first.harness, nightly.id, context);
+  else if (operation === "delete") await first.triggers.remove(first.harness, nightly.id, context);
+  else await first.triggers.update(first.harness, first.anchor, nightly.id, { baseRevision: 1, action: { ...nightly.action, workflow: "edited" } }, context);
+  release();
+  // Wait for the original task to settle through Durable's public task query.
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    const tasks = await first.harness.commit((tx) => tx.scanTasks({}, 100), context);
+    if (tasks.items.some((task) => task.kind === "forgerie.trigger" && task.state.status === "terminal")) break;
+    if (host.requests.length > 0) break;
+    if (Date.now() > deadline) throw new Error("Admission did not settle");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  expect(host.requests).toEqual([]);
+  const records = await listTriggers(first.harness, context);
+  expect(records[0]?.history ?? []).toEqual([]);
+});
+
+it("does not resume an interrupted manual fire into a recreated trigger", async () => {
+  const clock = shiftedClock("2026-10-12T12:00:00Z");
+  const held = recordingFire({ kind: "hold-until-cancelled" });
+  const first = await openHost(clock, held.fire);
+  await first.triggers.create(first.harness, first.anchor, nightly, context);
+  await first.triggers.run(first.harness, first.anchor, nightly.id, "same", context);
+  await until(first.harness, () => held.requests.length === 1);
+  await first.triggers.remove(first.harness, nightly.id, context);
+  await first.triggers.create(first.harness, first.anchor, { ...nightly, name: "Replacement" }, context);
+  await closeHost(first.harness);
+  const host = recordingFire({ kind: "start" });
+  const second = await openHost(clock, host.fire);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(host.requests).toEqual([]);
+  expect((await listTriggers(second.harness, context))[0]?.history).toEqual([]);
+});
+
+it("writes no stale completion into a replacement trigger", async () => {
+  const clock = shiftedClock("2026-10-12T12:00:00Z");
+  let enter!: () => void; let release!: () => void;
+  const entered = new Promise<void>((resolve) => { enter = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const first = await openHost(clock, async (request) => { enter(); await held; return { sessionId: "session", cwd: request.action.cwd, runId: "old-run" }; });
+  await first.triggers.create(first.harness, first.anchor, nightly, context);
+  await first.triggers.run(first.harness, first.anchor, nightly.id, "same", context);
+  await entered;
+  await first.triggers.remove(first.harness, nightly.id, context);
+  await first.triggers.create(first.harness, first.anchor, { ...nightly, name: "Replacement" }, context);
+  release();
+  const deadline = Date.now() + 5000;
+  while ((await first.harness.commit((tx) => tx.scanTasks({ kind: "forgerie.trigger.manual", status: "terminal" }, 100), context)).items.length === 0) {
+    if (Date.now() > deadline) throw new Error("Completion did not settle");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const [replacement] = await listTriggers(first.harness, context);
+  expect(replacement?.history).toEqual([]);
+  expect(replacement?.revision).toBe(1);
 });

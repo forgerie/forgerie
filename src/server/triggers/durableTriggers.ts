@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
 import { defineDoc, defineExtension, defineTask, type ConversationId, type Harness, type Tx, type TaskRuntime } from "@earendil-works/pi-durable";
 import { Check } from "typebox/value";
@@ -11,7 +12,8 @@ export const TRIGGERS_DOC_KIND = "forgerie.triggers";
 export const TRIGGER_TASK_KIND = "forgerie.trigger";
 
 /** Session-scoped: one document holds every trigger of the storage that hosts them. */
-const Triggers = defineDoc<{ records: Record<string, Trigger>; nextGeneration: number; manualRequests: Record<string, string> }>({
+type StoredTrigger = Trigger & { readonly incarnation: string };
+const Triggers = defineDoc<{ records: Record<string, StoredTrigger>; nextGeneration: number; manualRequests: Record<string, string> }>({
   kind: TRIGGERS_DOC_KIND, version: 1, scope: "session", initial: () => ({ records: {}, nextGeneration: 1, manualRequests: {} }),
 });
 
@@ -41,9 +43,12 @@ export interface DurableTriggerOptions {
   readonly fire: FireTrigger;
   /** The same clock the hosting Harness uses (`HarnessOptions.now`). */
   readonly now: () => number;
+  /** Admission can wait for host coordination without holding a storage transaction. */
+  readonly beforeAdmission?: (request: TriggerFireRequest, context: Context) => Promise<void>;
 }
 
-interface TriggerTaskInput { readonly triggerId: string; readonly generation: number; readonly firstOccurrence: number }
+interface TriggerTaskInput { readonly incarnation: string; readonly triggerId: string; readonly generation: number; readonly firstOccurrence: number }
+interface ManualTaskInput { readonly request: TriggerFireRequest; readonly incarnation: string }
 type TriggerCheckpoint =
   | { readonly phase: "wait"; readonly occurrence: number; readonly skippedBefore: number }
   | { readonly phase: "fire"; readonly occurrence: number; readonly skippedBefore: number; readonly request: TriggerFireRequest };
@@ -53,17 +58,17 @@ const ON_TIME_TOLERANCE_MS = 60_000;
 const stop = { status: "terminal", outcome: { status: "completed", result: null } } as const;
 
 /** The record a task may act for: present, active, and armed by this task's generation. */
-function armedFor(record: Readonly<Trigger> | undefined, input: TriggerTaskInput): boolean {
-  return record?.state.kind === "active" && record.generation === input.generation;
+function armedFor(record: Readonly<StoredTrigger> | undefined, input: TriggerTaskInput): boolean {
+  return record?.incarnation === input.incarnation && record.state.kind === "active" && record.generation === input.generation;
 }
 
-function recordAt(records: Readonly<Record<string, Trigger>>, id: string): Trigger | undefined {
+function recordAt(records: Readonly<Record<string, StoredTrigger>>, id: string): StoredTrigger | undefined {
   return Object.hasOwn(records, id) ? records[id] : undefined;
 }
 
 // Doc drafts are transaction overlays. Materialize them before the commit settles, and check the stored shape.
-function publicTrigger(record: Readonly<Trigger>): Trigger {
-  const plain: unknown = JSON.parse(JSON.stringify(record));
+function publicTrigger(record: Readonly<StoredTrigger>): Trigger {
+  const plain: unknown = JSON.parse(JSON.stringify({ ...record, incarnation: undefined }));
   if (!Check(TriggerSchema, plain)) throw new Error("Invalid trigger record");
   return plain;
 }
@@ -89,13 +94,21 @@ function recordFire(record: Trigger, fire: TriggerFire): void {
 export function durableTriggers(options: DurableTriggerOptions) {
   const { fire, now } = options;
 
-  async function executeFire<I, S>(runtime: TaskRuntime<I, S, null, object>, request: TriggerFireRequest, cause: TriggerFire["cause"], skippedBefore: number, context: Context): Promise<TriggerFire["outcome"]> {
+  async function executeFire<I, S>(runtime: TaskRuntime<I, S, null, object>, request: TriggerFireRequest, incarnation: string, cause: TriggerFire["cause"], skippedBefore: number, context: Context, scheduled?: TriggerTaskInput): Promise<TriggerFire["outcome"] | undefined> {
+    await options.beforeAdmission?.(request, context);
+    const admission = { accepted: false };
     await runtime.commit(async (tx) => {
       const record = recordAt((await tx.doc(Triggers)).records, request.triggerId);
-      if (record !== undefined && !record.history.some((entry) => entry.requestId === request.requestId)) {
+      if (record?.incarnation !== incarnation) return stop;
+      const previous = record.history.find((entry) => entry.requestId === request.requestId);
+      if (previous === undefined) {
+        if (scheduled !== undefined && !armedFor(record, scheduled)) return stop;
         recordFire(record, { occurrence: request.occurrence, requestId: request.requestId, cause, recordedAt: now(), skippedBefore, outcome: { kind: "running", startedAt: now() } });
-      }
+      } else if (previous.outcome.kind !== "running") return stop;
+      admission.accepted = true;
+      return undefined;
     }, context);
+    if (!admission.accepted) return undefined;
     try { return { kind: "started", ...await fire(request, context) }; }
     catch (error) {
       if (runtime.signal.aborted || context.abortSignal?.aborted === true) throw error;
@@ -103,15 +116,15 @@ export function durableTriggers(options: DurableTriggerOptions) {
     }
   }
 
-  const manualTask = defineTask<TriggerFireRequest, { phase: "fire" }, null>({
+  const manualTask = defineTask<ManualTaskInput, { phase: "fire" }, null>({
     name: "forgerie.trigger.manual", version: 1, initial: () => ({ phase: "fire" }),
     phases: { fire: async (running, runtime, context) => {
-      const snapshot = await runtime.snapshot(Triggers, context);
-      if (snapshot === undefined || recordAt(snapshot.records, running.input.triggerId) === undefined) { await runtime.commit(() => stop, context); return; }
-      const outcome = await executeFire(runtime, running.input, "manual", 0, context);
+      const { request, incarnation } = running.input;
+      const outcome = await executeFire(runtime, request, incarnation, "manual", 0, context);
+      if (outcome === undefined) return;
       await runtime.commit(async (tx) => {
-        const record = recordAt((await tx.doc(Triggers)).records, running.input.triggerId);
-        if (record !== undefined) recordFire(record, { occurrence: running.input.occurrence, requestId: running.input.requestId, cause: "manual", skippedBefore: 0, recordedAt: now(), outcome });
+        const record = recordAt((await tx.doc(Triggers)).records, request.triggerId);
+        if (record?.incarnation === incarnation) recordFire(record, { occurrence: request.occurrence, requestId: request.requestId, cause: "manual", skippedBefore: 0, recordedAt: now(), outcome });
         return stop;
       }, context);
     } },
@@ -145,18 +158,12 @@ export function durableTriggers(options: DurableTriggerOptions) {
       fire: async (running, runtime, context) => {
         const { occurrence, skippedBefore } = running.state.checkpoint;
         const { triggerId } = running.input;
-        const snapshot = await runtime.snapshot(Triggers, context);
-        const record = snapshot === undefined ? undefined : recordAt(snapshot.records, triggerId);
         const requestId = triggerRequestId(triggerId, occurrence);
-        const started = record?.history.some((entry) => entry.requestId === requestId && entry.outcome.kind === "running") === true;
-        if (record === undefined || (!armedFor(record, running.input) && !started)) {
-          await runtime.commit(() => stop, context);
-          return;
-        }
-        const outcome = await executeFire(runtime, running.state.checkpoint.request, "schedule", skippedBefore, context);
+        const outcome = await executeFire(runtime, running.state.checkpoint.request, running.input.incarnation, "schedule", skippedBefore, context, running.input);
+        if (outcome === undefined) return;
         await runtime.commit(async (tx) => {
           const live = recordAt((await tx.doc(Triggers)).records, triggerId);
-          if (live === undefined) return stop;
+          if (live?.incarnation !== running.input.incarnation) return stop;
           const at = runtime.now();
           recordFire(live, { occurrence, requestId, cause: "schedule", recordedAt: at, skippedBefore, outcome });
           if (!armedFor(live, running.input)) return stop;
@@ -169,14 +176,14 @@ export function durableTriggers(options: DurableTriggerOptions) {
     abort: (_running, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
   });
 
-  async function arm(tx: Tx, anchor: ConversationId, record: Trigger, at: number): Promise<void> {
+  async function arm(tx: Tx, anchor: ConversationId, record: StoredTrigger, at: number): Promise<void> {
     const doc = await tx.doc(Triggers);
     const generation = doc.nextGeneration;
     doc.nextGeneration = generation + 1;
     const nextFireAt = nextOccurrence(record.schedule, at);
     record.generation = generation;
     record.state = { kind: "active", nextFireAt };
-    await tx.createTask(task, { triggerId: record.id, generation, firstOccurrence: nextFireAt }, { ownership: { kind: "conversation" }, conversationId: anchor, background: true });
+    await tx.createTask(task, { triggerId: record.id, incarnation: record.incarnation, generation, firstOccurrence: nextFireAt }, { ownership: { kind: "conversation" }, conversationId: anchor, background: true });
   }
 
   return {
@@ -193,8 +200,8 @@ export function durableTriggers(options: DurableTriggerOptions) {
         if (input.id === undefined) for (let suffix = 2; recordAt(doc.records, id) !== undefined; suffix++) { const tail = `-${String(suffix)}`; id = base.slice(0, 48 - tail.length) + tail; }
         if (recordAt(doc.records, id) !== undefined) throw new TriggerError(`Trigger "${id}" already exists.`, 409, "id");
         const at = now();
-        const record: Trigger = {
-          id, name: input.name, schedule, action: input.action,
+        const record: StoredTrigger = {
+          incarnation: randomUUID(), id, name: input.name, schedule, action: input.action,
           missedGraceMinutes: input.missedGraceMinutes ?? DEFAULT_MISSED_GRACE_MINUTES,
           createdAt: at, createdBy, revision: 1, attention: null, generation: 1, state: { kind: "paused", pausedAt: at }, history: [],
         };
@@ -248,7 +255,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
       const requestId = triggerManualRequestId(id, clientRequestId);
       if (doc.manualRequests[requestId] === undefined) {
         doc.manualRequests[requestId] = id;
-        await tx.createTask(manualTask, { triggerId: id, name: record.name, timezone: record.schedule.timezone, action: publicAction(record.action), occurrence: now(), requestId }, { ownership: { kind: "conversation" }, conversationId: anchor, background: true });
+        await tx.createTask(manualTask, { incarnation: record.incarnation, request: { triggerId: id, name: record.name, timezone: record.schedule.timezone, action: publicAction(record.action), occurrence: now(), requestId } }, { ownership: { kind: "conversation" }, conversationId: anchor, background: true });
       }
       return { requestId };
     }, context),
