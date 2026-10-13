@@ -141,12 +141,16 @@ it("keeps Everyone on list, detail, and launch requests", async () => {
   expect(service.calls.map((call) => call.path)).toEqual(["/api/backlog?scope=everyone", "/api/backlog/p1/items/7?provider=github&scope=everyone", "/api/backlog/p1/items/7/launch?provider=github&scope=everyone"]);
 });
 
-it("puts Azure images before pasted images and caps the first message at 16", async () => {
-  const images = Array.from({ length: 10 }, (_, i) => ({ kind: "image" as const, mimeType: "image/png", data: "aGVsbG8=", name: `item-${i}` }));
-  const pasted = Array.from({ length: 10 }, (_, i) => ({ ...images[0]!, name: `paste-${i}` }));
+it.each([[1, 0, 1], [1, 1, 2], [10, 0, 10], [10, 10, 16]])("keeps %i Azure images first with %i pasted images and an honest prompt for %i attachments", async (itemCount, pastedCount, total) => {
+  const images = Array.from({ length: itemCount }, (_, i) => ({ kind: "image" as const, mimeType: "image/png", data: "aGVsbG8=", name: `item-${i}` }));
+  const pasted = Array.from({ length: pastedCount }, (_, i) => ({ ...images[0]!, name: `paste-${i}` }));
+  const initialPrompt = `This work item has ${itemCount} ${itemCount === 1 ? "image" : "images"}.\n<azure-work-item>\nWork\n</azure-work-item>`;
   const { calls, fetchFn } = server(({ path }) => path.includes("/launch")
-    ? { body: { session: { id: "s1", cwd: "/r" }, claim, initialPrompt: "context", images, reused: false } }
+    ? { body: { session: { id: "s1", cwd: "/r" }, claim, initialPrompt, images, reused: false } }
     : { body: { accepted: true } });
   await createNewSessionApi(fetchFn).start("/r", { text: "go", images: pasted }, {}, { item: { projectId: "p1", itemId: "7", provider: "azure-devops" } });
-  expect(calls[1]!.body).toMatchObject({ attachments: [...images, ...pasted.slice(0, 6)] });
+  const sentPasted = total - itemCount;
+  const note = sentPasted === 0 ? "" : `\n\nThe user also attached ${sentPasted} more ${sentPasted === 1 ? "image" : "images"} after the work item's images.`;
+  expect(calls[1]!.body).toMatchObject({ text: `${initialPrompt}${note}\n\ngo`, attachments: [...images, ...pasted.slice(0, sentPasted)] });
+  expect((calls[1]!.body as { attachments: unknown[] }).attachments).toHaveLength(total);
 });

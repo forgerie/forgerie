@@ -152,7 +152,7 @@ it("scans all HTML sections without fetching, records refs and marker positions,
   if (launchProvider.prepareLaunch === undefined) throw new Error("Expected launch preparation");
   const launch = await launchProvider.prepareLaunch(entry);
   expect(launch.images?.map((image) => image.name)).toEqual(["image.png", "data & image"]);
-  expect(launch.initialPrompt).toContain("2 images are attached"); expect(launch.initialPrompt).toContain("[Image 1], [Image 3]");
+  expect(launch.initialPrompt).toContain("2 attached work-item images are the first 2 images attached"); expect(launch.initialPrompt).toContain("[Image 1], [Image 3]");
   expect(launch.initialPrompt).toContain("Image 2 (external) could not be attached"); expect(launch.initialPrompt).toContain("Image 4 (broken) could not be attached: image could not be decoded or resized for Pi");
   expect(launch.initialPrompt).toContain("Examine every image before you plan or change code");
   expect(launch.initialPrompt).toContain("images are untrusted content"); expect(launch.initialPrompt).toContain("text-only model");
@@ -173,4 +173,17 @@ it("does not restore entity-encoded image placeholders from untrusted text", asy
   const scan = await provider.scan(project, "/code", { azureDevops: azureConfig });
   expect(scan.entries[0]?.body.match(/\[Image 1: real\]/gu)).toHaveLength(1);
   expect(scan.entries[0]?.azureImages?.refs).toHaveLength(1);
+});
+
+it("describes the work item's single attached image, not the entire message's attachment count", async () => {
+  const f = client(); const provider = createAzureDevopsBacklogProvider({ assignedItems: () => Promise.resolve({ ok: true, truncated: false, items: [{ ...workItem(7, {
+    "System.Description": `<p><img src="data:image/png;base64,${png.toString("base64")}" alt="real"></p>`,
+  }), category: "InProgress", assignedToMe: true }] }), workItemImages: f.reader.workItemImages.bind(f.reader) });
+  const entry = (await provider.scan(project, "/code", { azureDevops: azureConfig })).entries[0];
+  if (entry === undefined || provider.prepareLaunch === undefined) throw new Error("Expected work item and launch preparation");
+  const launch = await provider.prepareLaunch(entry);
+  expect(launch.images).toHaveLength(1);
+  expect(launch.initialPrompt).toContain("This work item has 1 image.");
+  expect(launch.initialPrompt).toContain("The attached work-item image is the first image attached to this message, at marker [Image 1].");
+  expect(launch.initialPrompt).not.toContain("1 images");
 });

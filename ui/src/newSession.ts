@@ -204,8 +204,14 @@ export function createNewSessionApi(fetchFn: Fetch) {
           // The server names its own startup token for a claimed start, so this one only identifies the request.
           const launched = await backlog.launch(options.item, options.startupToken ?? newStartupToken(), start);
           session = launched.session;
-          text = firstMessage(launched.initialPrompt, prompt.text, prompt.command !== undefined);
-          promptImages = [...(launched.images ?? []), ...promptImages].slice(0, MAX_ATTACHMENTS);
+          const itemImages = launched.images ?? [];
+          // The launch contract has at most 10 images. Only pasted images can
+          // yield to the 16-attachment cap; never remove a work-item image.
+          const pastedImages = promptImages.slice(0, MAX_ATTACHMENTS - itemImages.length);
+          promptImages = [...itemImages, ...pastedImages];
+          const extraImages = options.item.provider === "azure-devops" && itemImages.length > 0 && pastedImages.length > 0
+            ? `\n\nThe user also attached ${pastedImages.length} more ${pastedImages.length === 1 ? "image" : "images"} after the work item's images.` : "";
+          text = firstMessage(`${launched.initialPrompt}${extraImages}`, prompt.text, prompt.command !== undefined);
         } else {
           session = await call("/api/sessions", sessionSchema, post({ ...start, ...(options.startupToken ? { startupToken: options.startupToken } : {}) }));
         }

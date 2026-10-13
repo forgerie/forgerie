@@ -201,7 +201,7 @@ it("places markers across all sections and attaches images only on launch, inclu
   const launch = () => f.app.inject({ method: "POST", url: `${f.itemPath}/launch?provider=azure-devops`, payload: { requestId: "images", start: { cwd: f.repo } } });
   const first = (await launch()).json<BacklogLaunchResponse>();
   expect(first.images?.map((image) => image.name)).toEqual(["first", "third"]);
-  expect(first.initialPrompt).toContain("2 images are attached");
+  expect(first.initialPrompt).toContain("2 attached work-item images are the first 2 images attached");
   expect(first.initialPrompt).toContain("Examine every image before you plan or change code");
   expect(first.initialPrompt).toContain("Image 2 (second) could not be attached");
   expect(first.initialPrompt).toContain("[Image 1], [Image 3]");
