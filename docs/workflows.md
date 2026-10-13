@@ -27,7 +27,9 @@ workflow:
 Use the task input as the brief. Choose the workers that fit the task.
 Delegate independent work with child_agent. If review is true, send the
 combined result to a fresh reviewer. Use at most the specified rounds.
-Ask the user only when a decision blocks progress.
+Answer child questions from the task, contract, code, docs and chat.
+Ask the user only for an irreversible or external escalation. Record a
+provisional guess for a contradicts or stuck escalation and keep working.
 ```
 
 Launch it from the chat:
@@ -130,9 +132,17 @@ Durable child spawn, send, and fresh-child continuation requests retain their as
 
 Transient provider failures keep the associated child request working through the reporter's three retries (30 seconds, 2 minutes, 5 minutes). Each retry has a new input receipt and child-run history record. Only success or exhausted retries settle the workflow child. The final failed result contains the real provider error text. See [Provider failures](child-agents.md#provider-failures).
 
-Child questions still do not start parent turns; each normal completion report still does. Child outcomes come from the admitted Durable submission, independently of accounting or worktree reporting. A reporting failure preserves the child's actual answer, failure, or stop reason. An answer already claimed by another reporter records `delivered: "duplicate"` (“Duplicate report, not sent again”). A child stopped before reporting, a canceled reporter, or a missing reporting target records `delivered: "aborted"` (“Stopped before reporting”). Neither state is a delivery error. A delivered report records `true`; a report not yet delivered records `false`. Actual reporter failures still expose `deliveryError` and `delivered: false`. Old records with a string `deliveryError` still parse and read as `false`; Forgerie does not reinterpret their old text as a new label. Delivery means admission to the parent's inbox, not review or approval. Explicit completion remains possible after all child work settles.
+Child questions start parent turns, as durable follow-ups. The parent answers first; only irreversible or external escalations create user question cards. Each normal completion report also starts a parent turn. Child outcomes come from the admitted Durable submission, independently of accounting or worktree reporting. A reporting failure preserves the child's actual answer, failure, or stop reason. An answer already claimed by another reporter records `delivered: "duplicate"` (“Duplicate report, not sent again”). A child stopped before reporting, a canceled reporter, or a missing reporting target records `delivered: "aborted"` (“Stopped before reporting”). Neither state is a delivery error. A delivered report records `true`; a report not yet delivered records `false`. Actual reporter failures still expose `deliveryError` and `delivered: false`. Old records with a string `deliveryError` still parse and read as `false`; Forgerie does not reinterpret their old text as a new label. Delivery means admission to the parent's inbox, not review or approval. Explicit completion remains possible after all child work settles.
 
 If the coordinator forgets to finish, the run stays active. Stop ongoing work before using the finish HTTP route to record a failed or stopped run. Finishing changes metadata; it does not cancel work.
+
+## Decision log
+
+Each parent keeps a Durable decision log. A decision made while a workflow runs carries that run's `runId`. The log records parent answers to child questions, guesses in place of an escalation, automatic stops, approved or refused gated actions, and filed issues. It does not record other choices the agent judges notable. This slice implements answers and guesses; later slices add the other three kinds.
+
+An irreversible or external child escalation waits on you and shows the parent's guess and reason in its card. A contradicts or stuck escalation gives the child a provisional guess at once. Flagged standing guesses add to `flaggedDecisions`, not `waitingOnYou`, and never pin in the dock. Overturning records a note and sends one correction to a live child, or to its parent after the child finishes. It asks the agent to redo affected work. Delivery is a follow-up, not an interruption of an executing tool.
+
+Read all session decisions with `GET /sessions/:id/decisions?cwd=...`; filter on `runId` for one workflow. Overturn with `POST /sessions/:id/decisions/:did/overturn {cwd, note}`. Blank notes return 400, unknown IDs 404, and already overturned decisions 409. The wire type is `Decision` in `src/shared/decisions.ts`. Decision changes emit `workflow_runs_changed`, so clients refetch runs and decisions. There is no decision expiry yet. The [child-agent API](child-agents.md#decision-log-api) describes the fields and routing.
 
 ## Restarts, retention, and cost
 

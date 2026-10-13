@@ -387,6 +387,9 @@ export async function waitingWorkflowStops(harness: Harness, parent: Conversatio
   const run = doc?.active == null ? undefined : doc.records[doc.active];
   return run?.state.kind === "running" ? Object.values(run.stops ?? {}).filter((stop) => stop.state === "waiting").length : 0;
 }
+export async function activeWorkflowRunInTx(tx: Tx, parent: ConversationId): Promise<string | undefined> {
+  return (await tx.doc(Runs, parent)).active ?? undefined;
+}
 export async function activeWorkflowRun(harness: Harness, parent: ConversationId, context: Context): Promise<string | undefined> {
   return (await harness.snapshot(Runs, parent, context))?.active ?? undefined;
 }

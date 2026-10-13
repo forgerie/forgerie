@@ -63,6 +63,8 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     if (last?.role === "user") {
       parentInputs.push(text);
       const part = typeof last.content === "string" ? last.content : last.content.find((part) => part.type === "text")?.text ?? "";
+      const question = /^\[child \S+ asks ([^\]]+)\]/.exec(part);
+      if (question !== null) return fauxAssistantMessage([fauxToolCall("child_agent", { action: "escalate", questionId: question[1] ?? "", kind: "external", guess: "Proceed", why: "Configured escalation for retry tests" })], { stopReason: "toolUse" });
       if (part.startsWith("SPAWN ")) return fauxAssistantMessage([fauxToolCall("child_agent", spawnArgs(part.slice(6)))], { stopReason: "toolUse" });
     }
     return fauxAssistantMessage("PARENT-DONE");

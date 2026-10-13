@@ -110,10 +110,10 @@ export function createAskUserToolDefinition(deps: AskUserToolDeps) {
     name: "ask_user",
     exposure: MODEL_ONLY_EXPOSURE,
     label: "Ask user",
-    description: "Post a set of questions to the user as a browser form and end this run. Answers arrive later as a follow-up message; the user may leave any question unanswered.",
+    description: "Escalations only: post irreversible actions or actions outside the project in the user's name as a browser form and end this run. For contradicts or stuck escalations, proceed on your best guess and use record_decision instead. Answers arrive later as a follow-up message; the user may leave any question unanswered.",
     promptSnippet: "ask_user: post a question set to the user; ends the run, answers return as a follow-up",
     promptGuidelines: [
-      "When you need decisions from the user, post them together with ask_user instead of asking in prose one at a time. It ends the run and the answers, including the questions the user left unanswered, come back as a follow-up message that wakes you. Call it alone and last, and do not repost the same questions or poll for answers.",
+      "Ask only for escalations: irreversible actions or actions outside the project in the user's name. Answer child questions yourself from the task, contract, code, docs and chat. For going against what the user said or approved, or questions you cannot answer anywhere, proceed on your best guess and record_decision with guess: true. Taste and scope growth are not escalations. When you must wait for the user, post escalations together with ask_user instead of asking in prose one at a time. It ends the run and the answers, including the questions the user left unanswered, come back as a follow-up message that wakes you. Call it alone and last, and do not repost the same questions or poll for answers.",
     ],
     parameters: AskUserParams,
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {

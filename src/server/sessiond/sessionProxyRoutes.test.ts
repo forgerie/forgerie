@@ -20,6 +20,16 @@ afterEach(async () => {
 });
 
 describe("machine-scoped session proxy routes", () => {
+  it("forwards decision reads and overturn corrections through the session wildcard", async () => {
+    const payload = { cwd: "/repo", note: "Use the contract" };
+    expect((await app.inject({ url: "/api/machines/local/sessions/s1/decisions?cwd=%2Frepo" })).statusCode).toBe(200);
+    daemon.respondWith({ statusCode: 409, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Decision already overturned" }) });
+    expect((await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/decisions/d1/overturn", payload })).statusCode).toBe(409);
+    expect(daemon.requests).toEqual([
+      { method: "GET", path: "/sessions/s1/decisions?cwd=%2Frepo", body: undefined },
+      { method: "POST", path: "/sessions/s1/decisions/d1/overturn", body: payload },
+    ]);
+  });
   it("forwards PR catalogs, structured reads and opt-in watch mutations", async () => {
     await app.inject({ method: "GET", url: "/api/machines/local/github/pulls" });
     await app.inject({ method: "GET", url: "/api/machines/local/sessions/s1/pull-requests?cwd=/repo" });

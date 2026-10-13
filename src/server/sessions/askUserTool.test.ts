@@ -39,10 +39,13 @@ describe("createAskUserToolDefinition", () => {
     const { tool } = toolOverStore();
 
     expect(tool.name).toBe("ask_user");
-    expect(tool.description).toBe("Post a set of questions to the user as a browser form and end this run. Answers arrive later as a follow-up message; the user may leave any question unanswered.");
+    expect(tool.description).toContain("Escalations only");
+    expect(tool.description).toContain("irreversible");
+    expect(tool.description).toContain("record_decision");
+    expect(tool.description).toContain("Answers arrive later as a follow-up message");
     expect(tool.promptSnippet).toBe("ask_user: post a question set to the user; ends the run, answers return as a follow-up");
     expect(tool.promptGuidelines).toEqual([
-      "When you need decisions from the user, post them together with ask_user instead of asking in prose one at a time. It ends the run and the answers, including the questions the user left unanswered, come back as a follow-up message that wakes you. Call it alone and last, and do not repost the same questions or poll for answers.",
+      expect.stringContaining("Ask only for escalations"),
     ]);
   });
 

@@ -27,6 +27,7 @@ import type { DurableChildHost } from "./durableChildHost.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
+import { decisionExtension, decisions, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
 import { workflowExtension, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops, workflowProposals, startWorkflowProposal, decideWorkflowProposal, openWorkflowProposals } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
@@ -117,6 +118,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private childCount = 0;
   /** Child questions, workflow stops, and workflow proposals that wait for the user. */
   private waitingCount = 0;
+  private flaggedCount = 0;
   private childRunRecords: DurableChildRunRecords | undefined;
 
   private constructor(private readonly options: DurableAgentSessionOptions) {
@@ -319,6 +321,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   get hostsDurableChildren(): boolean { return this.options.childAgents !== undefined; }
   get workingDurableChildren(): number { return this.childCount; }
   get waitingOnUser(): number { return this.waitingCount; }
+  get flaggedDecisions(): number { return this.flaggedCount; }
+  decisions() { return decisions(this.journal.harness, this.journal.conversation.id, context); }
+  overturnDecision(id: string, note: string) { return overturnDecision(this.journal.harness, this.journal.conversation, id, note, context); }
   runWorkflow(name: string, inputs: WorkflowInputs, requestId: string) {
     if (!this.hostsDurableChildren) throw new Error("Workflow launches require durableChildren");
     return launchWorkflow(this.journal.harness, this.journal.conversation, new WorkflowLibrary(this.options.services.agentDir), this.options.services.cwd, this.sessionId, name, inputs, requestId, context);
@@ -395,9 +400,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (host === undefined) return;
     const ref = { id: this.sessionId, cwd: this.options.services.cwd };
     this.childWorktrees = host.worktrees === undefined ? undefined : new DurableChildWorktrees(host.worktrees, ref);
-    const { extensions, workflow } = await this.installChildExtensions();
+    const { extensions, workflow, decision } = await this.installChildExtensions();
     // Children select these explicitly. The parent must not, or ask_human and the coding tools join its loadout.
-    await this.journal.conversation.configure({ extensions: { add: [...extensions.parent, workflow], remove: [...extensions.childOnly] } }, context);
+    await this.journal.conversation.configure({ extensions: { add: [...extensions.parent, workflow, decision], remove: [...extensions.childOnly] } }, context);
     if (host.runRecords !== undefined) {
       this.childRunRecords = await DurableChildRunRecords.open(this.journal.harness, this.journal.conversation.id, ref, host.runRecords, context,
         (error) => { if (host.runRecordError === undefined) this.report(error); else host.runRecordError(error); });
@@ -418,7 +423,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
     const workflow = workflowExtension();
     this.registry.install(workflow);
-    return { extensions: this.installRoutedChildExtensions(source), workflow };
+    const decision = decisionExtension();
+    this.registry.install(decision);
+    return { extensions: this.installRoutedChildExtensions(source), workflow, decision };
   }
 
   /** Install child extensions whose callbacks resolve the owning parent, under names scoped to this session. */
@@ -459,16 +466,20 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     // Child questions, workflow stops, and open proposals wait on the user; the status counts them so the session list can say so.
     const recountWaiting = async () => {
       const waiting = await openChildQuestions(this.journal.harness, parent, context) + await waitingWorkflowStops(this.journal.harness, parent, context) + await openWorkflowProposals(this.journal.harness, parent, context);
-      if (waiting === this.waitingCount) return;
+      const flagged = await flaggedDecisions(this.journal.harness, parent, context);
+      if (waiting === this.waitingCount && flagged === this.flaggedCount) return;
       this.waitingCount = waiting;
+      this.flaggedCount = flagged;
       this.emit({ type: "durable_children_changed" });
     };
     await recountWaiting();
+    // Serial reads keep an older recount from publishing after a newer answer or overturn.
+    let recount = Promise.resolve();
     const unsubscribe = this.journal.harness.subscribeCommits((publication) => {
-      const runsChanged = workflowRunsChanged(publication, parent);
+      const runsChanged = workflowRunsChanged(publication, parent) || decisionsChanged(publication, parent);
       if (runsChanged) this.emit({ type: "workflow_runs_changed" });
       if (runsChanged || publication.changes.some((change) => change.type === "document" && change.conversationId === parent && change.record.kind === CHILD_QUESTIONS_DOC_KIND)) {
-        void recountWaiting().catch((error: unknown) => { this.report(error); });
+        recount = recount.then(recountWaiting).catch((error: unknown) => { this.report(error); });
       }
       const change = workflowActiveFromCommit(publication, this.journal.conversation.id);
       if (change === undefined) return;
@@ -823,8 +834,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.basePrompt = this.promptOptions();
     this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
     if (this.options.childAgents !== undefined) {
-      const { extensions, workflow } = await this.installChildExtensions();
-      await this.journal.conversation.configure({ extensions: { add: [...extensions.parent, workflow], remove: [...extensions.childOnly] } }, context);
+      const { extensions, workflow, decision } = await this.installChildExtensions();
+      await this.journal.conversation.configure({ extensions: { add: [...extensions.parent, workflow, decision], remove: [...extensions.childOnly] } }, context);
     }
     old.invalidate("Durable extensions reloaded");
     await options?.beforeSessionStart?.();

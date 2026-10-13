@@ -49,6 +49,7 @@ import { registerDurableChildRoutes } from "./sessions/durableChildRoutes.js";
 import { ChildRunStore } from "./sessions/childRunStore.js";
 import { registerChildRunRoutes } from "./sessions/childRunRoutes.js";
 import { registerIssueProposalRoutes } from "./sessions/issueProposalRoutes.js";
+import { registerDecisionRoutes } from "./sessions/decisionRoutes.js";
 import { registerWorkflowRoutes } from "./sessions/workflowRoutes.js";
 import { LiveChildSessionIndex, createDurableChildHost } from "./sessions/durableChildHost.js";
 import { bundledForgerieAgentsPath } from "./sessions/bundledForgerieSkills.js";
@@ -372,6 +373,7 @@ function registerSessionDaemonRoutes({ triggers, eventHub, workspaceActivity, se
   registerDurableChildRoutes(app, sessions);
   registerChildRunRoutes(app, childRuns);
   registerWorkflowRoutes(app, sessions);
+  registerDecisionRoutes(app, sessions);
   registerIssueProposalRoutes(app, sessions);
   registerPromptResourceRoutes(app, promptResources);
   registerPromptLibraryRoutes(app, promptLibrary);

@@ -2600,6 +2600,16 @@ export class PiSessionService implements SessionRouteService {
     } };
   }
 
+  async decisions(ref: PiSessionRef) {
+    const session = await this.getOrOpen(ref);
+    return session instanceof DurableAgentSession && session.hostsDurableChildren ? session.decisions() : [];
+  }
+  async overturnDecision(ref: PiSessionRef, id: string, note: string) {
+    await this.assertWritable(ref);
+    const session = await this.durableSession(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
+    return this.runSessionEntryMutation(session, "overturn a decision", () => session.overturnDecision(id, note));
+  }
   async workflowInventory(ref: PiSessionRef) { await this.getOrOpen(ref); return new WorkflowLibrary(this.agentDir).list(ref.cwd); }
   async workflowProposals(ref: PiSessionRef) {
     const session = await this.getOrOpen(ref);
@@ -3695,10 +3705,11 @@ export class PiSessionService implements SessionRouteService {
    * Both are omitted when zero so a resting session carries no extra wire
    * fields and the inbox has nothing to render.
    */
-  private liveWorkCounts(session: PiAgentSession): { workingAgents?: number; runningProcesses?: number; watchingPullRequest?: boolean; waitingOnYou?: number } {
+  private liveWorkCounts(session: PiAgentSession): { workingAgents?: number; runningProcesses?: number; watchingPullRequest?: boolean; waitingOnYou?: number; flaggedDecisions?: number } {
     const workingAgents = (this.workingAgentsBySession.get(session.sessionId) ?? 0)
       + (session instanceof DurableAgentSession ? session.workingDurableChildren : 0);
     const waitingOnYou = session instanceof DurableAgentSession ? session.waitingOnUser : 0;
+    const flaggedDecisions = session instanceof DurableAgentSession ? session.flaggedDecisions : 0;
     const bridge = this.active.get(session.sessionId)?.runtime.services?.processBridgeSlot;
     const runningProcesses = bridge?.snapshot().processes.filter((process) => process.status === "running").length ?? 0;
     return {
@@ -3706,6 +3717,7 @@ export class PiSessionService implements SessionRouteService {
       ...(workingAgents > 0 ? { workingAgents } : {}),
       ...(runningProcesses > 0 ? { runningProcesses } : {}),
       ...(waitingOnYou > 0 ? { waitingOnYou } : {}),
+      ...(flaggedDecisions > 0 ? { flaggedDecisions } : {}),
     };
   }
 

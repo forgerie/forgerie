@@ -68,6 +68,8 @@ const route: FauxResponseFactory = (context) => {
     if (said.startsWith("The user answered:")) return answer(`Thanks. ${said}`);
     return answer(`Tool said: ${said}`);
   }
+  const question = /^\[child (\w+) asks ([^\]]+)\]/.exec(said);
+  if (question !== null) return call("child_agent", { action: "escalate", questionId: question[2] ?? "", kind: "external", guess: "Teal", why: "Configured external escalation for the user-answer tests" });
   if (said.startsWith("[subagent")) return answer("Noted.");
   if (said.startsWith("[the user")) return answer("Understood.");
   if (said.startsWith("STEER")) return answer("Steered: finishing early.");
@@ -420,7 +422,7 @@ describe("Durable-native child agents in a Forgerie session", () => {
     expect(ended(survivor.conversationId)).toHaveLength(3);
   }, 30_000);
 
-  it("shows a child question in the parent with no parent turn, and the answer reaches the child", async () => {
+  it("shows an escalated child question in the parent, and the user answer reaches the child without another parent turn", async () => {
     const ref = { id: (await service.start(directory)).id, cwd: directory };
     await service.prompt(ref, "Start a child named asker: ASK the user");
     const asker = await child(ref, "asker");

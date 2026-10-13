@@ -845,6 +845,8 @@ export interface SessionStatus {
   runningProcesses?: number;
   /** Child agent questions and workflow stops that wait for the user; omitted when none. */
   waitingOnYou?: number;
+  /** Flagged standing decisions; non-blocking and omitted when none. */
+  flaggedDecisions?: number;
   pendingMessageCount: number;
   queuedMessages: QueuedSessionMessage[];
   /** Pi's configured action for two Escape presses with an empty idle editor. */

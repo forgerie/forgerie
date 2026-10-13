@@ -21,7 +21,7 @@ const EQUIVALENT: Readonly<Record<string, { tool: string; note: string }>> = {
   grep: { tool: "bash", note: "grep, find, and ls run through bash." },
   find: { tool: "bash", note: "grep, find, and ls run through bash." },
   ls: { tool: "bash", note: "grep, find, and ls run through bash." },
-  contact_supervisor: { tool: "ask_human", note: "contact_supervisor is ask_human here: it asks the user one question and waits for the answer." },
+  contact_supervisor: { tool: "ask_human", note: "contact_supervisor is ask_human here: it asks your parent one question and waits for the answer. Only the parent can escalate it to the user." },
 };
 
 export interface ChildRuntimePlan {

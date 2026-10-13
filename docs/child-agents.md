@@ -14,7 +14,7 @@ A session can run background child agents inside its own Durable storage. The ag
 | Read a child | Open it from the list | Shows its task, its tool calls with folded output, and its replies as they stream. |
 | Steer a child | The reply box in the open child | While it works, your message joins its run at its next tool call. When it is idle, your message is a new task. |
 | Stop a child | Stop in the child header | Ends the child's current work and closes unanswered questions. The parent keeps running. |
-| Answer a child | The question card in the parent thread, or in the open child | The answer goes to the child. The parent model gets no turn. |
+| Answer an escalation | The question card in the parent thread, or in the open child | Only irreversible or external escalations wait for you. Your answer goes to the child without another parent turn. |
 
 Finished worktree children show Review changes, Land, Discard, and Continue working in the footer. Land stays disabled for dirty or unreadable worktrees. Discard first lists the commits and files to remove and requires confirmation. A refused action keeps the worktree and shows the reason.
 
@@ -25,6 +25,23 @@ Run history is in the header. It shows retained runs, estimated costs, turns, to
 The parent model sees each steer and stop as a note, so it does not undo what you told a child. Each child's final answer reaches the parent as a new message, and the parent continues from it.
 
 Esc in the parent does not stop its children.
+
+## Questions and decisions
+
+A child's `ask_human` goes to its parent first as `[child <name> asks <questionId>] <question>`. The child waits. A busy parent receives one follow-up, like a completion report. The question does not create a user card or count as **Needs your response**. The parent answers from the task, contract, code, docs and chat with `child_agent({action: "answer", name, questionId, answer, reason})`.
+
+Only escalations reach you. The parent can call `child_agent({action: "escalate", questionId, kind, guess, why})`:
+
+| Kind | Result |
+| --- | --- |
+| `irreversible` or `external` | A question card shows the parent's guess and reason. It is dock-pinned, counts as **Needs your response**, and the child waits for you. |
+| `contradicts` or `stuck` | The child receives “Provisional answer from the parent, which the user may overturn: …” at once. A flagged guess enters the decision log. No card waits for you. |
+
+Taste and scope growth are not escalations. There is no timeout that forwards a slow parent's question to you. Open question counts and `/children` question lists include only escalations waiting for you, not questions waiting for the parent. Questions already open before this change remain user-facing.
+
+The decision log records parent answers and provisional guesses, not every choice an agent judges notable. User answers to escalated child questions record `by: "user"`. `by: "parent"` identifies parent answers and guesses. Each record includes the active workflow run ID, if one exists when the decision commits. A parent's own `record_decision({question, choice, reason, guess: true})` is only for guesses in place of an escalation. `guess: false` is refused; ADR 0005 excludes ordinary choices. The parent uses `ask_user` only for escalations that must wait for you.
+
+Overturning a decision records your correction and sends it once to the affected child if it still has a live run. Otherwise it wakes the parent. Delivery uses a follow-up; it does not interrupt a tool already running. Answers, routing receipts, decisions, and pending correction deliveries survive restart. The log has no expiry in this slice. A wrong answer can affect work before you overturn it; correction costs model turns and may throw away work.
 
 ## Agent files
 
@@ -40,7 +57,7 @@ Agent files use the pi-subagents format, and older files name pi-subagents tools
 | --- | --- |
 | `read`, `write`, `edit`, `bash` | Durable's coding tools. `read` also returns PNG, JPEG, GIF, and WebP files as images, up to 3.75 MB. |
 | `grep`, `find`, `ls` | `bash`. |
-| `contact_supervisor` | `ask_human`, which asks the user in the parent's chat. Every child has it. |
+| `contact_supervisor` | `ask_human`, which asks the parent first. Every child has it. |
 | `watchdog_diff` | Forgerie's read-only `watchdog_diff`. Without `range` it shows uncommitted changes against `HEAD` plus untracked paths, as in pi-subagents. With `range` it shows a committed range's commits and diff. `cwd` picks another repository or worktree, and `offset` pages through output longer than 60,000 characters. |
 | `skills` | A list of those skills' files in the child's instructions. `skillPath` folders, relative to the agent file, come first, then the skills the parent session sees. `inheritSkills: true` lists every session skill. |
 | Other named tools registered in the parent session | The session's tool, including extension tools such as `web_search`, `fetch_content`, `get_search_content`, and `source_check`. The parent's active-tool selection does not limit sharing. Argument validation and extension `tool_call`/`tool_result` hooks still apply. |
@@ -71,7 +88,7 @@ Children live in the parent's Durable storage, and they run only while the daemo
 - Children with native `write`, `edit`, or `bash` default to worktree isolation. General helpers and files without a tool list also get worktrees. This includes old `grep`, `find`, and `ls` names translated to `bash`. Agents with only read-only tools default to shared. Explicit `isolation` wins. Worktree defaults require Git and the session's worktree support; Forgerie refuses rather than silently sharing when these are unavailable.
 - A shared writer spawn is refused while another writer child of this parent is busy in the same cwd. Pending submissions, reports, and retries reserve that cwd too. The refusal names the other child. This is child spawn admission, not a filesystem sandbox or a lock against other sessions, the parent, shared extension tools, or user edits.
 - Shared tools run in the parent session's working folder even when the child uses `isolation: "worktree"`. They keep the parent extension's execution context. For example, the bundled `process` tool and `workspace_services` act on the parent checkout. Worktree isolation applies to child-native coding tools, not shared session tools.
-- Children never share `child_agent`, `ask_user`, `end_turn`, `spawn_session`, `handoff_session`, `workflow_finish`, `workflow_stop`, `propose_workflow`, any `propose_*` tool, `subagent`, `bg_wait`, or `web_enable`. The parent's `grep`, `find`, and `ls` are also excluded; agent files translate these names to child-native `bash`. Tools with `model-only` or `hidden` exposure are also excluded.
+- Children never share `child_agent`, `record_decision`, `ask_user`, `end_turn`, `spawn_session`, `handoff_session`, `workflow_finish`, `workflow_stop`, `propose_workflow`, any `propose_*` tool, `subagent`, `bg_wait`, or `web_enable`. The parent's `grep`, `find`, and `ls` are also excluded; agent files translate these names to child-native `bash`. Tools with `model-only` or `hidden` exposure are also excluded.
 - `childToolsDeny` denies more shared session tool names (default `[]`). It does not remove child-native tools and is not a shell or filesystem sandbox.
 - Worktree isolation starts at the parent's committed `HEAD`. It does not copy uncommitted parent files.
 - Landing targets the repository's default branch. It can also land commits inherited from an unlanded parent branch. The `ahead` summary counts only commits after the parent's starting `HEAD`.
@@ -98,6 +115,13 @@ Browser requests use `/api` before the paths below. Sessiond uses the paths with
   isolation?: "shared" | "worktree"; // Spawn only. Default worktree for writers, shared for read-only.
   allowMissingTools?: boolean; // Spawn only. Default false.
 }
+```
+
+The other action shapes are:
+
+```ts
+{action: "answer", name: string, questionId: string, answer: string, reason: string}
+{action: "escalate", questionId: string, kind: "irreversible" | "external" | "contradicts" | "stuck", guess: string, why: string}
 ```
 
 `worktree` allocates under `<main-checkout>/.worktrees/` at the parent's `HEAD`. The allocation receipt, path, and branch are deterministic for the Durable tool task. Restart replay reuses that receipt and original starting commit. Each child conversation saves its own `cwd`.
@@ -256,7 +280,20 @@ Records live in `$PI_WEB_DATA_DIR/child-runs.json`, with private recovery checkp
 
 Completed records expire 90 days after `finishedAt`. Unfinished records remain. Sessiond prunes on startup, reads, writes, and a daily timer. Expiry removes only history metadata. It does not delete conversations, transcripts, branches, or worktree files. Invalid history files fail rather than being reset or overwritten. Records are new metadata, not a complete backfill of historical child runs.
 
+### Decision log API
+
+| Method and path | Request | Response |
+| --- | --- | --- |
+| `GET /sessions/:id/decisions` | Only query `cwd`. | `Decision[]`, newest first. Sessions without Durable hosting return `[]` (200). |
+| `POST /sessions/:id/decisions/:did/overturn` | Exactly `{cwd, note}`. Note is nonblank, at most 8000 characters. | The updated `Decision`. 400 for invalid input, 404 for an unknown decision, 409 if already overturned. |
+
+`Decision` and its TypeBox schema live in `src/shared/decisions.ts`. Times are Unix milliseconds. State is `{kind: "standing"}` or `{kind: "overturned", note, at}`. A decision document change emits `workflow_runs_changed`. `flaggedDecisions` counts flagged standing decisions and is omitted when zero. It does not add to `waitingOnYou`.
+
+Server slices record `gated`, `auto-stop`, and `issue` through `logDecision(tx, parent, input, recipient?)` in `durableDecisions.ts`, within the action's own commit. `input.id` must be stable for that action. The helper sets time, active run ID, and standing state, and reuses the saved record on replay. Recipient is internal routing metadata, not part of the wire record.
+
 ## Verification
+
+`parentAnswers.test.ts` checks parent answers, all four escalation kinds, busy-parent follow-ups, waiting and flagged counts, restart receipts, and one correction to live children or their parents. `PARENT_ANSWERS_REAL=1 ./scripts/parent-answers-real.ts` uses real parent and child models in an isolated temporary profile. It checks that the parent answers from its task, the child finishes, one decision is recorded, and no user action is needed. It removes its temporary workspace and copied credentials on exit. Model calls incur costs.
 
 `durableChildAutonomy.test.ts` uses real Git worktrees and Durable journals. It checks missing-tool refusal and override, isolation defaults, shared-writer refusal, retry deadlines through journal reopen, exhausted and non-transient errors, Stop during backoff, duplicate/aborted delivery, and old record parsing. `CHILD_RETRY_REAL=1 ./scripts/child-retry-real.ts` uses real parent and child models with a configured provider that fails once with “overloaded”. It verifies the 30-second reporter wait, `/children` retry state, and the final parent report. Its temporary profile disables Durable's inner retries so that one provider failure exercises the reporter. It removes copied model credentials on exit and does not open the live daemon.
 

@@ -3,7 +3,7 @@
  *
  * A child is an ordinary Durable conversation in the parent session's own storage. A background anchor task of the
  * parent conversation owns it, so the parent's Esc does not reach it, and its work survives a restart with the parent's
- * storage. A child asks the user through an entry in the parent transcript: the parent model gets no turn.
+ * storage. A child asks its parent first. Only irreversible or external escalations wait on the user.
  *
  * Pattern from pi-durable test/examples/23-subagent-background.ts. Findings: prototypes/durable-child-spike/README.md.
  */
@@ -26,6 +26,8 @@ import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { planChildRuntime, runtimeGaps, childIsWriter, missingToolsRefusal, type ChildRuntimePlan, type ChildSkill } from "./durableChildRuntime.js";
 import { readsImages, watchdogDiffTool } from "./durableChildTools.js";
 import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild, workflowChildRefusal, workflowWorkerModel } from "./durableWorkflowRuns.js";
+import { logDecision } from "./durableDecisions.js";
+import { WorkflowError } from "../resources/workflowLibrary.js";
 
 export const CHILD_TOOL_NAME = "child_agent";
 export const CHILD_QUESTION_KIND = "forgerie.child-question";
@@ -38,7 +40,10 @@ export const isChildEntryKind = (kind: string): boolean => CHILD_ENTRY_KINDS.has
 // defineDoc needs JSON-compatible type aliases; interfaces lack the index signature.
 /* eslint-disable @typescript-eslint/consistent-type-definitions */
 type ChildRecord = { conversationId: ConversationId; reported: EntryId[]; agent: string | null; createdAt: number; worktreeId?: string; agentFile?: { path: string; sha256: string } };
-type ChildQuestion = { child: ConversationId; childName: string; question: string; answer: string | null; askedAt: number; closed?: boolean };
+type QuestionRouting = { kind: "parent" } | { kind: "user"; escalation: "irreversible" | "external"; guess: string; why: string }
+  | { kind: "answered"; by: "parent" | "user"; provisional: boolean };
+// No routing field means a user-facing question created before parent-first routing.
+type ChildQuestion = { child: ConversationId; childName: string; question: string; answer: string | null; askedAt: number; closed?: boolean; routing?: QuestionRouting; resolvedBy?: string };
 type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean; worktreeId?: string };
 type ReporterState = { phase: "deliver"; attempt?: number; error?: string } | { phase: "retry"; attempt: number; error: string; until: number; run?: string }
   | { phase: "observe"; run: string; owner: TaskId } | { phase: "report"; report?: string; suppressed?: "duplicate" | "aborted" };
@@ -204,28 +209,48 @@ async function parentOf(api: CommitApi, context: Context): Promise<ConversationI
   return parent;
 }
 
-/** A child's only way to reach the human. Named apart from Forgerie's ask_user so the parent's tool is not replaced. */
+/** A durable outbox: saving the question and delivery task is atomic; submit deduplicates restart replay. */
+const QuestionDelivery = defineTask<{ questionId: string; text: string }, { phase: "deliver" }, null>({
+  name: "forgerie.child-question-delivery", version: 1, initial: () => ({ phase: "deliver" }),
+  phases: { deliver: async (task, runtime, context) => {
+    const parent = await runtime.conversation(runtime.conversationId, context);
+    if (parent === undefined) throw new Error("Child question parent is missing");
+    const question = (await runtime.snapshot(Questions, runtime.conversationId, context))?.items[task.input.questionId];
+    if (question?.closed !== true && question?.answer === null) {
+      await parent.submit({ type: "input", content: task.input.text, whenBusy: "followUp", requestId: `child-question:${task.input.questionId}` }, context);
+    }
+    await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+  } },
+  abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+});
+
+/** ask_human retains its agent-file name, but asks the parent first. */
 const askHumanTool = defineTool({
   name: "ask_human",
-  description: "Ask the human user one question and wait for the answer. Use it only when you are blocked and cannot decide yourself.",
-  parameters: Type.Object({ question: Type.String() }),
-  // A rerun finds the same question by the call's task id, so it never asks twice.
+  description: "Ask your parent agent one question and wait for its answer. Use it only when blocked and you cannot decide from your task, code or docs. The parent answers or escalates under the autonomy policy.",
+  parameters: Type.Object({ question: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
   replay: "safe",
   execute: async (args, api, context) => {
+    if (args.question.trim() === "") return { content: [{ type: "text" as const, text: "A nonblank question is required" }], isError: true };
     const parentId = await parentOf(api, context);
     const questionId = `q:${String(api.taskId)}`;
-    // One commit records the question and appends its transcript entry, so a rerun after a crash finds both or neither.
     await api.commit(async (tx) => {
       const doc = await tx.doc(Questions, parentId);
       if (doc.items[questionId] !== undefined) return;
       const agents = (await tx.doc(Children, parentId)).agents;
-      const childName = Object.entries(agents).find(([, agent]) => agent.conversationId === api.conversationId)?.[0] ?? "subagent";
-      doc.items[questionId] = { child: api.conversationId, childName, question: args.question, answer: null, askedAt: Date.now() };
-      await tx.appendEntry(parentId, { kind: CHILD_QUESTION_KIND, data: { questionId, child: api.conversationId, childName, question: args.question } });
+      const childName = Object.entries(agents).find(([, agent]) => agent.conversationId === api.conversationId)?.[0] ?? "child";
+      doc.items[questionId] = { child: api.conversationId, childName, question: args.question, answer: null, askedAt: Date.now(), routing: { kind: "parent" } };
+      await tx.createTask(QuestionDelivery, { questionId, text: `[child ${childName} asks ${questionId}] ${args.question}` }, { conversationId: parentId, ownership: { kind: "conversation" }, background: true });
     }, context);
     for (;;) {
-      const answer = (await api.snapshot(Questions, parentId, context))?.items[questionId]?.answer;
-      if (typeof answer === "string") return { content: [{ type: "text" as const, text: `The user answered: ${answer}` }] };
+      const item = (await api.snapshot(Questions, parentId, context))?.items[questionId];
+      if (typeof item?.answer === "string") {
+        const routing = item.routing;
+        const prefix = routing?.kind === "answered" && routing.provisional ? "Provisional answer from the parent, which the user may overturn: "
+          : routing?.kind === "answered" && routing.by === "parent" ? "The parent answered: " : "The user answered: ";
+        return { content: [{ type: "text" as const, text: `${prefix}${item.answer}` }] };
+      }
+      if (item?.closed === true) return { content: [{ type: "text" as const, text: "This question was closed without an answer." }], isError: true };
       await sleep(250, undefined, { signal: context.abortSignal });
     }
   },
@@ -330,26 +355,40 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
   const childTool = defineTool({
     name: CHILD_TOOL_NAME,
     description: [
-      "Run a background child agent in this session. Actions: spawn (name, message, optional agent and isolation) and send (name, message).",
+      "Run a background child agent in this session. Actions: spawn (name, message, optional agent and isolation), send (name, message), answer (name, questionId, answer, reason), escalate (questionId, kind, guess, why).",
       "Writers (write, edit, or bash) and general helpers default to isolation: worktree. Read-only agents default to shared. Explicit isolation wins; two live shared writers in the same directory are refused.",
       "A child works on its own; its answer is reported back to you as a new message when it arrives. Do not wait or poll.",
-      "The user can open a child, steer it, stop it, and answer its questions. Several spawns in one reply run in parallel.",
+      "A child asks you first. Answer from the task, contract, code, docs and chat. Escalate only irreversible actions, actions outside the project in the user's name, contradicting what the user said or approved, or questions you cannot answer anywhere. Taste and scope are decisions, not escalations.",
+      "irreversible/external wait for the user. contradicts/stuck give your best guess at once, marked provisional in the decision log. Do not wait or poll. The user can open, steer and stop children. Several spawns in one reply run in parallel.",
       ...(agentList === "" ? [] : [`Agents (pass one as \`agent\`; omit for a general helper):\n${agentList}`]),
     ].join("\n"),
-    parameters: Type.Object({
-      action: Type.Union([Type.Literal("spawn"), Type.Literal("send")]),
-      name: Type.String({ description: "Short unique name for this child, such as ui or api." }),
-      message: Type.String({ description: "The full task. The child does not see this conversation." }),
-      agent: Type.Optional(Type.String({ description: "Agent file name for spawn." })),
-      isolation: Type.Optional(Type.Union([Type.Literal("shared"), Type.Literal("worktree")], { description: "Working directory for spawn. Default worktree for writers and general helpers, shared for read-only agents." })),
-      allowMissingTools: Type.Optional(Type.Boolean({ description: "Spawn despite unavailable tools named by the agent file. Default false." })),
-      model: Type.Optional(Type.String({ description: "Model for spawn as provider/model-id, optionally with :thinking-level. Overrides the agent file." })),
-    }),
+    parameters: Type.Union([
+      Type.Object({
+        action: Type.Union([Type.Literal("spawn"), Type.Literal("send")]),
+        name: Type.String({ description: "Short unique name for this child, such as ui or api." }),
+        message: Type.String({ description: "The full task. The child does not see this conversation." }),
+        agent: Type.Optional(Type.String({ description: "Agent file name for spawn." })),
+        isolation: Type.Optional(Type.Union([Type.Literal("shared"), Type.Literal("worktree")], { description: "Working directory for spawn. Default worktree for writers and general helpers, shared for read-only agents." })),
+        allowMissingTools: Type.Optional(Type.Boolean({ description: "Spawn despite unavailable tools named by the agent file. Default false." })),
+        model: Type.Optional(Type.String({ description: "Model for spawn as provider/model-id, optionally with :thinking-level. Overrides the agent file." })),
+      }),
+      Type.Object({ action: Type.Literal("answer"), name: Type.String({ minLength: 1 }), questionId: Type.String({ minLength: 1 }), answer: Type.String({ minLength: 1, maxLength: 65536 }), reason: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
+      Type.Object({ action: Type.Literal("escalate"), questionId: Type.String({ minLength: 1 }), kind: Type.Union([Type.Literal("irreversible"), Type.Literal("external"), Type.Literal("contradicts"), Type.Literal("stuck")]), guess: Type.String({ minLength: 1, maxLength: 65536 }), why: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
+    ]),
     // Tool calls serialize name allocation. Children themselves remain parallel background conversations.
     executionMode: "sequential",
     // One task-keyed reporter receipt covers spawn/send; isolated worktrees use the same task key.
     replay: "safe",
     execute: async (args, api, context) => {
+      if (args.action === "answer" || args.action === "escalate") {
+        try {
+          const result = await api.commit((tx) => resolveChildQuestion(tx, api.conversationId, args, String(api.taskId)), context);
+          return { content: [{ type: "text" as const, text: result }] };
+        } catch (error) {
+          if (!(error instanceof WorkflowError)) throw error;
+          return { content: [{ type: "text" as const, text: error.message }], isError: true };
+        }
+      }
       const selected = await resolve(api.conversationId, context);
       const extraTools = selected.extraTools ?? [];
       const agentList = (selected.agents ?? []).map((agent) => `- ${agent.name}: ${agent.description}`).join("\n");
@@ -441,7 +480,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
     },
   });
   const extensions = {
-    parent: [defineExtension({ name: "forgerie.child-agents", tasks: [Anchor, Reporter], tools: [childTool] })],
+    parent: [defineExtension({ name: "forgerie.child-agents", tasks: [Anchor, Reporter, QuestionDelivery], tools: [childTool] })],
     childOnly: [ChildTools],
     refresh: () => durableChildExtensions(options),
   };
@@ -467,7 +506,7 @@ export function modelChoice(spec: string): { model: { provider: string; modelId:
 function childInstructions(name: string, profile: ChildAgentProfile | undefined, plan: ChildRuntimePlan, projectContext: string | undefined): string {
   const project = profile?.inheritProjectContext !== false && projectContext !== undefined && projectContext !== ""
     ? `\n\n<project_context>\n${projectContext}\n</project_context>` : "";
-  return `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked.${plan.section === "" ? "" : `\n\n${plan.section}`}${project}`;
+  return `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked; it asks your parent, not the user.${plan.section === "" ? "" : `\n\n${plan.section}`}${project}`;
 }
 
 function withChildAdmission<T>(worktrees: DurableChildWorktrees | undefined, operation: () => Promise<T>): Promise<T> {
@@ -493,7 +532,7 @@ export function childWorkIsLive(graph: TaskGraph, parent: ConversationId): boole
 /** Questions children asked that the user has not answered and that no stop closed. */
 export async function openChildQuestions(harness: Harness, parent: ConversationId, context: Context): Promise<number> {
   const items = Object.values((await harness.snapshot(Questions, parent, context))?.items ?? {});
-  return items.filter((question) => question.answer === null && question.closed !== true).length;
+  return items.filter((question) => question.answer === null && question.closed !== true && (question.routing === undefined || question.routing.kind === "user")).length;
 }
 
 /** Frozen launch provenance for the disk run-history projection, not a browser summary. */
@@ -522,7 +561,7 @@ export async function listChildren(harness: Harness, parent: ConversationId, con
       busy: retry !== undefined || (await harness.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined,
       ...(retry === undefined ? {} : { retry }),
       ...(agent.worktreeId === undefined ? {} : { worktree: await requireWorktrees(worktrees).summary(agent.worktreeId) }),
-      questions: questions.filter(([, question]) => question.child === agent.conversationId && question.answer === null && question.closed !== true)
+      questions: questions.filter(([, question]) => question.child === agent.conversationId && question.answer === null && question.closed !== true && (question.routing === undefined || question.routing.kind === "user"))
         .map(([questionId, question]) => ({ questionId, question: question.question, askedAt: question.askedAt }))
         .sort((a, b) => a.askedAt - b.askedAt),
     };
@@ -586,15 +625,43 @@ export async function stopChild(harness: Harness, parent: Conversation, conversa
   });
 }
 
+type ChildResolution = { action: "answer"; name: string; questionId: string; answer: string; reason: string }
+  | { action: "escalate"; questionId: string; kind: "irreversible" | "external" | "contradicts" | "stuck"; guess: string; why: string };
+
+async function resolveChildQuestion(tx: Tx, parent: ConversationId, args: ChildResolution, receipt: string): Promise<string> {
+  const items = (await tx.doc(Questions, parent)).items;
+  const item = Object.hasOwn(items, args.questionId) ? items[args.questionId] : undefined;
+  if (item === undefined) throw new WorkflowError(404, "Child question not found");
+  if (item.resolvedBy === receipt) return "Question already resolved by this call.";
+  if (item.answer !== null || item.closed === true || item.routing?.kind !== "parent") throw new WorkflowError(409, "Child question is not waiting for the parent");
+  if (args.action === "answer" && item.childName !== args.name) throw new WorkflowError(404, "Question does not belong to that child");
+  const choice = args.action === "answer" ? args.answer : args.guess;
+  const reason = args.action === "answer" ? args.reason : args.why;
+  if (choice.trim() === "" || reason.trim() === "") throw new WorkflowError(400, "A nonblank answer or guess and reason are required");
+  item.resolvedBy = receipt;
+  if (args.action === "escalate" && (args.kind === "irreversible" || args.kind === "external")) {
+    item.routing = { kind: "user", escalation: args.kind, guess: choice, why: reason };
+    await tx.appendEntry(parent, { kind: CHILD_QUESTION_KIND, data: { questionId: args.questionId, child: item.child, childName: item.childName, question: item.question, guess: choice, why: reason, kind: args.kind } });
+    return "Escalated to the user. The child waits; keep working on anything independent.";
+  }
+  const provisional = args.action === "escalate";
+  item.answer = choice;
+  item.routing = { kind: "answered", by: "parent", provisional };
+  await logDecision(tx, parent, { id: `d:${args.questionId}`, kind: provisional ? "guess" : "child-answer", by: "parent", question: item.question, choice, reason, flagged: provisional }, item.child);
+  return provisional ? "Provisional answer sent and flagged in the decision log." : "Answer sent and recorded in the decision log.";
+}
+
 export async function answerChildQuestion(parent: Conversation, questionId: string, answer: string, context: Context): Promise<void> {
-  const accepted = await parent.commit(async (tx) => {
+  if (answer.trim() === "") throw new WorkflowError(400, "A nonblank answer is required");
+  await parent.commit(async (tx) => {
     const item = (await tx.doc(Questions, parent.id)).items[questionId];
-    if (item?.answer !== null || item.closed === true) return false;
+    if (item?.answer !== null || item.closed === true || (item.routing !== undefined && item.routing.kind !== "user")) throw new Error(`Question ${questionId} is not open for the user`);
+    const reason = item.routing?.kind === "user" ? item.routing.why : "The user answered a child question";
     item.answer = answer;
-    return true;
+    item.routing = { kind: "answered", by: "user", provisional: false };
+    await logDecision(tx, parent.id, { id: `d:${questionId}`, kind: "child-answer", by: "user", question: item.question, choice: answer, reason, flagged: false }, item.child);
+    await tx.appendEntry(parent.id, { kind: CHILD_ANSWER_KIND, data: { questionId, answer } });
   }, context);
-  if (!accepted) throw new Error(`Question ${questionId} is not open`);
-  await parent.submit({ type: "write", requestId: `answer:${questionId}`, entry: { kind: CHILD_ANSWER_KIND, data: { questionId, answer } } }, context);
 }
 
 /** Ownership is checked before Git reads; the caller never supplies a checkout path. */
