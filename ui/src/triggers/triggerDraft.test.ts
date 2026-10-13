@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createOf, draftOf, draftProblems, emptyDraft, fieldOf, isDirty, problemList, updateOf } from "./triggerDraft";
-import { docs, FORGERIE, HOST_ZONE, nightly, workflows } from "./fixtures/triggers";
+import { docs, FORGERIE, HOST_ZONE, nightly, triage, workflows } from "./fixtures/triggers";
+import { wireThinkingLevel } from "./triggerWire";
 
 const workflow = (name: string) => workflows.find((item) => item.name === name);
 
@@ -34,6 +35,21 @@ describe("the request a draft becomes", () => {
     expect(updateOf(docs, { ...draftOf(docs), grace: 1440 }, workflow("docs-sweep"), 12)).toEqual({ baseRevision: 12, missedGraceMinutes: 1440 });
     const model = updateOf(nightly, { ...draftOf(nightly), model: "openai/gpt-5", thinkingLevel: "high" }, workflow("refine-backlog"), 12);
     expect(model.action).toEqual({ ...nightly.action, model: "openai/gpt-5", thinkingLevel: "high" });
+  });
+  it("leaves the action alone when only another field was edited, and keeps omitted inputs omitted", () => {
+    // The stored action leaves `label` to the workflow's default ("any"). A rename must not freeze that default
+    // into the action, which would also re-arm the trigger on the server.
+    const stored = { ...triage, action: { ...triage.action, inputs: { task: "Triage new issues." } } };
+    expect(updateOf(stored, { ...draftOf(stored), name: "Issue triage" }, workflow("triage-issues"), 12)).toEqual({ baseRevision: 12, name: "Issue triage" });
+    // An edit to an input sends the action, still without the default the reader never touched.
+    expect(updateOf(stored, { ...draftOf(stored), inputs: { task: "Triage everything." } }, workflow("triage-issues"), 12).action)
+      .toEqual({ ...stored.action, inputs: { task: "Triage everything." } });
+  });
+  it("keeps a thinking level with no model set", () => {
+    const thinking = { ...nightly, action: { ...nightly.action, thinkingLevel: wireThinkingLevel("high") } };
+    expect(updateOf(thinking, { ...draftOf(thinking), workflow: "docs-sweep", inputs: {} }, workflow("docs-sweep"), 12).action)
+      .toEqual({ kind: "workflow", cwd: FORGERIE, workflow: "docs-sweep", inputs: {}, thinkingLevel: "high" });
+    expect(createOf({ ...draftOf(thinking), name: "x" }, workflow("refine-backlog")).action.thinkingLevel).toBe("high");
   });
   it("is dirty only when a field differs from where it started", () => {
     expect(isDirty(draftOf(nightly), draftOf(nightly))).toBe(false);

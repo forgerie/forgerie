@@ -85,11 +85,12 @@ export function fieldOf(path: string | undefined): DraftField | undefined {
 }
 
 function actionOf(draft: TriggerDraft, workflow: TriggerWorkflow | undefined): TriggerAction {
-  const typed = workflow ? launchInputs({ definition: { inputs: workflow.inputs } }, inputFields(workflow, draft).values) : undefined;
+  // Only the values the draft holds: a declared default the reader never set stays out, so the server applies it.
+  const typed = workflow ? launchInputs({ definition: { inputs: workflow.inputs } }, draft.inputs) : undefined;
   // Without the workflow's declaration, keep what was typed as text: the server checks it against the workflow.
   const inputs = typed && "inputs" in typed ? typed.inputs : Object.fromEntries(Object.entries(draft.inputs).filter(([, value]) => value.trim() !== ""));
   return { kind: "workflow", cwd: draft.cwd, workflow: draft.workflow, inputs,
-    ...(draft.model ? { model: draft.model } : {}), ...(draft.model && draft.thinkingLevel ? { thinkingLevel: wireThinkingLevel(draft.thinkingLevel) } : {}) };
+    ...(draft.model ? { model: draft.model } : {}), ...(draft.thinkingLevel ? { thinkingLevel: wireThinkingLevel(draft.thinkingLevel) } : {}) };
 }
 const scheduleOfDraft = (draft: TriggerDraft) => scheduleOf(draft.repeat === "daily" ? WEEK : draft.days, draft.at, draft.timezone);
 
@@ -98,7 +99,14 @@ export function createOf(draft: TriggerDraft, workflow: TriggerWorkflow | undefi
 }
 
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
-const sortedAction = (action: TriggerAction) => ({ ...action, inputs: Object.fromEntries(Object.entries(action.inputs).sort(([a], [b]) => a.localeCompare(b))) });
+const sortedInputs = (inputs: Readonly<Record<string, string>>) =>
+  Object.fromEntries(Object.entries(inputs).filter(([, value]) => value !== "").sort(([a], [b]) => a.localeCompare(b)));
+/** The reader changed what a run does: the project, the workflow, an input, the model, or the thinking level. */
+function actionEdited(draft: TriggerDraft, saved: TriggerDraft): boolean {
+  const action = (value: TriggerDraft) => ({ cwd: value.cwd, workflow: value.workflow, model: value.model ?? null, thinkingLevel: value.thinkingLevel ?? null,
+    inputs: sortedInputs(value.inputs) });
+  return !same(action(draft), action(saved));
+}
 
 /** Only what changed, against the revision the draft started from. */
 export function updateOf(trigger: Trigger, draft: TriggerDraft, workflow: TriggerWorkflow | undefined, baseRevision: number): TriggerUpdate {
@@ -107,8 +115,9 @@ export function updateOf(trigger: Trigger, draft: TriggerDraft, workflow: Trigge
   if (name !== trigger.name) update.name = name;
   const schedule = scheduleOfDraft(draft);
   if (!same(schedule, scheduleOf(scheduleDays(trigger.schedule), trigger.schedule.at, trigger.schedule.timezone))) update.schedule = schedule;
-  const action = actionOf(draft, workflow);
-  if (!same(sortedAction(action), sortedAction(trigger.action))) update.action = action;
+  // The action goes only when one of its own fields was edited. Building it fills nothing in, but an unrelated edit
+  // must not resend it: a new action re-arms the trigger on the server.
+  if (actionEdited(draft, draftOf(trigger))) update.action = actionOf(draft, workflow);
   if (draft.grace !== trigger.missedGraceMinutes) update.missedGraceMinutes = draft.grace;
   return update;
 }
