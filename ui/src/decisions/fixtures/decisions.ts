@@ -21,22 +21,22 @@ export const GUESS: Decision = {
   flagged: true, state: { kind: "standing" },
 };
 export const OVERTURNED: Decision = {
-  id: "d-3", at: LOG_NOW - 70 * MIN, kind: "guess", by: "design", runId: RUN_ID,
+  id: "d-3", at: LOG_NOW - 70 * MIN, kind: "guess", by: "parent", runId: RUN_ID,
   question: "Export button: in the header or under the table?",
   choice: "Under the table, beside the row count.",
   reason: "The header is full at the folded width.",
   flagged: true, state: { kind: "overturned", note: "Put it in the header menu. The table foot is for paging.", at: LOG_NOW - 3 * MIN },
 };
-/** A decision outside the run, in the session itself. */
+/** The reader's own answer to an escalated question, outside the run. */
 export const SESSION_ANSWER: Decision = {
-  id: "d-4", at: LOG_NOW - 26 * 60 * MIN, kind: "child-answer", by: "parent",
+  id: "d-4", at: LOG_NOW - 26 * 60 * MIN, kind: "child-answer", by: "user",
   question: "Use the existing date helper in src/shared/time.ts, or add a new one for the CSV’s ISO dates?",
   choice: "Use the existing helper and add an ISO variant beside it.",
   reason: "One module for dates keeps the time zone rules in one place.",
   flagged: false, state: { kind: "standing" },
 };
 export const LONG: Decision = {
-  id: "d-5", at: LOG_NOW - 3 * 24 * 60 * MIN, kind: "child-answer", by: "design-engineer-on-the-long-branch-name",
+  id: "d-5", at: LOG_NOW - 3 * 24 * 60 * MIN, kind: "child-answer", by: "parent",
   question: "Rename src/server/sessions/durableDecisionsRepositoryAdapterForTheLongPathCase.ts, or keep the name the build worker chose?",
   choice: "Keep the name. Renaming it now would touch twelve imports across three branches that are still open, and the reviewer has already read it under this name.",
   reason: "A rename can follow once every branch has landed.",

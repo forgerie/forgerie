@@ -68,6 +68,8 @@ describe("the session's decisions sheet", () => {
     expect(guess.querySelector(".decision-record-reason")?.textContent).toBe(GUESS.reason);
     expect(guess.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe("Flagged guess");
     expect(record(ANSWER.question)?.querySelector('[role="img"]')).toBeNull();
+    // The reader's own answer to an escalated question names the reader as you.
+    expect(record(SESSION_ANSWER.question)?.querySelector(".decision-record-subject")?.textContent).toBe("you");
     // The section counts what still stands flagged.
     expect(sheet().querySelector(".list-section-aside [role='img']")?.getAttribute("aria-label")).toBe("1 flagged guess");
   });
@@ -109,7 +111,7 @@ describe("the session's decisions sheet", () => {
     await act(async () => { overturn.click(); });
     expect(overturn.getAttribute("aria-pressed")).toBe("true");
     expect(footer()?.querySelector(".action-footer-note")?.textContent)
-      .toBe("Overturn “Newest first, with the stage as a label on each row”. Your note goes to parent, or to its parent if parent has finished.");
+      .toBe("Overturn “Newest first, with the stage as a label on each row”. The agent that acted on it gets your note and redoes the work; if it has finished, the parent agent does.");
     expect(button("Send and overturn")?.disabled).toBe(true);
     await type("Group by stage. Inside each stage, newest first.");
     await act(async () => { button("Send and overturn")?.click(); });
@@ -140,7 +142,7 @@ describe("the session's decisions sheet", () => {
     await act(async () => { record(GUESS.question)!.querySelector("button")!.click(); });
     await type("Draft for the guess");
     await act(async () => { record(SESSION_ANSWER.question)!.querySelector("button")!.click(); });
-    expect(footer()?.querySelector(".action-footer-note")?.textContent).toContain(SESSION_ANSWER.choice);
+    expect(footer()?.querySelector(".action-footer-note")?.textContent).toContain(SESSION_ANSWER.choice.replace(/\.$/u, ""));
     // A new decision starts with an empty note: a note is written for one choice.
     expect(footer()?.querySelector("textarea")?.value).toBe("");
     await act(async () => { record(SESSION_ANSWER.question)!.querySelector("button")!.click(); });

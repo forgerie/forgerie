@@ -30,6 +30,7 @@ const parts = (process.env.PARTS ?? [
   "src/workflows/WorkflowRunSheet.organism.part.tsx#DecisionsUnread",
   "src/childAgents/ChildEntryView.molecule.part.tsx#Escalated",
   "src/ui/BadgeButton.atom.part.tsx#QuietCount",
+  "src/ui/Picker.organism.part.tsx#default",
 ].join(" ")).split(" ");
 const schemes = (process.env.SCHEMES ?? "dark,light").split(",");
 const postures = (process.env.POSTURES ?? FOLD8_POSTURES.map((posture) => posture.name).join(",")).split(",");

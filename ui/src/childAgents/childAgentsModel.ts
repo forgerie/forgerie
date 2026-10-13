@@ -50,6 +50,7 @@ export const CHILD_NOTE_TYPE = "forgerie.child-note";
  * Why the parent passed a child's question on to the reader (docs/adr/0001): only an irreversible action or one
  * outside the project in the reader's name reaches the reader. `guess` and `why` are what the parent would choose.
  * The other two kinds never reach the reader as a card; the child goes on with the guess and the log flags it.
+ * The server writes the three as top-level fields of the question entry's details (durableChildAgents.ts).
  */
 export const escalationSchema = z.object({
   kind: z.enum(["irreversible", "external", "contradicts", "stuck"]),
@@ -77,7 +78,7 @@ export function childEntryOf(message: PiMessage): ChildEntry | undefined {
   switch (message.customType) {
     case CHILD_QUESTION_TYPE: {
       // A malformed escalation drops out, not the question: the reader can still answer it.
-      const escalation = escalationSchema.safeParse(details["escalation"]);
+      const escalation = escalationSchema.safeParse({ kind: details["kind"], guess: details["guess"], why: details["why"] });
       return { kind: "question", questionId: str(details, "questionId"), child: num(details, "child"),
         childName: str(details, "childName") || "child", question: str(details, "question"), ...(escalation.success ? { escalation: escalation.data } : {}) };
     }

@@ -2,7 +2,7 @@
 // Routes: GET /api/sessions/:id/decisions?cwd= and POST /api/sessions/:id/decisions/:did/overturn { cwd, note }.
 // A change fires the session's `workflow_runs_changed` event; the binding calls refresh() on it.
 import { z } from "zod";
-import { decisionSchema, decisionsSchema, sortDecisions, type Decision, type DecisionLogView } from "./decisionsModel";
+import { decisionSchema, decisionsSchema, OVERTURN_NOTE_MAX, sortDecisions, type Decision, type DecisionLogView } from "./decisionsModel";
 
 export type Request = (path: string, init: RequestInit) => Promise<Response>;
 export interface SessionRef { id: string; cwd: string }
@@ -65,10 +65,16 @@ export function createDecisionsStore(request: Request, ref: () => SessionRef | u
      */
     async overturn(id: string, note: string): Promise<boolean> {
       const session = ref();
-      if (!session || state.overturning !== undefined || note.trim() === "") return false;
+      const text = note.trim();
+      if (!session || state.overturning !== undefined || text === "") return false;
+      // The server refuses a longer note; say so here, and keep the note in its field to shorten.
+      if (text.length > OVERTURN_NOTE_MAX) {
+        update({ ...state, error: `Shorten the note to ${OVERTURN_NOTE_MAX.toLocaleString("en-US")} characters or fewer. It has ${text.length.toLocaleString("en-US")}.` });
+        return false;
+      }
       update({ ...state, overturning: id, error: undefined });
       try {
-        const decision = await call(`${base(session)}/${encodeURIComponent(id)}/overturn`, decisionSchema, { cwd: session.cwd, note });
+        const decision = await call(`${base(session)}/${encodeURIComponent(id)}/overturn`, decisionSchema, { cwd: session.cwd, note: text });
         generation += 1;
         update({ ...state, overturning: undefined, decisions: replace(decision) });
         return true;

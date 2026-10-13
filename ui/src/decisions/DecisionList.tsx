@@ -3,7 +3,7 @@ import { AlertCard } from "../ui/AlertCard";
 import { DecisionRecord } from "../ui/DecisionRecord";
 import { IconCount } from "../ui/IconCount";
 import { ListSection } from "../ui/ListSection";
-import { age, flaggedCount, KIND_PHRASE, type Decision } from "./decisionsModel";
+import { age, deciderName, flaggedCount, KIND_PHRASE, type Decision } from "./decisionsModel";
 
 /**
  * Shape: decisions the agents made without the reader, newest first. Each says
@@ -41,10 +41,10 @@ export function DecisionList({ title, decisions, readError, now, target, busy = 
       aside={flagged > 0 ? <IconCount icon={<FlagIcon aria-hidden />} count={flagged} label={`${String(flagged)} flagged ${flagged === 1 ? "guess" : "guesses"}`} /> : undefined}
       empty={decisions === undefined ? "Reading the decisions…" : "No decisions yet."}
       note={onChoose !== undefined && decisions !== undefined && decisions.length > 0
-        ? "Overturning a decision sends your note to the agent that made it. If that agent has finished, its parent gets the note." : undefined}>
+        ? "Overturning a decision sends your note to the agent that acted on it, which redoes the work. If that agent has finished, the parent agent gets the note." : undefined}>
       {decisions?.map((decision) => {
         const overturned = decision.state.kind === "overturned" ? decision.state : undefined;
-        return <DecisionRecord key={decision.id} subject={decision.by} phrase={KIND_PHRASE[decision.kind]}
+        return <DecisionRecord key={decision.id} subject={deciderName(decision.by)} phrase={KIND_PHRASE[decision.kind]}
           time={age(decision.at, now)} timeTitle={new Date(decision.at).toLocaleString()} status={overturned ? "Overturned" : undefined}
           question={decision.question} choice={decision.choice} reason={decision.reason}
           flag={decision.flagged ? overturned ? "Flagged guess, overturned" : "Flagged guess" : undefined}

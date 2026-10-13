@@ -1,37 +1,47 @@
 // The decision log: choices the agents made without the reader (docs/adr/0001, docs/adr/0005).
-// The server side is the Durable doc `forgerie.decisions` per parent conversation; the routes are
-// GET /api/sessions/:id/decisions?cwd= and POST /api/sessions/:id/decisions/:did/overturn.
-// TODO(slice 1 build): mirror src/shared/decisions.ts once it lands, with a parity test like childRetry.test.ts.
+// The server side is src/server/sessions/durableDecisions.ts (the Durable doc `forgerie.decisions` per parent
+// conversation); the routes are src/server/sessions/decisionRoutes.ts. The wire shape is src/shared/decisions.ts:
+// these schemas mirror it field for field, and decisionsParity.test.ts holds them to it.
 import { z } from "zod";
 
 export const DECISION_KINDS = ["child-answer", "guess", "gated", "auto-stop", "issue"] as const;
 export const decisionKindSchema = z.enum(DECISION_KINDS);
-export const decisionSchema = z.object({
-  id: z.string().min(1),
-  /** When the agent decided, in epoch ms. */
+export const decisionStateSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("standing") }),
+  z.strictObject({ kind: z.literal("overturned"), note: z.string(), at: z.number() }),
+]);
+export const decisionSchema = z.strictObject({
+  id: z.string(),
+  /** When it was decided, in epoch ms. */
   at: z.number(),
   kind: decisionKindSchema,
-  /** Who decided: the agent's name as the session knows it, such as a child's name. */
+  /** Who decided: "parent", or "user" for the reader's own answer to an escalated question. */
   by: z.string(),
-  /** The workflow run the decision belongs to, if any. */
+  /** The workflow run that was active when it was decided, if any. */
   runId: z.string().optional(),
   question: z.string(),
   choice: z.string(),
   reason: z.string(),
   /** A guess made in place of an escalation: the reader may want to look at it. */
   flagged: z.boolean(),
-  state: z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("standing") }),
-    z.object({ kind: z.literal("overturned"), note: z.string(), at: z.number() }),
-  ]),
+  state: decisionStateSchema,
 });
 export const decisionsSchema = z.array(decisionSchema);
+/** The longest correction the server takes, counted before it trims. */
+export const OVERTURN_NOTE_MAX = 8000;
+/** The overturn route's body. */
+export const decisionOverturnSchema = z.strictObject({ cwd: z.string().min(1), note: z.string().min(1).max(OVERTURN_NOTE_MAX) });
 export type Decision = z.infer<typeof decisionSchema>;
 export type DecisionKind = z.infer<typeof decisionKindSchema>;
 
-/** Newest first; two decisions at the same moment keep a fixed order by id. Never changes its input. */
+/** Who decided, in the reader's words: the reader is "you". */
+export function deciderName(by: string): string {
+  return by === "user" ? "you" : by;
+}
+
+/** Newest first; two decisions at the same moment by id, descending, as the server lists them. Never changes its input. */
 export function sortDecisions(decisions: readonly Decision[]): Decision[] {
-  return [...decisions].sort((a, b) => b.at - a.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return [...decisions].sort((a, b) => b.at - a.at || b.id.localeCompare(a.id));
 }
 
 /**

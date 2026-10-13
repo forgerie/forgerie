@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  age, decisionSchema, decisionsOfRun, decisionsSchema, flaggedCount, logSummary, openerLabel, shortChoice, sortDecisions, type Decision,
+  age, deciderName, decisionSchema, decisionsOfRun, decisionsSchema, flaggedCount, logSummary, openerLabel, shortChoice, sortDecisions, type Decision,
 } from "./decisionsModel";
 import { ANSWER, GUESS, LOG_NOW, OVERTURNED, RUN_ID, SESSION_ANSWER, SESSION_DECISIONS } from "./fixtures/decisions";
 
@@ -20,7 +20,7 @@ describe("the decision wire shape", () => {
     delete noReason.reason;
     for (const bad of [
       { ...ANSWER, kind: "hunch" },
-      { ...ANSWER, id: "" },
+      { ...ANSWER, extra: true },
       { ...ANSWER, at: "yesterday" },
       { ...ANSWER, flagged: "yes" },
       noReason,
@@ -32,10 +32,10 @@ describe("the decision wire shape", () => {
 
 describe("ordering and counts", () => {
   const older: Decision = { ...ANSWER, id: "d-0", at: ANSWER.at };
-  it("sorts newest first, ties by id, without changing its input", () => {
+  it("sorts newest first, ties by id descending as the server does, without changing its input", () => {
     const input = [OVERTURNED, ANSWER, SESSION_ANSWER, GUESS, older];
     const copy = [...input];
-    expect(sortDecisions(input).map((decision) => decision.id)).toEqual(["d-0", "d-1", "d-2", "d-3", "d-4"]);
+    expect(sortDecisions(input).map((decision) => decision.id)).toEqual(["d-1", "d-0", "d-2", "d-3", "d-4"]);
     expect(input).toEqual(copy);
   });
 
@@ -60,6 +60,11 @@ describe("words", () => {
     expect(age(LOG_NOW - 15 * 24 * 60 * MIN, LOG_NOW)).toBe("2w");
     // A clock that runs behind the server never shows a negative age.
     expect(age(LOG_NOW + 5 * MIN, LOG_NOW)).toBe("<1m");
+  });
+
+  it("calls the reader you, and any agent by its name", () => {
+    expect(deciderName("user")).toBe("you");
+    expect(deciderName("parent")).toBe("parent");
   });
 
   it("sums up the log and names the header button", () => {

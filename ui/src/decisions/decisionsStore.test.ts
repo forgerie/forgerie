@@ -135,6 +135,17 @@ describe("overturning a decision", () => {
     expect(store.getSnapshot().error).toBeUndefined();
   });
 
+  it("sends the note trimmed, and refuses one longer than the server takes, keeping it to shorten", async () => {
+    const { calls, store } = routes((_path, init) => init.method === "POST" ? json(200, overturned(GUESS, "Group by stage.")) : json(200, RUN_DECISIONS));
+    await store.retry();
+    expect(await store.overturn(GUESS.id, `  ${"x".repeat(8001)}  `)).toBe(false);
+    expect(store.getSnapshot().error).toBe("Shorten the note to 8,000 characters or fewer. It has 8,001.");
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(0);
+    expect(await store.overturn(GUESS.id, "\n  Group by stage.  \n")).toBe(true);
+    expect(calls.at(-1)?.body).toEqual({ cwd: "/srv/app", note: "Group by stage." });
+    expect(store.getSnapshot().error).toBeUndefined();
+  });
+
   it("sends nothing for a blank note or while another overturn is on its way", async () => {
     const reply = held();
     const { calls, store } = routes((_path, init) => init.method === "POST" ? reply.promise : json(200, RUN_DECISIONS));
