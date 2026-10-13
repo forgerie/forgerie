@@ -139,10 +139,10 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
   const workflows: WorkflowsLoad = cwd ? workflowLoads[cwd] ?? { type: "loading" } : { type: "ready", workflows: [] };
   const workflow: TriggerWorkflow | undefined = workflows.type === "ready" ? workflows.workflows.find((item) => item.name === draft.workflow) : undefined;
 
-  const [save, setSave] = useState<{ key: string; state: TriggerSave; field?: string | undefined }>({ key, state: { type: "idle" } });
+  const [save, setSave] = useState<{ key: string; state: TriggerSave }>({ key, state: { type: "idle" } });
   const saveState = save.key === key ? save.state : { type: "idle" as const };
   const problems: DraftProblems = { ...draftProblems(draft, workflow) };
-  const refusedField = save.key === key && save.state.type === "refused" ? fieldOf(save.field) : undefined;
+  const refusedField = save.key === key && save.state.type === "refused" ? save.state.field : undefined;
   if (refusedField && save.state.type === "refused") problems[refusedField] ??= save.state.message;
 
   const [failure, setFailure] = useState<string>();
@@ -254,7 +254,7 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
         return;
       }
       const refusal = error instanceof TriggerRefusal ? error : undefined;
-      setSave({ key, state: { type: "refused", message: messageOf(error), off: refusal?.status === 503 }, field: refusal?.field });
+      setSave({ key, state: { type: "refused", message: messageOf(error), off: refusal?.status === 503, field: fieldOf(refusal?.field) } });
     } finally { inFlight.current = false; }
   }
 

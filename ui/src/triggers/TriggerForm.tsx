@@ -11,13 +11,12 @@ import { TimeField } from "../ui/TimeField";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "../ui/ModelPicker";
 import { TextButton } from "../ui/TextButton";
 import { PageSection } from "../ui/PageSection";
-import { ProblemList } from "../ui/ProblemList";
 import { WorkflowInputFields } from "../workflows/WorkflowInputFields";
 import { thinkingLevelsFor, type Project, type Workspace } from "../newSession";
 import type { SessionModel } from "../contracts";
 import { RUN_LATE_CHOICES } from "./triggersModel";
 import { thinkingLevelOf } from "./triggerWire";
-import { inputFields, type DraftProblems, type TriggerDraft } from "./triggerDraft";
+import { fieldDomId, inputFields, type DraftProblems, type TriggerDraft } from "./triggerDraft";
 import { clockChangeHint, zoneLabel, DAY_SHORT, graceWords, runLateHint, WEEK, type Weekday } from "./triggerWords";
 
 /** The project's saved workflows, as the server lists them for a folder. */
@@ -68,12 +67,12 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
   // While a save is in flight every control is locked, so nothing typed during the request is lost when it lands.
   return <FormLock locked={disabled}>
     <PropertyList label="Trigger settings">
-      <SettingsField label="Project" hint="Each run starts a new session in this folder." problem={problems.project}>
+      <SettingsField label="Project" fieldId={fieldDomId("project")} hint="Each run starts a new session in this folder." problem={problems.project}>
         <DestinationPicker binding={{ cwd: draft.cwd, label: draft.cwd ? projectLabel : "Choose a project", lead: "Runs in", disabled,
           listProjects: projects.list, listWorkspaces: projects.workspaces,
           onChoose: (cwd) => { if (cwd !== draft.cwd) set({ cwd, workflow: "", inputs: {} }); } }} />
       </SettingsField>
-      <SettingsField label="Workflow" problem={problems.workflow} hint={!draft.cwd ? "Choose a project to see its workflows." : workflow ? workflow.hasLandStop
+      <SettingsField label="Workflow" fieldId={fieldDomId("workflow")} problem={problems.workflow} hint={!draft.cwd ? "Choose a project to see its workflows." : workflow ? workflow.hasLandStop
         ? "Ends at a land stop, so each run waits for you to land it."
         : "This workflow has no land stop. Its runs do not wait for your review." : undefined}>
         <OptionPicker label="Workflow" value={draft.workflow || undefined} placeholder="Choose a workflow" search="Find a workflow"
@@ -86,34 +85,33 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
         <ToggleGroup label="Repeat" value={draft.repeat} onChange={(repeat) => set({ repeat })}
           options={[{ value: "daily", label: "Every day" }, { value: "days", label: "Some days" }]} />
       </SettingsField>
-      {draft.repeat === "days" ? <SettingsField label="Days" problem={problems.days}>
+      {draft.repeat === "days" ? <SettingsField label="Days" fieldId={fieldDomId("days")} problem={problems.days}>
         <ToggleGroup multiple label="Days" value={draft.days} onChange={(days) => set({ days })}
           options={WEEK.map((day: Weekday) => ({ value: day, label: DAY_SHORT[day] }))} />
       </SettingsField> : null}
-      <SettingsField label="Time" hint={clockChangeHint(draft.at)} problem={problems.time}>
+      <SettingsField label="Time" fieldId={fieldDomId("time")} hint={clockChangeHint(draft.at)} problem={problems.time}>
         <TimeField label="Time" value={draft.at} disabled={disabled} onChange={(at) => set({ at })} />
       </SettingsField>
-      <SettingsField label="Time zone" problem={problems.timezone}
+      <SettingsField label="Time zone" fieldId={fieldDomId("timezone")} problem={problems.timezone}
         hint={draft.timezone !== hostZone ? `Forgerie's host uses ${hostZone}.` : undefined}>
         <OptionPicker label="Time zone" value={zoneLabel(draft.timezone)} placeholder="Choose a time zone" search="Find a time zone" disabled={disabled}
           options={(timezones.includes(draft.timezone) ? timezones : [draft.timezone, ...timezones]).map((zone) =>
             ({ id: zone, name: zoneLabel(zone), current: zone === draft.timezone, ...zone === hostZone ? { variant: "host" } : {} }))}
           onChoose={(timezone) => set({ timezone, zoneChosen: true })} />
       </SettingsField>
-      <SettingsField label="Model" problem={problems.model}>
+      <SettingsField label="Model" fieldId={fieldDomId("model")} problem={problems.model}>
         <div ref={modelAnchor}>
           <ModelPicker binding={modelBinding} anchor={modelAnchor} open={modelOpen} onOpenChange={setModelOpen} />
           {draft.model && !disabled ? <TextButton label="Use the default" onPress={() => set({ model: undefined, thinkingLevel: undefined })} /> : null}
         </div>
       </SettingsField>
-      <SettingsField label="Run late" hint={runLateHint(draft.at, draft.grace, locale)} problem={problems.late}>
+      <SettingsField label="Run late" fieldId={fieldDomId("late")} hint={runLateHint(draft.at, draft.grace, locale)} problem={problems.late}>
         <ToggleGroup label="Run late" value={String(draft.grace)} onChange={(value) => set({ grace: Number(value) })}
           options={lateChoices.map((minutes) => ({ value: String(minutes), label: graceWords(minutes) }))} />
       </SettingsField>
     </PropertyList>
-    {fields.inputs.length > 0 ? <PageSection title="Inputs">
+    {fields.inputs.length > 0 || problems.inputs ? <PageSection title="Inputs" fieldId={fieldDomId("inputs")} problem={problems.inputs}>
       <WorkflowInputFields inputs={fields.inputs} values={fields.values} onChange={(name, value) => set({ inputs: { ...draft.inputs, [name]: value } })} />
-      {problems.inputs ? <div data-problem=""><ProblemList label="Input problem" problems={[problems.inputs]} /></div> : null}
     </PageSection> : null}
   </FormLock>;
 }

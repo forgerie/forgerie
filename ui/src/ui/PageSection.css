@@ -1,3 +1,4 @@
 /* The agent page's section heading: a label, set apart from what came before by the page's largest gap. */
 .page-section { margin-block-start: var(--space-8); }
 .page-section-title { margin: 0 0 var(--space-2); color: var(--muted-foreground); font-family: var(--body-font); font-size: var(--label-text); font-weight: 500; }
+.page-section-problem { margin: var(--space-2) 0 0; color: var(--destructive); font-size: var(--label-text); line-height: 1.45; }

@@ -89,8 +89,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `ReadoutLine` (molecule): one sentence about a state with the action that changes it at the line's end; the action wraps under the sentence first.
 - `TextButton` (atom): a quiet action drawn as words at the text's size, with a control-sized target and a danger tone.
 - `TimeField` (atom): a time of day as `HH:mm`, typed or picked with the browser's control in the reader's locale.
-- `ProblemList` (atom): what stops a form from saving, as a short list in the danger tone that takes focus when a save is refused.
 - `OptionPicker` (molecule): one choice as a chip that opens searchable options at window level; a blocked option stays visible and says why.
 - `HeaderIcon` (atom): an icon-only header control, such as Close, muted until hovered, with a control-sized target and its label as name and tooltip.
 - `BackButton` (atom): a page header's way back, named for where it goes, divided from the title by a rule; a narrow header keeps only its chevron.
-- `PageSection` (molecule): a titled part of a document page: a small quiet heading set apart by the page's largest gap, then its content at full width.
+- `PageSection` (molecule): a titled part of a document page: a small quiet heading set apart by the page's largest gap, then its content at full width, and a problem under it that describes the controls inside.

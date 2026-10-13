@@ -16,7 +16,7 @@ import { TriggerStatus } from "./TriggerStatus";
 import { TriggerForm, type WorkflowsLoad } from "./TriggerForm";
 import { TriggerRuns } from "./TriggerRuns";
 import { triggersPlan, UNMEASURED } from "./triggersModel";
-import { problemList, type DraftProblems, type TriggerDraft } from "./triggerDraft";
+import { fieldDomId, firstProblem, problemList, type DraftField, type DraftProblems, type TriggerDraft } from "./triggerDraft";
 import { storeOffWords, type WordClock } from "./triggerWords";
 
 /** Where the page is: reading the trigger, unknown, unreadable, or ready to edit. A new trigger is always ready. */
@@ -27,7 +27,7 @@ export type TriggerPageLoad =
   | { type: "ready"; trigger?: Trigger | undefined };
 
 /** Save state: a save in flight, a save that just landed, or a refusal. `off`: the trigger store is unavailable (503). */
-export type TriggerSave = { type: "idle" } | { type: "saving" } | { type: "saved" } | { type: "refused"; message: string; off?: boolean | undefined };
+export type TriggerSave = { type: "idle" } | { type: "saving" } | { type: "saved" } | { type: "refused"; message: string; off?: boolean | undefined; field?: DraftField | undefined };
 
 export interface TriggerPageActions {
   onDraft: (draft: TriggerDraft) => void;
@@ -75,22 +75,28 @@ export function TriggerPage({ load, draft, dirty, problems, save, conflict, fail
 }) {
   const [room, setRoom] = useState(UNMEASURED);
   const plan = triggersPlan(room.column, room.header, room.body);
-  const body = useRef<HTMLDivElement>(null);
   const trigger = load.type === "ready" ? load.trigger : undefined;
   const fresh = load.type === "ready" && !trigger;
   const saving = save.type === "saving";
   const listed = problemList(problems);
-  // A refused save moves focus to the first field at fault, so the reader lands on what to fix.
-  const [asked, setAsked] = useState(0);
+  // A save stopped in the browser, or refused by the server for one field, moves focus to that field's first control,
+  // so the reader lands on what to fix and hears the problem that describes it.
+  const [focusing, setFocusing] = useState<{ field: DraftField } | undefined>();
   // Problems show once the reader tried to save, or when the server named a field.
   const [tried, setTried] = useState(false);
   const showing = checked || tried || save.type === "refused";
   useLayoutEffect(() => {
-    if (asked === 0) return;
-    const target = body.current?.querySelector<HTMLElement>("[data-problem] :is(input, button, textarea, [tabindex])");
-    target?.focus();
-  }, [asked]);
-  const submit = () => { setTried(true); if (listed.length > 0) setAsked((count) => count + 1); else actions.onSave(); };
+    if (!focusing) return;
+    const row = document.getElementById(fieldDomId(focusing.field));
+    row?.querySelector<HTMLElement>("input:not(:disabled), textarea:not(:disabled), select:not(:disabled), button:not(:disabled)")?.focus();
+  }, [focusing]);
+  const refusedField = save.type === "refused" ? save.field : undefined;
+  useEffect(() => { if (refusedField) setFocusing({ field: refusedField }); }, [save, refusedField]);
+  const submit = () => {
+    setTried(true);
+    const first = firstProblem(problems);
+    if (first) setFocusing({ field: first }); else actions.onSave();
+  };
   // Ctrl or Cmd + S saves, as in the agent editor.
   const latest = useRef(submit);
   latest.current = submit;
@@ -144,12 +150,12 @@ export function TriggerPage({ load, draft, dirty, problems, save, conflict, fail
       <HeaderIcon label="Close triggers" icon={<XIcon aria-hidden />} onPress={actions.onClose} />
     </>} error={error} recovery={recovery} notice={notice}>
     {load.type === "loading" ? <LoadingLines label="Reading the trigger…" /> : null}
-    {load.type === "ready" ? <div ref={body}>
+    {load.type === "ready" ? <div>
       {fresh ? <Lede>A trigger starts a saved workflow at a set time, in a new session of the project. You review each run in its session.</Lede> : null}
       {trigger ? <TriggerAttention trigger={trigger} clock={clock} errorLines={plan.errorLines} onAcknowledge={actions.onAcknowledge}
         onRunNow={actions.onRunNow} onOpenSession={actions.onOpenSession} /> : null}
       <TitleField label="Trigger name" placeholder="Name the trigger" value={draft.name} maxLength={120} disabled={saving} autoFocus={focusName}
-        problem={showing ? problems.name : undefined} onChange={(name) => actions.onDraft({ ...draft, name })} />
+        problem={showing ? problems.name : undefined} fieldId={fieldDomId("name")} onChange={(name) => actions.onDraft({ ...draft, name })} />
       {trigger ? <TriggerStatus trigger={trigger} clock={clock} starting={starting} creatorName={creatorName}
         onPause={actions.onPause} onResume={actions.onResume} onOpenSession={actions.onOpenSession} /> : null}
       <TriggerForm draft={draft} onDraft={actions.onDraft} problems={showing ? problems : {}} disabled={saving} hostZone={clock.hostZone}

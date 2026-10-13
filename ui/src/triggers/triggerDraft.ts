@@ -67,6 +67,10 @@ export function draftProblems(draft: TriggerDraft, workflow: TriggerWorkflow | u
   }
   return problems;
 }
+/** The stable DOM id of a field's row, so a page can move focus to the field a problem names. */
+export const fieldDomId = (field: DraftField) => `trigger-field-${field}`;
+/** The first field with a problem, in the page's order. */
+export const firstProblem = (problems: DraftProblems): DraftField | undefined => FIELD_ORDER.find((field) => problems[field] !== undefined);
 export const problemList = (problems: DraftProblems) => FIELD_ORDER.flatMap((field) => problems[field] ? [problems[field]] : []);
 
 /** Which field a server's dotted path is about. */

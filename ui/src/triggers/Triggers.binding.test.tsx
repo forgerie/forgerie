@@ -268,6 +268,16 @@ describe("a trigger's page", () => {
     expect(field("Trigger name")?.value).toBe("My new trigger");
   });
 
+  it("moves focus to the field a server refusal names, and links the problem to it", async () => {
+    await render({ view: "trigger", id: "weekday-triage" });
+    await type("Trigger name", "Mine");
+    store.failNext("update", new TriggerRefusal("Choose a time Forgerie can keep.", 400, "schedule.at"));
+    await press("Save");
+    const time = document.activeElement as HTMLInputElement;
+    expect(time.type).toBe("time");
+    expect(describedBy(time)).toContain("Choose a time Forgerie can keep.");
+  });
+
   it("says when no trigger has the ID", async () => {
     await render({ view: "trigger", id: "gone" });
     expect(text()).toContain("No trigger has this ID. It may have been deleted.");
@@ -298,7 +308,25 @@ const locked = (control: Element) => (control as HTMLButtonElement).disabled || 
 /** Ctrl+S, as the page's shortcut hears it. */
 const saveKey = () => act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true })); });
 
+/** The words an element's aria-describedby points at. */
+const describedBy = (element: Element) => (element.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean)
+  .map((id) => document.getElementById(id)?.textContent ?? "").join(" ");
+
 describe("the create page", () => {
+  it("moves focus to an input with a problem, and links the problem to it", async () => {
+    await render({ view: "create" }, []);
+    await type("Trigger name", "Nightly docs");
+    await press("Choose a project");
+    await press(/^forgerie/);
+    await press(/^Workflow:/);
+    await press(/^refine-backlog/);
+    await press("Create");
+    expect(store.calls.some((call) => call[0] === "create")).toBe(false);
+    const task = document.activeElement as HTMLTextAreaElement;
+    expect(task.tagName).toBe("TEXTAREA");
+    expect(describedBy(task)).toContain("Fill in task.");
+  });
+
   it("sends one create for repeated saves, and locks the form while it is in flight", async () => {
     await render({ view: "create" }, []);
     await type("Trigger name", "Nightly docs");
