@@ -12,8 +12,9 @@ import { pathToFileURL } from "node:url";
 const repo = process.env.FORGERIE_ROOT ?? resolve(new URL("../..", import.meta.url).pathname);
 const { launchChrome, getFreePort, waitForDebugger, evaluate, sleep, openPage } = await import(pathToFileURL(join(repo, "scripts/lib/cdp.mjs")));
 const { FOLD8_POSTURES } = await import(pathToFileURL(join(repo, "scripts/lib/fold8-postures.mjs")));
-const SIZES = [...FOLD8_POSTURES, { name: "split-pane", width: 352, height: 783 }]
-  .filter((size) => !process.env.SIZES || process.env.SIZES.split(" ").includes(size.name));
+// The tiny pane is the brief's smallest rung (the header's primary moves into ⋯). It runs only when SIZES names it.
+const SIZES = [...FOLD8_POSTURES, { name: "split-pane", width: 352, height: 783 }, { name: "tiny-pane", width: 280, height: 600, optional: true }]
+  .filter((size) => process.env.SIZES ? process.env.SIZES.split(" ").includes(size.name) : !size.optional);
 const out = resolve(process.env.SHOT_DIR ?? "/tmp/forgerie-triggers-shots");
 const base = new URL("/verification/triggers-preview.html", process.env.APP_URL ?? "http://127.0.0.1:8510/");
 const DPR = Number(process.env.DPR ?? 1);
@@ -41,6 +42,7 @@ const SHOTS = {
   many: { state: "many" },
   "run-dialog": { state: "failed", steps: [click("Run now…")] },
   "row-menu": { state: "list", steps: [click("Commands for Docs sweep")] },
+  "header-menu": { state: "list", steps: [click("Trigger commands")] },
   footer: { state: "list", sheet: true },
 };
 const names = (process.env.SHOTS ?? Object.keys(SHOTS).join(" ")).split(" ").filter(Boolean);
