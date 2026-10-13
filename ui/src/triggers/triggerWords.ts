@@ -245,3 +245,8 @@ export function missedWords(fire: TriggerFire, zone: string, grace: number, cloc
   return grace <= 0 ? `Forgerie was not running at ${time}, and this trigger does not run late, so the run did not start.`
     : `Forgerie was not running at ${time} and came back more than ${graceWords(grace)} later, so the run did not start late.`;
 }
+
+/** The store is unavailable (503): what is wrong, what stops, and what to do. */
+export function storeOffWords(message: string): string {
+  return `Triggers are off: ${message.trim().replace(/\.+$/u, "")}. No trigger runs until sessiond can open its store. Check the sessiond log, then restart sessiond.`;
+}

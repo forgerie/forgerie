@@ -13,10 +13,9 @@ import { TriggerRow, type TriggerRowActions } from "./TriggerRow";
 import {
   FILTER_FROM, groupTriggers, listOf, matchesFilter, totalWords, triggersPlan, UNMEASURED, type TriggerGroupKey, type TriggerListLoad,
 } from "./triggersModel";
-import type { WordClock } from "./triggerWords";
+import { storeOffWords, type WordClock } from "./triggerWords";
 
 const EMPTY_TEXT = "A trigger starts a saved workflow at a set time, in a new session of a project. In the morning, you review the work in that session.";
-const sentence = (text: string) => text.trim().replace(/\.+$/u, "");
 
 /**
  * Shape: every trigger, grouped so a problem comes first: Needs a look, then
@@ -44,7 +43,7 @@ export function TriggerList({ load, clock, projectLabel, starting, failure, onDi
   const shown = filtering ? triggers.filter((trigger) => matchesFilter(trigger, query, projectLabel(trigger.action.cwd))) : triggers;
   const groups = groupTriggers(shown);
   const readError = load.type === "off"
-    ? `Triggers are off: ${sentence(load.message)}. No trigger runs until sessiond can open its store. Check the sessiond log, then restart sessiond.`
+    ? storeOffWords(load.message)
     : load.type === "failed" ? `Could not read triggers: ${load.message}` : undefined;
   const commands: MenuCommand[] = [
     ...plan.primary === "menu" ? [{ label: "New trigger", icon: <PlusIcon aria-hidden />, onSelect: onNew }] : [],

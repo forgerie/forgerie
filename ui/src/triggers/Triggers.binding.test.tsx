@@ -8,7 +8,7 @@ import { useTriggerList } from "./useTriggerList";
 import type { TriggerPlace } from "./triggersModel";
 import { audit, digest, docs, HOST_ZONE, manyList, NOW, nightly, notes, triage } from "./fixtures/triggers";
 import { memoryApi, memoryDirectory, type MemoryStore } from "./fixtures/memoryApi";
-import type { TriggersApi } from "./triggersApi";
+import { TriggerRefusal, type TriggersApi } from "./triggersApi";
 
 let root: Root;
 let store: MemoryStore;
@@ -253,6 +253,23 @@ describe("a trigger's page", () => {
 });
 
 describe("the create page", () => {
+  it("fails with the store's own words when the store is off", async () => {
+    await render({ view: "create" }, []);
+    store.failNext("create", new TriggerRefusal("database is locked", 503));
+    await type("Trigger name", "Nightly docs");
+    await press("Choose a project");
+    await press(/^forgerie/);
+    await press(/^Workflow:/);
+    await press(/^docs-sweep/);
+    await press("Create");
+    expect(text()).toContain("Triggers are off: database is locked. No trigger runs until sessiond can open its store.");
+    expect((document.querySelector<HTMLInputElement>('input[aria-label="Trigger name"]'))?.value).toBe("Nightly docs");
+    // Drafts outlive the page, so this one goes before the next test opens the create page.
+    await press("Trigger commands");
+    await press("Discard");
+    expect(moves.at(-1)).toEqual({ view: "list" });
+  });
+
   it("lists what is missing instead of sending, then creates without an ID", async () => {
     await render({ view: "create" });
     await press("Create");

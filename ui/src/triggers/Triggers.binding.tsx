@@ -252,7 +252,8 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
         readDetail(trigger.id);
         return;
       }
-      setSave({ key, state: { type: "refused", message: messageOf(error) }, field: error instanceof TriggerRefusal ? error.field : undefined });
+      const refusal = error instanceof TriggerRefusal ? error : undefined;
+      setSave({ key, state: { type: "refused", message: messageOf(error), off: refusal?.status === 503 }, field: refusal?.field });
     }
   }
 

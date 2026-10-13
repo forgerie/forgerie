@@ -17,7 +17,7 @@ import { TriggerForm, type WorkflowsLoad } from "./TriggerForm";
 import { TriggerRuns } from "./TriggerRuns";
 import { triggersPlan, UNMEASURED } from "./triggersModel";
 import { problemList, type DraftProblems, type TriggerDraft } from "./triggerDraft";
-import type { WordClock } from "./triggerWords";
+import { storeOffWords, type WordClock } from "./triggerWords";
 
 /** Where the page is: reading the trigger, unknown, unreadable, or ready to edit. A new trigger is always ready. */
 export type TriggerPageLoad =
@@ -26,8 +26,8 @@ export type TriggerPageLoad =
   | { type: "failed"; message: string }
   | { type: "ready"; trigger?: Trigger | undefined };
 
-/** Save state: a save in flight, a save that just landed, or a refusal with the field it names. */
-export type TriggerSave = { type: "idle" } | { type: "saving" } | { type: "saved" } | { type: "refused"; message: string };
+/** Save state: a save in flight, a save that just landed, or a refusal. `off`: the trigger store is unavailable (503). */
+export type TriggerSave = { type: "idle" } | { type: "saving" } | { type: "saved" } | { type: "refused"; message: string; off?: boolean | undefined };
 
 export interface TriggerPageActions {
   onDraft: (draft: TriggerDraft) => void;
@@ -125,7 +125,7 @@ export function TriggerPage({ load, draft, dirty, problems, save, conflict, fail
   ] : [];
   const error = load.type === "missing" ? "No trigger has this ID. It may have been deleted."
     : load.type === "failed" ? `Could not read the trigger: ${load.message}`
-    : save.type === "refused" ? `Forgerie did not save the trigger: ${save.message}` : failure
+    : save.type === "refused" ? save.off ? storeOffWords(save.message) : `Forgerie did not save the trigger: ${save.message}` : failure
     // The summary of what to fix, under the header where the primary action is, in the tone of a refusal.
     ?? (showing && listed.length > 0 ? listed.join(" ") : undefined);
   const recovery = load.type === "missing" ? <button type="button" onClick={actions.onBack}>Show all triggers</button>
