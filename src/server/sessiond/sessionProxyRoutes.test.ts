@@ -20,6 +20,18 @@ afterEach(async () => {
 });
 
 describe("machine-scoped session proxy routes", () => {
+  it("forwards gated action reads, approvals and refusals unchanged", async () => {
+    await app.inject({url: "/api/machines/local/sessions/s1/gated-actions?cwd=%2Frepo"});
+    for (const action of ["approve", "refuse"]) {
+      daemon.respondWith({statusCode: 409, headers: {"content-type": "application/json"}, body: JSON.stringify({error: "Gated action is not waiting"})});
+      expect((await app.inject({method: "POST", url: `/api/machines/local/sessions/s1/gated-actions/g1/${action}`, payload: {cwd: "/repo"}})).statusCode).toBe(409);
+    }
+    expect(daemon.requests).toEqual([
+      {method: "GET", path: "/sessions/s1/gated-actions?cwd=%2Frepo", body: undefined},
+      {method: "POST", path: "/sessions/s1/gated-actions/g1/approve", body: {cwd: "/repo"}},
+      {method: "POST", path: "/sessions/s1/gated-actions/g1/refuse", body: {cwd: "/repo"}},
+    ]);
+  });
   it("forwards decision reads and overturn corrections through the session wildcard", async () => {
     const payload = { cwd: "/repo", note: "Use the contract" };
     expect((await app.inject({ url: "/api/machines/local/sessions/s1/decisions?cwd=%2Frepo" })).statusCode).toBe(200);

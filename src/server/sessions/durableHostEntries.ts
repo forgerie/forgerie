@@ -5,5 +5,7 @@
 import { childEntryText, isChildEntryKind } from "./durableChildAgents.js";
 import { isWorkflowEntryKind, workflowEntryText } from "./durableWorkflowRuns.js";
 
-export const isHostEntryKind = (kind: string): boolean => isChildEntryKind(kind) || isWorkflowEntryKind(kind);
-export const hostEntryText = (kind: string, data: unknown): string => isWorkflowEntryKind(kind) ? workflowEntryText(kind, data) : childEntryText(kind, data);
+import { GATED_ACTION_ENTRY_KIND } from "../../shared/gatedActions.js";
+
+export const isHostEntryKind = (kind: string): boolean => kind === GATED_ACTION_ENTRY_KIND || isChildEntryKind(kind) || isWorkflowEntryKind(kind);
+export const hostEntryText = (kind: string, data: unknown): string => kind === GATED_ACTION_ENTRY_KIND ? `Gated action: ${JSON.stringify(data)}` : isWorkflowEntryKind(kind) ? workflowEntryText(kind, data) : childEntryText(kind, data);

@@ -440,6 +440,9 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
           const refusal = await workflowChildRefusal(tx, api.conversationId, name);
           if (refusal !== undefined) return refusal;
           const state = await tx.doc(Children, api.conversationId);
+          const parentAgent = await tx.doc(AgentDoc, api.conversationId);
+          const parentNames = Array.isArray(parentAgent.extensions) ? parentAgent.extensions : parentAgent.extensions?.add ?? [];
+          const gateNames = parentNames.filter(name => name.startsWith("forgerie.gated-actions"));
           const background = { ownership: { kind: "conversation" }, background: true } as const;
           if (action === "spawn") {
             if (Object.hasOwn(state.agents, name)) return `${name} already exists; use send.`;
@@ -456,6 +459,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
               ...(chosenThinking === undefined ? {} : { thinkingLevel: chosenThinking }),
               instructions: childInstructions(name, profile, plan, selected.projectContext),
             });
+            (await tx.doc(AgentDoc, child.id)).extensions = [ChildTools.name, ...gateNames];
             state.agents[name] = { conversationId: child.id, reported: [], agent: profile?.name ?? null, createdAt: Date.now(),
               ...(profile === undefined ? {} : { agentFile: profile.source }),
               ...(checkout === undefined ? {} : { worktreeId: checkout.id }) };
@@ -467,6 +471,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
             // a workflow or the agent may have chosen it for this child.
             await configure(tx, agent.conversationId, { extensions: [ChildTools], tools: childToolsFor(runtime, extraTools, sharedTools),
               instructions: childInstructions(name, sentProfile, runtime, selected.projectContext) });
+            (await tx.doc(AgentDoc, agent.conversationId)).extensions = [ChildTools.name, ...gateNames];
             if (sentProfile !== undefined) agent.agentFile = sentProfile.source;
           }
           const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);

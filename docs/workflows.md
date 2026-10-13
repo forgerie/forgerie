@@ -198,3 +198,7 @@ WORKFLOW_REAL=1 ./scripts/workflow-real.ts
 Set `WORKFLOW_MODEL` to change the model. Set `WORKFLOW_SERVE=1` to keep the isolated HTTP server on `127.0.0.1:8544` for browser acceptance, then stop it with SIGTERM. If it is killed with SIGKILL, remove the temporary `agent/models.json` credential file yourself.
 
 `WORKFLOW_REAL=1 ./scripts/workflow-proposal-real.ts` uses a separate temporary profile, Git workspace, and in-process daemon. The real model proposes a workflow; the script starts it through the HTTP route and waits at its first stop. It verifies that `git status --porcelain` in the workspace did not change. It does not restart or deploy the live daemon. Model calls incur provider costs.
+
+## Gated actions
+
+Workflow parents and children use the same [gated actions](gated-actions.md). These approvals cover one irreversible or external tool call, not a whole workflow stage. Agents keep working on independent parts while a gate waits. Approvals and refusals enter the active run's decision log. Waiting gates count as **Needs your response**.

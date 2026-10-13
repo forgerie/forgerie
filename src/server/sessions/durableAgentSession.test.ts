@@ -130,6 +130,8 @@ describe("SDK-compatible Durable execution", () => {
     const forkAgent = await fork.journal.conversation.agent(context);
     expect(parentAgent.tools.map((tool) => tool.name)).toEqual(["read"]);
     expect(forkAgent.tools.map((tool) => tool.name)).toEqual(["bash"]);
+    expect(parentAgent.extensions.filter(item => item.name.startsWith("forgerie.gated-actions:")).map(item => item.name)).toEqual([`forgerie.gated-actions:${String(parent.journal.conversation.id)}`]);
+    expect(forkAgent.extensions.filter(item => item.name.startsWith("forgerie.gated-actions:")).map(item => item.name)).toEqual([`forgerie.gated-actions:${String(fork.journal.conversation.id)}`]);
     expect(parentAgent.tools[0]?.description).not.toBe("Fork-only read override");
     expect(parentAgent.tools[0]?.replay).toBe("safe");
     provider.setResponses([fauxAssistantMessage([fauxToolCall("read", {})], { stopReason: "toolUse" }), fauxAssistantMessage("inactive read rejected")]);

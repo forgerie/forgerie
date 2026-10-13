@@ -1,0 +1,180 @@
+import type { Context, JsonValue } from "@earendil-works/chord";
+import { AgentDoc, LiveDoc, ToolTask, UsageDoc, defineDoc, defineExtension, defineTask, hook, section, type JsonObject, type CommitPublication, type Conversation, type ConversationId, type Harness, type ToolDiagnostic, type ToolExecutionApi, type Tx, type TaskRuntime } from "@earendil-works/pi-durable";
+import type { Usage } from "@earendil-works/pi-ai";
+import { Check } from "typebox/value";
+import { GatedActionSchema, GATED_ACTION_ENTRY_KIND, type GatedAction, type GatedActionEntry } from "../../shared/gatedActions.js";
+import { defaultAutonomyPolicySource, type AutonomyPolicySource, type GatedCategory } from "../../shared/autonomyPolicy.js";
+import { gatedAction, type GatedActionReads } from "./gatedActions.js";
+import { durableJson } from "./durableJson.js";
+import { deliverInputUntilPlaced, type InputPlacementState } from "./durableInputPlacement.js";
+import { durableChildRunMetadata } from "./durableChildAgents.js";
+import { logDecision } from "./durableDecisions.js";
+import { WorkflowError } from "../resources/workflowLibrary.js";
+
+export const GATED_ACTIONS_DOC_KIND = "forgerie.gated-actions";
+export const GATED_ACTION_GUIDANCE = "Irreversible actions and actions outside the project in the user's name are gated. While approval waits, keep working on parts that do not depend on it. Do not retry the blocked call; its result will arrive as a message.";
+/* eslint-disable @typescript-eslint/consistent-type-definitions */
+type GateRecord = { id: string; conversationId: ConversationId; by: string; tool: string; args: JsonObject; category: GatedCategory; description: string; requestedAt: number;
+  state: {kind: "waiting" | "approved" | "refused"} | {kind: "ran"; result: JsonValue; at: number} | {kind: "failed"; error: string; at: number} };
+type RunInput = { parent: ConversationId; id: string; cwd: string };
+type RunState = { phase: "ready" } | { phase: "unknown" };
+/* eslint-enable @typescript-eslint/consistent-type-definitions */
+const Gates = defineDoc<{ records: Record<string, GateRecord>; cwd: Record<string, string> }>({
+  kind: GATED_ACTIONS_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({records: {}, cwd: {}}),
+});
+export function gatedActionsChanged(publication: CommitPublication, parent: ConversationId): boolean {
+  return publication.changes.some(change => change.type === "document" && change.conversationId === parent && change.record.kind === GATED_ACTIONS_DOC_KIND);
+}
+function publicGate(record: GateRecord): GatedAction {
+  const plain: unknown = JSON.parse(JSON.stringify(record));
+  if (!Check(GatedActionSchema, plain)) throw new Error("Invalid gated action record");
+  return plain;
+}
+export async function gatedActions(harness: Harness, parent: ConversationId, context: Context): Promise<GatedAction[]> {
+  return Object.values((await harness.snapshot(Gates, parent, context))?.records ?? {}).map(publicGate).sort((a, b) => b.requestedAt - a.requestedAt || b.id.localeCompare(a.id));
+}
+export async function waitingGatedActions(harness: Harness, parent: ConversationId, context: Context): Promise<number> {
+  return (await gatedActions(harness, parent, context)).filter(gate => gate.state.kind === "waiting").length;
+}
+async function recipient(tx: Tx, parent: ConversationId, original: ConversationId): Promise<ConversationId> {
+  return original !== parent && await tx.conversation(original) !== undefined && (await tx.doc(LiveDoc, original)).run !== undefined ? original : parent;
+}
+const Delivery = defineTask<{ id: string; original: ConversationId; text: string }, InputPlacementState, null>({
+  name: "forgerie.gated-action-delivery", version: 1, initial: () => ({phase: "deliver"}),
+  phases: { deliver: (task, runtime, context) => deliverInputUntilPlaced(runtime, task.state.checkpoint, {
+    requestId: `gate-result:${task.input.id}`, content: task.input.text, previousRecipient: task.input.original,
+    selectRecipient: tx => recipient(tx, runtime.conversationId, task.input.original),
+  }, context) },
+  abort: (_task, runtime, context) => runtime.commit(() => ({status: "terminal", outcome: {status: "aborted"}}), context),
+});
+async function finish(tx: Tx, parent: ConversationId, id: string, state: GateRecord["state"]): Promise<void> {
+  const gate = (await tx.doc(Gates, parent)).records[id];
+  if (gate === undefined) throw new Error("Gated action disappeared");
+  gate.state = state;
+  const text = state.kind === "refused" ? `The user refused gate ${id}: ${gate.description}.`
+    : state.kind === "failed" ? `Gate ${id} failed: ${state.error}` : state.kind === "ran" ? `Gate ${id} ran: ${gate.description}. Result: ${JSON.stringify(state.result)}` : "";
+  await tx.createTask(Delivery, {id, original: gate.conversationId, text}, {conversationId: parent, ownership: {kind: "conversation"}, background: true});
+}
+const Run = defineTask<RunInput, RunState, null>({
+  name: "forgerie.gated-action-run", version: 1, initial: () => ({phase: "ready"}),
+  phases: {
+    ready: async (task, runtime, context) => {
+      const gate = (await runtime.snapshot(Gates, task.input.parent, context))?.records[task.input.id];
+      if (gate?.state.kind !== "approved") throw new Error("Gated run has no approval");
+      const agent = await runtime.agent(context);
+      const tool = agent.tools.find(candidate => candidate.name === gate.tool);
+      // This intent commits BEFORE any non-idempotent effect. Only this invocation can execute it.
+      // Restart enters unknown, including a crash immediately after this commit and before execute.
+      await runtime.commit(() => ({status: "running", checkpoint: {phase: "unknown"}}), context);
+      let state: GateRecord["state"];
+      let usage: Usage | undefined;
+      let output = "";
+      const diagnostics: ToolDiagnostic[] = [];
+      let details: JsonValue | undefined;
+      try {
+        if (tool === undefined) throw new Error(`Approved tool ${gate.tool} is no longer available`);
+        if (agent.cwd !== task.input.cwd) throw new Error("The conversation cwd changed since this action was blocked; the action was not run");
+        const api: ToolExecutionApi = {
+          taskId: runtime.taskId, conversationId: runtime.conversationId, callId: `gate:${gate.id}`, registry: runtime.registry,
+          agent: runtime.agent.bind(runtime), models: runtime.models, env: await runtime.env(context), outputWindow: undefined,
+          output: chunk => { output = (output + (typeof chunk === "string" ? chunk : Buffer.from(chunk).toString())).slice(-65536); }, diagnostic: diagnostic => { diagnostics.push(diagnostic); },
+          details: value => { details = value; return Promise.resolve(); }, snapshot: runtime.snapshot.bind(runtime), snapshotAsOf: runtime.snapshotAsOf.bind(runtime), watchDoc: runtime.watchDoc.bind(runtime),
+          commit: (change, ctx) => commitValue(runtime, change, ctx),
+          memo: runtime.memo.bind(runtime), getTask: runtime.getTask.bind(runtime), waitForTask: runtime.waitForTask.bind(runtime), conversation: runtime.conversation.bind(runtime),
+          createTask: (definition, input, options, ctx) => commitValue(runtime, tx => tx.createTask(definition, input, options), ctx),
+        };
+        const result = await tool.execute(gate.args, api, context);
+        const allDiagnostics = [...diagnostics, ...result.diagnostics ?? []];
+        const saved = durableJson({...result, content: result.content ?? [{type: "text", text: output}], details: result.details ?? details, diagnostics: allDiagnostics});
+        usage = result.usage;
+        state = result.isError === true || allDiagnostics.some(diagnostic => diagnostic.severity === "error") ? {kind: "failed", error: JSON.stringify(saved), at: Date.now()} : {kind: "ran", result: saved, at: Date.now()};
+      } catch (error) {
+        if (runtime.signal.aborted) throw error;
+        state = {kind: "failed", error: [error instanceof Error ? error.message : String(error), output].filter(text => text !== "").join("\n"), at: Date.now()};
+      }
+      await runtime.commit(async tx => { await finish(tx, task.input.parent, task.input.id, state); if (usage !== undefined) await recordToolUsage(tx, runtime.conversationId, gate.tool, usage); return {status: "terminal", outcome: {status: "completed", result: null}}; }, context);
+    },
+    unknown: (task, runtime, context) => runtime.commit(async tx => {
+      await finish(tx, task.input.parent, task.input.id, {kind: "failed", error: "Unknown outcome: the approved action was interrupted and may have run. It will not be run again. Check its effects before requesting another action.", at: Date.now()});
+      return {status: "terminal", outcome: {status: "completed", result: null}};
+    }, context),
+  },
+  abort: (task, runtime, context) => runtime.commit(async tx => {
+    await finish(tx, task.input.parent, task.input.id, {kind: "failed", error: "Unknown outcome: approved action stopped; it will not be run again.", at: Date.now()});
+    return {status: "terminal", outcome: {status: "aborted"}};
+  }, context),
+});
+export interface GatedActionsExtensionOptions {
+  harness(): Harness;
+  parent: ConversationId;
+  reads: GatedActionReads;
+  policy?: AutonomyPolicySource;
+  name?: string;
+}
+export function gatedActionsExtension(options: GatedActionsExtensionOptions) {
+  return defineExtension({name: options.name ?? "forgerie.gated-actions", tasks: [Run, Delivery], sections: [section("gated-actions", () => GATED_ACTION_GUIDANCE)], hooks: [hook(ToolTask, {
+    beforeTool: async (call, api, context) => {
+      const id = `g:${String(api.conversationId)}:${String(api.taskId)}`;
+      const prior = (await api.snapshot(Gates, options.parent, context))?.records[id];
+      if (prior !== undefined) return {block: blocked(id)};
+      const cwd = (await api.snapshot(AgentDoc, api.conversationId, context))?.cwd ?? ".";
+      const found = await gatedAction(call.name, call.arguments, cwd, options.reads);
+      if (found === undefined || !(await (options.policy ?? defaultAutonomyPolicySource).read(cwd)).gated[found.category]) return undefined;
+      const childName = api.conversationId === options.parent ? undefined : Object.entries(await durableChildRunMetadata(options.harness(), options.parent, context)).find(([, child]) => child.conversationId === api.conversationId)?.[0];
+      await options.harness().commit(async tx => {
+        const doc = await tx.doc(Gates, options.parent);
+        if (Object.hasOwn(doc.records, id)) return;
+        const by = api.conversationId === options.parent ? "parent" : `child ${childName ?? String(api.conversationId)}`;
+        doc.records[id] = {id, conversationId: api.conversationId, by, tool: call.name, args: jsonArgs(call.arguments), ...found, requestedAt: Date.now(), state: {kind: "waiting"}};
+        doc.cwd[id] = cwd;
+        const entry: GatedActionEntry = {id, by, tool: call.name, ...found, command: preview(call.name, call.arguments)};
+        await tx.appendEntry(options.parent, {kind: GATED_ACTION_ENTRY_KIND, data: durableJson(entry)});
+      }, context);
+      return {block: blocked(id)};
+    },
+  })]});
+}
+const blocked = (id: string) => `Blocked until the user approves (gate ${id}). Keep working on anything that does not depend on it; you will get the result as a message.`;
+function preview(tool: string, args: Record<string, unknown>): string { return (typeof args["command"] === "string" ? args["command"] : `${tool} ${JSON.stringify(args)}`).slice(0, 4000); }
+export async function decideGatedAction(harness: Harness, parent: Conversation, id: string, choice: "approved" | "refused", context: Context): Promise<GatedAction> {
+  const record = await parent.commit(async tx => {
+    const doc = await tx.doc(Gates, parent.id);
+    const gate = Object.hasOwn(doc.records, id) ? doc.records[id] : undefined;
+    if (gate === undefined) throw new WorkflowError(404, "Gated action not found in this session");
+    if (gate.state.kind !== "waiting") throw new WorkflowError(409, "Gated action is not waiting");
+    gate.state = {kind: choice};
+    await logDecision(tx, parent.id, {id: `gate:${id}`, kind: "gated", by: "user", question: gate.description, choice, reason: `The user ${choice} this tool call`, flagged: false}, gate.conversationId);
+    if (choice === "refused") await finish(tx, parent.id, id, {kind: "refused"});
+    else await tx.createTask(Run, {parent: parent.id, id, cwd: doc.cwd[id] ?? "."}, {conversationId: gate.conversationId, ownership: {kind: "conversation"}, background: true});
+    return publicGate(gate);
+  }, context);
+  harness.resume();
+  // Admission is durable. Do not keep the HTTP connection open for an arbitrary shell command.
+  return record;
+}
+
+function jsonArgs(value: unknown): JsonObject {
+  const json = durableJson(value);
+  if (json === null || typeof json !== "object" || Array.isArray(json)) throw new Error("Tool arguments must be an object");
+  return json;
+}
+
+async function commitValue<T>(runtime: TaskRuntime<RunInput, RunState, null, object>, change: (tx: Tx) => T | Promise<T>, context: Context): Promise<T> {
+  const saved: {result?: {value: T}} = {};
+  await runtime.commit(async tx => { saved.result = {value: await change(tx)}; return undefined; }, context);
+  if (saved.result === undefined) throw new Error("Commit returned no result");
+  return saved.result.value;
+}
+
+async function recordToolUsage(tx: Tx, conversation: ConversationId, tool: string, usage: Usage): Promise<void> {
+  const ledger = await tx.doc(UsageDoc, conversation);
+  const old = ledger.tools[tool];
+  ledger.tools[tool] = {
+    input: (old?.input ?? 0) + usage.input, output: (old?.output ?? 0) + usage.output,
+    cacheRead: (old?.cacheRead ?? 0) + usage.cacheRead, cacheWrite: (old?.cacheWrite ?? 0) + usage.cacheWrite, totalTokens: (old?.totalTokens ?? 0) + usage.totalTokens,
+    ...(usage.reasoning === undefined && old?.reasoning === undefined ? {} : {reasoning: (old?.reasoning ?? 0) + (usage.reasoning ?? 0)}),
+    ...(usage.cacheWrite1h === undefined && old?.cacheWrite1h === undefined ? {} : {cacheWrite1h: (old?.cacheWrite1h ?? 0) + (usage.cacheWrite1h ?? 0)}),
+    cost: {input: (old?.cost.input ?? 0) + usage.cost.input, output: (old?.cost.output ?? 0) + usage.cost.output,
+      cacheRead: (old?.cost.cacheRead ?? 0) + usage.cost.cacheRead, cacheWrite: (old?.cost.cacheWrite ?? 0) + usage.cost.cacheWrite, total: (old?.cost.total ?? 0) + usage.cost.total},
+  };
+}

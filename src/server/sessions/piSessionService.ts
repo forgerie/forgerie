@@ -917,6 +917,17 @@ function createDefaultRuntimeFactory(
       services,
       sessionManager,
       customTools,
+      ...(github?.gateIssueLabels === undefined ? {} : { gatedIssueLabels: async (targetCwd: string, issue: string | number, slug?: string, worktreeId?: string) => {
+        let number = typeof issue === "number" ? issue : Number(issue);
+        if (typeof issue === "string" && issue.startsWith("https://")) {
+          const url = new URL(issue); const target = /^\/([^/]+\/[^/]+)\/issues\/(\d+)\/?$/u.exec(url.pathname);
+          if (url.hostname !== "github.com" || target?.[1] === undefined || target[2] === undefined) throw new Error("Issue URL cannot be confirmed");
+          slug = target[1]; number = Number(target[2]);
+        }
+        const resolved = worktreeId === undefined ? targetCwd : await github.target?.({id: sessionManager.getSessionId(), cwd}, worktreeId);
+        if (resolved === undefined || github.gateIssueLabels === undefined) throw new Error("Issue target unavailable");
+        return github.gateIssueLabels(resolved, number, slug);
+      } }),
       // The adapter excludes question on initial registration and reload.
       ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
       ...(initialModel === undefined ? {} : { initialModel }),
@@ -2600,9 +2611,20 @@ export class PiSessionService implements SessionRouteService {
     } };
   }
 
+  async gatedActions(ref: PiSessionRef) {
+    const session = await this.getOrOpen(ref);
+    return session instanceof DurableAgentSession ? session.gatedActions() : [];
+  }
+  async decideGatedAction(ref: PiSessionRef, id: string, choice: "approved" | "refused") {
+    await this.assertWritable(ref);
+    const session = await this.getOrOpen(ref);
+    if (!(session instanceof DurableAgentSession)) throw new Error("This session does not host Durable gated actions");
+    this.assertHandoffDestinationAcceptsInput(session);
+    return this.runSessionEntryMutation(session, "decide a gated action", () => session.decideGatedAction(id, choice));
+  }
   async decisions(ref: PiSessionRef) {
     const session = await this.getOrOpen(ref);
-    return session instanceof DurableAgentSession && session.hostsDurableChildren ? session.decisions() : [];
+    return session instanceof DurableAgentSession ? session.decisions() : [];
   }
   async overturnDecision(ref: PiSessionRef, id: string, note: string) {
     await this.assertWritable(ref);

@@ -49,7 +49,7 @@ import { registerDurableChildRoutes } from "./sessions/durableChildRoutes.js";
 import { ChildRunStore } from "./sessions/childRunStore.js";
 import { registerChildRunRoutes } from "./sessions/childRunRoutes.js";
 import { registerIssueProposalRoutes } from "./sessions/issueProposalRoutes.js";
-import { registerDecisionRoutes } from "./sessions/decisionRoutes.js";
+import { registerDecisionRoutes, registerGatedActionRoutes } from "./sessions/decisionRoutes.js";
 import { registerWorkflowRoutes } from "./sessions/workflowRoutes.js";
 import { LiveChildSessionIndex, createDurableChildHost } from "./sessions/durableChildHost.js";
 import { bundledForgerieAgentsPath } from "./sessions/bundledForgerieSkills.js";
@@ -264,6 +264,7 @@ async function createSessionDaemonRuntime() {
     }) }),
     github: {
       target: (ref, id) => relatedWork.toolCwd(ref, id),
+      gateIssueLabels: (cwd, number, slug) => githubAgent.gateIssueLabels(cwd, number, slug),
       read: (cwd, request) => githubAgent.read(cwd, request),
       write: (cwd, id, request) => githubAgent.write(cwd, id, request),
       prepareIssue: (cwd, input) => githubAgent.prepareIssue(cwd, input),
@@ -374,6 +375,7 @@ function registerSessionDaemonRoutes({ triggers, eventHub, workspaceActivity, se
   registerChildRunRoutes(app, childRuns);
   registerWorkflowRoutes(app, sessions);
   registerDecisionRoutes(app, sessions);
+  registerGatedActionRoutes(app, sessions);
   registerIssueProposalRoutes(app, sessions);
   registerPromptResourceRoutes(app, promptResources);
   registerPromptLibraryRoutes(app, promptLibrary);

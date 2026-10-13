@@ -96,6 +96,14 @@ export class GitHubAgent {
     return this.merge(this.caller(repo.slug), number, method, headSha);
   }
 
+  async gateIssueLabels(cwd: string, number: number, slug?: string): Promise<string[]> {
+    const repo = slug ?? (await this.resolveRepo(cwd)).slug;
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repo) || !Number.isSafeInteger(number) || number < 1) throw new GitHubToolError("Invalid issue target");
+    const issue = await this.caller(repo).get(`/issues/${String(number)}`, IssueSchema, "Issues: read");
+    if (issue.pull_request !== undefined) throw new GitHubToolError("A pull request close requires approval");
+    return labelsOf(issue);
+  }
+
   async read(cwd: string, request: ReadRequest): Promise<string> {
     const repo = await this.resolveRepo(cwd);
     const call = this.caller(repo.slug);

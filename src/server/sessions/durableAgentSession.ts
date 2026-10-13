@@ -1,3 +1,9 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { sanitizedGitEnv } from "../git/gitEnv.js";
+import { gatedActionsExtension, gatedActions, decideGatedAction, waitingGatedActions, gatedActionsChanged } from "./durableGatedActions.js";
+import type { GatedActionReads } from "./gatedActions.js";
+import type { AutonomyPolicySource } from "../../shared/autonomyPolicy.js";
 import { readFile } from "node:fs/promises";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { clampThinkingLevel, getSupportedThinkingLevels, type AssistantMessage, type ImageContent, type Message } from "@earendil-works/pi-ai";
@@ -35,6 +41,8 @@ import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
 import type { WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 
 export interface DurableAgentSessionOptions {
+  gatedIssueLabels?: GatedActionReads["issueLabels"];
+  autonomyPolicy?: AutonomyPolicySource;
   handle?: DurableSessionHandle;
   services: AgentSessionServices;
   sessionManager: SessionManager;
@@ -118,6 +126,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private childCount = 0;
   /** Child questions, workflow stops, and workflow proposals that wait for the user. */
   private waitingCount = 0;
+  private waitingGates = 0;
+  private gateUnsubscribe: (() => void) | undefined;
   private flaggedCount = 0;
   private childRunRecords: DurableChildRunRecords | undefined;
 
@@ -278,6 +288,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     await this.journal.conversation.commit((tx) => createDurableParentInitializer(this.sessionManager)(tx, { id: this.journal.conversation.id }), context);
     await this.rebindDurableParentState();
     await this.restoreAgentSelection();
+    await this.startGatedActions();
     await this.startChildAgents();
     await this.startEventStream();
   }
@@ -320,8 +331,10 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   // ─── Host operations on Durable children. None of them starts a parent turn. ───
   get hostsDurableChildren(): boolean { return this.options.childAgents !== undefined; }
   get workingDurableChildren(): number { return this.childCount; }
-  get waitingOnUser(): number { return this.waitingCount; }
+  get waitingOnUser(): number { return this.waitingCount + this.waitingGates; }
   get flaggedDecisions(): number { return this.flaggedCount; }
+  gatedActions() { return gatedActions(this.journal.harness, this.journal.conversation.id, context); }
+  decideGatedAction(id: string, choice: "approved" | "refused") { return decideGatedAction(this.journal.harness, this.journal.conversation, id, choice, context); }
   decisions() { return decisions(this.journal.harness, this.journal.conversation.id, context); }
   overturnDecision(id: string, note: string) { return overturnDecision(this.journal.harness, this.journal.conversation, id, note, context); }
   runWorkflow(name: string, inputs: WorkflowInputs, requestId: string) {
@@ -395,6 +408,34 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     return extensions;
   }
 
+  private async startGatedActions(): Promise<void> {
+    this.gateUnsubscribe?.();
+    const parent = this.journal.conversation.id;
+    const extension = gatedActionsExtension({name: `forgerie.gated-actions:${String(parent)}`, parent,
+      harness: () => this.journal.harness,
+      ...(this.options.autonomyPolicy === undefined ? {} : {policy: this.options.autonomyPolicy}),
+      reads: {git: async (cwd, args) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8", maxBuffer: 4 * 1024 * 1024})).stdout,
+        issueLabels: this.options.gatedIssueLabels ?? (() => Promise.reject(new Error("GitHub labels unavailable")))},
+    });
+    const {tasks, ...selected} = extension;
+    this.registry.install(defineExtension({name: "forgerie.gated-action-runtime", tasks: tasks ?? []}));
+    this.registry.install(selected);
+    const retained = (await this.journal.conversation.agent(context)).extensions.filter(item => !item.name.startsWith("forgerie.gated-actions:"));
+    await this.journal.conversation.configure({extensions: [...retained, selected]}, context);
+    const recount = async () => {
+      this.waitingGates = await waitingGatedActions(this.journal.harness, parent, context);
+      this.flaggedCount = await flaggedDecisions(this.journal.harness, parent, context);
+      this.emit({type: "durable_children_changed"});
+    };
+    await recount();
+    let pending = Promise.resolve();
+    this.gateUnsubscribe = this.journal.harness.subscribeCommits(publication => {
+      if (!gatedActionsChanged(publication, parent) && !decisionsChanged(publication, parent)) return;
+      this.emit({type: "workflow_runs_changed"});
+      pending = pending.then(recount).catch((error: unknown) => { this.report(error); });
+    });
+  }
+
   private async startChildAgents(): Promise<void> {
     const host = this.options.childAgents;
     if (host === undefined) return;
@@ -402,7 +443,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.childWorktrees = host.worktrees === undefined ? undefined : new DurableChildWorktrees(host.worktrees, ref);
     const { extensions, workflow, decision } = await this.installChildExtensions();
     // Children select these explicitly. The parent must not, or ask_human and the coding tools join its loadout.
-    await this.journal.conversation.configure({ extensions: { add: [...extensions.parent, workflow, decision], remove: [...extensions.childOnly] } }, context);
+    const retained = (await this.journal.conversation.agent(context)).extensions.filter(item => !extensions.childOnly.some(child => child.name === item.name));
+    await this.journal.conversation.configure({extensions: [...new Map([...retained, ...extensions.parent, workflow, decision].map(item => [item.name, item])).values()]}, context);
     if (host.runRecords !== undefined) {
       this.childRunRecords = await DurableChildRunRecords.open(this.journal.harness, this.journal.conversation.id, ref, host.runRecords, context,
         (error) => { if (host.runRecordError === undefined) this.report(error); else host.runRecordError(error); });
@@ -793,6 +835,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     finally { this.branchTargetId = undefined; }
     if (selected.cancelled) return { cancelled: true };
     await this.stream?.stop();
+    this.gateUnsubscribe?.();
     await this.childWatch?.stop();
     await this.childRunRecords?.close();
     this.childRunRecords = undefined;
@@ -804,6 +847,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       await this.mutation;
       await this.rebindDurableParentState();
       await this.restoreAgentSelection();
+      await this.startGatedActions();
       await this.startChildAgents();
       await this.startEventStream();
     } catch (error) { this.bindConversation(); throw error; }
@@ -835,7 +879,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
     if (this.options.childAgents !== undefined) {
       const { extensions, workflow, decision } = await this.installChildExtensions();
-      await this.journal.conversation.configure({ extensions: { add: [...extensions.parent, workflow, decision], remove: [...extensions.childOnly] } }, context);
+      const retained = (await this.journal.conversation.agent(context)).extensions.filter(item => !extensions.childOnly.some(child => child.name === item.name));
+      await this.journal.conversation.configure({extensions: [...new Map([...retained, ...extensions.parent, workflow, decision].map(item => [item.name, item])).values()]}, context);
     }
     old.invalidate("Durable extensions reloaded");
     await options?.beforeSessionStart?.();
@@ -847,6 +892,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.closed = true;
     this.bashController?.abort();
     this.branchSummaryController?.abort();
+    this.gateUnsubscribe?.();
     await this.childWatch?.stop();
     await this.parentAppWatch?.stop();
     this.sdkView?.close();

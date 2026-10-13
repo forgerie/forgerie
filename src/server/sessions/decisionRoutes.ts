@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { DecisionOverturnSchema, type Decision } from "../../shared/decisions.js";
+import { GatedActionRequestSchema, type GatedAction } from "../../shared/gatedActions.js";
 import type { SessionRouteRef } from "./sessionService.js";
 import { normalizeRequestCwd } from "../workingDirectory.js";
 import { WorkflowError } from "../resources/workflowLibrary.js";
@@ -9,6 +10,20 @@ import { WorkflowError } from "../resources/workflowLibrary.js";
 export interface DecisionRouteService {
   decisions(ref: SessionRouteRef): Promise<Decision[]>;
   overturnDecision(ref: SessionRouteRef, id: string, note: string): Promise<Decision>;
+}
+export interface GatedActionRouteService {
+  gatedActions(ref: SessionRouteRef): Promise<GatedAction[]>;
+  decideGatedAction(ref: SessionRouteRef, id: string, choice: "approved" | "refused"): Promise<GatedAction>;
+}
+export function registerGatedActionRoutes(app: FastifyInstance, service: GatedActionRouteService, prefix = ""): void {
+  app.get<{ Params: { sessionId: string }; Querystring: unknown }>(`${prefix}/sessions/:sessionId/gated-actions`, (request, reply) => run(reply, () => {
+    if (!Check(GatedActionRequestSchema, request.query)) throw new WorkflowError(400, "Only a nonempty cwd query is accepted");
+    return service.gatedActions({id: request.params.sessionId, cwd: normalizeRequestCwd(request.query.cwd)});
+  }));
+  for (const action of ["approve", "refuse"] as const) app.post<{ Params: { sessionId: string; gateId: string }; Body: unknown }>(`${prefix}/sessions/:sessionId/gated-actions/:gateId/${action}`, (request, reply) => run(reply, () => {
+    if (!Check(GatedActionRequestSchema, request.body)) throw new WorkflowError(400, "Only a nonempty cwd is accepted");
+    return service.decideGatedAction({id: request.params.sessionId, cwd: normalizeRequestCwd(request.body.cwd)}, request.params.gateId, action === "approve" ? "approved" : "refused");
+  }));
 }
 const query = Type.Object({ cwd: Type.String({ minLength: 1 }) }, { additionalProperties: false });
 export function registerDecisionRoutes(app: FastifyInstance, service: DecisionRouteService, prefix = ""): void {

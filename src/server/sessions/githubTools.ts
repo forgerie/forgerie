@@ -5,6 +5,7 @@ import { READ_ACTIONS, WRITE_ACTIONS, type GitHubAgent } from "../github/githubA
 import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
 
 export type GitHubToolDeps = Pick<GitHubAgent, "read" | "write"> & {
+  gateIssueLabels?: GitHubAgent["gateIssueLabels"];
   prepareIssue?: GitHubAgent["prepareIssue"];
   createIssue?: GitHubAgent["createIssue"];
   propose?: (ref: { id: string; cwd: string }, targetCwd: string, input: IssueProposalInput) => Promise<IssueProposal>;
