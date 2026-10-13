@@ -12,6 +12,48 @@ const reads: GatedActionReads = {
 };
 type RepositoryState = "clean" | "unknown-remote";
 const cases: [string, string | undefined, RepositoryState?][] = [
+  ["git --config-env core.ignorecase=IGNORECASE push -f", "force-push"],
+  ["git --namespace scoped push -f", "force-push"], ["git --namespace=scoped push origin feature", "force-push"],
+  ["git --config-env core.ignorecase=IGNORECASE status", undefined],
+  ["npm --color always publish", "publish"], ["npm --no-color always publish", "publish"],
+  ["npm --yes null publish", "publish"], ["npm -y null publish", "publish"],
+  ["npm --workspaces null publish", "publish"], ["npm --no-workspaces null publish", "publish"],
+  ["npm --no-optional null publish", "publish"], ["npm --no-production null publish", "publish"],
+  ["npm --no-expect-results null publish", "publish"], ["npm --no-browser firefox publish", "publish"],
+  ["npm --color always install", undefined], ["npm --yes null run publish-docs", undefined],
+  ["npm --no-workspaces null install", undefined],
+  ["git clean -fn --no-dry", "destroy-local"], ["git clean -fn --no-dry-r", "destroy-local"],
+  ["git clean -f --excl -n", "destroy-local"], ["git clean -fn --excl --no-dry-run", undefined],
+  ["git push --tags --no-ta origin", "force-push"], ["git push --no-ta --tags origin", undefined],
+  ["git push --push-opt --tags origin", "force-push"],
+  ["npm --ignore-scripts true publish", "publish"], ["npm --dry-run false publish", "publish"],
+  ["npm --json true publish", "publish"], ["npm --json true install", undefined],
+  ["npm --silent true run publish-docs", undefined], ["npm --force false publish", "publish"],
+  ["npm --no-ignore-scripts true publish", "publish"], ["npm --no-dry-run false publish", "publish"],
+  ["npm --no-progress false publish", "publish"], ["npm -s false publish", "publish"],
+  ["npm -gs true publish", "publish"], ["npm -f true publish", "publish"],
+  ["npm --json true --ignore-scripts false publish", "publish"], ["npm --json true -- publish", "publish"],
+  ["npm --dry-run true --no-dry-run publish", "publish"], ["npm publish --no-dry-run", "publish"],
+  ["npm --json=false publish", "publish"], ["npm --dry-run=false publish", "publish"],
+  ["npm --no-json true view publish", undefined], ["npm --no-dry-run false run publish-docs", undefined],
+  ["npm --ignore-scripts false install", undefined], ["npm -gs false install", undefined],
+  ["npm --dry-run=true install", undefined], ["npm --json -- true publish", undefined],
+  ["git clean -fn --no-dry-run", "destroy-local"], ["git clean --no-dry-run -n", undefined],
+  ["git clean -nf --no-dry-run", "destroy-local"], ["git clean -fn --no-dry-run -n", undefined],
+  ["git clean --dry-run --no-dry-run -f", "destroy-local"], ["git clean --no-dry-run --dry-run -f", undefined],
+  ["git clean -f -- -n", "destroy-local"], ["git clean -n -- --no-dry-run", undefined],
+  ["git clean -f -e -n", "destroy-local"], ["git clean -fe-n", "destroy-local"],
+  ["git clean -fen", "destroy-local"], ["git clean -fneanything", undefined],
+  ["git clean -f --exclude --dry-run", "destroy-local"], ["git clean -fn -e --no-dry-run", undefined],
+  ["git clean -f --exclude=--dry-run", "destroy-local"],
+  ["git push --tags --no-tags origin", "force-push"], ["git push --no-tags --tags origin", undefined],
+  ["git push --push-option --tags origin", "force-push"], ["git push -o --tags origin", "force-push"],
+  ["git push --tags -o --no-tags origin", undefined], ["git push --repo --tags", "force-push"],
+  ["git push --tags --no-tags --repo origin", "force-push"], ["git push --no-tags --tags --repo origin", undefined],
+  ["git push --tags --no-tags origin main", "force-push"], ["git push --tags --no-tags origin feature", undefined],
+  ["git push -n origin main", "force-push"], ["git push --no-dry-run origin main", "force-push"],
+  ["git push -n --no-dry-run -f origin feature", "force-push"], ["git push -n --delete origin feature", "delete-remote"],
+  ["git push -n origin feature", undefined], ["git push --no-dry-run -n origin feature", undefined],
   ["command -p git push -f", "force-push"], ["command -v git", undefined],
   ["command -V git", undefined], ["command -pv git push -f", undefined],
   ["env -i git push -f", "force-push"], ["env -u HOME git push -f", "force-push"],
@@ -124,5 +166,12 @@ it("uses real read-only Git observations for dirty checkout forms and unmerged b
     // A local main branch cannot prove the remote's default branch.
     expect((await classify("git push origin feature"))?.category).toBe("force-push");
     expect(await classify("git branch -df feature")).toBeUndefined();
+    const untracked = join(root, "preview-check"); await writeFile(untracked, "scratch");
+    expect((await classify("git clean -fn --no-dry-run"))?.category).toBe("destroy-local");
+    expect(await classify("git clean --no-dry-run -fn")).toBeUndefined();
+    await git("clean", "--no-dry-run", "-fn");
+    expect(await promisify(execFile)("git", ["-C", root, "status", "--porcelain", "--", "preview-check"])).toMatchObject({stdout: "?? preview-check\n"});
+    await git("clean", "-fn", "--no-dry-run"); // Scratch only: verify the same flag sequence really removes the file.
+    expect((await git("status", "--porcelain", "--", "preview-check")).stdout).toBe("");
   } finally { await rm(root, {recursive: true, force: true}); }
 });

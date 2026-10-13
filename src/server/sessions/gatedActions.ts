@@ -56,9 +56,9 @@ async function shellAction(command: string, cwd: string, reads: GatedActionReads
         const option = tokens.shift();
         if (option === "-C") { gitCwd = resolve(gitCwd, tokens.shift() ?? "."); }
         else if (option?.startsWith("-C") === true) gitCwd = resolve(gitCwd, option.slice(2));
-        else if (option === "-c" || option === "--git-dir" || option === "--work-tree") { overriddenGitState = true; tokens.shift(); }
+        else if (option === "-c" || option === "--git-dir" || option === "--work-tree" || option === "--config-env" || option === "--namespace") { overriddenGitState = true; tokens.shift(); }
         else if (option?.startsWith("-c") === true) overriddenGitState = true;
-        else if (option?.startsWith("--git-dir=") === true || option?.startsWith("--work-tree=") === true || option?.startsWith("--config-env=") === true) overriddenGitState = true;
+        else if (option?.startsWith("--git-dir=") === true || option?.startsWith("--work-tree=") === true || option?.startsWith("--config-env=") === true || option?.startsWith("--namespace=") === true) overriddenGitState = true;
       }
       const action = tokens.shift();
       const found = await gitAction(action, tokens, gitCwd, (overriddenGitState || uncertainCwd) ? {...reads, git: unavailableReads.git.bind(unavailableReads)} : reads);
@@ -116,12 +116,29 @@ function normalizeCommand(words: readonly string[], cwd: string): {tokens: strin
 }
 const NPM_VALUE_OPTIONS = new Set(["--access", "--tag", "--otp", "--prefix", "--workspace", "-w", "--registry", "--userconfig", "--globalconfig", "--cache", "--loglevel", "--scope", "--auth-type", "--fetch-retries", "--fetch-timeout", "--proxy", "--https-proxy", "--node-options", "--script-shell"]);
 const NPM_BOOLEAN_OPTIONS = new Set(["--dry-run", "--force", "--global", "-g", "--silent", "-s", "--verbose", "--json", "--ignore-scripts", "--foreground-scripts", "--workspaces", "--include-workspace-root", "--audit", "--fund", "--package-lock", "--package-lock-only", "--save", "--save-dev", "--save-exact", "--legacy-peer-deps", "--offline", "--prefer-offline", "--prefer-online", "--yes", "-y", "--color", "--unicode", "--timing", "--progress"]);
+// npm's boolean unions also accept these literal values before the command.
+const NPM_BOOLEAN_LITERALS: Record<string, readonly string[]> = {
+  "--color": ["always"], "--yes": ["null"], "-y": ["null"], "--workspaces": ["null"],
+  "--expect-results": ["null"], "--optional": ["null"], "--production": ["null"],
+};
 function npmCommand(tokens: readonly string[]): string | undefined {
   for (let i = 0; i < tokens.length; i++) {
     const option = tokens[i] ?? "";
     if (option === "--") return tokens[i + 1];
     if (!option.startsWith("-")) return option;
-    if (option.includes("=") || option.startsWith("--no-") || (option.startsWith("-w") && option !== "-w") || /^-[gsfy]+$/u.test(option) || NPM_BOOLEAN_OPTIONS.has(option)) continue;
+    if (option.includes("=") || (option.startsWith("-w") && option !== "-w")) continue;
+    // browser is a String/Boolean union; a negated spelling can still consume a browser value.
+    if (option === "--browser" || option === "--no-browser") {
+      if (tokens[i + 1] !== undefined && tokens[i + 1]?.startsWith("-") === false) i++;
+      continue;
+    }
+    const positive = option.startsWith("--no-") ? `--${option.slice(5)}` : /^-[gsfy]*y$/u.test(option) ? "-y" : option;
+    const literals = NPM_BOOLEAN_LITERALS[positive] ?? [];
+    if (option.startsWith("--no-") || /^-[gsfy]+$/u.test(option) || NPM_BOOLEAN_OPTIONS.has(option) || literals.length > 0) {
+      // npm accepts literal boolean values separately, including after negated switches and short groups.
+      if (tokens[i + 1] === "true" || tokens[i + 1] === "false" || literals.includes(tokens[i + 1] ?? "")) i++;
+      continue;
+    }
     // Unknown boolean flags must not consume a visible publish command as an option value.
     if (NPM_VALUE_OPTIONS.has(option) || (tokens[i + 1] !== "publish" && tokens[i + 1]?.startsWith("-") === false)) i++;
   }
@@ -145,16 +162,40 @@ function operands(tokens: readonly string[], valued: readonly string[] = []): st
   }
   return result;
 }
+const PUSH_VALUE_OPTIONS = ["--repo", "--receive-pack", "--exec", "--push-option", "-o"];
+
+/** Safe exemptions need effective flags, not presence: negations, values and -- change their meaning. */
+function effectiveFlag(tokens: readonly string[], long: string, short: string | undefined, valued: readonly string[]): boolean {
+  let enabled = false;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i] ?? "";
+    if (token === "--") break;
+    // Git accepts unique long-option abbreviations. A value that looks like a flag stays data.
+    if (valued.some(name => token === name || (token.startsWith("--") && !token.includes("=") && name.startsWith(token)))) { i++; continue; }
+    if (token === long) enabled = true;
+    else if ((token.startsWith("--no-") && `--no-${long.slice(2)}`.startsWith(token.split("=")[0] ?? token)) || token.startsWith(`${long}=`)) enabled = false;
+    else if (/^-[^-]/u.test(token)) {
+      for (let j = 1; j < token.length; j++) {
+        if (valued.includes(`-${token[j] ?? ""}`)) {
+          if (j === token.length - 1) i++; // Otherwise the rest of the short group is its attached value.
+          break;
+        }
+        if (short !== undefined && token[j] === short) enabled = true;
+      }
+    }
+  }
+  return enabled;
+}
 async function gitAction(action: string | undefined, tokens: string[], cwd: string, reads: GatedActionReads): Promise<GatedActionMatch | undefined> {
   if (action === "push") {
-    const words = operands(tokens, ["--repo", "--receive-pack", "--exec", "--push-option", "-o"]);
+    const words = operands(tokens, PUSH_VALUE_OPTIONS);
     if (flag(tokens, "--delete", "d") || words.some(t => t.startsWith(":"))) return match("delete-remote", "Delete a remote Git ref");
     if (flag(tokens, "--force", "f") || flag(tokens, "--force-with-lease") || flag(tokens, "--force-if-includes") || words.some(t => t.startsWith("+"))) return match("force-push", "Force-push Git refs");
     if (flag(tokens, "--all") || flag(tokens, "--branches") || flag(tokens, "--mirror")) return match("force-push", "Push all branches, including the default branch");
     const remoteOption = optionValue(tokens, "--repo");
     const remote = remoteOption ?? words[0] ?? "origin";
     const refs = remoteOption === undefined ? words.slice(1) : words;
-    if (refs.length === 0) return flag(tokens, "--tags") ? undefined : match("force-push", "Push Git refs with unknown implicit destination");
+    if (refs.length === 0) return effectiveFlag(tokens, "--tags", undefined, PUSH_VALUE_OPTIONS) ? undefined : match("force-push", "Push Git refs with unknown implicit destination");
     try {
       const prefix = `refs/remotes/${remote}/`;
       const remoteHead = (await reads.git(cwd, ["symbolic-ref", `${prefix}HEAD`])).trim();
@@ -171,7 +212,7 @@ async function gitAction(action: string | undefined, tokens: string[], cwd: stri
   }
   if (action === "reset" && flag(tokens, "--hard")) return match("destroy-local", "Discard local changes with git reset --hard");
   // ADR 0003 gates git clean, including an interactive clean. Preview-only clean is read-only.
-  if (action === "clean" && !flag(tokens, "--dry-run", "n")) return match("destroy-local", "Remove untracked files with git clean");
+  if (action === "clean" && !effectiveFlag(tokens, "--dry-run", "n", ["--exclude", "-e"])) return match("destroy-local", "Remove untracked files with git clean");
   if (action === "restore" || action === "checkout") {
     let paths: string[];
     if (action === "checkout" && (flag(tokens, "--force", "f") || flag(tokens, "--patch", "p"))) paths = [];
