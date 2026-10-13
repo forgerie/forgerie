@@ -43,7 +43,7 @@ async function stop(process: ChildProcess) {
   await closed;
 }
 
-it.each(["session", "workflow"])("SIGKILL after %s and a fresh process leave exactly one file, journal and run", async (checkpoint) => {
+it.each(["header", "session", "workflow"])("SIGKILL after %s and a fresh process leave exactly one file, journal and run", async (checkpoint) => {
   const root = await mkdtemp(join(tmpdir(), "forgerie-trigger-restart-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
@@ -72,9 +72,11 @@ it.each(["session", "workflow"])("SIGKILL after %s and a fresh process leave exa
     expect(second.output()).toContain('"history":1,"runs":1,"land":"waiting"');
     const line = second.output().split("\n").find((line) => line.startsWith("RESULT "));
     const result: unknown = JSON.parse(line?.slice(7) ?? "null");
-    if (!Check(Type.Object({ sessionId: Type.String(), occurrence: Type.Number(), requestId: Type.String(), name: Type.String() }), result)) throw new Error("Invalid restart result");
+    if (!Check(Type.Object({ sessionId: Type.String(), occurrence: Type.Number(), requestId: Type.String(), name: Type.String(), model: Type.String(), thinkingLevel: Type.String() }), result)) throw new Error("Invalid restart result");
     expect(result.sessionId).toBe(triggerSessionId(result.requestId, result.occurrence));
     expect(result.sessionId).toBe(header.id);
+    expect(result.model).toBe("faux-selected");
+    expect(result.thinkingLevel).toBe("high");
     expect(result.name).toBe(`Nightly refinement · ${new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(result.occurrence)}`);
     const files = (await readdir(directory)).filter((name) => name.endsWith(".jsonl"));
     expect(files).toEqual(before);

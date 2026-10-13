@@ -23,7 +23,7 @@ if (root === undefined) throw new Error("Temporary root is required");
 const cwd = join(root, "workspace");
 const agentDir = join(root, "agent");
 const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-const provider = fauxProvider();
+const provider = fauxProvider({ models: [{ id: "faux-1", reasoning: true }, { id: "faux-selected", reasoning: true }] });
 models.registerNativeProvider(provider.provider);
 provider.setResponses(Array.from({ length: 30 }, () => (transcript) => {
   const launch = transcript.messages.find((message) => message.role === "user" && JSON.stringify(message.content).includes("Workflow run "));
@@ -35,7 +35,11 @@ const archive = new SessionArchiveStore(join(root, "archive.json"));
 await archive.initialize();
 const sessions = new PiSessionService(new SessionEventHub(), { agentDir, modelRuntime: models, archiveStore: archive,
   durableChildAgents: createDurableChildHost({ index: new LiveChildSessionIndex(join(root, "children.json")), runRecords: new ChildRunStore(join(root, "child-runs.json")) }),
-  sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] }),
+  sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [], onTriggerHeaderCreated: () => {
+    if (checkpoint !== "header") return;
+    process.stdout.write("CHECKPOINT header\n");
+    process.kill(process.pid, "SIGSTOP");
+  } }),
 });
 const library = new WorkflowLibrary(agentDir);
 const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
@@ -52,7 +56,7 @@ const triggers = await TriggerService.open({ env: { PI_WEB_DATA_DIR: root }, wor
 });
 try {
   if ((await triggers.list()).triggers.length === 0) {
-    await triggers.create({ id: "night", name: "Nightly refinement", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", cwd, workflow: "nightly", inputs: {} } });
+    await triggers.create({ id: "night", name: "Nightly refinement", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", cwd, workflow: "nightly", inputs: {}, model: "faux/faux-selected", thinkingLevel: "high" } });
     await triggers.pause("night");
     await triggers.run("night", { requestId: "restart" });
   }
@@ -65,7 +69,7 @@ try {
       const ref = { id: fire.outcome.sessionId, cwd };
       const runs = await sessions.workflowRuns(ref);
       if (runs[0]?.stops?.["land"]?.state === "waiting" && !(await sessions.status(ref)).isStreaming) {
-        process.stdout.write(`RESULT ${JSON.stringify({ sessionId: ref.id, history: trigger.history.length, runs: runs.length, land: "waiting", name: (await sessions.list(cwd)).find((session) => session.id === ref.id)?.name, occurrence: fire.occurrence, requestId: fire.requestId })}\n`);
+        process.stdout.write(`RESULT ${JSON.stringify({ sessionId: ref.id, history: trigger.history.length, runs: runs.length, land: "waiting", name: (await sessions.list(cwd)).find((session) => session.id === ref.id)?.name, occurrence: fire.occurrence, requestId: fire.requestId, model: (await sessions.status(ref)).model?.id, thinkingLevel: (await sessions.status(ref)).thinkingLevel })}\n`);
         break;
       }
     }

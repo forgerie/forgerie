@@ -112,3 +112,23 @@ it("persists a failed fire message without a model turn, with session identity a
     expect((await readFile(entry.path, "utf8")).split('"customType":"forgerie:trigger"')).toHaveLength(2);
   } finally { await sessions.dispose(); await rm(root, { recursive: true, force: true }); }
 });
+
+it("keeps a persisted model and thinking choice when a trigger retry proposes another", async () => {
+  const root = await mkdtemp(join(tmpdir(), "trigger-selection-retention-"));
+  const agentDir = join(root, "agent");
+  const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
+  const provider = fauxProvider({ models: [{ id: "faux-1", reasoning: true }, { id: "faux-selected", reasoning: true }] });
+  models.registerNativeProvider(provider.provider);
+  const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] });
+  const open = () => new PiSessionService(new CapturingSessionEventHub(), { agentDir, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore() });
+  let sessions = open();
+  const ref = { id: "01900000-0000-7000-8000-000000000001", cwd: root };
+  const action = { kind: "workflow" as const, cwd: root, workflow: "nightly", inputs: {}, model: "faux/faux-selected", thinkingLevel: "high" as const };
+  try {
+    await sessions.ensureTriggerSession(ref, action);
+    await sessions.dispose(); sessions = open();
+    await sessions.ensureTriggerSession(ref, { ...action, model: "faux/faux-1", thinkingLevel: "low" });
+    expect(await sessions.status(ref)).toMatchObject({ model: { id: "faux-selected" }, thinkingLevel: "high" });
+    expect(provider.state.callCount).toBe(0);
+  } finally { await sessions.dispose(); await rm(root, { recursive: true, force: true }); }
+});

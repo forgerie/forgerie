@@ -1723,12 +1723,26 @@ export class PiSessionService implements SessionRouteService {
 
   /** Internal receipt-keyed session creation. The public start options do not contain sessionId. */
   async ensureTriggerSession(ref: PiSessionRef, action: TriggerAction): Promise<void> {
-    if (await this.triggerSessionExists(ref)) return;
-    const initialModel = action.model === undefined ? undefined : await this.resolveNewSessionModel(action.model);
-    await this.startSession(ref.cwd, { sessionId: ref.id,
+    const existing = await this.triggerSessionExists(ref) ? await this.historySessionManager(ref) : undefined;
+    const branch = existing?.getBranch() ?? [];
+    const hasModel = branch.some((entry) => isRecord(entry) && entry["type"] === "model_change");
+    const hasThinking = branch.some((entry) => isRecord(entry) && entry["type"] === "thinking_level_change");
+    if (existing !== undefined && hasModel && hasThinking) return;
+    const initialModel = hasModel || action.model === undefined ? undefined : await this.resolveNewSessionModel(action.model);
+    const options = {
       ...(initialModel === undefined ? {} : { initialModel }),
-      ...(action.thinkingLevel === undefined ? {} : { initialThinkingLevel: action.thinkingLevel }),
-    });
+      ...(hasThinking || action.thinkingLevel === undefined ? {} : { initialThinkingLevel: action.thinkingLevel }),
+    };
+    if (existing === undefined) { await this.startSession(ref.cwd, { ...options, sessionId: ref.id }); return; }
+    const active = this.activeForRef(ref);
+    if (active !== undefined) {
+      if (initialModel !== undefined) await active.runtime.session.setModel(initialModel);
+      if (options.initialThinkingLevel !== undefined) active.runtime.session.setThinkingLevel(options.initialThinkingLevel);
+      return;
+    }
+    // A header-only creation has no saved choice. Seed both choices together before opening its journal.
+    // Existing native agent state remains authoritative if a crash only delayed its JSONL projection.
+    await this.openExistingSession(ref.id, ref.cwd, () => existing, options);
   }
 
   async triggerSessionExists(ref: PiSessionRef): Promise<boolean> {
@@ -4138,7 +4152,7 @@ export class PiSessionService implements SessionRouteService {
     sessionId: string,
     cwd: string,
     openSessionManager: () => PiSessionManager,
-    options: Pick<CreateSessionRuntimeOptions, "notificationGeneration" | "notifications"> = {},
+    options: Pick<CreateSessionRuntimeOptions, "notificationGeneration" | "notifications" | "initialModel" | "initialThinkingLevel"> = {},
   ): Promise<ActiveSession<PiSessionRuntime>> {
     if (this.stopping) return Promise.reject(new Error("Session service is shutting down"));
     const active = this.activeForRef({ id: sessionId, cwd });

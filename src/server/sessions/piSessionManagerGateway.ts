@@ -64,6 +64,8 @@ export class SessionDirResolver {
 
 export interface PiSessionManagerGatewayOptions extends SessionDirResolverOptions {
   sessionNameIndexFilePath?: string;
+  /** Host coordination after a fixed-ID header is durable, before runtime selection is initialized. */
+  onTriggerHeaderCreated?: () => void;
   onSessionNameIndexPersistenceError?: (operation: "load" | "save", error: unknown) => void;
 }
 
@@ -82,6 +84,7 @@ export function createPiSessionManagerGateway(options: PiSessionManagerGatewayOp
       ...(options.sessionNameIndexFilePath === undefined ? {} : { filePath: options.sessionNameIndexFilePath }),
       ...(options.onSessionNameIndexPersistenceError === undefined ? {} : { onPersistenceError: options.onSessionNameIndexPersistenceError }),
     }),
+    options.onTriggerHeaderCreated,
   );
 }
 
@@ -98,6 +101,7 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
   constructor(
     private readonly resolver: SessionDirResolver,
     private readonly catalogScanner: SessionCatalogScanner,
+    private readonly onTriggerHeaderCreated?: () => void,
   ) {}
 
   defaultSessionsRoot(): string {
@@ -146,6 +150,7 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
     const file = manager.getSessionFile();
     if (file === undefined) throw new Error("A trigger requires persistent session storage");
     writeFileSync(file, `${JSON.stringify(manager.getHeader())}\n`, { flag: "wx", mode: 0o600 });
+    this.onTriggerHeaderCreated?.();
     return SessionManager.open(file, resolution.sessionDir);
   }
 
