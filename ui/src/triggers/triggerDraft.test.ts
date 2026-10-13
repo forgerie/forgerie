@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { Trigger } from "@shared/triggers";
 import { createOf, draftOf, draftProblems, emptyDraft, fieldOf, isDirty, problemList, updateOf } from "./triggerDraft";
 import { docs, FORGERIE, HOST_ZONE, nightly, triage, workflows } from "./fixtures/triggers";
-import { wireThinkingLevel } from "./triggerWire";
 
 const workflow = (name: string) => workflows.find((item) => item.name === name);
 
@@ -46,7 +46,7 @@ describe("the request a draft becomes", () => {
       .toEqual({ ...stored.action, inputs: { task: "Triage everything." } });
   });
   it("keeps a thinking level with no model set", () => {
-    const thinking = { ...nightly, action: { ...nightly.action, thinkingLevel: wireThinkingLevel("high") } };
+    const thinking: Trigger = { ...nightly, action: { ...nightly.action, thinkingLevel: "high" } };
     expect(updateOf(thinking, { ...draftOf(thinking), workflow: "docs-sweep", inputs: {} }, workflow("docs-sweep"), 12).action)
       .toEqual({ kind: "workflow", cwd: FORGERIE, workflow: "docs-sweep", inputs: {}, thinkingLevel: "high" });
     expect(createOf({ ...draftOf(thinking), name: "x" }, workflow("refine-backlog")).action.thinkingLevel).toBe("high");

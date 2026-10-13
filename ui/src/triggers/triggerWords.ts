@@ -4,7 +4,6 @@
 import type { Trigger, TriggerFire } from "@shared/triggers";
 import { nextOccurrence, type TriggerSchedule } from "@shared/triggerSchedules";
 import { WEEK, type Weekday } from "./triggerValues";
-import { daysOf, wireDays } from "./triggerWire";
 
 /** What every time word needs: the instant now, the browser's locale and zone, and the host's zone. */
 export interface WordClock {
@@ -59,13 +58,13 @@ export function zoneWords(zone: string): string {
 
 /** The days a schedule runs on, Monday first. */
 export function scheduleDays(schedule: TriggerSchedule): Weekday[] {
-  return schedule.kind === "daily" ? [...WEEK] : daysOf(schedule);
+  return schedule.kind === "daily" ? [...WEEK] : WEEK.filter((day) => schedule.on.includes(day));
 }
 /** A schedule from the form's choices. Seven days, or none chosen yet, is every day. */
 export function scheduleOf(days: readonly string[], at: string, timezone: string): TriggerSchedule {
   const on = WEEK.filter((day) => days.includes(day));
   if (on.length === 0 || on.length === 7) return { kind: "daily", at, timezone };
-  return { kind: "weekly", at, timezone, on: wireDays(on) };
+  return { kind: "weekly", at, timezone, on };
 }
 
 const listWords = (items: readonly string[]) => items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")}, and ${items.at(-1) ?? ""}`;

@@ -4,7 +4,6 @@ import { DEFAULT_MISSED_GRACE_MINUTES, type Trigger, type TriggerAction, type Tr
 import { launchInputs, proposalInputs, type WorkflowInput } from "../workflows/workflowsModel";
 import { scheduleDays, scheduleOf } from "./triggerWords";
 import { thinkingLevelOf, WEEK, type ThinkingLevel, type Weekday } from "./triggerValues";
-import { wireThinkingLevel } from "./triggerWire";
 
 export interface TriggerDraft {
   name: string;
@@ -95,7 +94,7 @@ function actionOf(draft: TriggerDraft, workflow: TriggerWorkflow | undefined): T
   // Without the workflow's declaration, keep what was typed as text: the server checks it against the workflow.
   const inputs = typed && "inputs" in typed ? typed.inputs : Object.fromEntries(Object.entries(draft.inputs).filter(([, value]) => value.trim() !== ""));
   return { kind: "workflow", cwd: draft.cwd, workflow: draft.workflow, inputs,
-    ...(draft.model ? { model: draft.model } : {}), ...(draft.thinkingLevel ? { thinkingLevel: wireThinkingLevel(draft.thinkingLevel) } : {}) };
+    ...(draft.model ? { model: draft.model } : {}), ...(draft.thinkingLevel ? { thinkingLevel: draft.thinkingLevel } : {}) };
 }
 const scheduleOfDraft = (draft: TriggerDraft) => scheduleOf(draft.repeat === "daily" ? WEEK : draft.days, draft.at, draft.timezone);
 
