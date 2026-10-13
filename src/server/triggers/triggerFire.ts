@@ -16,7 +16,7 @@ export function triggerSessionId(requestId: string, occurrence: number): string 
 }
 
 export function workflowTriggerFire(options: {
-  sessions: Pick<PiSessionService, "ensureTriggerSession" | "nameTriggerSession" | "noteTriggerFailure" | "runWorkflow">;
+  sessions: Pick<PiSessionService, "ensureTriggerSession" | "triggerSessionExists" | "nameTriggerSession" | "noteTriggerFailure" | "runWorkflow">;
   validateAction: (action: TriggerAction) => Promise<void>;
   requireWorkspace: (cwd: string) => Promise<void>;
   /** Restart acceptance can interrupt at either externally committed effect. */
@@ -24,11 +24,12 @@ export function workflowTriggerFire(options: {
 }): FireTrigger {
   return async (request, context) => {
     context.abortSignal?.throwIfAborted();
-    await options.requireWorkspace(request.action.cwd);
     const sessionId = triggerSessionId(request.requestId, request.occurrence);
     const ref = { id: sessionId, cwd: request.action.cwd };
-    await options.sessions.ensureTriggerSession(ref, request.action);
     try {
+      await options.requireWorkspace(request.action.cwd);
+      context.abortSignal?.throwIfAborted();
+      await options.sessions.ensureTriggerSession(ref, request.action);
       await options.afterStep?.("session", request, context);
       context.abortSignal?.throwIfAborted();
       const date = new Intl.DateTimeFormat("en-US", { timeZone: request.timezone, month: "short", day: "numeric" }).format(request.occurrence);
@@ -41,7 +42,9 @@ export function workflowTriggerFire(options: {
     } catch (error) {
       if (context.abortSignal?.aborted === true) throw error;
       const message = error instanceof Error ? error.message : String(error);
-      await options.sessions.noteTriggerFailure(ref, request.requestId, `Trigger “${request.name}” at ${new Date(request.occurrence).toISOString()} failed: ${message}`);
+      if (!await options.sessions.triggerSessionExists(ref)) throw error;
+      try { await options.sessions.noteTriggerFailure(ref, request.requestId, `Trigger “${request.name}” at ${new Date(request.occurrence).toISOString()} failed: ${message}`); }
+      catch (delivery) { throw new TriggerFireError(`${message}; could not persist failure message: ${delivery instanceof Error ? delivery.message : String(delivery)}`, sessionId, ref.cwd); }
       throw new TriggerFireError(message, sessionId, ref.cwd);
     }
   };

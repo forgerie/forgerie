@@ -92,6 +92,7 @@ it("creates, detects revision conflicts, re-arms edits, pauses, resumes, acknowl
 
 it.each([
   ["name", { name: "" }], ["name", { name: "   " }], ["schedule.at", { schedule: { kind: "daily", at: "25:00", timezone: "UTC" } }],
+  ["schedule.at", { schedule: { kind: "weekly", on: ["mon"], at: "25:00", timezone: "UTC" } }],
   ["schedule.timezone", { schedule: { kind: "daily", at: "03:00", timezone: "Nowhere/Here" } }],
   ["action.cwd", { action: { kind: "workflow", cwd: "/unknown", workflow: "nightly", inputs: {} } }],
   ["action.workflow", { action: { kind: "workflow", cwd: "CURRENT", workflow: "script", inputs: {} } }],
@@ -108,9 +109,11 @@ it.each([
 
 it("refuses extra fields, invalid operations, duplicate IDs and malformed JSON", async () => {
   expect(await http("POST", "", { ...create(), extra: true })).toMatchObject({ status: 400 });
+  expect(await http("POST", "/constructor/pause", {})).toMatchObject({ status: 404 });
   const trigger = await created();
   expect(await http("POST", "", { ...create(), id: trigger.id })).toMatchObject({ status: 409 });
-  expect(await http("PATCH", `/${trigger.id}`, { name: "no revision" })).toMatchObject({ status: 400 });
+  expect(await http("PATCH", `/${trigger.id}`, { name: "no revision" })).toMatchObject({ status: 400, value: { field: "baseRevision" } });
+  expect(await http("DELETE", `/${trigger.id}`, { extra: true })).toMatchObject({ status: 400, value: { field: "extra" } });
   for (const operation of ["pause", "resume", "acknowledge", "run"]) expect(await http("POST", `/${trigger.id}/${operation}`, { extra: true })).toMatchObject({ status: 400 });
   expect(await http("POST", `/${trigger.id}/run`, { requestId: "bad_id" })).toMatchObject({ status: 400 });
   const response = await fetch(`${base}/api/triggers`, { method: "POST", headers: { "content-type": "application/json" }, body: "{" });
@@ -122,20 +125,25 @@ it("refuses extra fields, invalid operations, duplicate IDs and malformed JSON",
 it("deduplicates manual requests while paused without moving the next fire and bounds list history", async () => {
   const trigger = await created();
   const before = (await service.get(trigger.id)).state;
+  await http("POST", `/${trigger.id}/run`, { requestId: "active" });
+  await vi.waitFor(async () => { expect((await service.get(trigger.id)).history[0]?.outcome.kind).toBe("started"); });
+  expect((await service.get(trigger.id)).state).toEqual(before);
   await http("POST", `/${trigger.id}/pause`, {});
-  for (let index = 0; index < 9; index++) {
+  for (let index = 0; index < 55; index++) {
     const result = await http("POST", `/${trigger.id}/run`, { requestId: String(index) });
     expect(result).toEqual({ status: 202, value: { requestId: `trigger-${trigger.id}-run-${String(index)}` } });
-    await vi.waitFor(async () => { expect((await service.get(trigger.id)).history.filter((entry) => entry.outcome.kind === "started")).toHaveLength(index + 1); });
+    await vi.waitFor(async () => { const record = await service.get(trigger.id); expect(record.history.filter((entry) => entry.outcome.kind === "started")).toHaveLength(Math.min(index + 2, 50)); expect(record.history[0]?.requestId).toBe(`trigger-${trigger.id}-run-${String(index)}`); expect(record.history[0]?.outcome.kind).toBe("started"); });
   }
   await http("POST", `/${trigger.id}/run`, { requestId: "0" });
-  expect(fires).toBe(9);
+  expect(fires).toBe(56);
   expect((await service.get(trigger.id)).state.kind).toBe("paused");
   expect(before.kind).toBe("active");
   const list = await http("GET", "");
   if (!Check(TriggerListResponseSchema, list.value)) throw new Error("Invalid list");
   expect(list.value.triggers[0]?.history).toHaveLength(7);
-  expect((await service.get(trigger.id)).history).toHaveLength(9);
+  const detail = await http("GET", `/${trigger.id}`);
+  if (!Check(TriggerSchema, detail.value)) throw new Error("Invalid detail");
+  expect(detail.value.history).toHaveLength(50);
   expect(list.value.timezones).toContain("UTC");
   expect(list.value.timezones).toEqual([...new Set(list.value.timezones)].sort());
   for (const timezone of list.value.timezones) expect(() => parseTriggerSchedule({ kind: "daily", at: "03:00", timezone })).not.toThrow();

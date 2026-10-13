@@ -88,3 +88,14 @@ The inventory is local to one host and process namespace. Do not share it betwee
 If the web process is unavailable, `forgerie version` also tries the daemon's health endpoint with a bounded wait. Read the unit journals for startup errors. If dictation is unavailable, check the web unit's worker path and speech host allowlist.
 
 Keep the previous verified commit and build until the new instance works. Rollback needs another approved idle window: restore the previous source, install its lockfile, rebuild, and restart both units. Do not remove profiles or runtime data as part of rollback.
+
+## Scheduled triggers with no login
+
+On hosts outside NixOS that run sessiond as a systemd user unit, enable linger for its user so the unit can run with nobody logged in:
+
+```bash
+sudo loginctl enable-linger <user>
+loginctl show-user <user> -p Linger
+```
+
+Replace `<user>` with the account that owns `forgerie-sessiond.service`. This keeps that account's user manager running after logout and starts it at boot. It does not enable the service unit itself or keep the machine awake. Suspend can delay a scheduled workflow until wake; the trigger's grace window decides whether it runs late or is recorded as missed. See [scheduled workflows](triggers.md).

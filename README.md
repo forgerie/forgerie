@@ -22,7 +22,7 @@ The app includes projects, session worktrees, chat, files, diffs, backlog items,
 
 ## Configuration and deployment
 
-[Configuration](docs/config.md) explains profiles, environment variables, and dictation. [Plugins](docs/plugins.md) covers Pi extensions and current browser-app plugins. [Deployment](docs/deployment.md) covers existing systemd user units.
+[Configuration](docs/config.md) explains profiles, environment variables, and dictation. [Plugins](docs/plugins.md) covers Pi extensions and current browser-app plugins. [Deployment](docs/deployment.md) covers existing systemd user units. [Triggers](docs/triggers.md) covers scheduled workflows and missed runs.
 
 The `forgerie` CLI controls existing Linux service units. It does not install services. The web server and session daemon also have separate built entrypoints. Keep the app on a trusted private network. Forgerie has no login barrier and is not a sandbox or a multi-tenant service.
 

@@ -1,6 +1,6 @@
 import { createWorkflowScheduleTool } from "../triggers/triggerTool.js";
 import type { TriggerService } from "../triggers/triggerService.js";
-import type { TriggerAction } from "../../shared/triggers.js";
+import type { TriggerSessionAction } from "../triggers/triggerTypes.js";
 import type { SessionSearchService } from "./sessionSearchService.js";
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
@@ -1722,13 +1722,17 @@ export class PiSessionService implements SessionRouteService {
   }
 
   /** Internal receipt-keyed session creation. The public start options do not contain sessionId. */
-  async ensureTriggerSession(ref: PiSessionRef, action: Omit<TriggerAction, "thinkingLevel"> & { thinkingLevel?: ClientThinkingLevel }): Promise<void> {
-    if (this.activeForRef(ref) !== undefined || await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader) !== undefined) return;
+  async ensureTriggerSession(ref: PiSessionRef, action: TriggerSessionAction): Promise<void> {
+    if (await this.triggerSessionExists(ref)) return;
     const initialModel = action.model === undefined ? undefined : await this.resolveNewSessionModel(action.model);
     await this.startSession(ref.cwd, { sessionId: ref.id,
       ...(initialModel === undefined ? {} : { initialModel }),
       ...(action.thinkingLevel === undefined ? {} : { initialThinkingLevel: action.thinkingLevel }),
     });
+  }
+
+  async triggerSessionExists(ref: PiSessionRef): Promise<boolean> {
+    return this.activeForRef(ref) !== undefined || await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader) !== undefined;
   }
 
   async nameTriggerSession(ref: PiSessionRef, name: string): Promise<void> {

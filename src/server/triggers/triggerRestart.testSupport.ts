@@ -66,7 +66,7 @@ try {
       const ref = { id: fire.outcome.sessionId, cwd };
       const runs = await sessions.workflowRuns(ref);
       if (runs[0]?.stops?.["land"]?.state === "waiting" && !(await sessions.status(ref)).isStreaming) {
-        process.stdout.write(`RESULT ${JSON.stringify({ sessionId: ref.id, history: trigger.history.length, runs: runs.length, land: "waiting", name: (await sessions.list(cwd)).find((session) => session.id === ref.id)?.name })}\n`);
+        process.stdout.write(`RESULT ${JSON.stringify({ sessionId: ref.id, history: trigger.history.length, runs: runs.length, land: "waiting", name: (await sessions.list(cwd)).find((session) => session.id === ref.id)?.name, occurrence: fire.occurrence, requestId: fire.requestId })}\n`);
         break;
       }
     }

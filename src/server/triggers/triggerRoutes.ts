@@ -20,7 +20,7 @@ export function registerTriggerRoutes(app: FastifyInstance, service: TriggerServ
       routes.post<{ Params: { id: string }; Body: unknown }>(`${prefix}/triggers/:id/${action}`, (request, reply) => run(reply, () => { triggerBody(empty, request.body); return service[action](request.params.id); }));
     }
     routes.post<{ Params: { id: string }; Body: TriggerRunRequest }>(`${prefix}/triggers/:id/run`, (request, reply) => run(reply, () => service.run(request.params.id, request.body), 202));
-    routes.delete<{ Params: { id: string } }>(`${prefix}/triggers/:id`, (request, reply) => run(reply, async () => { await service.remove(request.params.id); return { ok: true }; }));
+    routes.delete<{ Params: { id: string }; Body: unknown }>(`${prefix}/triggers/:id`, (request, reply) => run(reply, async () => { if (request.body !== undefined) triggerBody(empty, request.body); await service.remove(request.params.id); return { ok: true }; }));
     done();
   });
 }

@@ -1,4 +1,3 @@
-import { normalizeRequestCwd } from "../workingDirectory.js";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -12,12 +11,22 @@ import { TRIGGER_LIST_HISTORY, TriggerCreateSchema, TriggerUpdateSchema, Trigger
 import { assertProseOnly, workflowInputs, type WorkflowLibrary } from "../resources/workflowLibrary.js";
 import { acquireDurableOwnership, type DurableOwnership } from "../sessions/durableOwnership.js";
 import type { ProjectWorkspaceCwds } from "../workspaces/projectWorkspaceCwds.js";
+import { normalizeRequestCwd } from "../workingDirectory.js";
 import { durableTriggers, listTriggers, TriggerError, TRIGGERS_DOC_KIND, type FireTrigger } from "./durableTriggers.js";
 
 export function triggerBody<S extends TSchema>(schema: S, input: unknown): Static<S> {
   if (Check(schema, input)) return input;
-  const first = Errors(schema, input)[0];
-  const field = first?.instancePath.replace(/^\//u, "").replaceAll("/", ".");
+  const errors = Errors(schema, input);
+  // TypeBox reports every failed union branch. Do not blame fields that belong to a different discriminator.
+  const rejectedBranches = errors.filter((error) => error.keyword === "const").flatMap((error) => {
+    const branch = /^(.*\/anyOf\/[0-9]+)(?:\/|$)/u.exec(error.schemaPath)?.[1];
+    return branch === undefined ? [] : [branch];
+  });
+  const first = errors.find((error) => error.keyword !== "anyOf" && !rejectedBranches.some((branch) => error.schemaPath === branch || error.schemaPath.startsWith(`${branch}/`))) ?? errors[0];
+  const property = first?.keyword === "required" && first.params.requiredProperties.length === 1 ? first.params.requiredProperties[0]
+    : first?.keyword === "additionalProperties" && first.params.additionalProperties.length === 1 ? first.params.additionalProperties[0] : undefined;
+  const path = `${first?.instancePath ?? ""}${property === undefined ? "" : `/${property}`}`;
+  const field = path.replace(/^\//u, "").replaceAll("/", ".");
   throw new TriggerError(first?.message ?? "Invalid trigger body", 400, field === "" ? undefined : field);
 }
 
@@ -66,7 +75,7 @@ export class TriggerService {
   }
   private opened() {
     if (this.store.kind !== "open") throw new TriggerError(this.store.error, 503);
-    this.store.ownership.assertOwned();
+    try { this.store.ownership.assertOwned(); } catch (error) { throw new TriggerError(error instanceof Error ? error.message : String(error), 503); }
     return this.store;
   }
   async close(): Promise<void> {
@@ -116,10 +125,10 @@ export class TriggerService {
   async update(id: string, value: unknown): Promise<Trigger> {
     const { harness, anchor } = this.opened();
     const input: TriggerUpdate = triggerBody(TriggerUpdateSchema, value);
-    await this.get(id);
+    const current = await this.get(id);
     if (input.name?.trim() === "") throw new TriggerError("Give the trigger a name", 400, "name");
     if (input.schedule !== undefined) this.schedule(input.schedule);
-    if (input.action !== undefined) await this.validateAction(input.action);
+    await this.validateAction(input.action ?? current.action);
     return this.core.update(harness, anchor, id, input, context);
   }
   private schedule(value: unknown): void {

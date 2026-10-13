@@ -179,6 +179,10 @@ it("refuses a duplicate ID and invalid input, and removes a trigger", async () =
   await expect(triggers.create(harness, anchor, { ...nightly, id: "other", schedule: { kind: "daily", at: "03:00", timezone: "Nowhere/Here" } }, context)).rejects.toThrow("Unknown time zone");
   await triggers.remove(harness, "nightly", context);
   expect(await listTriggers(harness, context)).toEqual([]);
+  const named = await triggers.create(harness, anchor, { ...nightly, id: "constructor" }, context);
+  expect(named.id).toBe("constructor");
+  await triggers.pause(harness, named.id, context);
+  await triggers.remove(harness, named.id, context);
 });
 
 it("stores running before firing, preserves the entry on restart, and increments revision", async () => {
@@ -231,4 +235,24 @@ it("keeps attention until explicit acknowledgement, including failed session ide
   const seen = await triggers.acknowledge(harness, nightly.id, context);
   expect(seen.attention).toBeNull();
   expect(seen.revision).toBe(paused.revision + 1);
+});
+
+it("finishes a scheduled fire after pause, edit and restart using the original action", async () => {
+  const clock = shiftedClock("2026-10-13T02:59:59.950Z");
+  const held = recordingFire({ kind: "hold-until-cancelled" });
+  const first = await openHost(clock, held.fire);
+  clock.set(JUST_BEFORE_THREE);
+  await first.triggers.create(first.harness, first.anchor, nightly, context);
+  await until(first.harness, (records) => records[0]?.history[0]?.outcome.kind === "running" && held.requests.length === 1);
+  const paused = await first.triggers.pause(first.harness, nightly.id, context);
+  await first.triggers.update(first.harness, first.anchor, nightly.id, { baseRevision: paused.revision, name: "Edited", action: { ...nightly.action, workflow: "updated-workflow" } }, context);
+  await closeHost(first.harness);
+  const host = recordingFire({ kind: "start" });
+  const second = await openHost(clock, host.fire);
+  const [record] = await until(second.harness, fired(1));
+  expect(host.requests).toEqual(held.requests);
+  expect(record?.history).toHaveLength(1);
+  expect(record?.state.kind).toBe("paused");
+  expect(record?.name).toBe("Edited");
+  expect(record?.action.workflow).toBe("updated-workflow");
 });

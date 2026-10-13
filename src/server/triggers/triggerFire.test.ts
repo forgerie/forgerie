@@ -69,7 +69,12 @@ it.each(["session", "workflow"])("SIGKILL after %s and a fresh process leave exa
     const second = child(root, "none"); children.push(second.process);
     expect(await second.closed, second.errors()).toBe(0);
     expect(second.output()).toContain('"history":1,"runs":1,"land":"waiting"');
-    expect(second.output()).toContain('"name":"Nightly refinement · ');
+    const line = second.output().split("\n").find((line) => line.startsWith("RESULT "));
+    const result: unknown = JSON.parse(line?.slice(7) ?? "null");
+    if (!Check(Type.Object({ sessionId: Type.String(), occurrence: Type.Number(), requestId: Type.String(), name: Type.String() }), result)) throw new Error("Invalid restart result");
+    expect(result.sessionId).toBe(triggerSessionId(result.requestId, result.occurrence));
+    expect(result.sessionId).toBe(header.id);
+    expect(result.name).toBe(`Nightly refinement · ${new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(result.occurrence)}`);
     const files = (await readdir(directory)).filter((name) => name.endsWith(".jsonl"));
     expect(files).toEqual(before);
     expect(files[0]).toContain(header.id);

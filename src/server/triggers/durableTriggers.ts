@@ -41,7 +41,6 @@ export interface DurableTriggerOptions {
   readonly fire: FireTrigger;
   /** The same clock the hosting Harness uses (`HarnessOptions.now`). */
   readonly now: () => number;
-  readonly changed?: () => void;
 }
 
 interface TriggerTaskInput { readonly triggerId: string; readonly generation: number; readonly firstOccurrence: number }
@@ -55,6 +54,10 @@ const stop = { status: "terminal", outcome: { status: "completed", result: null 
 /** The record a task may act for: present, active, and armed by this task's generation. */
 function armedFor(record: Readonly<Trigger> | undefined, input: TriggerTaskInput): boolean {
   return record?.state.kind === "active" && record.generation === input.generation;
+}
+
+function recordAt(records: Readonly<Record<string, Trigger>>, id: string): Trigger | undefined {
+  return Object.hasOwn(records, id) ? records[id] : undefined;
 }
 
 // Doc drafts are transaction overlays. Materialize them before the commit settles, and check the stored shape.
@@ -84,16 +87,14 @@ function recordFire(record: Trigger, fire: TriggerFire): void {
  */
 export function durableTriggers(options: DurableTriggerOptions) {
   const { fire, now } = options;
-  const changed = options.changed ?? (() => undefined);
 
   async function executeFire<I, S>(runtime: TaskRuntime<I, S, null, object>, request: TriggerFireRequest, cause: TriggerFire["cause"], skippedBefore: number, context: Context): Promise<TriggerFire["outcome"]> {
     await runtime.commit(async (tx) => {
-      const record = (await tx.doc(Triggers)).records[request.triggerId];
+      const record = recordAt((await tx.doc(Triggers)).records, request.triggerId);
       if (record !== undefined && !record.history.some((entry) => entry.requestId === request.requestId)) {
         recordFire(record, { occurrence: request.occurrence, requestId: request.requestId, cause, recordedAt: now(), skippedBefore, outcome: { kind: "running", startedAt: now() } });
       }
     }, context);
-    changed();
     try { return { kind: "started", ...await fire(request, context) }; }
     catch (error) {
       if (runtime.signal.aborted || context.abortSignal?.aborted === true) throw error;
@@ -104,14 +105,14 @@ export function durableTriggers(options: DurableTriggerOptions) {
   const manualTask = defineTask<TriggerFireRequest, { phase: "fire" }, null>({
     name: "forgerie.trigger.manual", version: 1, initial: () => ({ phase: "fire" }),
     phases: { fire: async (running, runtime, context) => {
-      if ((await runtime.snapshot(Triggers, context))?.records[running.input.triggerId] === undefined) { await runtime.commit(() => stop, context); return; }
+      const snapshot = await runtime.snapshot(Triggers, context);
+      if (snapshot === undefined || recordAt(snapshot.records, running.input.triggerId) === undefined) { await runtime.commit(() => stop, context); return; }
       const outcome = await executeFire(runtime, running.input, "manual", 0, context);
       await runtime.commit(async (tx) => {
-        const record = (await tx.doc(Triggers)).records[running.input.triggerId];
+        const record = recordAt((await tx.doc(Triggers)).records, running.input.triggerId);
         if (record !== undefined) recordFire(record, { occurrence: running.input.occurrence, requestId: running.input.requestId, cause: "manual", skippedBefore: 0, recordedAt: now(), outcome });
         return stop;
       }, context);
-      changed();
     } },
     abort: (_running, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
   });
@@ -123,7 +124,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
       wait: async (running, runtime, context) => {
         await runtime.sleep(running.state.checkpoint.occurrence, context);
         await runtime.commit(async (tx) => {
-          const record = (await tx.doc(Triggers)).records[running.input.triggerId];
+          const record = recordAt((await tx.doc(Triggers)).records, running.input.triggerId);
           if (record === undefined || !armedFor(record, running.input)) return stop;
           const at = runtime.now();
           // Occurrences that passed while the daemon was down fold into the latest one. It fires once, or not at all.
@@ -138,12 +139,12 @@ export function durableTriggers(options: DurableTriggerOptions) {
           record.state = { kind: "active", nextFireAt };
           return { status: "running", checkpoint: { phase: "wait", occurrence: nextFireAt, skippedBefore: 0 } };
         }, context);
-        changed();
       },
       fire: async (running, runtime, context) => {
         const { occurrence, skippedBefore } = running.state.checkpoint;
         const { triggerId } = running.input;
-        const record = (await runtime.snapshot(Triggers, context))?.records[triggerId];
+        const snapshot = await runtime.snapshot(Triggers, context);
+        const record = snapshot === undefined ? undefined : recordAt(snapshot.records, triggerId);
         const requestId = triggerRequestId(triggerId, occurrence);
         const started = record?.history.some((entry) => entry.requestId === requestId && entry.outcome.kind === "running") === true;
         if (record === undefined || (!armedFor(record, running.input) && !started)) {
@@ -152,7 +153,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
         }
         const outcome = await executeFire(runtime, running.state.checkpoint.request, "schedule", skippedBefore, context);
         await runtime.commit(async (tx) => {
-          const live = (await tx.doc(Triggers)).records[triggerId];
+          const live = recordAt((await tx.doc(Triggers)).records, triggerId);
           if (live === undefined) return stop;
           const at = runtime.now();
           recordFire(live, { occurrence, requestId, cause: "schedule", recordedAt: at, skippedBefore, outcome });
@@ -161,7 +162,6 @@ export function durableTriggers(options: DurableTriggerOptions) {
           live.state = { kind: "active", nextFireAt };
           return { status: "running", checkpoint: { phase: "wait", occurrence: nextFireAt, skippedBefore: 0 } };
         }, context);
-        changed();
       },
     },
     abort: (_running, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
@@ -188,8 +188,8 @@ export function durableTriggers(options: DurableTriggerOptions) {
         const doc = await tx.doc(Triggers);
         const base = input.name.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "").slice(0, 48).replace(/-$/u, "") || "trigger";
         let id = input.id ?? base;
-        if (input.id === undefined) for (let suffix = 2; doc.records[id] !== undefined; suffix++) { const tail = `-${String(suffix)}`; id = base.slice(0, 48 - tail.length) + tail; }
-        if (doc.records[id] !== undefined) throw new TriggerError(`Trigger "${id}" already exists.`, 409, "id");
+        if (input.id === undefined) for (let suffix = 2; recordAt(doc.records, id) !== undefined; suffix++) { const tail = `-${String(suffix)}`; id = base.slice(0, 48 - tail.length) + tail; }
+        if (recordAt(doc.records, id) !== undefined) throw new TriggerError(`Trigger "${id}" already exists.`, 409, "id");
         const at = now();
         const record: Trigger = {
           id, name: input.name, schedule, action: input.action,
@@ -204,7 +204,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
 
     /** Stop future fires. A fire already in progress finishes and is recorded. */
     pause: (harness: Harness, id: string, context: Context): Promise<Trigger> => harness.commit(async (tx) => {
-      const record = (await tx.doc(Triggers)).records[id];
+      const record = recordAt((await tx.doc(Triggers)).records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
       if (record.state.kind === "active") { record.state = { kind: "paused", pausedAt: now() }; record.revision += 1; }
       return publicTrigger(record);
@@ -212,7 +212,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
 
     /** Arm a paused trigger from the current time. Occurrences that passed while it was paused do not fire. */
     resume: (harness: Harness, anchor: ConversationId, id: string, context: Context): Promise<Trigger> => harness.commit(async (tx) => {
-      const record = (await tx.doc(Triggers)).records[id];
+      const record = recordAt((await tx.doc(Triggers)).records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
       if (record.state.kind === "paused") { await arm(tx, anchor, record, now()); record.revision += 1; }
       return publicTrigger(record);
@@ -220,7 +220,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
 
     update: (harness: Harness, anchor: ConversationId, id: string, input: unknown, context: Context): Promise<Trigger> => harness.commit(async (tx) => {
       if (!Check(TriggerUpdateSchema, input)) throw new TriggerError("Invalid trigger update");
-      const record = (await tx.doc(Triggers)).records[id];
+      const record = recordAt((await tx.doc(Triggers)).records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
       if (record.revision !== input.baseRevision) throw new TriggerError(`Trigger revision is ${String(record.revision)}; read it again before editing.`, 409, "baseRevision");
       if (input.name !== undefined) record.name = input.name;
@@ -233,7 +233,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
     }, context),
 
     acknowledge: (harness: Harness, id: string, context: Context): Promise<Trigger> => harness.commit(async (tx) => {
-      const record = (await tx.doc(Triggers)).records[id];
+      const record = recordAt((await tx.doc(Triggers)).records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
       if (record.attention !== null) { record.attention = null; record.revision += 1; }
       return publicTrigger(record);
@@ -241,7 +241,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
 
     run: (harness: Harness, anchor: ConversationId, id: string, clientRequestId: string, context: Context): Promise<{ requestId: string }> => harness.commit(async (tx) => {
       const doc = await tx.doc(Triggers);
-      const record = doc.records[id];
+      const record = recordAt(doc.records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
       const requestId = triggerManualRequestId(id, clientRequestId);
       if (doc.manualRequests[requestId] === undefined) {
@@ -254,7 +254,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
     /** Delete the trigger and its history. Its task stops at its next phase. */
     remove: (harness: Harness, id: string, context: Context): Promise<void> => harness.commit(async (tx) => {
       const doc = await tx.doc(Triggers);
-      if (doc.records[id] === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
+      if (recordAt(doc.records, id) === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Records are keyed by trigger ID.
       delete doc.records[id];
       for (const [requestId, triggerId] of Object.entries(doc.manualRequests)) if (triggerId === id) {
