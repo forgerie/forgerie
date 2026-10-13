@@ -199,15 +199,18 @@ project. A team or board name is not an Area Path.
   `(image omitted: model does not support images)` for a text-only model.
   The Azure prompt tells the agent to stop and ask for an image-capable model
   in that case, rather than claim to have examined the images.
-- Azure launch prompts and prepared images are saved privately with their
-  local claim, so a retry returns the same context and images, including after
-  a daemon restart. Retries of a new launch reuse these bytes instead of
-  downloading again. A legacy claim without a snapshot reads images on retry.
-  Release or archive removes the snapshot. This adds disk and memory use for
-  each held Azure item; the claim file grows with its image data. List responses
-  never include these private snapshots. Before downgrading to a build without
-  image support, release or archive Azure claims using the current build so
-  the older daemon can read the claim file.
+- Azure launch prompts and prepared images are saved in one private file per
+  local claim: `<data dir>/backlog-launch/<claimId>.json`. Files are replaced
+  atomically with mode `0600` in a `0700` directory. Claim metadata stays small
+  in `backlog-claims.json`; claim mutations do not rewrite or clone image data.
+  A retry loads only its own snapshot and returns the same context and images,
+  including after a daemon restart. It does not download them again. A legacy
+  claim without a snapshot reads images on retry. Release or archive deletes
+  that claim's snapshot. Startup removes orphan snapshot files and leftover
+  snapshot temporary files. Inline `launchContents` from the first image-support
+  build migrate to separate files before being removed from claim metadata.
+  This adds disk use per held Azure item and memory use while preparing or
+  reading that item's snapshot. List responses never include image payloads.
 - Each list or detail read queries Azure again. There is no stale cache. A
   launch re-reads the item, and a second scope query checks membership
   after batch retrieval. Azure can still change after the final read.

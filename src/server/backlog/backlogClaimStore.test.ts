@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -68,9 +68,86 @@ it("keeps private launch images across restart, never includes them in claims, a
   const content = { initialPrompt: "Examine every image", images: [{ kind: "image" as const, mimeType: "image/png" as const, data: "aGVsbG8=", name: "image.png" }] };
   await claims.bind(reservation.claimId, "image-session", "/repo", undefined, content);
   const restarted = new BacklogClaimStore(file); await restarted.initialize();
-  expect(restarted.launchContent(reservation.claimId)).toEqual(content);
+  expect(await restarted.launchContent(reservation.claimId)).toEqual(content);
   expect(JSON.stringify(await restarted.list())).not.toContain("aGVsbG8=");
   await restarted.releaseSessions(["image-session"]);
-  expect(restarted.launchContent(reservation.claimId)).toBeUndefined();
+  expect(await restarted.launchContent(reservation.claimId)).toBeUndefined();
   expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ version: 1, claims: [] });
+});
+
+const launchContent = { initialPrompt: "Inspect the image", images: [{ kind: "image" as const, mimeType: "image/png" as const, data: "aGVsbG8=", name: "image.png" }] };
+it("stores snapshots separately with private permissions and reads only the requested snapshot", async () => {
+  const file = await path(); const store = new BacklogClaimStore(file); await store.initialize();
+  const snapshots = join(file, "..", "backlog-launch");
+  const first = await store.reserve(input); await store.bind(first.claimId, "first", "/repo", undefined, launchContent);
+  const second = await store.reserve({ ...input, itemId: "second" }); await store.bind(second.claimId, "second", "/repo", undefined, launchContent);
+  expect((await stat(snapshots)).mode & 0o777).toBe(0o700);
+  expect((await stat(join(snapshots, `${first.claimId}.json`))).mode & 0o777).toBe(0o600);
+  expect(JSON.parse(await readFile(join(snapshots, `${first.claimId}.json`), "utf8"))).toEqual(launchContent);
+  const metadata = await readFile(file, "utf8"); expect(metadata).not.toContain("launchContents"); expect(metadata).not.toContain("aGVsbG8=");
+  await writeFile(join(snapshots, `${second.claimId}.json`), "corrupt second snapshot");
+  const restarted = new BacklogClaimStore(file); await restarted.initialize();
+  expect(await restarted.launchContent(first.claimId)).toEqual(launchContent);
+  await expect(restarted.launchContent(second.claimId)).rejects.toThrow("Invalid backlog launch snapshot");
+  await store.release(key, first.claimId); expect(await readdir(snapshots)).toEqual([`${second.claimId}.json`]);
+  await store.releaseSessions(["second"]); expect(await readdir(snapshots)).toEqual([]);
+});
+
+it("removes orphan snapshots and leftover temporary files at startup, even without claim metadata", async () => {
+  const file = await path(); const snapshots = join(file, "..", "backlog-launch"); await mkdir(snapshots);
+  await writeFile(join(snapshots, "orphan.json"), JSON.stringify(launchContent));
+  await writeFile(join(snapshots, "orphan.random.tmp"), "partial snapshot");
+  const store = new BacklogClaimStore(file); await store.initialize();
+  expect(await readdir(snapshots)).toEqual([]);
+  const held = await store.reserve(input); await store.bind(held.claimId, "held", "/repo", undefined, launchContent);
+  await writeFile(join(snapshots, "removed.json"), JSON.stringify(launchContent));
+  await writeFile(join(snapshots, `${held.claimId}.random.tmp`), "partial replacement");
+  const restarted = new BacklogClaimStore(file); await restarted.initialize();
+  expect(await readdir(snapshots)).toEqual([`${held.claimId}.json`]);
+  expect(await restarted.launchContent(held.claimId)).toEqual(launchContent);
+});
+
+it("migrates inline snapshots before removing them from claim metadata and preserves retry contents", async () => {
+  const file = await path(); const store = new BacklogClaimStore(file); await store.initialize();
+  const reservation = await store.reserve(input); const claim = await store.bind(reservation.claimId, "legacy", "/repo");
+  await writeFile(file, JSON.stringify({ version: 1, claims: [claim], launchContents: { [claim.claimId]: launchContent, orphan: launchContent } }));
+  const restarted = new BacklogClaimStore(file); await restarted.initialize();
+  expect(await restarted.get(key)).toEqual(claim); expect(await restarted.launchContent(claim.claimId)).toEqual(launchContent);
+  expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ version: 1, claims: [claim] });
+  expect(await readdir(join(file, "..", "backlog-launch"))).toEqual([`${claim.claimId}.json`]);
+});
+
+it("keeps metadata small and does not rewrite existing snapshots during other claim mutations", async () => {
+  const file = await path(); const store = new BacklogClaimStore(file); await store.initialize();
+  const payload = { ...launchContent, images: launchContent.images.map((image) => ({ ...image, data: "a".repeat(1024 * 1024) })) };
+  const first = await store.reserve(input); await store.bind(first.claimId, "first", "/repo", undefined, payload);
+  const snapshot = join(file, "..", "backlog-launch", `${first.claimId}.json`);
+  const original = await stat(snapshot);
+  for (let i = 1; i < 5; i++) {
+    const next = await store.reserve({ ...input, itemId: `item-${String(i)}` }); await store.bind(next.claimId, `session-${String(i)}`, "/repo", undefined, payload);
+  }
+  expect((await stat(file)).size).toBeLessThan(8192);
+  expect((await stat(snapshot)).mtimeMs).toBe(original.mtimeMs); expect((await stat(snapshot)).ino).toBe(original.ino);
+});
+
+it("removes a snapshot written before a failed bind and a snapshot left with an interrupted reservation", async () => {
+  const file = await path(); const store = new BacklogClaimStore(file); await store.initialize();
+  const reservation = await store.reserve(input);
+  await rm(file); await mkdir(file);
+  await expect(store.bind(reservation.claimId, "session", "/repo", undefined, launchContent)).rejects.toThrow();
+  const snapshots = join(file, "..", "backlog-launch"); expect(await readdir(snapshots)).toEqual([]);
+  expect((await store.get(key))?.kind).toBe("launching");
+  await rm(file, { recursive: true }); await writeFile(file, JSON.stringify({ version: 1, claims: [reservation] }));
+  await writeFile(join(snapshots, `${reservation.claimId}.json`), JSON.stringify(launchContent));
+  const restarted = new BacklogClaimStore(file); await restarted.initialize();
+  expect((await restarted.get(key))?.kind).toBe("interrupted"); expect(await readdir(snapshots)).toEqual([]);
+});
+
+it("keeps inline migration data intact if its private snapshot cannot be saved", async () => {
+  const file = await path(); const store = new BacklogClaimStore(file); await store.initialize();
+  const reservation = await store.reserve(input); const claim = await store.bind(reservation.claimId, "legacy", "/repo");
+  const original = JSON.stringify({ version: 1, claims: [claim], launchContents: { [claim.claimId]: launchContent } });
+  await writeFile(file, original); await writeFile(join(file, "..", "backlog-launch"), "not a directory");
+  await expect(new BacklogClaimStore(file).initialize()).rejects.toThrow();
+  expect(await readFile(file, "utf8")).toBe(original);
 });

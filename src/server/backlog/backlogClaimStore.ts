@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { BacklogClaimSchema, BacklogLaunchContentSchema, type BacklogClaim, type BacklogProviderId, type BacklogLaunchContent } from "../../shared/backlog.js";
+import { BacklogLaunchSnapshots } from "./backlogLaunchSnapshots.js";
 import { BacklogError, isMissingFile } from "./backlogError.js";
 
 const FileSchema = Type.Object({ version: Type.Literal(1), claims: Type.Array(BacklogClaimSchema),
@@ -22,24 +23,30 @@ const withProvider = (value: unknown): unknown => {
 /** Single daemon owner; serialize mutations and publish only after atomic disk replacement. */
 export class BacklogClaimStore {
   private claims: BacklogClaim[] = [];
-  private launchContents: Record<string, BacklogLaunchContent> = {};
+  private readonly snapshots: BacklogLaunchSnapshots;
   private queue: Promise<void> = Promise.resolve();
-  constructor(private readonly path?: string) {}
+  constructor(private readonly path?: string) { this.snapshots = new BacklogLaunchSnapshots(path === undefined ? undefined : join(dirname(path), "backlog-launch")); }
 
   async initialize(): Promise<void> {
     if (this.path === undefined) return;
     let value: unknown;
     try { value = withProvider(JSON.parse(await readFile(this.path, "utf8"))); }
-    catch (error) { if (isMissingFile(error)) return; throw error; }
+    catch (error) { if (isMissingFile(error)) { await this.snapshots.initialize([]); return; } throw error; }
     if (!Check(FileSchema, value)) throw new Error("Invalid backlog claim file");
     const identities = value.claims.map((claim) => JSON.stringify([claim.repo, claim.provider, claim.itemId]));
     if (new Set(identities).size !== identities.length || new Set(value.claims.map((claim) => claim.claimId)).size !== identities.length) throw new Error("Duplicate backlog claims");
     this.claims = value.claims;
-    this.launchContents = value.launchContents ?? {};
+    // Finish every snapshot write before removing the legacy inline payloads.
+    // A failed migration leaves the old metadata intact and is safe to retry.
+    for (const claim of this.claims) {
+      const content = value.launchContents?.[claim.claimId];
+      if (claim.kind === "claimed" && content !== undefined) await this.snapshots.write(claim.claimId, content);
+    }
     // A killed launch is not still running. Retain ownership until explicit guarded recovery.
-    if (this.claims.some((claim) => claim.kind === "launching")) {
+    if (value.launchContents !== undefined || this.claims.some((claim) => claim.kind === "launching")) {
       await this.persist(this.claims.map((claim) => claim.kind === "launching" ? { ...claim, kind: "interrupted" } : claim));
     }
+    await this.snapshots.initialize(this.claims.filter((claim) => claim.kind === "claimed").map((claim) => claim.claimId));
   }
   list(): Promise<BacklogClaim[]> { return Promise.resolve(structuredClone(this.claims)); }
   get(key: BacklogItemKey): Promise<BacklogClaim | undefined> {
@@ -55,13 +62,23 @@ export class BacklogClaimStore {
     });
   }
   /** Private launch snapshot. Never included in list/detail claims. */
-  launchContent(claimId: string): BacklogLaunchContent | undefined { return structuredClone(this.launchContents[claimId]); }
+  async launchContent(claimId: string): Promise<BacklogLaunchContent | undefined> {
+    if (!this.claims.some((claim) => claim.claimId === claimId && claim.kind === "claimed")) return undefined;
+    return await this.snapshots.read(claimId);
+  }
   bind(claimId: string, sessionId: string, cwd: string, branch?: string, content?: BacklogLaunchContent): Promise<Extract<BacklogClaim, { kind: "claimed" }>> {
     return this.exclusive(async () => {
       const reservation = this.claims.find((claim) => claim.claimId === claimId);
       if (reservation?.kind !== "launching") throw new BacklogError("conflict", "Launch reservation changed");
       const claim = { ...reservation, kind: "claimed" as const, sessionId, cwd, ...(branch === undefined ? {} : { branch }) };
-      await this.persist(this.claims.map((record) => record.claimId === claimId ? claim : record), content === undefined ? this.launchContents : { ...this.launchContents, [claimId]: content });
+      if (content !== undefined) await this.snapshots.write(claimId, content);
+      try { await this.persist(this.claims.map((record) => record.claimId === claimId ? claim : record)); }
+      catch (error) {
+        // The reservation still owns the item. Startup also removes a snapshot
+        // left by a crash between its write and the claim metadata commit.
+        if (content !== undefined) await this.snapshots.remove([claimId]).catch(() => undefined);
+        throw error;
+      }
       return structuredClone(claim);
     });
   }
@@ -88,13 +105,8 @@ export class BacklogClaimStore {
     await previous;
     try { return await run(); } finally { release(); }
   }
-  private async persist(claims: BacklogClaim[], contents = this.launchContents): Promise<void> {
-    const launchContents: Record<string, BacklogLaunchContent> = {};
-    for (const claim of claims) {
-      const content = contents[claim.claimId];
-      if (content !== undefined) launchContents[claim.claimId] = content;
-    }
-    const value = { version: 1, claims, ...(Object.keys(launchContents).length === 0 ? {} : { launchContents }) };
+  private async persist(claims: BacklogClaim[]): Promise<void> {
+    const value = { version: 1, claims };
     if (!Check(FileSchema, value)) throw new Error("Invalid backlog claim mutation");
     if (this.path !== undefined) {
       await mkdir(dirname(this.path), { recursive: true });
@@ -104,7 +116,10 @@ export class BacklogClaimStore {
         await rename(temporary, this.path);
       } catch (error) { await unlink(temporary).catch(() => undefined); throw error; }
     }
+    const kept = new Set(claims.map((claim) => claim.claimId));
+    const removed = this.claims.filter((claim) => !kept.has(claim.claimId)).map((claim) => claim.claimId);
     this.claims = structuredClone(claims);
-    this.launchContents = structuredClone(launchContents);
+    // Commit metadata first. Startup removes any orphan left if deletion fails.
+    await this.snapshots.remove(removed);
   }
 }

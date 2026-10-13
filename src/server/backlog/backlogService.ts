@@ -104,7 +104,7 @@ export class BacklogService {
           await this.deps.claims.releaseSessions([existing.sessionId]);
           throw new BacklogError("conflict", "Launch session was archived; use a new requestId");
         }
-        const content = this.deps.claims.launchContent(existing.claimId)
+        const content = await this.deps.claims.launchContent(existing.claimId)
           ?? await selected.prepareLaunch?.(entry) ?? { initialPrompt: selected.prompt(entry) };
         return { session: { id: existing.sessionId, cwd: existing.cwd }, claim: existing, ...content, reused: true };
       }
