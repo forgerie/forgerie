@@ -46,7 +46,7 @@ export interface TriggerEntry {
   chip?: { text: string; tone: "bad" | "warn" } | undefined;
   /** The entry's accessible name and title. */
   title: string;
-  /** Some trigger needs a look: the opener's dot lights too. */
+  /** Some trigger needs a look, or the store is off: the opener's dot lights too. */
   attention: boolean;
 }
 
@@ -67,7 +67,8 @@ export function attentionTone(trigger: Trigger): "bad" | "warn" | undefined {
 }
 
 export function triggerEntry(load: TriggerListLoad): TriggerEntry {
-  if (load.type === "off") return { chip: { text: "Off", tone: "bad" }, title: "Triggers are off", attention: false };
+  // No trigger runs while the store is off, so the opener's dot says so even when the session list is closed.
+  if (load.type === "off") return { chip: { text: "Off", tone: "bad" }, title: "Triggers are off", attention: true };
   const list = listOf(load);
   const count = list?.attentionCount ?? 0;
   if (!list || count <= 0) return { title: "Triggers", attention: false };

@@ -42,7 +42,7 @@ describe("the session list's entry", () => {
       .toEqual({ chip: { text: "1", tone: "warn" }, title: "Triggers: 1 needs a look", attention: true });
   });
   it("says Off when the store is unavailable", () => {
-    expect(triggerEntry({ type: "off", message: "database is locked" })).toEqual({ chip: { text: "Off", tone: "bad" }, title: "Triggers are off", attention: false });
+    expect(triggerEntry({ type: "off", message: "database is locked" })).toEqual({ chip: { text: "Off", tone: "bad" }, title: "Triggers are off", attention: true });
   });
   it("keeps the last count after a failed read", () => {
     expect(triggerEntry({ type: "failed", message: "HTTP 500", last: mixedList }).chip).toEqual({ text: "2", tone: "bad" });
