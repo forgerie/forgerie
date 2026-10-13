@@ -1,5 +1,6 @@
 import { useId, useRef, type ReactNode } from "react";
 import { useDescribedControls } from "../useDescribedControls";
+import "./settings.css";
 
 /**
  * System molecule: one property row. Label beside the value while the column has room, above it when it does not.

@@ -490,12 +490,12 @@
   "ui/useSheetDrag.ts -> ../sheetDrag"
  ],
  "stylesheet not owned by its sibling": [
-  "ui/backlog/backlog.css: imported by ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
+  "ui/backlog/backlog.css: imported by ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx, ui/backlog/GitHubConnect.tsx",
   "ui/markdown/richBlocks.css: imported by ui/markdown/RichBlocks.tsx",
   "ui/pullRequest.css: imported by ui/PullNoticeRow.tsx, ui/PullRequestReview.tsx",
   "ui/settings/models.css: imported by ui/settings/ModelsView.tsx",
   "ui/settings/plugins.css: imported by ui/settings/PluginsView.tsx",
-  "ui/settings/settings.css: imported by ui/backlog/BacklogView.tsx, ui/settings/ModelsView.tsx, ui/settings/PluginsView.tsx, ui/settings/SettingsView.tsx",
+  "ui/settings/settings.css: imported by ui/backlog/BacklogView.tsx, ui/settings/AgentEditor.tsx, ui/settings/ModelsView.tsx, ui/settings/PluginsView.tsx, ui/settings/PromptEditor.tsx, ui/settings/SettingsField.tsx, ui/settings/SettingsFrame.tsx, ui/settings/SettingsRow.tsx, ui/settings/SettingsToggle.tsx, ui/settings/SettingsView.tsx",
   "ui/theme.css: imported by main.tsx"
  ],
  "stylesheet with @import": [

@@ -5,10 +5,11 @@
  * by somebody else's import looks right in the app and broken in Caliper.
  */
 import { existsSync } from "node:fs";
+import ts from "typescript";
 import { describe, test } from "vitest";
 import {
-  BASE_CSS, LIBRARY_CLASS, classSelectors, classesRenderedBy, cssFiles, cssImports, css, ENTRY, expectOnlyPending, GLOBAL_CSS, rel,
-  runtimeModules, selectors, TOKENS_CSS,
+  ast, BASE_CSS, LIBRARY_CLASS, classSelectors, classesRenderedBy, componentFiles, cssFiles, cssImports, css, ENTRY, expectOnlyPending, GLOBAL_CSS, rel,
+  resolveImport, runtimeModules, selectors, TOKENS_CSS,
 } from "./source";
 
 const ownedFiles = cssFiles.filter((file) => !GLOBAL_CSS.includes(file));
@@ -57,5 +58,43 @@ describe("a stylesheet does not reach into another component", () => {
     // tokens.css names values. base.css styles bare elements. Classes belong to components.
     expectOnlyPending("class in a global stylesheet", [TOKENS_CSS, BASE_CSS].filter(existsSync)
       .flatMap((file) => classSelectors(file).map((name) => `${rel(file)}: .${name}`)));
+  });
+});
+
+describe("a component loads the styles it renders", () => {
+  // A lazy chunk carries only the CSS its own modules import. A class styled by a sheet that some other screen imports
+  // looks right in the dev server (which loads every sheet) and after that screen has opened, and unstyled before:
+  // the Triggers page drew SettingsFrame with no padding until Settings or Backlog had been opened once.
+  /** Modules this one loads with it: static imports only. A dynamic import() is a later chunk, not a guarantee. */
+  const staticImports = (file: string) => ast(file).statements.flatMap((statement) => {
+    if (ts.isImportDeclaration(statement) && !statement.importClause?.isTypeOnly) return [(statement.moduleSpecifier as ts.StringLiteral).text];
+    if (ts.isExportDeclaration(statement) && statement.moduleSpecifier && !statement.isTypeOnly) return [(statement.moduleSpecifier as ts.StringLiteral).text];
+    return [];
+  }).map((specifier) => resolveImport(file, specifier)).filter((target): target is string => target !== undefined);
+  const loadedWith = new Map<string, Set<string>>();
+  /** Every stylesheet that is loaded whenever this module is: its own imports and those of everything it imports. */
+  function sheetsLoadedWith(file: string): Set<string> {
+    const known = loadedWith.get(file);
+    if (known) return known;
+    const sheets = new Set<string>();
+    loadedWith.set(file, sheets);
+    for (const target of staticImports(file)) {
+      if (target.endsWith(".css")) sheets.add(target);
+      else if (runtimeModules.includes(target)) for (const sheet of sheetsLoadedWith(target)) sheets.add(sheet);
+    }
+    return sheets;
+  }
+  const always = new Set([...GLOBAL_CSS, ...cssImports(ENTRY)]);
+  const definedIn = new Map<string, string[]>();
+  for (const sheet of cssFiles) for (const name of classSelectors(sheet)) definedIn.set(name, [...(definedIn.get(name) ?? []), sheet]);
+
+  test("every class a component renders is styled by a sheet that loads with it", () => {
+    expectOnlyPending("class styled by a sheet the component does not load", componentFiles.flatMap((file) => {
+      const loaded = sheetsLoadedWith(file);
+      return [...classesRenderedBy(file)].filter((name) => {
+        const sheets = definedIn.get(name);
+        return sheets !== undefined && !LIBRARY_CLASS.test(name) && !sheets.some((sheet) => always.has(sheet) || loaded.has(sheet));
+      }).map((name) => `${rel(file)}: .${name}`);
+    }));
   });
 });

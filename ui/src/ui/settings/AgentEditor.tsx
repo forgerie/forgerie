@@ -13,6 +13,7 @@ import { PromptEditor } from "./PromptEditor";
 import { SettingsFrame } from "./SettingsFrame";
 import { SettingsToggle } from "./SettingsToggle";
 import { SettingsField as Field } from "./SettingsField";
+import "./settings.css";
 
 
 type Loaded = { baseText: string; baseMtimeMs: number | null; readOnly: boolean };

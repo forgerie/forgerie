@@ -1,6 +1,7 @@
 import { ExternalLinkIcon, KeyRoundIcon } from "lucide-react";
 import type { BacklogWarning } from "../../backlog/backlogApi";
 import type { GitHubAppLoad } from "../../backlog/useGitHubApp";
+import "./backlog.css";
 
 const reposOf = (warnings: readonly BacklogWarning[]) => [...new Set(warnings.map((warning) => warning.path))];
 function list(names: readonly string[]): string {

@@ -6,6 +6,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { BoldIcon, CodeIcon, Heading2Icon, ItalicIcon, ListIcon, ListOrderedIcon, QuoteIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { keepPromptTextLiteral } from "../../agents/promptMarkdown";
+import "./settings.css";
 
 interface Format { key: string; label: string; icon: LucideIcon; active: (editor: Editor) => boolean; run: (editor: Editor) => void }
 // The marks and blocks a prompt actually uses. Everything else stays typeable as Markdown.

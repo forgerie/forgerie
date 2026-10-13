@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ChevronRightIcon } from "lucide-react";
+import "./settings.css";
 
 /**
  * System molecule: one settings destination, with facts that wrap before its navigation mark yields.

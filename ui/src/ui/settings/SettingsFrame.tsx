@@ -1,5 +1,6 @@
 import { useContext, useLayoutEffect, useRef, type ReactNode } from "react";
 import { SessionFrameLeading } from "../SessionFrame";
+import "./settings.css";
 
 /** The room a page has: its header's width, its reading column's width, and its scroll region's height, in CSS pixels. */
 export interface FrameRoom { header: number; column: number; body: number }
