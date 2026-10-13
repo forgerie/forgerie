@@ -38,8 +38,27 @@ describe("stripGrid", () => {
     expect(grid.columns).toHaveLength(run.length - grid.fold);
   });
 
-  it("always shows one column, however narrow", () => {
-    expect(stripGrid(stages(5, "done"), 1)).toMatchObject({ fold: 4 });
+  it("folds every stage into the count when not one column fits beside it, one px either side", () => {
+    // The count, then one gap and one mark: 30 px of grid, so a 75 px inner width.
+    const one = widthFor(STRIP_FOLD_WIDTH + STRIP_GAP + STRIP_MARK);
+    expect(one).toBe(75);
+    expect(stripGrid(stages(5, "done"), one)).toMatchObject({ fold: 4 });
+    expect(stripGrid(stages(5, "done"), one).columns).toHaveLength(1);
+    expect(stripGrid(stages(5, "done"), one - 1)).toMatchObject({ rows: 1, fold: 5, columns: [] });
+  });
+
+  it("gives a count that stands alone the worst state of every stage", () => {
+    const run = [stage("a", "done"), stage("b", "failed", "done"), stage("c", "working"), stage("d", "next")];
+    expect(stripGrid(run, 50)).toMatchObject({ fold: 4, foldTone: "failed", columns: [] });
+    expect(stripGrid([stage("a", "done"), stage("b", "waiting")], 1)).toMatchObject({ fold: 2, foldTone: "waiting", columns: [] });
+  });
+
+  it("never draws columns past the share once the count fits in it", () => {
+    for (let width = STRIP_FOLD_WIDTH / STRIP_GRID_SHARE; width <= 400; width += 1) {
+      const grid = stripGrid(stages(30, "done"), width);
+      const drawn = (grid.fold > 0 ? STRIP_FOLD_WIDTH : -STRIP_GAP) + grid.columns.length * (STRIP_MARK + STRIP_GAP);
+      expect(drawn, `at ${String(width)}`).toBeLessThanOrEqual(width * STRIP_GRID_SHARE);
+    }
   });
 
   it("is as many rows as the most lanes, up to three", () => {

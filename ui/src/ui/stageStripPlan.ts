@@ -15,10 +15,12 @@ export const STRIP_GAP = 3;
 export const STRIP_GRID_SHARE = 0.4;
 /** At most three blocks high, as the brand mark. */
 export const STRIP_ROWS_MAX = 3;
-/** The room the `+n` count takes before the first shown column (1.25rem; StageStrip.css draws it that wide). */
+/**
+ * The room the `+n` count takes before the first shown column (1.25rem; StageStrip.css draws it that wide).
+ * When not even one column fits beside it, every stage folds and the count stands alone, so the run stays
+ * counted at any width. Below an inner width of STRIP_FOLD_WIDTH / STRIP_GRID_SHARE the count alone is over the share.
+ */
 export const STRIP_FOLD_WIDTH = 20;
-/** A run with stages always shows at least this many columns, so the grid never folds away whole. */
-export const STRIP_COLUMNS_MIN = 1;
 
 /** Worst first: what a top block or the `+n` count shows when it stands for several lanes. */
 const SEVERITY: readonly StageStripState[] = ["failed", "waiting", "working", "next", "done"];
@@ -30,7 +32,7 @@ export function worstState(states: readonly StageStripState[]): StageStripState 
 export interface StripGrid {
   /** Blocks per column: min(STRIP_ROWS_MAX, the largest lane count). 0 without stages. */
   rows: number;
-  /** How many leading stages fold into the `+n` count. */
+  /** How many leading stages fold into the `+n` count. Every stage folds when not one column fits. */
   fold: number;
   /** The worst state the count hides; undefined when nothing folds. */
   foldTone: StageStripState | undefined;
@@ -61,7 +63,7 @@ export function stripGrid(segments: readonly StageStripSegment[], innerWidth: nu
   const budget = innerWidth * STRIP_GRID_SHARE;
   const fits = !(innerWidth > 0) || columnsWidth(segments.length) <= budget;
   const shown = fits ? segments.length
-    : Math.max(STRIP_COLUMNS_MIN, Math.floor((budget - STRIP_FOLD_WIDTH) / (STRIP_MARK + STRIP_GAP)));
+    : Math.max(0, Math.floor((budget - STRIP_FOLD_WIDTH) / (STRIP_MARK + STRIP_GAP)));
   const fold = segments.length - Math.min(shown, segments.length);
   const folded = segments.slice(0, fold);
   return {

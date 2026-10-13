@@ -60,7 +60,7 @@ export function StageStrip({ icon, title, status, count = 0, label, segments, on
   const [ref, width] = useInnerWidth<HTMLButtonElement>();
   const grid = stripGrid(segments, width);
   return <button ref={ref} type="button" className="stage-strip" aria-label={`${label}: ${status}`} onClick={onPress}>
-    {grid.columns.length === 0
+    {segments.length === 0
       ? <span className="stage-strip-icon" aria-hidden>{icon}</span>
       : <span className="stage-strip-grid" aria-hidden>
         {grid.fold > 0 && <span className="stage-strip-fold" data-tone={foldTone(grid.foldTone)}>+{grid.fold}</span>}
