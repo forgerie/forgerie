@@ -89,44 +89,78 @@ token in Azure. Deleting the local file does not revoke it there.
 
 ## Map work items to code
 
-Register the local code repository as a Forgerie project. Open **Settings →
-Backlog**, select the project, turn on Azure DevOps, and fill in organization,
-project, and optional Area Path. Select only Azure DevOps to hide local Markdown
-items without changing their files. Click **Save changes**. Source chips beside
-each backlog project show which sources are enabled.
+Add one Azure board in **Settings → Backlog → Sources**. Enter its organization,
+Azure project, and optional exact Area Path. A source belongs to the board, not
+to a code repository or project group. It remains available when you unregister
+a code project.
 
-Settings shows **Set in Forgerie**, **From the repo file**, or **Default:
-Markdown**. Forgerie saves its whole backlog section in the private data-dir
-file `backlog-settings.json`; it wins over the repository section. **Use the
-repo file** removes that override. Changes apply on the next read. Credentials stay in the Azure CLI sign-in or PAT file, not in Settings.
+Register your local code repositories as Forgerie projects. Set the source's
+optional **Destination** to the project where sessions should normally start.
+Without a destination, the source is **Not routed**. A manual launch requires
+you to choose a registered project. With a destination, a manual launch starts
+there by default, but you can choose any registered project and workspace.
+Forgerie never infers a destination from development links, tags, or work-item
+types. This change does not launch sessions automatically.
 
-You can also configure the repo file. In its canonical checkout, add this
-`backlog` section to `.forgerie/config.json`. Preserve the file's other settings:
+Each Azure work item appears once and can hold only one local claim, even when
+several code repositories use the board. Mine lists every work-item type
+assigned to the signed-in Azure DevOps user in the configured Azure project,
+not only Stories or the current sprint. Refresh after changing settings.
+Credentials stay in the Azure CLI sign-in or PAT file, not in Settings.
 
-```json
-{
-  "backlog": {
-    "providers": ["markdown", "azure-devops"],
-    "azureDevops": {
-      "organization": "amazeinsights",
-      "project": "Amaze Insights"
-    }
-  }
-}
-```
+An Area Path includes that area and its descendants. Read the exact value from
+Azure; a team or board name is not proof of its Area Path. Two sources on the
+same organization and Azure project must use non-overlapping Area Paths.
+Organization, project, and Area Path comparisons ignore case. A source with
+no Area Path overlaps every source on that board. `A\B` overlaps `A\B\C`,
+but not `A\Bc`. Settings refuses an overlapping save and names the other
+source. Narrow the Area Path before using Everyone on a large board.
 
-Mine lists every work-item type assigned to the signed-in Azure DevOps user in
-that Azure project, not only Stories or the current sprint. It does not list items from
-other Azure projects automatically. Refresh the backlog after changing config.
+If you later unregister the destination project, Forgerie keeps that setting
+and marks the source **Not routed** because its project is missing. Select
+another destination or choose a project at manual launch. Deleting a source
+does not stop sessions or release their claims. Archive the holding session,
+or release its exact claim through the source item release API.
 
-If several repositories share the Azure project, add `azureDevops.areaPath`
-in Settings or each repository's configuration. It must name the exact Azure
-Area Path.
-The query includes that area and its descendants. A board's team name, such as
-`Incentive Team`, is not proof of its Area Path. Read that value from Azure.
-Use non-overlapping areas. Mapping the same Azure items to two local repos
-lists them twice, and each repo can hold its own claim. Forgerie does not infer
-which code repository an Azure work item needs.
+### Existing settings and repository files
+
+The first read of a version-1 `backlog-settings.json` copies it to
+`backlog-settings.v1.json` with private mode `0600`, unless that backup already
+exists. Forgerie groups identical Azure sections into standalone sources with
+**no destination**. It also imports repo-file Azure sections from registered
+projects that have no saved backlog override. It removes Azure from the
+per-project entries and retains Markdown and GitHub. An Azure-only entry is
+removed so that the repo file or Markdown default applies. Set each imported
+source's destination before using it as a default.
+
+The new settings file is version 2. Migration replaces it atomically. If a
+backup, repo read, or write fails, version 1 stays intact and Backlog and
+Settings show a recovery error. Fix the cause and reload. Existing overlapping
+Area Paths remain separate, with warnings. The earliest-created source owns
+any item returned by both, so the item still appears once. Edit the Area Paths
+to remove the overlap.
+
+Repository `.forgerie/config.json` Azure backlog sections are retired.
+Forgerie shows a retirement note in the backlog and project settings and reads
+Azure boards only from **Settings → Backlog → Sources**. It never edits the
+repo file. Markdown and GitHub still use per-project settings or the repo
+file. An Azure board setting can no longer be shared through repository config.
+
+A restored legacy claim file can contain several Azure claims for one item.
+Forgerie keeps every claim and marks the item **contested**, naming each
+holding session. Launch is refused until release or archive leaves at most
+one claim. The remaining claim still holds the item; a new session needs its
+release too. No claim or session is removed automatically.
+
+### Downgrade
+
+An older daemon cannot read version-2 backlog settings. Stop Forgerie, keep a
+copy of the version-2 file, and restore `<data dir>/backlog-settings.v1.json`
+over `<data dir>/backlog-settings.json` before starting the older daemon.
+This restores the pre-migration settings; later source and destination edits
+are not in that backup. The older daemon refuses the version-2 file rather
+than overwriting it. Reload browser tabs after changing versions; old Azure
+item links and per-project launch routes do not work with standalone sources.
 
 ## Mine and Everyone
 
@@ -162,7 +196,7 @@ project. A team or board name is not an Area Path.
   `Microsoft.VSTS.Common.ClosedDate` also marks it closed. This covers old
   process states such as `Done` without guessing from the state name or Reason.
   Without ClosedDate, an unknown state stays visible and blocked; it cannot
-  launch. One warning per project and provider gives the count and at most five
+  launch. One warning per source gives the count and at most five
   example IDs, instead of one warning per item.
 - Mine keeps the `@Me` query without a ClosedDate predicate. Its closed items
   remain available under **Show done items**. A known open category still wins
@@ -225,8 +259,8 @@ project. A team or board name is not an Area Path.
   or open items in this project/Area Path for Everyone. Narrow the Area Path
   if you reach this limit.
 - A scan has a 30-second deadline, an 8 MiB response limit, and at most 32 work
-  item types. It honors HTTP 429 `Retry-After`. A failure does not hide items
-  from the project's other providers.
+  item types. It honors HTTP 429 `Retry-After`. A failure does not hide Markdown or GitHub
+  items from code projects.
 - HTTP 401 and 403 produce an Azure access warning. Detail requests report
   access or service failures as unavailable, not as a deleted item. No raw
   Azure error body or credential is returned to the browser.
@@ -234,7 +268,7 @@ project. A team or board name is not an Area Path.
   `#<number>`. A changed organization cannot reuse the old item's claim.
 - If an item leaves the selected scope query, it leaves the list. Its session
   keeps running. Archive the session to clear its claim, or release the exact claim
-  through the existing backlog release API. Disabling the provider does not
+  through the existing backlog release API. Deleting the source does not
   prevent that release API from working.
 
 Credentials use the server user's Azure CLI sign-in or a private PAT file.

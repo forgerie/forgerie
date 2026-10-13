@@ -105,41 +105,58 @@ setting. See [Azure credentials and their security costs](azure-devops.md#connec
 
 ## Backlog settings
 
-Open **Settings → Backlog** to set each project's Markdown, GitHub, and Azure
-DevOps sources. The server saves the whole section in
-`<data dir>/backlog-settings.json` (version 1, private mode 0600, atomic writes).
-This override wins over the canonical checkout's `.forgerie/config.json`
-`backlog` section. It is not a field-by-field merge. **Use the repo file**
-removes the override; the repo file applies again. With neither section,
-Forgerie reads Markdown from `.forgerie/backlog/`.
+Open **Settings → Backlog** to set each project's Markdown and GitHub providers
+and to manage standalone Azure DevOps **Sources**. The server saves settings in
+`<data dir>/backlog-settings.json` (version 2, private mode `0600`, atomic writes).
+The file contains `projects`, `sources`, an optional `githubLogin`, and a
+file-wide revision sequence.
 
-A saved override always has an explicit, non-empty `providers` list. For example,
-`["azure-devops"]` never scans local Markdown, even when `work/items` contains
-files. Turning off a source leaves its files and remote items unchanged.
-Revisions prevent one open Settings page from overwriting a newer save. A
-conflict asks you to reload before saving. A file-level revision sequence
-prevents an old tab from overwriting an override that was deleted and recreated.
-Changes apply on the next read.
+A per-project override wins over the canonical checkout's `.forgerie/config.json`
+`backlog` section. It is not a field-by-field merge. **Use the repo file** removes
+the override. With neither section, Forgerie reads Markdown from
+`.forgerie/backlog/`. A saved override has an explicit, non-empty `providers`
+list containing Markdown, GitHub, or both. Turning off a provider leaves files
+and remote items unchanged.
+
+Azure sources contain an organization, Azure project, optional exact Area Path,
+and optional registered destination project. They belong to no code repository
+or project group. Saves reject overlapping Area Paths on the same board.
+Without a destination, a manual launch needs a project selection. A registered
+destination sets the default; a manual launch can choose any registered project.
+A destination whose project was unregistered stays saved but resolves to
+**Not routed**. No automation launches sessions in this change.
+
+Revisions prevent an open Settings page from overwriting a newer save. A
+conflict asks you to reload. The file-wide revision sequence also prevents an
+old tab from overwriting an entry that was deleted and recreated. Changes apply
+on the next read.
 
 Settings lists a read error beside an inaccessible project folder or invalid
 repo config. Other projects and the GitHub username stay editable. Stored
 Forgerie overrides remain visible even when their project folder is missing.
 
-An unreadable, malformed, or invalid `backlog-settings.json` stops backlog
-reads for every project and shows the same recovery message in Settings.
-Forgerie does not fall back to repo files: that could silently show Markdown
-for a project set to Azure DevOps only. Restore `<data dir>/backlog-settings.json`
-from a valid backup, or remove it, then reload. Removing the file discards all
-Forgerie backlog overrides and the GitHub username; repo-file/default settings
-apply again. Forgerie never overwrites the damaged file automatically.
+On the first version-1 read, Forgerie backs up the file as
+`backlog-settings.v1.json`, imports identical Azure board sections as one source
+with no destination, removes Azure from project overrides, and atomically writes
+version 2. Repository `backlog.azureDevops` and `azure-devops` provider settings
+are retired with a warning; Forgerie never edits the repo file. See
+[migration and downgrade](azure-devops.md#existing-settings-and-repository-files)
+for import rules, overlapping migrated sources, and restoring the version-1
+backup before running an older daemon.
 
-The same file stores the optional `githubLogin` used by **Mine**. This is a
-username, not a credential. Without it, Mine shows no GitHub issues and gives a
-Settings reminder in its warning. Everyone keeps the trusted-author filter but
-lists issues regardless of assignment. The browser remembers the scope in
-localStorage. See [Azure DevOps backlog](azure-devops.md) for PAT setup, Area
-Path routing, and the cost of Everyone reads. Never put a token in Settings or
-in repository config.
+An unreadable, malformed, invalid, or failed-to-migrate `backlog-settings.json`
+stops all backlog reads and shows the same recovery message in Settings.
+Forgerie never silently falls back to repo files or overwrites the damaged file.
+Restore it from a valid backup, or remove it, then reload. Removing the file
+discards all Forgerie backlog overrides, Azure sources, and the GitHub username;
+only project-owned repo-file/default providers apply again.
+
+The optional `githubLogin` is a username, not a credential. Without it, Mine
+shows no GitHub issues and gives a Settings reminder. Everyone keeps the
+trusted-author filter but lists issues regardless of assignment. The browser
+remembers the scope in localStorage. See [Azure DevOps backlog](azure-devops.md)
+for credentials, Area Paths, destinations, and the cost of Everyone reads.
+Never put a token in Settings or repository config.
 
 ## Bundled CLIProxyAPI provider
 
@@ -154,7 +171,7 @@ Restart the session daemon after a Forgerie upgrade changes the bundled provider
 
 ## Project settings and worktree hooks
 
-The project file is `.forgerie/config.json`, relative to the checkout root. It is not a second global agent profile. Version 1 and files without a version retain their existing backlog, path access, and uploads behavior. Version 2 adds declared workspace services.
+The project file is `.forgerie/config.json`, relative to the checkout root. It is not a second global agent profile. Version 1 and files without a version retain their project-owned backlog, path access, and uploads behavior. Azure backlog sections are retired as described above. Version 2 adds declared workspace services.
 
 See [session worktrees](session-worktrees.md) for creation, hooks, ownership, Land, Discard, and the services API. Existing hooks still come from the main checkout.
 
