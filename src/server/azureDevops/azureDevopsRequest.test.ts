@@ -21,6 +21,69 @@ async function fixture() {
 }
 
 describe("authenticated Azure reads", () => {
+  it("runs az again for a 401 while the original refresh is still cleaning up", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "azure-refresh-cleanup-")); directories.push(directory);
+    let release: () => void = () => undefined;
+    let started: () => void = () => undefined;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const running = new Promise<void>((resolve) => { started = resolve; });
+    let calls = 0;
+    const credentials = new AzureDevopsCredentials({ directory, now: () => TIME, runner: async (_command, _args, options) => {
+      const number = ++calls;
+      if (number === 1) {
+        // Simulate extension files so the real recursive cleanup crosses several I/O turns.
+        const extensionDir = options.env["AZURE_EXTENSION_DIR"] ?? "";
+        await Promise.all(Array.from({ length: 32 }, (_, index) => writeFile(join(extensionDir, `extension-${String(index)}`), "placeholder")));
+        started(); await hold;
+      }
+      return JSON.stringify({ accessToken: token(number), expires_on: (TIME + 3600_000) / 1000 });
+    } });
+    const priming = credentials.read("amazeinsights");
+    const headers: string[] = [];
+    await running;
+    try {
+      const request = azureDevopsRequest(credentials, "amazeinsights", "https://dev.azure.com/", { method: "GET" }, (_url, init) => {
+        const header = new Headers(init.headers).get("Authorization") ?? ""; headers.push(header);
+        return Promise.resolve(new Response("", { status: header === `Bearer ${token(1)}` ? 401 : 200 }));
+      });
+      release();
+      const result = await request; await priming;
+      expect(result.ok && result.response.status).toBe(200);
+      expect(headers).toEqual([`Bearer ${token(1)}`, `Bearer ${token(2)}`]);
+      expect(calls).toBe(2);
+    } finally { release(); await priming; }
+  });
+  it("does not reuse a refresh invalidated while its cleanup is held", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "azure-invalidated-cleanup-")); directories.push(directory);
+    let release: () => void = () => undefined;
+    let cleaning: () => void = () => undefined;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const cleanupStarted = new Promise<void>((resolve) => { cleaning = resolve; });
+    let calls = 0; let cleanups = 0;
+    const credentials = new AzureDevopsCredentials({ directory, now: () => TIME,
+      runner: () => { calls++; return Promise.resolve(JSON.stringify({ accessToken: token(calls), expires_on: (TIME + 3600_000) / 1000 })); },
+      removeExtensionDirectory: async (path) => {
+        if (++cleanups === 1) { cleaning(); await hold; }
+        await rm(path, { recursive: true, force: true });
+      },
+    });
+    const priming = credentials.read("amazeinsights");
+    await cleanupStarted;
+    try {
+      credentials.invalidate(`Bearer ${token(1)}`);
+      const headers: string[] = [];
+      const result = await azureDevopsRequest(credentials, "amazeinsights", "https://dev.azure.com/", { method: "GET" }, (_url, init) => {
+        const header = new Headers(init.headers).get("Authorization") ?? ""; headers.push(header);
+        return Promise.resolve(new Response("", { status: header === `Bearer ${token(2)}` ? 200 : 401 }));
+      });
+      expect(result.ok && result.response.status).toBe(200);
+      expect(headers).toEqual([`Bearer ${token(2)}`]); expect(calls).toBe(2);
+      release();
+      expect(await priming).toEqual({ ok: true, authorization: `Bearer ${token(2)}` });
+      expect(await credentials.read("amazeinsights")).toEqual({ ok: true, authorization: `Bearer ${token(2)}` });
+      expect(calls).toBe(2);
+    } finally { release(); await priming; }
+  });
   it.each(["backlog", "pull-request"] as const)("shares CLI authorization and refreshes once after a %s 401", async (first) => {
     const f = await fixture(); const authorizations: string[] = [];
     const fetcher = (url: string, init: RequestInit) => {

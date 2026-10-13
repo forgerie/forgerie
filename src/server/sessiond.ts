@@ -150,7 +150,8 @@ async function createSessionDaemonRuntime() {
   const githubIssues = new GitHubIssueClient({ app: github, fetch: fetchGitHub, trust: githubTrust });
   const pullStore = new PullRequestStore(join(piWebDataDir(daemonEnvironment), "pull-requests.json"));
   await pullStore.initialize();
-  const azureCredentials = new AzureDevopsCredentials({ directory: join(piWebDataDir(daemonEnvironment), "azure-devops"), azureCliCommand: config.azureDevops?.azureCliCommand ?? "az", env: daemonEnvironment });
+  const azureCredentials = new AzureDevopsCredentials({ directory: join(piWebDataDir(daemonEnvironment), "azure-devops"), azureCliCommand: config.azureDevops?.azureCliCommand ?? "az", env: daemonEnvironment,
+    onCleanupWarning: (message) => { app.log.warn(message); } });
   const azurePulls = new AzurePullReader({ credentials: azureCredentials, fetch });
   const backlogSettings = new BacklogSettingsStore(join(piWebDataDir(daemonEnvironment), "backlog-settings.json"));
   const githubAgent: GitHubAgent = new GitHubAgent({ app: github, fetch: fetchGitHub, trust: githubTrust, backlogConfig: async (root) => {

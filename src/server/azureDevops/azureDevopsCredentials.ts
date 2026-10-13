@@ -22,20 +22,28 @@ const TokenSchema = Type.Object({
   expiresOn: Type.Optional(Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?$" })),
 });
 const REFRESH_MARGIN_MS = 5 * 60_000;
+interface CliCredential { authorization: string; refreshAt: number }
+type CliRefreshResult = { ok: true; credential: CliCredential } | { ok: false; message: string };
+interface RefreshFlight { generation: number; pending: Promise<CliRefreshResult> }
 interface Dependencies {
   directory: string;
   azureCliCommand?: string;
   runner?: AzureCliRunner;
   now?: () => number;
   env?: NodeJS.ProcessEnv;
+  removeExtensionDirectory?: (directory: string) => Promise<void>;
+  onCleanupWarning?: (message: string) => void;
 }
 
 /** One daemon-owned credential source for both Azure readers. Only CLI access tokens are cached. */
 export class AzureDevopsCredentials implements AzureCredentialSource {
   private readonly pat: AzureDevopsPatStore;
   private readonly now: () => number;
-  private cached: { authorization: string; refreshAt: number } | undefined;
-  private refreshing: Promise<AzureAuthorization> | undefined;
+  private cached: CliCredential | undefined;
+  private refreshing: RefreshFlight | undefined;
+  private generation = 0;
+  private lastRejectedAuthorization: string | undefined;
+  private cleanupWarningSent = false;
   constructor(private readonly deps: Dependencies) {
     this.pat = new AzureDevopsPatStore(deps.directory);
     this.now = deps.now ?? Date.now;
@@ -44,22 +52,33 @@ export class AzureDevopsCredentials implements AzureCredentialSource {
     return `Run \`az login\` as the Forgerie user, or put a PAT in ${join(this.deps.directory, `${organization.toLowerCase()}.pat`)}.`;
   }
   invalidate(rejectedAuthorization: string): void {
-    // A late 401 for the previous token must not discard a concurrent refresh's new token.
-    if (this.cached?.authorization === rejectedAuthorization) this.cached = undefined;
+    // Ignore late rejections of an older token and duplicate 401s from the same generation.
+    if (this.cached !== undefined && this.cached.authorization !== rejectedAuthorization) return;
+    if (this.cached === undefined && this.lastRejectedAuthorization === rejectedAuthorization) return;
+    if (this.cached === undefined && this.refreshing === undefined) return;
+    this.lastRejectedAuthorization = rejectedAuthorization;
+    this.cached = undefined;
+    this.generation++;
   }
   async read(organization: string): Promise<AzureAuthorization> {
     const pat = await this.pat.read(organization);
     if (pat.ok) return { ok: true, authorization: pat.authorization };
     if (pat.kind !== "missing") return { ok: false, message: pat.message };
-    if (this.cached !== undefined && this.now() < this.cached.refreshAt) return { ok: true, authorization: this.cached.authorization };
-    const pending = this.refreshing ?? this.refresh();
-    this.refreshing = pending;
-    try {
-      const result = await pending;
-      return result.ok ? result : { ok: false, message: `${result.message} ${this.fixMessage(organization)}` };
-    } finally { if (this.refreshing === pending) this.refreshing = undefined; }
+    for (;;) {
+      if (this.cached !== undefined && this.now() < this.cached.refreshAt) return { ok: true, authorization: this.cached.authorization };
+      const flight = this.refreshing?.generation === this.generation ? this.refreshing : { generation: this.generation, pending: this.refresh() };
+      this.refreshing = flight;
+      try {
+        const result = await flight.pending;
+        // Refresh includes cleanup. A 401 during either phase makes this result obsolete.
+        if (flight.generation !== this.generation) continue;
+        if (!result.ok) return { ok: false, message: `${result.message} ${this.fixMessage(organization)}` };
+        this.cached = result.credential;
+        return { ok: true, authorization: result.credential.authorization };
+      } finally { if (this.refreshing === flight) this.refreshing = undefined; }
+    }
   }
-  private async refresh(): Promise<AzureAuthorization> {
+  private async refresh(): Promise<CliRefreshResult> {
     let extensionDir: string | undefined;
     try {
       extensionDir = await mkdtemp(join(tmpdir(), "forgerie-azure-extensions-"));
@@ -72,17 +91,26 @@ export class AzureDevopsCredentials implements AzureCredentialSource {
       const expiry = value.expires_on === undefined ? Date.parse(value.expiresOn ?? "") : Number(value.expires_on) * 1000;
       if (!Number.isFinite(expiry) || expiry <= this.now()) return this.failed("Azure CLI returned an expired or invalid expiry.");
       const authorization = `Bearer ${value.accessToken}`;
-      this.cached = { authorization, refreshAt: expiry - REFRESH_MARGIN_MS };
-      return { ok: true, authorization };
+      return { ok: true, credential: { authorization, refreshAt: expiry - REFRESH_MARGIN_MS } };
     } catch (error) {
       // Never forward stdout, exception messages, stack/cause, or unfiltered CLI stderr.
       const timeout = typeof error === "object" && error !== null && "killed" in error && error.killed === true;
       return this.failed(timeout ? "Azure CLI did not finish within 30 seconds." : `Azure CLI could not provide credentials.${safeCliError(error)}`);
     } finally {
-      if (extensionDir !== undefined) await rm(extensionDir, { recursive: true, force: true }).catch(() => undefined);
+      if (extensionDir !== undefined) {
+        try {
+          await (this.deps.removeExtensionDirectory ?? ((directory: string) => rm(directory, { recursive: true, force: true })))(extensionDir);
+        } catch {
+          // Cleanup must not leak filesystem errors or discard otherwise valid credentials.
+          if (!this.cleanupWarningSent) {
+            this.cleanupWarningSent = true;
+            this.deps.onCleanupWarning?.("Azure CLI temporary extension directory could not be removed.");
+          }
+        }
+      }
     }
   }
-  private failed(reason: string): AzureAuthorization { return { ok: false, message: reason }; }
+  private failed(reason: string): { ok: false; message: string } { return { ok: false, message: reason }; }
 }
 
 function safeCliError(error: unknown): string {

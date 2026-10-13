@@ -81,6 +81,22 @@ describe("Azure credentials", () => {
     release(); const results = await Promise.all(reads);
     expect(results.every((r) => r.ok)).toBe(true); expect(f.calls()).toBe(1);
   });
+  it("warns once about cleanup failure without leaking errors or credentials", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "azure-cleanup-warning-")); directories.push(directory);
+    const warnings: string[] = [];
+    const source = new AzureDevopsCredentials({ directory, now: () => TIME,
+      runner: () => Promise.resolve(JSON.stringify({ accessToken: TOKEN, expires_on: (TIME + 3600_000) / 1000 })),
+      removeExtensionDirectory: (path) => { directories.push(path); return Promise.reject(new Error(`${TOKEN} ${path}`)); },
+      onCleanupWarning: (message) => { warnings.push(message); },
+    });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await source.read("amazeinsights");
+      if (!result.ok) throw new Error("Credential read failed");
+      source.invalidate(result.authorization);
+    }
+    expect(warnings).toEqual(["Azure CLI temporary extension directory could not be removed."]);
+    expect(JSON.stringify(warnings)).not.toContain(TOKEN); expect(JSON.stringify(warnings)).not.toContain(directory);
+  });
   it("prefers epoch expiry over a conflicting local-time expiry", async () => {
     const f = await fixture(() => Promise.resolve(JSON.stringify({ accessToken: TOKEN, expires_on: String((TIME + 3600_000) / 1000), expiresOn: "2000-01-01 00:00:00.000000" })));
     expect(await f.source.read("amazeinsights")).toMatchObject({ ok: true });
