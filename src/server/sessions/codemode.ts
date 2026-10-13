@@ -19,6 +19,9 @@ export const MODEL_ONLY_EXPOSURE: ToolExposure = "model-only";
  * `extensions` setting removes it, and another extension that registers
  * `codemode` replaces it. Pi registers the tool inactive; see
  * {@link codemodeDefaultTools} for how Forgerie turns it on.
+ * DurableSdkTools owns the nested `ctx.executeTool` path. It applies the same gate
+ * admission as ToolTask.beforeTool and resolves a waiting gate as text, so the
+ * sandbox can keep working instead of rejecting the whole script.
  */
 export function hostedCodemodeExtension(): InlineExtension {
   return { name: CODEMODE_TOOL_NAME, factory: createCodemodeExtension(), replaceable: true, builtin: true };

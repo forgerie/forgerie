@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
-import { gatedActionsExtension, gatedActions, decideGatedAction, waitingGatedActions, gatedActionsChanged } from "./durableGatedActions.js";
+import { gatedActionsExtension, gateToolCall, type GatedActionsExtensionOptions, gatedActions, decideGatedAction, waitingGatedActions, gatedActionsChanged } from "./durableGatedActions.js";
 import type { GatedActionReads } from "./gatedActions.js";
 import type { AutonomyPolicySource } from "../../shared/autonomyPolicy.js";
 import { readFile } from "node:fs/promises";
@@ -127,6 +127,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   /** Child questions, workflow stops, and workflow proposals that wait for the user. */
   private waitingCount = 0;
   private waitingGates = 0;
+  private gateOptions: GatedActionsExtensionOptions | undefined;
   private gateUnsubscribe: (() => void) | undefined;
   private flaggedCount = 0;
   private childRunRecords: DurableChildRunRecords | undefined;
@@ -156,7 +157,10 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     const extensions = this.resourceLoader.getExtensions();
     this.runner = new ExtensionRunner(extensions.extensions, extensions.runtime, services.cwd, sessionManager, new ModelRegistry(this.modelRuntime));
     this.tools = new DurableSdkTools({ cwd: services.cwd, settings: this.settingsManager, runner: this.extensionRunner, customTools: options.customTools ?? [],
-      beforeCall: () => this.journal.project(), emit: (event) => { this.emit(event); } });
+      beforeCall: () => this.journal.project(), gateNested: (call, api, index, ctx) => {
+        if (this.gateOptions === undefined) throw new Error("Nested gated actions are not bound");
+        return gateToolCall(this.gateOptions, call, api, ctx, {index, cwd: this.options.services.cwd, extension: `forgerie.sdk-tools:${this.sessionId}:nested`});
+      }, emit: (event) => { this.emit(event); } });
     this.basePrompt = this.promptOptions();
     this.agent = { streamFunction: this.modelRuntime.streamSimple.bind(this.modelRuntime) };
     this.bindCore();
@@ -231,6 +235,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.registry.install(extension);
     if (this.journalValue === undefined) return;
     const journal = this.journal;
+    const owner = journal.conversation.id;
+    this.registry.install(this.tools.nestedExtension(() => this.dispatch(owner).tools, `${name}:nested`));
     this.mutation = this.mutation.then(async () => {
       const agent = await journal.conversation.agent(context);
       // A fork inherits its parent's extension names. Select only this adapter's SDK declarations;
@@ -411,12 +417,13 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private async startGatedActions(): Promise<void> {
     this.gateUnsubscribe?.();
     const parent = this.journal.conversation.id;
-    const extension = gatedActionsExtension({name: `forgerie.gated-actions:${String(parent)}`, parent,
+    this.gateOptions = {name: `forgerie.gated-actions:${String(parent)}`, parent,
       harness: () => this.journal.harness,
       ...(this.options.autonomyPolicy === undefined ? {} : {policy: this.options.autonomyPolicy}),
       reads: {git: async (cwd, args) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8", maxBuffer: 4 * 1024 * 1024})).stdout,
         issueLabels: this.options.gatedIssueLabels ?? (() => Promise.reject(new Error("GitHub labels unavailable")))},
-    });
+    };
+    const extension = gatedActionsExtension(this.gateOptions);
     const {tasks, ...selected} = extension;
     this.registry.install(defineExtension({name: "forgerie.gated-action-runtime", tasks: tasks ?? []}));
     this.registry.install(selected);
@@ -871,7 +878,10 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (this.errorListener !== undefined) runner.onError(this.errorListener);
     this.runner = runner;
     this.tools = new DurableSdkTools({ cwd: this.options.services.cwd, settings: this.settingsManager, runner, customTools: this.options.customTools ?? [],
-      beforeCall: () => this.journal.project(), emit: (event) => { this.emit(event); } });
+      beforeCall: () => this.journal.project(), gateNested: (call, api, index, ctx) => {
+        if (this.gateOptions === undefined) throw new Error("Nested gated actions are not bound");
+        return gateToolCall(this.gateOptions, call, api, ctx, {index, cwd: this.options.services.cwd, extension: `forgerie.sdk-tools:${this.sessionId}:nested`});
+      }, emit: (event) => { this.emit(event); } });
     this.bindCore();
     this.installSdkTools();
     await this.mutation;

@@ -1,7 +1,8 @@
+import type { Context } from "@earendil-works/chord";
 import { randomUUID } from "node:crypto";
 import type { AgentTool, AgentToolCallOutcome, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { defineTool as sdkDefineTool, createReadToolDefinition, createBashToolDefinition, createEditToolDefinition, createWriteToolDefinition, createGrepToolDefinition, createFindToolDefinition, createLsToolDefinition, wrapRegisteredTool, createSyntheticSourceInfo, type ExtensionRunner, type SettingsManager, type ToolDefinition, type ExecuteToolOptions } from "@earendil-works/pi-coding-agent";
-import { defineExtension, defineTool, type ConversationId, type Extension, type ToolRegistration } from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, type ConversationId, type Extension, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { Value } from "typebox/value";
 import { durableJson } from "./durableJson.js";
 import { isChildNativeTool } from "./durableChildRuntime.js";
@@ -21,6 +22,7 @@ export interface DurableSdkToolsOptions {
   runner: ExtensionRunner;
   customTools: readonly ToolDefinition[];
   beforeCall(): Promise<void>;
+  gateNested?(call: {name: string; arguments: Record<string, unknown>}, api: ToolExecutionApi, index: number, context: Context): Promise<string | undefined>;
   emit(event: unknown): void;
 }
 
@@ -30,7 +32,7 @@ export class DurableSdkTools {
   private readonly callable = new Map<string, AgentTool>();
   private readonly replaySafe = new Set<string>();
   private active: string[] = [];
-  private readonly nestedCounts = new Map<string, number>();
+  private readonly invocations = new Map<string, {api: ToolExecutionApi; context: Context; next: number}>();
   private initialized = false;
   private activatedOnRegistration = new Set<string>();
 
@@ -121,9 +123,7 @@ export class DurableSdkTools {
         replay: this.replaySafe.has(name) ? "safe" : "unsafe",
         execute: async (args, api, context) => {
           const target = dispatch?.(api.conversationId) ?? this;
-          const outcome = await target.execute(api.callId, name, args, context.abortSignal, undefined, async (partial) => {
-            await api.details(durableJson(partial), context);
-          });
+          const outcome = await target.invoke(api, context, api.callId, name, args, "parent");
           return {
             content: outcome.result.content,
             isError: outcome.isError,
@@ -152,9 +152,7 @@ export class DurableSdkTools {
         }
         // Model-generated ids may repeat across conversations. The durable child task makes this id its own.
         const id = `child:${String(api.conversationId)}:${String(api.taskId)}:${api.callId}`;
-        const outcome = await tools.execute(id, definition.name, args, context.abortSignal, undefined, async (partial) => {
-          await api.details(durableJson(partial), context);
-        }, "child");
+        const outcome = await tools.invoke(api, context, id, definition.name, args, "child");
         return { content: outcome.result.content, isError: outcome.isError,
           ...(outcome.result.details === undefined ? {} : { details: durableJson(outcome.result.details) }),
           ...(outcome.result.usage === undefined ? {} : { usage: outcome.result.usage }),
@@ -163,14 +161,41 @@ export class DurableSdkTools {
     }));
   }
 
+  /** Installed by name, but never selected as model declarations. Approval resolves the saved nested tool here. */
+  nestedExtension(current: () => DurableSdkTools, name: string): Extension {
+    const tools = this.getCallable().map(tool => defineTool({
+      name: tool.name, description: tool.description, parameters: tool.parameters, replay: "unsafe",
+      execute: async (args, api, context): Promise<ToolExecutionResult> => {
+        const outcome = await current().invoke(api, context, `gate:${String(api.conversationId)}:${String(api.taskId)}:${api.callId}`, tool.name, args, "approvedNested");
+        return {content: outcome.result.content, isError: outcome.isError,
+          ...(outcome.result.details === undefined ? {} : {details: durableJson(outcome.result.details)}),
+          ...(outcome.result.usage === undefined ? {} : {usage: outcome.result.usage}),
+          ...(outcome.result.structuredContent === undefined ? {} : {structuredContent: durableJson(outcome.result.structuredContent)})};
+      },
+    }));
+    return defineExtension({name, tools});
+  }
+
+  private async invoke(api: ToolExecutionApi, context: Context, id: string, name: string, args: unknown, caller: "parent" | "child" | "approvedNested"): Promise<AgentToolCallOutcome> {
+    if (this.invocations.has(id)) throw new Error("An active SDK tool call reused its call ID");
+    this.invocations.set(id, {api, context, next: 0});
+    try {
+      return await this.execute(id, name, args, context.abortSignal, undefined, partial => api.details(durableJson(partial), context), caller);
+    } finally { this.invocations.delete(id); }
+  }
+
   async executeNested(parentId: string, name: string, args: unknown, options: ExecuteToolOptions): Promise<AgentToolCallOutcome> {
-    const index = (this.nestedCounts.get(parentId) ?? 0) + 1;
-    this.nestedCounts.set(parentId, index);
-    return this.execute(`${parentId}/${String(index)}`, name, args, options.signal, parentId, options.onUpdate);
+    const invocation = this.invocations.get(parentId);
+    if (invocation === undefined) throw new Error("Nested tool calls require an active Durable invocation");
+    const index = ++invocation.next;
+    const id = `${parentId}/${String(index)}`;
+    this.invocations.set(id, invocation);
+    try { return await this.execute(id, name, args, options.signal, parentId, options.onUpdate, "parent", index); }
+    finally { this.invocations.delete(id); }
   }
 
   /** `caller: "child"` runs a shared session tool for a child: `childTools` has already checked it against the deny list, and it need not be active for the parent. */
-  private async execute(callId: string, name: string, args: unknown, signal?: AbortSignal, parentToolCallId?: string, onUpdate?: (partial: AgentToolResult<unknown>) => void | Promise<void>, caller: "parent" | "child" = "parent"): Promise<AgentToolCallOutcome> {
+  private async execute(callId: string, name: string, args: unknown, signal?: AbortSignal, parentToolCallId?: string, onUpdate?: (partial: AgentToolResult<unknown>) => void | Promise<void>, caller: "parent" | "child" | "approvedNested" = "parent", nestedIndex?: number): Promise<AgentToolCallOutcome> {
     const tool = this.callable.get(name);
     const definition = this.definitions.get(name);
     const json = durableJson(args);
@@ -179,8 +204,15 @@ export class DurableSdkTools {
     const error = (text: string): AgentToolCallOutcome => ({ toolCall, result: { content: [{ type: "text", text }], details: undefined }, isError: true });
     if (tool === undefined || definition === undefined) return error(`Unknown tool: ${name}`);
     if (caller === "parent" && parentToolCallId === undefined && !this.active.includes(name)) return error(`Tool ${name} is not active for this conversation.`);
-    if (parentToolCallId !== undefined && !this.getCallable().some((candidate) => candidate.name === name)) return error(`Tool ${name} is not callable from codemode.`);
+    if ((parentToolCallId !== undefined || caller === "approvedNested") && !this.getCallable().some((candidate) => candidate.name === name)) return error(`Tool ${name} is not callable from codemode.`);
     if (!Value.Check(tool.parameters, args)) return error(`Invalid arguments for tool ${name}`);
+    if (parentToolCallId !== undefined) {
+      const invocation = this.invocations.get(parentToolCallId);
+      if (invocation === undefined || nestedIndex === undefined) return error("Nested call lost its Durable invocation");
+      const block = await this.options.gateNested?.(toolCall, invocation.api, nestedIndex, invocation.context);
+      // A waiting gate resolves as text, not a rejected script promise. No underlying tool ran.
+      if (block !== undefined) return {toolCall, result: {content: [{type: "text", text: block}], details: {gated: true}}, isError: false};
+    }
     await this.options.beforeCall();
     const eventBase = { toolCallId: callId, toolName: name, args, input, ...(parentToolCallId === undefined ? {} : { parentToolCallId }) };
     const blocked = await this.options.runner.emitToolCall({ type: "tool_call", ...eventBase });
