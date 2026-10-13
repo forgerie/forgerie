@@ -1,3 +1,4 @@
+import { realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -48,7 +49,11 @@ export class TriggerService {
   readonly timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   readonly timezones = [...new Set([...Intl.supportedValuesOf("timeZone"), "UTC"])].sort();
   private constructor(private readonly options: TriggerServiceOptions) {
-    this.core = durableTriggers({ fire: options.fire, now: options.now ?? Date.now });
+    this.core = durableTriggers({ fire: async (request, signal) => {
+      const cwd = await this.requireWorkspace(request.action.cwd);
+      if (cwd !== request.action.cwd) throw new TriggerError("The saved workspace destination changed", 400, "action.cwd");
+      return options.fire({ ...request, action: { ...request.action, cwd } }, signal);
+    }, now: options.now ?? Date.now });
   }
   static async open(options: TriggerServiceOptions): Promise<TriggerService> {
     const service = new TriggerService(options);
@@ -96,7 +101,7 @@ export class TriggerService {
   }
   async workflows(cwd: string): Promise<TriggerWorkflowsResponse> {
     this.opened();
-    await this.requireWorkspace(cwd);
+    cwd = await this.requireWorkspace(cwd);
     const inventory = await this.options.workflows.list(cwd);
     return { diagnostics: inventory.diagnostics, workflows: inventory.workflows.map((workflow): TriggerWorkflow => {
       let kind: "prose" | "script" = "prose";
@@ -104,23 +109,36 @@ export class TriggerService {
       return { name: workflow.name, ...(workflow.description === undefined ? {} : { description: workflow.description }), kind, inputs: workflow.definition.inputs ?? {}, hasLandStop: workflow.definition.stages?.some((stage) => stage.stop === "land") ?? false };
     }) };
   }
-  async requireWorkspace(cwd: string): Promise<void> {
-    try { normalizeRequestCwd(cwd); } catch (error) { throw new TriggerError(error instanceof Error ? error.message : String(error), 400, "action.cwd"); }
-    if (await this.options.workspaces.forCwd(cwd) === undefined) throw new TriggerError("Choose a workspace of a registered project", 400, "action.cwd");
+  async requireWorkspace(cwd: string): Promise<string> {
+    let canonical: string;
+    try {
+      normalizeRequestCwd(cwd);
+      canonical = await realpath(cwd);
+      if (!(await stat(canonical)).isDirectory()) throw new Error("cwd must be an existing directory");
+    } catch (error) { throw new TriggerError(error instanceof Error ? error.message : String(error), 400, "action.cwd"); }
+    const locator = this.options.workspaces;
+    const paths = locator.canonicalForCwd === undefined ? await locator.forCwd(canonical) : await locator.canonicalForCwd(canonical);
+    const canonicalPaths = await Promise.all((paths ?? []).map(async (path) => {
+      try { const canonicalPath = await realpath(path); return (await stat(canonicalPath)).isDirectory() ? canonicalPath : undefined; }
+      catch { return undefined; }
+    }));
+    if (!canonicalPaths.includes(canonical)) throw new TriggerError("Choose a workspace of a registered project", 400, "action.cwd");
+    return canonical;
   }
-  async validateAction(action: TriggerAction): Promise<void> {
-    await this.requireWorkspace(action.cwd);
+  async validateAction(action: TriggerAction): Promise<TriggerAction> {
+    action = { ...action, cwd: await this.requireWorkspace(action.cwd) };
     const workflow = await this.options.workflows.read(action.cwd, action.workflow).catch((error: unknown) => { throw new TriggerError(error instanceof Error ? error.message : String(error), 400, "action.workflow"); });
     try { assertProseOnly(workflow); } catch (error) { throw new TriggerError(error instanceof Error ? error.message : String(error), 400, "action.workflow"); }
     try { workflowInputs(workflow.definition, action.inputs); } catch (error) { throw new TriggerError(error instanceof Error ? error.message : String(error), 400, "action.inputs"); }
+    return action;
   }
   async create(value: unknown, creator: TriggerCreator = { kind: "user" }): Promise<Trigger> {
     const { harness, anchor } = this.opened();
     const input: TriggerCreate = triggerBody(TriggerCreateSchema, value);
     if (input.name.trim() === "") throw new TriggerError("Give the trigger a name", 400, "name");
     this.schedule(input.schedule);
-    await this.validateAction(input.action);
-    return this.core.create(harness, anchor, input, context, creator);
+    const action = await this.validateAction(input.action);
+    return this.core.create(harness, anchor, { ...input, action }, context, creator);
   }
   async update(id: string, value: unknown): Promise<Trigger> {
     const { harness, anchor } = this.opened();
@@ -128,8 +146,8 @@ export class TriggerService {
     const current = await this.get(id);
     if (input.name?.trim() === "") throw new TriggerError("Give the trigger a name", 400, "name");
     if (input.schedule !== undefined) this.schedule(input.schedule);
-    await this.validateAction(input.action ?? current.action);
-    return this.core.update(harness, anchor, id, input, context);
+    const action = await this.validateAction(input.action ?? current.action);
+    return this.core.update(harness, anchor, id, { ...input, ...(input.action === undefined && action.cwd === current.action.cwd ? {} : { action }) }, context);
   }
   private schedule(value: unknown): void {
     try { parseTriggerSchedule(value); } catch (error) { throw new TriggerError(error instanceof Error ? error.message : String(error), 400, "schedule.timezone"); }

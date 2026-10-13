@@ -69,8 +69,7 @@ async function daemon(hold: boolean) {
   });
   const triggers = await TriggerService.open({ env: { PI_WEB_DATA_DIR: root }, workflows: library, workspaces, now,
     fire: workflowTriggerFire({ sessions,
-      requireWorkspace: async (value) => { if (await workspaces.forCwd(value) === undefined) throw new Error("Unregistered workspace"); },
-      validateAction: async (action) => { const workflow = await library.read(action.cwd, action.workflow); assertProseOnly(workflow); workflowInputs(workflow.definition, action.inputs); },
+        validateAction: async (action) => { const workflow = await library.read(action.cwd, action.workflow); assertProseOnly(workflow); workflowInputs(workflow.definition, action.inputs); },
       afterStep: async (step, _request, context) => {
         if (!hold || step !== "workflow") return;
         interrupted = true;

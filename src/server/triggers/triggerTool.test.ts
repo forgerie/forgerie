@@ -81,7 +81,7 @@ it("persists a failed fire message without a model turn, with session identity a
   const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] });
   const sessions = new PiSessionService(new CapturingSessionEventHub(), { agentDir, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore() });
   try {
-    const fire = workflowTriggerFire({ sessions, requireWorkspace: () => Promise.resolve(), validateAction: () => Promise.reject(new Error("Workflow disappeared")) });
+    const fire = workflowTriggerFire({ sessions, validateAction: () => Promise.reject(new Error("Workflow disappeared")) });
     const request = { triggerId: "night", name: "Nightly refinement", occurrence: Date.parse("2026-10-13T03:00Z"), requestId: "trigger-night-failure", timezone: "UTC", action: { kind: "workflow" as const, cwd: root, workflow: "missing", inputs: {} } };
     await expect(fire(request, context)).rejects.toMatchObject({ message: "Workflow disappeared", cwd: root });
     const files = await gateway.list(root);

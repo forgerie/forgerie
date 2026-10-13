@@ -1,3 +1,4 @@
+import { realpath, stat } from "node:fs/promises";
 import type { Project, WorkspaceListing } from "../types.js";
 import { cwdPathsEqual } from "../workingDirectory.js";
 
@@ -29,10 +30,26 @@ export interface ProjectWorkspaceCwds {
    * when no registered project contains it. The result includes `cwd` itself.
    */
   forCwd(cwd: string): Promise<string[] | undefined>;
+  /** Existing canonical workspace directories, for security-sensitive callers. */
+  canonicalForCwd?(cwd: string): Promise<string[] | undefined>;
 }
 
 export class RegisteredProjectWorkspaceCwds implements ProjectWorkspaceCwds {
   constructor(private readonly deps: ProjectWorkspaceCwdsDeps) {}
+
+  async canonicalForCwd(cwd: string): Promise<string[] | undefined> {
+    for (const project of await this.deps.projects.list()) {
+      const paths: string[] = [];
+      for (const workspace of await this.deps.workspaces.list(project)) {
+        try {
+          const path = await realpath(workspace.path);
+          if ((await stat(path)).isDirectory()) paths.push(path);
+        } catch { /* Missing or inaccessible directories are not eligible workspace destinations. */ }
+      }
+      if (paths.includes(cwd)) return [...new Set(paths)];
+    }
+    return undefined;
+  }
 
   async forCwd(cwd: string): Promise<string[] | undefined> {
     const projects = await this.deps.projects.list();

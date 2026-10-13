@@ -290,7 +290,6 @@ async function createSessionDaemonRuntime() {
   const triggers: TriggerService = await TriggerService.open({
     env: daemonEnvironment, workflows: triggerWorkflows, workspaces: projectWorkspaces,
     fire: workflowTriggerFire({ sessions,
-      requireWorkspace: async (cwd) => { if (await projectWorkspaces.forCwd(cwd) === undefined) throw new Error("Workspace is no longer registered"); },
       validateAction: async (action) => {
         const workflow = await triggerWorkflows.read(action.cwd, action.workflow);
         assertProseOnly(workflow);

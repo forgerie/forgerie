@@ -42,7 +42,6 @@ const projects = new ProjectService(new ProjectStore(join(root, "projects.json")
 const workspaces = new RegisteredProjectWorkspaceCwds({ projects, workspaces: new WorkspaceService() });
 const triggers = await TriggerService.open({ env: { PI_WEB_DATA_DIR: root }, workflows: library, workspaces,
   fire: workflowTriggerFire({ sessions,
-    requireWorkspace: async (value) => { if (await workspaces.forCwd(value) === undefined) throw new Error("Unregistered workspace"); },
     validateAction: async (action) => { const workflow = await library.read(action.cwd, action.workflow); assertProseOnly(workflow); workflowInputs(workflow.definition, action.inputs); },
     afterStep: async (step) => {
       if (step !== checkpoint) return;
