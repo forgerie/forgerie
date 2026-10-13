@@ -11,13 +11,20 @@ const limits = { maxBytes: 100_000, tooLarge: "Plugin settings are limited to 10
  *   GET  /aui/plugins           the plugin catalog and its revision
  *   POST /aui/plugins           { revision, change } (409 if the revision moved)
  *   POST /aui/plugins/restart   { revision, confirm: true }
+ *   GET  /aui/plugins/readme    ?id=package:<source>  a Pi package's README as text
  *   GET  /aui/app-plugins       the browser app's bundled plugins: on or off, and their settings
  */
 export function pluginMiddleware(service: PluginService): Middleware {
   return (request, response, next) => {
     const path = new URL(request.url ?? "/", "http://local").pathname;
-    if (path !== "/aui/plugins" && path !== "/aui/plugins/restart" && path !== "/aui/app-plugins") { next(); return; }
+    if (path !== "/aui/plugins" && path !== "/aui/plugins/restart" && path !== "/aui/plugins/readme" && path !== "/aui/app-plugins") { next(); return; }
     const handle = async () => {
+      if (path === "/aui/plugins/readme") {
+        if (request.method !== "GET") throw new SettingsHttpError(405, "Use GET.");
+        const id = new URL(request.url ?? "/", "http://local").searchParams.get("id");
+        if (id === null || id === "") throw new SettingsHttpError(400, "Name a package with ?id=.");
+        return service.readme(id);
+      }
       if (path === "/aui/app-plugins") {
         if (request.method !== "GET") throw new SettingsHttpError(405, "Use GET.");
         return service.appStates();

@@ -52,6 +52,9 @@ describe("settings HTTP routes", () => {
     expect((await post("/aui/plugins", { revision: "stale", change: { type: "add", source: "/missing" } })).statusCode).toBe(409);
     expect((await post("/aui/plugins", { change: { type: "settings", id: "forgerie:quota", settings: [] } })).statusCode).toBe(400);
     expect((await post("/aui/plugins", "a".repeat(100_001))).statusCode).toBe(413);
+    expect((await app.inject("/aui/plugins/readme")).statusCode).toBe(400);
+    expect((await app.inject("/aui/plugins/readme?id=package:%2Fetc")).statusCode).toBe(404);
+    expect((await post("/aui/plugins/readme?id=x", {})).statusCode).toBe(405);
   });
 
   it("lists, edits, and deletes the top-level agent files in ~/.agents, and never reaches below it", async () => {

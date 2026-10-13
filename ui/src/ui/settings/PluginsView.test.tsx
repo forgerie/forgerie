@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginsView, plainName, tildify } from "./PluginsView";
 import type { PluginsApi } from "../../plugins/pluginsApi";
-import type { PluginCatalog, PluginChange } from "@shared/pluginsContract";
+import type { PluginCatalog, PluginChange, PluginReadme } from "@shared/pluginsContract";
 import { resolveAppSettings } from "@shared/appPlugins";
 import { accountMetersManifest } from "@shared/appPluginManifests";
 
@@ -14,6 +14,8 @@ let calls: PluginChange[];
 let restarts: number;
 let selected: string | undefined;
 let api: PluginsApi;
+let readme: PluginReadme;
+let readmeReads: string[];
 const settle = () => act(async () => { for (let index = 0; index < 6; index++) await new Promise((resolve) => setTimeout(resolve, 0)); });
 const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent?.trim() === text || node.getAttribute("aria-label") === text)!;
 const click = async (text: string) => { const node = button(text); expect(node, text).toBeDefined(); await act(async () => node.click()); await settle(); };
@@ -46,7 +48,10 @@ beforeEach(() => {
       return catalog;
     },
     restart: async () => { restarts += 1; catalog = { ...catalog, restartRequired: false }; return catalog; },
+    readme: async (id) => { readmeReads.push(id); return readme; },
   };
+  readmeReads = [];
+  readme = { text: null, truncated: false };
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
@@ -105,6 +110,39 @@ describe("Plugins settings", () => {
     expect(document.querySelector("[role=switch]")!.getAttribute("aria-checked")).toBe("false");
     expect(document.querySelector(".notice[data-tone=pending]")!.textContent).toContain("Restart Forgerie to apply your changes");
     expect(status()).toBe("Saved");
+  });
+  it("shows a package's README under its properties, styled like a reply", async () => {
+    readme = { file: "README.md", truncated: true, repository: { blob: "https://github.com/o/r/blob/HEAD/", raw: "https://raw.githubusercontent.com/o/r/HEAD/", directory: "" },
+      text: "# pi-goal\n\nRuns **goals**. See [usage](docs/usage.md) and [install](#install).\n\n![shot](shot.png) ![badge](http://img.example/b.svg)\n\n"
+        + "<p align=\"center\"><script>alert(1)</script><a href=\"javascript:alert(1)\">bad</a></p>\n\n```sh\nnpm i pi-goal\n```\n" };
+    selected = "package:pi-goal"; await render();
+    expect(readmeReads).toEqual(["package:pi-goal"]);
+    const section = document.querySelector(".plugin-readme")!;
+    expect(section.querySelector("h2")!.textContent).toBe("Readme");
+    expect(section.querySelector<HTMLAnchorElement>(".plugin-readme-source")!.href).toBe("https://github.com/o/r/blob/HEAD/README.md");
+    // The title repeats the page's name, so it is dropped.
+    expect(section.querySelector(".plugin-readme-body h1")).toBeNull();
+    expect(section.querySelector(".plugin-readme-body strong")!.textContent).toBe("goals");
+    const links = [...section.querySelectorAll<HTMLAnchorElement>(".plugin-readme-body a")];
+    expect(links.find((link) => link.textContent === "usage")).toMatchObject({ href: "https://github.com/o/r/blob/HEAD/docs/usage.md", target: "_blank" });
+    expect(links.some((link) => link.textContent === "install" || link.textContent === "bad")).toBe(false);
+    expect(section.textContent).toContain("install");
+    const images = [...section.querySelectorAll<HTMLImageElement>(".plugin-readme-body img")];
+    expect(images.map((image) => image.getAttribute("src"))).toEqual(["https://raw.githubusercontent.com/o/r/HEAD/shot.png"]);
+    expect(images[0]!.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(section.querySelector("script")).toBeNull();
+    expect(section.querySelector(".code-header")!.textContent).toContain("sh");
+    expect(section.querySelector(".code-body code")!.textContent).toBe("npm i pi-goal");
+    expect(section.querySelector(".plugin-readme-more")!.textContent).toContain("Read all of it on GitHub");
+  });
+  it("shows no README section when a package has none, and never reads one for a missing package", async () => {
+    selected = "package:pi-goal"; await render();
+    expect(document.querySelector(".plugin-readme")).toBeNull();
+    await act(async () => root.unmount());
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    readmeReads = [];
+    selected = "package:gone"; await render();
+    expect(readmeReads).toEqual([]);
   });
   it("names a package that is configured but not on disk", async () => {
     selected = "package:gone"; await render();

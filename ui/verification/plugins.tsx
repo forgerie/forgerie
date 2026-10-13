@@ -22,6 +22,21 @@ let catalog: PluginCatalog = { profileDir: "/home/simonwjackson/.local/share/for
     { id: "builtin:pi-processes", kind: "builtin", name: "pi-processes", source: "Forgerie", description: "Runs dev servers, watchers, and other long commands in the background.", enabled: true },
     { id: "builtin:pi-subagents", kind: "builtin", name: "pi-subagents", source: "Forgerie", description: "Lets a session hand work to the agents in Settings.", enabled: true },
   ] };
+// A README shaped like real ones: a repeated title, badges, HTML, a relative image and link, code, a table, and a fold.
+const goalReadme = { file: "README.md", truncated: false,
+  repository: { blob: "https://github.com/narumitw/pi-goal/blob/HEAD/", raw: "https://raw.githubusercontent.com/narumitw/pi-goal/HEAD/", directory: "" },
+  text: [
+    "# pi-goal", "",
+    "[![npm](https://img.shields.io/npm/v/@narumitw/pi-goal)](https://www.npmjs.com/package/@narumitw/pi-goal) [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)", "",
+    "Autonomous `/goal` completion for Pi. Give the agent a goal; it keeps working until the goal is **verified done** or it reports a real blocker.", "",
+    "## Install", "", "```sh", "pi install npm:@narumitw/pi-goal", "```", "",
+    "## Usage", "", "1. Start a session.", "2. Type `/goal ship the release notes`.", "3. Watch the queue in the status line.", "",
+    "> The agent stops only when it calls `goal_complete` or `goal_blocked`.", "",
+    "### Options", "", "| Setting | Default | What it does |", "| --- | --- | --- |", "| `maxTurns` | `40` | Turns before the goal pauses. |", "| `queue` | `false` | Runs goals in order. Experimental. |", "",
+    "See [the design notes](docs/design.md) and the [changelog](#changelog).", "",
+    "<details><summary>Configuration file</summary>", "", "```json", "{ \"goal\": { \"maxTurns\": 40 } }", "```", "", "</details>", "",
+    "## Changelog", "", "- **0.49.6**: ordered queues.", "- **0.49.0**: first release.",
+  ].join("\n") };
 let serial = 1;
 const api: PluginsApi = {
   list: async () => catalog,
@@ -39,6 +54,7 @@ const api: PluginsApi = {
     return catalog;
   },
   restart: async () => { catalog = { ...catalog, restartRequired: false }; return catalog; },
+  readme: async (id) => id === "package:goal" ? goalReadme : { text: null, truncated: false },
 };
 function Screen() {
   const [selected, setSelected] = useState(new URLSearchParams(location.search).get("plugin") ?? undefined);

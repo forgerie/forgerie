@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { execFile } from "node:child_process";
@@ -9,7 +9,7 @@ import lockfile from "proper-lockfile";
 import { z } from "zod";
 import { activeForgerieProfile, type ForgerieProfile, type Gateway } from "./forgerieProfile.js";
 import { isErrnoCode, SettingsHttpError } from "./http.js";
-import { changeSchema, type ManagedPlugin, type PluginCatalog, type PluginChange } from "../../shared/pluginsContract.js";
+import { changeSchema, type ManagedPlugin, type PluginCatalog, type PluginChange, type PluginReadme } from "../../shared/pluginsContract.js";
 import { AppSettingsError, resolveAppSettings, storedAppSettings, type AppPluginManifest, type AppPluginStates } from "../../shared/appPlugins.js";
 import { APP_PLUGIN_MANIFESTS } from "../../shared/appPluginManifests.js";
 
@@ -50,6 +50,57 @@ export function extensionName(path: string): string {
   return (/^index\.[cm]?[jt]s$/u.test(file) ? basename(dirname(path)) : file.replace(/\.[cm]?[jt]s$/u, "")) || file;
 }
 const units = ["forgerie-web.service", "forgerie-sessiond.service"];
+/** The most README text the page shows. Longer files stop here, and the reply says so. */
+export const README_MAX_BYTES = 512 * 1024;
+const readmeName = /^readme(?:\.(?:md|markdown|mdown|txt))?$/iu;
+/** `README.md` before `README.markdown` before a bare `README`, so the Markdown file wins when a package ships several. */
+const readmeRank = (name: string) => /\.md$/iu.test(name) ? 0 : /\.(?:markdown|mdown)$/iu.test(name) ? 1 : /^readme$/iu.test(name) ? 2 : 3;
+
+const repositorySchema = z.object({ repository: z.union([z.string(), z.object({ url: z.string(), directory: z.string().optional() })]).optional() }).catch({});
+/**
+ * Where a package's GitHub repository serves files, from package.json's
+ * `repository`. Other hosts get nothing: their URL layouts differ.
+ */
+export function githubRepository(repository: string | { url: string; directory?: string | undefined } | undefined): PluginReadme["repository"] {
+  if (repository === undefined) return undefined;
+  const url = typeof repository === "string" ? repository : repository.url;
+  const match = /^(?:github:)?([\w.-]+)\/([\w.-]+?)(?:\.git)?$/u.exec(url)
+    ?? /^(?:git\+)?(?:https?|git|ssh):\/\/(?:[^@/]+@)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?(?:#.*)?$/u.exec(url)
+    ?? /^git@github\.com:([\w.-]+)\/([\w.-]+?)(?:\.git)?$/u.exec(url);
+  const owner = match?.[1];
+  const name = match?.[2];
+  if (owner === undefined || name === undefined) return undefined;
+  const directory = typeof repository === "string" ? "" : (repository.directory ?? "").replace(/^[./]+|\/+$/gu, "");
+  return { blob: `https://github.com/${owner}/${name}/blob/HEAD/`, raw: `https://raw.githubusercontent.com/${owner}/${name}/HEAD/`,
+    directory: directory === "" ? "" : `${directory}/` };
+}
+
+/**
+ * The README in a package folder, read as text. Only a regular file counts:
+ * a symlink could point anywhere on this host, so it is skipped.
+ */
+export async function readReadme(folder: string): Promise<PluginReadme> {
+  let names: string[];
+  try { names = await readdir(folder); } catch { return { text: null, truncated: false }; }
+  for (const name of names.filter((entry) => readmeName.test(entry)).sort((a, b) => readmeRank(a) - readmeRank(b))) {
+    const path = join(folder, name);
+    const info = await lstat(path).catch(() => undefined);
+    if (info?.isFile() !== true) continue;
+    const handle = await open(path, "r");
+    try {
+      const buffer = Buffer.alloc(Math.min(info.size, README_MAX_BYTES));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const truncated = info.size > README_MAX_BYTES;
+      const decoded = buffer.subarray(0, bytesRead).toString("utf8");
+      // A cut can split a multi-byte character. The decoder turns the broken tail into U+FFFD; drop it.
+      let repository: PluginReadme["repository"];
+      try { repository = githubRepository(repositorySchema.parse(JSON.parse(await readFile(join(folder, "package.json"), "utf8"))).repository); }
+      catch { repository = undefined; }
+      return { text: truncated ? decoded.replace(/\uFFFD+$/u, "") : decoded, file: name, truncated, ...(repository ? { repository } : {}) };
+    } finally { await handle.close(); }
+  }
+  return { text: null, truncated: false };
+}
 
 export class PluginError extends SettingsHttpError {}
 export interface PluginServices {
@@ -71,6 +122,9 @@ export const localPluginServices: PluginServices = {
     await exec("systemd-run", ["--user", "--collect", "--on-active=1", "systemctl", "--user", "restart", ...units], { timeout: 10_000 });
   },
 };
+
+const packageManager = (profile: ForgerieProfile) => new DefaultPackageManager({ cwd: profile.dir, agentDir: profile.dir,
+  settingsManager: SettingsManager.create(profile.dir, profile.dir, { projectTrusted: false }) });
 
 async function textAt(path: string): Promise<string> {
   try { return await readFile(path, "utf8"); } catch (error) {
@@ -129,11 +183,22 @@ export class PluginService {
     return { plugins: this.appPlugins.map((manifest) => ({ id: manifest.id, enabled: config.plugins[manifest.id]?.enabled !== false,
       settings: { ...resolveAppSettings(manifest, config.plugins[manifest.id]?.settings) } })) };
   }
+  /**
+   * A configured Pi package's README. Only a package in this profile's list can
+   * be read, so an id cannot name an arbitrary folder. Never loads its code.
+   */
+  async readme(id: string): Promise<PluginReadme> {
+    const { profile, settings } = await this.snapshot();
+    const entry = [...settings.packages, ...settings.forgerieDisabledPackages].find((candidate) => packageId(packageSource(candidate)) === id);
+    if (entry === undefined) throw new PluginError(404, "That package is not in this profile's plugin list.");
+    let path: string | undefined;
+    try { path = packageManager(profile).getInstalledPath(packageSource(entry), "user"); } catch { path = undefined; }
+    return path === undefined ? { text: null, truncated: false } : readReadme(path);
+  }
   async list(): Promise<PluginCatalog> {
     const data = await this.snapshot();
     const { profile, settings, config } = data;
-    const manager = new DefaultPackageManager({ cwd: profile.dir, agentDir: profile.dir,
-      settingsManager: SettingsManager.create(profile.dir, profile.dir, { projectTrusted: false }) });
+    const manager = packageManager(profile);
     const [resolved, services] = await Promise.all([manager.resolve(() => Promise.resolve("skip")), this.services.read()]);
     // Reads package.json as data. Locating a package never loads its code or installs a missing one.
     const describePackage = async (entry: z.infer<typeof packageSchema>, enabled: boolean): Promise<ManagedPlugin> => {

@@ -1,10 +1,10 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { extensionName, PluginService, sourceName, type PluginServices } from "./pluginService.js";
+import { extensionName, githubRepository, PluginService, README_MAX_BYTES, sourceName, type PluginServices } from "./pluginService.js";
 import type { ForgerieProfile, Gateway } from "./forgerieProfile.js";
 import type { AppPluginManifest } from "../../shared/appPlugins.js";
 
@@ -86,6 +86,36 @@ describe("plugin management", () => {
     const catalog = await service.list();
     expect(catalog.plugins[0]).toMatchObject({ name: "nowhere", installed: false, description: "", filtered: false });
     expect(catalog.plugins[0]?.version).toBeUndefined();
+  });
+  it("reads a configured package's README as text, preferring Markdown and skipping symlinks", async () => {
+    const id = `package:${packagePath}`;
+    expect(await service.readme(id)).toEqual({ text: null, truncated: false });
+    await writeFile(join(packagePath, "README"), "plain");
+    await writeFile(join(packagePath, "readme.md"), "# test-plugin\n\nUse it.\n");
+    expect(await service.readme(id)).toEqual({ text: "# test-plugin\n\nUse it.\n", file: "readme.md", truncated: false });
+    await rm(join(packagePath, "readme.md"));
+    await writeFile(join(root, "secret.txt"), "secret");
+    await symlink(join(root, "secret.txt"), join(packagePath, "README.md"));
+    expect(await service.readme(id)).toMatchObject({ text: "plain", file: "README" });
+    await expect(service.readme(`package:${root}`)).rejects.toMatchObject({ status: 404 });
+  });
+  it("finds where a GitHub repository serves a README's relative files", async () => {
+    const base = { blob: "https://github.com/o/r/blob/HEAD/", raw: "https://raw.githubusercontent.com/o/r/HEAD/", directory: "" };
+    for (const url of ["o/r", "github:o/r", "git+https://github.com/o/r.git", "https://github.com/o/r", "git@github.com:o/r.git", "git://github.com/o/r.git", "git+ssh://git@github.com/o/r.git"]) {
+      expect(githubRepository(url), url).toEqual(base);
+    }
+    expect(githubRepository({ url: "https://github.com/o/r", directory: "./packages/tool/" })).toEqual({ ...base, directory: "packages/tool/" });
+    expect(githubRepository("https://gitlab.com/o/r")).toBeUndefined();
+    expect(githubRepository("gitlab:o/r")).toBeUndefined();
+    await writeFile(join(packagePath, "README.md"), "![shot](docs/shot.png)");
+    await json(join(packagePath, "package.json"), { name: "@tests/test-plugin", repository: { type: "git", url: "git+https://github.com/o/r.git" } });
+    expect((await service.readme(`package:${packagePath}`)).repository).toEqual(base);
+  });
+  it("stops a long README at the limit and says so", async () => {
+    await writeFile(join(packagePath, "README.md"), `${"a".repeat(README_MAX_BYTES - 1)}é more`);
+    const readme = await service.readme(`package:${packagePath}`);
+    expect(readme.truncated).toBe(true);
+    expect(readme.text).toBe("a".repeat(README_MAX_BYTES - 1));
   });
   it("derives a name from a source when there is no package.json", () => {
     expect(sourceName("npm:@router-for-me/pi-cliproxyapi-provider@1.4.18")).toBe("@router-for-me/pi-cliproxyapi-provider");

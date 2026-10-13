@@ -25,6 +25,27 @@ export const catalogSchema = z.object({
   restartRequired: z.boolean(), restartAvailable: z.boolean(),
 });
 export type PluginCatalog = z.infer<typeof catalogSchema>;
+/** A Pi package's README, read as text from its installed folder. `text` is null when the package has none. */
+export const readmeSchema = z.object({
+  text: z.string().nullable(),
+  /** The file's name, such as `README.md`. */
+  file: z.string().optional(),
+  /** True when the file was longer than Forgerie shows and the text stops early. */
+  truncated: z.boolean(),
+  /**
+   * Where the package's GitHub repository serves files, from package.json, so
+   * relative links and images in the README can resolve. Absent for other hosts.
+   */
+  repository: z.object({
+    /** Pages, such as `https://github.com/owner/name/blob/HEAD/`. */
+    blob: z.string(),
+    /** Raw files for images, such as `https://raw.githubusercontent.com/owner/name/HEAD/`. */
+    raw: z.string(),
+    /** The package's folder in a monorepo, such as `packages/tool/`, or empty. */
+    directory: z.string(),
+  }).optional(),
+});
+export type PluginReadme = z.infer<typeof readmeSchema>;
 const sourceSchema = z.string().trim().min(1).max(2048).refine((value) => !/[\r\n\0]/u.test(value), "Use one package source.");
 export const changeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("add"), source: sourceSchema }),

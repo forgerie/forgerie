@@ -10,6 +10,7 @@ import { SettingsField } from "./SettingsField";
 import { SettingsToggle } from "./SettingsToggle";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { useMenu } from "../useMenu";
+import { PluginReadmeSection, type ReadmeLoad } from "./PluginReadme";
 import "./settings.css";
 import "./plugins.css";
 
@@ -62,6 +63,17 @@ export function PluginsView({ selected, onOpen, onBack, onClose, onCatalog, api 
       .catch((error: unknown) => { if (!controller.signal.aborted) setLoad({ type: "failed", message: errorText(error) }); });
     return () => controller.abort();
   }, [api]);
+  // A package's README, read once per opened package. Other kinds have no folder of their own to read.
+  const readmeId = plugin?.kind === "package" && plugin.installed !== false ? plugin.id : undefined;
+  const [readme, setReadme] = useState<{ id: string; load: ReadmeLoad } | undefined>();
+  useEffect(() => {
+    if (!readmeId) return;
+    const controller = new AbortController();
+    setReadme({ id: readmeId, load: { type: "loading" } });
+    api.readme(readmeId, controller.signal).then((value) => { if (!controller.signal.aborted) setReadme({ id: readmeId, load: { type: "ready", value } }); })
+      .catch((error: unknown) => { if (!controller.signal.aborted) setReadme({ id: readmeId, load: { type: "failed", message: errorText(error) } }); });
+    return () => controller.abort();
+  }, [api, readmeId]);
   const { setOpen: setMenuOpen } = menu;
   useEffect(() => { setMenuOpen(false); setRemoving(false); setTyped({}); }, [selected, setMenuOpen]);
   const busy = phase.type === "busy";
@@ -149,6 +161,7 @@ export function PluginsView({ selected, onOpen, onBack, onClose, onCatalog, api 
         <div className="agent-properties plugin-fields">{fields.map((def) => fieldOf(def, appValues, typed, busy, setSwitch,
           (id, text) => setTyped((current) => ({ ...current, [id]: text }))))}</div>
       </form> : null}
+      {readmeId && readme?.id === readmeId ? <PluginReadmeSection load={readme.load} name={plainName(plugin)} packageName={plugin.name} /> : null}
     </PluginDetail> : null}
     {catalog && selected && !adding && !plugin ? <p className="settings-hint">This plugin is no longer listed. Go back to Plugins.</p> : null}
     {confirmRestart ? <ConfirmDialog title="Restart Forgerie?" icon={<RotateCwIcon size={16} />} confirmLabel="Stop runs and restart"

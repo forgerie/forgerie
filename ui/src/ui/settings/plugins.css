@@ -25,3 +25,30 @@
 @media (prefers-reduced-motion: reduce) { .plugin-form input { transition: none; } }
 
 /* An app plugin's address setting: the install field's look, inside a property row. */
+
+/* README: the package's own document, under its properties. It reads like a
+   reply in the transcript: the same type, links, tables, and code sheets.
+   Only the head row, images, and heading rules are its own. */
+.plugin-readme { margin-block-start: var(--space-8); min-inline-size: 0; }
+.plugin-readme-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-1) var(--space-3);
+  padding-block-end: var(--space-2); border-block-end: 1px solid var(--line); margin-block-end: var(--space-5); }
+.plugin-readme-head .agent-section { margin: 0; }
+.plugin-readme-source { display: inline-flex; align-items: center; gap: var(--space-1); min-inline-size: 0; color: var(--muted-foreground);
+  font-family: var(--code-font); font-size: var(--meta-text); overflow-wrap: anywhere; text-decoration: none; }
+a.plugin-readme-source:hover { color: var(--foreground); }
+.plugin-readme-body { font-size: var(--text-size); overflow-wrap: anywhere; }
+/* GitHub rules its top headings, so a long README keeps its sections apart. */
+.plugin-readme-body :is(h1, h2) { padding-block-end: var(--space-2); border-block-end: 1px solid var(--line); }
+.plugin-readme-body h1 { margin-block-start: var(--space-8); }
+.plugin-readme-body h2 { margin-block-start: var(--space-6); }
+.plugin-readme-body .markdown-content > :first-child { margin-block-start: 0; }
+.plugin-readme-body img { border-radius: var(--radius-document); vertical-align: middle; }
+/* A row of badges sits on one line; a screenshot keeps its own block. */
+.plugin-readme-body :is(p, a) > img { display: inline-block; margin-inline-end: var(--space-1); }
+.plugin-readme-body p[align="center"], .plugin-readme-body div[align="center"] { text-align: center; }
+.plugin-readme-body pre:not(.code-body) { overflow-x: auto; }
+.plugin-readme-body details { margin-block: var(--space-3); }
+.plugin-readme-body summary { cursor: pointer; }
+.plugin-readme-alt { color: var(--muted-foreground); font-style: italic; }
+.plugin-readme-code { min-inline-size: 0; }
+.plugin-readme-more { margin-block: var(--space-5) 0; }
