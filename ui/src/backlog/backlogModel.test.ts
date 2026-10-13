@@ -172,8 +172,15 @@ describe("sources", () => {
     const groups = groupBacklog([contested], [warning], { sources: [summary()] });
     expect(groups.map((group) => group.kind)).toEqual(["held"]);
     const look = (id: string) => id === "s1" ? { state: "working", name: "Checkout fix", time: "4m" } : undefined;
-    expect(contestedLine(contested, look)).toBe("Held by 2 sessions: Checkout fix, a session not in the list. Archive or release them until one holds it.");
+    expect(contestedLine(contested, look)).toBe("Held by 2 sessions: Checkout fix, session s9. Archive or release them until one holds it.");
     expect(contestedLine(sourceItem(), look)).toBeUndefined();
+    // Two holders the list does not know stay two different names; launches in progress name their claim.
+    const unknown = sourceItem({ claim: claimed("s7"), readiness: "claimed", contested: { claims: [claimed("s7"), claimed("s8"),
+      { ...claimed("x"), kind: "launching", claimId: "c-start" } as BacklogClaim, { ...claimed("x"), kind: "interrupted", claimId: "c-int" } as BacklogClaim], message } });
+    expect(contestedLine(unknown, () => undefined)).toBe("Held by 4 sessions: session s7, session s8, a starting session (claim c-start), an interrupted launch (claim c-int). "
+      + "Archive or release them until one holds it.");
+    // Every holding session is marked in the session list, not only the first claim's.
+    expect([...heldSessions([contested, unknown])].sort()).toEqual(["s1", "s7", "s8", "s9"]);
     expect(otherWarnings(groups, [warning])).toEqual([]);
   });
   it("keeps a source's overlap note in its group, and a source with no items says it below the list", () => {

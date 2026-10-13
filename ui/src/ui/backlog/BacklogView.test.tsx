@@ -383,7 +383,7 @@ describe("Azure DevOps sources", () => {
     const { b } = binding(list([contested], [{ sourceId: "src-1", provider: "azure-devops", path: contested.path, kind: "contested-claim", message }], [summary()]), { projects });
     await render({}, b);
     expect(groups()).toEqual(["In a session"]);
-    expect(document.querySelector(".bl-contested")!.textContent).toBe("Held by 2 sessions: Atomic deploys, a session not in the list. Archive or release them until one holds it.");
+    expect(document.querySelector(".bl-contested")!.textContent).toBe("Held by 2 sessions: Atomic deploys, session s-other. Archive or release them until one holds it.");
     expect(document.querySelector(".bl-problems")).toBeNull();
     await render({ item: refOf(contested) }, b);
     expect(document.querySelector(".bl-claim")!.textContent).toContain("Held by 2 sessions");

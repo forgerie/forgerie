@@ -208,7 +208,9 @@ export function groupBacklog(items: readonly BacklogItem[], warnings: readonly B
  */
 export function contestedLine(item: Pick<BacklogItem, "contested">, look: (sessionId: string) => SessionLook | undefined): string | undefined {
   if (!item.contested) return undefined;
-  const names = item.contested.claims.map((claim) => claim.kind === "claimed" ? look(claim.sessionId)?.name ?? "a session not in the list" : claim.kind === "launching" ? "a starting session" : "an interrupted launch");
+  // A holder the session list does not know keeps its id, so each one can still be found and archived or released.
+  const names = item.contested.claims.map((claim) => claim.kind === "claimed" ? look(claim.sessionId)?.name ?? `session ${claim.sessionId}`
+    : claim.kind === "launching" ? `a starting session (claim ${claim.claimId})` : `an interrupted launch (claim ${claim.claimId})`);
   return `Held by ${String(names.length)} sessions: ${names.join(", ")}. Archive or release them until one holds it.`;
 }
 
@@ -224,7 +226,9 @@ export function ownersText(items: readonly BacklogItem[]): string {
 }
 /** Sessions that hold an item, so the session list can mark them. */
 export function heldSessions(items: readonly BacklogItem[]): ReadonlySet<string> {
-  return new Set(items.flatMap((item) => item.claim?.kind === "claimed" ? [item.claim.sessionId] : []));
+  // A contested item has more than one holder, and each one holds it.
+  return new Set(items.flatMap((item) => [...item.claim ? [item.claim] : [], ...item.contested?.claims ?? []]
+    .flatMap((claim) => claim.kind === "claimed" ? [claim.sessionId] : [])));
 }
 
 /**
