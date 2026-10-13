@@ -53,7 +53,7 @@ it("rejects credentials, unsafe directories, missing sources, and invalid logins
   await expect(f.store.setGitHubLogin("a--b")).rejects.toThrow();
   expect(await readFile(f.path, "utf8")).toBe(before);
   await writeFile(f.path, "test-only-secret-invalid-json");
-  await expect(f.store.read()).rejects.toThrow("Invalid backlog settings file; it has not been overwritten.");
+  await expect(f.store.read()).rejects.toThrow("Cannot read backlog-settings.json. Restore it from a backup, or remove it");
   await mkdir(join(f.root, ".forgerie"));
   await writeFile(join(f.root, ".forgerie/config.json"), "test-only-secret-invalid-json");
   await expect(resolveBacklogConfig(f.project, f.root)).rejects.toThrow("Invalid JSON in .forgerie/config.json.");

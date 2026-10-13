@@ -1,3 +1,4 @@
+import type { BacklogSettingsResponse } from "../../shared/backlogSettings.js";
 import Fastify from "fastify";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -28,5 +29,61 @@ it("validates settings routes, guards revisions, shows origins, and restores the
     expect((await app.inject({ method: "PUT", url: "/backlog/settings/github-login", payload: { githubLogin: "a--b" } })).statusCode).toBe(400);
     expect((await app.inject({ method: "PUT", url: "/backlog/settings/github-login", payload: { githubLogin: null } })).statusCode).toBe(200);
     expect((await get()).json()).not.toHaveProperty("githubLogin");
+  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it("isolates inaccessible repo settings and returns stored overrides without opening their project directories", async () => {
+  const root = await mkdtemp(join(tmpdir(), "settings-inaccessible-")); const app = Fastify();
+  try {
+    const good = { id: "good", name: "Healthy", path: root, createdAt: "today" };
+    const missing = { ...good, id: "missing", name: "Missing", path: join(root, "gone") };
+    const stored = { ...good, id: "stored", name: "Stored", path: join(root, "also-gone") };
+    const invalid = { ...good, id: "invalid", name: "Invalid repo file", path: join(root, "invalid") };
+    await mkdir(join(invalid.path, ".forgerie"), { recursive: true });
+    await writeFile(join(invalid.path, ".forgerie/config.json"), "invalid-json-must-not-be-reflected");
+    const projects = [good, missing, stored, invalid];
+    const store = new BacklogSettingsStore(join(root, "backlog-settings.json"));
+    await store.setGitHubLogin("octocat"); await store.save(stored.id, { providers: ["azure-devops"] }, 0);
+    registerBacklogSettingsRoutes(app, store, { list: () => Promise.resolve(projects), requireProject: (id) => { const project = projects.find((p) => p.id === id); return project === undefined ? Promise.reject(new Error("Project not found")) : Promise.resolve(project); } });
+    const response = await app.inject({ method: "GET", url: "/backlog/settings" });
+    expect(response.statusCode).toBe(200);
+    const readError = "Cannot read this project's backlog settings. Check its project folder and .forgerie/config.json, then reload.";
+    expect(response.json()).toMatchObject({ githubLogin: "octocat", projects: [
+      { projectId: "good", source: "default", backlog: { providers: ["markdown"] } },
+      { projectId: "missing", error: readError },
+      { projectId: "stored", source: "forgerie", revision: 1, backlog: { providers: ["azure-devops"] } },
+      { projectId: "invalid", error: readError },
+    ] });
+    expect(response.body).not.toContain("invalid-json-must-not-be-reflected");
+    expect((await app.inject({ method: "PUT", url: "/backlog/settings/projects/good", payload: { backlog: { providers: ["github"] }, baseRevision: 0 } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "PUT", url: "/backlog/settings/github-login", payload: { githubLogin: "new-login" } })).statusCode).toBe(200);
+    const after = (await app.inject({ method: "GET", url: "/backlog/settings" })).json<BacklogSettingsResponse>();
+    expect(after.githubLogin).toBe("new-login");
+    expect(after.projects.find((project) => project.projectId === "good")).toMatchObject({ source: "forgerie", backlog: { providers: ["github"] } });
+  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it.each(["not-json-secret", JSON.stringify({ version: 99, projects: {} })])("fails closed with the same file recovery message in Backlog and Settings (%s)", async (contents) => {
+  const root = await mkdtemp(join(tmpdir(), "settings-corrupt-")); const app = Fastify();
+  try {
+    const { BacklogService } = await import("./backlogService.js");
+    const { BacklogClaimStore } = await import("./backlogClaimStore.js");
+    const { registerBacklogRoutes } = await import("./backlogRoutes.js");
+    const project = { id: "p", name: "Project", path: root, createdAt: "today" };
+    await mkdir(join(root, ".forgerie/backlog"), { recursive: true });
+    await writeFile(join(root, ".forgerie/backlog/item.md"), "---\nid: item\ntitle: Must not appear\n---\n");
+    const path = join(root, "backlog-settings.json"); await writeFile(path, contents);
+    const store = new BacklogSettingsStore(path);
+    const projects = { list: () => Promise.resolve([project]), requireProject: () => Promise.resolve(project) };
+    const claims = new BacklogClaimStore(join(root, "claims.json")); await claims.initialize();
+    registerBacklogSettingsRoutes(app, store, projects);
+    registerBacklogRoutes(app, new BacklogService({ projects, claims, settings: store, userSessions: { start: () => Promise.reject(new Error("Must not launch")) }, sessions: { stop: () => undefined }, isArchived: () => Promise.resolve(false) }));
+    const backlog = await app.inject({ method: "GET", url: "/backlog" });
+    const settings = await app.inject({ method: "GET", url: "/backlog/settings" });
+    expect(backlog.statusCode).toBe(503); expect(settings.statusCode).toBe(503);
+    const message = backlog.json<{ error: string }>().error;
+    expect(message).toContain("backlog-settings.json"); expect(message).toContain("Restore"); expect(message).toContain("remove");
+    expect(settings.json()).toMatchObject({ error: message });
+    expect(backlog.body).not.toContain("Must not appear"); expect(settings.body).not.toContain("not-json-secret");
   } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
 });

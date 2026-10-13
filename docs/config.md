@@ -97,6 +97,18 @@ conflict asks you to reload before saving. A file-level revision sequence
 prevents an old tab from overwriting an override that was deleted and recreated.
 Changes apply on the next read.
 
+Settings lists a read error beside an inaccessible project folder or invalid
+repo config. Other projects and the GitHub username stay editable. Stored
+Forgerie overrides remain visible even when their project folder is missing.
+
+An unreadable, malformed, or invalid `backlog-settings.json` stops backlog
+reads for every project and shows the same recovery message in Settings.
+Forgerie does not fall back to repo files: that could silently show Markdown
+for a project set to Azure DevOps only. Restore `<data dir>/backlog-settings.json`
+from a valid backup, or remove it, then reload. Removing the file discards all
+Forgerie backlog overrides and the GitHub username; repo-file/default settings
+apply again. Forgerie never overwrites the damaged file automatically.
+
 The same file stores the optional `githubLogin` used by **Mine**. This is a
 username, not a credential. Without it, Mine shows no GitHub issues and gives a
 Settings reminder in its warning. Everyone keeps the trusted-author filter but

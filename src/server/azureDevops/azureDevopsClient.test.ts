@@ -91,3 +91,25 @@ it("Everyone excludes closed states in WIQL and marks only @Me ids without conne
   expect(queries[0]).toContain("[System.AreaPath] UNDER"); expect(queries[2]).toContain("@Me"); expect(queries[2]).toContain("[System.Id] IN (7, 8)");
   expect(s.requests.some((r) => r.url.includes("connectionData"))).toBe(false);
 });
+
+it.each(["$&", "$`", "$'", " ORDER BY"].flatMap((token) => ["project", "area", "state"].map((field) => ({ token, field }))))(
+  "keeps $token literal in $field for Everyone and the identity WIQL", async ({ token, field }) => {
+    const s = await server();
+    const project = `Owner's Product${field === "project" ? token : ""}`;
+    const areaPath = `Owner's Product\\Team's Area${field === "area" ? token : ""}`;
+    const closed = `Closed owner's state${field === "state" ? token : ""}`;
+    s.state.closedState = closed;
+    s.state.items = [workItem(7, { "System.TeamProject": project })];
+    const result = await s.client.assignedItems({ organization: "example", project, areaPath }, "everyone");
+    expect(result).toMatchObject({ ok: true, items: [{ id: 7, assignedToMe: true }] });
+    const queries = s.requests.filter((request) => request.url.includes("/wiql")).map((request) => request.body);
+    const literal = (value: string) => "'" + value.split("'").join("''") + "'";
+    const bounds = `[System.TeamProject] = ${literal(project)}`;
+    const area = `[System.AreaPath] UNDER ${literal(areaPath)}`;
+    const select = "SELECT [System.Id] FROM WorkItems WHERE ";
+    const order = " ORDER BY [System.ChangedDate] DESC";
+    const everyone = select + bounds + " AND " + area + ` AND [System.State] NOT IN (${literal(closed)}, 'Rejected')` + order;
+    const identity = select + bounds + " AND [System.AssignedTo] = @Me AND " + area + " AND [System.Id] IN (7)" + order;
+    expect(queries).toEqual([{ query: everyone }, { query: everyone }, { query: identity }]);
+  },
+);

@@ -15,7 +15,7 @@ export const workItem = (id = 7, fields: Partial<AzureWorkItem["fields"]> = {}) 
 const BatchRequest = Type.Object({ ids: Type.Array(Type.Integer()) });
 interface ServerState {
   items: ReturnType<typeof workItem>[]; everyone: number[] | undefined; assigned: number[]; status: number; retryAfter: string; redirect: boolean;
-  malformed: boolean; incomplete: boolean; category: string; afterQuery: (() => void) | undefined;
+  malformed: boolean; incomplete: boolean; category: string; closedState: string; afterQuery: (() => void) | undefined;
 }
 
 /** A real HTTP service with configurable work items and failures, exercising the production HTTP client. */
@@ -23,7 +23,7 @@ export async function azureServer() {
   const app = Fastify();
   const state: ServerState = {
     items: [workItem()], everyone: undefined, assigned: [7], status: 200, retryAfter: "60", redirect: false, malformed: false, incomplete: false,
-    category: "InProgress", afterQuery: undefined,
+    category: "InProgress", closedState: "Shipped", afterQuery: undefined,
   };
   const requests: { url: string; method: string; body: unknown; authorization: string | undefined }[] = [];
   app.all("/*", (request, reply) => {
@@ -44,7 +44,7 @@ export async function azureServer() {
     }
     if (path.endsWith("/workitemtypes")) return { value: [{ name: "User Story" }] };
     if (path.endsWith("/states")) return { value: [
-      { name: "Active", category: state.category }, { name: "Shipped", category: "Completed" }, { name: "Rejected", category: "Removed" },
+      { name: "Active", category: state.category }, { name: state.closedState, category: "Completed" }, { name: "Rejected", category: "Removed" },
     ] };
     return reply.code(404).send();
   });

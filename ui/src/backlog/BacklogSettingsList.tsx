@@ -18,7 +18,9 @@ export function BacklogSettingsList({ back, close, load, error, busy, login, onL
       <ActionFooter actions={[{ label: "Save username", disabled: busy || login === (load.value.settings.githubLogin ?? ""), onPress: onSaveLogin }]} />
       <Lede>Choose each project's backlog sources. Credentials stay in private files on the server.</Lede>
       <ListSection title="Projects" empty="Register a project to configure its backlog.">{load.value.settings.projects.map((entry) => <SettingsRow key={entry.projectId}
-        name={load.value.projects.find((p) => p.id === entry.projectId)?.name ?? entry.projectId} description={backlogSettingsOrigin(entry.source)} onOpen={() => onOpen(entry.projectId)} />)}</ListSection>
+        name={load.value.projects.find((p) => p.id === entry.projectId)?.name ?? entry.projectId} description={"error" in entry ? undefined : backlogSettingsOrigin(entry.source)}
+        flags={"error" in entry ? <span data-tone="error">{entry.error}</span> : undefined} dimmed={"error" in entry}
+        onOpen={() => { if (!("error" in entry)) onOpen(entry.projectId); }} />)}</ListSection>
     </> : null}
   </SettingsFrame>;
 }

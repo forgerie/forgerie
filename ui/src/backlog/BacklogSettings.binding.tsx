@@ -22,7 +22,7 @@ export function BacklogSettingsView({ api, selected, onOpen, back, close }: { ap
   };
   const entry = load.type === "ready" ? load.value.settings.projects.find((p) => p.projectId === selected) : undefined;
   const name = load.type === "ready" ? load.value.projects.find((p) => p.id === selected)?.name ?? selected : selected;
-  if (entry) return <ProjectEditorBinding key={`${entry.projectId}:${entry.source}:${entry.revision ?? 0}`} entry={entry} name={name ?? entry.projectId} back={back} close={close} busy={busy} error={error}
+  if (entry && !("error" in entry)) return <ProjectEditorBinding key={`${entry.projectId}:${entry.source}:${entry.revision ?? 0}`} entry={entry} name={name ?? entry.projectId} back={back} close={close} busy={busy} error={error}
     onSave={(backlog) => void mutate(() => api.save(entry.projectId, backlog, entry.revision ?? 0))}
     onRemove={() => void mutate(() => api.remove(entry.projectId, entry.revision ?? 0))} onReload={() => { setError(undefined); void refresh(); }} />;
   return <BacklogSettingsList back={back} close={close} load={load} error={error} busy={busy} login={login} onLogin={setLogin}

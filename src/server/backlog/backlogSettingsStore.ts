@@ -7,16 +7,19 @@ import { BacklogSettingsFileSchema, GitHubLoginSchema, type BacklogSettingsFile 
 import { parseBacklogConfig } from "../workspaces/projectPiWebConfig.js";
 import { isMissingFile } from "./backlogError.js";
 export class BacklogSettingsConflict extends Error {}
+export class BacklogSettingsUnavailable extends Error {
+  constructor() { super("Cannot read backlog-settings.json. Restore it from a backup, or remove it to use repo-file/default backlog settings, then reload. The file has not been overwritten."); }
+}
 /** Sessiond owns writes. Failed writes leave the old complete snapshot intact. */
 export class BacklogSettingsStore {
   private queue: Promise<unknown> = Promise.resolve();
   constructor(private readonly path: string) {}
   async read(): Promise<BacklogSettingsFile> {
     let source: string;
-    try { source = await readFile(this.path, "utf8"); } catch (error) { if (isMissingFile(error)) return { version: 1, projects: {} }; throw error; }
+    try { source = await readFile(this.path, "utf8"); } catch (error) { if (isMissingFile(error)) return { version: 1, projects: {} }; throw new BacklogSettingsUnavailable(); }
     let value: unknown;
-    try { value = JSON.parse(source); } catch { throw new Error("Invalid backlog settings file; it has not been overwritten."); }
-    if (!Check(BacklogSettingsFileSchema, value)) throw new Error("Invalid backlog settings file; it has not been overwritten.");
+    try { value = JSON.parse(source); } catch { throw new BacklogSettingsUnavailable(); }
+    if (!Check(BacklogSettingsFileSchema, value)) throw new BacklogSettingsUnavailable();
     return value;
   }
   save(projectId: string, backlog: BacklogConfig, baseRevision: number): Promise<void> {

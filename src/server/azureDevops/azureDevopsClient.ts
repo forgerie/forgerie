@@ -30,6 +30,7 @@ interface Dependencies {
 class AzureReadError extends Error {
   constructor(readonly kind: "auth" | "unavailable", message: string) { super(message); }
 }
+const wiql = (predicates: readonly string[]) => `SELECT [System.Id] FROM WorkItems WHERE ${predicates.join(" AND ")} ORDER BY [System.ChangedDate] DESC`;
 const quote = (text: string) => `'${text.replaceAll("'", "''")}'`;
 
 /** Reads only. POSTs execute a query or retrieve a batch; no endpoint can mutate work items. */
@@ -49,7 +50,10 @@ export class AzureDevopsClient {
       // One deadline for the entire scan, not 30 seconds for each batch or type.
       const signal = AbortSignal.timeout(30_000);
       const headers = { Authorization: `Basic ${Buffer.from(`:${credential.token}`).toString("base64")}`, Accept: "application/json", "Content-Type": "application/json" };
-      const mineQuery = `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = ${quote(config.project)} AND [System.AssignedTo] = @Me${config.areaPath === undefined ? "" : ` AND [System.AreaPath] UNDER ${quote(config.areaPath)}`} ORDER BY [System.ChangedDate] DESC`;
+      const project = `[System.TeamProject] = ${quote(config.project)}`;
+      const area = config.areaPath === undefined ? [] : [`[System.AreaPath] UNDER ${quote(config.areaPath)}`];
+      const minePredicates = [project, "[System.AssignedTo] = @Me", ...area];
+      const mineQuery = wiql(minePredicates);
       const read = <T extends TSchema>(path: string, schema: T, body?: unknown) => this.request(`${base}/${path}`, schema, organization,
         { headers, signal, redirect: "error", method: body === undefined ? "GET" : "POST", ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
       const categories = new Map<string, Map<string, string>>();
@@ -64,7 +68,7 @@ export class AzureDevopsClient {
         const types = await read("workitemtypes?api-version=7.1", TypesSchema);
         for (const type of types.value) await readStates(type.name);
         const closed = [...new Set([...categories.values()].flatMap((states) => [...states].filter(([, category]) => category === "Completed" || category === "Removed").map(([name]) => name)))];
-        query = mineQuery.replace(" AND [System.AssignedTo] = @Me", "").replace(" ORDER BY", `${closed.length === 0 ? "" : ` AND [System.State] NOT IN (${closed.map(quote).join(", ")})`} ORDER BY`);
+        query = wiql([project, ...area, ...(closed.length === 0 ? [] : [`[System.State] NOT IN (${closed.map(quote).join(", ")})`])]);
       }
       const result = await read("wiql?api-version=7.1&$top=501", QuerySchema, { query });
       const ids = [...new Set(result.workItems.map((item) => item.id))].slice(0, 500);
@@ -85,7 +89,7 @@ export class AzureDevopsClient {
       if (ids.length > 0) {
         const current = await read("wiql?api-version=7.1&$top=501", QuerySchema, { query });
         const assigned = new Set(current.workItems.map((item) => item.id));
-        const mine = scope === "mine" ? assigned : new Set((await read("wiql?api-version=7.1&$top=501", QuerySchema, { query: mineQuery.replace(" ORDER BY", ` AND [System.Id] IN (${ids.join(", ")}) ORDER BY`) })).workItems.map((item) => item.id));
+        const mine = scope === "mine" ? assigned : new Set((await read("wiql?api-version=7.1&$top=501", QuerySchema, { query: wiql([...minePredicates, `[System.Id] IN (${ids.join(", ")})`]) })).workItems.map((item) => item.id));
         return { ok: true, items: items.filter((item) => assigned.has(item.id)).map((item) => ({ ...item,
           assignedToMe: mine.has(item.id), category: categories.get(item.fields["System.WorkItemType"])?.get(item.fields["System.State"]) })), truncated: result.workItems.length > 500 || current.workItems.length > 500 };
       }

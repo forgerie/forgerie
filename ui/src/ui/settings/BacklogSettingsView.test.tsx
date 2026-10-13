@@ -38,3 +38,41 @@ it("shows the project list and saves a GitHub username", async () => {
   await click(button("Save username")); expect(logins).toEqual(["octocat"]);
   await click(document.querySelector<HTMLButtonElement>(".agent-row")!); expect(opened).toEqual(["p"]);
 });
+
+it("shows a project read error while the GitHub username and healthy project's settings stay editable", async () => {
+  const { createBacklogSettingsApi } = await import("../../backlog/backlogSettingsApi");
+  const saves: unknown[] = []; const logins: unknown[] = [];
+  const settings = { githubLogin: "octocat", projects: [
+    { projectId: "good", source: "default", backlog: { providers: ["markdown"] } },
+    { projectId: "missing", error: "Cannot read this project's backlog settings. Check its project folder and .forgerie/config.json, then reload." },
+  ] };
+  const api = createBacklogSettingsApi(async (path, init) => {
+    if (init?.method === "PUT") {
+      const body: unknown = JSON.parse(String(init.body));
+      if (path.endsWith("github-login")) logins.push(body); else saves.push({ path, body });
+      return Response.json({ saved: true });
+    }
+    return Response.json(path === "/api/projects" ? [{ id: "good", name: "Healthy", path: "/repo" }, { id: "missing", name: "Missing", path: "/gone" }] : settings);
+  });
+  let selected: string | undefined;
+  const renderPage = async () => { await act(async () => root.render(<BacklogSettingsView api={api} selected={selected} onOpen={(id) => { selected = id; }} back={null} close={null} />)); await settle(); };
+  await renderPage();
+  expect(document.body.textContent).toContain("Check its project folder");
+  const input = document.querySelector<HTMLInputElement>('[aria-label="GitHub username"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "new-login"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  await click(button("Save username")); expect(logins).toEqual([{ githubLogin: "new-login" }]);
+  const healthy = [...document.querySelectorAll<HTMLButtonElement>(".agent-row")].find((row) => row.textContent?.includes("Healthy"))!;
+  await click(healthy); await renderPage();
+  await click(document.querySelector<HTMLInputElement>('.choice-list-rows li:nth-child(2) input')!);
+  await click(button("Save changes"));
+  expect(saves).toEqual([{ path: "/api/backlog/settings/projects/good", body: { backlog: { providers: ["markdown", "github"], github: { authors: "trusted" } }, baseRevision: 0 } }]);
+});
+
+it("shows the server's corrupt-settings recovery message rather than an empty/default settings page", async () => {
+  const { createBacklogSettingsApi } = await import("../../backlog/backlogSettingsApi");
+  const message = "Cannot read backlog-settings.json. Restore it from a backup, or remove it to use repo-file/default backlog settings, then reload. The file has not been overwritten.";
+  const api = createBacklogSettingsApi(async (path) => path === "/api/projects" ? Response.json([]) : Response.json({ error: message }, { status: 503 }));
+  await act(async () => root.render(<BacklogSettingsView api={api} onOpen={() => {}} back={null} close={null} />)); await settle();
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain(message);
+  expect(document.querySelector('[aria-label="GitHub username"]')).toBeNull();
+});
