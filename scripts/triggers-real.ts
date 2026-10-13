@@ -68,7 +68,7 @@ async function daemon(hold: boolean) {
     durableChildAgents: createDurableChildHost({ runRecords: records, index: new LiveChildSessionIndex(join(root, "children.json")) }),
   });
   const triggers = await TriggerService.open({ env: { PI_WEB_DATA_DIR: root }, workflows: library, workspaces, now,
-    fire: workflowTriggerFire({ sessions,
+    fireFactory: (validateWorkspace) => workflowTriggerFire({ sessions, validateWorkspace,
         validateAction: async (action) => { const workflow = await library.read(action.cwd, action.workflow); assertProseOnly(workflow); workflowInputs(workflow.definition, action.inputs); },
       afterStep: async (step, _request, context) => {
         if (!hold || step !== "workflow") return;

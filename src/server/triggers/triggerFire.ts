@@ -18,6 +18,7 @@ export function triggerSessionId(requestId: string, occurrence: number): string 
 export function workflowTriggerFire(options: {
   sessions: Pick<PiSessionService, "ensureTriggerSession" | "triggerSessionExists" | "nameTriggerSession" | "noteTriggerFailure" | "runWorkflow">;
   validateAction: (action: TriggerAction) => Promise<void>;
+  validateWorkspace?: (cwd: string) => Promise<void>;
   /** Restart acceptance can interrupt at either externally committed effect. */
   afterStep?: (step: "session" | "workflow", request: TriggerFireRequest, context: Context) => Promise<void>;
 }): FireTrigger {
@@ -26,6 +27,7 @@ export function workflowTriggerFire(options: {
     const sessionId = triggerSessionId(request.requestId, request.occurrence);
     const ref = { id: sessionId, cwd: request.action.cwd };
     try {
+      await options.validateWorkspace?.(ref.cwd);
       context.abortSignal?.throwIfAborted();
       await options.sessions.ensureTriggerSession(ref, request.action);
       await options.afterStep?.("session", request, context);

@@ -31,15 +31,18 @@ export function triggerBody<S extends TSchema>(schema: S, input: unknown): Stati
   throw new TriggerError(first?.message ?? "Invalid trigger body", 400, field === "" ? undefined : field);
 }
 
-interface TriggerServiceOptions {
+interface TriggerServiceDependencies {
   env: Readonly<NodeJS.ProcessEnv>;
   workflows: WorkflowLibrary;
   workspaces: ProjectWorkspaceCwds;
-  fire: FireTrigger;
   publish: () => void;
   onError: (error: unknown) => void;
   now?: () => number;
 }
+type TriggerServiceOptions = TriggerServiceDependencies & (
+  | { fire: FireTrigger; fireFactory?: never }
+  | { fireFactory: (validateWorkspace: (cwd: string) => Promise<void>) => FireTrigger; fire?: never }
+);
 type TriggerStore = { kind: "open"; harness: Harness; anchor: ConversationId; ownership: DurableOwnership; unsubscribe: () => void } | { kind: "unavailable"; error: string };
 
 /** Daemon-wide owner. All clients use this boundary, including agents. */
@@ -49,11 +52,15 @@ export class TriggerService {
   readonly timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   readonly timezones = [...new Set([...Intl.supportedValuesOf("timeZone"), "UTC"])].sort();
   private constructor(private readonly options: TriggerServiceOptions) {
-    this.core = durableTriggers({ fire: async (request, signal) => {
-      const cwd = await this.requireWorkspace(request.action.cwd);
-      if (cwd !== request.action.cwd) throw new TriggerError("The saved workspace destination changed", 400, "action.cwd");
-      return options.fire({ ...request, action: { ...request.action, cwd } }, signal);
-    }, now: options.now ?? Date.now });
+    const validateWorkspace = async (cwd: string): Promise<void> => {
+      const canonical = await this.requireWorkspace(cwd);
+      if (canonical !== cwd) throw new TriggerError("The saved workspace destination changed", 400, "action.cwd");
+    };
+    const configured = options.fireFactory === undefined ? options.fire : options.fireFactory(validateWorkspace);
+    this.core = durableTriggers({ fire: options.fireFactory === undefined ? async (request, signal) => {
+      await validateWorkspace(request.action.cwd);
+      return configured(request, signal);
+    } : configured, now: options.now ?? Date.now });
   }
   static async open(options: TriggerServiceOptions): Promise<TriggerService> {
     const service = new TriggerService(options);

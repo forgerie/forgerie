@@ -132,3 +132,36 @@ it("keeps a persisted model and thinking choice when a trigger retry proposes an
     expect(provider.state.callCount).toBe(0);
   } finally { await sessions.dispose(); await rm(root, { recursive: true, force: true }); }
 });
+
+it("keeps the existing session identity when restart workspace validation fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "trigger-retry-workspace-failure-"));
+  const cwd = join(root, "workspace"); const agentDir = join(root, "agent");
+  await mkdir(cwd); await mkdir(join(agentDir, "prompts"), { recursive: true });
+  await writeFile(join(agentDir, "prompts", "nightly.md"), "---\nworkflow: { version: 1 }\n---\nReview.\n");
+  const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
+  const provider = fauxProvider(); models.registerNativeProvider(provider.provider);
+  const sessions = new PiSessionService(new CapturingSessionEventHub(), { agentDir, modelRuntime: models, archiveStore: emptyArchiveStore(), sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] }) });
+  const projects = new ProjectService(new ProjectStore(join(root, "projects.json"))); await projects.add({ path: cwd });
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => { enter = resolve; });
+  let hold = true;
+  const options = { env: { PI_WEB_DATA_DIR: root }, workflows: new WorkflowLibrary(agentDir), workspaces: new RegisteredProjectWorkspaceCwds({ projects, workspaces: new WorkspaceService() }),
+    fireFactory: (validateWorkspace: (cwd: string) => Promise<void>) => workflowTriggerFire({ sessions, validateWorkspace, validateAction: () => Promise.resolve(), afterStep: async (step, _request, context) => {
+      if (step !== "session" || !hold) return;
+      enter();
+      await new Promise<never>((_resolve, reject) => { context.abortSignal?.addEventListener("abort", () => { reject(new Error("restart")); }, { once: true }); });
+    } }), publish: () => undefined, onError: (error: unknown) => { throw error; },
+  };
+  let triggers = await TriggerService.open(options);
+  try {
+    await triggers.create({ id: "night", name: "Night", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", cwd, workflow: "nightly", inputs: {} } });
+    await triggers.run("night", { requestId: "retry" }); await entered;
+    const [session] = await sessions.list(cwd); if (session === undefined) throw new Error("Session was not created");
+    await triggers.close(); hold = false; await rm(cwd, { recursive: true });
+    triggers = await TriggerService.open(options);
+    await vi.waitFor(async () => { expect((await triggers.get("night")).history[0]?.outcome.kind).toBe("failed"); });
+    expect((await triggers.get("night")).history[0]?.outcome).toMatchObject({ kind: "failed", sessionId: session.id, cwd });
+    expect(await readFile(session.path, "utf8")).toContain('"customType":"forgerie:trigger"');
+    expect(provider.state.callCount).toBe(0);
+  } finally { await triggers.close(); await sessions.dispose(); await rm(root, { recursive: true, force: true }); }
+});

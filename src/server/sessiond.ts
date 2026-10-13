@@ -289,7 +289,7 @@ async function createSessionDaemonRuntime() {
   const triggerWorkflows = new WorkflowLibrary(activeAgentProfile.dir);
   const triggers: TriggerService = await TriggerService.open({
     env: daemonEnvironment, workflows: triggerWorkflows, workspaces: projectWorkspaces,
-    fire: workflowTriggerFire({ sessions,
+    fireFactory: (validateWorkspace) => workflowTriggerFire({ sessions, validateWorkspace,
       validateAction: async (action) => {
         const workflow = await triggerWorkflows.read(action.cwd, action.workflow);
         assertProseOnly(workflow);

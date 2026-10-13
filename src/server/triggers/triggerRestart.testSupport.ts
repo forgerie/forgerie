@@ -45,7 +45,7 @@ const library = new WorkflowLibrary(agentDir);
 const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
 const workspaces = new RegisteredProjectWorkspaceCwds({ projects, workspaces: new WorkspaceService() });
 const triggers = await TriggerService.open({ env: { PI_WEB_DATA_DIR: root }, workflows: library, workspaces,
-  fire: workflowTriggerFire({ sessions,
+  fireFactory: (validateWorkspace) => workflowTriggerFire({ sessions, validateWorkspace,
     validateAction: async (action) => { const workflow = await library.read(action.cwd, action.workflow); assertProseOnly(workflow); workflowInputs(workflow.definition, action.inputs); },
     afterStep: async (step) => {
       if (step !== checkpoint) return;
