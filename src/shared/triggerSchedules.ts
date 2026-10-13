@@ -9,7 +9,10 @@ export const TriggerScheduleSchema = Type.Union([
   Type.Object({ kind: Type.Literal("daily"), at: LocalTimeSchema, timezone: TimeZoneSchema }, { additionalProperties: false }),
   Type.Object({
     kind: Type.Literal("weekly"),
-    on: Type.Array(Type.Union(WEEKDAYS.map((day) => Type.Literal(day))), { minItems: 1, maxItems: 7, uniqueItems: true }),
+    on: Type.Array(Type.Union([
+      Type.Literal(WEEKDAYS[0]), Type.Literal(WEEKDAYS[1]), Type.Literal(WEEKDAYS[2]),
+      Type.Literal(WEEKDAYS[3]), Type.Literal(WEEKDAYS[4]), Type.Literal(WEEKDAYS[5]), Type.Literal(WEEKDAYS[6]),
+    ]), { minItems: 1, maxItems: 7, uniqueItems: true }),
     at: LocalTimeSchema,
     timezone: TimeZoneSchema,
   }, { additionalProperties: false }),

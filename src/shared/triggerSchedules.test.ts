@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextOccurrence, parseTriggerSchedule, TriggerScheduleError } from "./triggerSchedules.js";
+import { nextOccurrence, parseTriggerSchedule, TriggerScheduleError, WEEKDAYS, type TriggerSchedule } from "./triggerSchedules.js";
 
 const iso = (value: number) => new Date(value).toISOString();
 const at = (value: string) => Date.parse(value);
@@ -60,4 +60,15 @@ describe("parseTriggerSchedule", () => {
   ])("rejects %j", (input) => {
     expect(() => parseTriggerSchedule(input)).toThrow(TriggerScheduleError);
   });
+});
+
+
+type KnownWeekday = (typeof WEEKDAYS)[number];
+type ScheduleWeekday = Extract<TriggerSchedule, { kind: "weekly" }>["on"][number];
+const weekdaysMatch: [Exclude<KnownWeekday, ScheduleWeekday>, Exclude<ScheduleWeekday, KnownWeekday>] extends [never, never] ? true : never = true;
+void weekdaysMatch;
+
+it.each(WEEKDAYS)("accepts and types the weekly day %s", (day) => {
+  const schedule: TriggerSchedule = { kind: "weekly", on: [day], at: "03:00", timezone: "UTC" };
+  expect(parseTriggerSchedule(schedule)).toEqual(schedule);
 });
