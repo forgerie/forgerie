@@ -1,4 +1,3 @@
-import { WorkflowIcon } from "lucide-react";
 import { ActionFooter } from "../ui/ActionFooter";
 import { DecisionCard } from "../ui/DecisionCard";
 import { MarkdownFragment } from "../ui/MarkdownFragment";
@@ -23,7 +22,7 @@ export function WorkflowProposalCard({ entry, proposal, read, onReview }: {
 }) {
   const waiting = proposalIsOpen(proposal, read);
   const open = waiting && onReview !== undefined;
-  return <DecisionCard icon={<WorkflowIcon />} title={entry.name} meta="Proposed workflow" open={open}
+  return <DecisionCard title={entry.name} meta="Proposed workflow" open={open}
     closed={waiting ? "Waiting for a decision." : proposalOutcome(proposal)}
     // Review is the card's one action: in a short container the card compacts to its title line and Review, and the sheet keeps the rest.
     action={open ? { label: "Review", onPress: onReview } : undefined}

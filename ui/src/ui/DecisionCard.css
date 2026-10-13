@@ -1,19 +1,14 @@
-/* The question card's edge and wash, for a decision with more than an answer box. */
-.decision-card { display: grid; gap: var(--space-3); min-inline-size: 0; margin-block: var(--space-2); padding: var(--space-3) var(--space-4) var(--space-4);
-  border: var(--hairline) solid var(--line); border-inline-start: 0.1875rem solid var(--muted-foreground); border-radius: var(--radius-surface);
-  font-size: var(--small-text); line-height: 1.5; }
-.decision-card[data-open] { border-inline-start-color: var(--live); background: var(--live-wash); }
-/* The icon sits on the title's first line. The fact follows the title on its line while both fit, and drops
-   under the title, aligned with it, when they do not; a long title or a long fact wraps in its own column. */
-.decision-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; column-gap: var(--space-2); min-inline-size: 0; }
-.decision-card-icon { display: grid; place-items: center; block-size: 1lh; font-size: var(--text-size); color: var(--muted-foreground); }
-.decision-card-icon svg { inline-size: 1rem; block-size: 1rem; }
-.decision-card[data-open] .decision-card-icon { color: var(--ink-live); }
-.decision-card-heading { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); min-inline-size: 0; }
-.decision-card-title { flex: 1 1 auto; min-inline-size: 0; font-size: var(--text-size); font-weight: 600; overflow-wrap: anywhere; }
+/* Not a box. A rule on the start edge marks something that waits on the reader: live while open, quiet once
+   decided. No border, no wash, no icon; the rule, the title's ink and the choices carry the state. */
+.decision-card { display: grid; gap: var(--space-2); min-inline-size: 0; margin-block: var(--space-3); padding: var(--space-1) 0 var(--space-1) var(--space-4);
+  border-inline-start: 0.125rem solid var(--line-focus); font-size: var(--small-text); line-height: 1.5; }
+.decision-card[data-open] { border-inline-start-color: var(--live); }
+/* The title, then a short fact after it on its line while both fit; the fact wraps under the title when they do not. */
+.decision-card-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); min-inline-size: 0; }
+.decision-card-title { min-inline-size: 0; font-size: var(--small-text); font-weight: 600; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.decision-card[data-open] .decision-card-title { color: var(--ink-live); }
 .decision-card-meta { min-inline-size: 0; color: var(--muted-foreground); font-size: var(--label-text); overflow-wrap: anywhere; }
-/* The live wash darkens the muted ink below a readable contrast, so an open card's fact is set a step stronger. */
-.decision-card[data-open] .decision-card-meta { color: var(--quiet-foreground); }
+.decision-card[data-open] .decision-card-body { font-size: var(--text-size); line-height: 1.625; }
 .decision-card-body { display: grid; gap: var(--space-2); min-inline-size: 0; overflow-wrap: anywhere; }
 /* A failed choice: said in the failure ink right above the choices, so the retry sits under its reason. */
 .decision-card-problem { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0; color: var(--ink-bad); overflow-wrap: anywhere; }
@@ -32,7 +27,7 @@
    to its title line with the action at its end, so the action shows without a scroll; the body and footer yield. */
 @container (block-size < 30rem) {
   .decision-card[data-open]:has(> .decision-card-action) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-3);
-    padding-block: var(--space-2); }
+    padding-block: 0; }
   .decision-card[data-open]:has(> .decision-card-action) > :is(.decision-card-body, .decision-card-foot) { display: none; }
   .decision-card[data-open]:has(> .decision-card-action) > .decision-card-problem { grid-column: 1 / -1; }
   .decision-card[data-open] > .decision-card-action { grid-row: 1; grid-column: 2; }

@@ -236,7 +236,7 @@ tokens as unused.
 ### Signal tones
 
 - **Live Blue** (`{colors.live}`): work that is moving, and an open
-  decision's edge and wash.
+  decision's edge and title.
 - **Bad Red** (`{colors.bad}`, dark `{colors.bad-dark}`): failed work and
   removed lines in a diff.
 - **Warn Amber** (`{colors.warn}`, dark `{colors.warn-dark}`): retried work,
@@ -327,9 +327,18 @@ an invisible layer centred on it.
 
 ### Decision card
 
-Something that waits on the reader. While open, it has a live edge on its
-start side and a live wash. Once decided, it goes quiet and says the decision
-in one line.
+Something that waits on the reader. It is not a box: no border, no wash, no
+icon. A 2 px rule on its start side marks it, and the content sits a step in
+from the rule.
+
+- **Open:** the rule and the title are live. The body reads at body size.
+  The choices sit under it, with the one primary choice filled.
+- **Decided:** the rule turns to the focus hairline (`--line-focus`) and the
+  title to muted ink. The choices give way to one line that says what was
+  decided.
+
+The same card shows the same decision wherever it appears, such as in the
+chat and in a workflow's sheet. (`DecisionCard`)
 
 ### Status chip
 
@@ -360,6 +369,12 @@ The motif's home in the browser. See Motif.
 - **Don't** give a tone a second meaning on a new surface.
 - **Don't** add width breakpoints between 475 and 932 px.
 - **Don't** add shadows to surfaces that stay in the page.
+- **Don't** nest a box inside a box. A list in a panel is rows, not cards;
+  a selected row takes the active wash (ink at 6 %), not an outline.
+- **Don't** mark state with a pill when a block, the ink, or the weight of
+  the text can carry it. One state, one treatment.
+- **Don't** build a card from a tinted wash, a coloured border and an icon.
+  It reads as a template. Use the decision card's rule instead.
 
 ## Open questions
 

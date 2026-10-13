@@ -1,4 +1,3 @@
-import { FileCheckIcon, GitMergeIcon } from "lucide-react";
 import { DecisionCard } from "../ui/DecisionCard";
 import { EventLine } from "../ui/EventLine";
 import { MarkdownFragment } from "../ui/MarkdownFragment";
@@ -39,7 +38,7 @@ export function WorkflowEntryView({ entry, run, deciding = false, onDecide, onRe
     case "proposal": return <WorkflowProposalCard entry={entry} proposal={proposal} read={proposalsRead} onReview={onReviewProposal} />;
     case "stop": {
       const open = onDecide !== undefined && stopIsOpen(run, entry);
-      return <DecisionCard icon={entry.stop === "land" ? <GitMergeIcon /> : <FileCheckIcon />} title={entry.stageName} meta={entry.workflow}
+      return <DecisionCard title={entry.stageName} meta={entry.workflow}
         open={open} closed={stopIsOpen(run, entry) ? "Waiting for a decision." : stopOutcome(run, entry)}
         footer={open && <WorkflowStopChoices entry={entry} deciding={deciding} onDecide={onDecide} onReview={onReview} />}>
         <MarkdownFragment text={entry.summary} />

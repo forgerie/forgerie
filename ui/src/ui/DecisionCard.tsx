@@ -4,9 +4,9 @@ import { scrollParent } from "./scrollParent";
 import "./DecisionCard.css";
 
 /**
- * Molecule: something in a thread that waits on the reader's decision. While
- * it is open it wears the live colour on its edge and a faint live wash, and
- * its footer holds the choices. A choice that failed says why above them; the
+ * Molecule: something in a thread that waits on the reader's decision. It is
+ * not a box: a rule on its start edge marks it, live while open, and its
+ * title is set in the live ink. Its footer holds the choices. A choice that failed says why above them; the
  * reason grows the card upward, so the choices stay where the reader pressed
  * them. Once decided it goes quiet and says what was decided in one line,
  * where the choices stood; that line can open what the decision made.
@@ -17,8 +17,7 @@ import "./DecisionCard.css";
  * card compacts: the action moves to the end of the title line and the body
  * and footer yield, so the action is in view without a scroll.
  */
-export function DecisionCard({ icon, title, meta, open, closed, closedHref, problem, focusClosed = false, children, footer, action }: {
-  icon: ReactNode;
+export function DecisionCard({ title, meta, open, closed, closedHref, problem, focusClosed = false, children, footer, action }: {
   title: string;
   /** A short fact about the subject, such as the file it concerns: at the end of the title line, or under the title when they do not fit together. */
   meta?: ReactNode;
@@ -78,11 +77,8 @@ export function DecisionCard({ icon, title, meta, open, closed, closedHref, prob
   }, [shown]);
   return <section className="decision-card" ref={card} data-open={open || undefined} aria-label={title}>
     <header className="decision-card-head">
-      <span className="decision-card-icon" aria-hidden>{icon}</span>
-      <span className="decision-card-heading">
-        <span className="decision-card-title">{title}</span>
-        {meta !== undefined && <span className="decision-card-meta">{meta}</span>}
-      </span>
+      <span className="decision-card-title">{title}</span>
+      {meta !== undefined && <span className="decision-card-meta">{meta}</span>}
     </header>
     {children !== undefined && <div className="decision-card-body">{children}</div>}
     {shown !== undefined && <p className="decision-card-problem" role="alert">

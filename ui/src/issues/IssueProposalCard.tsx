@@ -1,4 +1,3 @@
-import { CircleDotIcon } from "lucide-react";
 import { ActionFooter } from "../ui/ActionFooter";
 import { DecisionCard } from "../ui/DecisionCard";
 import { Excerpt } from "../ui/Excerpt";
@@ -35,7 +34,7 @@ export function IssueProposalCard({ proposal, outcome, pending, failure, decided
   const retry = !busy && failure?.decision === "create";
   const hasBody = proposal.body.trim() !== "";
   const details = outcome === undefined && (hasBody || proposal.labels.length > 0);
-  return <DecisionCard icon={<CircleDotIcon />} title={proposal.title} meta={proposal.repo} open={decidable}
+  return <DecisionCard title={proposal.title} meta={proposal.repo} open={decidable}
     closed={outcome?.state === "created" ? `Created issue #${String(outcome.number)}`
       : outcome?.state === "dismissed" ? "Dismissed" : "Waiting for a decision."}
     closedHref={outcome?.state === "created" ? outcome.url : undefined} focusClosed={decidedHere}
