@@ -2,8 +2,6 @@
 
 Forgerie is a browser control surface for persistent [Pi Coding Agent](https://github.com/earendil-works/pi/tree/main/packages/coding-agent) sessions. Agents run in real workspaces on your server. You can read, steer, stop, and answer them from a browser.
 
-Forgerie is a hard fork of [PI WEB](https://github.com/jmfederico/pi-web). It is a local product, not a public npm service.
-
 ## Local development
 
 Use a Linux server with Node 24, npm, Git, and a configured Pi profile. Native Windows server installation is unsupported. Windows browsers can still connect. The repository pins its Pi SDK versions in `package.json`.
