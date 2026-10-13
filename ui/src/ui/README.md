@@ -14,7 +14,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place; inside a list it opens at window level, above the button when the room below is short.
 - `ChoiceList` (molecule): pick any number of rows; the legend counts the choice, a long list gets a search field, and a chosen id with no row stays visible.
 - `ListSection` (molecule): a titled list of `<li>` rows on a settings-style page, with an optional readout beside the title, an empty text, a control under the rows, and a note on where the items live. `placement="document"` lines it up under a document page's fields.
-- `ActionRow` (molecule): a list item that is not a link: name and status on one line, a detail under them, its commands at the end.
+- `ActionRow` (molecule): a list item that is not a link: name and status on one line, a detail under them, its commands at the end. `layout="head"` lines the commands up with the status; `"stacked"` puts the status under the name for a narrow row.
 - `TitleField` (atom): a document title typed in place, in the title face, with its standfirst under it.
 - `Lede` (atom): the one quiet paragraph that opens a page.
 - `FilterChip` (atom): a filter that is on, above the list it narrows, with a clear button; not drawn when no filter is on.

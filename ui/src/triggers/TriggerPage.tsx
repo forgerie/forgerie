@@ -151,7 +151,7 @@ export function TriggerPage({ load, draft, dirty, problems, save, conflict, fail
         onPause={actions.onPause} onResume={actions.onResume} onOpenSession={actions.onOpenSession} /> : null}
       <TriggerForm draft={draft} onDraft={actions.onDraft} problems={showing ? problems : {}} disabled={saving} hostZone={clock.hostZone}
         timezones={timezones} projectLabel={projectLabel} projects={projects} workflows={workflows} listModels={listModels} locale={clock.locale} />
-      {trigger ? <TriggerRuns trigger={trigger} clock={clock} starting={starting} onOpenSession={actions.onOpenSession} /> : null}
+      {trigger ? <TriggerRuns trigger={trigger} clock={clock} starting={starting} narrow={plan.row.tier === "narrow"} onOpenSession={actions.onOpenSession} /> : null}
     </div> : null}
   </SettingsFrame>;
 }

@@ -192,6 +192,10 @@ describe("a trigger's page", () => {
     await render({ view: "trigger", id: "docs-sweep" });
     expect(text()).toContain("Paused since Oct 10. If you resume now, the next run is Sun, Oct 18 at 4:00 AM New York time.");
     expect(text()).toContain("Last run Oct 4 at 4:00 AM New York time was missed.");
+    // The Runs list names the zone once, in its heading, not on every row.
+    expect([...document.querySelectorAll(".action-row-name")].map((node) => node.textContent)).toEqual(["Sun, Oct 4, 4:00 AM", "Sun, Sep 27, 4:00 AM"]);
+    expect(document.querySelector(".list-section-aside")?.textContent).toContain("New York time");
+    expect(document.querySelector(".action-row")?.getAttribute("data-layout")).toBe("head");
     await press("Resume");
     expect(store.calls).toContainEqual(["resume", "docs-sweep"]);
     expect(text()).toContain("Next run Tue, Oct 13 at 5:00 AM New York time, in 9 hours.");

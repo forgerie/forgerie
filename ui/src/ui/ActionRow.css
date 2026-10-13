@@ -8,3 +8,8 @@
 .action-row-detail { grid-area: detail; margin-block-start: var(--space-1); min-inline-size: 0; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.45; overflow-wrap: anywhere; }
 .action-row-detail code { font-family: var(--code-font); font-size: var(--meta-text); }
 .action-row-actions { grid-area: actions; align-self: center; display: flex; align-items: center; gap: var(--space-1); }
+/* Head: the status and the commands share the first line and line up; the detail runs under both. */
+.action-row[data-layout="head"] { grid-template-areas: "name status actions" "detail detail detail"; align-items: center; }
+/* Stacked, for a narrow row: the name has its own line; the status and the commands share the next. */
+.action-row[data-layout="stacked"] { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name name" "status actions" "detail detail"; align-items: center; }
+.action-row[data-layout="stacked"] .action-row-status { justify-self: start; }

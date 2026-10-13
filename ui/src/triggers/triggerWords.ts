@@ -123,10 +123,14 @@ export function whenAt(ms: number, zone: string, clock: WordClock): string {
   const { date, time } = instant(ms, zone, clock);
   return `${date} at ${time}`;
 }
-/** "Tue, Oct 12, 3:00 AM": a run's name in the Runs list. */
+/** "Tue, Oct 12, 3:00 AM": a run's name in the Runs list. The list names the zone once, in its heading. */
 export function runWhen(ms: number, zone: string, clock: WordClock): string {
-  const { weekday, date, time } = instant(ms, zone, clock);
+  const { weekday, date, time } = instant(ms, zone, { ...clock, browserZone: zone });
   return `${weekday}, ${date}, ${time}`;
+}
+/** "New York time" when the trigger's zone is not the browser's: said once, in the Runs heading. */
+export function runsZone(zone: string, clock: WordClock): string | undefined {
+  return zone === clock.browserZone ? undefined : zoneWords(zone);
 }
 /** "Oct 12". */
 export function dateOnly(ms: number, zone: string, clock: WordClock): string {
