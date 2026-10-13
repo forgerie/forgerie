@@ -361,3 +361,19 @@ it("accepts both manual runs whose trigger/client tuples formerly collided", asy
   await until(harness, (records) => records.every((record) => record.history[0]?.outcome.kind === "started"));
   expect(host.requests).toHaveLength(2);
 });
+
+it("separates recreated manual runs even at an identical request time", async () => {
+  const instant = at("2026-10-12T12:00:00Z");
+  const clock = { now: () => instant, set: () => undefined };
+  const host = recordingFire({ kind: "start" });
+  const { harness, anchor, triggers } = await openHost(clock, host.fire);
+  await triggers.create(harness, anchor, nightly, context);
+  const first = await triggers.run(harness, anchor, nightly.id, "same", context);
+  await until(harness, fired(1));
+  await triggers.remove(harness, nightly.id, context);
+  await triggers.create(harness, anchor, nightly, context);
+  const second = await triggers.run(harness, anchor, nightly.id, "same", context);
+  expect(second.requestId).not.toBe(first.requestId);
+  await until(harness, fired(1));
+  expect(host.requests).toHaveLength(2);
+});

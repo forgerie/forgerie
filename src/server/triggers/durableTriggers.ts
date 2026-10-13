@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
 import { defineDoc, defineExtension, defineTask, type ConversationId, type Harness, type Tx, type TaskRuntime } from "@earendil-works/pi-durable";
 import { Check } from "typebox/value";
@@ -262,8 +262,8 @@ export function durableTriggers(options: DurableTriggerOptions) {
       const record = recordAt(doc.records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
       assertProject(record.action, scope);
-      const requestId = triggerManualRequestId(id, clientRequestId);
       const receiptKey = JSON.stringify([record.incarnation, clientRequestId]);
+      const requestId = triggerManualRequestId(id, createHash("sha256").update(receiptKey).digest("hex").slice(0, 32));
       if (doc.manualRequests[receiptKey] === undefined) {
         doc.manualRequests[receiptKey] = { triggerId: id, incarnation: record.incarnation };
         await tx.createTask(manualTask, { incarnation: record.incarnation, request: { triggerId: id, name: record.name, timezone: record.schedule.timezone, action: publicAction(record.action), occurrence: now(), requestId } }, { ownership: { kind: "conversation" }, conversationId: anchor, background: true });

@@ -5,7 +5,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
 import { Check } from "typebox/value";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { TriggerSchema, TriggerListResponseSchema, TriggerWorkflowsResponseSchema, TriggerErrorResponseSchema, triggerManualRequestId, type Trigger } from "../../shared/triggers.js";
+import { TriggerSchema, TriggerListResponseSchema, TriggerWorkflowsResponseSchema, TriggerErrorResponseSchema, TriggerRunResponseSchema, type Trigger } from "../../shared/triggers.js";
 import { parseTriggerSchedule } from "../../shared/triggerSchedules.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
 import { ProjectService } from "../projects/projectService.js";
@@ -131,8 +131,10 @@ it("deduplicates manual requests while paused without moving the next fire and b
   await http("POST", `/${trigger.id}/pause`, {});
   for (let index = 0; index < 55; index++) {
     const result = await http("POST", `/${trigger.id}/run`, { requestId: String(index) });
-    expect(result).toEqual({ status: 202, value: { requestId: triggerManualRequestId(trigger.id, String(index)) } });
-    await vi.waitFor(async () => { const record = await service.get(trigger.id); expect(record.history.filter((entry) => entry.outcome.kind === "started")).toHaveLength(Math.min(index + 2, 50)); expect(record.history[0]?.requestId).toBe(triggerManualRequestId(trigger.id, String(index))); expect(record.history[0]?.outcome.kind).toBe("started"); });
+    expect(result.status).toBe(202);
+    if (!Check(TriggerRunResponseSchema, result.value)) throw new Error("Invalid run response");
+    const requestId = result.value.requestId;
+    await vi.waitFor(async () => { const record = await service.get(trigger.id); expect(record.history.filter((entry) => entry.outcome.kind === "started")).toHaveLength(Math.min(index + 2, 50)); expect(record.history[0]?.requestId).toBe(requestId); expect(record.history[0]?.outcome.kind).toBe("started"); });
   }
   await http("POST", `/${trigger.id}/run`, { requestId: "0" });
   expect(fires).toBe(56);
