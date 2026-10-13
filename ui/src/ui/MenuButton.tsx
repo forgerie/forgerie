@@ -27,7 +27,8 @@ export function MenuButton({ label, commands, align = "end", layer = "inline" }:
   align?: "start" | "end";
   /**
    * `window` opens the menu at window level, so a scrolling list or a narrow pane never clips it: under the
-   * button, or above it when the room below is short. Use it for a button inside a list.
+   * button, or above it when the room below is short, and always at least 4px inside the window on both axes.
+   * Use it for a button inside a list.
    */
   layer?: "inline" | "window";
 }) {
@@ -46,16 +47,26 @@ export function MenuButton({ label, commands, align = "end", layer = "inline" }:
       const box = button.getBoundingClientRect();
       const room = window.visualViewport?.height ?? window.innerHeight;
       const width = window.visualViewport?.width ?? window.innerWidth;
-      const up = box.bottom + element.offsetHeight + 8 > room && box.top > room - box.bottom;
-      // Measured window geometry, not theme decisions.
+      // Measured window geometry, not theme decisions. The menu never comes closer than this to the window's edge.
+      const EDGE = 4;
+      // A menu taller than the window scrolls inside it.
+      Object.assign(element.style, { maxBlockSize: `${String(room - 2 * EDGE)}px`, overflowY: "auto" });
+      const height = element.offsetHeight;
+      const menuWidth = element.offsetWidth;
+      // Under the button while it fits, else above it while that fits, else wherever the window has room.
+      const below = box.bottom + EDGE;
+      const above = box.top - EDGE - height;
+      const top = below + height + EDGE <= room ? below : above >= EDGE ? above : room - height - EDGE;
+      const left = align === "start" ? box.left : box.right - menuWidth;
+      const clamp = (value: number, max: number) => Math.max(EDGE, Math.min(value, max));
       Object.assign(element.style, {
-        top: up ? "auto" : `${String(box.bottom + 4)}px`, bottom: up ? `${String(room - box.top + 4)}px` : "auto",
-        left: align === "start" ? `${String(Math.max(4, box.left))}px` : "auto",
-        right: align === "end" ? `${String(Math.max(4, width - box.right))}px` : "auto",
+        top: `${String(clamp(top, room - height - EDGE))}px`, bottom: "auto",
+        left: `${String(clamp(left, width - menuWidth - EDGE))}px`, right: "auto",
       });
     };
     place();
-    const close = () => setOpen(false);
+    // A scroll under the menu moves the button away from it. A scroll inside a tall menu does not.
+    const close = (event: Event) => { if (!(event.target instanceof Node && element.contains(event.target))) setOpen(false); };
     window.addEventListener("resize", place);
     window.addEventListener("scroll", close, true);
     return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", close, true); };
