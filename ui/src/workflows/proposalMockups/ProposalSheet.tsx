@@ -45,7 +45,14 @@ const READ_FAILED = "The server did not answer in time.";
  * The plan: its overview, then one section per heading. A stage's section carries the stage's number in the
  * reader's route. A stage the reader removed stays, struck; a stage they added has a section the agent will write.
  */
-function PlanBody({ proposal, stages = proposal.stages, changes = [] }: { proposal: MockProposal; stages?: readonly WorkflowStage[]; changes?: readonly RouteChange[] }) {
+export type StageProgress = "done" | "current" | "waiting" | "next";
+const PROGRESS: Record<StageProgress, string | undefined> = { done: "Done", current: "Now", waiting: "Waits for you", next: undefined };
+
+export function PlanBody({ proposal, stages = proposal.stages, changes = [], progress }: {
+  proposal: MockProposal; stages?: readonly WorkflowStage[]; changes?: readonly RouteChange[];
+  /** During a run: where each stage stands. The plan marks the stage at work. */
+  progress?: Readonly<Record<string, StageProgress>> | undefined;
+}) {
   const numberOf = (id: string | undefined) => { const at = id === undefined ? -1 : stages.findIndex((stage) => stage.id === id); return at < 0 ? undefined : at + 1; };
   const added = stages.filter((stage) => !proposal.stages.some((s) => s.id === stage.id));
   // A new stage's section follows the section of the stage before it in the reader's route.
@@ -66,9 +73,12 @@ function PlanBody({ proposal, stages = proposal.stages, changes = [] }: { propos
       return <Fragment key={index}>
         {index === firstStageSection && chainAfter(undefined).map(placeholder)}
         <section data-stage={removed ? undefined : s.stage} data-number={number} data-removed={removed || undefined} className="pm-sec"
+          data-progress={s.stage === undefined ? undefined : progress?.[s.stage]}
           style={number === undefined ? undefined : { "--stage": number }}>
           <div className="markdown pm-sec-head"><h2><span className="pm-sec-title"><MarkdownFragment inline text={s.title} /></span>
-            {removed && <span className="pm-removed">Removed</span>}</h2></div>
+            {removed && <span className="pm-removed">Removed</span>}
+            {s.stage !== undefined && progress?.[s.stage] !== undefined && PROGRESS[progress[s.stage] as StageProgress] !== undefined
+              && <span className="pm-progress" data-progress={progress[s.stage]}>{PROGRESS[progress[s.stage] as StageProgress]}</span>}</h2></div>
           {removed && <p className="pm-sec-flag">You removed this stage. The agent takes it out when it updates the plan.</p>}
           {workerLines.length > 0 && <p className="pm-sec-flag">{workerLines.map((change) => <span key={changeLine(change, stages)} className={change.kind === "add-worker" ? "pm-new" : "pm-removed"}>
             {change.kind === "add-worker" ? "+" : "−"} {"worker" in change ? change.worker : ""}</span>)}The agent updates this section to match.</p>}

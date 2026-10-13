@@ -304,3 +304,100 @@ button.pm-route-stage { cursor: pointer; }
 .pm-sec[data-removed] .pm-sec-title { text-decoration: line-through; text-decoration-color: var(--ink-bad); color: var(--muted-foreground); }
 .pm-sec[data-removed] .pm-sec-body { opacity: 0.45; }
 .pm-sec[data-removed] .markdown h2::before { display: none; }
+
+/* ================= Run mode =================
+   The same sheet while the workflow runs. The rail is the live route; the
+   left pane is the plan or one worker's record. Blocks follow the tally:
+   done is plain ink, working blinks live, waiting is solid live with a wash
+   ring, failed is bad, planned is a hollow outline. */
+.pm-block[data-s="done"] { background: var(--meter-ink); box-shadow: none; }
+.pm-block[data-s="working"] { background: var(--tone-live); box-shadow: none; animation: pm-blink 1.2s ease-in-out infinite; }
+.pm-block[data-s="waiting"] { background: var(--tone-live); box-shadow: 0 0 0 2px var(--live-wash); }
+.pm-block[data-s="failed"] { background: var(--tone-bad); box-shadow: none; }
+@keyframes pm-blink { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .pm-block[data-s="working"] { animation: none; } }
+
+.pm-progress { flex: none; padding: 0 var(--space-2); border-radius: var(--radius-pill); font-family: var(--body-font); font-size: var(--meta-text);
+  font-weight: 600; line-height: 1.5; letter-spacing: 0; background: var(--muted); color: var(--muted-foreground); }
+.pm-progress[data-progress="current"], .pm-progress[data-progress="waiting"] { background: var(--live-wash); color: var(--ink-live); }
+.pm-sec-head .pm-progress { font-size: var(--label-text); }
+/* The plan marks the stage at work: its number fills live. A done stage's number fills ink. */
+.pm-sec[data-progress="current"] .markdown h2::before, .pm-sec[data-progress="waiting"] .markdown h2::before {
+  background: var(--live); border-color: transparent; color: var(--primary-foreground); }
+.pm-sec[data-progress="done"] .markdown h2::before { background: var(--meter-ink); border-color: transparent; color: var(--primary-foreground); }
+
+.pm-route-meta { font-size: var(--label-text); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.pm-live .pm-route-num svg { inline-size: 0.875rem; block-size: 0.875rem; color: var(--muted-foreground); }
+.pm-live .pm-route-item[data-progress="next"] .pm-route-name { color: var(--muted-foreground); font-weight: 400; }
+.pm-live .pm-route-item[data-progress="current"] .pm-route-num { color: var(--ink-live); font-weight: 600; }
+/* A stop that waits on the reader is a decision card: a live edge on its start side and a live wash. */
+.pm-live .pm-route-item[data-progress="waiting"] { background: var(--live-wash); box-shadow: inset 2px 0 0 var(--live), 0 0 0 var(--hairline) var(--live-edge); }
+.pm-you[data-waiting] { background: var(--live); color: var(--primary-foreground); }
+.pm-live .pm-worker-list { margin: calc(-1 * var(--space-1)) 0 0; padding: 0 var(--space-1) var(--space-1) calc(var(--space-2) + 1.125rem); gap: 0.125rem; }
+.pm-live-worker { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; column-gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size);
+  padding: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--foreground); text-align: start; cursor: pointer; }
+/* Blocks hang right-aligned in a margin column two marks wide, as in the chat's tally, so names line up. Three marks wide, as the tally wraps. */
+.pm-live-worker { grid-template-columns: calc(var(--mark) * 3 + var(--mark-gap) * 2) minmax(0, 1fr); }
+.pm-live-worker .pm-blocks { justify-self: end; padding-block-start: 0.3125rem; }
+.pm-live-worker:hover { background: var(--hover-surface); }
+.pm-live-worker[aria-current] { background: var(--muted); box-shadow: inset 0 0 0 var(--hairline) var(--line-focus); }
+.pm-live-worker:focus-visible { outline: 2px solid var(--line-focus); outline-offset: -2px; }
+.pm-live-worker-text { display: grid; min-inline-size: 0; font-size: var(--label-text); line-height: 1.45; color: var(--muted-foreground); }
+.pm-live-worker-text .pm-worker-who { font-size: var(--small-text); color: var(--foreground); }
+.pm-live-worker-text .pm-worker-who code { font-size: var(--small-text); }
+.pm-live-worker-model[data-edited] { color: var(--ink-warn); }
+.pm-run-inputs { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-1) var(--space-3); margin: 0; font-size: var(--label-text); }
+.pm-run-inputs dt { color: var(--muted-foreground); }
+.pm-run-inputs dd { margin: 0; min-inline-size: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.pm-stop { display: grid; gap: var(--space-2); margin-block-end: var(--space-6); }
+.pm-stop-narrow { display: none; }
+.pm-text-button[data-tone="danger"] { color: var(--destructive); }
+.pm-button[data-tone="danger"] { color: var(--destructive); border-color: var(--destructive-line, var(--line)); }
+.pm-run-foot { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+
+/* The worker pane: a header, the model, the record that scrolls, and the box to steer it. */
+.pm-run[data-view="worker"] .pm-doc { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.pm-worker-pane { --pane-pad: var(--pad); flex: 1; display: flex; flex-direction: column; min-block-size: 0; }
+.pm-pane-head { flex: none; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-2) calc(var(--pane-pad) - var(--space-2));
+  border-block-end: var(--hairline) solid var(--line); }
+.pm-back { display: inline-flex; align-items: center; gap: var(--space-1); flex: none; }
+.pm-back svg { inline-size: 1rem; block-size: 1rem; }
+.pm-back-narrow { display: none; }
+.pm-pane-titles { flex: 1; min-inline-size: 0; display: grid; }
+.pm-pane-title { margin: 0; display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; font-size: var(--text-size); font-weight: 600; }
+.pm-pane-title code { font-family: var(--code-font); }
+.pm-pane-title > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-weight: 400; font-size: var(--small-text); }
+.pm-pane-status { margin: 0; font-size: var(--label-text); color: var(--muted-foreground); }
+.pm-pane-model { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-1) var(--pane-pad);
+  border-block-end: var(--hairline) solid var(--line); }
+.pm-pane-model .pm-worker-model { grid-column: auto; }
+.pm-pane-model .pm-field-hint { flex-basis: 100%; padding-block-end: var(--space-1); }
+.pm-pane-log { flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4) var(--pane-pad) var(--space-6); }
+.pm-pane-log > * { max-inline-size: 40rem; }
+.pm-pane-reply { flex: none; padding: var(--space-2) var(--pane-pad) var(--space-3); border-block-start: var(--hairline) solid var(--line); }
+.pm-pane-reply > * { max-inline-size: 40rem; }
+.pm-round { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-2) 0; color: var(--muted-foreground); font-size: var(--label-text); }
+.pm-round::before, .pm-round::after { content: ""; flex: 1; block-size: var(--hairline); background: var(--line); }
+.pm-round span { flex: 0 1 auto; text-align: center; }
+
+@container sheet (min-width: 50rem) {
+  .pm-worker-pane { --pane-pad: clamp(1.5rem, 5cqi, 4rem); }
+  .pm-run .pm-rail-section + .pm-rail-section { padding-block-start: var(--space-2); }
+  .pm-run-foot { grid-template-columns: minmax(0, 1fr); }
+  .pm-run-foot .pm-actions { display: grid; }
+}
+/* One column: the route comes first; a worker opens over it, with a way back, and the run's footer waits. */
+@container sheet (max-width: 49.99rem) {
+  .pm-run .pm-body { display: flex; flex-direction: column; }
+  .pm-run .pm-rail { order: -1; border-block-start: 0; border-block-end: var(--hairline) solid var(--line); padding-block: var(--space-4); }
+  .pm-run[data-view="worker"] .pm-body { overflow: hidden; }
+  .pm-run[data-view="worker"] .pm-rail, .pm-run[data-view="worker"] .pm-run-foot { display: none; }
+  .pm-run[data-view="worker"] .pm-doc { flex: 1; min-block-size: 0; }
+  .pm-back-wide { display: none; }
+  .pm-run .pm-stop-wide { display: none; }
+  .pm-run .pm-stop-narrow { display: grid; order: -2; margin: 0; padding: var(--space-4) var(--pad); border-block-end: var(--hairline) solid var(--line); }
+  .pm-back-narrow { display: inline; }
+}
+@container sheet (max-width: 40rem) {
+  .pm-run-foot { grid-template-columns: minmax(0, 1fr) auto; }
+}

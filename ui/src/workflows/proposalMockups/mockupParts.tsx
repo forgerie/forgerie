@@ -19,13 +19,15 @@ export function Sheet({ label, children }: { label: string; children: ReactNode 
   </dialog>;
 }
 
-export function SheetHead({ title, name, stages }: { title: string; name: string; stages: number }) {
+export function SheetHead({ title, name, stages, subtitle, closeLabel = "Close the proposal" }: {
+  title: string; name: string; stages: number; subtitle?: ReactNode; closeLabel?: string;
+}) {
   return <header className="pm-head">
     <div className="pm-head-titles">
       <h2 className="pm-title" title={title}>{title}</h2>
-      <p className="pm-subtitle">{name !== title && <code>{name}</code>}<span>{stages === 0 ? "Proposed workflow" : `Proposed workflow, ${String(stages)} stages`}</span></p>
+      <p className="pm-subtitle">{name !== title && <code>{name}</code>}<span>{subtitle ?? (stages === 0 ? "Proposed workflow" : `Proposed workflow, ${String(stages)} stages`)}</span></p>
     </div>
-    <button type="button" className="pm-icon-button" aria-label="Close the proposal" title="Close the proposal"><XIcon aria-hidden /></button>
+    <button type="button" className="pm-icon-button" aria-label={closeLabel} title={closeLabel}><XIcon aria-hidden /></button>
   </header>;
 }
 

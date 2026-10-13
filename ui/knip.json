@@ -6,8 +6,22 @@
     "scripts/*.mjs",
     "gates/*.mjs"
   ],
-  "project": ["src/**/*.{ts,tsx}", "gates/**/*.{ts,mjs}", "scripts/*.mjs"],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "gates/**/*.{ts,mjs}",
+    "scripts/*.mjs"
+  ],
   "ignoreExportsUsedInFile": true,
-  "ignoreDependencies": ["@tiptap/extension-bubble-menu", "@fontsource-variable/jetbrains-mono", "@fontsource-variable/public-sans"],
-  "ignoreBinaries": ["magick", "which"]
+  "ignoreDependencies": [
+    "@tiptap/extension-bubble-menu",
+    "@fontsource-variable/jetbrains-mono",
+    "@fontsource-variable/public-sans"
+  ],
+  "ignoreBinaries": [
+    "magick",
+    "which"
+  ],
+  "ignore": [
+    "src/workflows/proposalMockups/local/**"
+  ]
 }

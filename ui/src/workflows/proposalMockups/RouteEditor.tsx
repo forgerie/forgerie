@@ -9,7 +9,7 @@ import type { WorkflowStage } from "../workflowsModel";
 import { AGENTS, freeStageId, freeWorkerName, MODELS, modelName, modelText, parseModel, sessionModelOf, withModel, withWorkers, type Worker } from "./routeEdits";
 
 /** One worker's model, as the composer's picker shows it. Without a model, the worker runs on the session's. */
-function WorkerModel({ worker, proposed, disabled, onChange }: {
+export function WorkerModel({ worker, proposed, disabled, onChange }: {
   worker: Worker; proposed: string | undefined; disabled: boolean; onChange: (model: string | undefined) => void;
 }) {
   const anchor = useRef<HTMLSpanElement>(null);

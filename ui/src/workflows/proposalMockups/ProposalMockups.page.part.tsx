@@ -2,6 +2,8 @@ import { workflowProposalSchema, type WorkflowStage } from "../workflowsModel";
 import { withModel, withWorkers } from "./routeEdits";
 import { CHANGES_NOTE, FLAKY_HUNT, fromRecord, type MockProposal } from "./planDocument";
 import { PlanPage, ProposalSheet } from "./ProposalSheet";
+import { SETTINGS_LIVE, SETTINGS_STOP, type LiveRun } from "./liveRun";
+import { RunSheet } from "./RunSheet";
 
 export const name = "Workflow proposal mockup";
 export const note = "Mockup only: the proposal sheet with the plan as a document, a rail for the route and inputs, and every state of the shipped sheet";
@@ -60,3 +62,15 @@ export function Started() { return <ProposalSheet outcome={{ kind: "started" }} 
 export function Dismissed() { return <ProposalSheet outcome={{ kind: "dismissed" }} />; }
 export function Replaced() { return <ProposalSheet outcome={{ kind: "replaced" }} />; }
 export function ProseOnly() { return <ProposalSheet proposal={FLAKY_HUNT} />; }
+
+/** Run mode. The NZBFAST run is local only; the settings-store-port runs are fixtures. */
+const nzbfast = Object.values(import.meta.glob<{ default: LiveRun }>("./local/*.run.ts", { eager: true }))[0]?.default;
+const live = (show: (run: LiveRun) => React.ReactNode) => nzbfast === undefined ? missing : show(nzbfast);
+export function RunStart() { return live((run) => <RunSheet run={run} />); }
+export function RunPlan() { return live((run) => <RunSheet run={run} at="review" />); }
+export function RunWorker() { return live((run) => <RunSheet run={run} select="review/build" />); }
+export function RunWorkerModelChanged() { return live((run) => <RunSheet run={run} select="review/build" models={{ build: "anthropic/claude-opus-4-5:high" }} />); }
+export function RunReviewer() { return live((run) => <RunSheet run={run} select="review/review" />); }
+export function RunRetried() { return live((run) => <RunSheet run={run} select="recon/host-scout" />); }
+export function RunSettingsWorking() { return <RunSheet run={SETTINGS_LIVE} select="port/api" />; }
+export function RunSettingsStop() { return <RunSheet run={SETTINGS_STOP} />; }
