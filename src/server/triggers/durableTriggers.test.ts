@@ -256,3 +256,27 @@ it("finishes a scheduled fire after pause, edit and restart using the original a
   expect(record?.name).toBe("Edited");
   expect(record?.action.workflow).toBe("updated-workflow");
 });
+
+it.each([
+  { missedGraceMinutes: 0, lateMs: 1, outcome: "started" },
+  { missedGraceMinutes: 0, lateMs: 30_000, outcome: "started" },
+  { missedGraceMinutes: 0, lateMs: 60_000, outcome: "started" },
+  { missedGraceMinutes: 0, lateMs: 60_001, outcome: "missed" },
+  { missedGraceMinutes: 1, lateMs: 60_001, outcome: "missed" },
+  { missedGraceMinutes: 2, lateMs: 120_000, outcome: "started" },
+  { missedGraceMinutes: 2, lateMs: 120_001, outcome: "missed" },
+])("at $lateMs ms late with $missedGraceMinutes minutes grace, records $outcome", async ({ missedGraceMinutes, lateMs, outcome }) => {
+  const occurrence = at("2026-10-13T03:00:00Z");
+  let instant = occurrence - 150;
+  // A real Durable timer with a configurable wall clock. Freeze its late wake time for exact boundary checks.
+  const clock = { now: () => instant, set: (value: string) => { instant = at(value); } };
+  const host = recordingFire({ kind: "start" });
+  const { harness, anchor, triggers } = await openHost(clock, host.fire);
+  await triggers.create(harness, anchor, { ...nightly, missedGraceMinutes }, context);
+  instant = occurrence + lateMs;
+  const [trigger] = await until(harness, fired(1));
+  expect(trigger?.history[0]).toMatchObject({ occurrence, recordedAt: instant, outcome: { kind: outcome } });
+  expect(host.requests).toHaveLength(outcome === "started" ? 1 : 0);
+  expect(trigger?.state).toEqual({ kind: "active", nextFireAt: at("2026-10-14T03:00:00Z") });
+  expect(trigger?.attention === null).toBe(outcome === "started");
+});

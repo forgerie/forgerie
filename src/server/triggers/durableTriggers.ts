@@ -49,6 +49,7 @@ type TriggerCheckpoint =
   | { readonly phase: "fire"; readonly occurrence: number; readonly skippedBefore: number; readonly request: TriggerFireRequest };
 
 const MINUTE = 60_000;
+const ON_TIME_TOLERANCE_MS = 60_000;
 const stop = { status: "terminal", outcome: { status: "completed", result: null } } as const;
 
 /** The record a task may act for: present, active, and armed by this task's generation. */
@@ -133,7 +134,8 @@ export function durableTriggers(options: DurableTriggerOptions) {
             occurrence = next;
             skippedBefore += 1;
           }
-          if (at - occurrence <= record.missedGraceMinutes * MINUTE) return { status: "running", checkpoint: { phase: "fire", occurrence, skippedBefore, request: { triggerId: record.id, name: record.name, timezone: record.schedule.timezone, action: publicAction(record.action), occurrence, requestId: triggerRequestId(record.id, occurrence) } } };
+          // Timer jitter counts as on time even when the user refuses late runs. It does not extend a longer grace window.
+          if (at - occurrence <= Math.max(ON_TIME_TOLERANCE_MS, record.missedGraceMinutes * MINUTE)) return { status: "running", checkpoint: { phase: "fire", occurrence, skippedBefore, request: { triggerId: record.id, name: record.name, timezone: record.schedule.timezone, action: publicAction(record.action), occurrence, requestId: triggerRequestId(record.id, occurrence) } } };
           recordFire(record, { occurrence, requestId: triggerRequestId(record.id, occurrence), cause: "schedule", recordedAt: at, skippedBefore, outcome: { kind: "missed" } });
           const nextFireAt = nextOccurrence(record.schedule, at);
           record.state = { kind: "active", nextFireAt };
