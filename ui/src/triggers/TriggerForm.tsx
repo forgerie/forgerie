@@ -15,7 +15,7 @@ import { WorkflowInputFields } from "../workflows/WorkflowInputFields";
 import { thinkingLevelsFor, type Project, type Workspace } from "../newSession";
 import type { SessionModel } from "../contracts";
 import { RUN_LATE_CHOICES } from "./triggersModel";
-import { thinkingLevelOf } from "./triggerWire";
+import { thinkingLevelOf } from "./triggerValues";
 import { fieldDomId, inputFields, type DraftProblems, type TriggerDraft } from "./triggerDraft";
 import { clockChangeHint, zoneLabel, DAY_SHORT, graceWords, runLateHint, WEEK, type Weekday } from "./triggerWords";
 

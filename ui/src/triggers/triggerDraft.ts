@@ -3,7 +3,8 @@
 import { DEFAULT_MISSED_GRACE_MINUTES, type Trigger, type TriggerAction, type TriggerCreate, type TriggerUpdate, type TriggerWorkflow } from "@shared/triggers";
 import { launchInputs, proposalInputs, type WorkflowInput } from "../workflows/workflowsModel";
 import { scheduleDays, scheduleOf } from "./triggerWords";
-import { thinkingLevelOf, WEEK, wireThinkingLevel, type ThinkingLevel, type Weekday } from "./triggerWire";
+import { thinkingLevelOf, WEEK, type ThinkingLevel, type Weekday } from "./triggerValues";
+import { wireThinkingLevel } from "./triggerWire";
 
 export interface TriggerDraft {
   name: string;

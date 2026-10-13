@@ -3,7 +3,8 @@
 // part fixes them. Copy talks about times and runs, never cron words.
 import type { Trigger, TriggerFire } from "@shared/triggers";
 import { nextOccurrence, type TriggerSchedule } from "@shared/triggerSchedules";
-import { daysOf, WEEK, wireDays, type Weekday } from "./triggerWire";
+import { WEEK, type Weekday } from "./triggerValues";
+import { daysOf, wireDays } from "./triggerWire";
 
 /** What every time word needs: the instant now, the browser's locale and zone, and the host's zone. */
 export interface WordClock {

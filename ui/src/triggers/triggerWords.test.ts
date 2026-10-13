@@ -5,6 +5,7 @@ import {
   clockChangeHint, graceWords, lastRunWords, missedWords, nextIfResumed, outcomeWords, relativeLong, relativeShort, rowLabel, runLateHint, runRecorded,
   scheduleOf, scheduleWords, skippedWords, storeOffWords, stripMarks, stripWords, whenLong, whenShort, zoneLabel, type WordClock,
 } from "./triggerWords";
+import { wireDays } from "./triggerWire";
 import { digest, docs, HOST_ZONE, NOW, nightly, serverRunId, triage } from "./fixtures/triggers";
 
 const LOCALE = "en-US";
@@ -28,7 +29,7 @@ describe("schedule words", () => {
   });
   it("reads all seven days as daily, and saves them as daily", () => {
     expect(weekly(["mon", "tue", "wed", "thu", "fri", "sat", "sun"], "03:00")).toEqual(daily("03:00"));
-    expect(scheduleWords({ kind: "weekly", at: "03:00", timezone: HOST_ZONE, on: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as never[] }, HOST_ZONE, LOCALE))
+    expect(scheduleWords({ kind: "weekly", at: "03:00", timezone: HOST_ZONE, on: wireDays(["sun", "mon", "tue", "wed", "thu", "fri", "sat"]) }, HOST_ZONE, LOCALE))
       .toBe("Every night at 3:00 AM");
   });
   it("words the store being off as two sentences", () => {
