@@ -1,19 +1,32 @@
 import { workflowProposalSchema } from "../workflowsModel";
-import { CHANGES_NOTE, FLAKY_HUNT, fromRecord } from "./planDocument";
-import { ProposalSheet } from "./ProposalSheet";
+import { CHANGES_NOTE, FLAKY_HUNT, fromRecord, type MockProposal } from "./planDocument";
+import { PlanPage, ProposalSheet } from "./ProposalSheet";
 
 export const name = "Workflow proposal mockup";
 export const note = "Mockup only: the proposal sheet with the plan as a document, a rail for the route and inputs, and every state of the shipped sheet";
 
-/** Real proposals copied from local sessions into local/ (ignored by Git). Absent on other machines. */
-const local = Object.values(import.meta.glob<{ default: unknown }>("./local/*.json", { eager: true }))
-  .map((module) => workflowProposalSchema.pick({ name: true, summary: true, text: true, definition: true, inputs: true }).safeParse(module.default))
-  .flatMap((parsed) => parsed.success ? [fromRecord(parsed.data)] : []);
+/**
+ * Real proposals copied from local sessions into local/ (ignored by Git), by file name. Absent on other machines.
+ * `unzen-nzbfast-switch` is a stored proposal as its agent wrote it; `.rewritten` is the same plan rewritten
+ * under prototypes/workflow-proposal-document/proposal-guidance.md.
+ */
+const local: Record<string, MockProposal> = Object.fromEntries(Object.entries(import.meta.glob<{ default: unknown }>("./local/*.json", { eager: true }))
+  .flatMap(([path, module]) => {
+    const parsed = workflowProposalSchema.pick({ name: true, summary: true, text: true, definition: true, inputs: true }).safeParse(module.default);
+    return parsed.success ? [[path.replace(/^.*\//u, "").replace(/\.json$/u, ""), fromRecord(parsed.data)]] : [];
+  }));
+const ORIGINAL = "unzen-nzbfast-switch";
+const REWRITTEN = "unzen-nzbfast-switch.rewritten";
+const missing = <p style={{ padding: 24 }}>Copy a proposal record into proposalMockups/local/ to see it here.</p>;
+const real = (key: string, show: (proposal: MockProposal) => React.ReactNode) => { const proposal = local[key]; return proposal === undefined ? missing : show(proposal); };
 
 export default function Review() { return <ProposalSheet />; }
-export function RealProposal() { return local[0] === undefined ? <p style={{ padding: 24 }}>Copy a proposal record into proposalMockups/local/ to see it here.</p>
-  : <ProposalSheet proposal={local[0]} />; }
-export function RealProposalAtTrial() { return local[0] === undefined ? null : <ProposalSheet proposal={local[0]} at="trial" />; }
+export function RealOriginal() { return real(ORIGINAL, (p) => <ProposalSheet proposal={p} />); }
+export function RealRewritten() { return real(REWRITTEN, (p) => <ProposalSheet proposal={p} />); }
+export function RealOriginalAtTrial() { return real(ORIGINAL, (p) => <ProposalSheet proposal={p} at="trial" />); }
+export function RealRewrittenAtTrial() { return real(REWRITTEN, (p) => <ProposalSheet proposal={p} at="trial" />); }
+export function RealPlanOriginal() { return real(ORIGINAL, (p) => <PlanPage proposal={p} />); }
+export function RealPlanRewritten() { return real(REWRITTEN, (p) => <PlanPage proposal={p} />); }
 export function AtAStage() { return <ProposalSheet at="port" />; }
 export function EditedInputs() { return <ProposalSheet edits={{ base: "next", rounds: "3" }} />; }
 export function InputsOpen() { return <ProposalSheet inputsOpen edits={{ rounds: "3" }} />; }

@@ -41,7 +41,8 @@ function StageMarks({ stage }: { stage: WorkflowStage }) {
 
 function StageWho({ stage }: { stage: WorkflowStage }) {
   const workers = stage.workers ?? [];
-  if (workers.length === 0) return <span className="pm-route-who">{stage.stop === "land" ? "You land the branches" : stage.stop === undefined ? "This chat" : "You approve"}</span>;
+  if (workers.length === 0) return <span className="pm-route-who" data-does={stage.stop === undefined && stage.does !== undefined || undefined}>
+    {stage.stop === "land" ? "You land the branches" : stage.stop !== undefined ? "You approve" : stage.does ?? "This chat"}</span>;
   if (workers.length > 3) return <span className="pm-route-who"><span>{workers.length} workers: {workers.map((worker) => worker.name).join(", ")}</span></span>;
   return <span className="pm-route-who">{workers.map((worker) => <span key={worker.name}><code>{worker.name}</code> {worker.agent}</span>)}</span>;
 }

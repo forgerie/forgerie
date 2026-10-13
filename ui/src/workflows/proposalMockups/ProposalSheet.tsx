@@ -32,6 +32,24 @@ export interface ProposalSheetProps {
 
 const READ_FAILED = "The server did not answer in time.";
 
+/** The plan: its overview, then one section per heading. A stage's section carries the stage's number. */
+function PlanBody({ proposal }: { proposal: MockProposal }) {
+  return <>
+    {proposal.overview !== "" && <section className="pm-overview"><PlanMarkdown id="overview" text={proposal.overview} /></section>}
+    {proposal.sections.map((s, index) => {
+      const number = s.stage === undefined ? undefined : proposal.stages.findIndex((stage) => stage.id === s.stage) + 1;
+      return <section key={index} data-stage={s.stage} data-number={number} className="pm-sec" style={number === undefined ? undefined : { "--stage": number }}>
+        <PlanMarkdown id={`section-${String(index)}`} text={`## ${s.title}\n\n${s.body}`} />
+      </section>;
+    })}
+  </>;
+}
+
+/** The plan alone, at its full length, as the sheet's left pane sets it. For comparing two plans. */
+export function PlanPage({ proposal }: { proposal: MockProposal }) {
+  return <div className="pm-page"><h1 className="pm-title">{proposal.title}</h1><article className="pm-doc"><div className="pm-measure"><PlanBody proposal={proposal} /></div></article></div>;
+}
+
 export function ProposalSheet({ proposal = SETTINGS_PORT, read: initialRead = "ready", blocked, starting = false, error, changing: initialChanging = false,
   outcome: initialOutcome, edits, inputsOpen = false, at }: ProposalSheetProps) {
   const [read, setRead] = useState(initialRead);
@@ -81,15 +99,7 @@ export function ProposalSheet({ proposal = SETTINGS_PORT, read: initialRead = "r
       <div className="pm-body">
         <article className="pm-doc" aria-label="Plan" aria-busy={read === "reading" || undefined}>
           <div className="pm-measure">
-            {read === "ready" && <>
-              {proposal.overview !== "" && <section className="pm-overview"><PlanMarkdown id="overview" text={proposal.overview} /></section>}
-              {sections.map((s, index) => {
-                const number = s.stage === undefined ? undefined : stages.findIndex((stage) => stage.id === s.stage) + 1;
-                return <section key={index} data-stage={s.stage} data-number={number} className="pm-sec" style={number === undefined ? undefined : { "--stage": number }}>
-                  <PlanMarkdown id={`section-${String(index)}`} text={`## ${s.title}\n\n${s.body}`} />
-                </section>;
-              })}
-            </>}
+            {read === "ready" && <PlanBody proposal={proposal} />}
             {read === "reading" && <div className="pm-reading">
               <Lede>{proposal.summary}</Lede>
               <div className="pm-skeleton" aria-hidden><span /><span /><span /><span /><span /></div>

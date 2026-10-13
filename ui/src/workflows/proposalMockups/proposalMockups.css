@@ -92,6 +92,8 @@ button.pm-route-stage:hover { background: var(--hover-surface); }
 .pm-route-text { flex: 1; min-inline-size: 0; display: grid; gap: 0.125rem; }
 .pm-route-name { font-weight: 500; line-height: 1.35; }
 .pm-route-who { display: grid; color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.45; }
+/* A stage this chat runs says what it does, in two lines at most. */
+.pm-route-who[data-does] { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .pm-route-who code { font-family: var(--code-font); font-size: var(--label-text); color: var(--foreground); }
 .pm-marks { flex: none; display: inline-flex; align-items: center; gap: var(--space-2); padding-block-start: 0.25rem; }
 .pm-blocks { display: inline-flex; gap: var(--mark-gap); }
@@ -218,3 +220,9 @@ button.pm-route-stage:hover { background: var(--hover-surface); }
   .pm-input-summary-meta { display: none; }
   .pm-foot { gap: var(--space-2); padding-block: var(--space-2); }
 }
+
+/* The plan alone, for comparing two plans at full length. */
+.pm-page { display: grid; justify-items: start; gap: var(--space-2); padding: var(--space-6) clamp(1.5rem, 5cqi, 4rem); background: var(--modal-surface); color: var(--foreground);
+  font-family: var(--body-font); min-block-size: 100dvh; }
+.pm-page .pm-doc { padding: var(--space-4) 0 0; }
+.pm-page .pm-title { white-space: normal; max-inline-size: 40rem; }
