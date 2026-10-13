@@ -3,8 +3,8 @@
 // models, so the run can start with it. Adding or removing a stage or a
 // worker changes what the plan describes, so the agent must update the plan
 // before the run starts.
-import type { SessionModel } from "../../contracts";
-import type { WorkflowStage } from "../workflowsModel";
+import type { SessionModel } from "../../src/contracts";
+import type { WorkflowStage } from "../../src/workflows/workflowsModel";
 
 export type Worker = NonNullable<WorkflowStage["workers"]>[number];
 

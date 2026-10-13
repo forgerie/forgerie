@@ -1,4 +1,4 @@
-import { workflowProposalSchema, type WorkflowStage } from "../workflowsModel";
+import { workflowProposalSchema, type WorkflowStage } from "../../src/workflows/workflowsModel";
 import { withModel, withWorkers } from "./routeEdits";
 import { CHANGES_NOTE, FLAKY_HUNT, fromRecord, type MockProposal } from "./planDocument";
 import { PlanPage, ProposalSheet } from "./ProposalSheet";
@@ -20,7 +20,7 @@ const local: Record<string, MockProposal> = Object.fromEntries(Object.entries(im
   }));
 const ORIGINAL = "unzen-nzbfast-switch";
 const REWRITTEN = "unzen-nzbfast-switch.rewritten";
-const missing = <p style={{ padding: 24 }}>Copy a proposal record into proposalMockups/local/ to see it here.</p>;
+const missing = <p style={{ padding: 24 }}>Copy a proposal record into ui/verification/proposal-mockups/local/ to see it here.</p>;
 const real = (key: string, show: (proposal: MockProposal) => React.ReactNode) => { const proposal = local[key]; return proposal === undefined ? missing : show(proposal); };
 
 /** The reader's route edits, as a function of the agent's route. */

@@ -1,8 +1,8 @@
 // Mockup only. The proposals the mockup shows. A plan is plain Markdown that
 // can use the chat's rich blocks; an agent reads the same text it runs.
 // `fromRecord` turns any stored proposal record into what the sheet shows.
-import { PROPOSAL_STAGES, PROSE_PROPOSAL } from "../fixtures/proposals";
-import { proseOf, type WorkflowProposal, type WorkflowStage } from "../workflowsModel";
+import { PROPOSAL_STAGES, PROSE_PROPOSAL } from "../../src/workflows/fixtures/proposals";
+import { proseOf, type WorkflowProposal, type WorkflowStage } from "../../src/workflows/workflowsModel";
 
 /** A part of the plan. With `stage`, it describes that stage, and the route opens it. */
 export interface PlanSection {

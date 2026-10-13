@@ -16,7 +16,7 @@ const { chromium } = require("playwright-core");
 
 const origin = process.argv[2] ?? "http://localhost:8510";
 const scheme = process.argv[3] ?? "light";
-const part = "src/workflows/proposalMockups/ProposalMockups.page.part.tsx";
+const part = "verification/proposal-mockups/ProposalMockups.page.part.tsx";
 const sizes = [
   ["desktop", 1440, 900],
   ["tablet", 1180, 820],

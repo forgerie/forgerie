@@ -2,9 +2,9 @@
 // it: where each stage stands, each worker's runs as tally blocks, and each
 // worker's live record. A build reads this from the run record and the
 // child transcripts the child agents panel already reads.
-import type { ExchangeLine } from "../../ui/ExchangeLog";
-import { PROPOSAL_RUN } from "../fixtures/proposals";
-import type { StopEntry, WorkflowRun } from "../workflowsModel";
+import type { ExchangeLine } from "../../src/ui/ExchangeLog";
+import { PROPOSAL_RUN } from "../../src/workflows/fixtures/proposals";
+import type { StopEntry, WorkflowRun } from "../../src/workflows/workflowsModel";
 import { SETTINGS_PORT, type MockProposal } from "./planDocument";
 import type { StageProgress } from "./ProposalSheet";
 

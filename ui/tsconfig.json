@@ -15,5 +15,5 @@
     "noEmit": true,
     "paths": { "@shared/*": ["../src/shared/*"] }
   },
-  "include": ["src", "gates", "verification/preview.tsx", "verification/worktree-preview.tsx", "verification/dictation-live.tsx", "verification/plugins.tsx", "verification/pull-request-preview.tsx", "verification/triggers-preview.tsx", "vite.config.ts"]
+  "include": ["src", "gates", "verification/preview.tsx", "verification/worktree-preview.tsx", "verification/dictation-live.tsx", "verification/plugins.tsx", "verification/pull-request-preview.tsx", "verification/triggers-preview.tsx", "verification/proposal-mockups", "vite.config.ts"]
 }

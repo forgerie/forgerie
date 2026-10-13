@@ -4,7 +4,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ArrowRightLeftIcon, CheckIcon, ChevronDownIcon, MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import type { InputSpec, InputValues } from "./planDocument";
-import { PortalLayerProvider } from "../../ui/portalLayer";
+import { PortalLayerProvider } from "../../src/ui/portalLayer";
 import "./proposalMockups.css";
 
 /** The modal. It grows to two panes' width when the window has room, and each axis gives up its margin before the content shrinks. */

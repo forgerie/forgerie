@@ -5,10 +5,10 @@
 // proposalMockups.css choose the layout from the sheet's size.
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Undo2Icon } from "lucide-react";
-import type { WorkflowStage } from "../workflowsModel";
-import { AlertCard } from "../../ui/AlertCard";
-import { Lede } from "../../ui/Lede";
-import { MarkdownFragment } from "../../ui/MarkdownFragment";
+import type { WorkflowStage } from "../../src/workflows/workflowsModel";
+import { AlertCard } from "../../src/ui/AlertCard";
+import { Lede } from "../../src/ui/Lede";
+import { MarkdownFragment } from "../../src/ui/MarkdownFragment";
 import { PlanMarkdown } from "./PlanMarkdown";
 import { SETTINGS_PORT, type InputValues, type MockProposal } from "./planDocument";
 import { Actions, ChangesBox, Decided, InputFields, InputSummary, Sheet, SheetHead, type Outcome } from "./mockupParts";

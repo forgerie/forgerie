@@ -3,9 +3,9 @@
 // facts, details and the rest. The renderer reads its text from an assistant
 // message, so this wraps the text in a one-message thread.
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useExternalStoreRuntime } from "@assistant-ui/react";
-import { MarkdownText } from "../../ui/MarkdownText";
-import type { TranscriptMessage } from "../../transcript";
-import { useThreadMessages } from "../../useThreadMessages";
+import { MarkdownText } from "../../src/ui/MarkdownText";
+import type { TranscriptMessage } from "../../src/transcript";
+import { useThreadMessages } from "../../src/useThreadMessages";
 
 const Text = () => <MarkdownText />;
 const Assistant = () => <MessagePrimitive.Root className="pm-doc-message">

@@ -20,8 +20,5 @@
   "ignoreBinaries": [
     "magick",
     "which"
-  ],
-  "ignore": [
-    "src/workflows/proposalMockups/local/**"
   ]
 }

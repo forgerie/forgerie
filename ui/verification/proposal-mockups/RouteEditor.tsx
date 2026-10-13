@@ -3,9 +3,9 @@
 // stages and workers can be added and removed; the plan then needs an update.
 import { Fragment, useRef, useState } from "react";
 import { PlusIcon, XIcon } from "lucide-react";
-import { ModelPicker, type ModelBinding, type PickerOpen } from "../../ui/ModelPicker";
-import { thinkingLevelsFor } from "../../newSession";
-import type { WorkflowStage } from "../workflowsModel";
+import { ModelPicker, type ModelBinding, type PickerOpen } from "../../src/ui/ModelPicker";
+import { thinkingLevelsFor } from "../../src/newSession";
+import type { WorkflowStage } from "../../src/workflows/workflowsModel";
 import { AGENTS, freeStageId, freeWorkerName, MODELS, modelName, modelText, parseModel, sessionModelOf, withModel, withWorkers, type Worker } from "./routeEdits";
 
 /** One worker's model, as the composer's picker shows it. Without a model, the worker runs on the session's. */

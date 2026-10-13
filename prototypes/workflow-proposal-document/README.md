@@ -14,7 +14,7 @@ and "card deck", were dropped on 2026-10-13. They are in Git history at
 commit `68084ac8`.
 
 The mockup is React, not HTML, so that the plan uses the real renderer and
-the real theme. It lives in `ui/src/workflows/proposalMockups/` as one
+the real theme. It lives in `ui/verification/proposal-mockups/` as one
 Caliper part, `ProposalMockups.page.part.tsx`, with one state for each state
 of the shipped sheet. The states work: Start, Ask for changes, Dismiss, the
 route, the inputs and Retry all respond. Delete that folder when the sheet is
@@ -74,7 +74,7 @@ Start, Ask for changes and Dismiss are in view at every size.
 
 The proposal is the `settings-store-port` fixture
 (`ui/src/workflows/fixtures/proposals.ts`). Its plan is rewritten with rich
-blocks in `ui/src/workflows/proposalMockups/planDocument.ts`. The file paths
+blocks in `ui/verification/proposal-mockups/planDocument.ts`. The file paths
 in the `files` block are invented. The prose-only state uses the
 `flaky-test-hunt` fixture as written.
 
