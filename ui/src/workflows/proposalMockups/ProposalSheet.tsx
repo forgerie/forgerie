@@ -23,7 +23,7 @@ export interface ProposalSheetProps {
   changing?: boolean;
   outcome?: Outcome;
   /** Inputs the reader already edited. */
-  edits?: Partial<InputValues>;
+  edits?: InputValues;
   /** Open the folded inputs in one column. */
   inputsOpen?: boolean;
   /** Start scrolled to this stage's section. */
@@ -41,11 +41,12 @@ export function ProposalSheet({ proposal = SETTINGS_PORT, read: initialRead = "r
   const [open, setOpen] = useState(inputsOpen);
   const [current, setCurrent] = useState<string>();
   const frame = useRef<HTMLDivElement>(null);
-  const { stages, sections, fields } = proposal;
+  const { stages, sections, inputs } = proposal;
   const ready = read === "ready";
   const decided = outcome !== undefined;
 
-  const section = (id: string) => frame.current?.querySelector<HTMLElement>(`#pm-sec-${id}`) ?? undefined;
+  const section = (stage: string) => frame.current?.querySelector<HTMLElement>(`[data-stage="${stage}"]`) ?? undefined;
+  const linked = sections.flatMap((s) => s.stage === undefined ? [] : [s.stage]);
   const jump = (id: string, smooth = true) => {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     section(id)?.scrollIntoView({ block: "start", behavior: smooth && !reduce ? "smooth" : "auto" });
@@ -54,10 +55,10 @@ export function ProposalSheet({ proposal = SETTINGS_PORT, read: initialRead = "r
   // The section in view: the last one whose heading passed the top 40% of the plan's scroller.
   const spy = (event: React.UIEvent) => {
     const box = event.target;
-    const first = sections[0] === undefined ? undefined : section(sections[0].id);
+    const first = linked[0] === undefined ? undefined : section(linked[0]);
     if (!(box instanceof HTMLElement) || first === undefined || !box.contains(first)) return;
     const line = box.getBoundingClientRect().top + box.clientHeight * 0.4;
-    setCurrent(sections.filter((s) => (section(s.id)?.getBoundingClientRect().top ?? Infinity) <= line).at(-1)?.id);
+    setCurrent(linked.filter((id) => (section(id)?.getBoundingClientRect().top ?? Infinity) <= line).at(-1));
   };
   useEffect(() => { if (at !== undefined) { const timer = setTimeout(() => jump(at, false), 60); return () => clearTimeout(timer); } return undefined; }, []);
 
@@ -81,10 +82,13 @@ export function ProposalSheet({ proposal = SETTINGS_PORT, read: initialRead = "r
         <article className="pm-doc" aria-label="Plan" aria-busy={read === "reading" || undefined}>
           <div className="pm-measure">
             {read === "ready" && <>
-              <section className="pm-overview"><PlanMarkdown id="overview" text={proposal.overview} /></section>
-              {sections.map((s) => <section key={s.id} id={`pm-sec-${s.id}`} className="pm-sec">
-                <PlanMarkdown id={s.id} text={`## ${s.title}\n\n${s.body}`} />
-              </section>)}
+              {proposal.overview !== "" && <section className="pm-overview"><PlanMarkdown id="overview" text={proposal.overview} /></section>}
+              {sections.map((s, index) => {
+                const number = s.stage === undefined ? undefined : stages.findIndex((stage) => stage.id === s.stage) + 1;
+                return <section key={index} data-stage={s.stage} data-number={number} className="pm-sec" style={number === undefined ? undefined : { "--stage": number }}>
+                  <PlanMarkdown id={`section-${String(index)}`} text={`## ${s.title}\n\n${s.body}`} />
+                </section>;
+              })}
             </>}
             {read === "reading" && <div className="pm-reading">
               <Lede>{proposal.summary}</Lede>
@@ -100,19 +104,19 @@ export function ProposalSheet({ proposal = SETTINGS_PORT, read: initialRead = "r
         <aside className="pm-rail" aria-label="Before you start">
           {stages.length > 0 && <section className="pm-rail-section">
             <h3 className="pm-section-label">Route</h3>
-            <Route stages={stages} current={current} onJump={ready && sections.length > 0 ? jump : undefined} />
+            <Route stages={stages} current={current} onJump={ready && linked.length > 0 ? jump : undefined} linked={linked} />
           </section>}
-          <section className="pm-rail-section pm-rail-inputs">
+          {inputs.length > 0 && <section className="pm-rail-section pm-rail-inputs">
             <h3 className="pm-section-label">Inputs</h3>
-            {ready ? <InputFields fields={fields} values={values} proposed={proposal.proposed} onChange={setValues} disabled={decided || busy} />
+            {ready ? <InputFields inputs={inputs} values={values} proposed={proposal.proposed} onChange={setValues} disabled={decided || busy} />
               : <p className="pm-note">The inputs arrive with the plan.</p>}
-          </section>
+          </section>}
         </aside>
       </div>
       <footer className="pm-foot" data-open={open || undefined} data-decided={decided || undefined}>
-        {ready && !decided && !changing && <div className="pm-foot-inputs">
-          <InputSummary fields={fields} values={values} proposed={proposal.proposed} open={open} onToggle={() => setOpen(!open)} />
-          {open && <InputFields fields={fields} values={values} proposed={proposal.proposed} onChange={setValues} disabled={busy} compact />}
+        {ready && !decided && !changing && inputs.length > 0 && <div className="pm-foot-inputs">
+          <InputSummary inputs={inputs} values={values} proposed={proposal.proposed} open={open} onToggle={() => setOpen(!open)} />
+          {open && <InputFields inputs={inputs} values={values} proposed={proposal.proposed} onChange={setValues} disabled={busy} compact />}
         </div>}
         <div className="pm-decide">{decide}</div>
       </footer>

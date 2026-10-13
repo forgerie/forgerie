@@ -54,9 +54,11 @@
 .pm-doc-thread, .pm-doc-message { display: block; }
 .pm-doc-message .markdown-content { font-size: var(--text-size); line-height: 1.625; }
 /* A stage's section: its heading carries the stage's number, as the route does. */
-.pm-sec { counter-increment: stage; scroll-margin-block-start: var(--space-4); }
+.pm-sec { scroll-margin-block-start: var(--space-4); }
 .pm-sec .markdown h2 { display: flex; align-items: center; gap: var(--space-2); margin-block: 2.25rem 0.625rem; font-size: 1.125rem; }
-.pm-sec .markdown h2::before { content: counter(stage); flex: none; display: grid; place-items: center; inline-size: 1.5rem; block-size: 1.5rem;
+.pm-sec:not([data-number]) .markdown h2::before { display: none; }
+.pm-measure > .pm-sec:first-child .markdown h2 { margin-block-start: 0; }
+.pm-sec .markdown h2::before { content: counter(stage); counter-reset: stage var(--stage, 0); flex: none; display: grid; place-items: center; inline-size: 1.5rem; block-size: 1.5rem;
   border: var(--hairline) solid var(--line-focus); border-radius: 50%; font-family: var(--code-font); font-size: var(--label-text); font-weight: 500;
   font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
 .pm-reading { display: grid; gap: var(--space-4); }
@@ -111,6 +113,14 @@ button.pm-route-stage:hover { background: var(--hover-surface); }
 .pm-reset { position: relative; margin-inline-start: var(--space-2); padding: 0; border: 0; background: none; color: var(--foreground); font: inherit;
   text-decoration: underline; text-decoration-color: var(--line-focus); text-underline-offset: 0.2em; cursor: pointer; }
 .pm-reset::after { content: ""; position: absolute; inset: -0.875rem -0.5rem; }
+.pm-input { inline-size: 100%; min-block-size: 2.5rem; padding: 0 var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
+  background: var(--background); color: var(--foreground); font-family: var(--code-font); font-size: var(--small-text); }
+.pm-input::placeholder { color: var(--muted-foreground); font-family: var(--body-font); }
+.pm-input:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 1px; }
+.pm-input:disabled { background: transparent; color: var(--muted-foreground); }
+.pm-input-number { inline-size: 7rem; font-variant-numeric: tabular-nums; }
+.pm-field[data-edited] .pm-input { border-color: color-mix(in oklab, var(--tone-warn) 55%, transparent); }
+.pm-field > .pm-input:not(.pm-input-number) { justify-self: stretch; }
 .pm-textarea { inline-size: 100%; resize: vertical; padding: var(--space-2) var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
   background: var(--background); color: var(--foreground); font: inherit; font-size: var(--small-text); line-height: 1.5; }
 .pm-textarea:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 1px; }
@@ -129,7 +139,7 @@ button.pm-route-stage:hover { background: var(--hover-surface); }
 .pm-field[data-edited] .pm-segment[aria-checked="true"], .pm-field[data-edited] .pm-stepper, .pm-field[data-edited] .pm-textarea { border-color: color-mix(in oklab, var(--tone-warn) 55%, transparent); }
 /* Compact: the branch and the rounds share a row under the task while they fit. */
 .pm-fields[data-compact] { display: flex; flex-wrap: wrap; align-items: start; gap: var(--space-3) var(--space-4); }
-.pm-fields[data-compact] [data-field="task"] { flex-basis: 100%; }
+.pm-fields[data-compact] [data-wide] { flex-basis: 100%; }
 .pm-fields[data-compact] .pm-textarea { resize: none; }
 
 /* Folded inputs, in the footer in one column */

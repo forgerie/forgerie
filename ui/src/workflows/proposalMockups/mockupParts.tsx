@@ -4,7 +4,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ArrowRightLeftIcon, CheckIcon, ChevronDownIcon, MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import type { WorkflowStage } from "../workflowsModel";
-import type { InputName, InputValues } from "./planDocument";
+import type { InputSpec, InputValues } from "./planDocument";
 import "./proposalMockups.css";
 
 /** The modal. It grows to two panes' width when the window has room, and each axis gives up its margin before the content shrinks. */
@@ -42,11 +42,16 @@ function StageMarks({ stage }: { stage: WorkflowStage }) {
 function StageWho({ stage }: { stage: WorkflowStage }) {
   const workers = stage.workers ?? [];
   if (workers.length === 0) return <span className="pm-route-who">{stage.stop === "land" ? "You land the branches" : stage.stop === undefined ? "This chat" : "You approve"}</span>;
+  if (workers.length > 3) return <span className="pm-route-who"><span>{workers.length} workers: {workers.map((worker) => worker.name).join(", ")}</span></span>;
   return <span className="pm-route-who">{workers.map((worker) => <span key={worker.name}><code>{worker.name}</code> {worker.agent}</span>)}</span>;
 }
 
 /** The stages in order. With `onJump`, a stage opens its section of the plan; `current` is the section in view. */
-export function Route({ stages, current, onJump }: { stages: readonly WorkflowStage[]; current?: string | undefined; onJump?: ((id: string) => void) | undefined }) {
+export function Route({ stages, current, onJump, linked }: {
+  stages: readonly WorkflowStage[]; current?: string | undefined; onJump?: ((id: string) => void) | undefined;
+  /** The stages that have a section in the plan. Only those jump. */
+  linked?: readonly string[] | undefined;
+}) {
   return <ol className="pm-route" role="list">
     {stages.map((stage, index) => {
       const content = <>
@@ -54,55 +59,78 @@ export function Route({ stages, current, onJump }: { stages: readonly WorkflowSt
         <span className="pm-route-text"><span className="pm-route-name">{stage.name}</span><StageWho stage={stage} /></span>
         <StageMarks stage={stage} />
       </>;
-      return <li key={stage.id}>{onJump === undefined ? <div className="pm-route-stage">{content}</div>
+      return <li key={stage.id}>{onJump === undefined || linked?.includes(stage.id) === false ? <div className="pm-route-stage">{content}</div>
         : <button type="button" className="pm-route-stage" aria-current={current === stage.id ? "location" : undefined}
           onClick={() => onJump(stage.id)}>{content}</button>}</li>;
     })}
   </ol>;
 }
 
-const LABELS: Record<InputName, string> = { task: "Task", base: "Branch to land on", rounds: "Review rounds" };
-const proposedText = (name: InputName, value: string | number) => name === "task" ? "The agent proposed a different task." : `The agent proposed ${String(value)}.`;
+const LONG_TEXT = 48;
+const valueText = (value: string) => value === "" ? "nothing" : value;
 
-/** The declared inputs: the task as text, the branch as a choice, the rounds as a number. An edited input says what the agent proposed and can go back to it. */
-export function InputFields({ fields, values, proposed, onChange, disabled = false, compact = false }: {
-  fields: readonly InputName[]; values: InputValues; proposed: InputValues; onChange: (next: InputValues) => void; disabled?: boolean; compact?: boolean;
+/** One input. A choice is a segmented control, a number a stepper, a yes or no a switch, and text a field that grows when the value is long. */
+function InputControl({ spec, value, labelId, disabled, compact, onChange }: {
+  spec: InputSpec; value: string; labelId: string; disabled: boolean; compact: boolean; onChange: (value: string) => void;
+}) {
+  if (spec.choices !== undefined && spec.choices.length > 0) return <div className="pm-segments" role="radiogroup" aria-labelledby={labelId}>
+    {spec.choices.map((choice) => <button key={choice} type="button" role="radio" aria-checked={value === choice} className="pm-segment" disabled={disabled}
+      onClick={() => onChange(choice)}><code>{choice}</code></button>)}
+  </div>;
+  if (spec.type === "boolean") return <div className="pm-segments" role="radiogroup" aria-labelledby={labelId}>
+    {["true", "false"].map((choice) => <button key={choice} type="button" role="radio" aria-checked={value === choice} className="pm-segment" disabled={disabled}
+      onClick={() => onChange(choice)}>{choice === "true" ? "Yes" : "No"}</button>)}
+  </div>;
+  if (spec.type === "number") {
+    const number = Number(value || 0);
+    // A small count steps; a port or an id is typed.
+    if (number > 99) return <input className="pm-input pm-input-number" aria-labelledby={labelId} inputMode="numeric" value={value} disabled={disabled}
+      onChange={(event) => onChange(event.target.value.replace(/[^\d]/gu, ""))} />;
+    return <div className="pm-stepper" role="group" aria-labelledby={labelId}>
+      <button type="button" aria-label="Less" disabled={disabled || number <= 0} onClick={() => onChange(String(number - 1))}><MinusIcon aria-hidden /></button>
+      <output aria-live="polite">{number}</output>
+      <button type="button" aria-label="More" disabled={disabled} onClick={() => onChange(String(number + 1))}><PlusIcon aria-hidden /></button>
+    </div>;
+  }
+  if (spec.name === "task" || value.length > LONG_TEXT) return <textarea className="pm-textarea" aria-labelledby={labelId} rows={compact ? 2 : 3} value={value}
+    disabled={disabled} onChange={(event) => onChange(event.target.value)} />;
+  return <input className="pm-input" aria-labelledby={labelId} value={value} placeholder="Empty" disabled={disabled} onChange={(event) => onChange(event.target.value)} />;
+}
+
+/** The declared inputs. An edited input says what the agent proposed and can go back to it. */
+export function InputFields({ inputs, values, proposed, onChange, disabled = false, compact = false }: {
+  inputs: readonly InputSpec[]; values: InputValues; proposed: InputValues; onChange: (next: InputValues) => void; disabled?: boolean; compact?: boolean;
 }) {
   const id = useId();
-  const edited = (name: InputName) => values[name] !== proposed[name];
-  const head = (name: InputName) => <span className="pm-field-head">
-    <span className="pm-field-label" id={`${id}-${name}`}>{LABELS[name]}</span>
-    {edited(name) && <span className="pm-edited">Edited</span>}
-  </span>;
-  const foot = (name: InputName) => edited(name) ? <span className="pm-field-hint">{proposedText(name, proposed[name])}
-    {!disabled && <button type="button" className="pm-reset" onClick={() => onChange({ ...values, [name]: proposed[name] })}>Use the agent's</button>}</span>
-    : name === "rounds" && !compact ? <span className="pm-field-hint">The run stops and reports after this many.</span> : null;
   return <div className="pm-fields" data-compact={compact || undefined}>
-    {fields.map((name) => <div key={name} className="pm-field" data-field={name} data-edited={edited(name) || undefined}>
-      {head(name)}
-      {name === "task" && <textarea className="pm-textarea" aria-labelledby={`${id}-task`} rows={compact ? 2 : 3} value={values.task} disabled={disabled}
-        onChange={(event) => onChange({ ...values, task: event.target.value })} />}
-      {name === "base" && <div className="pm-segments" role="radiogroup" aria-labelledby={`${id}-base`}>
-        {["main", "next"].map((branch) => <button key={branch} type="button" role="radio" aria-checked={values.base === branch} className="pm-segment" disabled={disabled}
-          onClick={() => onChange({ ...values, base: branch })}><code>{branch}</code></button>)}
-      </div>}
-      {name === "rounds" && <div className="pm-stepper" role="group" aria-labelledby={`${id}-rounds`}>
-        <button type="button" aria-label="Fewer rounds" disabled={disabled || values.rounds <= 1} onClick={() => onChange({ ...values, rounds: values.rounds - 1 })}><MinusIcon aria-hidden /></button>
-        <output aria-live="polite">{values.rounds}</output>
-        <button type="button" aria-label="More rounds" disabled={disabled || values.rounds >= 9} onClick={() => onChange({ ...values, rounds: values.rounds + 1 })}><PlusIcon aria-hidden /></button>
-      </div>}
-      {foot(name)}
-    </div>)}
+    {inputs.map((spec) => {
+      const value = values[spec.name] ?? "";
+      const agent = proposed[spec.name] ?? "";
+      const edited = value !== agent;
+      const wide = spec.type === "string" && spec.choices === undefined;
+      return <div key={spec.name} className="pm-field" data-wide={wide || undefined} data-edited={edited || undefined}>
+        <span className="pm-field-head">
+          <span className="pm-field-label" id={`${id}-${spec.name}`}>{spec.label}</span>
+          {edited && <span className="pm-edited">Edited</span>}
+        </span>
+        <InputControl spec={spec} value={value} labelId={`${id}-${spec.name}`} disabled={disabled} compact={compact} onChange={(next) => onChange({ ...values, [spec.name]: next })} />
+        {edited ? <span className="pm-field-hint">{agent.length > LONG_TEXT ? "The agent proposed a different value." : `The agent proposed ${valueText(agent)}.`}
+          {!disabled && <button type="button" className="pm-reset" onClick={() => onChange({ ...values, [spec.name]: agent })}>Use the agent's</button>}</span>
+          : spec.hint !== undefined && !compact ? <span className="pm-field-hint">{spec.hint}</span> : null}
+      </div>;
+    })}
   </div>;
 }
 
 /** Folded inputs: one line that says what is set, and opens the fields. */
-export function InputSummary({ fields, values, proposed, open, onToggle }: { fields: readonly InputName[]; values: InputValues; proposed: InputValues; open: boolean; onToggle: () => void }) {
-  const edits = fields.filter((name) => values[name] !== proposed[name]).length;
+export function InputSummary({ inputs, values, proposed, open, onToggle }: { inputs: readonly InputSpec[]; values: InputValues; proposed: InputValues; open: boolean; onToggle: () => void }) {
+  const edits = inputs.filter(({ name }) => values[name] !== proposed[name]).length;
+  const lead = inputs.find((spec) => spec.name === "task") ?? inputs[0];
+  const rest = inputs.filter((spec) => spec !== lead && (values[spec.name] ?? "") !== "");
   return <button type="button" className="pm-input-summary" aria-expanded={open} onClick={onToggle}>
-    <span className="pm-field-label">Inputs</span>
-    <span className="pm-input-summary-text">{values.task}</span>
-    {fields.includes("base") && <span className="pm-input-summary-meta"><code>{values.base}</code>{fields.includes("rounds") && `, ${String(values.rounds)} rounds`}</span>}
+    <span className="pm-field-label">{inputs.length === 1 ? "Input" : `${String(inputs.length)} inputs`}</span>
+    <span className="pm-input-summary-text">{lead === undefined ? "" : lead.name === "task" ? values[lead.name] : `${lead.label}: ${values[lead.name] ?? ""}`}</span>
+    {rest.length > 0 && <span className="pm-input-summary-meta">{rest.slice(0, 2).map((spec) => values[spec.name]).join(", ")}{rest.length > 2 ? ", …" : ""}</span>}
     {edits > 0 && <span className="pm-edited">{edits} edited</span>}
     <ChevronDownIcon aria-hidden className="pm-chevron" />
   </button>;
