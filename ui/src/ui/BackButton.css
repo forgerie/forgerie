@@ -1,0 +1,12 @@
+/* Settings' Back: muted words after a chevron, divided from the title by a rule. It yields its words before the title does. */
+.back-button { position: relative; flex: 0 1 auto; display: inline-flex; align-items: center; gap: var(--space-1); min-inline-size: var(--icon-size); block-size: 2rem;
+  margin-inline-start: calc(-1 * var(--space-2) + var(--hairline) * 2); padding-inline: var(--space-2); border: 0; border-inline-end: var(--hairline) solid var(--line);
+  border-radius: var(--radius-control) 0 0 var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text);
+  white-space: nowrap; overflow: hidden; transition: color 150ms; }
+.back-button::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: var(--control-size); translate: -50% -50%; }
+.back-button:hover { color: var(--foreground); }
+.back-button svg { flex: none; }
+.back-button-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+@container (max-width: 26rem) { .back-button-label { display: none; } }
+@media (prefers-reduced-motion: reduce) { .back-button { transition: none; } }

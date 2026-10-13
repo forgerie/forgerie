@@ -1,0 +1,4 @@
+/* The agent page's problem list: danger ink, a short indent, no box. */
+.problem-list { color: var(--destructive); font-size: var(--small-text); line-height: 1.5; }
+.problem-list:focus-visible { outline: calc(var(--hairline) * 2) solid var(--foreground); outline-offset: calc(var(--hairline) * 2); }
+.problem-list-items { margin: 0; padding-inline-start: var(--space-5); }

@@ -1,0 +1,5 @@
+/* A hairline box at a chip's height, the search field's edge and ring. */
+.time-field { min-block-size: 2rem; padding-inline: var(--space-2); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
+  background: transparent; color: var(--foreground); font: inherit; font-size: var(--small-text); font-variant-numeric: tabular-nums; }
+.time-field:focus-visible { border-color: var(--line-focus); outline: calc(var(--hairline) * 2) solid var(--foreground); outline-offset: calc(var(--hairline) * 2); }
+.time-field:disabled { opacity: 0.6; }

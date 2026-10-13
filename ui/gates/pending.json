@@ -342,9 +342,6 @@
   "ui/ImageGallery.tsx:47",
   "ui/ImageViewer.tsx:158"
  ],
- "layer without parts": [
-  "template"
- ],
  "owned selector with a universal child": [
   "ui/theme.css: *"
  ],

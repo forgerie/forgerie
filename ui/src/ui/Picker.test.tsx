@@ -370,3 +370,32 @@ describe("dock rule A", () => {
     expect(shellLayout(DOCK_MIN_WIDTH)).toBe("docked");
   });
 });
+
+describe("the footer's places", () => {
+  it("shows Triggers with its count in the problem's tone, Settings as its gear, and Full screen in ⋯", () => {
+    const onTriggers = vi.fn();
+    const onFullscreen = vi.fn();
+    act(() => root.render(<Picker view={view([S("a")])} prefs={defaults} onPrefs={() => undefined} actions={{ onSelect: () => undefined, onRetry: () => undefined,
+      onBacklog: () => undefined, backlogCount: 12, onSettings: () => undefined, onFullscreen, fullscreen: false,
+      onTriggers, triggers: { title: "Triggers: 2 need a look", chip: { text: "2", tone: "bad" } } }} />));
+    const triggers = host.querySelector<HTMLButtonElement>('button[aria-label="Triggers: 2 need a look"]');
+    expect(triggers?.textContent).toBe("Triggers2");
+    expect(triggers?.querySelector(".picker-footer-count")?.getAttribute("data-tone")).toBe("bad");
+    act(() => triggers?.click());
+    expect(onTriggers).toHaveBeenCalledOnce();
+    // An 18rem list has no room for Settings' word or a fourth control: the gear keeps its name, Full screen moves into ⋯.
+    expect(host.querySelector('button[aria-label="Settings"]')?.textContent).toBe("");
+    expect(host.querySelector('.picker-footer button[aria-label="Full screen"]')).toBeNull();
+    act(() => host.querySelector<HTMLButtonElement>('button[aria-label="More session commands"]')?.click());
+    const item = [...host.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')].find((node) => node.textContent === "Full screen");
+    expect(item?.getAttribute("aria-checked")).toBe("false");
+    act(() => item?.click());
+    expect(onFullscreen).toHaveBeenCalledOnce();
+  });
+  it("shows no chip when no trigger needs a look", () => {
+    act(() => root.render(<Picker view={view([S("a")])} prefs={defaults} onPrefs={() => undefined} actions={{ onSelect: () => undefined, onRetry: () => undefined,
+      onTriggers: () => undefined, triggers: { title: "Triggers" } }} />));
+    const triggers = host.querySelector<HTMLButtonElement>('button[aria-label="Triggers"]');
+    expect(triggers?.textContent).toBe("Triggers");
+  });
+});

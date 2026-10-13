@@ -1,0 +1,17 @@
+/* Past outcomes as a short line of marks, the size of a tally mark. The tones are the app's:
+   a muted dot is the ordinary case and earns no colour; only trouble is coloured. */
+.mark-strip {
+  /** Size of one mark. @label Strip mark @min 0.3125 @max 0.625 @step 0.0625 */
+  --mark-strip-size: 0.4375rem;
+  display: inline-flex; flex: none; align-items: center; gap: calc(var(--pip-gap) * 2); vertical-align: middle; line-height: 1;
+}
+.mark-strip-mark { flex: none; box-sizing: border-box; inline-size: var(--mark-strip-size); block-size: var(--mark-strip-size); border-radius: 50%; background: var(--muted-foreground); }
+.mark-strip[data-quiet] .mark-strip-mark[data-tone="plain"] { background: var(--faint-foreground); }
+.mark-strip-mark[data-tone="bad"] { border-radius: var(--hairline); background: var(--destructive); }
+.mark-strip-mark[data-tone="warn"] { border: calc(var(--hairline) * 1.5) solid var(--tone-warn); background: transparent; }
+.mark-strip-mark[data-tone="live"] { border: calc(var(--hairline) * 1.5) solid var(--live); background: transparent; animation: mark-strip-pulse 1.6s ease-in-out infinite; }
+.mark-strip-more { flex: none; margin-inline-end: var(--space-1); color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
+.mark-strip-more[data-tone="bad"] { color: var(--destructive); }
+.mark-strip-more[data-tone="warn"] { color: var(--ink-warn); }
+@keyframes mark-strip-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .mark-strip-mark[data-tone="live"] { animation: none; } }

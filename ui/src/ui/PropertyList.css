@@ -1,0 +1,2 @@
+/* The agent page's property block: a rule above and below, the rows' own rules between. */
+.property-list { margin-block: var(--space-6) 0; padding-block: var(--space-1); border-block: var(--hairline) solid var(--line); }

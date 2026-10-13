@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from "react";
 import { ChevronRightIcon } from "lucide-react";
+import { Excerpt } from "./Excerpt";
 import "./AlertCard.css";
 
 export interface AlertAction {
@@ -16,7 +17,7 @@ export interface AlertAction {
  * what happened, a plain explanation, the code that ran, quiet actions, and
  * an output panel the actions can fill.
  */
-export function AlertCard({ subject, title, time, children, code, codeLabel, actions = [], output, outputLabel, label, tone = "bad" }: {
+export function AlertCard({ subject, title, time, children, code, codeLabel, codeLines, actions = [], output, outputLabel, label, tone = "bad" }: {
   /** The thing that failed, in the code face, such as a process name. */
   subject?: string | undefined;
   /** What happened. With a subject, a few words after it, such as "failed". */
@@ -26,6 +27,8 @@ export function AlertCard({ subject, title, time, children, code, codeLabel, act
   children: ReactNode;
   code?: string | undefined;
   codeLabel?: string | undefined;
+  /** Cut long code to this many lines, with a toggle to read the rest. Absent: the code scrolls inside a few lines. */
+  codeLines?: number | undefined;
   actions?: readonly AlertAction[];
   /** Text an action loaded, such as recent output. Announced when it changes. */
   output?: string | undefined;
@@ -45,7 +48,9 @@ export function AlertCard({ subject, title, time, children, code, codeLabel, act
       {time && <span className="alert-card-time">{time}</span>}
     </header>
     <div className="alert-card-text">{children}</div>
-    {code !== undefined && <pre className="alert-card-code" tabIndex={0} aria-label={codeLabel}>{code}</pre>}
+    {code !== undefined && (codeLines === undefined
+      ? <pre className="alert-card-code" tabIndex={0} aria-label={codeLabel}>{code}</pre>
+      : <div className="alert-card-excerpt"><Excerpt label={codeLabel ?? title} lines={codeLines}><pre className="alert-card-code" data-cut="">{code}</pre></Excerpt></div>)}
     {actions.length > 0 && <div className="alert-card-actions">
       {actions.map((action) => <button key={action.label} type="button" className="alert-card-action"
         aria-expanded={action.expanded} aria-controls={action.expanded === undefined ? undefined : outputId}

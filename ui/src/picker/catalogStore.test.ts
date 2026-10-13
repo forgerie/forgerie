@@ -167,6 +167,26 @@ describe("live event cost", () => {
   });
 });
 
+describe("trigger changes", () => {
+  it("hands triggers.changed to the trigger list, leaves the catalog alone, and counts a rejoin as a change", async () => {
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    const before = store.getSnapshot();
+    let changes = 0;
+    const stop = store.onTriggersChanged(() => { changes += 1; });
+    api.emit({ type: "triggers.changed" });
+    await expect.poll(() => changes, { timeout: 2000 }).toBe(1);
+    expect(store.getSnapshot()).toBe(before);
+    // Events missed while the socket was down may have changed a trigger.
+    api.drop();
+    await until(store, () => store.getSnapshot().connection.type === "reconnecting");
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    await expect.poll(() => changes, { timeout: 2000 }).toBe(2);
+    stop();
+  });
+});
+
 describe("machine catalog", () => {
   it("clears an undeclared completion's attention mark when its unread event clears", async () => {
     const api = await machine();

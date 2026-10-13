@@ -81,7 +81,8 @@
 .agent-field-label { flex: 0 0 8rem; min-block-size: 2rem; display: flex; align-items: center; color: var(--muted-foreground); font-size: var(--small-text); }
 .agent-field-value { flex: 1 1 14rem; min-inline-size: 0; display: flex; align-items: center; min-block-size: 2rem; }
 .agent-field-hint { flex: 1 1 100%; margin: var(--space-1) 0 0; color: color-mix(in oklab, var(--muted-foreground) 85%, transparent); font-size: var(--label-text); line-height: 1.45; }
-@container settings (min-width: 30rem) { .agent-field-hint { padding-inline-start: calc(8rem + var(--space-4)); } }
+.agent-field-problem { flex: 1 1 100%; margin: var(--space-1) 0 0; color: var(--destructive); font-size: var(--label-text); line-height: 1.45; }
+@container settings (min-width: 30rem) { .agent-field-hint, .agent-field-problem { padding-inline-start: calc(8rem + var(--space-4)); } }
 .agent-model, .agent-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); inline-size: 100%; }
 .agent-field .model-trigger { flex: 0 1 auto; margin-inline-start: calc(-1 * var(--space-2)); color: var(--foreground); }
 .agent-field .model-trigger:disabled { opacity: 1; color: var(--foreground); }

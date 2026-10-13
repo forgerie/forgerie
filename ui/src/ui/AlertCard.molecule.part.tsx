@@ -35,3 +35,11 @@ export function Warn() {
     Live connection timed out. Try <strong>4</strong> starts in 3 s. Your draft stays here.
   </AlertCard>;
 }
+/** A long error cut to a few lines, with Show more. */
+export function CutError() {
+  return <AlertCard label="Run failed" subject="Failed" title="The Oct 12, 3:00 AM run failed." codeLabel="Error" codeLines={4}
+    code={'Workflow "refine-backlog" was not found in /home/reader/code/forgerie.\nThe library lists: release-notes, triage-issues.\nChecked .forgerie/workflows and ~/.forgerie/workflows.\nRename the workflow or choose another one on the trigger page.\nThe trigger keeps its schedule.\nThe next run tries again.'}
+    actions={[{ label: "Mark as seen", onPress: () => undefined }, { label: "Run now…", onPress: () => undefined }]}>
+    Fix the cause, then run it now or wait for the next run.
+  </AlertCard>;
+}

@@ -1,0 +1,7 @@
+/* The session list's skeleton bars, with the words under them. */
+.loading-lines { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-3) var(--space-2); }
+.loading-lines-bar { display: block; inline-size: var(--loading-lines-width, 70%); block-size: 0.875rem; border-radius: var(--radius-document);
+  background: var(--muted); animation: loading-lines-pulse 2s ease-in-out infinite; }
+.loading-lines-label { color: var(--muted-foreground); font-size: var(--small-text); }
+@keyframes loading-lines-pulse { 50% { opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) { .loading-lines-bar { animation: none; } }

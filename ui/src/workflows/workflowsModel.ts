@@ -162,7 +162,9 @@ export function runStatus(run: WorkflowRun): string {
 }
 
 /** Inputs a launch needs, from the workflow's declared defaults and what the reader typed. */
-export function launchInputs(workflow: SavedWorkflow, typed: Readonly<Record<string, string>>): { inputs: WorkflowInputs } | { problem: string } {
+/** Declared inputs are all a launch reads, so a trigger's workflow, which has no file around it, fits too. */
+export interface DeclaresInputs { definition: { inputs?: Readonly<Record<string, WorkflowInput>> | undefined; readonly [field: string]: unknown } }
+export function launchInputs(workflow: DeclaresInputs, typed: Readonly<Record<string, string>>): { inputs: WorkflowInputs } | { problem: string } {
   const inputs: WorkflowInputs = {};
   for (const [name, input] of Object.entries(workflow.definition.inputs ?? {})) {
     const raw = typed[name];
@@ -258,7 +260,7 @@ export function proposalOutcome(proposal: WorkflowProposal | undefined): string 
  * any value the agent filled that the definition does not declare (typed by its value). Each starts at the agent's
  * value, else the declared default, else empty.
  */
-export function proposalInputs(proposal: Pick<WorkflowProposal, "definition" | "inputs">): { inputs: [string, WorkflowInput][]; values: Record<string, string> } {
+export function proposalInputs(proposal: DeclaresInputs & Pick<WorkflowProposal, "inputs">): { inputs: [string, WorkflowInput][]; values: Record<string, string> } {
   const declared: [string, WorkflowInput][] = Object.entries(proposal.definition.inputs ?? {});
   const extra: [string, WorkflowInput][] = Object.entries(proposal.inputs).filter(([name]) => proposal.definition.inputs?.[name] === undefined)
     .map(([name, value]) => [name, { type: typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string" }]);

@@ -18,3 +18,5 @@
 .menu-button-separator { block-size: var(--hairline); margin: var(--space-1) calc(-1 * var(--space-1)); background: var(--line); }
 @keyframes menu-button-in { from { opacity: 0; scale: 0.96; } }
 @media (prefers-reduced-motion: reduce) { .menu-button-menu { animation: none; } .menu-button-trigger { transition: none; } }
+/* At window level the menu is fixed in place; its host sets where, against the button. */
+.menu-button-menu[data-layer="window"] { position: fixed; z-index: 100; inset-block-start: auto; inset-inline-end: auto; }

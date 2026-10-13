@@ -124,7 +124,7 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
   /** Where a folder lives, in the list's words: its project, and its branch off the main checkout. */
   const where = useCallback((cwd: string) => { const location = locate(cwd); return location.branch ? `${location.project} · ${location.branch}` : location.project; }, [locate]);
   return { view, prefs, setPrefs, find, look, recent, where, attention: attention(rows), actions: rowActions, archiveState, archiveAndNext,
-    onUnread: store.onUnread, onStartup: store.onStartup, onWorktree: store.onWorktree };
+    onUnread: store.onUnread, onStartup: store.onStartup, onWorktree: store.onWorktree, onTriggersChanged: store.onTriggersChanged };
 }
 
 export type ArchiveOutcome =

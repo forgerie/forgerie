@@ -50,3 +50,6 @@
   white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (prefers-reduced-motion: reduce) { .alert-card-marker { transition: none; } }
+/* Cut to a few lines by its excerpt, the code no longer scrolls on its own. */
+.alert-card-excerpt { margin-block-start: var(--space-2); font-family: var(--code-font); font-size: var(--code-size); line-height: 1.6; }
+.alert-card-code[data-cut] { margin: 0; padding-inline-start: 0; text-indent: 0; max-block-size: none; overflow: visible; }

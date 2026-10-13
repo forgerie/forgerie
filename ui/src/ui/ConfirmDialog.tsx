@@ -10,8 +10,8 @@ import { createPortal } from "react-dom";
  * says `busyLabel` and takes no second press. `held` disables it when the
  * decision cannot be made now; the body says why.
  */
-export function ConfirmDialog({ title, icon, children, confirmLabel, busyLabel, tone = "danger", busy = false, held = false, onConfirm, onCancel }: {
-  title: string; icon?: ReactNode; children: ReactNode; confirmLabel: string; busyLabel?: string; tone?: "danger" | "plain";
+export function ConfirmDialog({ title, icon, children, confirmLabel, busyLabel, cancelLabel = "Cancel", tone = "danger", busy = false, held = false, onConfirm, onCancel }: {
+  title: string; icon?: ReactNode; children: ReactNode; confirmLabel: string; busyLabel?: string; cancelLabel?: string; tone?: "danger" | "plain";
   busy?: boolean; held?: boolean; onConfirm: () => void; onCancel: () => void;
 }) {
   const titleId = useId();
@@ -35,7 +35,7 @@ export function ConfirmDialog({ title, icon, children, confirmLabel, busyLabel, 
       </header>
       <div className="wt-body" id={bodyId}>{children}</div>
       <footer className="wt-foot">
-        <button ref={cancel} type="button" className="wt-secondary" onClick={onCancel}>Cancel</button>
+        <button ref={cancel} type="button" className="wt-secondary" onClick={onCancel}>{cancelLabel}</button>
         <button type="button" className="primary wt-primary" data-tone={tone === "danger" ? "danger" : undefined} disabled={busy || held}
           onClick={onConfirm}>{busy ? busyLabel ?? confirmLabel : confirmLabel}</button>
       </footer>

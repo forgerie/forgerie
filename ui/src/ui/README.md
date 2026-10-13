@@ -11,22 +11,22 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions; an input such as a reply box can take the actions' place under the reason.
 - `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays, and a refusal may offer one follow-up (such as Create) to confirm in place.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
-- `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place.
+- `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place; inside a list it opens at window level, above the button when the room below is short.
 - `ChoiceList` (molecule): pick any number of rows; the legend counts the choice, a long list gets a search field, and a chosen id with no row stays visible.
-- `ListSection` (molecule): a titled list of `<li>` rows on a settings-style page, with an empty text and a note on where the items live.
+- `ListSection` (molecule): a titled list of `<li>` rows on a settings-style page, with an optional readout beside the title, an empty text, a control under the rows, and a note on where the items live.
 - `ActionRow` (molecule): a list item that is not a link: name and status on one line, a detail under them, its commands at the end.
 - `TitleField` (atom): a document title typed in place, in the title face, with its standfirst under it.
 - `Lede` (atom): the one quiet paragraph that opens a page.
 - `FilterChip` (atom): a filter that is on, above the list it narrows, with a clear button; not drawn when no filter is on.
 - `CopyButton` (molecule): copies text on press and reports the result in a live region.
 - `EventLine` (molecule): one quiet line for something that happened, with a tone dot, a time, an always-visible quote, and details on request.
-- `AlertCard` (molecule): a failure that may need the reader (or, in the warn tone, trouble that may clear on its own), drawn as a rail and wash in its tone: subject and phrase, explanation, wrapped code, quiet actions or a disclosure, and an output panel the actions fill.
+- `AlertCard` (molecule): a failure that may need the reader (or, in the warn tone, trouble that may clear on its own), drawn as a rail and wash in its tone: subject and phrase, explanation, wrapped code, quiet actions or a disclosure, and an output panel the actions fill; long code can be cut to a few lines with Show more.
 - `MarkdownFragment` (atom): renders a short piece of Markdown inside a block, under the reply's link and image policy, with no outer margin.
 - `Checklist` (molecule): shows progress on a list of tasks from `[x]`/`[~]`/`[ ]`/`[!]`/`[-]` lines, with an in-order meter and a count.
 - `FileTree` (molecule): shows the files a change touched as a tree, marked added, changed or deleted, with single-child directories folded.
 - `FactList` (molecule): shows a few headline values from `Label: value` lines; cells share a row and wrap by container width.
 - `TreeItem` (atom): one row of an ARIA tree, indented by level, with a chevron on a branch or a toned mark on a leaf, a count, and a dot.
-- `ToggleGroup` (molecule): a few choices of one setting as quiet pressed buttons, each with an optional count, a control-sized hit area, and an optional disabled state; as a form field it shows its label above them.
+- `ToggleGroup` (molecule): a few choices of one setting as quiet pressed buttons, each with an optional count, a control-sized hit area, and an optional disabled state; as a form field it shows its label above them; with `multiple`, any number can be pressed (such as days of the week) and the buttons wrap.
 - `FileTile` (atom): one file as a square: a picture fills it and any other file shows its type, the name under it, a note only for what the tile cannot show, and a corner remove.
 - `TileStrip` (molecule): one row of tiles that keeps its height and scrolls sideways, with each failure in full below.
 - `SplitButton` (molecule): an action and the one setting that changes what it does, in one chip; the second half shows the setting in effect and opens its choices, each explained, at window level.
@@ -78,4 +78,18 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `TextAreaField` (atom): a labelled box for a few lines of prose that grows with its text, with a hint under it.
 - `PinnedDock` (molecule): things that wait on the reader, pinned above an input under a counting heading; it takes at most 45% of the container height (a third on a container under 30rem tall) and scrolls inside past that.
 - `TagList` (atom): a few short words that classify something, as quiet pills on one wrapping row; readouts, not controls.
-- `Excerpt` (molecule): long content cut to its first few lines with a fade and a Show more toggle that appears only when it is cut; opened, it scrolls inside a share of the pane.
+- `Excerpt` (molecule): long content cut to its first few lines (a number the host may set) with a fade and a Show more toggle that appears only when it is cut; opened, it scrolls inside a share of the pane.
+- `MarkStrip` (atom): past outcomes in a line, oldest first: a dot for one that went as planned, a square for a failure, a ring for one that never happened, a pulsing ring for one under way; past a limit the oldest fold into a count in the worst tone they hide.
+- `RecordRow` (molecule): one record as one press target: a trouble mark, a two-line title, a time slot, meta parts that truncate from the end (or wrap to a second line when narrow), a foot with an outcome strip and words, and an inline action and ⋯ above the press target.
+- `RecordGroup` (molecule): a counted group of records under a heading with a rule to the edge, opened and closed from the heading, its name in full ink when it wants the reader.
+- `PropertyList` (molecule): a document's property rows between two rules, under its title.
+- `EmptyState` (molecule): an empty list as an invitation: an icon, a title, what goes here, and the action that adds the first one.
+- `LoadingLines` (atom): a first read in progress: pulsing bars of different lengths and one line that says what is being read.
+- `ReadoutLine` (molecule): one sentence about a state with the action that changes it at the line's end; the action wraps under the sentence first.
+- `TextButton` (atom): a quiet action drawn as words at the text's size, with a control-sized target and a danger tone.
+- `TimeField` (atom): a time of day as `HH:mm`, typed or picked with the browser's control in the reader's locale.
+- `ProblemList` (atom): what stops a form from saving, as a short list in the danger tone that takes focus when a save is refused.
+- `OptionPicker` (molecule): one choice as a chip that opens searchable options at window level; a blocked option stays visible and says why.
+- `HeaderIcon` (atom): an icon-only header control, such as Close, muted until hovered, with a control-sized target and its label as name and tooltip.
+- `BackButton` (atom): a page header's way back, named for where it goes, divided from the title by a rule; a narrow header keeps only its chevron.
+- `PageSection` (molecule): a titled part of a document page: a small quiet heading set apart by the page's largest gap, then its content at full width.

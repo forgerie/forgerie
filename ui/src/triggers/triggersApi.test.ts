@@ -1,0 +1,60 @@
+import { describe, expect, it } from "vitest";
+import { createTriggersApi, TriggerRefusal } from "./triggersApi";
+import { mixedList, nightly } from "./fixtures/triggers";
+
+/** The client takes its fetch as an argument: the test hands it one that records each request. */
+function served(status: number, body: unknown) {
+  const calls: { path: string; method: string; body?: unknown }[] = [];
+  const api = createTriggersApi(async (path, init = {}) => {
+    calls.push({ path, method: init.method ?? "GET", ...(typeof init.body === "string" ? { body: JSON.parse(init.body) as unknown } : {}) });
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  });
+  return { api, calls };
+}
+
+describe("the trigger routes", () => {
+  it("reads the list, and drops a malformed trigger instead of the list", async () => {
+    const { api, calls } = served(200, { ...mixedList, triggers: [...mixedList.triggers, { id: 7 }] });
+    const list = await api.list();
+    expect(list.triggers.map((trigger) => trigger.id)).toEqual(mixedList.triggers.map((trigger) => trigger.id));
+    expect(list.timezones).toContain("UTC");
+    expect(calls).toEqual([{ path: "/api/triggers", method: "GET" }]);
+  });
+  it("sends each write to its route with its body", async () => {
+    const { api, calls } = served(200, nightly);
+    await api.update("nightly-refinement", { baseRevision: 12, name: "Nightly" });
+    await api.pause("nightly-refinement");
+    await api.resume("nightly-refinement");
+    await api.acknowledge("nightly-refinement");
+    await api.get("new");
+    expect(calls).toEqual([
+      { path: "/api/triggers/nightly-refinement", method: "PATCH", body: { baseRevision: 12, name: "Nightly" } },
+      { path: "/api/triggers/nightly-refinement/pause", method: "POST", body: {} },
+      { path: "/api/triggers/nightly-refinement/resume", method: "POST", body: {} },
+      { path: "/api/triggers/nightly-refinement/acknowledge", method: "POST", body: {} },
+      { path: "/api/triggers/new", method: "GET" },
+    ]);
+  });
+  it("runs with the browser's request ID and deletes", async () => {
+    const run = served(202, { requestId: "abc123" });
+    expect(await run.api.run("nightly-refinement", "abc123")).toEqual({ requestId: "abc123" });
+    expect(run.calls).toEqual([{ path: "/api/triggers/nightly-refinement/run", method: "POST", body: { requestId: "abc123" } }]);
+    const remove = served(200, { ok: true });
+    expect(await remove.api.remove("nightly-refinement")).toEqual({ ok: true });
+    expect(remove.calls).toEqual([{ path: "/api/triggers/nightly-refinement", method: "DELETE" }]);
+  });
+  it("reads a project's workflows by folder", async () => {
+    const { api, calls } = served(200, { workflows: [{ name: "a", kind: "prose", inputs: {}, hasLandStop: true }, { name: "b" }], diagnostics: [] });
+    expect((await api.workflows("/code/forgerie")).workflows.map((item) => item.name)).toEqual(["a"]);
+    expect(calls[0]?.path).toBe("/api/triggers/workflows?cwd=%2Fcode%2Fforgerie");
+  });
+  it("turns a refusal into its status, message, and field", async () => {
+    const { api } = served(400, { error: "Unknown time zone \"Mars/Olympus\".", field: "schedule.timezone" });
+    const refusal = await api.create({ name: "x", schedule: { kind: "daily", at: "03:00", timezone: "Mars/Olympus" },
+      action: { kind: "workflow", cwd: "/c", workflow: "w", inputs: {} } }).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(TriggerRefusal);
+    expect(refusal).toMatchObject({ status: 400, field: "schedule.timezone", message: "Unknown time zone \"Mars/Olympus\"." });
+    const off = await served(503, { error: "database is locked" }).api.list().catch((error: unknown) => error);
+    expect(off).toMatchObject({ status: 503, message: "database is locked" });
+  });
+});

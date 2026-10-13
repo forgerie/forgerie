@@ -1,0 +1,12 @@
+/* A choice as a quiet chip: the value in the foreground, a chevron that says it opens. */
+/* The chip lines up its words with the values above and below it; the room it gives up is its own margin, not its text's. */
+.option-picker { display: inline-flex; min-inline-size: 0; max-inline-size: calc(100% + var(--space-2)); margin-inline-start: calc(-1 * var(--space-2)); }
+.option-picker-trigger { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); min-inline-size: 0; max-inline-size: 100%;
+  block-size: 2rem; padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 500; }
+.option-picker-trigger::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
+.option-picker-trigger:not(:disabled):hover, .option-picker-trigger[aria-expanded="true"] { background: var(--hover-surface); }
+.option-picker-trigger[data-empty] { color: var(--muted-foreground); }
+.option-picker-trigger svg { flex: none; color: var(--muted-foreground); }
+.option-picker-value { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

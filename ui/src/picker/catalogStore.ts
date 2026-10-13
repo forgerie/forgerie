@@ -136,6 +136,11 @@ export class MutationError extends Error {
 export interface SessionRef { id: string; cwd: string }
 const errorBody = z.object({ error: z.string() });
 
+/** The global event that says the trigger document changed (src/shared/triggers.ts `TriggersChangedEvent`). */
+function isTriggersChanged(value: unknown): boolean {
+  return typeof value === "object" && value !== null && (value as { type?: unknown }).type === "triggers.changed";
+}
+
 /**
  * One machine's session catalog, kept live.
  *
@@ -155,6 +160,11 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
   const startupListeners = new Set<(event: StartupEvent) => void>();
   /** Worktree changes also go to whoever started a session, before the catalog lists it. */
   const worktreeListeners = new Set<(record: WorktreeRecord) => void>();
+  /** The trigger document changed. Triggers are not catalog state: whoever shows them reads them again. */
+  const triggerListeners = new Set<() => void>();
+  const triggersChanged = () => { for (const listener of triggerListeners) listener(); };
+  /** A rejoin may have missed a `triggers.changed`, so it counts as one. */
+  let joined = false;
   const lifetime = new AbortController();
   const initialDelay = options.timing?.retryDelayMs ?? 500;
   let retryDelay = initialDelay;
@@ -214,6 +224,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
         let event: CatalogEvent | undefined;
         try {
           const value: unknown = JSON.parse(text);
+          if (isTriggersChanged(value)) { triggersChanged(); return; }
           const startup = startupEventSchema.safeParse(value);
           if (startup.success) { for (const listener of startupListeners) listener(startup.data); return; }
           const worktree = parseWorktreeEvent(value);
@@ -275,6 +286,8 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
       current.buffer = undefined;
       retryDelay = initialDelay;
       update(next);
+      if (joined) triggersChanged();
+      joined = true;
     } catch (error) {
       if (!live()) return;
       if (error instanceof z.ZodError) {
@@ -341,10 +354,11 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
     onUnread: (listener: (id: string) => void) => { unreadListeners.add(listener); return () => { unreadListeners.delete(listener); }; },
     onStartup: (listener: (event: StartupEvent) => void) => { startupListeners.add(listener); return () => { startupListeners.delete(listener); }; },
     onWorktree: (listener: (record: WorktreeRecord) => void) => { worktreeListeners.add(listener); return () => { worktreeListeners.delete(listener); }; },
+    onTriggersChanged: (listener: () => void) => { triggerListeners.add(listener); return () => { triggerListeners.delete(listener); }; },
     start: () => { unwatch = transport.watchRecovery?.(recover); return join(); },
     retry: () => { update({ ...state, connection: { type: "loading" } }); recover(); },
     ...mutations,
-    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); clearTimeout(frame); closeAttempt(); unwatch?.(); listeners.clear(); unreadListeners.clear(); },
+    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); clearTimeout(frame); closeAttempt(); unwatch?.(); listeners.clear(); unreadListeners.clear(); triggerListeners.clear(); },
   };
 }
 export type CatalogStore = ReturnType<typeof createCatalogStore>;

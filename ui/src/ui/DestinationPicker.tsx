@@ -19,6 +19,8 @@ export interface DestinationBinding {
   placement?: "fresh" | "existing" | undefined;
   /** Whether a project is a Git repository, and its default branch. */
   worktreeOptions?: ((path: string, signal: AbortSignal) => Promise<WorktreeOptions>) | undefined;
+  /** The words before the choice. Absent: "Start in". */
+  lead?: string | undefined;
   /** `placement` is set when the choice offered one: "fresh" for a new worktree, "existing" for a listed folder. */
   onChoose: (cwd: string, label: string, placement?: "fresh" | "existing") => void;
 }
@@ -63,7 +65,7 @@ export function DestinationPicker({ binding }: { binding: DestinationBinding }) 
   const close = (returnFocus: boolean) => { setOpen(false); if (returnFocus) trigger.current?.focus({ preventScroll: true }); };
   return <div ref={row} className="destination">
     <FolderIcon aria-hidden size={14} />
-    <span className="destination-lead" id={`${panelId}-lead`}>Start in</span>
+    <span className="destination-lead" id={`${panelId}-lead`}>{binding.lead ?? "Start in"}</span>
     <button ref={trigger} type="button" className="destination-trigger" disabled={binding.disabled}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined}
       aria-labelledby={`${panelId}-lead ${panelId}-value`} title={binding.cwd} onClick={() => setOpen(!open)}>

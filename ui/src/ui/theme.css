@@ -877,7 +877,8 @@ summary.trace-line:hover { color: var(--foreground); }
 /* Backlog and Settings: the session list's last row, always in reach under the list.
    They share one row, so the list loses no height to the second entry. */
 .picker-footer { flex: none; display: flex; gap: var(--space-1); padding: var(--space-1) var(--space-2) var(--space-2); border-block-start: 1px solid var(--line); }
-.picker-footer .picker-new { flex: 1 1 0; min-inline-size: 0; margin: 0; inline-size: auto; }
+/* Three places and a toggle share one row: the spacing inside each entry yields first, so the words and counts keep their room. */
+.picker-footer .picker-new { flex: 1 1 auto; min-inline-size: 0; gap: var(--space-1); margin: 0; inline-size: auto; padding-inline: var(--space-1) var(--space-2); }
 /* Full screen is a toggle, not a place: an icon at the row's end, so Backlog and Settings keep their width. */
 .picker-footer .picker-footer-icon { flex: none; inline-size: var(--control-size); justify-content: center; padding-inline: 0; }
 /* The open-item count is a readout: it truncates before the entry's name does.
@@ -885,6 +886,11 @@ summary.trace-line:hover { color: var(--foreground); }
    landed beside Settings and read as Settings' number. */
 .picker-footer-count { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 0.375rem; border-radius: 999px; background: var(--muted); color: var(--muted-foreground);
   font-family: var(--code-font); font-size: var(--meta-text); font-weight: 400; line-height: 1.125rem; }
+/* A count that asks for a look: a failure in the bad tone, a missed run only in the warn tone. */
+.picker-footer-count[data-tone="bad"] { background: var(--destructive-wash); color: var(--destructive); }
+.picker-footer-count[data-tone="warn"] { background: var(--warn-wash); color: var(--ink-warn); }
+/* With no room for words, each place is its icon and its count, centred in its share of the row. */
+.picker-footer[data-labels="none"] .picker-new { justify-content: center; gap: var(--space-1); padding-inline: var(--space-1); }
 /* A session that holds a backlog item carries the item's mark. */
 .picker-from-backlog { flex: none; display: inline-flex; align-items: center; color: var(--muted-foreground); }
 .picker-from-backlog svg { inline-size: 0.75rem; block-size: 0.75rem; }

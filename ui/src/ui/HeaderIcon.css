@@ -1,0 +1,7 @@
+/* The session list's header icon: muted until hovered, a finger-sized target around a small mark. */
+.header-icon { position: relative; display: grid; place-items: center; flex: none; inline-size: var(--icon-size); block-size: var(--icon-size);
+  padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); transition: color 150ms; }
+.header-icon::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: var(--control-size); block-size: var(--control-size); translate: -50% -50%; }
+.header-icon:hover { color: var(--foreground); }
+.header-icon svg { inline-size: 1rem; block-size: 1rem; }
+@media (prefers-reduced-motion: reduce) { .header-icon { transition: none; } }

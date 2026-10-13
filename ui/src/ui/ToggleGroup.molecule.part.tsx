@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ToggleGroup } from "./ToggleGroup";
 
 export const name = "Toggle group";
-export const note = "A few choices of one setting, one pressed at a time";
+export const note = "A few choices of one setting, one pressed at a time, or any number pressed";
 
 export default function Lists() {
   const [value, setValue] = useState<"changes" | "files">("changes");
@@ -24,4 +24,10 @@ export function OneUnavailable() {
   const [value, setValue] = useState<"rich" | "source">("source");
   return <ToggleGroup label="View" value={value} onChange={setValue}
     options={[{ value: "rich", label: "Rich", disabled: true, title: "Too large for the rich view." }, { value: "source", label: "Source" }]} />;
+}
+/** Any number pressed, such as the days a schedule runs on; the buttons wrap when the row is narrow. */
+export function SeveralPressed() {
+  const [value, setValue] = useState<string[]>(["mon", "wed", "fri"]);
+  return <ToggleGroup multiple label="Days" value={value} onChange={setValue}
+    options={["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => ({ value: day.toLowerCase(), label: day }))} />;
 }

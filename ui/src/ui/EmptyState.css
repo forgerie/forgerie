@@ -1,0 +1,8 @@
+/* Centred in the column, a little below its top: the space above shrinks with a short pane. */
+.empty-state { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); max-inline-size: 30rem;
+  margin: clamp(var(--space-6), 12cqb, 6rem) auto 0; text-align: center; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
+.empty-state-icon { display: grid; place-items: center; color: var(--muted-foreground); }
+.empty-state-icon svg { inline-size: 1.5rem; block-size: 1.5rem; }
+.empty-state-title { margin: 0; color: var(--foreground); font-family: var(--body-font); font-size: var(--text-size); font-weight: 500; }
+.empty-state-text { margin: 0; overflow-wrap: anywhere; }
+.empty-state-action { margin-block-start: var(--space-2); }

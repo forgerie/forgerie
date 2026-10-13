@@ -31,6 +31,7 @@ import { createGitHubApi, readSetupReturn, submitToGitHub } from "./backlog/gith
 import type { GitHubAppPage } from "./backlog/useGitHubApp";
 import { useBacklogList } from "./backlog/useBacklogList";
 import { appPluginStore } from "./plugins/appPluginStates";
+import { readTriggersPlace, TRIGGER_PARAMS, writeTriggersPlace, type TriggerPlace, type TriggersSlot } from "./triggers/triggersModel";
 // Settings carry the prompt editor; the chat never pays for it.
 const SettingsView = lazy(() => import("./ui/settings/SettingsView").then((module) => ({ default: module.SettingsView })));
 // The backlog renders item files as documents; the chat never pays for it either.
@@ -54,10 +55,15 @@ const readSettings = (): SettingsPlace | undefined => {
 };
 /** `?backlog` keeps the backlog open across a reload; `?backlog=<projectId>/<itemId>` keeps one item open. */
 const readBacklog = () => readBacklogPlace(new URLSearchParams(window.location.search));
+/** `?triggers` keeps the triggers open across a reload; `?triggers=<id>` one trigger, `?triggers&create` a new one. */
+const readTriggers = () => readTriggersPlace(new URLSearchParams(window.location.search));
 /** `&item=<projectId>/<itemId>` keeps a backlog item riding with the new-session dialog across a reload. */
 const readItem = () => readItemParam(new URLSearchParams(window.location.search).get("item"));
-/** Settings and the backlog both take the thread's place, so opening one closes the other. */
-const clearSettings = (url: URL) => { url.searchParams.delete("settings"); url.searchParams.delete("agent"); url.searchParams.delete("plugin"); url.searchParams.delete("group"); url.searchParams.delete("backlog"); };
+/** Settings, the backlog, and the triggers all take the thread's place, so opening one closes the others. */
+const clearSettings = (url: URL) => {
+  url.searchParams.delete("settings"); url.searchParams.delete("agent"); url.searchParams.delete("plugin"); url.searchParams.delete("group"); url.searchParams.delete("backlog");
+  for (const param of TRIGGER_PARAMS) url.searchParams.delete(param);
+};
 const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
 const worktreeApi = createWorktreeApi((path, init) => fetch(path, init));
 const backlogApi = createBacklogApi((path, init) => fetch(path, init));
@@ -89,9 +95,10 @@ const DIALOG_ENTRY = { newSession: newStartupToken() };
  * `projectSettings` draws Settings → Project groups.
  * `resourceSettings` draws Settings → Skills and prompts; `resourceLens` draws a session's own.
  * `search` is session search, held by the binding above this app so its query and hits outlive every layout.
+ * `triggers` is the triggers screen and its entry at the foot of the session list, held by the binding above this app.
  */
-export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, search }: {
-  search?: SessionSearch | undefined;
+export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, search, triggers }: {
+  search?: SessionSearch | undefined; triggers?: TriggersSlot | undefined;
   shelves?: ReactNode; projectCatalog?: readonly Project[] | undefined; projectScope?: readonly string[] | undefined;
   projectFilter?: Omit<PickerFilter, "onManage"> | undefined; projectSettings?: SettingsPageRenderer | undefined; relatedWork?: RelatedWorkRenderer | undefined;
   resourceSettings?: SettingsPageRenderer | undefined; resourceLens?: ResourceLensRenderer | undefined;
@@ -103,6 +110,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const [composeMode, setComposeMode] = useState<LaunchMode>("switch");
   const [settings, setSettings] = useState(readSettings);
   const [backlog, setBacklog] = useState(readBacklogOrSetup);
+  const [triggerPlace, setTriggerPlace] = useState<TriggerPlace | undefined>(readTriggers);
   // The backlog item riding with the new-session dialog.
   const [composeItem, setComposeItem] = useState(readItem);
   const backlogList = useBacklogList(backlogApi);
@@ -141,7 +149,8 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     return () => window.removeEventListener("beforeunload", warn);
   }, [inFlight]);
   // With nothing selected there is nothing to cover, so the sheet starts open.
-  const [open, setOpen] = useState(() => readSelected() === undefined && readNew() === undefined && readSettings() === undefined && readBacklogOrSetup() === undefined);
+  const [open, setOpen] = useState(() => readSelected() === undefined && readNew() === undefined && readSettings() === undefined && readBacklogOrSetup() === undefined
+    && readTriggers() === undefined);
   // A deleted session cannot stay open: its thread has nothing left to load.
   // The URL is the source of truth for the selection, so read it there.
   const closeSession = useCallback(() => {
@@ -158,12 +167,14 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const query = search?.state.query ?? "";
   const mode = queryMode(query);
   const picker = usePicker(selectedId, { onDeleted, starting, projectScope, projectCatalog, titleFilter: mode === "title" ? query : undefined });
-  const { onStartup, onWorktree } = picker;
+  const { onStartup, onWorktree, onTriggersChanged } = picker;
   useEffect(() => onStartup(startup.emit), [onStartup, startup]);
+  const triggersChanged = triggers?.onChanged;
+  useEffect(() => triggersChanged ? onTriggersChanged(triggersChanged) : undefined, [onTriggersChanged, triggersChanged]);
   useEffect(() => onWorktree(worktreeEvents.emit), [onWorktree, worktreeEvents]);
   useEffect(() => () => launches.dispose(), [launches]);
   useEffect(() => {
-    const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setComposing(readNew()); setComposeItem(readItem()); setSettings(readSettings()); setBacklog(readBacklog()); };
+    const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setComposing(readNew()); setComposeItem(readItem()); setSettings(readSettings()); setBacklog(readBacklog()); setTriggerPlace(readTriggers()); };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
@@ -192,9 +203,10 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     setComposing(undefined);
     setComposeItem(undefined);
     setCommandSelection({ session, draft, ...(error ? { error } : {}) });
-    const inSettings = readSettings() !== undefined || readBacklog() !== undefined;
+    const inSettings = readSettings() !== undefined || readBacklog() !== undefined || readTriggers() !== undefined;
     setSettings(undefined);
     setBacklog(undefined);
+    setTriggerPlace(undefined);
     if (session.id === selectedId && !fromComposer && !inSettings) return;
     const url = new URL(window.location.href);
     clearSettings(url);
@@ -320,6 +332,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     if (replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     setSettings(place);
     setBacklog(undefined);
+    setTriggerPlace(undefined);
     if (place) setOpen(false);
     else if (!readSelected()) setOpen(true);
   }, []);
@@ -334,9 +347,22 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     if (place && !place.item) refreshBacklog();
     setBacklog(place);
     setSettings(undefined);
+    setTriggerPlace(undefined);
     if (place) setOpen(false);
     else if (!readSelected()) setOpen(true);
   }, [refreshBacklog]);
+  // The triggers take the thread's place the same way; the session stays in the URL underneath.
+  const placeTriggers = useCallback((place: TriggerPlace | undefined, options: { replace?: boolean } = {}) => {
+    const url = new URL(window.location.href);
+    clearSettings(url);
+    if (place) writeTriggersPlace(url, place);
+    if (options.replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
+    setTriggerPlace(place);
+    setSettings(undefined);
+    setBacklog(undefined);
+    if (place) setOpen(false);
+    else if (!readSelected()) setOpen(true);
+  }, []);
   // A start, a failed start, or an archive can claim or free an item. Read the list again when one settles.
   const settled = launchList.filter((launch) => launch.state.type !== "starting").length;
   const archived = picker.view.archivedCount;
@@ -401,6 +427,8 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
         onPlace: placeBacklog, onClose: () => placeBacklog(undefined),
         onLaunch: (item) => { void startNew("switch", item); },
         onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }), github: githubApi, githubPage }} /></Suspense>
+    : triggerPlace && triggers ? triggers.render({ place: triggerPlace, onPlace: placeTriggers,
+      onOpenSession: (session) => switchSession(session), sessionName: (id) => picker.find(id)?.name })
     : composing === "" && !selectedId
       ? <SessionFrame name="New session" status={<StatusChip label="No project" tone="bad" panel={{ title: "No project", children: <p>Forgerie knows no project yet, and this app cannot add one yet.</p> }} />}><div className="thread-empty" /></SessionFrame>
     : selectedId ? <ForgerieSession key={selectedId} id={selectedId} onUnread={picker.onUnread} found={sessionFound}
@@ -413,7 +441,8 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     // The picker covers this area whenever nothing is selected, so it holds no
     // message of its own: the picker is the instruction.
     : <SessionFrame name="No session open"><div className="thread-empty" /></SessionFrame>;
-  return <><AppShell open={open} onOpenChange={setOpen} attention={picker.attention}
+  // A trigger that needs a look lights the opener's dot too, when no session already does.
+  return <><AppShell open={open} onOpenChange={setOpen} attention={picker.attention ?? (triggers?.entry.attention ? "blocked" : undefined)}
     picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs}
       shelves={shelves} filter={projectFilter ? { ...projectFilter, onManage: () => placeSettings({ section: "projects" }) } : undefined}
       search={searchBox} results={searchResults} narrowed={mode === "title"} onEscape={clearSearch}
@@ -421,8 +450,10 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
         onBacklog: () => placeBacklog(backlog ?? {}), backlogOpen: backlog !== undefined,
         backlogCount: backlogItems ? openCount(backlogItems) : undefined,
+        onTriggers: triggers ? () => placeTriggers(triggerPlace ?? { view: "list" }) : undefined, triggersOpen: triggerPlace !== undefined,
+        triggers: triggers ? { title: triggers.entry.title, chip: triggers.entry.chip } : undefined,
         onFullscreen: fullscreen.state.type === "unsupported" ? undefined : fullscreen.toggle, fullscreen: fullscreen.state.type === "fullscreen",
-        onClose: layout === "overlay" && (selectedId || settings || backlog) ? () => setOpen(false) : undefined }} />}
+        onClose: layout === "overlay" && (selectedId || settings || backlog || triggerPlace) ? () => setOpen(false) : undefined }} />}
     // `known` is read once, when the thread mounts for this id. A direct URL
     // load before the catalog arrives passes nothing and the store looks it up.
     thread={<>{thread}{dialog}</>} />{toast}</>;

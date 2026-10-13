@@ -1,0 +1,17 @@
+/* The session list's group heading: weight, a count, and a rule to the edge, so it reads as the start
+   of a group and never as one more row. The button keeps a finger-sized height. */
+.record-group + .record-group { margin-block-start: var(--space-2); }
+.record-group-heading { margin: 0; font: inherit; }
+.record-group-toggle { display: flex; align-items: flex-end; gap: var(--space-1); inline-size: 100%; min-block-size: var(--control-size);
+  padding: 0 var(--space-2) var(--space-1); border: 0; border-radius: var(--radius-document); background: transparent;
+  color: var(--muted-foreground); font-size: var(--label-text); font-weight: 600; line-height: 1rem; text-align: start; transition: color 150ms; }
+.record-group-toggle::after { content: ""; flex: 1 1 0; min-inline-size: var(--space-4); block-size: var(--hairline);
+  margin: 0 0 calc(var(--space-2) - var(--hairline) / 2) var(--space-1); background: var(--line); }
+.record-group:first-child .record-group-toggle { min-block-size: 2rem; }
+.record-group-toggle:hover { color: var(--foreground); }
+.record-group-chevron { flex: none; inline-size: 0.75rem; block-size: 1rem; transition: transform 150ms; }
+.record-group-toggle[aria-expanded="false"] .record-group-chevron { transform: rotate(-90deg); }
+.record-group[data-emphasis] .record-group-label { color: var(--foreground); }
+.record-group-count { color: var(--muted-foreground); font-weight: 400; font-variant-numeric: tabular-nums; }
+.record-group-rows { display: flex; flex-direction: column; gap: calc(var(--hairline) * 2); margin: 0; padding: 0; list-style: none; }
+@media (prefers-reduced-motion: reduce) { .record-group-toggle, .record-group-chevron { transition: none; } }

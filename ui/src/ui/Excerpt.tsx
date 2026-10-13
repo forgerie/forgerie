@@ -11,9 +11,11 @@ import "./Excerpt.css";
  * upward, so whatever follows the excerpt, such as a card's choices, never
  * moves out of view.
  */
-export function Excerpt({ label, children, moreLabel = "Show more", lessLabel = "Show less" }: {
+export function Excerpt({ label, children, moreLabel = "Show more", lessLabel = "Show less", lines }: {
   /** The content's accessible name, used for the opened region. */
   label: string;
+  /** Lines shown before the toggle. Absent: the stylesheet's default. A short pane still shows fewer. */
+  lines?: number | undefined;
   children: ReactNode;
   moreLabel?: string;
   lessLabel?: string;
@@ -49,7 +51,8 @@ export function Excerpt({ label, children, moreLabel = "Show more", lessLabel = 
   const toggle = opened || cut;
   return <div className="excerpt">
     <div className="excerpt-box" id={id} ref={box} data-cut={!opened && cut ? "" : undefined} data-opened={opened ? "" : undefined}
-      role={opened ? "region" : undefined} aria-label={opened ? label : undefined} tabIndex={opened ? 0 : undefined}>
+      role={opened ? "region" : undefined} aria-label={opened ? label : undefined} tabIndex={opened ? 0 : undefined}
+      style={{ "--excerpt-lines": lines }}>
       <div ref={content}>{children}</div>
     </div>
     {toggle && <button type="button" className="excerpt-toggle" ref={toggleRef} aria-expanded={opened} aria-controls={id}

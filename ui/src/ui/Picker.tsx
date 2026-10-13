@@ -1,6 +1,6 @@
-import { ArchiveIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, HashIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+import { ArchiveIcon, CalendarClockIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, HashIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
 import type { CatalogConnection } from "../picker/catalogStore";
 import { commandForKey, rowCommands, type RowCommandKind } from "../picker/commands";
@@ -12,6 +12,7 @@ import { LogoMark } from "./LogoMark";
 import { WorktreeRowMark } from "./WorktreeChip";
 import { PullRequestRowMark } from "./PullRequestReview";
 import { FilterChip } from "./FilterChip";
+import { footerPlan, FOOTER_ALL_LABELS, FOOTER_ICONS_ONLY } from "./pickerFooter";
 
 /** What the picker draws. Built by the binding; the view does no I/O. */
 export interface PickerView {
@@ -46,6 +47,11 @@ export interface PickerActions {
   backlogOpen?: boolean | undefined;
   /** Open items across every project. Absent until the backlog is read. */
   backlogCount?: number | undefined;
+  /** Opens the triggers in the thread's place. */
+  onTriggers?: (() => void) | undefined;
+  triggersOpen?: boolean | undefined;
+  /** The triggers entry's name and its chip, shown only when there is something to act on. */
+  triggers?: { title: string; chip?: { text: string; tone: "bad" | "warn" } | undefined } | undefined;
   /** Toggles browser full screen. Absent when the browser cannot. */
   onFullscreen?: (() => void) | undefined;
   fullscreen?: boolean | undefined;
@@ -73,6 +79,27 @@ const AGENTS = <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12
 const TERMINAL = <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m7 10 3 3-3 3" /><path d="M12 16h5" /></svg>;
 const count = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
 const menuId = (id: string) => `picker-menu-${id}`;
+
+/** The footer's inner width, measured, so its plan follows the list's own room and never the window's. */
+function useInnerWidth(element: HTMLElement | null): number {
+  // Before the first measure: the usual room, a docked or overlaid list of about 18rem.
+  const [width, setWidth] = useState((FOOTER_ALL_LABELS + FOOTER_ICONS_ONLY) / 2);
+  useLayoutEffect(() => {
+    if (!element) return;
+    const measure = () => {
+      const style = getComputedStyle(element);
+      const inner = element.clientWidth - (parseFloat(style.paddingInlineStart) || 0) - (parseFloat(style.paddingInlineEnd) || 0);
+      // A footer that is not laid out (a hidden sheet's first frame, a test page) keeps the last plan.
+      if (element.clientWidth > 0) setWidth(inner);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+  return width;
+}
 
 interface Press { x: number; y: number; at: number; timer: ReturnType<typeof setTimeout> }
 
@@ -205,6 +232,9 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
   const [menu, setMenu] = useState<"board" | undefined>();
   const [rowMenu, setRowMenu] = useState<{ id: string; confirming: boolean } | undefined>();
   const listRef = useRef<HTMLDivElement>(null);
+  const [footer, setFooter] = useState<HTMLDivElement | null>(null);
+  const plan = footerPlan(useInnerWidth(footer));
+  const fullScreenInMenu = actions.onFullscreen !== undefined && plan.fullScreen === "menu";
   const change = onPrefs;
 
   // The selected row's group opens, so the current session is never hidden.
@@ -302,6 +332,12 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
           <button role="menuitem" onClick={() => { setMenu(undefined); filter.onManage(); }}>
             <FolderTreeIcon aria-hidden />{filter.options.length ? "Edit project groups…" : "Group projects…"}</button>
         </> : null}
+        {fullScreenInMenu ? <>
+          <div className="picker-menu-separator" role="separator" />
+          <button role="menuitemcheckbox" aria-checked={actions.fullscreen === true}
+            onClick={() => { setMenu(undefined); actions.onFullscreen?.(); }}>
+            <CheckIcon aria-hidden />Full screen</button>
+        </> : null}
       </div> : null}
     </header>
     {search ? <div className="picker-search">{search}</div> : null}
@@ -347,14 +383,20 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
     </div>}
     {shelves}
     </div>
-    {actions.onSettings || actions.onBacklog ? <div className="picker-footer">
+    {actions.onSettings || actions.onBacklog || actions.onTriggers ? <div className="picker-footer" ref={setFooter} data-labels={plan.placeLabels ? undefined : "none"}>
       {actions.onBacklog ? <button className="picker-new" onClick={actions.onBacklog} aria-current={actions.backlogOpen ? "page" : undefined}
-        title={actions.backlogCount === undefined ? "Backlog" : `Backlog: ${String(actions.backlogCount)} open ${actions.backlogCount === 1 ? "item" : "items"}`}>
-        <ListTodoIcon aria-hidden size={16} />Backlog{actions.backlogCount === undefined ? null
+        title={actions.backlogCount === undefined ? "Backlog" : `Backlog: ${String(actions.backlogCount)} open ${actions.backlogCount === 1 ? "item" : "items"}`}
+        aria-label={plan.placeLabels ? undefined : "Backlog"}>
+        <ListTodoIcon aria-hidden size={16} />{plan.placeLabels ? "Backlog" : null}{actions.backlogCount === undefined ? null
           : <span className="picker-footer-count" aria-hidden="true">{actions.backlogCount}</span>}</button> : null}
-      {actions.onSettings ? <button className="picker-new" onClick={actions.onSettings} aria-current={actions.settingsOpen ? "page" : undefined}>
-        <SettingsIcon aria-hidden size={16} />Settings</button> : null}
-      {actions.onFullscreen ? <button className="picker-new picker-footer-icon" onClick={actions.onFullscreen}
+      {actions.onTriggers ? <button className="picker-new" onClick={actions.onTriggers} aria-current={actions.triggersOpen ? "page" : undefined}
+        title={actions.triggers?.title ?? "Triggers"} aria-label={actions.triggers?.title ?? "Triggers"}>
+        <CalendarClockIcon aria-hidden size={16} />{plan.placeLabels ? "Triggers" : null}{actions.triggers?.chip
+          ? <span className="picker-footer-count" data-tone={actions.triggers.chip.tone} aria-hidden="true">{actions.triggers.chip.text}</span> : null}</button> : null}
+      {actions.onSettings ? <button className={plan.settingsLabel ? "picker-new" : "picker-new picker-footer-icon"} onClick={actions.onSettings}
+        aria-current={actions.settingsOpen ? "page" : undefined} aria-label={plan.settingsLabel ? undefined : "Settings"} title={plan.settingsLabel ? undefined : "Settings"}>
+        <SettingsIcon aria-hidden size={16} />{plan.settingsLabel ? "Settings" : null}</button> : null}
+      {actions.onFullscreen && !fullScreenInMenu ? <button className="picker-new picker-footer-icon" onClick={actions.onFullscreen}
         aria-label={actions.fullscreen ? "Exit full screen" : "Full screen"} title={actions.fullscreen ? "Exit full screen" : "Full screen"}>
         {actions.fullscreen ? <Minimize2Icon aria-hidden size={16} /> : <Maximize2Icon aria-hidden size={16} />}</button> : null}
     </div> : null}
