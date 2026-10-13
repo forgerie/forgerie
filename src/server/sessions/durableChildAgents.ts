@@ -146,21 +146,25 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
     observe: async (reporter, runtime, context) => {
       const { run, owner } = reporter.state.checkpoint;
       const finished = await runtime.waitForTask(owner, context);
-      const progress = { pending: false };
-      await runtime.commit(async (tx) => {
-        const claim = (await tx.doc(Children, runtime.conversationId)).retryOwners?.[run];
-        const submission = claim === undefined ? undefined : await tx.submissionByRequest(claim.conversationId, claim.requestId);
-        const accepted = await tx.submissionByRequest(runtime.conversationId, `child-report:${String(owner)}`);
-        if (accepted === undefined && finished.state.outcome.status === "aborted") {
-          await undeliveredWorkflowChild(tx, runtime.conversationId, reporter.id, "aborted");
-          return { status: "terminal", outcome: { status: "completed", result: null } };
-        }
-        // An ancillary reporter failure need not have stopped its admitted child input.
-        if (submission?.status === "queued" || submission?.status === "placed") { progress.pending = true; return undefined; }
-        if (submission !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, submission);
-        return { status: "running", checkpoint: { phase: "report", suppressed: accepted === undefined ? "aborted" : "duplicate" } };
-      }, context);
-      if (progress.pending) await runtime.sleep(runtime.now() + 250, context);
+      // Returning with the same checkpoint faults the task. Keep waiting in this invocation until it can advance.
+      for (;;) {
+        const progress = { pending: false };
+        await runtime.commit(async (tx) => {
+          const claim = (await tx.doc(Children, runtime.conversationId)).retryOwners?.[run];
+          const submission = claim === undefined ? undefined : await tx.submissionByRequest(claim.conversationId, claim.requestId);
+          const accepted = await tx.submissionByRequest(runtime.conversationId, `child-report:${String(owner)}`);
+          if (accepted === undefined && finished.state.outcome.status === "aborted") {
+            await undeliveredWorkflowChild(tx, runtime.conversationId, reporter.id, "aborted");
+            return { status: "terminal", outcome: { status: "completed", result: null } };
+          }
+          // An ancillary reporter failure need not have stopped its admitted child input.
+          if (submission?.status === "queued" || submission?.status === "placed") { progress.pending = true; return undefined; }
+          if (submission !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, submission);
+          return { status: "running", checkpoint: { phase: "report", suppressed: accepted === undefined ? "aborted" : "duplicate" } };
+        }, context);
+        if (!progress.pending) return;
+        await runtime.sleep(runtime.now() + 250, context);
+      }
     },
     report: async (reporter, runtime, context) => {
       const checkpoint = reporter.state.checkpoint;

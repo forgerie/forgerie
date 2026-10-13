@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { getCurrentSystemPrompt, type JsonObject } from "@earendil-works/pi-ai";
@@ -19,14 +20,18 @@ import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
 import { SessionWorktreeStore } from "../workspaces/sessionWorktreeStore.js";
+import { DurableChildRunRecords } from "./durableChildRunRecords.js";
+import { ChildRunStore } from "./childRunStore.js";
 
 const roots: string[] = [];
 const journals: DurableSessionJournal[] = [];
+const recorders: DurableChildRunRecords[] = [];
 afterEach(async () => {
+  await Promise.all(recorders.splice(0).map((recorder) => recorder.close()));
   await Promise.all(journals.splice(0).map((journal) => journal.close()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-async function fixture(errors: string[] = [], holdAt?: number) {
+async function fixture(errors: string[] = [], holdAt?: number, recordRuns = false) {
   const root = await mkdtemp(join(tmpdir(), "forgerie-child-autonomy-")); roots.push(root);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
   git("init", "-b", "main"); git("config", "user.name", "Autonomy test"); git("config", "user.email", "test@example.invalid");
@@ -53,7 +58,7 @@ async function fixture(errors: string[] = [], holdAt?: number) {
         return fauxAssistantMessage([fauxToolCall("ask_human", { question: "Wait?" })], { stopReason: "toolUse" });
       }
       const error = errors[childCalls++];
-      return error === undefined ? fauxAssistantMessage("CHILD-SUCCESS") : fauxAssistantMessage("", { stopReason: "error", errorMessage: error });
+      return error === undefined ? fauxAssistantMessage(text.includes("RETRY-SUCCESS") ? "RETRY-SUCCESS" : "CHILD-SUCCESS") : fauxAssistantMessage("", { stopReason: "error", errorMessage: error });
     }
     if (last?.role === "user") {
       parentInputs.push(text);
@@ -62,13 +67,32 @@ async function fixture(errors: string[] = [], holdAt?: number) {
     }
     return fauxAssistantMessage("PARENT-DONE");
   }));
-  const registry = createRegistry(); registry.install(workflowExtension()); const extensions = durableChildExtensions({ catalog, worktrees, commit: (change, ctx) => journal.harness.commit(change, ctx) });
+  const recordPath = join(root, "child-runs.json");
+  const runStore = new ChildRunStore(recordPath);
+  const recordErrors: unknown[] = [];
+  const runtimeErrors: unknown[] = [];
+  let recorder: DurableChildRunRecords | undefined;
+  let failedWrite: Promise<void> | undefined;
+  let releaseFailedWrite: (() => void) | undefined;
+  const registry = createRegistry(); registry.install(workflowExtension()); const extensions = durableChildExtensions({ catalog, worktrees,
+    ...(recordRuns ? { flushRunRecords: async () => { await failedWrite; await recorder?.flush(); } } : {}),
+    commit: (change, ctx) => journal.harness.commit(change, ctx) });
   for (const extension of [...extensions.parent, ...extensions.childOnly]) registry.install(extension);
   let now = 1000000;
-  async function open() {
+  async function open(corruptRecords = false) {
+    // Let the retry's real history write fail before either flush caller can pass the accounting boundary.
+    if (corruptRecords) failedWrite = new Promise<void>((resolve) => { releaseFailedWrite = resolve; });
     const journal = await DurableSessionJournal.open({ manager, models, registry, agent: { cwd: root, model: { provider: "faux", modelId: "faux-1" }, extensions: [...extensions.parent, workflowExtension()] },
-      familyOptions: { models, registry, now: () => now, settings: { retry: { enabled: false } } } });
-    journals.push(journal); journal.harness.resume(); return journal;
+      familyOptions: { models, registry, now: () => now, settings: { retry: { enabled: false } }, onReport: (error) => { runtimeErrors.push(error); } } });
+    journals.push(journal);
+    if (recordRuns) {
+      recorder = await DurableChildRunRecords.open(journal.harness, journal.conversation.id, { id: "parent", cwd: root }, runStore, context,
+        (error) => { recordErrors.push(error); releaseFailedWrite?.(); }, () => now);
+      recorders.push(recorder);
+    }
+    // Only this private history file fails. Durable can still admit the retry and run its tools.
+    if (corruptRecords) await writeFile(recordPath, "{invalid child run history");
+    journal.harness.resume(); return journal;
   }
   let journal = await open();
   const children = () => listChildren(journal.harness, journal.conversation.id, context, worktrees);
@@ -78,7 +102,9 @@ async function fixture(errors: string[] = [], holdAt?: number) {
     return journal.conversation.context(context);
   }
   return { children, spawn, parentInputs, calls: () => childCalls, journal: () => journal,
-    restart: async (at: number) => { await journal.close(); now = at; journal = await open(); },
+    restart: async (at: number, corruptRecords = false) => { await recorder?.close(); await journal.close(); now = at; journal = await open(corruptRecords); },
+    advanceClock: (ms: number) => { now += ms; },
+    recordPath, recordErrors, runtimeErrors,
     startWorkflow: async () => {
       const proposal = await journal.conversation.commit((tx) => proposeWorkflow(tx, journal.conversation.id, "p:autonomy", { name: "autonomy", summary: "Autonomy check", text: "---\nworkflow: {version: 1}\n---\nWait." }), context);
       await startWorkflowProposal(journal.harness, journal.conversation, root, "parent", proposal.id, {}, "start", context);
@@ -216,6 +242,47 @@ it.each(["success", "exhausted", "stop"] as const)("shares one durable retry own
   expect(run.parentInputs.filter((text) => text.includes("[subagent retry"))).toHaveLength(1);
   expect(run.parentInputs.find((text) => text.includes("[subagent retry"))).toContain(result);
   expect((await run.children())[0]?.retry).toBeUndefined();
+});
+
+it("keeps an observer waiting after its owner faults on run-record flush, then preserves the retry's answer", async () => {
+  const run = await fixture(["overloaded"], 1, true);
+  await run.startWorkflow();
+  await run.spawn({ name: "retry", agent: "reader", message: "HOLD" });
+  await vi.waitFor(async () => { expect((await run.children())[0]?.questions).toHaveLength(1); });
+  await run.spawn({ action: "send", name: "retry", message: "Steer" });
+  await run.answer();
+  await vi.waitFor(async () => { expect((await run.children())[0]?.retry).toMatchObject({ attempt: 1, until: 1030000 }); });
+  const savedRecords = await readFile(run.recordPath, "utf8");
+  await run.restart(1030000, true);
+  try {
+    await vi.waitFor(async () => { expect((await run.children())[0]?.questions).toHaveLength(1); });
+    await vi.waitFor(() => { expect(run.recordErrors.length).toBeGreaterThan(0); });
+    await vi.waitFor(async () => {
+      const reporters = await run.journal().harness.commit((tx) => tx.scanTasks({ kind: "forgerie.child-reporter", status: "terminal" }, 100), context);
+      expect(reporters.items.filter((task) => task.state.status === "terminal" && task.state.outcome.status === "faulted")).toHaveLength(1);
+    });
+    // Let the observer finish a poll while the admitted retry is still placed and waiting on the question.
+    run.advanceClock(1000);
+    await sleep(350);
+    await writeFile(run.recordPath, savedRecords);
+    const question = (await run.children())[0]?.questions[0];
+    if (question === undefined) throw new Error("Missing retry question");
+    await answerChildQuestion(run.journal().conversation, question.questionId, "RETRY-SUCCESS", context);
+    run.advanceClock(1000);
+    await vi.waitFor(async () => {
+      run.advanceClock(250);
+      const states = (await run.runs())[0]?.children.map((child) => child.state);
+      expect(states).toHaveLength(2);
+      expect(states).toEqual([
+        expect.objectContaining({ kind: "settled", outcome: "answered", result: "RETRY-SUCCESS" }),
+        expect.objectContaining({ kind: "settled", outcome: "answered", result: "RETRY-SUCCESS" }),
+      ]);
+    }, { timeout: 5000 });
+    expect(run.runtimeErrors.some((error) => String(error).includes("returned without durable progress"))).toBe(false);
+    expect(run.calls()).toBe(2);
+  } finally {
+    await writeFile(run.recordPath, savedRecords);
+  }
 });
 
 it("keeps the remaining retry budget when a new steer joins a retry run", async () => {
