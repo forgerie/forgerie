@@ -62,7 +62,6 @@ function SourceEditorBinding({ source, catalog, back, close, busy, error, onSave
 }) {
   const [draft, setDraft] = useState<SourceDraft>({ organization: source?.organization ?? "", project: source?.project ?? "", areaPath: source?.areaPath ?? "",
     destination: source?.destinationProjectId ?? NO_DESTINATION });
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const input = sourceInput(draft);
   // A field shows its problem once it holds something; an empty required field only keeps Save off.
   const problems: SourceProblems = {
@@ -79,9 +78,7 @@ function SourceEditorBinding({ source, catalog, back, close, busy, error, onSave
   const shown = overlapping ? sourceOverlapMessage(overlapping) : error;
   return <BacklogSourceSettings fresh={source === undefined} title={source?.project ?? "New Azure DevOps source"} back={back} close={close} busy={busy}
     error={shown} recovery={error && !overlapping ? <button onClick={onReload}>Reload</button> : undefined}
-    draft={draft} problems={problems} projects={catalog.projects} valid={valid} confirmDelete={confirmDelete}
-    onDraft={(next) => { setDraft(next); setConfirmDelete(false); }} onSave={() => onSave(input)}
-    onDelete={() => { if (confirmDelete) { setConfirmDelete(false); onDelete(); } else setConfirmDelete(true); }} />;
+    draft={draft} problems={problems} projects={catalog.projects} valid={valid} onDraft={setDraft} onSave={() => onSave(input)} onDelete={onDelete} />;
 }
 
 function ProjectEditorBinding({ entry, name, back, close, busy, error, onSave, onRemove, onReload }: {

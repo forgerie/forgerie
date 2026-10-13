@@ -26,12 +26,12 @@ export function BacklogProjectSettings({ entry, name, back, close, busy, error, 
     recovery={error ? <button onClick={onReload}>Reload</button> : undefined}
     notice={entry.warnings?.length ? entry.warnings.map((warning) => <p key={warning}>{warning}</p>) : undefined}>
     <Lede>{backlogSettingsOrigin(entry.source)}</Lede>
-    <ChoiceList legend="Sources" missing="Unknown source" search="Find a source" choices={PROJECT_PROVIDERS} chosen={providers} disabled={busy} onChange={onSources} />
+    <ChoiceList legend="Providers" missing="Unknown provider" search="Find a provider" choices={PROJECT_PROVIDERS} chosen={providers} disabled={busy} onChange={onSources} />
     {providers.includes("github") ? <>
       <SettingsField label="GitHub repo" hint="Optional owner/name override. Otherwise use the origin remote."><SettingsInput label="GitHub repo" value={repo} onChange={onRepo} disabled={busy} /></SettingsField>
       <SettingsField label="Trusted authors only" hint={trusted ? "List repo owners, members, and collaborators." : "List all authors. Their text is untrusted agent context."}><SettingsToggle label="Trusted authors only" checked={trusted} onChange={onTrusted} disabled={busy} /></SettingsField>
     </> : null}
-    {!valid ? <Lede>Select at least one source and fill in its valid settings.</Lede> : null}
+    {!valid ? <Lede>Select at least one provider and fill in its valid settings.</Lede> : null}
     <ActionFooter actions={[{ label: "Use the repo file", onPress: onRemove, disabled: busy || entry.source !== "forgerie" }]} note="Forgerie replaces the whole repo backlog section. Turning Markdown off leaves its files on disk. Add Azure DevOps boards under Sources in Settings → Backlog." />
   </SettingsFrame>;
 }

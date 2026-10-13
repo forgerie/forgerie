@@ -283,7 +283,6 @@
   "ui/WorktreeActions.tsx",
   "ui/WorktreeChip.tsx",
   "ui/WorktreeSetupCard.tsx",
-  "ui/backlog/BacklogView.tsx",
   "ui/backlog/GitHubConnect.tsx",
   "ui/markdown/RichBlocks.tsx",
   "ui/markdown/markdownPolicy.tsx",

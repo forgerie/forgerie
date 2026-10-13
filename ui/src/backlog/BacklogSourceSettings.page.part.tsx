@@ -20,13 +20,13 @@ const draftOf = (source: typeof routedSource): SourceDraft => ({ organization: s
   destination: source.destinationProjectId ?? NO_DESTINATION });
 function Stateful({ start, fresh, error, problems = {} }: { start: SourceDraft; fresh: boolean; error?: string; problems?: SourceProblems }) {
   const [draft, setDraft] = useState(start);
-  const [confirm, setConfirm] = useState(false);
+  const [deleted, setDeleted] = useState(false);
   const missing = !projects.some((project) => project.id === draft.destination) && draft.destination !== NO_DESTINATION;
   const shown: SourceProblems = { ...problems, ...(missing ? { destination: "This project is no longer registered. Choose another project, or None." } : {}) };
   return <BacklogSourceSettings fresh={fresh} title={fresh ? "New Azure DevOps source" : start.project} back={null} close={null} busy={false}
-    error={error} recovery={error ? <button type="button">Reload</button> : undefined}
-    draft={draft} problems={shown} projects={projects} valid={Boolean(draft.organization && draft.project) && !missing && !error} confirmDelete={confirm}
-    onDraft={(next) => { setDraft(next); setConfirm(false); }} onSave={() => undefined} onDelete={() => setConfirm(!confirm)} />;
+    error={deleted ? "Deleted. The list no longer shows this source." : error} recovery={error ? <button type="button">Reload</button> : undefined}
+    draft={draft} problems={shown} projects={projects} valid={Boolean(draft.organization && draft.project) && !missing && !error}
+    onDraft={setDraft} onSave={() => undefined} onDelete={() => setDeleted(true)} />;
 }
 export default function New() { return <Stateful fresh start={{ organization: "", project: "", areaPath: "", destination: NO_DESTINATION }} />; }
 export function Edit() { return <Stateful fresh={false} start={draftOf(routedSource)} />; }

@@ -183,10 +183,10 @@ it("adds an Azure DevOps source with a destination, refuses an overlapping board
     body: { organization: "contoso", project: "Fabrikam Web", baseRevision: 3 } });
 
   // Delete asks twice, then sends the revision it read.
+  await press(document.querySelector<HTMLButtonElement>('[aria-label="Source commands"]')!);
   await press(button("Delete source"));
   expect(server.calls.some((call) => call.method === "DELETE")).toBe(false);
-  expect(document.body.textContent).toContain("Press again to delete.");
-  await press(button("Delete this source"));
+  await press(button("Delete? Sessions keep its work items"));
   expect(server.calls.find((call) => call.method === "DELETE")).toEqual({ method: "DELETE", path: "/api/backlog/settings/sources/00000000-0000-4000-8000-000000000001", body: { baseRevision: 4 } });
   expect(selected).toBeUndefined();
   expect(sourceRows().map((row) => row.textContent)).toEqual(["Support DeskfabrikamNot routed: each start asks for a project"]);
