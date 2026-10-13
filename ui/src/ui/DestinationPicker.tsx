@@ -63,16 +63,20 @@ export function DestinationPicker({ binding }: { binding: DestinationBinding }) 
   const trigger = useRef<HTMLButtonElement>(null);
   const panelId = useId();
   const close = (returnFocus: boolean) => { setOpen(false); if (returnFocus) trigger.current?.focus({ preventScroll: true }); };
+  // Disabled while open (a save starts), the panel closes at once: it lives outside any form lock, so it must not stay
+  // to take a choice, its own automatic one included.
+  const shown = open && binding.disabled !== true;
+  useEffect(() => { if (binding.disabled) setOpen(false); }, [binding.disabled]);
   return <div ref={row} className="destination">
     <FolderIcon aria-hidden size={14} />
     <span className="destination-lead" id={`${panelId}-lead`}>{binding.lead ?? "Start in"}</span>
     <button ref={trigger} type="button" className="destination-trigger" disabled={binding.disabled}
-      aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined}
+      aria-haspopup="dialog" aria-expanded={shown} aria-controls={shown ? panelId : undefined}
       aria-labelledby={`${panelId}-lead ${panelId}-value`} title={binding.cwd} onClick={() => setOpen(!open)}>
       <span className="destination-value" id={`${panelId}-value`}>{binding.label}</span>
       <ChevronDownIcon aria-hidden size={14} />
     </button>
-    {open && createPortal(<DestinationPanel id={panelId} binding={binding} anchor={row} trigger={trigger} onClose={close} />, layer)}
+    {shown && createPortal(<DestinationPanel id={panelId} binding={binding} anchor={row} trigger={trigger} onClose={close} />, layer)}
   </div>;
 }
 
@@ -126,12 +130,16 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
   useEffect(() => {
     // A Git project also offers a fresh worktree, so its one checkout is still a choice.
     if (!project || workspaces.type !== "ready" || workspaces.value.length !== 1 || autoChosen.current === project.id || !optionsSettled || git) return;
+    if (latest.current.binding.disabled) return;
     autoChosen.current = project.id;
     const only = workspaces.value[0]!;
     latest.current.binding.onChoose(only.path, workspaceLabel(project, only), placed);
     latest.current.onClose(true);
   }, [project, workspaces, optionsSettled, git, placed]);
-  const choose = (cwd: string, label: string, placement: "fresh" | "existing" | undefined = placed) => { binding.onChoose(cwd, label, placement); onClose(true); };
+  const choose = (cwd: string, label: string, placement: "fresh" | "existing" | undefined = placed) => {
+    if (binding.disabled) return;
+    binding.onChoose(cwd, label, placement); onClose(true);
+  };
   const freshHere = binding.placement === "fresh" && project !== undefined && (binding.cwd === project.path || binding.cwd.startsWith(`${project.path}/`));
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "Escape") return;

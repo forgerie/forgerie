@@ -115,7 +115,13 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
   // the revision, but it leaves the form's fields alone, so the draft moves onto the newer revision without a word.
   // A refused save stays a conflict until the newer trigger has been read.
   const conflict = Boolean(trigger && stored && (isDirty(stored.start, start) || (stored.refused && trigger.revision <= stored.revision)));
+  // A second Save (a double press, a held Ctrl+S) while one is in flight sends nothing: a create carries no ID, so
+  // two requests would make two triggers. The ref answers at once; the save state reaches the page a render later.
+  const inFlight = useRef(false);
   const setDraft = (next: TriggerDraft) => {
+    // While a save is in flight the draft is what is being saved, and success drops it, so a change now would be lost.
+    // The form locks its controls and its pickers close; this refuses whatever still reaches here.
+    if (inFlight.current) return;
     const base = stored?.start ?? start;
     if (trigger ? isDirty(next, base) : isDirty(next, emptyDraft(next.timezone))) {
       drafts.set(key, { draft: next, start: base, revision: stored?.revision ?? trigger?.revision ?? 0, refused: stored?.refused ?? false });
@@ -217,9 +223,6 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
     } catch (error) { setQuestion({ ...question, busy: false, error: messageOf(error) }); }
   }
 
-  // A second Save (a double press, a held Ctrl+S) while one is in flight sends nothing: a create carries no ID, so
-  // two requests would make two triggers. The ref answers at once; the save state reaches the page a render later.
-  const inFlight = useRef(false);
   async function submit() {
     // Create only from the create page, and update only a trigger read in full. A trigger that went missing or
     // cannot be read has nothing to save onto, so its leftover draft never becomes a new trigger.

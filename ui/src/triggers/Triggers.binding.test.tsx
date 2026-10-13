@@ -301,6 +301,41 @@ describe("a trigger's page", () => {
     expect(describedBy(time)).toContain("Choose a time Forgerie can keep.");
   });
 
+  it("closes an open picker when a save starts, and a choice during the save changes nothing", async () => {
+    await render({ view: "trigger", id: "weekday-triage" });
+    await type("Trigger name", "Mine");
+    await press(/^Time zone:/);
+    const newYork = button(/^New York \(America\/New_York\)/);
+    expect(newYork).toBeDefined();
+    const held = store.hold("update");
+    await saveKey();
+    // The panel is gone at once; a press on the option it showed reaches nothing.
+    expect(button(/^New York \(America\/New_York\)/)).toBeUndefined();
+    expect(document.querySelector('[role="dialog"][aria-label="Time zone"]')).toBeNull();
+    await act(async () => newYork?.click());
+    expect(button(/^Time zone:/)?.getAttribute("aria-label")).toBe("Time zone: Denver (America/Denver)");
+    await act(async () => held.release());
+    await flush();
+    expect(store.calls.filter((call) => call[0] === "update")).toEqual([["update", "weekday-triage", { baseRevision: 12, name: "Mine" }]]);
+    expect(text()).toContain("Saved");
+    expect(text()).not.toContain("Unsaved changes");
+    expect(button(/^Time zone:/)?.getAttribute("aria-label")).toBe("Time zone: Denver (America/Denver)");
+  });
+
+  it("closes the project picker when a save starts", async () => {
+    await render({ view: "trigger", id: "weekday-triage" });
+    await type("Trigger name", "Mine");
+    await press("pi-mono");
+    expect(button(/^forgerie/)).toBeDefined();
+    const held = store.hold("update");
+    await saveKey();
+    expect(button(/^forgerie/)).toBeUndefined();
+    await act(async () => held.release());
+    await flush();
+    expect(store.calls.filter((call) => call[0] === "update")).toEqual([["update", "weekday-triage", { baseRevision: 12, name: "Mine" }]]);
+    expect(store.triggers().find((trigger) => trigger.id === "weekday-triage")?.action.cwd).toBe(triage.action.cwd);
+  });
+
   it("says when no trigger has the ID", async () => {
     await render({ view: "trigger", id: "gone" });
     expect(text()).toContain("No trigger has this ID. It may have been deleted.");
