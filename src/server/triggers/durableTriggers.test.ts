@@ -38,7 +38,7 @@ function recordingFire(behavior: FireBehavior) {
         signal.abortSignal?.addEventListener("abort", () => { reject(new Error("cancelled")); }, { once: true });
       });
     }
-    return { sessionId: `session-${String(requests.length)}`, runId: `run-${request.requestId}` };
+    return { cwd: request.action.cwd, sessionId: `session-${String(requests.length)}`, runId: `run-${request.requestId}` };
   };
   return { requests, fire };
 }
@@ -74,7 +74,7 @@ async function until(harness: Harness, done: (triggers: Trigger[]) => boolean): 
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
-const fired = (count: number) => (triggers: Trigger[]) => (triggers[0]?.history.length ?? 0) >= count;
+const fired = (count: number) => (triggers: Trigger[]) => (triggers[0]?.history.filter((entry) => entry.outcome.kind !== "running").length ?? 0) >= count;
 
 it("fires at the occurrence with a per-occurrence request ID, records it, and arms the next day", async () => {
   const clock = shiftedClock("2026-10-13T02:59:59.950Z");
@@ -86,7 +86,7 @@ it("fires at the occurrence with a per-occurrence request ID, records it, and ar
 
   const [trigger] = await until(harness, fired(1));
   const occurrence = at("2026-10-13T03:00:00Z");
-  expect(host.requests).toEqual([{ triggerId: "nightly", name: "Nightly refinement", action: nightly.action, occurrence, requestId: `trigger-nightly-${String(occurrence)}` }]);
+  expect(host.requests).toEqual([{ triggerId: "nightly", name: "Nightly refinement", action: nightly.action, timezone: "UTC", occurrence, requestId: `trigger-nightly-${String(occurrence)}` }]);
   expect(trigger?.history[0]).toMatchObject({ occurrence, skippedBefore: 0, outcome: { kind: "started", sessionId: "session-1", runId: `run-trigger-nightly-${String(occurrence)}` } });
   expect(trigger?.state).toEqual({ kind: "active", nextFireAt: at("2026-10-14T03:00:00Z") });
 });
@@ -179,4 +179,56 @@ it("refuses a duplicate ID and invalid input, and removes a trigger", async () =
   await expect(triggers.create(harness, anchor, { ...nightly, id: "other", schedule: { kind: "daily", at: "03:00", timezone: "Nowhere/Here" } }, context)).rejects.toThrow("Unknown time zone");
   await triggers.remove(harness, "nightly", context);
   expect(await listTriggers(harness, context)).toEqual([]);
+});
+
+it("stores running before firing, preserves the entry on restart, and increments revision", async () => {
+  const clock = shiftedClock("2026-10-12T12:00:00Z");
+  const held = recordingFire({ kind: "hold-until-cancelled" });
+  const first = await openHost(clock, held.fire);
+  const created = await first.triggers.create(first.harness, first.anchor, nightly, context);
+  await first.triggers.pause(first.harness, created.id, context);
+  await first.triggers.run(first.harness, first.anchor, created.id, "one", context);
+  const [running] = await until(first.harness, (records) => records[0]?.history[0]?.outcome.kind === "running");
+  expect(running?.revision).toBe(3);
+  expect(running?.history[0]?.cause).toBe("manual");
+  await closeHost(first.harness);
+  const started = recordingFire({ kind: "start" });
+  const second = await openHost(clock, started.fire);
+  await second.triggers.run(second.harness, second.anchor, created.id, "one", context);
+  const [finished] = await until(second.harness, fired(1));
+  expect(finished?.history).toHaveLength(1);
+  expect(finished?.state.kind).toBe("paused");
+  expect(finished?.revision).toBe(4);
+  expect(started.requests).toHaveLength(1);
+});
+
+it("derives collision-safe slugs and keeps history and creator through re-arming edits", async () => {
+  const clock = shiftedClock("2026-10-12T12:00:00Z");
+  const { harness, anchor, triggers } = await openHost(clock, recordingFire({ kind: "start" }).fire);
+  const input = { name: nightly.name, schedule: nightly.schedule, action: nightly.action };
+  const first = await triggers.create(harness, anchor, input, context, { kind: "agent", sessionId: "parent", cwd: "/work/repo" });
+  const second = await triggers.create(harness, anchor, input, context);
+  expect(first.id).toBe("nightly-refinement");
+  expect(second.id).toBe("nightly-refinement-2");
+  const updated = await triggers.update(harness, anchor, first.id, { baseRevision: 1, schedule: { ...nightly.schedule, at: "04:00" } }, context);
+  expect(updated.generation).toBeGreaterThan(first.generation);
+  expect(updated.createdBy).toEqual(first.createdBy);
+  expect(updated.revision).toBe(2);
+  await expect(triggers.update(harness, anchor, first.id, { baseRevision: 1, name: "stale" }, context)).rejects.toThrow("revision is 2");
+});
+
+it("keeps attention until explicit acknowledgement, including failed session identity", async () => {
+  const clock = shiftedClock("2026-10-12T12:00:00Z");
+  const { TriggerFireError } = await import("./durableTriggers.js");
+  const { harness, anchor, triggers } = await openHost(clock, () => Promise.reject(new TriggerFireError("launch refused", "session", "/work/repo")));
+  await triggers.create(harness, anchor, nightly, context);
+  await triggers.run(harness, anchor, nightly.id, "one", context);
+  const [failed] = await until(harness, fired(1));
+  expect(failed?.attention).not.toBeNull();
+  expect(failed?.history[0]?.outcome).toEqual({ kind: "failed", error: "launch refused", sessionId: "session", cwd: "/work/repo" });
+  const paused = await triggers.pause(harness, nightly.id, context);
+  expect(paused.attention).toEqual(failed?.attention);
+  const seen = await triggers.acknowledge(harness, nightly.id, context);
+  expect(seen.attention).toBeNull();
+  expect(seen.revision).toBe(paused.revision + 1);
 });

@@ -1,0 +1,149 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import Fastify, { type FastifyInstance } from "fastify";
+import websocket from "@fastify/websocket";
+import { Check } from "typebox/value";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { TriggerSchema, TriggerListResponseSchema, TriggerWorkflowsResponseSchema, TriggerErrorResponseSchema, type Trigger } from "../../shared/triggers.js";
+import { parseTriggerSchedule } from "../../shared/triggerSchedules.js";
+import { WorkflowLibrary } from "../resources/workflowLibrary.js";
+import { ProjectService } from "../projects/projectService.js";
+import { ProjectStore } from "../storage/projectStore.js";
+import { WorkspaceService } from "../workspaces/workspaceService.js";
+import { RegisteredProjectWorkspaceCwds } from "../workspaces/projectWorkspaceCwds.js";
+import { SessionDaemonClient } from "../../sessiond/sessionDaemonClient.js";
+import { registerSessionProxyRoutes } from "../sessiond/sessionProxyRoutes.js";
+import { TriggerService } from "./triggerService.js";
+import { registerTriggerRoutes } from "./triggerRoutes.js";
+
+let root: string;
+let cwd: string;
+let service: TriggerService;
+let daemon: FastifyInstance;
+let edge: FastifyInstance;
+let base: string;
+let changes = 0;
+let fires = 0;
+let options: Parameters<typeof TriggerService.open>[0];
+const prose = "---\ndescription: Nightly task\nworkflow:\n  version: 1\n  inputs:\n    task: { type: string, default: baseline }\n  stages:\n    - { id: land, name: Land, stop: land }\n---\nReview the task, then stop at land.\n";
+const create = () => ({ name: "Nightly refinement", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", cwd, workflow: "nightly", inputs: {} } });
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), "forgerie-trigger-http-"));
+  cwd = join(root, "workspace");
+  await mkdir(join(cwd, ".pi", "prompts"), { recursive: true });
+  await writeFile(join(cwd, ".pi", "prompts", "nightly.md"), prose);
+  await writeFile(join(cwd, ".pi", "prompts", "script.md"), prose + "\n```js workflow\nreturn 1\n```\n");
+  await writeFile(join(cwd, ".pi", "prompts", "broken.md"), "---\nworkflow: nope\n---\nBad\n");
+  const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
+  await projects.add({ path: cwd });
+  changes = 0; fires = 0;
+  options = { env: { PI_WEB_DATA_DIR: root }, workflows: new WorkflowLibrary(join(root, "agent")), workspaces: new RegisteredProjectWorkspaceCwds({ projects, workspaces: new WorkspaceService() }),
+    fire: (request) => { fires++; return Promise.resolve({ sessionId: "session", cwd, runId: request.requestId }); },
+    publish: () => { changes++; }, onError: () => undefined,
+  };
+  service = await TriggerService.open(options);
+  daemon = Fastify();
+  registerTriggerRoutes(daemon, service);
+  const address = await daemon.listen({ port: 0, host: "127.0.0.1" });
+  edge = Fastify(); await edge.register(websocket);
+  vi.stubEnv("PI_WEB_SESSIOND_URL", address);
+  registerSessionProxyRoutes(edge, new SessionDaemonClient());
+  base = await edge.listen({ port: 0, host: "127.0.0.1" });
+});
+afterEach(async () => { await edge.close(); await daemon.close(); await service.close(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+async function http(method: string, path: string, body?: unknown) {
+  const response = await fetch(`${base}/api/triggers${path}`, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
+  const value: unknown = await response.json();
+  return { status: response.status, value };
+}
+async function created(): Promise<Trigger> {
+  const result = await http("POST", "", create());
+  expect(result.status).toBe(201);
+  if (!Check(TriggerSchema, result.value)) throw new Error("Invalid trigger response");
+  return result.value;
+}
+
+it("lists workflows without any session, including scripts, inputs, land stops and diagnostics", async () => {
+  const result = await http("GET", `/workflows?cwd=${encodeURIComponent(cwd)}`);
+  expect(result.status).toBe(200);
+  expect(Check(TriggerWorkflowsResponseSchema, result.value)).toBe(true);
+  expect(result.value).toMatchObject({ workflows: [{ name: "nightly", kind: "prose", inputs: { task: { type: "string", default: "baseline" } }, hasLandStop: true }, { name: "script", kind: "script" }], diagnostics: [{ name: "broken" }] });
+  expect(await http("GET", "/workflows?cwd=/unknown")).toMatchObject({ status: 400, value: { field: "action.cwd" } });
+  expect(await http("GET", "/workflows?cwd=relative")).toMatchObject({ status: 400 });
+});
+
+it("creates, detects revision conflicts, re-arms edits, pauses, resumes, acknowledges and deletes", async () => {
+  const trigger = await created();
+  expect(trigger).toMatchObject({ id: "nightly-refinement", revision: 1, createdBy: { kind: "user" }, attention: null });
+  const update = await http("PATCH", `/${trigger.id}`, { baseRevision: 1, name: "Updated", schedule: { kind: "daily", at: "04:00", timezone: "UTC" } });
+  expect(update).toMatchObject({ status: 200, value: { name: "Updated", revision: 2 } });
+  const conflict = await http("PATCH", `/${trigger.id}`, { baseRevision: 1, name: "stale" });
+  expect(conflict).toMatchObject({ status: 409, value: { field: "baseRevision" } });
+  expect(JSON.stringify(conflict.value)).toContain("revision is 2");
+  expect(await http("POST", `/${trigger.id}/pause`, {})).toMatchObject({ status: 200, value: { state: { kind: "paused" }, revision: 3 } });
+  expect(await http("POST", `/${trigger.id}/pause`, {})).toMatchObject({ value: { revision: 3 } });
+  expect(await http("POST", `/${trigger.id}/resume`, {})).toMatchObject({ value: { state: { kind: "active" }, revision: 4 } });
+  expect(await http("POST", `/${trigger.id}/acknowledge`, {})).toMatchObject({ value: { attention: null } });
+  expect(await http("DELETE", `/${trigger.id}`)).toEqual({ status: 200, value: { ok: true } });
+  expect(await http("GET", `/${trigger.id}`)).toMatchObject({ status: 404 });
+  expect(changes).toBeGreaterThanOrEqual(5);
+});
+
+it.each([
+  ["name", { name: "" }], ["name", { name: "   " }], ["schedule.at", { schedule: { kind: "daily", at: "25:00", timezone: "UTC" } }],
+  ["schedule.timezone", { schedule: { kind: "daily", at: "03:00", timezone: "Nowhere/Here" } }],
+  ["action.cwd", { action: { kind: "workflow", cwd: "/unknown", workflow: "nightly", inputs: {} } }],
+  ["action.workflow", { action: { kind: "workflow", cwd: "CURRENT", workflow: "script", inputs: {} } }],
+  ["action.workflow", { action: { kind: "workflow", cwd: "CURRENT", workflow: "missing", inputs: {} } }],
+  ["action.inputs", { action: { kind: "workflow", cwd: "CURRENT", workflow: "nightly", inputs: { task: 9 } } }],
+  ["action.model", { action: { kind: "workflow", cwd: "CURRENT", workflow: "nightly", inputs: {}, model: "not-a-model" } }],
+])("returns a field error for %s", async (field, invalid) => {
+  const input: unknown = JSON.parse(JSON.stringify({ ...create(), ...invalid }).replaceAll("CURRENT", cwd));
+  const result = await http("POST", "", input);
+  expect(result.status).toBe(400);
+  expect(Check(TriggerErrorResponseSchema, result.value)).toBe(true);
+  expect(result.value).toMatchObject({ field });
+});
+
+it("refuses extra fields, invalid operations, duplicate IDs and malformed JSON", async () => {
+  expect(await http("POST", "", { ...create(), extra: true })).toMatchObject({ status: 400 });
+  const trigger = await created();
+  expect(await http("POST", "", { ...create(), id: trigger.id })).toMatchObject({ status: 409 });
+  expect(await http("PATCH", `/${trigger.id}`, { name: "no revision" })).toMatchObject({ status: 400 });
+  for (const operation of ["pause", "resume", "acknowledge", "run"]) expect(await http("POST", `/${trigger.id}/${operation}`, { extra: true })).toMatchObject({ status: 400 });
+  expect(await http("POST", `/${trigger.id}/run`, { requestId: "bad_id" })).toMatchObject({ status: 400 });
+  const response = await fetch(`${base}/api/triggers`, { method: "POST", headers: { "content-type": "application/json" }, body: "{" });
+  expect(response.status).toBe(400);
+  const malformed: unknown = await response.json();
+  expect(Check(TriggerErrorResponseSchema, malformed)).toBe(true);
+});
+
+it("deduplicates manual requests while paused without moving the next fire and bounds list history", async () => {
+  const trigger = await created();
+  const before = (await service.get(trigger.id)).state;
+  await http("POST", `/${trigger.id}/pause`, {});
+  for (let index = 0; index < 9; index++) {
+    const result = await http("POST", `/${trigger.id}/run`, { requestId: String(index) });
+    expect(result).toEqual({ status: 202, value: { requestId: `trigger-${trigger.id}-run-${String(index)}` } });
+    await vi.waitFor(async () => { expect((await service.get(trigger.id)).history.filter((entry) => entry.outcome.kind === "started")).toHaveLength(index + 1); });
+  }
+  await http("POST", `/${trigger.id}/run`, { requestId: "0" });
+  expect(fires).toBe(9);
+  expect((await service.get(trigger.id)).state.kind).toBe("paused");
+  expect(before.kind).toBe("active");
+  const list = await http("GET", "");
+  if (!Check(TriggerListResponseSchema, list.value)) throw new Error("Invalid list");
+  expect(list.value.triggers[0]?.history).toHaveLength(7);
+  expect((await service.get(trigger.id)).history).toHaveLength(9);
+  expect(list.value.timezones).toContain("UTC");
+  expect(list.value.timezones).toEqual([...new Set(list.value.timezones)].sort());
+  for (const timezone of list.value.timezones) expect(() => parseTriggerSchedule({ kind: "daily", at: "03:00", timezone })).not.toThrow();
+});
+
+it("fails only trigger calls with 503 when another daemon owns the store", async () => {
+  const unavailable = await TriggerService.open(options);
+  try { await expect(unavailable.list()).rejects.toMatchObject({ status: 503 }); } finally { await unavailable.close(); }
+  await service.close();
+  expect(await http("GET", "")).toMatchObject({ status: 503 });
+});

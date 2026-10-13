@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { TriggerService } from "./triggers/triggerService.js";
+import { registerTriggerRoutes } from "./triggers/triggerRoutes.js";
+import { workflowTriggerFire } from "./triggers/triggerFire.js";
+import { WorkflowLibrary, assertProseOnly, workflowInputs } from "./resources/workflowLibrary.js";
 import { SessionSearchService } from "./sessions/sessionSearchService.js";
 import { registerSessionSearchRoutes } from "./sessions/sessionSearchRoutes.js";
 import { mkdir, rm } from "node:fs/promises";
@@ -223,6 +227,7 @@ async function createSessionDaemonRuntime() {
     projectWorkspaces,
     sessionWorktrees,
     projectTools: { work: relatedWork, worktrees: sessionWorktrees },
+    triggers: () => triggers,
     workspaceServices,
     askUserEnabled: config.askUser,
     codemodeEnabled: config.codemode,
@@ -281,6 +286,20 @@ async function createSessionDaemonRuntime() {
     },
     onError: (error, sessionId) => { app.log.error({ err: error, sessionId }, "pull request watch failed"); },
   });
+  const triggerWorkflows = new WorkflowLibrary(activeAgentProfile.dir);
+  const triggers: TriggerService = await TriggerService.open({
+    env: daemonEnvironment, workflows: triggerWorkflows, workspaces: projectWorkspaces,
+    fire: workflowTriggerFire({ sessions,
+      requireWorkspace: async (cwd) => { if (await projectWorkspaces.forCwd(cwd) === undefined) throw new Error("Workspace is no longer registered"); },
+      validateAction: async (action) => {
+        const workflow = await triggerWorkflows.read(action.cwd, action.workflow);
+        assertProseOnly(workflow);
+        workflowInputs(workflow.definition, action.inputs);
+      },
+    }),
+    publish: () => { eventHub.publishGlobal({ type: "triggers.changed" }); },
+    onError: (error) => { app.log.error({ err: error }, "trigger store unavailable"); },
+  });
   const promptResources = new PromptResourceCatalogService({ agentDir: activeAgentProfile.dir });
   const promptLibrary = new AgentDirPromptLibrary(activeAgentProfile.dir);
   const resourceEditor = new ResourceEditorService({ agentDir: activeAgentProfile.dir, session: async (id) => {
@@ -306,10 +325,11 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
-  return { eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
+  return { triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ triggers, eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
+  registerTriggerRoutes(app, triggers);
   registerBacklogRoutes(app, backlog);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);
@@ -345,7 +365,7 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, se
   app.get("/runtime", () => runtimeComponent);
 }
 
-async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): Promise<void> {
+async function listenSessionDaemon({ triggers, sessions, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): Promise<void> {
   pulls.start();
   childRuns.start((error) => { app.log.error({ err: error }, "child run retention failed"); });
   let shuttingDown = false;
@@ -380,6 +400,7 @@ async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pu
     await attempt("stop worktree cleanup", () => worktreeCleanup.stop());
     await attempt("dispose PR watches", () => { pulls.dispose(); });
     await attempt("dispose catalog refresher", () => { catalogRefresher.dispose(); });
+    await attempt("close triggers", () => triggers.close());
     await attempt("dispose sessions", () => sessions.dispose());
     await attempt("detach workspace services", () => workspaceServices.dispose());
     await attempt("flush child run records", () => childRuns.stop());

@@ -1,3 +1,4 @@
+import type { TriggersChangedEvent } from "./triggers.js";
 export type { PromptRequestOptions } from "./promptRequest.js";
 import type { SessionResponse } from "./sessionResponse.js";
 import type { PullLink } from "./pullRequests.js";
@@ -1265,6 +1266,7 @@ type SessionUiEventBody =
   | { type: "processes.output"; id: string; lines: ManagedProcessLogLine[]; droppedLines: number };
 
 export type GlobalSessionEvent =
+  | TriggersChangedEvent
   | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.tabs" | "session.created" | "session.pull-request" | "session.pull-request.unlinked" }>
   | SessionNotificationSummaryEvent
   | SessionUnreadEvent

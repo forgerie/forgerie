@@ -59,6 +59,15 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
   app.all(`${prefix}/project-groups/*`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/project-workspaces`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/project-workspaces/*`, (request, reply) => proxy(request, reply));
+  app.register((routes, _options, done) => {
+    routes.setErrorHandler((error, _request, reply) => {
+      const status = typeof error === "object" && error !== null && "statusCode" in error && typeof error.statusCode === "number" ? error.statusCode : 500;
+      void reply.code(status).send({ error: error instanceof Error ? error.message : String(error) });
+    });
+    routes.all(`${prefix}/triggers`, (request, reply) => proxy(request, reply));
+    routes.all(`${prefix}/triggers/*`, (request, reply) => proxy(request, reply));
+    done();
+  });
   app.all(`${prefix}/backlog`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/backlog/*`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/github`, (request, reply) => proxy(request, reply));

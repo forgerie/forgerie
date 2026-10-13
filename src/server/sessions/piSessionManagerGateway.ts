@@ -1,4 +1,4 @@
-import type { Dirent } from "node:fs";
+import { writeFileSync, type Dirent } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -134,9 +134,19 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
     this.summaryScanner.invalidate(sessionFile);
   }
 
-  create(cwd: string, options?: { parentSession?: string }): PiSessionManager {
+  create(cwd: string, options?: { parentSession?: string; sessionId?: string }): PiSessionManager {
     const resolution = this.resolver.resolve(cwd);
-    return SessionManager.create(cwd, resolution.sessionDir, options?.parentSession === undefined ? undefined : { parentSession: options.parentSession });
+    const manager = SessionManager.create(cwd, resolution.sessionDir, {
+      ...(options?.parentSession === undefined ? {} : { parentSession: options.parentSession }),
+      ...(options?.sessionId === undefined ? {} : { id: options.sessionId }),
+    });
+    if (options?.sessionId === undefined) return manager;
+    // The SDK defers a new file until conversation messages exist. Persist the identity before opening
+    // its Durable journal, so a restart cannot create an orphan journal under a new timestamped path.
+    const file = manager.getSessionFile();
+    if (file === undefined) throw new Error("A trigger requires persistent session storage");
+    writeFileSync(file, `${JSON.stringify(manager.getHeader())}\n`, { flag: "wx", mode: 0o600 });
+    return SessionManager.open(file, resolution.sessionDir);
   }
 
   async listAll(): Promise<PiSessionListEntry[]> {

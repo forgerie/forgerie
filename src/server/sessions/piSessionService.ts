@@ -1,3 +1,6 @@
+import { createWorkflowScheduleTool } from "../triggers/triggerTool.js";
+import type { TriggerService } from "../triggers/triggerService.js";
+import type { TriggerAction } from "../../shared/triggers.js";
 import type { SessionSearchService } from "./sessionSearchService.js";
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
@@ -335,6 +338,7 @@ interface StartSessionOptions {
 
 interface InternalStartSessionOptions extends StartSessionOptions {
   creationProvenance?: SessionCreationProvenance;
+  sessionId?: string;
 }
 
 function requirePromptText(value: unknown): string {
@@ -444,7 +448,7 @@ export interface PiSessionManagerGateway {
    * told explicitly.
    */
   invalidateSessionFile(sessionFile: string): void;
-  create(cwd: string, options?: { parentSession?: string }): PiSessionManager;
+  create(cwd: string, options?: { parentSession?: string; sessionId?: string }): PiSessionManager;
   /**
    * Cross-project listing of Pi's session stores (the default store plus any
    * env-configured session dir). Session cleanup scans every project at once;
@@ -830,9 +834,11 @@ export function createPiWebCustomToolDefinitions(
   endTurn?: EndTurnToolDeps,
   projectTools?: ProjectToolDeps,
   workspaceServices?: WorkspaceServices,
+  triggers?: () => TriggerService,
 ) {
   return [
     createPiWebEditToolDefinition(cwd),
+    ...(triggers === undefined ? [] : [createWorkflowScheduleTool(cwd, triggers)]),
     ...(projectTools === undefined ? [] : createProjectTools(cwd, projectTools)),
     ...(workspaceServices === undefined ? [] : [createWorkspaceServicesTool(cwd, workspaceServices)]),
     ...(endTurn === undefined ? [] : [createEndTurnToolDefinition(endTurn)]),
@@ -858,6 +864,7 @@ function createDefaultRuntimeFactory(
   durableChildAgents?: DurableChildHost,
   workspaceServices?: WorkspaceServices,
   beforeResume?: (session: DurableAgentSession) => Promise<boolean>,
+  triggers?: () => TriggerService,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
     const processBridgeSlot = createProcessBridgeSlot();
@@ -900,7 +907,7 @@ function createDefaultRuntimeFactory(
         await session.parentState.declareResponse(awaiting, durableContext);
         await session.refreshParentAppState();
       },
-    }, projectTools, workspaceServices);
+    }, projectTools, workspaceServices, triggers);
     const session = await DurableAgentSession.open({
       ...(handle === undefined ? {} : { handle }),
       ...(beforeResume === undefined ? {} : { beforeResume }),
@@ -950,6 +957,7 @@ export interface PiSessionServiceDependencies {
   sessionWorktrees?: SessionWorktrees;
   projectTools?: ProjectToolDeps;
   workspaceServices?: WorkspaceServices;
+  triggers?: () => TriggerService;
   archiveStore?: SessionArchiveRepository;
   /** Pinned-session catalog; defaults to an in-memory store in tests. Production wiring injects the durable store. */
   pinStore?: SessionPinRepository;
@@ -1189,6 +1197,7 @@ export class PiSessionService implements SessionRouteService {
       deps.durableChildAgents,
       deps.workspaceServices,
       (session) => this.prepareDurableFamily(session),
+      deps.triggers,
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;
@@ -1679,7 +1688,10 @@ export class PiSessionService implements SessionRouteService {
       if (blocking !== undefined) throw new Error("This workspace is closed or a worktree lifecycle action is running");
     }
     const active = await this.create(
-      this.sessionManager.create(cwd, options.parentSession === undefined ? undefined : { parentSession: options.parentSession }),
+      this.sessionManager.create(cwd, {
+        ...(options.parentSession === undefined ? {} : { parentSession: options.parentSession }),
+        ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
+      }),
       cwd,
       {
         startupIntent: "create",
@@ -1707,6 +1719,35 @@ export class PiSessionService implements SessionRouteService {
     // session to their list without a manual reload.
     this.events.publishGlobal({ type: "session.created", session: created });
     return created;
+  }
+
+  /** Internal receipt-keyed session creation. The public start options do not contain sessionId. */
+  async ensureTriggerSession(ref: PiSessionRef, action: Omit<TriggerAction, "thinkingLevel"> & { thinkingLevel?: ClientThinkingLevel }): Promise<void> {
+    if (this.activeForRef(ref) !== undefined || await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader) !== undefined) return;
+    const initialModel = action.model === undefined ? undefined : await this.resolveNewSessionModel(action.model);
+    await this.startSession(ref.cwd, { sessionId: ref.id,
+      ...(initialModel === undefined ? {} : { initialModel }),
+      ...(action.thinkingLevel === undefined ? {} : { initialThinkingLevel: action.thinkingLevel }),
+    });
+  }
+
+  async nameTriggerSession(ref: PiSessionRef, name: string): Promise<void> {
+    const session = await this.getOrOpen(ref);
+    this.cancelSessionTitleGeneration(session);
+    session.setSessionName(name);
+    this.rememberSessionName(session);
+  }
+
+  async noteTriggerFailure(ref: PiSessionRef, requestId: string, text: string): Promise<void> {
+    const session = await this.getOrOpen(ref);
+    const delivered = session.sessionManager.getBranch().some((entry) => isRecord(entry) && entry["type"] === "custom_message" && entry["customType"] === "forgerie:trigger" && getString(entry["details"], "requestId") === requestId);
+    if (delivered) return;
+    await this.runSessionEntryMutation(session, "record trigger failure", () => session.sendCustomMessage(
+      { customType: "forgerie:trigger", content: text, display: true, details: { requestId } }, { triggerTurn: false },
+    ));
+    this.unreadStore.observeActivityState(ref.id, ref.cwd, true);
+    await this.publishUnreadMutations(this.unreadStore.observeActivityState(ref.id, ref.cwd, false));
+    this.publishStatus(session);
   }
 
   /**
