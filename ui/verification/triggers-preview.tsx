@@ -11,6 +11,7 @@ import { TriggersScreen } from "../src/triggers/Triggers.binding";
 import { useTriggerList } from "../src/triggers/useTriggerList";
 import { triggerEntry, type TriggerPlace } from "../src/triggers/triggersModel";
 import { memoryApi, memoryDirectory } from "../src/triggers/fixtures/memoryApi";
+import { createTriggerMemory } from "../src/triggers/triggerMemory";
 import { audit, calmList, digest, docs, emptyList, HOST_ZONE, manyList, mixedList, NOW, nightly, projects } from "../src/triggers/fixtures/triggers";
 import "../src/ui/theme.css";
 import "../src/ui/settings/settings.css";
@@ -26,6 +27,7 @@ const PAGES: Record<string, TriggerPlace> = {
 const store = memoryApi((lists[state] ?? mixedList).triggers, { now: NOW, off: state === "off" ? "Could not open the trigger store: database is locked" : undefined });
 if (state === "failed-read") store.failNext("list", new Error("Request failed: HTTP 500"));
 const locate = createLocationResolver(projects, []);
+const memory = createTriggerMemory();
 const sessions = [
   { id: "s1", cwd: projects[0]!.path, name: "Nightly refinement · Oct 10", modified: new Date(NOW - 15 * 3_600_000).toISOString() },
   { id: "s2", cwd: projects[1]!.path, name: "Weekday triage · Oct 12", modified: new Date(NOW - 9 * 3_600_000).toISOString() },
@@ -46,7 +48,7 @@ function Preview() {
       actions={{ onSelect: () => undefined, onRetry: () => undefined, onNew: () => undefined, onClose: () => setOpen(false),
         onBacklog: () => undefined, backlogCount: 12, onSettings: () => undefined, onFullscreen: () => undefined, fullscreen: false,
         onTriggers: () => { setPlace({ view: "list" }); setOpen(false); }, triggersOpen: place !== undefined, triggers: { title: entry.title, chip: entry.chip } }} />}
-    thread={place ? <TriggersScreen list={list} api={store.api} directory={memoryDirectory} now={() => NOW} zone={HOST_ZONE} locale="en-US"
+    thread={place ? <TriggersScreen list={list} api={store.api} directory={memoryDirectory} memory={memory} now={() => NOW} zone={HOST_ZONE} locale="en-US"
       args={{ place, onPlace: (next) => setPlace(next), onOpenSession: () => undefined, sessionName: () => "Lockfile review" }} />
       : <div className="thread-empty" />} />;
 }

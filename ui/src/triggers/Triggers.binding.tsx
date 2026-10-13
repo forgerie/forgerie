@@ -7,7 +7,8 @@ import { TriggerRefusal, type TriggersApi } from "./triggersApi";
 import { listOf, type TriggerPlace, type TriggersScreenArgs } from "./triggersModel";
 import type { TriggerList as TriggerListState } from "./useTriggerList";
 import { createOf, draftOf, draftProblems, emptyDraft, fieldOf, isDirty, updateOf, type DraftProblems, type TriggerDraft } from "./triggerDraft";
-import { runRecorded, whenLong, type PendingRun, type WordClock } from "./triggerWords";
+import { runRecorded, whenLong, type WordClock } from "./triggerWords";
+import { draftKey, type TriggerMemory } from "./triggerMemory";
 import { TriggersView, type TriggerNote, type TriggerScreen } from "./TriggersView";
 import type { TriggerQuestion } from "./TriggerDialog";
 import type { TriggerPageLoad, TriggerSave } from "./TriggerPage";
@@ -24,17 +25,6 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
 const browserZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return "UTC"; } };
 /** One request ID per Run now dialog, sent again unchanged if the answer is lost. */
 const newRequestId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-const CREATE = "create";
-
-/**
- * A draft, the saved settings it started from, and the revision it read them at. Drafts outlive the page, so Back,
- * a fold, or a visit elsewhere keeps them. `refused` is set when the server refused a save because another change
- * came first.
- */
-interface Draft { draft: TriggerDraft; start: TriggerDraft; revision: number; refused: boolean }
-const drafts = new Map<string, Draft>();
-/** Run now requests this browser sent that their trigger's history does not show yet. */
-const pendingRuns = new Map<string, PendingRun>();
 
 /**
  * Binding: the triggers screen. The list comes from the app's binding, which
@@ -42,11 +32,13 @@ const pendingRuns = new Map<string, PendingRun>();
  * full, the project's workflows, and the models; it keeps drafts and the one
  * question the screen asks, and it sends every write.
  */
-export function TriggersScreen({ args, list, api, directory, now: clockNow = Date.now, zone = browserZone(), locale, requestId = newRequestId }: {
+export function TriggersScreen({ args, list, api, directory, memory, now: clockNow = Date.now, zone = browserZone(), locale, requestId = newRequestId }: {
   args: TriggersScreenArgs;
   list: TriggerListState;
   api: TriggersApi;
   directory: TriggerDirectory;
+  /** Drafts and pending runs, kept by the caller so they outlive the screen. */
+  memory: TriggerMemory;
   /** The clock; fixed by a preview. */
   now?: () => number;
   /** The browser's zone; fixed by a preview. */
@@ -55,6 +47,7 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
   requestId?: () => string;
 }) {
   const { place, onPlace, onOpenSession, sessionName } = args;
+  const { drafts, pendingRuns } = memory;
   const [, redraw] = useState(0);
   const touch = useCallback(() => redraw((count) => count + 1), []);
   const [now, setNow] = useState(clockNow);
@@ -110,7 +103,7 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
   const starting = new Set(pendingRuns.keys());
 
   // The draft: stored while it differs from its start, else the trigger as saved.
-  const key = place.view === "create" ? CREATE : triggerId ?? "";
+  const key = place.view === "list" ? "" : draftKey(place);
   const stored = drafts.get(key);
   const host = value?.timezone;
   const start = trigger ? draftOf(trigger) : emptyDraft(host ?? zone);
@@ -214,7 +207,7 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
     }
     try {
       await api.remove(target.id);
-      drafts.delete(target.id);
+      drafts.delete(draftKey({ view: "trigger", id: target.id }));
       pendingRuns.delete(target.id);
       setQuestion(undefined);
       setNote({ text: `Deleted “${target.name}”.` });
@@ -236,8 +229,8 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
     try {
       if (!updating) {
         const created = await api.create(createOf(draft, workflow));
-        drafts.delete(CREATE);
-        setSave({ key: created.id, state: { type: "idle" } });
+        drafts.delete(draftKey({ view: "create" }));
+        setSave({ key: draftKey({ view: "trigger", id: created.id }), state: { type: "idle" } });
         setDetail({ id: created.id, load: { type: "ready", trigger: created } });
         const next = created.state.kind === "active" ? ` Next run ${whenLong(created.state.nextFireAt, created.schedule.timezone, clock)}.` : "";
         setNote({ text: `Created “${created.name}”.${next}` });

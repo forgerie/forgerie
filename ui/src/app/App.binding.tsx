@@ -18,6 +18,7 @@ import { StatusChip } from "../ui/StatusChip";
 import { createTriggersApi } from "../triggers/triggersApi";
 import { triggerEntry, type TriggersSlot } from "../triggers/triggersModel";
 import { useTriggerList } from "../triggers/useTriggerList";
+import { createTriggerMemory } from "../triggers/triggerMemory";
 // The triggers screen carries the schedule rules and its form; the chat never pays for it.
 const TriggersScreen = lazy(() => import("../triggers/Triggers.binding").then((module) => ({ default: module.TriggersScreen })));
 const request = (path: string, init?: RequestInit) => fetch(path, init);
@@ -28,6 +29,8 @@ const searchApi = createSearchApi(browserTransport.request);
 const resourceSettings: SettingsPageRenderer = ({ back, close, item, onOpen }) => <ResourceSettings api={resourceApi} item={item} onOpen={onOpen} back={back} close={close} />;
 const triggersApi = createTriggersApi(request);
 const directory = createNewSessionApi(request);
+/** Trigger drafts and pending runs, for the app's life: they outlive the screen while a session is open. */
+const triggerMemory = createTriggerMemory();
 /** The machine socket's `triggers.changed`, handed from the app (which owns the socket) to the trigger list held here. */
 const triggerListeners = new Set<() => void>();
 const triggerChanges = (listener: () => void) => { triggerListeners.add(listener); return () => { triggerListeners.delete(listener); }; };
@@ -51,7 +54,7 @@ export function AppBinding({ shelves }: { shelves?: ReactNode }) {
     entry: triggerEntry(triggerList.load),
     onChanged: triggersChanged,
     render: (args) => <Suspense fallback={<SessionFrame name="Triggers" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
-      <TriggersScreen args={args} list={triggerList} api={triggersApi} directory={directory} /></Suspense>,
+      <TriggersScreen args={args} list={triggerList} api={triggersApi} directory={directory} memory={triggerMemory} /></Suspense>,
   }), [triggerList]);
   return <App triggers={triggers} shelves={shelves} projectScope={groups.scope} projectCatalog={groups.loaded ? groups.catalog.projects : undefined}
     projectFilter={groups.filter} projectSettings={settings} search={search} relatedWork={related} resourceSettings={resourceSettings} resourceLens={resourceLens} />;

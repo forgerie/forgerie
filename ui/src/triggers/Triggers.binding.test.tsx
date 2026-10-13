@@ -9,6 +9,7 @@ import type { TriggerPlace } from "./triggersModel";
 import { audit, digest, docs, HOST_ZONE, manyList, NOW, nightly, notes, triage } from "./fixtures/triggers";
 import { memoryApi, memoryDirectory, type MemoryStore } from "./fixtures/memoryApi";
 import { TriggerRefusal, type TriggersApi } from "./triggersApi";
+import { createTriggerMemory, type TriggerMemory } from "./triggerMemory";
 
 let root: Root;
 let store: MemoryStore;
@@ -20,12 +21,14 @@ let ids = 0;
 const changeListeners = new Set<() => void>();
 const changes = (listener: () => void) => { changeListeners.add(listener); return () => { changeListeners.delete(listener); }; };
 const triggersChanged = () => act(async () => { for (const listener of changeListeners) listener(); });
+/** Drafts and pending runs: each test owns its own, so none leaks into the next. */
+let memory: TriggerMemory;
 /** The client the screen reads through: the store's, unless a test holds a read back. */
 let api: TriggersApi;
 
 function Harness() {
   const list = useTriggerList(api, changes);
-  return <TriggersScreen list={list} api={api} directory={memoryDirectory} now={() => NOW} zone={HOST_ZONE} locale="en-US"
+  return <TriggersScreen list={list} api={api} directory={memoryDirectory} memory={memory} now={() => NOW} zone={HOST_ZONE} locale="en-US"
     requestId={() => `req${String(++ids)}`}
     args={{ place, onPlace: (next) => { moves.push(next); if (next) place = next; }, onOpenSession: (session) => opened.push(session), sessionName: () => "Lockfile review" }} />;
 }
@@ -63,7 +66,7 @@ const type = async (label: string, value: string) => {
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   root = createRoot(document.body.appendChild(document.createElement("div")));
-  moves.length = 0; opened.length = 0; ids = 0; changeListeners.clear();
+  moves.length = 0; opened.length = 0; ids = 0; changeListeners.clear(); memory = createTriggerMemory();
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
@@ -221,7 +224,7 @@ describe("a trigger's page", () => {
     await press("Save");
     expect(store.calls.filter((call) => call[0] === "update")).toEqual([["update", "weekday-triage", expect.objectContaining({ baseRevision: 12 })]]);
     expect(store.triggers()[0]?.name).toBe("Weekday triage");
-    // Drafts outlive the page, so this one goes before the next test reads the same trigger.
+    // Reload drops the draft.
     await press("Reload");
     expect(text()).not.toContain("Unsaved changes");
   });
@@ -250,6 +253,19 @@ describe("a trigger's page", () => {
     await flush();
     expect(store.calls.filter((call) => call[0] === "create" || call[0] === "update")).toEqual([]);
     expect(store.triggers().map((trigger) => trigger.id)).toEqual(["release-notes"]);
+  });
+
+  it("keeps the new-trigger draft apart from a trigger whose ID is create", async () => {
+    const named: Trigger = { ...notes, id: "create", name: "Create release notes" };
+    await render({ view: "create" }, [named]);
+    await type("Trigger name", "My new trigger");
+    place = { view: "trigger", id: "create" };
+    await rerender();
+    expect(field("Trigger name")?.value).toBe("Create release notes");
+    expect(text()).not.toContain("Unsaved changes");
+    place = { view: "create" };
+    await rerender();
+    expect(field("Trigger name")?.value).toBe("My new trigger");
   });
 
   it("says when no trigger has the ID", async () => {
@@ -318,7 +334,7 @@ describe("the create page", () => {
     await press("Create");
     expect(text()).toContain("Triggers are off. Database is locked. No trigger runs until sessiond can open its store.");
     expect((document.querySelector<HTMLInputElement>('input[aria-label="Trigger name"]'))?.value).toBe("Nightly docs");
-    // Drafts outlive the page, so this one goes before the next test opens the create page.
+    // Discard drops the draft and leaves the create page.
     await press("Trigger commands");
     await press("Discard");
     expect(moves.at(-1)).toEqual({ view: "list" });
