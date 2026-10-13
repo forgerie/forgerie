@@ -84,6 +84,14 @@ export class BacklogClaimStore {
       return structuredClone(claim);
     });
   }
+  /** Only the launch owner calls this, after its session has stopped. Keep the exact claim for recovery. */
+  interrupt(claimId: string): Promise<void> {
+    return this.exclusive(async () => {
+      const reservation = this.claims.find((claim) => claim.claimId === claimId);
+      if (reservation?.kind !== "launching") throw new BacklogError("conflict", "Launch reservation changed");
+      await this.persist(this.claims.map((claim) => claim.claimId === claimId ? { ...reservation, kind: "interrupted" } : claim));
+    });
+  }
   release(key: BacklogItemKey, claimId: string, allowLaunching = false): Promise<void> {
     return this.exclusive(async () => {
       const matches = this.claims.filter((claim) => sameItem(claim, key));

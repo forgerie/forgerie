@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -175,4 +175,36 @@ it("keeps legacy duplicate Azure claims releasable by either exact claimId", asy
     await store.releaseSessions(["session-a"]);
     expect(await store.list()).toEqual([]);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+it("interrupts only the exact launching reservation and retains ownership until guarded release", async () => {
+  const file = await path(); const claims = new BacklogClaimStore(file); await claims.initialize();
+  const first = await claims.reserve(input);
+  const second = await claims.reserve({ ...input, itemId: "second" });
+  await claims.bind(second.claimId, "session", "/repo");
+  await expect(claims.interrupt("stale")).rejects.toThrow("Launch reservation changed");
+  await expect(claims.interrupt(second.claimId)).rejects.toThrow("Launch reservation changed");
+  await claims.interrupt(first.claimId);
+  expect(await claims.get(key)).toMatchObject({ ...first, kind: "interrupted" });
+  expect((await claims.list()).find((claim) => claim.claimId === second.claimId)?.kind).toBe("claimed");
+  await expect(claims.reserve(input)).rejects.toThrow("already has a claim");
+  const restarted = new BacklogClaimStore(file); await restarted.initialize();
+  expect(await restarted.get(key)).toMatchObject({ ...first, kind: "interrupted" });
+  await expect(claims.release(key, "stale")).rejects.toThrow("Claim changed");
+  await claims.release(key, first.claimId);
+  expect((await claims.reserve(input)).kind).toBe("launching");
+});
+it("fails closed without changing disk or memory when interruption cannot persist", async () => {
+  const file = await path(); const claims = new BacklogClaimStore(file); await claims.initialize();
+  const reservation = await claims.reserve(input); const before = await readFile(file, "utf8");
+  const directory = join(file, ".."); await chmod(directory, 0o500);
+  try {
+    await expect(claims.interrupt(reservation.claimId)).rejects.toThrow();
+    expect(await claims.get(key)).toEqual(reservation);
+    expect(await readFile(file, "utf8")).toBe(before);
+    await expect(claims.release(key, reservation.claimId)).rejects.toThrow("Wait for the launch");
+  } finally { await chmod(directory, 0o700); }
+  await claims.interrupt(reservation.claimId);
+  expect(await claims.get(key)).toMatchObject({ kind: "interrupted" });
 });

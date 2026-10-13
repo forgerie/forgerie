@@ -196,7 +196,8 @@ export class BacklogService {
     try { claim = await this.deps.claims.bind(reservation.claimId, session.id, session.cwd, session.worktree?.branch, provider === "azure-devops" ? content : undefined); }
     catch (error) {
       await this.deps.sessions.stop(session);
-      // Keep the durable reservation. Restart marks it interrupted; explicit recovery cannot double-launch silently.
+      // Stop must finish before exact release can permit another launch. A failed interruption write keeps ownership.
+      await this.deps.claims.interrupt(reservation.claimId);
       throw error;
     }
     if (await this.deps.isArchived(session.id)) {
