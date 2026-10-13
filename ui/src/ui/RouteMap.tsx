@@ -14,6 +14,8 @@ export interface RouteTrack {
   lines?: readonly ReactNode[];
   /** Trouble the worker works through on its own, such as a model error it retries: lines in the warn tone, after the plain lines. */
   notice?: readonly string[] | undefined;
+  /** A failure the worker cannot work through, such as a report that never reached the agent: drawn in the failure tone, whole. */
+  problem?: string | undefined;
   /** Accessible name of the press, such as "Open design". */
   label?: string;
   onPress?: () => void;
@@ -61,6 +63,7 @@ export function RouteMap({ label, steps }: { label: string; steps: readonly Rout
                 </span>
                 {track.lines?.map((line, index) => <span key={index} className="route-map-track-line">{line}</span>)}
                 {track.notice?.map((line, index) => <span key={`notice-${String(index)}`} className="route-map-track-notice">{line}</span>)}
+                {track.problem !== undefined && <span className="route-map-track-problem">{track.problem}</span>}
               </>;
               return <li key={track.key} className="route-map-track" data-state={track.state}>
                 {track.onPress === undefined ? <div className="route-map-track-body">{inner}</div>

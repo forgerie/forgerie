@@ -23,12 +23,11 @@ const stopStateSchema = z.object({
   requestedAt: z.number().optional(), decidedAt: z.number().optional(), landed: z.array(z.string()).optional(), round: z.number().optional(),
 });
 /**
- * Whether the child's report reached the parent. `duplicate`: the parent already had this answer, so it was not sent
- * again. `aborted`: the child was stopped before it reported. Neither is a failure. A record written before these
- * values carries `delivered: false` with a `deliveryError` string, or a string here; both read as `false`, and the
- * `deliveryError` field is dropped.
+ * Whether the child's report reached the parent (src/shared/workflowRuns.ts, WorkflowChildDeliverySchema).
+ * `duplicate`: the parent already had this answer, so it was not sent again. `aborted`: the child was stopped before
+ * it reported. Neither is a failure. `false` with a `deliveryError` is one: the reporter failed, and says why.
  */
-const deliveredSchema = z.union([z.literal(true), z.literal(false), z.literal("duplicate"), z.literal("aborted"), z.string().transform(() => false as const)]);
+export const deliveredSchema = z.union([z.boolean(), z.literal("duplicate"), z.literal("aborted")]);
 export const workflowRunSchema = z.object({
   id: z.string(), requestId: z.string(), startedAt: z.number(),
   definition: z.object({ name: z.string(), path: z.string(), sha256: z.string(), text: z.string() }),
@@ -43,7 +42,8 @@ export const workflowRunSchema = z.object({
     conversationId: z.number(), reporterId: z.number(), name: z.string(), stage: z.string().optional(),
     state: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("working") }),
-      z.object({ kind: z.literal("settled"), outcome: z.enum(["answered", "failed", "stopped"]), result: z.string(), delivered: deliveredSchema }),
+      z.object({ kind: z.literal("settled"), outcome: z.enum(["answered", "failed", "stopped"]), result: z.string(), delivered: deliveredSchema,
+        deliveryError: z.string().optional() }),
     ]),
   })),
 });
@@ -130,10 +130,7 @@ export function activeRun(runs: readonly WorkflowRun[]): WorkflowRun | undefined
 
 /** How each stage reads now. A finished run reads as done when it completed, and keeps its stops otherwise. */
 export function viewsOf(run: WorkflowRun): Record<string, StageView> {
-  // The shared stop rules read only whether each child is working. Delivery reads as a plain yes or no there, so
-  // they accept a run whether or not the server's shared type knows "duplicate" and "aborted" yet.
-  const views = stageViews({ ...run, children: run.children.map(({ name, stage, state }) => ({ name, stage,
-    state: state.kind === "working" ? state : { ...state, delivered: state.delivered === true } })) });
+  const views = stageViews(run);
   if (run.state.kind === "running") return views;
   const completed = run.state.outcome === "completed";
   return Object.fromEntries(Object.entries(views).map(([id, view]) => [id, completed ? "done" : view === "working" ? "next" : view]));
@@ -196,9 +193,24 @@ export function launchInputs(workflow: DeclaresInputs, typed: Readonly<Record<st
 /** What a run's children look like to the route: their branch, whether they wait on the reader, and a retry Forgerie waits to make. */
 export interface ChildLook { name: string; agent: string | null; branch?: string | undefined; asking: boolean; retry?: ChildRetry | undefined }
 
+type Settled = Extract<WorkflowRun["children"][number]["state"], { kind: "settled" }>;
+/**
+ * The words the server wrote, before "duplicate" and "aborted" existed, for a report it held back on purpose. It was
+ * one of the two, never a failure, so it reads as unsent and not as an error.
+ */
+const LEGACY_SUPPRESSED = "Completion report suppressed; no parent message was submitted.";
+
 /** What became of a settled child's report, when it was not sent and that is no failure. */
-export function deliveryNote(delivered: true | false | "duplicate" | "aborted"): string | undefined {
-  return delivered === "duplicate" ? "Duplicate report, not sent again" : delivered === "aborted" ? "Stopped before reporting" : undefined;
+export function deliveryNote(state: Pick<Settled, "delivered" | "deliveryError">): string | undefined {
+  if (state.delivered === "duplicate") return "Duplicate report, not sent again";
+  if (state.delivered === "aborted") return "Stopped before reporting";
+  return state.delivered === false && state.deliveryError === LEGACY_SUPPRESSED ? "Report not sent" : undefined;
+}
+
+/** Why a settled child's report never reached the agent, when the reporter failed. */
+export function deliveryProblem(state: Pick<Settled, "delivered" | "deliveryError">): string | undefined {
+  return state.delivered === true || state.deliveryError === undefined || state.deliveryError === LEGACY_SUPPRESSED ? undefined
+    : `Report not delivered: ${state.deliveryError}`;
 }
 
 /**
@@ -225,9 +237,10 @@ export function routeSteps(stages: readonly WorkflowStage[], run: WorkflowRun | 
       const last = mine.at(-1)?.state;
       const retry = trackState === "working" ? look?.retry : undefined;
       const lines = [declared?.agent ?? look?.agent ?? (mine.length > 0 ? "general helper" : undefined), declared?.model, look?.branch,
-        last?.kind === "settled" ? deliveryNote(last.delivered) : undefined].filter((line) => line !== undefined);
+        last?.kind === "settled" ? deliveryNote(last) : undefined].filter((line) => line !== undefined);
       const notice = retry && [retryLine(retry, ROUTE_ERROR_LENGTH), ...(now === undefined ? [] : [retryWait(retry, now)])];
-      return { key: name, name, state: trackState, lines, ...(notice ? { notice } : {}),
+      const problem = last?.kind === "settled" ? deliveryProblem(last) : undefined;
+      return { key: name, name, state: trackState, lines, ...(notice ? { notice } : {}), ...(problem === undefined ? {} : { problem }),
         ...(mine.length > 0 && open !== undefined ? { label: `Open ${name}`, onPress: () => open(name) } : {}) };
     });
     return { key: stage.id, name: stage.name, state, ...(stage.stop === undefined ? {} : { mine: true }), ...(word === undefined ? {} : { word }),

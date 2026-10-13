@@ -41,3 +41,12 @@ export function Retrying() {
     { key: "c", name: "Land", state: "next", mine: true },
   ]} />;
 }
+/** A worker whose report never reached the agent: the reason in the failure tone. */
+export function ReportFailed() {
+  return <RouteMap label="Run" steps={[
+    { key: "b", name: "Design and build", state: "done", tracks: [
+      { key: "build", name: "build", state: "done", lines: ["full-stack-engineer", "feat/run-export-api"],
+        problem: "Report not delivered: Completion reporter faulted: Disk full", label: "Open build", onPress: () => {} },
+    ] },
+  ]} />;
+}

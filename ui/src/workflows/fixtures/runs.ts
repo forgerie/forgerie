@@ -1,4 +1,4 @@
-import type { SavedWorkflow, StopEntry, WorkflowEntry, WorkflowRun, WorkflowStage } from "../workflowsModel";
+import type { ChildLook, SavedWorkflow, StopEntry, WorkflowEntry, WorkflowRun, WorkflowStage } from "../workflowsModel";
 
 const AT = 1791500000000;
 const RUN_ID = "7f1c2a9b3e4d5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8";
@@ -71,16 +71,19 @@ export const RUN_NOW = AT + 600_000;
 
 /**
  * design waits to retry a model error; build answered, but the parent already had that answer, so the report was
- * not sent again; docs, a child the agent added, was stopped before it reported.
+ * not sent again; docs, a child the agent added, was stopped before it reported; tests answered, but its reporter
+ * failed, so the agent never heard.
  */
 export const UNSENT: WorkflowRun = { ...BUILDING,
   children: [
     { conversationId: 15, reporterId: 4, name: "design", stage: "build", state: { kind: "working" } },
     { conversationId: 21, reporterId: 5, name: "build", stage: "build", state: { kind: "settled", outcome: "answered", result: "Done.", delivered: "duplicate" } },
     { conversationId: 33, reporterId: 9, name: "docs", stage: "build", state: { kind: "settled", outcome: "stopped", result: "aborted", delivered: "aborted" } },
+    { conversationId: 34, reporterId: 10, name: "tests", stage: "build",
+      state: { kind: "settled", outcome: "answered", result: "Added 6 tests.", delivered: false, deliveryError: "Completion reporter faulted: Disk full" } },
   ] };
 
-export const RETRY_LOOKS = [
+export const RETRY_LOOKS: ChildLook[] = [
   { ...CHILD_LOOKS[0]!, retry: { attempt: 2, max: 3, until: RUN_NOW + 100_000,
     error: '529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_011CUyb5k8Yx2Q3r"}' } },
   CHILD_LOOKS[1]!,

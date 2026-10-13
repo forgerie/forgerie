@@ -6,10 +6,11 @@ import { partsOf, piMessageSchema, textOf, type PiMessage } from "../contracts";
 
 export const childQuestionSchema = z.object({ questionId: z.string(), question: z.string(), askedAt: z.number() });
 /**
- * Forgerie retries a child's model error itself before the parent hears of it. `attempt` is the try that waits,
- * counted from 1, of `max`; `error` is the provider's own text; `until` is when the try starts, in epoch ms.
+ * Forgerie retries a child's model error itself before the parent hears of it (src/shared/childRetry.ts). `attempt`
+ * is the try that waits, 1 to 3, of `max`, always 3; `error` is the provider's own text; `until` is when the try
+ * starts, in epoch ms. Like the server's schema, it refuses any other field.
  */
-export const childRetrySchema = z.object({ attempt: z.number().int().positive(), max: z.number().int().positive(), error: z.string(), until: z.number() });
+export const childRetrySchema = z.strictObject({ attempt: z.number().int().min(1).max(3), max: z.literal(3), error: z.string(), until: z.number() });
 export const childSummarySchema = z.object({
   name: z.string(),
   conversationId: z.number(),

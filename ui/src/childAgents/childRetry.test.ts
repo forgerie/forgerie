@@ -1,28 +1,46 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { childStatus, childSummariesSchema, childSummarySchema, nextRetry, orderChildren, reportOf, retryLine, retryWait, type ChildRetry } from "./childAgentsModel";
+import { Check } from "typebox/value";
+import { ChildRetrySchema, type ChildRetry as SharedChildRetry } from "@shared/childRetry";
+import type { DurableChildSummary } from "@shared/childAgents";
+import { childRetrySchema, childStatus, childSummariesSchema, childSummarySchema, nextRetry, orderChildren, reportOf, retryLine, retryWait, type ChildRetry, type ChildSummary } from "./childAgentsModel";
 import { CHILDREN, NOW, OVERLOADED, RETRYING } from "./fixtures/children";
 
-/** The contract's shape for a retry on a /children item (autonomy contract, slice 0), written out so the mirror cannot drift from it. */
-interface ContractRetry { attempt: number; max: number; error: string; until: number }
-
-describe("a child's retry, as /children sends it", () => {
-  it("mirrors the contract's shape", () => {
-    expectTypeOf<ChildRetry>().toEqualTypeOf<ContractRetry>();
-    const retry: ContractRetry = { attempt: 1, max: 3, error: "overloaded", until: NOW + 30_000 };
-    const wire = { name: "api", conversationId: 15, agent: "worker", busy: false, createdAt: 1, questions: [], retry };
-    expect(childSummarySchema.parse(wire).retry).toEqual(retry);
-    // Absent while no retry waits: the field is optional, not null.
-    expect(childSummarySchema.parse({ ...wire, retry: undefined }).retry).toBeUndefined();
-    expect(childSummarySchema.safeParse({ ...wire, retry: null }).success).toBe(false);
-    for (const field of ["attempt", "max", "error", "until"] as const) {
-      const partial: Record<string, unknown> = { ...retry };
-      delete partial[field];
-      expect(childSummarySchema.safeParse({ ...wire, retry: partial }).success, `without ${field}`).toBe(false);
-    }
-    expect(childSummarySchema.safeParse({ ...wire, retry: { ...retry, attempt: 0 } }).success).toBe(false);
-    expect(childSummariesSchema.parse([...CHILDREN, RETRYING])).toHaveLength(4);
+describe("a child's retry mirrors the server's schema", () => {
+  it("has the server's types", () => {
+    expectTypeOf<ChildRetry>().toEqualTypeOf<SharedChildRetry>();
+    expectTypeOf<NonNullable<ChildSummary["retry"]>>().toEqualTypeOf<NonNullable<DurableChildSummary["retry"]>>();
+    // A summary the server sends is one the browser reads.
+    expectTypeOf<DurableChildSummary>().toExtend<ChildSummary>();
   });
 
+  it("accepts and refuses the same values as the server", () => {
+    const retry = { attempt: 1, max: 3, error: "overloaded", until: NOW + 30_000 };
+    const samples: unknown[] = [
+      retry, { ...retry, attempt: 2 }, { ...retry, attempt: 3, error: OVERLOADED },
+      { ...retry, attempt: 4 }, { ...retry, attempt: 0 }, { ...retry, attempt: 1.5 }, { ...retry, max: 2 }, { ...retry, max: 4 },
+      { ...retry, error: 529 }, { ...retry, until: "soon" }, { ...retry, extra: true }, { attempt: 1, max: 3, error: "x" }, null, "retry",
+    ];
+    for (const sample of samples) expect(childRetrySchema.safeParse(sample).success, JSON.stringify(sample)).toBe(Check(ChildRetrySchema, sample));
+    // The pairs the server refuses, named.
+    for (const sample of [{ ...retry, attempt: 4 }, { ...retry, max: 2 }]) {
+      expect(Check(ChildRetrySchema, sample)).toBe(false);
+      expect(childRetrySchema.safeParse(sample).success).toBe(false);
+    }
+  });
+
+  it("is optional on a /children item, and absent while no retry waits", () => {
+    const wire: DurableChildSummary = { name: "api", conversationId: 15, agent: "worker", busy: false, createdAt: 1, questions: [],
+      retry: { attempt: 1, max: 3, error: "overloaded", until: NOW + 30_000 } };
+    expect(childSummarySchema.parse(wire).retry).toEqual(wire.retry);
+    const { retry: _retry, ...without } = wire;
+    void _retry;
+    expect(childSummarySchema.parse(without).retry).toBeUndefined();
+    expect(childSummarySchema.safeParse({ ...wire, retry: null }).success).toBe(false);
+    expect(childSummariesSchema.parse([...CHILDREN, RETRYING])).toHaveLength(4);
+  });
+});
+
+describe("a child's retry, as the reader sees it", () => {
   it("names the try, the provider's error, and the wait", () => {
     const retry = RETRYING.retry!;
     expect(childStatus(RETRYING)).toBe("Retrying 2 of 3");
