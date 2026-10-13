@@ -32,6 +32,7 @@
     "docs/deployment.md",
     "docs/session-worktrees.md",
     "docs/workflows.md",
+    "docs/triggers.md",
     "docs/web-search.md",
     "docs/fork-cleanup.md"
   ],
