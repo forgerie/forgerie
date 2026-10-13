@@ -16,10 +16,13 @@ export function azureImageSource(source: string, organization: string): AzureIma
   }
   try {
     const url = new URL(source);
-    const segments = url.pathname.split("/");
+    // Inspect the source path before URL normalizes dot segments or backslashes.
+    const path = /^https:\/\/[^/?#]+(\/[^?#]*)/iu.exec(source)?.[1] ?? "";
+    const segments = path.split("/");
     if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "dev.azure.com" || url.port !== ""
       || url.username !== "" || url.password !== "" || segments[1]?.toLowerCase() !== organization.toLowerCase()
-      || !/\/_apis\/wit\/attachments\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(url.pathname)) {
+      || /%(?:2f|5c|2e)/iu.test(path) || path.includes("\\") || segments.some((segment) => segment === ".." || segment === ".")
+      || !/^\/[^/]+\/(?:[^/]+\/)?_apis\/wit\/attachments\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(path)) {
       return { kind: "skipped", reason: "not an allowed Azure attachment URL for this organization" };
     }
     url.hash = "";

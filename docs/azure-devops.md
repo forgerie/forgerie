@@ -175,9 +175,12 @@ project. A team or board name is not an Area Path.
   section order. List and detail views never download images. Link targets
   are never fetched.
 - At launch, Forgerie reads only HTTPS attachment URLs under
-  `https://dev.azure.com/<configured organization>/` whose path ends with
-  `/_apis/wit/attachments/<guid>`. Organization and host matching ignore case.
-  Other hosts, organizations, paths, ports, HTTP URLs, and URL credentials are
+  `https://dev.azure.com/<configured organization>/`. Paths must be exactly
+  `/<organization>/<project-guid-or-name>/_apis/wit/attachments/<guid>` or
+  `/<organization>/_apis/wit/attachments/<guid>`. Organization and host matching
+  ignore case. Paths with encoded slashes, backslashes, or dots, literal
+  backslashes, or dot segments are refused before URL normalization. Other
+  hosts, organizations, paths, ports, HTTP URLs, and URL credentials are
   refused before Azure credentials are read. Reads use GET, the existing CLI
   token or PAT, one 401 retry, and no redirects. No write is sent to Azure.
 - Supported `data:image/(png|jpeg|gif|webp);base64,` sources are decoded locally.

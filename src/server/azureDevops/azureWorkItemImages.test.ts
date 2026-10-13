@@ -27,6 +27,11 @@ describe("Azure attachment reads through the client", () => {
     url.replace("555555555555", "not-a-guid"), url.replace("dev.azure.com", "dev.azure.com.evil.invalid"),
     url.replace("dev.azure.com", "user:password@dev.azure.com"), url.replace("dev.azure.com", "dev.azure.com:8443"),
     "file:///etc/passwd", "//dev.azure.com/amazeinsights/image.png",
+    url.replace("project-guid", "%2f..%2fother"), url.replace("project-guid", "%2F..%2Fother"),
+    url.replace("project-guid", "project%5cother"), url.replace("project-guid", "project%5Cother"),
+    url.replace("project-guid", "%2e%2e/amazeinsights/project-guid"), url.replace("project-guid", "project%2Ename"),
+    url.replace("project-guid", "../amazeinsights/project-guid"), url.replace("project-guid", "project/nested"),
+    url.replace("project-guid", "project//nested"), url.replace("project-guid", "project\\nested"),
   ])("never fetches or reads credentials for a rejected source: %s", async (source) => {
     const f = client(); let credentialsRead = 0;
     f.credentials.read = () => { credentialsRead++; return Promise.resolve({ ok: true, authorization: "Bearer secret" }); };
@@ -41,6 +46,12 @@ describe("Azure attachment reads through the client", () => {
     expect(result.attached[0]?.image).toMatchObject({ kind: "image", mimeType: "image/png", data: png.toString("base64") });
     expect(f.calls[0]?.init).toMatchObject({ method: "GET", redirect: "error" });
     expect(new Headers(f.calls[0]?.init.headers).get("authorization")).toMatch(/^Basic /u);
+  });
+
+  it.each([url.replace("/project-guid/", "/"), url.replace("project-guid", "Amaze%20Insights")])("allows only the documented organization and optional project path shape: %s", async (source) => {
+    const f = client();
+    expect((await f.reader.workItemImages("amazeinsights", [ref(source)])).attached).toHaveLength(1);
+    expect(f.calls).toHaveLength(1);
   });
 
   it("does not follow redirects or leak tokens to a redirect target", async () => {
