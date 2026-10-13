@@ -37,6 +37,13 @@ const click = (match) => `(async () => {
   target.click();
   return true;
 })()`;
+// The header's primary action: on the header while it has room, else first in its ⋯ menu.
+const primary = (label) => `(async () => {
+  if (${find(label)}) return ${click(label)};
+  if (!(await ${click("Trigger commands")})) return false;
+  await new Promise((done) => setTimeout(done, 300));
+  return ${click(label)};
+})()`;
 const reveal = (match) => `(() => { const target = ${find(match)}; if (!target) return false; target.scrollIntoView({ block: "center" }); return true; })()`;
 const scrollEnd = `(() => { const region = document.querySelector(".settings-scroll"); if (!region) return false; region.scrollTop = region.scrollHeight; return true; })()`;
 const typeInto = (label, text) => `(() => {
@@ -67,7 +74,7 @@ const SHOTS = {
   trigger: { state: "paused" },
   "trigger-form": { state: "paused", steps: [scrollEnd] },
   create: { state: "create", desktop: true },
-  "create-problems": { state: "create", steps: [click("Create")] },
+  "create-problems": { state: "create", steps: [primary("Create")] },
   missed: { state: "missed" },
   off: { state: "off" },
   many: { state: "many" },
@@ -90,10 +97,10 @@ const SHOTS = {
   "delete-dialog": { state: "paused", steps: [click("Trigger commands"), click("Delete trigger…")] },
   "delete-toast": { state: "paused", steps: [click("Trigger commands"), click("Delete trigger…"), click("Delete trigger")] },
   "run-toast": { state: "failed", steps: [click("Run now…"), click("Run now")] },
-  "days-problem": { state: "days-problem", steps: [click("Create")] },
+  "days-problem": { state: "days-problem", steps: [primary("Create")] },
   "workflow-picker": { state: "create-in-project", steps: [click({ prefix: "Workflow:" })] },
   "zone-picker": { state: "create-in-project", steps: [click({ prefix: "Time zone:" })] },
-  "input-problem": { state: "input-problem", steps: [click("Create")] },
+  "input-problem": { state: "input-problem", steps: [primary("Create")] },
   "show-all": { state: "long", steps: [reveal("Show all 50")] },
   "filter-none": { state: "many", steps: [typeInto("Filter by name, project, or workflow", "zzz")] },
   "groups-collapsed": { state: "many", steps: [closeGroup("Active"), closeGroup("Paused")] },
