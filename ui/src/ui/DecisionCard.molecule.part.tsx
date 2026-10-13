@@ -33,3 +33,16 @@ export function OneAction() {
     <p>Port the settings page to the shared store: agree the shape, move the API and the page in parallel, then a fresh review.</p>
   </DecisionCard>;
 }
+export function PinnedChoices() {
+  return <DecisionCard title="Publish 0.4.0 to npm" meta="Publish" open pinChoices
+    footer={<ActionFooter actions={[{ label: "Refuse", onPress: () => {} }, { label: "Approve and run", onPress: () => {}, tone: "primary" }]} />}>
+    <p>The choices sit beside the title in a short container, and the body follows them.</p>
+  </DecisionCard>;
+}
+export function ClosedFailed() {
+  return <DecisionCard title="Publish 0.4.0 to npm" meta="Publish" open={false} closedTone="bad"
+    closed="Approved — failed: npm ERR! 403 You cannot publish over the previously published version 0.4.0."
+    closedDetail={<p>The registry keeps every published version.</p>}>
+    <p>The body stays above the closed line.</p>
+  </DecisionCard>;
+}

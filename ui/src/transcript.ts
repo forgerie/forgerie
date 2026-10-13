@@ -10,6 +10,7 @@ import { childEntryOf, type ChildEntry } from "./childAgents/childAgentsModel";
 import { issueProposalOf, issueProposalDecisionOf, ISSUE_PROPOSAL_OUTCOME_TYPE } from "./issues/issueProposalModel";
 import type { IssueProposal, IssueProposalArtifact } from "./issues/issueProposal";
 import { workflowEntryOf, type WorkflowEntry } from "./workflows/workflowsModel";
+import { gatedEntryOf, type GatedEntry } from "./gatedActions/gatedActionsModel";
 import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCopy, reopenRun, runFromRecord, shellText, startedRun, unknownRun,
   type ShellEnd, type ShellRun } from "./shellRun";
 
@@ -51,6 +52,8 @@ export interface TranscriptMessage {
   childEntry?: ChildEntry;
   /** A workflow started, waits at a stop, or passed on the reader's decision. */
   workflowEntry?: WorkflowEntry;
+  /** A call Forgerie holds until the reader approves it. */
+  gatedAction?: GatedEntry;
   /**
    * The message's index in the `/messages` list it was read from. A search
    * match names a message by it. A message first seen live has none until
@@ -135,6 +138,8 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
     // An event this app cannot read still shows, as plain system text.
     return { id, role: "system", parts: [{ type: "text", text }], ...(processEvent ? { processEvent } : {}), key: keyOf(message) };
   }
+  const gatedAction = role === "custom" ? gatedEntryOf(message) : undefined;
+  if (gatedAction) return { id, role: "system", parts: [{ type: "text", text: textOf(message) }], gatedAction, key: keyOf(message) };
   // A workflow's launch and each decision are user messages to the parent model, but the reader did not type them.
   const workflowEntry = role === "custom" || role === "user" ? workflowEntryOf(message) : undefined;
   if (workflowEntry) return { id, role: "system", parts: [{ type: "text", text: textOf(message) }], workflowEntry, key: keyOf(message) };
@@ -497,6 +502,8 @@ export type ProcessEventArtifact = { processEvent: ProcessEvent };
 export type ChildEntryArtifact = { childEntry: ChildEntry };
 /** UI data of a workflow's row, carried as the system message's custom metadata. */
 export type WorkflowEntryArtifact = { workflowEntry: WorkflowEntry };
+/** UI data of a gated action's row, carried as the system message's custom metadata. */
+export type GatedActionArtifact = { gatedAction: GatedEntry };
 /** UI data of a marked message, carried in its custom metadata. A joined reply is marked when any of its messages is. */
 export type MarkArtifact = { marked: true };
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
@@ -515,7 +522,7 @@ export function markPosition(messages: readonly TranscriptMessage[], position: n
 }
 /** Whether a message converts to an assistant reply, which joins the assistant messages next to it. */
 function joinsReply(message: TranscriptMessage): boolean {
-  return message.role === "assistant" && !message.pullNotice && !message.processEvent && !message.childEntry && !message.workflowEntry && !message.summary;
+  return message.role === "assistant" && !message.pullNotice && !message.processEvent && !message.childEntry && !message.workflowEntry && !message.gatedAction && !message.summary;
 }
 /**
  * The thread's id for the message at `position`. Adjacent replies join into
@@ -544,6 +551,8 @@ function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
     metadata: { custom: { issueProposal: message.issueProposal } satisfies IssueProposalArtifact } };
   if (message.workflowEntry) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { workflowEntry: message.workflowEntry } satisfies WorkflowEntryArtifact } };
+  if (message.gatedAction) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
+    metadata: { custom: { gatedAction: message.gatedAction } satisfies GatedActionArtifact } };
   if (message.summary) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { summary: message.summary } satisfies SummaryArtifact } };
   if (message.role !== "assistant") {

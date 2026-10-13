@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { waitingItems, waitingLabel } from "./waitingOnYou";
+import { pinKey, waitingItems, waitingLabel } from "./waitingOnYou";
 import { BUILDING, CONTRACT_STOP, CONTRACT_WAITING } from "./workflows/fixtures/runs";
 
 const question = (id: string, extra: { answer?: string; cancelled?: boolean } = {}) =>
@@ -29,5 +29,20 @@ describe("a workflow proposal that waits on the reader", () => {
     expect(waitingItems(messages, [], [PROPOSAL])).toEqual([{ kind: "proposal", id: "7", entry: PROPOSAL_ENTRY }]);
     expect(waitingItems(messages, [], [STARTED_PROPOSAL])).toEqual([]);
     expect(waitingItems(messages, [])).toEqual([]);
+  });
+});
+
+describe("a gated action that waits on the reader", () => {
+  it("pins only while its record says it waits, in the thread's order, under its own key", async () => {
+    const { PUSH, PUSH_ENTRY, PUSH_RAN, PUSH_REFUSED, PUSH_RUNNING } = await import("./gatedActions/fixtures/gatedActions");
+    const messages = [question("1"), { id: "8", gatedAction: PUSH_ENTRY }];
+    const items = waitingItems(messages, [], [], [PUSH]);
+    expect(items).toEqual([expect.objectContaining({ kind: "question", id: "1" }), { kind: "gated", id: "8", entry: PUSH_ENTRY }]);
+    expect(items.map(pinKey)).toEqual(["q:q:1", "g:g-1"]);
+    // Before the records are read, and once it is decided, it does not pin.
+    expect(waitingItems(messages, [])).toHaveLength(1);
+    for (const record of [PUSH_RUNNING, PUSH_RAN, PUSH_REFUSED]) expect(waitingItems(messages, [], [], [record])).toHaveLength(1);
+    // Another action's record does not pin this one.
+    expect(waitingItems(messages, [], [], [{ ...PUSH, id: "g-9" }])).toHaveLength(1);
   });
 });

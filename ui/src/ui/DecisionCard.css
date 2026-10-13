@@ -10,10 +10,14 @@
 .decision-card-meta { min-inline-size: 0; color: var(--muted-foreground); font-size: var(--label-text); overflow-wrap: anywhere; }
 .decision-card[data-open] .decision-card-body { font-size: var(--text-size); line-height: 1.625; }
 .decision-card-body { display: grid; gap: var(--space-2); min-inline-size: 0; overflow-wrap: anywhere; }
+/* The body's gap spaces its paragraphs, so a plain paragraph keeps no margin of its own. */
+.decision-card-body > p { margin: 0; }
 /* A failed choice: said in the failure ink right above the choices, so the retry sits under its reason. */
 .decision-card-problem { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0; color: var(--ink-bad); overflow-wrap: anywhere; }
 .decision-card-problem-mark { flex: none; inline-size: 1rem; block-size: 1lh; }
 .decision-card-closed { margin: 0; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.decision-card-closed[data-tone="bad"] { color: var(--ink-bad); }
+.decision-card-detail { display: grid; gap: var(--space-2); min-inline-size: 0; }
 /* The closed line as a way to what the decision made. Its press area reaches past the line's own height. */
 .decision-card-link { display: inline-flex; align-items: flex-start; gap: var(--space-1); max-inline-size: 100%;
   padding-block: var(--space-2); margin-block: calc(-1 * var(--space-2));
@@ -31,4 +35,18 @@
   .decision-card[data-open]:has(> .decision-card-action) > :is(.decision-card-body, .decision-card-foot) { display: none; }
   .decision-card[data-open]:has(> .decision-card-action) > .decision-card-problem { grid-column: 1 / -1; }
   .decision-card[data-open] > .decision-card-action { grid-row: 1; grid-column: 2; }
+}
+/* A container with too little height for the whole card in a pinned dock (the dock takes 45% of the pane, a third under
+   30rem): choices that must stay in view move up beside the title, and wrap under it when the row is narrow; a failed
+   choice's reason follows them, then the body. The dock shows the card's top first, so the choices show without a scroll.
+   42rem takes in a fold phone's landscape postures and its folded portrait (374, 553 and 638 px tall), where an approval
+   card with a long command is taller than the dock's share; unfolded portrait (783) keeps the choices last. A guess
+   from those measurements, not a rule about devices. */
+@container (block-size < 42rem) {
+  .decision-card[data-open][data-pin-choices] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3);
+    padding-block: var(--space-2) var(--space-3); }
+  .decision-card[data-open][data-pin-choices] > .decision-card-head { flex: 1 1 12rem; }
+  .decision-card[data-open][data-pin-choices] > .decision-card-foot { flex: 0 1 auto; order: 1; }
+  .decision-card[data-open][data-pin-choices] > .decision-card-problem { flex: 1 1 100%; order: 2; }
+  .decision-card[data-open][data-pin-choices] > .decision-card-body { flex: 1 1 100%; order: 3; }
 }

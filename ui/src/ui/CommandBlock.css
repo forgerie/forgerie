@@ -1,0 +1,12 @@
+/* A command the reader must read whole before acting on it. The code sheet of a reply, quieter: a hairline and the
+   code surface. Every line wraps, continuation lines hang under the first, and the copy button keeps the end. */
+.command-block { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: var(--space-1); min-inline-size: 0;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-document); background: var(--code-surface); }
+.command-block-text { min-inline-size: 0; padding-block: calc(var(--space-1) / 2); font-family: var(--code-font); font-size: var(--code-size); line-height: 1.6; }
+.command-block-code { margin: 0; color: var(--foreground); font: inherit; font-variant-ligatures: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+.command-block-line { display: block; padding-inline-start: 2ch; text-indent: -2ch; }
+/* The prompt mark is drawn, so it never lands in the clipboard or in a selection. A shell command's later lines,
+   such as a here-document, line up under the command, past the mark. */
+.command-block-code[data-shell] > .command-block-line + .command-block-line { padding-inline-start: 4ch; }
+.command-block-code[data-shell] > .command-block-line:first-child::before { content: "$ "; color: var(--muted-foreground); user-select: none; }

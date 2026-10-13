@@ -12,7 +12,7 @@ import { useThreadMessages } from "./useThreadMessages";
 import { foldProcessEvents } from "./processes/processEvent";
 import { loadProcessOutput } from "./processes/processApi";
 import { ProcessEventView } from "./processes/ProcessEventView";
-import { markPosition, threadMessageIdAt, type ChildEntryArtifact, type ProcessEventArtifact, type WorkflowEntryArtifact } from "./transcript";
+import { markPosition, threadMessageIdAt, type ChildEntryArtifact, type GatedActionArtifact, type ProcessEventArtifact, type WorkflowEntryArtifact } from "./transcript";
 import type { FoundBinding, MatchBarView } from "./search/found";
 import { MatchBar } from "./search/MatchBar";
 import type { SystemArtifactView } from "./ui/Messages";
@@ -81,7 +81,10 @@ import { DecisionsOpener } from "./decisions/DecisionsOpener";
 import { DecisionsSheet } from "./decisions/DecisionsSheet";
 import { flaggedCount, type DecisionLogActions } from "./decisions/decisionsModel";
 import { WorkflowRunStrip } from "./workflows/WorkflowRunStrip";
-import { waitingItems, waitingLabel } from "./waitingOnYou";
+import { pinKey, waitingItems, waitingLabel } from "./waitingOnYou";
+import { createGatedActionsStore } from "./gatedActions/gatedActionsStore";
+import { GatedActionCard } from "./gatedActions/GatedActionCard";
+import type { GatedEntry } from "./gatedActions/gatedActionsModel";
 import { PinnedDock } from "./ui/PinnedDock";
 import { EventLine } from "./ui/EventLine";
 import { IssueProposalEntry } from "./issues/IssueProposalEntry";
@@ -125,12 +128,15 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const [decisions] = useState(() => createDecisionsStore(browserTransport.request, () => sessionRef.current));
   const log = useSyncExternalStore(decisions.subscribe, decisions.getSnapshot);
   const [decisionsOpen, setDecisionsOpen] = useState(false);
+  // Gated actions: calls Forgerie holds until the reader approves them. They change with the workflow records, on the same event.
+  const [gated] = useState(() => createGatedActionsStore(browserTransport.request, () => sessionRef.current));
+  const held = useSyncExternalStore(gated.subscribe, gated.getSnapshot);
   const [workflowSheet, setWorkflowSheet] = useState<{ type: "picker" } | { type: "plan"; name: string; task?: string } | { type: "run" }
     | { type: "proposal"; entry: ProposalEntry }>();
   const [store] = useState(() => createSessionStore(id, browserTransport, {}, known, createReadTracker(browserTransport, { subscribe: onUnread, isVisible: () => document.visibilityState === "visible", afterRender: afterTranscriptPaint }),
     (eventType) => {
       if (eventType === CHILDREN_CHANGED_EVENT) { childAgents.refresh(); workflows.refresh(); }
-      if (eventType === WORKFLOW_RUNS_CHANGED_EVENT) { workflows.refresh(); decisions.refresh(); }
+      if (eventType === WORKFLOW_RUNS_CHANGED_EVENT) { workflows.refresh(); decisions.refresh(); gated.refresh(); }
     }));
   const children = useSyncExternalStore(childAgents.subscribe, childAgents.getSnapshot);
   const [childrenOpen, setChildrenOpen] = useState(false);
@@ -145,8 +151,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   sessionRef.current = sessionId && cwd ? { id: sessionId, cwd } : undefined;
   const connected = state.connection.type === "ready";
   // Read the children on every join: a reconnect may have missed their change events.
-  useEffect(() => { if (connected && sessionId) { childAgents.refresh(); workflows.refresh(); decisions.refresh(); } }, [childAgents, workflows, decisions, connected, sessionId]);
-  useEffect(() => () => { childAgents.dispose(); workflows.dispose(); decisions.dispose(); }, [childAgents, workflows, decisions]);
+  useEffect(() => { if (connected && sessionId) { childAgents.refresh(); workflows.refresh(); decisions.refresh(); gated.refresh(); } },
+    [childAgents, workflows, decisions, gated, connected, sessionId]);
+  useEffect(() => () => { childAgents.dispose(); workflows.dispose(); decisions.dispose(); gated.dispose(); }, [childAgents, workflows, decisions, gated]);
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
     [sessionId, cwd]);
   const [attachments] = useState(() => createAttachmentAdapter(store.saveAttachment));
@@ -298,9 +305,16 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const deciding = flows.deciding;
   // What waits on the reader is pinned above the composer; its place in the thread keeps one quiet line.
   const proposals = flows.proposals;
-  const waiting = useMemo(() => readOnly ? [] : waitingItems(folded, runs, proposals), [folded, runs, proposals, readOnly]);
-  const pinned = useMemo(() => new Set(waiting.map((item) => item.kind === "question" ? `q:${item.entry.questionId}`
-    : item.kind === "proposal" ? `p:${item.entry.proposalId}` : `s:${item.entry.runId}/${item.entry.stage}/${String(item.entry.round)}`)), [waiting]);
+  const records = held.records;
+  const waiting = useMemo(() => readOnly ? [] : waitingItems(folded, runs, proposals, records), [folded, runs, proposals, records, readOnly]);
+  const pinned = useMemo(() => new Set(waiting.map(pinKey)), [waiting]);
+  // A gated action's card renders from its entry at once; the session's record says what became of it.
+  const gatedView = useCallback((entry: GatedEntry, key?: string) => <GatedActionCard key={key} entry={entry}
+    record={records?.find((record) => record.id === entry.id)} read={records !== undefined}
+    deciding={held.deciding?.id === entry.id ? held.deciding.choice : undefined}
+    problem={held.error?.id === entry.id ? held.error.message : undefined}
+    onApprove={readOnly ? undefined : () => { void gated.approve(entry.id); }}
+    onRefuse={readOnly ? undefined : () => { void gated.refuse(entry.id); }} />, [records, held.deciding, held.error, readOnly, gated]);
   // A proposal card renders from its entry at once; the session's record decides whether it is still open.
   const proposalView = useCallback((entry: ProposalEntry, key?: string) => <WorkflowEntryView key={key} entry={entry}
     proposal={proposals?.find((candidate) => candidate.id === entry.proposalId)} proposalsRead={proposals !== undefined}
@@ -308,9 +322,10 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const renderWaiting = useCallback((item: (typeof waiting)[number]) => item.kind === "question"
     ? <ChildEntryView key={item.id} entry={item.entry} onAnswer={childrenAvailable ? childAgents.answer : undefined} onOpen={childrenAvailable ? openChildByName : undefined} />
     : item.kind === "proposal" ? proposalView(item.entry, item.id)
+    : item.kind === "gated" ? gatedView(item.entry, item.id)
     : <WorkflowEntryView key={item.id} entry={item.entry} run={runs.find((run) => run.id === item.entry.runId)} deciding={deciding === `${item.entry.runId}/${item.entry.stage}`}
       onDecide={(decision, note) => workflows.decide(item.entry.runId, item.entry.stage, decision, note)}
-      onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />, [childrenAvailable, childAgents, openChildByName, runs, deciding, workflows, proposalView]);
+      onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />, [childrenAvailable, childAgents, openChildByName, runs, deciding, workflows, proposalView, gatedView]);
   const systemArtifact = useCallback<SystemArtifactView>((custom) => {
     const flow = (custom as Partial<WorkflowEntryArtifact> | undefined)?.workflowEntry;
     if (flow?.kind === "proposal") return pinned.has(`p:${flow.proposalId}`)
@@ -325,6 +340,10 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onDecide={stop !== undefined && !readOnly ? (decision, note) => workflows.decide(stop.runId, stop.stage, decision, note) : undefined}
         onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />;
     }
+    const action = (custom as Partial<GatedActionArtifact> | undefined)?.gatedAction;
+    if (action !== undefined) return pinned.has(`g:${action.id}`)
+      ? <EventLine tone="active" subject={action.by} phrase="waits for your approval, pinned below the thread" quoteFace="text" quote={action.description} />
+      : gatedView(action);
     const issue = (custom as Partial<IssueProposalArtifact> | undefined)?.issueProposal;
     if (issue !== undefined) return <IssueProposalEntry key={issue.proposalId} proposal={issue} sessionId={sessionId} cwd={cwd} readOnly={readOnly}
       request={browserTransport.request} />;
@@ -338,7 +357,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     if (event === undefined) return undefined;
     const onLoadOutput = sessionId && cwd ? () => loadProcessOutput(browserTransport.request, { id: sessionId, cwd }, event.id) : undefined;
     return <ProcessEventView event={event} onLoadOutput={onLoadOutput} />;
-  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned, proposalView]);
+  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned, proposalView, gatedView]);
   const running = activeRun(runs);
   // Flagged guesses never pin in the dock and never ask for a response; the header counts them quietly.
   // Before the log is read, the session's status says how many there are.

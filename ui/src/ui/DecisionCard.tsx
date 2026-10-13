@@ -16,16 +16,28 @@ import "./DecisionCard.css";
  * room. In a short container (under 30rem tall, as a phone on its side) the
  * card compacts: the action moves to the end of the title line and the body
  * and footer yield, so the action is in view without a scroll.
+ *
+ * A card whose choices must stay in view while its body must stay readable,
+ * such as an approval of an exact command, sets `pinChoices`. In a short
+ * container (under 42rem tall, as a fold phone in any posture but unfolded portrait)
+ * the choices move up beside the title, a failed choice's reason
+ * follows them, and the body comes after, so a short dock shows the choices
+ * first and scrolls to the rest.
  */
-export function DecisionCard({ title, meta, open, closed, closedHref, problem, focusClosed = false, children, footer, action }: {
+export function DecisionCard({ title, meta, open, closed, closedTone, closedHref, closedDetail, problem, focusClosed = false, pinChoices = false,
+  children, footer, action }: {
   title: string;
   /** A short fact about the subject, such as the file it concerns: at the end of the title line, or under the title when they do not fit together. */
   meta?: ReactNode;
   open: boolean;
   /** What was decided, shown once the card is closed. */
   closed?: string | undefined;
+  /** Draws the closed line in the failure ink, for a decision whose outcome failed. */
+  closedTone?: "bad" | undefined;
   /** Where the closed line leads, such as the thing the decision made. It opens in a new tab. */
   closedHref?: string | undefined;
+  /** What the decision produced, such as a command's output, under the closed line. */
+  closedDetail?: ReactNode;
   /** Why the last choice failed, shown above the choices while the card is open. */
   problem?: string | undefined;
   /**
@@ -34,6 +46,8 @@ export function DecisionCard({ title, meta, open, closed, closedHref, problem, f
    * closes from elsewhere, so a background update never moves focus.
    */
   focusClosed?: boolean;
+  /** In a short container, put the choices beside the title, above the body. */
+  pinChoices?: boolean;
   children?: ReactNode;
   /** The choices, shown while the card is open. */
   footer?: ReactNode;
@@ -75,7 +89,7 @@ export function DecisionCard({ title, meta, open, closed, closedHref, problem, f
     observer.observe(frame);
     return () => { observer.disconnect(); };
   }, [shown]);
-  return <section className="decision-card" ref={card} data-open={open || undefined} aria-label={title}>
+  return <section className="decision-card" ref={card} data-open={open || undefined} data-pin-choices={pinChoices || undefined} aria-label={title}>
     <header className="decision-card-head">
       <span className="decision-card-title">{title}</span>
       {meta !== undefined && <span className="decision-card-meta">{meta}</span>}
@@ -85,12 +99,13 @@ export function DecisionCard({ title, meta, open, closed, closedHref, problem, f
       <CircleAlertIcon className="decision-card-problem-mark" aria-hidden />{shown}
     </p>}
     {open ? footer !== undefined && footer !== null && footer !== false && <div className="decision-card-foot" ref={choices}>{footer}</div>
-      : closed !== undefined && <p className="decision-card-closed" ref={closedHref === undefined ? holdClosed : undefined}
+      : closed !== undefined && <p className="decision-card-closed" data-tone={closedTone} ref={closedHref === undefined ? holdClosed : undefined}
         tabIndex={closedHref === undefined && focusClosed ? -1 : undefined}>
         {closedHref === undefined ? closed : <a className="decision-card-link" ref={holdClosed} href={closedHref} target="_blank" rel="noreferrer">
           {closed}<ExternalLinkIcon className="decision-card-link-mark" aria-hidden />
         </a>}
       </p>}
+    {!open && closedDetail !== undefined && closedDetail !== null && closedDetail !== false && <div className="decision-card-detail">{closedDetail}</div>}
     {open && action !== undefined && <button type="button" className="decision-card-action" onClick={action.onPress}>{action.label}</button>}
   </section>;
 }
