@@ -25,8 +25,8 @@ export function TriggerStatus({ trigger, clock, starting, creatorName, onPause, 
     : outcome?.kind === "failed" && outcome.sessionId && outcome.cwd ? { id: outcome.sessionId, cwd: outcome.cwd } : undefined;
   const resumed = trigger.state.kind === "paused" ? nextIfResumed(trigger, clock.now) : undefined;
   return <div>
-    {creator ? <ReadoutLine action={<TextButton label="Open session" onPress={() => onOpenSession({ id: creator.sessionId, cwd: creator.cwd })} />}>
-      Created by an agent in {creatorName ? `“${creatorName}”` : "another session"}. It runs without your confirmation.
+    {creator ? <ReadoutLine action={<TextButton label="Open the agent's session" onPress={() => onOpenSession({ id: creator.sessionId, cwd: creator.cwd })} />}>
+      An agent made this trigger in {creatorName ? `“${creatorName}”` : "another session"}.
     </ReadoutLine> : null}
     {trigger.state.kind === "active"
       ? <ReadoutLine action={<TextButton label="Pause" onPress={onPause} />}>

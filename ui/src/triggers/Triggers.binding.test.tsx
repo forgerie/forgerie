@@ -183,7 +183,7 @@ describe("a trigger's page", () => {
     await type("Trigger name", "Mine");
     store.set([{ ...triage, name: "Theirs", revision: 13 }]);
     await press("Save");
-    expect(text()).toContain("This trigger changed while you were editing");
+    expect(text()).toContain("This trigger changed while you were editing. Forgerie cannot save over that change. Reload shows the new version and discards your changes.");
     await press("Reload");
     expect((document.querySelector<HTMLInputElement>('input[aria-label="Trigger name"]'))?.value).toBe("Theirs");
   });
@@ -237,7 +237,10 @@ describe("a trigger's page", () => {
 
   it("names an agent's trigger and links its session", async () => {
     await render({ view: "trigger", id: "dependency-audit" });
-    expect(text()).toContain("Created by an agent in “Lockfile review”.");
+    expect(text()).toContain("An agent made this trigger in “Lockfile review”.");
+    expect(text()).not.toContain("without your confirmation");
+    await press("Open the agent's session");
+    expect(opened.at(-1)).toEqual({ id: audit.createdBy.kind === "agent" ? audit.createdBy.sessionId : "", cwd: nightly.action.cwd });
     expect(document.querySelector(".alert-card-title")?.textContent).toBe("Missed Oct 12, 2:30 AM");
   });
 

@@ -131,7 +131,7 @@ export function TriggerPage({ load, draft, dirty, problems, save, conflict, fail
   const recovery = load.type === "missing" ? <button type="button" onClick={actions.onBack}>Show all triggers</button>
     : load.type === "failed" ? <button type="button" onClick={actions.onRetry}>Retry</button> : undefined;
   const notice = conflict ? <>
-    <p>This trigger changed while you were editing, so Forgerie cannot save over it. Reload to see the change. Your unsaved changes are discarded.</p>
+    <p>This trigger changed while you were editing. Forgerie cannot save over that change. Reload shows the new version and discards your changes.</p>
     <button type="button" onClick={actions.onReload}>Reload</button>
   </> : undefined;
   return <SettingsFrame back={<BackButton label="Triggers" onPress={actions.onBack} />} title={title} status={status} onRoom={setRoom}
