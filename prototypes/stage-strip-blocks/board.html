@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en" data-scheme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stage strip in blocks</title>
+<!--
+  Mockup: the workflow run strip above the composer (ui/src/ui/StageStrip.tsx),
+  redrawn with the tally block: a 7-unit square, 3-unit gap, corner radius a
+  quarter of the mark (ui/src/ui/TallyRow.css, docs/brand/README.md).
+  Three candidates, each laid out by its own plan(width, height). Every frame
+  on the board is that function run at one size.
+  ?scheme=light for the light palette. ?still freezes the blink for shots.
+-->
+<style>
+@font-face { font-family: "Public Sans Variable"; font-weight: 100 900; font-display: block;
+  src: url(fonts/public-sans-latin-wght-normal.woff2) format("woff2"); }
+@font-face { font-family: "JetBrains Mono Variable"; font-weight: 100 800; font-display: block;
+  src: url(fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2"); }
+
+/* Tokens copied from ui/src/ui/theme.css. */
+:root {
+  --tint: 106;
+  --background: oklch(0.992 0.002 var(--tint));
+  --foreground: oklch(0.145 0.006 var(--tint));
+  --primary-foreground: oklch(0.985 0.003 var(--tint));
+  --muted: oklch(0.97 0.004 var(--tint));
+  --muted-foreground: oklch(0.556 0.007 var(--tint));
+  --line: color-mix(in oklab, var(--foreground) 10%, transparent);
+  --line-focus: color-mix(in oklab, var(--foreground) 25%, transparent);
+  --tint-surface: color-mix(in oklab, var(--foreground) 2.5%, var(--background));
+  --body-font: "Public Sans Variable", sans-serif;
+  --code-font: "JetBrains Mono Variable", monospace;
+  --text-size: 0.9375rem; --small-text: 0.8125rem; --label-text: 0.75rem; --meta-text: 0.6875rem;
+  --radius-thread: 1rem; --radius-surface: 0.625rem; --radius-document: 0.375rem;
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-6: 1.5rem;
+  --control-size: 2.75rem;
+  --hairline: 1px;
+  --live: oklch(0.623 0.214 259.815);
+  --live-wash: color-mix(in oklab, var(--live) 16%, transparent);
+  --live-edge: color-mix(in oklab, var(--live) 45%, transparent);
+  --diff-add: oklch(0.6 0.15 150);
+  --diff-remove: oklch(0.6 0.2 25);
+  --tone-bad: var(--diff-remove);
+  --tone-live: var(--live);
+  --ink-good: color-mix(in oklab, var(--diff-add) 78%, var(--foreground));
+  --ink-bad: color-mix(in oklab, var(--diff-remove) 78%, var(--foreground));
+  --ink-live: color-mix(in oklab, var(--live) 75%, var(--foreground));
+  --meter-ink: color-mix(in oklab, var(--foreground) 52%, transparent);
+  --meter-rest: color-mix(in oklab, var(--foreground) 10%, transparent);
+  --tally-gutter: 2.25rem;
+  /* The block. */
+  --mark: 0.4375rem;
+  --mark-gap: 0.1875rem;
+  --mark-radius: calc(var(--mark) / 4);
+}
+:root[data-scheme="dark"] {
+  --background: oklch(0.17 0.003 var(--tint));
+  --foreground: oklch(0.985 0.002 var(--tint));
+  --primary-foreground: oklch(0.215 0.003 var(--tint));
+  --muted: oklch(0.275 0.004 var(--tint));
+  --muted-foreground: oklch(0.708 0.004 var(--tint));
+  --tint-surface: color-mix(in oklab, var(--foreground) 4%, var(--background));
+  --diff-add: oklch(0.72 0.16 150);
+  --diff-remove: oklch(0.7 0.19 25);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--body-font); font-size: var(--text-size);
+  -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; }
+
+/* ---------- The board ---------- */
+.board { padding: 2.5rem 2.5rem 3rem; display: grid; gap: 2.75rem; }
+.board-head { display: grid; gap: var(--space-2); max-inline-size: 46rem; }
+.board-head h1 { margin: 0; font-size: 1.375rem; font-weight: 650; letter-spacing: -0.01em; }
+.board-head p { margin: 0; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.55; }
+.legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin-block-start: var(--space-2); font-size: var(--label-text); color: var(--muted-foreground); }
+.legend span { display: inline-flex; align-items: center; gap: var(--space-2); }
+.variant { display: grid; gap: var(--space-4); padding-block-start: var(--space-6); border-block-start: var(--hairline) solid var(--line); }
+.variant-head { display: grid; grid-template-columns: 2.5rem 1fr; gap: 0 var(--space-2); align-items: baseline; max-inline-size: 54rem; }
+.variant-key { font-family: var(--code-font); font-size: var(--small-text); color: var(--muted-foreground); }
+.variant-head h2 { margin: 0; font-size: 1.0625rem; font-weight: 650; }
+.variant-head p { grid-column: 2; margin: var(--space-1) 0 0; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.55; }
+.frames { display: flex; flex-wrap: wrap; gap: var(--space-6) 2rem; align-items: flex-start; }
+.frame { display: grid; gap: var(--space-2); }
+.frame-cap { font-size: var(--label-text); color: var(--muted-foreground); }
+.frame-cap b { color: var(--foreground); font-weight: 550; }
+/* The session column the strip lives in. */
+.session { container-type: inline-size; padding: var(--space-3); border-radius: var(--radius-surface);
+  background: var(--background); outline: var(--hairline) dashed var(--line); outline-offset: 0; }
+.insitu .session { padding: var(--space-4) var(--space-4) var(--space-3); display: grid; gap: var(--space-3); }
+.reply { font-size: var(--text-size); line-height: 1.625; color: var(--foreground); }
+.reply p { margin: 0; }
+.composer { border: var(--hairline) solid var(--line); border-radius: var(--radius-thread); background: var(--tint-surface); overflow: hidden; }
+.composer-bar { block-size: 2px; inline-size: 24%; margin-inline-start: 1.5rem; background: color-mix(in oklab, var(--live) 60%, transparent); border-radius: 1px; }
+.composer-input { padding: 0.75rem 1rem 2.75rem; color: var(--muted-foreground); }
+
+/* ---------- Shared: the block and its five states ---------- */
+.mk { flex: none; inline-size: var(--mark); block-size: var(--mark); border-radius: var(--mark-radius); background: var(--meter-ink); }
+.mk[data-s="working"] { background: var(--tone-live); animation: blink 1.2s ease-in-out infinite; }
+.mk[data-s="waiting"] { background: var(--tone-live); box-shadow: 0 0 0 2px var(--live-wash); }
+.mk[data-s="failed"] { background: var(--tone-bad); }
+.mk[data-s="next"] { background: none; box-shadow: inset 0 0 0 var(--hairline) var(--muted-foreground); opacity: 0.7; }
+.mk[data-s="empty"] { background: none; }
+@keyframes blink { 50% { opacity: 0.35; } }
+:root[data-still] *, :root[data-still] *::before { animation: none !important; }
+
+/* Shared text row, as in StageStrip today. */
+.st-text { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; font-size: var(--small-text); }
+.st-icon { flex: none; display: grid; color: var(--muted-foreground); }
+.st-icon svg { inline-size: 1rem; block-size: 1rem; }
+.st-title { flex: none; font-weight: 600; }
+.st-status { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.st-count { flex: none; display: grid; place-items: center; min-inline-size: 1.25rem; block-size: 1.25rem; padding-inline: 0.3125rem; border-radius: 0.625rem;
+  background: var(--live); color: var(--primary-foreground); font-size: var(--label-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.st-open { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
+.st-clock { flex: none; font-family: var(--code-font); font-size: var(--meta-text); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.strip { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); inline-size: 100%; padding: var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--tint-surface); text-align: start; cursor: pointer; }
+.strip:hover { border-color: var(--line-focus); }
+.strip:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }
+.strip[data-short] { grid-template-columns: var(--bars-w) minmax(0, 1fr); align-items: center; gap: var(--space-3); padding-block: var(--space-1); }
+
+/* ---------- Today: bars ---------- */
+.t-bars { display: flex; gap: 0.25rem; }
+.t-seg { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 0.125rem; block-size: 0.5rem; }
+.t-bar { block-size: 0.25rem; border-radius: 0.125rem; background: var(--line-focus); }
+.t-seg[data-lanes] .t-bar { block-size: 0.1875rem; }
+.t-bar[data-s="done"] { background: var(--ink-good); }
+.t-bar[data-s="waiting"] { background: var(--live); }
+.t-bar[data-s="failed"] { background: var(--tone-bad); }
+.t-bar[data-s="working"] { background: linear-gradient(90deg, var(--live) 40%, var(--live-edge) 50%, var(--live) 60%) 0 0 / 250% 100%; }
+
+/* ---------- A: the mark ---------- */
+/* One row. The run is a small block grid where the icon was: a column per
+   stage, a block per worker, stacked from the floor like the brand mark. */
+.a-strip { display: flex; align-items: center; gap: var(--space-3); min-block-size: var(--control-size); padding-block: var(--space-1); }
+.a-grid { flex: none; display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--rows), var(--mark)); gap: var(--mark-gap); align-items: end; }
+.a-col { display: grid; grid-template-rows: subgrid; grid-row: 1 / -1; }
+.a-more { align-self: center; font-family: var(--code-font); font-size: var(--meta-text); color: var(--muted-foreground); line-height: 1; padding-inline-end: 1px; }
+.a-strip .st-text { flex: 1; }
+
+/* ---------- B: stage cells ---------- */
+/* Each stage is a block cell; its workers are marks inside it. The stages
+   at work take the width their names need; finished ones give it up. */
+.b-cells { display: flex; gap: var(--mark-gap); }
+.b-cell { --h: 1.375rem; display: flex; align-items: center; justify-content: center; gap: 0.3125rem; min-inline-size: 0; block-size: var(--h);
+  padding-inline: 0.375rem; border-radius: calc(var(--h) / 4); background: var(--meter-rest); }
+.b-cell[data-named] { justify-content: flex-start; }
+.b-marks { flex: none; display: flex; gap: 2px; }
+.b-cell .mk { --mark: 0.375rem; }
+.b-name { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--meta-text); font-weight: 500; color: var(--muted-foreground); line-height: 1; }
+.b-cell[data-s="working"] { background: var(--live-wash); }
+.b-cell[data-s="working"] .b-name { color: var(--ink-live); }
+.b-cell[data-s="waiting"] { background: var(--live); }
+.b-cell[data-s="waiting"] .b-name { color: var(--primary-foreground); font-weight: 600; }
+.b-cell[data-s="waiting"] .mk { background: var(--primary-foreground); box-shadow: none; }
+.b-cell[data-s="failed"] { background: color-mix(in oklab, var(--tone-bad) 18%, transparent); }
+.b-cell[data-s="failed"] .b-name { color: var(--ink-bad); }
+.b-cell[data-s="next"] { background: none; box-shadow: inset 0 0 0 var(--hairline) var(--line-focus); }
+.b-cell[data-s="next"] .b-name { color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); }
+.strip[data-short] .b-cell { --h: 1rem; padding-inline: 0.25rem; }
+
+/* ---------- C: the ledger ---------- */
+/* The tally from the chat margin, one block per thing that happened, in
+   order: each worker run, each of your stops, each retry. Stages are
+   separated by one empty block. Stages not reached show their planned
+   workers as outlines. */
+.c-top { display: flex; align-items: center; gap: var(--space-3); min-inline-size: 0; }
+.c-marks { flex: 1; min-inline-size: 0; display: flex; align-items: center; gap: var(--mark-gap); block-size: 0.75rem; }
+.c-group { display: flex; gap: var(--mark-gap); }
+.c-group + .c-group { margin-inline-start: var(--mark); }
+.c-more { font-family: var(--code-font); font-size: var(--meta-text); line-height: 1; color: var(--muted-foreground); margin-inline-end: var(--mark); }
+.c-more[data-s="failed"] { color: var(--ink-bad); }
+</style>
+</head>
+<body>
+<main class="board" id="board"></main>
+<script>
+"use strict";
+const params = new URLSearchParams(location.search);
+if (params.get("scheme") === "light") document.documentElement.dataset.scheme = "light";
+if (params.has("still")) document.documentElement.dataset.still = "";
+
+/* ---------- Content ----------
+   The run from the screenshot: coach-mvp-e2e, "Integrate, Land and deploy,
+   2 working", six stages, three of them with two workers. The stage names
+   Integrate and Land and deploy are from the screenshot; the other four
+   names, and the retry in Engine and UI, are invented for the mockup.
+   lanes: one state per declared worker, as stripSegments() gives today.
+   ledger: one state per thing that happened, in order (child runs, stops). */
+const RUNS = {
+  working: { title: "coach-mvp-e2e", status: "Integrate, Land and deploy, 2 working", count: 0, clock: "41 min", stages: [
+    { name: "Research", lanes: ["done", "done"], ledger: ["done", "done"] },
+    { name: "Contract", lanes: ["done"], ledger: ["done"] },
+    { name: "Engine and UI", lanes: ["done", "done"], ledger: ["failed", "done", "done"] },
+    { name: "Integrate", lanes: ["working"], ledger: ["working"] },
+    { name: "Device test", lanes: ["done", "done"], ledger: ["done", "done"] },
+    { name: "Land and deploy", lanes: ["working"], ledger: ["working"] },
+  ] },
+  waiting: { title: "coach-mvp-e2e", status: "Contract, waiting for you", count: 1, clock: "6 min", stages: [
+    { name: "Research", lanes: ["done", "done"], ledger: ["done", "done"] },
+    { name: "Contract", lanes: ["waiting"], ledger: ["waiting"] },
+    { name: "Engine and UI", lanes: ["next", "next"], ledger: ["next", "next"] },
+    { name: "Integrate", lanes: ["next"], ledger: ["next"] },
+    { name: "Device test", lanes: ["next", "next"], ledger: ["next", "next"] },
+    { name: "Land and deploy", lanes: ["next"], ledger: ["next"] },
+  ] },
+  failed: { title: "coach-mvp-e2e", status: "Failed", count: 0, clock: "23 min", stages: [
+    { name: "Research", lanes: ["done", "done"], ledger: ["done", "done"] },
+    { name: "Contract", lanes: ["done"], ledger: ["done"] },
+    { name: "Engine and UI", lanes: ["failed", "done"], ledger: ["failed", "done", "failed"] },
+    { name: "Integrate", lanes: ["next"], ledger: ["next"] },
+    { name: "Device test", lanes: ["next", "next"], ledger: ["next", "next"] },
+    { name: "Land and deploy", lanes: ["next"], ledger: ["next"] },
+  ] },
+  finished: { title: "coach-mvp-e2e", status: "Finished", count: 0, clock: "58 min", stages: [
+    { name: "Research", lanes: ["done", "done"], ledger: ["done", "done"] },
+    { name: "Contract", lanes: ["done"], ledger: ["done"] },
+    { name: "Engine and UI", lanes: ["done", "done"], ledger: ["failed", "done", "done"] },
+    { name: "Integrate", lanes: ["done"], ledger: ["done"] },
+    { name: "Device test", lanes: ["done", "done"], ledger: ["done", "done"] },
+    { name: "Land and deploy", lanes: ["done"], ledger: ["done", "done"] },
+  ] },
+};
+
+/* Worst state first: what a stage cell or a +n count shows when it stands for several. */
+const RANK = ["failed", "waiting", "working", "next", "done"];
+const worst = (states) => RANK.find((s) => states.includes(s)) ?? "done";
+
+/* ---------- Layout policy. Every threshold is a named guess until measured. ---------- */
+const T = {
+  pad: 12 + 1,             // strip padding-inline plus border
+  titleMin: 480,           // 30rem: below this the title goes, as today
+  shortSession: 448,       // 28rem of session height: the bars move beside the text, as today
+  shortBarsShare: 0.28,    // share of the strip the bars take in the short layout
+  shortBarsMin: 64,
+  mark: 7, gap: 3,
+  aGridShare: 0.4,         // A: the grid may take at most this share of the strip
+  aRowsMax: 3,             // A: at most three blocks high, like the brand mark
+  bEqualCell: 104,         // B: at this cell width every stage shows its name at equal width
+  bActiveWeight: 3.4,      // B: below it, stages at work take this many shares
+  bNameMin: 84,            // B: a cell narrower than this shows marks only
+  cClockMin: 360,          // C: below this the elapsed time moves out of the top row
+};
+const inner = (w) => w - 2 * T.pad;
+const isShort = (h) => h < T.shortSession;
+const barsWidth = (w, h) => isShort(h) ? Math.max(T.shortBarsMin, inner(w) * T.shortBarsShare) : inner(w);
+
+/* A: how many stage columns fit; leading finished stages fold into +n. */
+function planA(w, h, run) {
+  const rows = Math.min(T.aRowsMax, Math.max(...run.stages.map((s) => s.lanes.length)));
+  const budget = inner(w) * T.aGridShare;
+  const fit = Math.max(3, Math.floor((budget + T.gap) / (T.mark + T.gap)));
+  const fold = Math.max(0, run.stages.length - fit + (run.stages.length > fit ? 1 : 0));
+  return { rows, fold, title: w >= T.titleMin, short: isShort(h) };
+}
+/* B: cell weights and which cells carry names. */
+function planB(w, h, run) {
+  const short = isShort(h);
+  const room = barsWidth(w, h) - T.gap * (run.stages.length - 1);
+  const states = run.stages.map((s) => worst(s.lanes));
+  const equal = room / run.stages.length;
+  const active = (s) => s === "working" || s === "waiting" || s === "failed";
+  const weights = short || equal >= T.bEqualCell || !states.some(active) ? states.map(() => 1) : states.map((s) => active(s) ? T.bActiveWeight : 1);
+  const unit = room / weights.reduce((a, b) => a + b, 0);
+  const named = weights.map((wt) => !short && wt * unit >= T.bNameMin);
+  return { short, states, weights, named, title: w >= T.titleMin };
+}
+/* C: how many blocks fit in the row; the oldest whole stages fold into +n. */
+function planC(w, h, run) {
+  const short = isShort(h);
+  const clockInTop = !short && w >= T.cClockMin;
+  const room = barsWidth(w, h) - (clockInTop ? 52 : 0);
+  const widthOf = (groups) => groups.reduce((sum, g, i) => sum + g.length * T.mark + (g.length - 1) * T.gap + (i > 0 ? T.mark + T.gap : 0), 0);
+  let fold = 0;
+  const groups = run.stages.map((s) => s.ledger);
+  while (fold < groups.length - 1 && widthOf(groups.slice(fold)) + (fold > 0 ? 28 : 0) > room) fold += 1;
+  return { short, fold, clockInTop, title: w >= T.titleMin };
+}
+
+/* ---------- Drawing ---------- */
+const h = (tag, attrs = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === false) continue;
+    if (k === "class") el.className = v; else if (k === "style") el.style.cssText = v; else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid !== undefined && kid !== null && kid !== false) el.append(kid);
+  return el;
+};
+const svgIcon = (paths) => { const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("fill", "none"); s.setAttribute("stroke", "currentColor");
+  s.setAttribute("stroke-width", "2"); s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round");
+  s.innerHTML = paths; return s; };
+const workflowIcon = () => svgIcon('<rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/>');
+const chevron = () => { const s = svgIcon('<path d="m9 18 6-6-6-6"/>'); s.classList.add("st-open"); return s; };
+const mk = (s) => h("span", { class: "mk", "data-s": s });
+
+function textRow(run, { title, icon = true, clock = false }) {
+  return h("span", { class: "st-text" },
+    icon && h("span", { class: "st-icon", "aria-hidden": "true" }, workflowIcon()),
+    title && h("span", { class: "st-title" }, run.title),
+    h("span", { class: "st-status" }, run.status),
+    clock && h("span", { class: "st-clock" }, run.clock),
+    run.count > 0 && h("span", { class: "st-count", "aria-hidden": "true" }, String(run.count)),
+    chevron());
+}
+const shortStyle = (w, height) => `--bars-w:${barsWidth(w, height)}px`;
+const label = (run) => `Open the ${run.title} run: ${run.status}`;
+
+function today(run, w, height) {
+  const short = isShort(height);
+  const bars = h("span", { class: "t-bars", "aria-hidden": "true" }, run.stages.map((s) =>
+    h("span", { class: "t-seg", "data-lanes": s.lanes.length > 1 }, s.lanes.map((l) => h("span", { class: "t-bar", "data-s": l })))));
+  return h("button", { class: "strip", type: "button", "aria-label": label(run), "data-short": short, style: shortStyle(w, height) },
+    bars, textRow(run, { title: w >= T.titleMin }));
+}
+
+function variantA(run, w, height) {
+  const p = planA(w, height, run);
+  const shown = run.stages.slice(p.fold);
+  const folded = run.stages.slice(0, p.fold);
+  const grid = h("span", { class: "a-grid", "aria-hidden": "true", style: `--rows:${p.rows}` },
+    folded.length > 0 && h("span", { class: "a-more", style: `grid-row:1 / -1` }, `+${folded.length}`),
+    shown.map((s) => {
+      const lanes = s.lanes.length > p.rows ? [...s.lanes.slice(0, p.rows - 1), worst(s.lanes.slice(p.rows - 1))] : s.lanes;
+      const pad = Array(p.rows - lanes.length).fill("empty");
+      return h("span", { class: "a-col" }, [...pad, ...lanes].map(mk));
+    }));
+  return h("button", { class: "strip a-strip", type: "button", "aria-label": label(run) }, grid, textRow(run, { title: p.title, icon: false }));
+}
+
+function variantB(run, w, height) {
+  const p = planB(w, height, run);
+  const cells = h("span", { class: "b-cells", "aria-hidden": "true" }, run.stages.map((s, i) =>
+    h("span", { class: "b-cell", "data-s": p.states[i], "data-named": p.named[i], style: `flex:${p.weights[i]} 1 0` },
+      h("span", { class: "b-marks" }, s.lanes.map(mk)),
+      p.named[i] && h("span", { class: "b-name" }, s.name))));
+  return h("button", { class: "strip", type: "button", "aria-label": label(run), "data-short": p.short, style: shortStyle(w, height) },
+    cells, textRow(run, { title: p.title }));
+}
+
+function variantC(run, w, height) {
+  const p = planC(w, height, run);
+  const folded = run.stages.slice(0, p.fold).flatMap((s) => s.ledger);
+  const marks = h("span", { class: "c-marks", "aria-hidden": "true" },
+    folded.length > 0 && h("span", { class: "c-more", "data-s": worst(folded) }, `+${folded.length}`),
+    run.stages.slice(p.fold).map((s) => h("span", { class: "c-group" }, s.ledger.map(mk))));
+  const top = p.short ? marks : h("span", { class: "c-top" }, marks, p.clockInTop && h("span", { class: "st-clock" }, run.clock));
+  return h("button", { class: "strip", type: "button", "aria-label": label(run), "data-short": p.short, style: shortStyle(w, height) },
+    top, textRow(run, { title: p.title, clock: !p.clockInTop }));
+}
+
+/* ---------- The board ---------- */
+const TALL = 860;   // a session tall enough for the two-row strip
+const SHORT = 400;  // a wide-short session: the strip takes one row
+const LADDER = [
+  { w: 720, h: TALL, state: "working", cap: "720 wide" },
+  { w: 440, h: TALL, state: "working", cap: "440 wide" },
+  { w: 300, h: TALL, state: "working", cap: "300 wide" },
+  { w: 720, h: SHORT, state: "working", cap: "720 wide, short session" },
+  { w: 440, h: TALL, state: "waiting", cap: "Waiting for you" },
+  { w: 440, h: TALL, state: "failed", cap: "Failed" },
+  { w: 440, h: TALL, state: "finished", cap: "Finished" },
+];
+const VARIANTS = [
+  { key: "Now", name: "Today’s bars", draw: today, ladder: LADDER.slice(0, 4),
+    idea: "For reference: one stretched bar per stage, thin stacked bars for parallel workers, done in green." },
+  { key: "A", name: "The mark", draw: variantA, ladder: LADDER,
+    idea: "One row. The run becomes a small block grid in the icon’s place: a column per stage, a block per worker, stacked from the floor like the brand mark. The strip loses its bar row, so it is as tall in a tall session as in a short one." },
+  { key: "B", name: "Stage cells", draw: variantB, ladder: LADDER,
+    idea: "Each stage is a block cell with its workers as marks inside. Stages at work take the width their names need; finished stages shrink to their marks. The only candidate that names stages on the strip." },
+  { key: "C", name: "The ledger", draw: variantC, ladder: LADDER,
+    idea: "The chat margin’s tally, unchanged: one block per worker run and per stop, in order, a gap of one block between stages, outlines for what is planned. Retries and failures stay visible after they are fixed." },
+];
+
+function frame(variant, f) {
+  const run = RUNS[f.state];
+  const session = h("div", { class: "session", style: `inline-size:${f.w}px` }, variant.draw(run, f.w, f.h));
+  return h("figure", { class: "frame", style: "margin:0" }, h("figcaption", { class: "frame-cap" }, h("b", {}, f.cap)), session);
+}
+function insitu(variant) {
+  const w = 454, run = RUNS.working;
+  const session = h("div", { class: "session", style: `inline-size:${w}px` },
+    h("div", { class: "reply" }, h("p", {}, "Device test passed on the Fold. Landing the two branches and deploying to the watch now.")),
+    variant.draw(run, w, TALL),
+    h("div", { class: "composer" }, h("div", { class: "composer-bar" }), h("div", { class: "composer-input" }, "Message")));
+  return h("figure", { class: "frame insitu", style: "margin:0" }, h("figcaption", { class: "frame-cap" }, h("b", {}, "In place, 454 wide (Fold cover)")), session);
+}
+
+const board = document.getElementById("board");
+const only = params.get("only");
+if (!only) board.append(h("header", { class: "board-head" },
+  h("h1", {}, "The run strip, in blocks"),
+  h("p", {}, "Three ways to draw the workflow strip above the composer with the tally block: 7 units square, a 3-unit gap, corners a quarter of the mark. All three use the tally’s colours, so finished work is plain ink, not green; blue is work, red is a failure. Every frame is its candidate’s plan(width, height) run at that size."),
+  h("div", { class: "legend" },
+    h("span", {}, mk("done"), "Done"), h("span", {}, mk("working"), "Working (blinks)"), h("span", {}, mk("waiting"), "Waiting for you"),
+    h("span", {}, mk("failed"), "Failed"), h("span", {}, mk("next"), "Not reached"))));
+for (const variant of VARIANTS) {
+  if (only && variant.key !== only) continue;
+  board.append(h("section", { class: "variant" },
+    h("div", { class: "variant-head" }, h("span", { class: "variant-key" }, variant.key), h("h2", {}, variant.name), h("p", {}, variant.idea)),
+    h("div", { class: "frames" }, variant.ladder.map((f) => frame(variant, f)), variant.key !== "Now" && insitu(variant))));
+}
+</script>
+</body>
+</html>
