@@ -38,7 +38,7 @@ describe("a gated action that waits on the reader", () => {
     const messages = [question("1"), { id: "8", gatedAction: PUSH_ENTRY }];
     const items = waitingItems(messages, [], [], [PUSH]);
     expect(items).toEqual([expect.objectContaining({ kind: "question", id: "1" }), { kind: "gated", id: "8", entry: PUSH_ENTRY }]);
-    expect(items.map(pinKey)).toEqual(["q:q:1", "g:g-1"]);
+    expect(items.map(pinKey)).toEqual(["q:q:1", `g:${PUSH.id}`]);
     // Before the records are read, and once it is decided, it does not pin.
     expect(waitingItems(messages, [])).toHaveLength(1);
     for (const record of [PUSH_RUNNING, PUSH_RAN, PUSH_REFUSED]) expect(waitingItems(messages, [], [], [record])).toHaveLength(1);

@@ -1,14 +1,14 @@
 // What in a session's transcript waits on the reader right now: a child agent's open question, a workflow stop
 // the run is waiting at, a workflow proposal still open, and a gated action waiting for approval. The session pins these above the composer so they never scroll out of sight.
 import type { ChildEntry } from "./childAgents/childAgentsModel";
-import type { GatedAction, GatedEntry } from "./gatedActions/gatedActionsModel";
+import type { GatedAction, GatedActionEntry } from "./gatedActions/gatedActionsModel";
 import { stopIsOpen, type ProposalEntry, type StopEntry, type WorkflowEntry, type WorkflowProposal, type WorkflowRun } from "./workflows/workflowsModel";
 
 export type WaitingItem =
   | { kind: "question"; id: string; entry: Extract<ChildEntry, { kind: "question" }> }
   | { kind: "stop"; id: string; entry: StopEntry }
   | { kind: "proposal"; id: string; entry: ProposalEntry }
-  | { kind: "gated"; id: string; entry: GatedEntry };
+  | { kind: "gated"; id: string; entry: GatedActionEntry };
 
 /**
  * The open items, oldest first. `messages` are folded, so an answered question already carries its answer. A proposal
@@ -16,7 +16,7 @@ export type WaitingItem =
  * action likewise pins only once its record says it waits.
  */
 export function waitingItems(messages: readonly { id: string; childEntry?: ChildEntry | undefined; workflowEntry?: WorkflowEntry | undefined;
-  gatedAction?: GatedEntry | undefined }[], runs: readonly WorkflowRun[], proposals: readonly WorkflowProposal[] = [],
+  gatedAction?: GatedActionEntry | undefined }[], runs: readonly WorkflowRun[], proposals: readonly WorkflowProposal[] = [],
   gated: readonly GatedAction[] = []): WaitingItem[] {
   const items: WaitingItem[] = [];
   for (const message of messages) {

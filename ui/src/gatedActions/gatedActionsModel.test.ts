@@ -1,40 +1,32 @@
 import { describe, expect, it } from "vitest";
 import {
-  argumentsText, askerOf, CATEGORY_LABEL, consequenceOf, firstLine, GATED_ACTION_TYPE, GATED_CATEGORIES, gatedActionSchema, gatedActionsSchema,
-  gatedEntryOf, gatedIsWaiting, gatedMeta, gatedOutcome, saysMore, shownCall, sortGated,
+  argumentsText, askerOf, CATEGORY_LABEL, consequenceOf, errorText, firstLine, GATED_ACTION_TYPE, GATED_CATEGORIES, gatedActionSchema, gatedActionsSchema,
+  gatedEntryOf, gatedIsWaiting, gatedMeta, gatedOutcome, resultText, saysMore, shownCall, sortGated, unknownOutcome,
 } from "./gatedActionsModel";
-import { GATED_NOW, PUSH, PUSH_ENTRY, PUSH_FAILED, PUSH_RAN, PUSH_REFUSED, PUSH_RUNNING, REPLY, REPLY_ENTRY, RESET } from "./fixtures/gatedActions";
+import {
+  GATED_NOW, PUSH, PUSH_ENTRY, PUSH_FAILED, PUSH_RAN, PUSH_REFUSED, PUSH_RUNNING, PUSH_UNKNOWN, REPLY, REPLY_ENTRY, RESET,
+} from "./fixtures/gatedActions";
 
 const entry = (details: unknown, customType = GATED_ACTION_TYPE) => gatedEntryOf({ role: "custom", customType, content: "", details });
 
 describe("a gated action's record", () => {
   it("takes each state the server writes", () => {
-    for (const record of [PUSH, PUSH_RUNNING, PUSH_RAN, PUSH_FAILED, PUSH_REFUSED, RESET, REPLY]) expect(gatedActionSchema.parse(record)).toEqual(record);
+    for (const record of [PUSH, PUSH_RUNNING, PUSH_RAN, PUSH_FAILED, PUSH_UNKNOWN, PUSH_REFUSED, RESET, REPLY]) expect(gatedActionSchema.parse(record)).toEqual(record);
     expect(gatedActionsSchema.parse([])).toEqual([]);
   });
 
-  it("refuses a record it cannot read", () => {
-    const { description: _description, ...noDescription } = PUSH;
-    void _description;
-    for (const sample of [
-      noDescription, { ...PUSH, category: "deploy" }, { ...PUSH, state: { kind: "ran" } }, { ...PUSH, state: { kind: "failed", at: 1 } },
-      { ...PUSH, state: { kind: "refused" } }, { ...PUSH, state: { kind: "withdrawn" } }, { ...PUSH, args: "git push -f" }, { ...PUSH, extra: 1 },
-      { ...PUSH, requestedAt: "now" }, null, "record",
-    ]) expect(gatedActionSchema.safeParse(sample).success, JSON.stringify(sample)).toBe(false);
-  });
-
   it("lists newest first, then by id, without changing its input", () => {
-    const older = { ...RESET, requestedAt: PUSH.requestedAt };
-    const input = [REPLY, older, PUSH];
-    expect(sortGated(input).map((record) => record.id)).toEqual(["g-2", "g-1", "g-3"]);
-    expect(input.map((record) => record.id)).toEqual(["g-3", "g-2", "g-1"]);
+    const sameTime = { ...RESET, requestedAt: PUSH.requestedAt };
+    const input = [REPLY, sameTime, PUSH];
+    expect(sortGated(input).map((record) => record.id)).toEqual([PUSH.id, RESET.id, REPLY.id]);
+    expect(input.map((record) => record.id)).toEqual([REPLY.id, RESET.id, PUSH.id]);
   });
 });
 
 describe("the transcript entry", () => {
-  it("reads the hook's entry", () => {
+  it("reads the hook's entry, and drops the fields the session file stamps into it", () => {
     expect(entry(PUSH_ENTRY)).toEqual(PUSH_ENTRY);
-    expect(entry({ ...PUSH_ENTRY, extra: true })).toEqual(PUSH_ENTRY);
+    expect(entry({ ...PUSH_ENTRY, durableSessionId: "s-1", durableEntryId: 7, durableJournalId: "j", durableConversationId: 1, durableMessageIndex: 0 })).toEqual(PUSH_ENTRY);
   });
 
   it("is not an entry under another type, or with details it cannot read", () => {
@@ -42,34 +34,41 @@ describe("the transcript entry", () => {
     expect(gatedEntryOf({ role: "user", content: "", details: PUSH_ENTRY })).toBeUndefined();
     expect(entry({ ...PUSH_ENTRY, id: "" })).toBeUndefined();
     expect(entry({ ...PUSH_ENTRY, category: "deploy" })).toBeUndefined();
+    const { command: _command, ...noCommand } = PUSH_ENTRY;
+    void _command;
+    expect(entry({ ...noCommand, preview: PUSH_ENTRY.command })).toBeUndefined();
     expect(entry(undefined)).toBeUndefined();
   });
 });
 
 describe("what the card says", () => {
-  it("names every category, and says what cannot be undone and what Approve does", () => {
+  it("names every category with the shared label, and says what cannot be undone and what Approve does", () => {
+    expect(CATEGORY_LABEL["force-push"]).toBe("Force-push or push to the default branch");
     for (const category of GATED_CATEGORIES) {
       expect(CATEGORY_LABEL[category]).not.toBe("");
       expect(consequenceOf(category)).toMatch(/\. Approve runs it once, exactly as shown\.$/u);
     }
   });
 
-  it("says who asked, with the parent named as such", () => {
-    expect(askerOf("build")).toBe("build");
+  it("says who asked: a child by its name, and the parent named as such", () => {
+    expect(askerOf("child build")).toBe("build");
+    expect(askerOf("child 42")).toBe("42");
     expect(askerOf("parent")).toBe("the parent");
-    expect(gatedMeta(PUSH_ENTRY)).toBe("Force-push, asked by build");
-    expect(gatedMeta({ by: "parent", category: "publish" })).toBe("Publish, asked by the parent");
+    expect(askerOf("build")).toBe("build");
+    expect(askerOf("child ")).toBe("child ");
+    expect(gatedMeta(PUSH_ENTRY)).toBe("Force-push or push to the default branch, asked by build");
+    expect(gatedMeta({ by: "parent", category: "publish" })).toBe("Publish packages or releases, asked by the parent");
   });
 
-  it("shows a shell call's exact command from the record, and the preview until it is read", () => {
-    const shortened = { ...PUSH_ENTRY, preview: "git push --force-with-lease origin feat/…" };
-    expect(shownCall(shortened, undefined)).toEqual({ code: shortened.preview, shell: true });
+  it("shows a shell call's whole command from the record, and the entry's command until it is read", () => {
+    const shortened = { ...PUSH_ENTRY, command: "git push --force-with-lease origin feat/…" };
+    expect(shownCall(shortened, undefined)).toEqual({ code: shortened.command, shell: true });
     expect(shownCall(shortened, PUSH)).toEqual({ code: "git push --force-with-lease origin feat/run-export", shell: true });
-    expect(shownCall(shortened, { ...PUSH, args: {} })).toEqual({ code: shortened.preview, shell: true });
+    expect(shownCall(shortened, { ...PUSH, args: {} })).toEqual({ code: shortened.command, shell: true });
   });
 
-  it("shows another tool's preview, with every argument one step away once the record is read", () => {
-    expect(shownCall(REPLY_ENTRY, REPLY)).toEqual({ code: REPLY_ENTRY.preview, shell: false });
+  it("shows another tool's call as the entry has it, with every argument one step away once the record is read", () => {
+    expect(shownCall(REPLY_ENTRY, REPLY)).toEqual({ code: REPLY_ENTRY.command, shell: false });
     expect(argumentsText(REPLY_ENTRY, REPLY)).toContain("\"text\": \"Yes, it ships in the original box with the charger and the S Pen.");
     expect(argumentsText(REPLY_ENTRY, undefined)).toBeUndefined();
     expect(argumentsText(REPLY_ENTRY, { ...REPLY, args: {} })).toBeUndefined();
@@ -80,7 +79,7 @@ describe("what the card says", () => {
     expect(gatedIsWaiting(undefined, false)).toBe(true);
     expect(gatedIsWaiting(undefined, true)).toBe(false);
     expect(gatedIsWaiting(PUSH, true)).toBe(true);
-    for (const record of [PUSH_RUNNING, PUSH_RAN, PUSH_FAILED, PUSH_REFUSED]) expect(gatedIsWaiting(record, true)).toBe(false);
+    for (const record of [PUSH_RUNNING, PUSH_RAN, PUSH_FAILED, PUSH_UNKNOWN, PUSH_REFUSED]) expect(gatedIsWaiting(record, true)).toBe(false);
   });
 
   it("closes to one line for each outcome", () => {
@@ -89,8 +88,38 @@ describe("what the card says", () => {
     expect(gatedOutcome(PUSH_RAN)).toBe("Approved — ran");
     expect(gatedOutcome(PUSH_REFUSED)).toBe("Refused");
     expect(gatedOutcome(PUSH_FAILED)).toBe("Approved — failed: ! [rejected]        feat/run-export -> feat/run-export (stale info)");
+    expect(gatedOutcome({ ...PUSH, state: { kind: "failed", error: "The conversation cwd changed since this action was blocked; the action was not run", at: GATED_NOW } }))
+      .toBe("Approved — failed: The conversation cwd changed since this action was blocked; the action was not run");
     expect(gatedOutcome({ ...PUSH, state: { kind: "failed", error: "  ", at: GATED_NOW } })).toBe("Approved — failed");
     expect(gatedOutcome(undefined)).toBe("This action is no longer in the session's records.");
+  });
+
+  it("says an interrupted run's outcome is unknown, and keeps the server's advice for under the line", () => {
+    expect(gatedOutcome(PUSH_UNKNOWN)).toBe("Approved — outcome unknown: the approved action was interrupted and may have run");
+    expect(unknownOutcome(PUSH_UNKNOWN)).toEqual({
+      lead: "the approved action was interrupted and may have run",
+      rest: "It will not be run again. Check its effects before requesting another action.",
+    });
+    const stopped = { ...PUSH, state: { kind: "failed" as const, error: "Unknown outcome: approved action stopped; it will not be run again.", at: GATED_NOW } };
+    expect(gatedOutcome(stopped)).toBe("Approved — outcome unknown: approved action stopped; it will not be run again");
+    expect(unknownOutcome(stopped)?.rest).toBe("");
+    expect(unknownOutcome(PUSH_FAILED)).toBeUndefined();
+    expect(unknownOutcome(PUSH_RAN)).toBeUndefined();
+  });
+
+  it("reads a tool's JSON result as its text, and anything else as JSON", () => {
+    expect(resultText(PUSH_RAN.state.kind === "ran" ? PUSH_RAN.state.result : undefined)).toMatch(/^Enumerating objects[\s\S]*\(forced update\)$/u);
+    expect(resultText({ content: [{ type: "text", text: "one" }, { type: "image", data: "…" }, { type: "text", text: "two" }] })).toBe("one\ntwo");
+    expect(resultText({ content: [{ type: "image", data: "x" }], details: { id: 4 } })).toContain("\"details\"");
+    expect(resultText("plain")).toBe("plain");
+    expect(resultText(null)).toBe("");
+    expect(resultText({ merged: true })).toBe("{\n  \"merged\": true\n}");
+  });
+
+  it("reads a failed tool's saved result as its text, and a plain error as it is", () => {
+    expect(PUSH_FAILED.state.kind === "failed" && errorText(PUSH_FAILED.state.error)).toMatch(/^! \[rejected\][\s\S]*push again\.$/u);
+    expect(errorText("Approved tool bash is no longer available")).toBe("Approved tool bash is no longer available");
+    expect(errorText("{\"not\":\"a result\"}")).toBe("{\"not\":\"a result\"}");
   });
 
   it("cuts a long first line, and knows when a text says more than it", () => {

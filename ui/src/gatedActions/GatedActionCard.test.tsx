@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GatedActionCard } from "./GatedActionCard";
 import type { GatedAction } from "./gatedActionsModel";
-import { PUSH, PUSH_ENTRY, PUSH_FAILED, PUSH_RAN, PUSH_REFUSED, PUSH_RUNNING, REPLY, REPLY_ENTRY, RESET, RESET_ENTRY } from "./fixtures/gatedActions";
+import { PUSH, PUSH_ENTRY, PUSH_FAILED, PUSH_RAN, PUSH_REFUSED, PUSH_RUNNING, PUSH_UNKNOWN, REPLY, REPLY_ENTRY, RESET, RESET_ENTRY } from "./fixtures/gatedActions";
 
 let root: Root;
 beforeEach(() => {
@@ -29,7 +29,7 @@ describe("a gated action that waits on the reader", () => {
     expect(card().getAttribute("aria-label")).toBe("Force-push feat/run-export to origin");
     expect(card().hasAttribute("data-open")).toBe(true);
     expect(card().hasAttribute("data-pin-choices")).toBe(true);
-    expect(document.querySelector(".decision-card-meta")?.textContent).toBe("Force-push, asked by build");
+    expect(document.querySelector(".decision-card-meta")?.textContent).toBe("Force-push or push to the default branch, asked by build");
     const command = document.querySelector("[aria-label='Command'] .command-block-code")!;
     expect(command.textContent).toBe("git push --force-with-lease origin feat/run-export");
     expect(command.hasAttribute("data-shell")).toBe(true);
@@ -54,9 +54,9 @@ describe("a gated action that waits on the reader", () => {
   it("shows another tool's short form, with every argument behind one press", async () => {
     await act(async () => root.render(<GatedActionCard entry={REPLY_ENTRY} record={REPLY} read onApprove={() => {}} onRefuse={() => {}} />));
     const call = document.querySelector("[aria-label='Call'] .command-block-code")!;
-    expect(call.textContent).toBe(REPLY_ENTRY.preview);
+    expect(call.textContent).toBe(REPLY_ENTRY.command);
     expect(call.hasAttribute("data-shell")).toBe(false);
-    expect(document.querySelector(".disclosure-summary")?.textContent).toBe("All arguments to ebay_message_reply");
+    expect(document.querySelector(".disclosure-summary")?.textContent).toBe("All arguments to ebay_seller_message_reply");
     expect(document.querySelector("[aria-label='Arguments']")?.textContent).toContain("and there is a small mark on the hinge, shown in photo 6.");
   });
 
@@ -79,7 +79,7 @@ describe("a gated action that waits on the reader", () => {
   it("trusts its entry before the session's records are read", async () => {
     await act(async () => root.render(<GatedActionCard entry={PUSH_ENTRY} read={false} onApprove={() => {}} onRefuse={() => {}} />));
     expect(card().hasAttribute("data-open")).toBe(true);
-    expect(document.querySelector(".command-block-code")?.textContent).toBe(PUSH_ENTRY.preview);
+    expect(document.querySelector(".command-block-code")?.textContent).toBe(PUSH_ENTRY.command);
   });
 });
 
@@ -104,7 +104,10 @@ describe("a gated action once decided", () => {
   });
 
   it("says it ran and nothing more when it printed nothing", async () => {
-    await render({ ...PUSH, state: { kind: "ran", result: "\n", at: 1 } });
+    await render({ ...PUSH, state: { kind: "ran", result: { content: [{ type: "text", text: "\n" }], details: { exitCode: 0 }, diagnostics: [] }, at: 1 } });
+    expect(closedLine()?.textContent).toBe("Approved — ran");
+    // A result with no text still shows what it holds.
+    await render({ ...PUSH, state: { kind: "ran", result: null, at: 1 } });
     expect(closedLine()?.textContent).toBe("Approved — ran");
     expect(document.querySelector(".decision-card-detail")).toBeNull();
   });
@@ -120,6 +123,14 @@ describe("a gated action once decided", () => {
     await render({ ...PUSH, state: { kind: "failed", error: "fatal: could not read from remote repository.", at: 1 } });
     expect(closedLine()?.textContent).toBe("Approved — failed: fatal: could not read from remote repository.");
     expect(document.querySelector(".decision-card-detail")).toBeNull();
+  });
+
+  it("says an interrupted run's outcome is unknown, with the server's advice under it in plain words", async () => {
+    await render(PUSH_UNKNOWN);
+    expect(closedLine()?.textContent).toBe("Approved — outcome unknown: the approved action was interrupted and may have run");
+    expect(closedLine()?.getAttribute("data-tone")).toBe("bad");
+    expect(document.querySelector(".decision-card-detail")?.textContent).toBe("It will not be run again. Check its effects before requesting another action.");
+    expect(document.querySelector(".decision-card-detail .command-block")).toBeNull();
   });
 
   it("says it was refused", async () => {

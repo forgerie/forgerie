@@ -10,7 +10,7 @@ import { childEntryOf, type ChildEntry } from "./childAgents/childAgentsModel";
 import { issueProposalOf, issueProposalDecisionOf, ISSUE_PROPOSAL_OUTCOME_TYPE } from "./issues/issueProposalModel";
 import type { IssueProposal, IssueProposalArtifact } from "./issues/issueProposal";
 import { workflowEntryOf, type WorkflowEntry } from "./workflows/workflowsModel";
-import { gatedEntryOf, type GatedEntry } from "./gatedActions/gatedActionsModel";
+import { gatedEntryOf, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
 import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCopy, reopenRun, runFromRecord, shellText, startedRun, unknownRun,
   type ShellEnd, type ShellRun } from "./shellRun";
 
@@ -53,7 +53,7 @@ export interface TranscriptMessage {
   /** A workflow started, waits at a stop, or passed on the reader's decision. */
   workflowEntry?: WorkflowEntry;
   /** A call Forgerie holds until the reader approves it. */
-  gatedAction?: GatedEntry;
+  gatedAction?: GatedActionEntry;
   /**
    * The message's index in the `/messages` list it was read from. A search
    * match names a message by it. A message first seen live has none until
@@ -503,7 +503,7 @@ export type ChildEntryArtifact = { childEntry: ChildEntry };
 /** UI data of a workflow's row, carried as the system message's custom metadata. */
 export type WorkflowEntryArtifact = { workflowEntry: WorkflowEntry };
 /** UI data of a gated action's row, carried as the system message's custom metadata. */
-export type GatedActionArtifact = { gatedAction: GatedEntry };
+export type GatedActionArtifact = { gatedAction: GatedActionEntry };
 /** UI data of a marked message, carried in its custom metadata. A joined reply is marked when any of its messages is. */
 export type MarkArtifact = { marked: true };
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {

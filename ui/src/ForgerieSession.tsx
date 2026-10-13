@@ -84,7 +84,7 @@ import { WorkflowRunStrip } from "./workflows/WorkflowRunStrip";
 import { pinKey, waitingItems, waitingLabel } from "./waitingOnYou";
 import { createGatedActionsStore } from "./gatedActions/gatedActionsStore";
 import { GatedActionCard } from "./gatedActions/GatedActionCard";
-import type { GatedEntry } from "./gatedActions/gatedActionsModel";
+import { askerOf, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
 import { PinnedDock } from "./ui/PinnedDock";
 import { EventLine } from "./ui/EventLine";
 import { IssueProposalEntry } from "./issues/IssueProposalEntry";
@@ -309,7 +309,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const waiting = useMemo(() => readOnly ? [] : waitingItems(folded, runs, proposals, records), [folded, runs, proposals, records, readOnly]);
   const pinned = useMemo(() => new Set(waiting.map(pinKey)), [waiting]);
   // A gated action's card renders from its entry at once; the session's record says what became of it.
-  const gatedView = useCallback((entry: GatedEntry, key?: string) => <GatedActionCard key={key} entry={entry}
+  const gatedView = useCallback((entry: GatedActionEntry, key?: string) => <GatedActionCard key={key} entry={entry}
     record={records?.find((record) => record.id === entry.id)} read={records !== undefined}
     deciding={held.deciding?.id === entry.id ? held.deciding.choice : undefined}
     problem={held.error?.id === entry.id ? held.error.message : undefined}
@@ -342,7 +342,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     }
     const action = (custom as Partial<GatedActionArtifact> | undefined)?.gatedAction;
     if (action !== undefined) return pinned.has(`g:${action.id}`)
-      ? <EventLine tone="active" subject={action.by} phrase="waits for your approval, pinned below the thread" quoteFace="text" quote={action.description} />
+      ? <EventLine tone="active" subject={askerOf(action.by)} phrase="waits for your approval, pinned below the thread" quoteFace="text" quote={action.description} />
       : gatedView(action);
     const issue = (custom as Partial<IssueProposalArtifact> | undefined)?.issueProposal;
     if (issue !== undefined) return <IssueProposalEntry key={issue.proposalId} proposal={issue} sessionId={sessionId} cwd={cwd} readOnly={readOnly}

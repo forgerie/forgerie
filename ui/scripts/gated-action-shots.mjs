@@ -22,7 +22,7 @@ await mkdir(out, { recursive: true });
 const base = process.env.APP_URL ?? "http://localhost:5173/";
 const card = "src/gatedActions/GatedActionCard.organism.part.tsx";
 const parts = (process.env.PARTS ?? [
-  ...["default", "LongCommand", "MessageInYourName", "Approving", "ChoiceFailed", "Running", "Ran", "Failed", "Refused", "ReadOnly", "Gone", "Pinned", "PinnedLongCommand"]
+  ...["default", "LongCommand", "MessageInYourName", "Approving", "ChoiceFailed", "Running", "Ran", "Failed", "OutcomeUnknown", "Refused", "ReadOnly", "Gone", "Pinned", "PinnedLongCommand"]
     .map((state) => `${card}#${state}`),
   "src/ui/CommandBlock.molecule.part.tsx#default",
   "src/ui/CommandBlock.molecule.part.tsx#LongCommand",

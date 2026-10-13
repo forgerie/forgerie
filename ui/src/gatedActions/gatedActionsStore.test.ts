@@ -30,7 +30,7 @@ describe("reading a session's gated actions", () => {
     store.refresh();
     await settle();
     expect(calls).toEqual([{ path: LIST, method: "GET", body: undefined }]);
-    expect(store.getSnapshot().records?.map((record) => record.id)).toEqual(["g-1", "g-2", "g-3"]);
+    expect(store.getSnapshot().records?.map((record) => record.id)).toEqual([PUSH.id, RESET.id, REPLY.id]);
   });
 
   it("reads an empty list, as a session without Durable children has", async () => {
@@ -107,10 +107,10 @@ describe("approving and refusing", () => {
     const { calls, store } = routes((_path, init) => init.method === "POST" ? reply.promise : json(200, [PUSH, RESET]));
     await store.retry();
     const sent = store.approve(PUSH.id);
-    expect(store.getSnapshot().deciding).toEqual({ id: "g-1", choice: "approve" });
+    expect(store.getSnapshot().deciding).toEqual({ id: PUSH.id, choice: "approve" });
     reply.release(json(200, PUSH_RUNNING));
     expect(await sent).toBe(true);
-    expect(calls.at(-1)).toEqual({ path: "/api/sessions/s%201/gated-actions/g-1/approve", method: "POST", body: { cwd: "/srv/app" } });
+    expect(calls.at(-1)).toEqual({ path: "/api/sessions/s%201/gated-actions/g%3A21%3A184/approve", method: "POST", body: { cwd: "/srv/app" } });
     expect(store.getSnapshot()).toMatchObject({ deciding: undefined, error: undefined, records: [PUSH_RUNNING, RESET] });
   });
 
@@ -118,7 +118,7 @@ describe("approving and refusing", () => {
     const { calls, store } = routes((_path, init) => init.method === "POST" ? json(200, PUSH_REFUSED) : json(200, [PUSH]));
     await store.retry();
     expect(await store.refuse(PUSH.id)).toBe(true);
-    expect(calls.at(-1)).toEqual({ path: "/api/sessions/s%201/gated-actions/g-1/refuse", method: "POST", body: { cwd: "/srv/app" } });
+    expect(calls.at(-1)).toEqual({ path: "/api/sessions/s%201/gated-actions/g%3A21%3A184/refuse", method: "POST", body: { cwd: "/srv/app" } });
     expect(store.getSnapshot().records).toEqual([PUSH_REFUSED]);
   });
 
@@ -126,18 +126,18 @@ describe("approving and refusing", () => {
     const { store } = routes((_path, init) => init.method === "POST" ? json(200, PUSH_RUNNING) : json(200, [RESET]));
     await store.retry();
     await store.approve(PUSH.id);
-    expect(store.getSnapshot().records?.map((record) => record.id)).toEqual(["g-1", "g-2"]);
+    expect(store.getSnapshot().records?.map((record) => record.id)).toEqual([PUSH.id, RESET.id]);
   });
 
   it("keeps the server's refusal on the action it was made on, reads again, and lets the reader dismiss it", async () => {
     let afterRefusal = false;
     const { calls, store } = routes((_path, init) => {
-      if (init.method === "POST") { afterRefusal = true; return json(409, { error: "This action is not waiting." }); }
+      if (init.method === "POST") { afterRefusal = true; return json(409, { error: "Gated action is not waiting" }); }
       return json(200, [afterRefusal ? PUSH_REFUSED : PUSH]);
     });
     await store.retry();
     expect(await store.approve(PUSH.id)).toBe(false);
-    expect(store.getSnapshot()).toMatchObject({ deciding: undefined, error: { id: "g-1", message: "This action is not waiting." } });
+    expect(store.getSnapshot()).toMatchObject({ deciding: undefined, error: { id: PUSH.id, message: "Gated action is not waiting" } });
     await settle();
     expect(calls.filter((call) => call.method === "GET")).toHaveLength(2);
     expect(store.getSnapshot().records).toEqual([PUSH_REFUSED]);

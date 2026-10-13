@@ -33,7 +33,9 @@ afterEach(async () => {
 const messages: PiMessage[] = [
   { role: "user", content: "Rebase the export branch and push it." },
   { role: "assistant", content: [{ type: "text", text: "The branch is rebased. The push needs your approval." }] },
-  { role: "custom", customType: "forgerie.gated-action", content: "Blocked until the user approves (gate g-1).", details: PUSH_ENTRY },
+  // As the session file holds it: the entry's fields, with the file's own bookkeeping stamped in.
+  { role: "custom", customType: "forgerie.gated-action", content: `Gated action: ${JSON.stringify(PUSH_ENTRY)}`,
+    details: { ...PUSH_ENTRY, durableSessionId: "test", durableEntryId: 12, durableJournalId: "j-1", durableConversationId: 1, durableMessageIndex: 0 } },
 ];
 
 /** A Durable session with a blocked call. The routes answer from `state`, which a test changes as the server would. */
@@ -49,7 +51,7 @@ async function sessionWithGate(status: SessionStatus, options: { records?: Gated
   vi.spyOn(browserTransport, "request").mockImplementation(async (path, init) => {
     if (init.method === "POST") posts.push({ path, body: JSON.parse(String(init.body)) });
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
-    if (path.endsWith(`/gated-actions/${PUSH.id}/approve`)) {
+    if (path.endsWith(`/gated-actions/${encodeURIComponent(PUSH.id)}/approve`)) {
       if (state.refusal !== undefined) return Response.json({ error: state.refusal }, { status: 409 });
       state.records = [PUSH_RUNNING];
       return Response.json(PUSH_RUNNING);
@@ -83,7 +85,7 @@ describe("a gated action in a session", () => {
     const api = await sessionWithGate(idle);
     await until(() => dockButton("Approve and run") !== undefined);
     await act(async () => { dockButton("Approve and run")?.click(); });
-    expect(api.posts).toEqual([{ path: `/api/sessions/test/gated-actions/${PUSH.id}/approve`, body: { cwd: "/work" } }]);
+    expect(api.posts).toEqual([{ path: `/api/sessions/test/gated-actions/${encodeURIComponent(PUSH.id)}/approve`, body: { cwd: "/work" } }]);
     await until(() => document.querySelector(".pinned-dock") === null);
     expect(document.querySelector(".decision-card-closed")?.textContent).toBe("Approved — running…");
     api.state.records = [PUSH_RAN];

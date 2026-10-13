@@ -3,8 +3,8 @@ import { CommandBlock } from "../ui/CommandBlock";
 import { DecisionCard } from "../ui/DecisionCard";
 import { Disclosure } from "../ui/Disclosure";
 import {
-  argumentsText, consequenceOf, gatedIsWaiting, gatedMeta, gatedOutcome, saysMore, shownCall,
-  type GatedAction, type GatedChoice, type GatedEntry,
+  argumentsText, consequenceOf, errorText, gatedIsWaiting, gatedMeta, gatedOutcome, resultText, saysMore, shownCall, unknownOutcome,
+  type GatedAction, type GatedChoice, type GatedActionEntry,
 } from "./gatedActionsModel";
 
 /**
@@ -14,11 +14,12 @@ import {
  * asked. Approve and run is the one filled choice, and the note above it says
  * what cannot be undone. In a short container the choices move up beside the
  * title. Once decided it closes to one line: running, ran (with what it
- * printed), failed (with the error), or refused. Without the choices, as in a
+ * printed), failed (with the error), outcome unknown (a run a restart cut off,
+ * which may have happened and never runs again), or refused. Without the choices, as in a
  * read-only transcript, it only says what became of the call.
  */
 export function GatedActionCard({ entry, record, read, deciding, problem, onApprove, onRefuse }: {
-  entry: GatedEntry;
+  entry: GatedActionEntry;
   /** The session's record of this action, as last read. */
   record?: GatedAction | undefined;
   /** Whether the session's records were read at least once. Before that, the card trusts its entry. */
@@ -36,10 +37,13 @@ export function GatedActionCard({ entry, record, read, deciding, problem, onAppr
   const call = shownCall(entry, record);
   const all = argumentsText(entry, record);
   const state = record?.state;
-  const output = state?.kind === "ran" && state.result.trim() !== ""
-    ? <CommandBlock code={state.result} label="Result" copyLabel="Copy result" lines={3} moreLabel="Show full result" />
-    : state?.kind === "failed" && saysMore(state.error)
-      ? <CommandBlock code={state.error} label="Error" copyLabel="Copy error" lines={3} moreLabel="Show full error" /> : undefined;
+  const printed = state?.kind === "ran" ? resultText(state.result) : "";
+  const unknown = unknownOutcome(record);
+  const error = state?.kind === "failed" && unknown === undefined ? errorText(state.error) : "";
+  // Forgerie's own words on an interrupted run are prose for the reader; a tool's output stays in the code face.
+  const output = printed.trim() !== "" ? <CommandBlock code={printed} label="Result" copyLabel="Copy result" lines={3} moreLabel="Show full result" />
+    : unknown !== undefined && unknown.rest !== "" ? <p>{unknown.rest}</p>
+    : saysMore(error) ? <CommandBlock code={error} label="Error" copyLabel="Copy error" lines={3} moreLabel="Show full error" /> : undefined;
   return <DecisionCard title={entry.description.trim() === "" ? entry.tool : entry.description} meta={gatedMeta(entry)}
     open={open} pinChoices problem={problem}
     closed={waiting ? "Waiting for a decision." : gatedOutcome(record)} closedTone={state?.kind === "failed" ? "bad" : undefined} closedDetail={output}
