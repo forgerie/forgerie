@@ -44,7 +44,7 @@ Agent files use the pi-subagents format, and older files name pi-subagents tools
 | `watchdog_diff` | Forgerie's read-only `watchdog_diff`. Without `range` it shows uncommitted changes against `HEAD` plus untracked paths, as in pi-subagents. With `range` it shows a committed range's commits and diff. `cwd` picks another repository or worktree, and `offset` pages through output longer than 60,000 characters. |
 | `skills` | A list of those skills' files in the child's instructions. `skillPath` folders, relative to the agent file, come first, then the skills the parent session sees. `inheritSkills: true` lists every session skill. |
 | Other named tools registered in the parent session | The session's tool, including extension tools such as `web_search`, `fetch_content`, `get_search_content`, and `source_check`. The parent's active-tool selection does not limit sharing. Argument validation and extension `tool_call`/`tool_result` hooks still apply. |
-| Missing or excluded tools | Nothing. The child's instructions say `Not available here: …`, and the parent's spawn result says `Not available to it here: …`. Excluded tools include parent-only tools, tools with `model-only` or `hidden` exposure, and names in `childToolsDeny`. |
+| Missing or excluded tools | Spawn is refused. The result names the missing tools and catalog agents whose files declare them. These declarations do not make an unavailable tool available on this host. `allowMissingTools: true` allows the spawn without those tools; the child instructions and spawn result still name the gaps. Excluded tools include parent-only tools, tools with `model-only` or `hidden` exposure, and names in `childToolsDeny`. |
 
 Without `tools`, a child gets every child-native tool, not the parent's extension tools. A child cannot start children of its own.
 
@@ -52,13 +52,22 @@ Tools registered after the session opens become available to new spawns and pare
 
 Each `send` from the parent reads the child's agent file again and applies the current tools, skills, and instructions before the message arrives. A child spawned under an older Forgerie, or before its file changed, catches up on its next task. The model stays as it was spawned, because a workflow or the parent may have chosen it. If the agent file is gone, the child keeps its spawn-time tools and the send result says so. A message the user types into a child does not refresh it.
 
+## Provider failures
+
+After Durable's own generation retries end, Forgerie retries transient child `model_error` failures at most three more times: after 30 seconds, 2 minutes, and 5 minutes. Transient errors include overloaded providers, 5xx, `auth_unavailable`, closed WebSockets, disconnected streams, rate limits, and transport failures. Invalid credentials, quota or billing limits, and context limits are not retried. Other failures reach the parent at once.
+
+Each retry submits “Continue where you stopped; the last request failed with: <detail>” with its own durable request ID. The reporter saves `{phase: "retry", attempt, error, until}` and sleeps with Durable's clock. Restart keeps the original deadline and does not repeat an admitted retry. `/children` exposes the pending retry as `{attempt, max: 3, error, until}`. The child remains busy during backoff. Stop cancels the pending retry too. When the retry budget ends, the parent report includes the actual error text, not just `model_error`.
+
+A retry is a new child run in run history, not another turn of the failed run. Each retry can also incur Durable's normal generation retries and model costs. The schedule is reporter backoff, not an upper bound on total elapsed time.
+
 ## Restarts
 
 Children live in the parent's Durable storage, and they run only while the daemon has the parent session open. At startup, the daemon discovers unfinished work from saved Durable journals and reopens its parent without a browser request. It also repairs unfinished child-run records. `$PI_WEB_DATA_DIR/durable-children-live.json` remains an index for worktree protection, not the recovery authority. A missing index does not prevent child recovery. A tool call that was interrupted reruns only when the tool is replay-safe; otherwise the child is told that the call was interrupted. See [startup recovery](deployment.md#update-an-existing-checkout) for costs and diagnostics.
 
 ## Limits
 
-- Children share the parent's working folder unless spawn sets `isolation: "worktree"`.
+- Children with native `write`, `edit`, or `bash` default to worktree isolation. General helpers and files without a tool list also get worktrees. This includes old `grep`, `find`, and `ls` names translated to `bash`. Agents with only read-only tools default to shared. Explicit `isolation` wins. Worktree defaults require Git and the session's worktree support; Forgerie refuses rather than silently sharing when these are unavailable.
+- A shared writer spawn is refused while another writer child of this parent is busy in the same cwd. Pending submissions, reports, and retries reserve that cwd too. The refusal names the other child. This is child spawn admission, not a filesystem sandbox or a lock against other sessions, the parent, shared extension tools, or user edits.
 - Shared tools run in the parent session's working folder even when the child uses `isolation: "worktree"`. They keep the parent extension's execution context. For example, the bundled `process` tool and `workspace_services` act on the parent checkout. Worktree isolation applies to child-native coding tools, not shared session tools.
 - Children never share `child_agent`, `ask_user`, `end_turn`, `spawn_session`, `handoff_session`, `workflow_finish`, `workflow_stop`, `propose_workflow`, any `propose_*` tool, `subagent`, `bg_wait`, or `web_enable`. The parent's `grep`, `find`, and `ls` are also excluded; agent files translate these names to child-native `bash`. Tools with `model-only` or `hidden` exposure are also excluded.
 - `childToolsDeny` denies more shared session tool names (default `[]`). It does not remove child-native tools and is not a shell or filesystem sandbox.
@@ -84,7 +93,8 @@ Browser requests use `/api` before the paths below. Sessiond uses the paths with
   name: string;
   message: string;
   agent?: string; // Spawn only. Agent-file name.
-  isolation?: "shared" | "worktree"; // Spawn only. Default shared.
+  isolation?: "shared" | "worktree"; // Spawn only. Default worktree for writers, shared for read-only.
+  allowMissingTools?: boolean; // Spawn only. Default false.
 }
 ```
 
@@ -96,7 +106,7 @@ A successful tool result contains `content: [{type: "text", text: string}]` and 
 
 | Method and path | Request | Response |
 | --- | --- | --- |
-| `GET /sessions/:id/children` | Query `cwd` | `DurableChildSummary[]`, defined below. |
+| `GET /sessions/:id/children` | Query `cwd` | `DurableChildSummary[]`, defined in `src/shared/childAgents.ts` and shown below. |
 | `GET /sessions/:id/children/:child/messages` | Query `cwd` | `{messages: ModelMessage[], busy: boolean, partial?: AssistantMessage}` using Pi message shapes. |
 | `POST /sessions/:id/children/:child/message` | `{cwd: string, text: string}` | `{ok: true}`. Steers a busy child or starts new work in an idle child. |
 | `POST /sessions/:id/children/:child/stop` | `{cwd: string}` | `{ok: true}`. |
@@ -108,6 +118,7 @@ interface DurableChildSummary {
   conversationId: number;
   agent: string | null;
   busy: boolean;
+  retry?: {attempt: number; max: 3; error: string; until: number}; // Pending backoff; until is Unix milliseconds.
   createdAt: number; // Unix milliseconds.
   questions: {questionId: string; question: string; askedAt: number}[];
   worktree?: {
@@ -244,6 +255,8 @@ Records live in `$PI_WEB_DATA_DIR/child-runs.json`, with private recovery checkp
 Completed records expire 90 days after `finishedAt`. Unfinished records remain. Sessiond prunes on startup, reads, writes, and a daily timer. Expiry removes only history metadata. It does not delete conversations, transcripts, branches, or worktree files. Invalid history files fail rather than being reset or overwritten. Records are new metadata, not a complete backfill of historical child runs.
 
 ## Verification
+
+`durableChildAutonomy.test.ts` uses real Git worktrees and Durable journals. It checks missing-tool refusal and override, isolation defaults, shared-writer refusal, retry deadlines through journal reopen, exhausted and non-transient errors, Stop during backoff, duplicate/aborted delivery, and old record parsing. `CHILD_RETRY_REAL=1 ./scripts/child-retry-real.ts` uses real parent and child models with a configured provider that fails once with “overloaded”. It verifies the 30-second reporter wait, `/children` retry state, and the final parent report. Its temporary profile disables Durable's inner retries so that one provider failure exercises the reporter. It removes copied model credentials on exit and does not open the live daemon.
 
 `durableChildSessionTools.test.ts` uses the production Durable session with registered extension tools. It checks named-tool selection, exclusions, missing-tool reports, validation, extension hooks, separate call IDs, late registration, and replacement registries after reload.
 

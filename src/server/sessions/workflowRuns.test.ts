@@ -119,8 +119,8 @@ const route: FauxResponseFactory = (context) => {
   if (said === "FAIL-CHILD") return fauxAssistantMessage("", { stopReason: "error", errorMessage: "Controlled workflow child failure" });
   if (said.startsWith("CHILD-TASK") || said.startsWith("CHILD-COMMIT")) return fauxAssistantMessage([fauxToolCall("work", {})], { stopReason: "toolUse" });
   if (said.includes("WORKFLOW-TEST")) {
-    if (said.includes('"task":"parallel"')) return fauxAssistantMessage(["alpha", "beta", "gamma"].map((name) => fauxToolCall("child_agent", { action: "spawn", name, message: "CHILD-TASK" })), { stopReason: "toolUse" });
-    return call("child_agent", { action: "spawn", name: `writer${String(++sequence)}`, message: said.includes('"task":"failure"') ? "FAIL-CHILD" : "CHILD-TASK", ...(isolate ? { isolation: "worktree" } : {}) });
+    if (said.includes('"task":"parallel"')) return fauxAssistantMessage(["alpha", "beta", "gamma"].map((name) => fauxToolCall("child_agent", { action: "spawn", name, message: "CHILD-TASK", isolation: "worktree" })), { stopReason: "toolUse" });
+    return call("child_agent", { action: "spawn", name: `writer${String(++sequence)}`, message: said.includes('"task":"failure"') ? "FAIL-CHILD" : "CHILD-TASK", isolation: isolate ? "worktree" : "shared" });
   }
   return answer("Session title");
 };
@@ -195,7 +195,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       expect(runBody((await server.inject({ method: "POST", url, payload })).json()).id).toBe(first.id);
       const completedChild = await until(async () => {
         const run = (await service.workflowRuns(ref))[0];
-        return run?.children[0]?.state.kind === "settled" && run.children[0].state.delivered ? run : false;
+        return run?.children[0]?.state.kind === "settled" && run.children[0].state.delivered !== false ? run : false;
       });
       expect(completedChild.state.kind).toBe("running");
       expect(await new LiveChildSessionIndex(join(agentDir, "live.json")).list()).toContainEqual(ref);
@@ -406,6 +406,12 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
   });
 
   it("associates three parallel children, keeps stopped and failed results, and expires only completed records", async () => {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: sanitizedGitEnv(), encoding: "utf8" });
+    git("init", "-b", "main"); git("config", "user.email", "workflow@example.invalid"); git("config", "user.name", "Workflow tests");
+    await writeFile(join(root, "base.txt"), "base"); git("add", "base.txt"); git("commit", "-m", "Initial workspace");
+    const ownership = new SessionWorktreeStore(join(agentDir, "ownership.json")); await ownership.initialize();
+    worktrees = new SessionWorktrees(ownership, { publish: () => undefined });
+    await service.dispose(); service = openService();
     const ref = { id: (await service.start(root)).id, cwd: root };
     await new AgentDirPromptLibrary(agentDir).save({ name: "experiment", body: definition });
     const first = await service.runWorkflow(ref, "experiment", { task: "parallel" }, "parallel-1");
@@ -415,12 +421,12 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     await service.stopDurableChild(ref, beta.conversationId);
     const settled = await until(async () => {
       const run = (await service.workflowRuns(ref))[0];
-      return run?.children.length === 3 && run.children.every((child) => child.state.kind === "settled" && (child.state.delivered || child.state.deliveryError !== undefined)) ? run : false;
+      return run?.children.length === 3 && run.children.every((child) => child.state.kind === "settled" && (child.state.delivered !== false || child.state.deliveryError !== undefined)) ? run : false;
     });
     expect(settled.children.map((child) => child.state.kind === "settled" ? child.state.outcome : "working").sort()).toEqual(["answered", "answered", "stopped"]);
     const stopped = settled.children.find((child) => child.name === "beta")?.state;
-    expect(stopped).toMatchObject({ kind: "settled", outcome: "stopped", delivered: false });
-    if (stopped?.kind === "settled") expect(stopped.deliveryError).toBeTruthy();
+    expect(stopped).toMatchObject({ kind: "settled", outcome: "stopped", delivered: "aborted" });
+    if (stopped?.kind === "settled") expect(stopped.deliveryError).toBeUndefined();
     await service.finishWorkflow(ref, first.id, "stopped", "Stopped this experiment");
     await until(async () => !(await service.status(ref)).isStreaming);
     const failed = await service.runWorkflow(ref, "experiment", { task: "failure" }, "failure-1");

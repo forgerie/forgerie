@@ -29,6 +29,7 @@ const attempts: Attempt[] = [];
 const systemSeen: string[] = [];
 /** Image parts a child's model received in tool results. */
 const imagesSeen: string[] = [];
+let parallelStart = false;
 
 const work = defineTool({
   name: "work",
@@ -38,6 +39,7 @@ const work = defineTool({
   executionMode: "sequential",
   execute: async (args, api) => {
     attempts.push({ conv: Number(api.conversationId), step: args.step, phase: "start" });
+    while (parallelStart && args.step === 1 && new Set(attempts.filter((a) => a.phase === "start").map((a) => a.conv)).size < 3) await sleep(10);
     await sleep(250);
     attempts.push({ conv: Number(api.conversationId), step: args.step, phase: "end" });
     return { content: [{ type: "text" as const, text: `work step ${String(args.step)}/${String(args.of)} done` }],
@@ -53,7 +55,7 @@ const text = (content: unknown): string => typeof content === "string" ? content
 const route: FauxResponseFactory = (context) => {
   const last = [...context.messages].reverse().find((message) => message.role !== "system");
   const said = text(last?.content);
-  const call = (name: string, args: Record<string, string | number>) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
+  const call = (name: string, args: Record<string, string | number | boolean>) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
   const answer = (value: string): AssistantMessage => fauxAssistantMessage([fauxText(value)]);
   // A child whose agent file carries a PROFILE marker: keep what its model was sent.
   const seen = JSON.stringify(context);
@@ -71,14 +73,14 @@ const route: FauxResponseFactory = (context) => {
   if (said.startsWith("STEER")) return answer("Steered: finishing early.");
   if (said === "FAIL") return fauxAssistantMessage("", { stopReason: "error", errorMessage: "Controlled child failure" });
   if (said === "Start three children in one reply") return fauxAssistantMessage(
-    ["alpha", "beta", "gamma"].map((name) => fauxToolCall("child_agent", { action: "spawn", name, message: "run work 5 times" })),
+    ["alpha", "beta", "gamma"].map((name) => fauxToolCall("child_agent", { action: "spawn", name, message: "run work 5 times", isolation: "worktree" })),
     { stopReason: "toolUse" },
   );
   const send = /^Send child (\w+): ([\s\S]*)$/.exec(said);
   if (send !== null) return call("child_agent", { action: "send", name: send[1] ?? "", message: send[2] ?? "" });
   const spawn = /^Start a child named (\w+)(?: as (\w+))?(?: (isolated))?: ([\s\S]*)$/.exec(said);
   if (spawn !== null) return call("child_agent", { action: "spawn", name: spawn[1] ?? "", message: spawn[4] ?? "",
-    ...(spawn[2] === undefined ? {} : { agent: spawn[2] }), ...(spawn[3] === undefined ? {} : { isolation: "worktree" }) });
+    ...(spawn[2] === undefined ? {} : { agent: spawn[2] }), isolation: spawn[3] === undefined ? "shared" : "worktree", allowMissingTools: true });
   const steps = /run work (\d+) times/.exec(said);
   if (steps !== null) return call("work", { step: 1, of: Number(steps[1]) });
   const diff = /^DIFF (\S+)$/.exec(said);
@@ -143,6 +145,7 @@ const childText = async (ref: Ref, conversationId: number) => (await service.dur
 const ended = (conv: number) => attempts.filter((a) => a.conv === conv && a.phase === "end");
 
 beforeEach(async () => {
+  parallelStart = false;
   attempts.length = 0;
   systemSeen.length = 0;
   imagesSeen.length = 0;
@@ -497,6 +500,8 @@ describe("Durable-native child agents in a Forgerie session", () => {
   }, 30_000);
 
   it("runs three children in parallel and resumes each with one report after restart", async () => {
+    await gitWorkspace();
+    parallelStart = true;
     const ref = { id: (await service.start(directory)).id, cwd: directory };
     await service.prompt(ref, "Start three children in one reply");
     const initial = await until("three children", async () => {

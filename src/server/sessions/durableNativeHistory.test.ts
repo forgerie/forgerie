@@ -65,7 +65,7 @@ it("retains real child and workflow ownership and terminal tasks through fork an
   const children = durableChildExtensions();
   for (const extension of [...children.parent, ...children.childOnly, workflowExtension()]) registry.install(extension);
   provider.setResponses([
-    fauxAssistantMessage([fauxToolCall("child_agent", { action: "spawn", name: "worker", message: "Child task" })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxToolCall("child_agent", { action: "spawn", name: "worker", message: "Child task", isolation: "shared" })], { stopReason: "toolUse" }),
     ...Array.from({ length: 12 }, () => fauxAssistantMessage("Finished.")),
   ]);
   const options = { models, registry };

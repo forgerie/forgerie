@@ -258,7 +258,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       summarize: (source, cut, instructions) => this.summarizeBranch(source, cut, instructions),
       manager: this.sessionManager, models: this.modelRuntime, registry: this.registry,
       agent: { ...(this.model === undefined ? {} : { model: { provider: this.model.provider, modelId: this.model.id } }), thinkingLevel: this.thinkingLevel, cwd: this.options.services.cwd },
-      settings: { contextRetentionMs: 0, steeringMode: this.settingsManager.getSteeringMode(), followUpMode: this.settingsManager.getFollowUpMode(),
+      settings: { contextRetentionMs: 0, retry: this.settingsManager.getRetrySettings(), steeringMode: this.settingsManager.getSteeringMode(), followUpMode: this.settingsManager.getFollowUpMode(),
         compaction: { enabled: this.settingsManager.getCompactionEnabled(), reserveTokens: this.settingsManager.getCompactionReserveTokens(this.model), keepRecentTokens: this.settingsManager.getCompactionKeepRecentTokens(this.model) } },
       onReport: (error) => { this.extensionRunner.emitError({ extensionPath: "<durable>", event: "runtime", error: String(error) }); },
       // Only Durable's own coding tools use the environment. Child agents run them; the parent uses the SDK tools.

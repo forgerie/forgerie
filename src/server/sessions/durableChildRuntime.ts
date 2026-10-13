@@ -98,3 +98,18 @@ export function runtimeGaps(plan: ChildRuntimePlan): string {
   ];
   return parts.length === 0 ? "" : ` Not available to it here: ${parts.join("; ")}.`;
 }
+
+/** Native bash can write too, including when an old agent file asks for grep/find/ls. */
+export function childIsWriter(tools: readonly string[] | undefined): boolean {
+  return tools === undefined || tools.some((name) => name === "write" || name === "edit" || name === "bash");
+}
+
+/** Catalog recommendations describe declared capabilities; they do not promise this host can supply them. */
+export function missingToolsRefusal(plan: ChildRuntimePlan, agents: readonly ChildAgentProfile[]): string | undefined {
+  if (plan.unavailable.length === 0) return undefined;
+  const alternatives = plan.unavailable.map((tool) => {
+    const names = agents.filter((agent) => agent.tools?.includes(tool) === true).map((agent) => agent.name);
+    return `${tool}: ${names.length === 0 ? "no catalog agents declare it" : names.join(", ")}`;
+  });
+  return `Cannot spawn: missing tools ${plan.unavailable.join(", ")}. Catalog agents that declare them: ${alternatives.join("; ")}. Choose a suitable agent or set allowMissingTools: true to proceed without them.`;
+}

@@ -3,7 +3,7 @@ import { AssistantEntry, defineDoc, defineExtension, defineTask, defineTool, Inb
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { Check } from "typebox/value";
-import { WorkflowOutcomeSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowInputs, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
+import { WorkflowOutcomeSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowChildDelivery, type WorkflowInputs, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
 import { WorkflowProposalSchema, WorkflowProposalToolSchema, type WorkflowProposal, type WorkflowProposalTool } from "../../shared/workflowProposals.js";
 import { admitChild, completionProblem, declaredWorker, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
 import { assertProseOnly, parseWorkflow, WorkflowError, workflowInputs, workflowPrompt, type ProseWorkflow, type WorkflowLibrary } from "../resources/workflowLibrary.js";
@@ -66,7 +66,7 @@ async function asTool(action: () => Promise<string>) {
 export function workflowExtension() {
   return defineExtension({ name: "forgerie.workflows", tasks: [Launch], tools: [defineTool({
     name: "propose_workflow",
-    description: "When you understand a task that needs several workers, a review, or the user's check, design a workflow for this task, call propose_workflow, then end your turn. Not for small tasks. Never write a workflow file into the repository for a one-off workflow. Supply complete prompt-format text with workflow version 1 frontmatter and prose, and pre-fill its inputs. Only the user can start the proposal, ask for changes, or dismiss it.",
+    description: "When you understand a task that needs several workers, a review, or the user's check, design a workflow for this task, call propose_workflow, then end your turn. Not for small tasks. Never write a workflow file into the repository for a one-off workflow. Supply complete prompt-format text with workflow version 1 frontmatter and prose, and pre-fill its inputs. Add no approve stops unless the user asked to check something. Only irreversible steps need a stop. Only the user can start the proposal, ask for changes, or dismiss it.",
     parameters: WorkflowProposalToolSchema,
     // The task-keyed proposal ID reuses the committed proposal and its card.
     replay: "safe", executionMode: "sequential",
@@ -318,7 +318,7 @@ export async function finishWorkflow(tx: Tx, parent: ConversationId, runId: stri
     if (problem !== undefined) throw new WorkflowError(409, problem);
   }
   await reconcileReportFailures(tx, parent, run);
-  if (run.children.some((child) => child.state.kind === "working" || (!child.state.delivered && child.state.deliveryError === undefined))) throw new WorkflowError(409, "Wait for associated child work and reports before finishing the workflow");
+  if (run.children.some((child) => child.state.kind === "working" || (child.state.delivered === false && child.state.deliveryError === undefined))) throw new WorkflowError(409, "Wait for associated child work and reports before finishing the workflow");
   await assertChildWorkSettled(tx, parent);
   run.state = { kind: "finished", outcome, result, finishedAt: Date.now() };
   doc.active = null;
@@ -366,15 +366,16 @@ export async function deliveredWorkflowChild(tx: Tx, parent: ConversationId, rep
     if (child.state.kind === "settled") child.state.delivered = true;
   }
 }
-export async function undeliveredWorkflowChild(tx: Tx, parent: ConversationId, reporter: TaskId, reason: string): Promise<void> {
+export async function undeliveredWorkflowChild(tx: Tx, parent: ConversationId, reporter: TaskId, reason: Exclude<WorkflowChildDelivery, boolean>): Promise<void> {
   for (const child of await reporterChildren(tx, parent, reporter)) {
-    if (child.state.kind === "settled") child.state.deliveryError = reason;
+    if (child.state.kind === "working") child.state = { kind: "settled", outcome: "stopped", result: "aborted", delivered: reason };
+    else child.state.delivered = reason;
   }
 }
 async function submissionState(tx: Tx, submission: SubmissionRecord): Promise<WorkflowChild["state"]> {
   if (submission.type !== "input") throw new Error("Workflow child submission is not input");
   if (submission.status === "queued" || submission.status === "placed") return { kind: "working" };
-  if (submission.status === "unanswered") return { kind: "settled", outcome: submission.reason === "aborted" ? "stopped" : "failed", result: submission.reason, delivered: false };
+  if (submission.status === "unanswered") return { kind: "settled", outcome: submission.reason === "aborted" ? "stopped" : "failed", result: submission.detail === undefined ? submission.reason : typeof submission.detail === "string" ? submission.detail : JSON.stringify(submission.detail), delivered: false };
   const answer = (await tx.entry(AssistantEntry, submission.answer))?.model?.[0];
   if (answer?.role !== "assistant") throw new Error("Workflow child answer is missing");
   const result = answer.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
@@ -393,7 +394,7 @@ const reporterIdSchema = Type.Unsafe<TaskId>(Type.Integer({ minimum: 1 }));
 const childIdSchema = Type.Unsafe<ConversationId>(Type.Integer({ minimum: 1 }));
 async function reconcileReportFailures(tx: Tx, parent: ConversationId, run: WorkflowRun): Promise<void> {
   for (const child of run.children) {
-    if (child.state.kind === "settled" && (child.state.delivered || child.state.deliveryError !== undefined)) continue;
+    if (child.state.kind === "settled" && (child.state.delivered !== false || child.state.deliveryError !== undefined)) continue;
     const id = child.reporterId;
     if (!Check(reporterIdSchema, id)) throw new Error("Invalid workflow reporter identity");
     const reporter = await tx.task(id);
@@ -405,13 +406,19 @@ async function reconcileReportFailures(tx: Tx, parent: ConversationId, run: Work
     if (child.state.kind === "working") {
       const conversationId = child.conversationId;
       if (!Check(childIdSchema, conversationId)) throw new Error("Invalid workflow child identity");
-      const submission = await tx.submissionByRequest(conversationId, `child:${String(id)}`);
+      // The reporter may fail after a retry input rather than after the original admitted request.
+      let submission: SubmissionRecord | undefined;
+      for (const request of [3, 2, 1, 0]) {
+        submission = await tx.submissionByRequest(conversationId, request === 0 ? `child:${String(id)}` : `child:${String(id)}:retry:${String(request)}`);
+        if (submission !== undefined) break;
+      }
       child.state = submission === undefined ? { kind: "settled", outcome: "failed", result: reason, delivered: false }
         : await submissionState(tx, submission);
       if (child.state.kind === "working") continue;
     }
     // A crash/abort can occur after admission but before the delivery marker commits.
     if (await tx.submissionByRequest(parent, `child-report:${String(id)}`) !== undefined) child.state.delivered = true;
+    else if (outcome.status === "aborted") child.state.delivered = "aborted";
     else child.state.deliveryError = reason;
   }
 }

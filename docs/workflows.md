@@ -54,7 +54,7 @@ While the run is active, a strip above the composer shows its stages as bars. Pa
 
 ## Temporary workflow proposals
 
-For a task that needs several workers, a review, or your check, the agent can call `propose_workflow({name, summary, text, inputs?})`, then end its turn. Small tasks do not need a proposal. A one-off workflow must not become a file in the repository.
+For a task that needs several workers, a review, or your check, the agent can call `propose_workflow({name, summary, text, inputs?})`, then end its turn. Small tasks do not need a proposal. A one-off workflow must not become a file in the repository. The tool guidance says: “Add no approve stops unless the user asked to check something. Only irreversible steps need a stop.”
 
 The **Proposed workflow** card shows the name, overview, stages, workers, and stops. An open proposal counts as **Needs your response**. Review it and change the pre-filled inputs before choosing:
 
@@ -128,7 +128,9 @@ The tool records a final result. Repeating the same completion is safe. A differ
 
 Durable child spawn, send, and fresh-child continuation requests retain their association in the same commit that creates their reporter. Their settled results stay in the workflow record. Each child run started while the workflow is active also saves `workflowRunId` in the existing child-run history. A steer joins its current child run. A new idle input creates another child run.
 
-Child questions still do not start parent turns; each normal completion report still does. Child outcomes come from the admitted Durable submission, independently of accounting or worktree reporting. A reporting failure preserves the child's actual answer, failure, or stop reason. If a reporter terminates without delivering, the record exposes `deliveryError`. Stopped or suppressed reports also keep `delivered: false` and a reason. Delivery means admission to the parent's inbox, not review or approval. Explicit completion remains possible after all child work settles.
+Transient provider failures keep the associated child request working through the reporter's three retries (30 seconds, 2 minutes, 5 minutes). Each retry has a new input receipt and child-run history record. Only success or exhausted retries settle the workflow child. The final failed result contains the real provider error text. See [Provider failures](child-agents.md#provider-failures).
+
+Child questions still do not start parent turns; each normal completion report still does. Child outcomes come from the admitted Durable submission, independently of accounting or worktree reporting. A reporting failure preserves the child's actual answer, failure, or stop reason. An answer already claimed by another reporter records `delivered: "duplicate"` (“Duplicate report, not sent again”). A child stopped before reporting, a canceled reporter, or a missing reporting target records `delivered: "aborted"` (“Stopped before reporting”). Neither state is a delivery error. A delivered report records `true`; a report not yet delivered records `false`. Actual reporter failures still expose `deliveryError` and `delivered: false`. Old records with a string `deliveryError` still parse and read as `false`; Forgerie does not reinterpret their old text as a new label. Delivery means admission to the parent's inbox, not review or approval. Explicit completion remains possible after all child work settles.
 
 If the coordinator forgets to finish, the run stays active. Stop ongoing work before using the finish HTTP route to record a failed or stopped run. Finishing changes metadata; it does not cancel work.
 
@@ -167,7 +169,7 @@ Browser URLs use `/api` before these paths. Requests identify the parent's `cwd`
 
 `requestId` contains 1 to 128 letters, digits, or hyphens. Use a new ID for an intentional rerun. An expired receipt cannot be reused. Results must contain 1 to 65536 characters and cannot be blank.
 
-`WorkflowRun` is defined once in `src/shared/workflowRuns.ts`. It contains the session, launch ID, request ID, start time, definition snapshot, resolved inputs, explicit run state, the frozen stages, the state of each stop, and child requests with their stage. The stop rules are pure functions in `src/shared/workflowStops.ts`, shared by the server and the browser. Each child request identifies its conversation and reporter, with working or settled state. Settled state contains its outcome, result, delivery flag, and optional delivery error. Child requests are not unique child conversations; multiple sends can share one child's answer.
+`WorkflowRun` is defined once in `src/shared/workflowRuns.ts`. It contains the session, launch ID, request ID, start time, definition snapshot, resolved inputs, explicit run state, the frozen stages, the state of each stop, and child requests with their stage. The stop rules are pure functions in `src/shared/workflowStops.ts`, shared by the server and the browser. Each child request identifies its conversation and reporter, with working or settled state. Settled state contains its outcome, result, delivery state (`true`, `"duplicate"`, `"aborted"`, or `false`), and optional delivery error for actual reporter failures or old records. Child requests are not unique child conversations; multiple sends can share one child's answer.
 
 Invalid requests and input definitions return 400. Missing workflows and foreign run IDs return 404. Active work, script files, conflicting request IDs, and conflicting completions return 409. Unexpected filesystem or storage failures return 500. Errors have shape `{error: string}`. No route accepts an arbitrary workflow path.
 

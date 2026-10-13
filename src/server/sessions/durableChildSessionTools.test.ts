@@ -75,7 +75,7 @@ async function fixture(named: string[], definitions: Pick<ToolDefinition, "name"
     }
     const last = context.messages.at(-1);
     const text = JSON.stringify(last);
-    if (text.includes("SPAWN")) return fauxAssistantMessage([fauxToolCall("child_agent", { action: "spawn", name: `probe${String(offered.length)}`, agent: "probe", message: "Run your named tool once" }, { id: "same-id" })], { stopReason: "toolUse" });
+    if (text.includes("SPAWN")) return fauxAssistantMessage([fauxToolCall("child_agent", { action: "spawn", name: `probe${String(offered.length)}`, agent: "probe", message: "Run your named tool once", isolation: "shared", allowMissingTools: true }, { id: "same-id" })], { stopReason: "toolUse" });
     return fauxAssistantMessage("parent done");
   }));
   async function spawn() {
