@@ -18,3 +18,27 @@ _Avoid_: Snippet, highlight
 
 **Off-branch hit**:
 A search hit whose matched passage lies on a branch other than the session's current branch. Opening it shows the passage in the session's history tree and leaves the current branch as it is.
+
+## Autonomy
+
+**Autonomy policy**:
+The rule that says which situations reach the user and which the agents settle themselves. One global default; a project or a workflow can tighten or loosen it.
+_Avoid_: Permission mode, trust level
+
+**Escalation**:
+A situation that the autonomy policy sends to the user: an irreversible action, an action outside the project in the user's name, going against something the user said or approved, or a question the parent cannot answer anywhere. Everything else is a decision the agents make.
+_Avoid_: Question (a child's question goes to its parent first and is not an escalation by itself)
+
+**Gated action**:
+A tool call that is irreversible or acts outside the project in the user's name. Forgerie blocks it in code until the user approves; the agent keeps working on what does not depend on it.
+_Avoid_: Dangerous command
+
+**Decision**:
+A choice an agent made without the user, such as a parent's answer to a child's question or a guess in place of an escalation. Each decision records the question, the choice, and the reason.
+
+**Decision log**:
+The non-blocking list of decisions for one session or workflow run. The user reads it when they like and can overturn any decision.
+_Avoid_: Audit log, history
+
+**Auto-land**:
+A setting, global or per workflow, under which a workflow's land stop passes without the user and the run lands its branches itself.
