@@ -4868,15 +4868,14 @@ export class PiSessionService implements SessionRouteService {
 
     const controller = new AbortController();
     this.sessionTitleGenerationControllers.set(session, controller);
-    void generateShortSessionName(session.agent.streamFunction, model, titleInput, controller.signal).then((name) => {
-      if (name === undefined && !controller.signal.aborted) {
-        this.logger.info({ sessionId: session.sessionId, outcome: "fallback" }, "session title generation returned no usable name");
-      }
+    void generateShortSessionName(session.agent.streamFunction, model, titleInput, controller.signal, (failureKind) => {
+      this.logger.info({ sessionId: session.sessionId, outcome: "fallback", failureKind }, "session title generation returned no usable name");
+    }).then((name) => {
       this.applyGeneratedSessionName(session, name ?? fallbackSessionName(titleInput), controller);
-    }).catch((error: unknown) => {
+    }).catch(() => {
       if (!controller.signal.aborted) {
         this.logger.info(
-          { sessionId: session.sessionId, outcome: "fallback", error: error instanceof Error ? error.message : String(error) },
+          { sessionId: session.sessionId, outcome: "fallback", failureKind: "exception" },
           "session title generation failed",
         );
       }
