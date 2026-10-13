@@ -61,19 +61,28 @@ go when this prototype does.
 systemctl --user status forgerie-voice-content.service
 systemctl --user disable --now forgerie-voice-content.service
 rm ~/.config/systemd/user/forgerie-voice-content.service
+rm -rf ~/.local/state/forgerie-voice-content
 
 # the TLS front door, held by tailscaled
 sudo tailscale serve --https=8790 off
 ```
 
-The unit runs `nix run path:...`, so it picks up source changes on restart. It
-holds about 2.8 GB of RSS and roughly 850 MB of VRAM for the Kokoro context.
+The unit builds the flake to `~/.local/state/forgerie-voice-content/result` and
+runs that. The build result is a garbage-collection root, which matters: the
+first version of the unit used `nix run`, which leaves no root, and the nightly
+`nix-gc` on 2026-08-30 deleted the served source out from under the running
+process. The process stayed up and answered 404 to everything. Restart the unit
+to pick up source changes.
+
+The unit passes `--unsafe-allow-remote`, because the tailnet front door sends
+`Host: zao.hummingbird-lake.ts.net:8790` and the server otherwise accepts only
+loopback Host and Origin values. The listener itself stays on loopback, so
+`tailscale serve` remains the only way in. There is still no authentication:
+anyone on the tailnet can reach `/api/tts` and `/api/stt` at that URL.
+
+It holds about 2.8 GB of RSS and roughly 850 MB of VRAM for the Kokoro context.
 This host has 6 GB of VRAM and `comics.service` already holds 2.5 GB of it, so
 stop one of them before a third CUDA job.
-
-There is no authentication. Anyone on the tailnet can reach `/api/tts` and
-`/api/stt` at that URL. That is the same posture as the other prototypes here,
-and it is only acceptable because the tailnet is the boundary.
 
 Headphones help. The barge-in gate raises its threshold while the voice speaks,
 but a loud speaker next to the microphone still causes false interruptions.
