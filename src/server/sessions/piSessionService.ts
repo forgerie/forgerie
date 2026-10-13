@@ -1,6 +1,6 @@
 import { createWorkflowScheduleTool } from "../triggers/triggerTool.js";
 import type { TriggerService } from "../triggers/triggerService.js";
-import type { TriggerSessionAction } from "../triggers/triggerTypes.js";
+import type { TriggerAction } from "../../shared/triggers.js";
 import type { SessionSearchService } from "./sessionSearchService.js";
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
@@ -1722,7 +1722,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   /** Internal receipt-keyed session creation. The public start options do not contain sessionId. */
-  async ensureTriggerSession(ref: PiSessionRef, action: TriggerSessionAction): Promise<void> {
+  async ensureTriggerSession(ref: PiSessionRef, action: TriggerAction): Promise<void> {
     if (await this.triggerSessionExists(ref)) return;
     const initialModel = action.model === undefined ? undefined : await this.resolveNewSessionModel(action.model);
     await this.startSession(ref.cwd, { sessionId: ref.id,

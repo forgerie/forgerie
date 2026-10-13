@@ -14,7 +14,12 @@ export const TriggerActionSchema = Type.Object({
   inputs: WorkflowInputsSchema,
   /** Strict `provider/model-id`, the same form as `POST /sessions` `modelSpec`. Absent: the new-session default. */
   model: Type.Optional(Type.String({ minLength: 3, maxLength: 128, pattern: "^[^/\\s]+/\\S+$" })),
-  thinkingLevel: Type.Optional(Type.Union(KNOWN_THINKING_LEVELS.map((level) => Type.Literal(level)))),
+  thinkingLevel: Type.Optional(Type.Union([
+    Type.Literal(KNOWN_THINKING_LEVELS[0]), Type.Literal(KNOWN_THINKING_LEVELS[1]),
+    Type.Literal(KNOWN_THINKING_LEVELS[2]), Type.Literal(KNOWN_THINKING_LEVELS[3]),
+    Type.Literal(KNOWN_THINKING_LEVELS[4]), Type.Literal(KNOWN_THINKING_LEVELS[5]),
+    Type.Literal(KNOWN_THINKING_LEVELS[6]),
+  ])),
 }, { additionalProperties: false });
 export type TriggerAction = Static<typeof TriggerActionSchema>;
 
