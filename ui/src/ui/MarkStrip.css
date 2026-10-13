@@ -13,5 +13,6 @@
 .mark-strip-more { flex: none; margin-inline-end: var(--space-1); color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
 .mark-strip-more[data-tone="bad"] { color: var(--destructive); }
 .mark-strip-more[data-tone="warn"] { color: var(--ink-warn); }
-@keyframes mark-strip-pulse { 50% { opacity: 0.35; } }
+/* The ring is 7px wide: below 70% it all but vanishes, so the pulse stays above that floor. */
+@keyframes mark-strip-pulse { 50% { opacity: 0.7; } }
 @media (prefers-reduced-motion: reduce) { .mark-strip-mark[data-tone="live"] { animation: none; } }
