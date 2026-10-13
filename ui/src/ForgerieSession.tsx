@@ -430,8 +430,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           onOpen={() => { pull.clearNotice(); setPullSelected(firstToShow(pullItems)); setPullOpen(true); }} />}
         {childrenAvailable && !readOnly && <WorkflowOpener waiting={waitingStops(running)} running={running !== undefined}
           onOpen={() => { void workflows.readSaved(); setWorkflowSheet({ type: "picker" }); }} />}
-        {/* Like the child agents, the log's button appears once there is something in it. */}
-        {childrenAvailable && ((log.decisions?.length ?? 0) > 0 || flagged > 0 || decisionsOpen) && <DecisionsOpener flagged={flagged}
+        {/* Like the child agents, the log's button appears once there is something in it. A failed read shows it too:
+            the sheet is where the reader sees why and retries. */}
+        {childrenAvailable && ((log.decisions?.length ?? 0) > 0 || flagged > 0 || log.readError !== undefined || decisionsOpen) && <DecisionsOpener flagged={flagged}
           onOpen={() => { decisions.refresh(); setDecisionsOpen(true); }} />}
         {childrenAvailable && (children.children.length > 0 || childrenOpen) && <ChildAgentsOpener children={children.children}
           onOpen={() => { childAgents.refresh(); setChildrenOpen(true); }} />}

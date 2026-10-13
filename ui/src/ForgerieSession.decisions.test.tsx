@@ -37,8 +37,8 @@ const messages: PiMessage[] = [
 ];
 
 /** A Durable session whose agents made decisions. The routes answer from `state`, which a test changes as the server would. */
-async function sessionWithDecisions(status: SessionStatus) {
-  const state = { decisions: [ANSWER, GUESS, OVERTURNED] as Decision[] };
+async function sessionWithDecisions(status: SessionStatus, options: { decisions?: Decision[]; readFails?: boolean; opener?: string } = {}) {
+  const state = { decisions: options.decisions ?? [ANSWER, GUESS, OVERTURNED], readFails: options.readFails ?? false };
   const posts: { path: string; body: unknown }[] = [];
   const reads = { decisions: 0 };
   server = new WebSocketServer({ port: 0 });
@@ -56,7 +56,10 @@ async function sessionWithDecisions(status: SessionStatus) {
       state.decisions = state.decisions.map((decision) => decision.id === done.id ? done : decision);
       return Response.json(done);
     }
-    if (path.includes("/decisions?")) { reads.decisions += 1; return Response.json(state.decisions); }
+    if (path.includes("/decisions?")) {
+      reads.decisions += 1;
+      return state.readFails ? Response.json({ error: "Durable storage is unavailable." }, { status: 500 }) : Response.json(state.decisions);
+    }
     if (path.includes("/children?")) return Response.json([]);
     if (path.includes("/workflow-proposals?") || path.includes("/workflow-runs?")) return Response.json([]);
     if (path.includes("/messages?")) return Response.json({ messages, start: 0, total: messages.length });
@@ -66,7 +69,7 @@ async function sessionWithDecisions(status: SessionStatus) {
     return Response.json({ error: "Not found" }, { status: 404 });
   });
   await act(async () => root.render(<ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={() => {}} />));
-  await until(() => button("Decisions, 1 flagged guess to look at") !== undefined);
+  await until(() => button(options.opener ?? "Decisions, 1 flagged guess to look at") !== undefined);
   const emit = (eventType: string) => { for (const socket of server!.clients) socket.send(JSON.stringify({ type: "pi.event", eventType })); };
   return { state, posts, reads, emit };
 }
@@ -98,6 +101,19 @@ describe("a session's decision log", () => {
     expect(document.querySelector("dialog[open] .sheet-dialog-foot")).toBeNull();
     expect(button("Decisions")).toBeDefined();
     expect(button("Decisions, 1 flagged guess to look at")).toBeUndefined();
+  });
+
+  it("offers the log after a failed first read, with no flagged guess and no run, and Retry recovers it", async () => {
+    const api = await sessionWithDecisions(idle, { decisions: [ANSWER], readFails: true, opener: "Decisions" });
+    expect(document.querySelector(".stage-strip")).toBeNull();
+    await act(async () => { button("Decisions")?.click(); });
+    await until(() => document.querySelector("dialog[open] .alert-card")?.textContent?.includes("Durable storage is unavailable.") === true);
+    expect(document.querySelector("dialog[open] .decision-record")).toBeNull();
+    api.state.readFails = false;
+    await act(async () => { [...document.querySelectorAll<HTMLButtonElement>("dialog[open] button")].find((node) => node.textContent === "Retry")?.click(); });
+    await until(() => document.querySelector("dialog[open] .decision-record-question")?.textContent === ANSWER.question);
+    expect(document.querySelector("dialog[open] .alert-card")).toBeNull();
+    expect(button("Decisions")).toBeDefined();
   });
 
   it("reads the log again when the server says the workflow records changed", async () => {
