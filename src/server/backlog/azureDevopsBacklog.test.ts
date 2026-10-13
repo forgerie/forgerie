@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -294,4 +294,28 @@ it("racing manual launches into two destinations create only one Azure session",
   const responses = await Promise.all([f.repo, path].map((cwd, index) => f.app.inject({ method: "POST", url: `${f.itemPath}/launch`, payload: { requestId: `race-${String(index)}`, start: { cwd } } })));
   expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
   expect(f.started).toHaveLength(1); expect(await f.claims.list()).toHaveLength(1);
+});
+
+
+it.each(["symlink-outside", "traversal-outside", "symlink-registered"] as const)("checks the resolved Azure launch destination for %s", async (alias) => {
+  const f = await fixture(); const outside = join(f.root, "outside"); await mkdir(outside);
+  let cwd: string;
+  if (alias === "symlink-outside") {
+    cwd = join(f.repo, "outside-link"); await symlink(outside, cwd);
+  } else if (alias === "traversal-outside") {
+    // Keep the traversal in the HTTP body; path.join would normalize it before the server sees it.
+    cwd = `${f.repo}/../outside`;
+  } else {
+    cwd = join(f.root, "registered-link"); await symlink(f.repo, cwd);
+  }
+  const response = await f.app.inject({ method: "POST", url: `${f.itemPath}/launch`, payload: { requestId: "path-alias", start: { cwd } } });
+  if (alias === "symlink-registered") {
+    expect(response.statusCode).toBe(200);
+    expect(response.json<BacklogLaunchResponse>().claim).toMatchObject({ projectId: f.project.id, repo: f.repo, cwd: f.repo });
+    expect(f.started).toHaveLength(1); expect(await f.claims.list()).toHaveLength(1);
+  } else {
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ kind: "invalid-request", error: "Session destination must belong to a registered project" });
+    expect(f.started).toEqual([]); expect(await f.claims.list()).toEqual([]);
+  }
 });
