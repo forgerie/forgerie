@@ -54,7 +54,7 @@ export function TriggerList({ load, clock, projectLabel, starting, failure, onDi
     if (next.has(key)) next.delete(key); else next.add(key);
     return next;
   });
-  return <SettingsFrame title="Triggers" onRoom={setRoom}
+  return <SettingsFrame title="Triggers" onRoom={setRoom} density={plan.density}
     actions={<>
       {plan.primary === "header" ? <HeaderButton label="New trigger" icon={<PlusIcon aria-hidden size={16} />} onPress={onNew} /> : null}
       <MenuButton label="Trigger commands" commands={commands} />
@@ -70,7 +70,7 @@ export function TriggerList({ load, clock, projectLabel, starting, failure, onDi
         clear={{ label: "Clear the filter", onClear: () => setQuery("") }} />
     </ListTools> : null}
     {filtering && query.trim() && shown.length === 0 ? <p>No triggers match “{query.trim()}”.</p> : null}
-    {groups.map((group) => <RecordGroup key={group.key} label={group.label} count={group.triggers.length} emphasis={group.key === "attention"}
+    {groups.map((group) => <RecordGroup key={group.key} label={group.label} count={group.triggers.length} emphasis={group.key === "attention"} compact={plan.density === "compact"}
       open={!closed.has(group.key)} onToggle={() => toggle(group.key)}>
       {group.triggers.map((trigger) => <TriggerRow key={trigger.id} trigger={trigger} clock={clock} project={projectLabel(trigger.action.cwd)}
         plan={plan.row} starting={starting.has(trigger.id)} actions={actions} />)}

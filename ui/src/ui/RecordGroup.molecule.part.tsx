@@ -22,3 +22,14 @@ export function Emphasis() {
 export function Closed() {
   return <RecordGroup label="Paused" count={4} open={false} onToggle={() => undefined}><li>Hidden</li></RecordGroup>;
 }
+export function Compact() {
+  return <>
+    <RecordGroup label="Needs a look" count={1} open emphasis compact onToggle={() => undefined}>
+      <RecordRow label="Nightly refinement" title="Nightly refinement" time="in 9 h" mark="bad" meta={[{ key: "when", text: "Every night at 3:00 AM" }]}
+        outcome="Failed Oct 12: Workflow was not found" onOpen={() => undefined} />
+    </RecordGroup>
+    <RecordGroup label="Active" count={1} open compact onToggle={() => undefined}>
+      <RecordRow label="Weekday triage" title="Weekday triage" time="in 15 h" meta={[{ key: "when", text: "Weekdays at 9:00 AM" }]} outcome="Started Oct 12, 9:00 AM" onOpen={() => undefined} />
+    </RecordGroup>
+  </>;
+}

@@ -97,6 +97,10 @@ describe("the size plan", () => {
     expect(triggersPlan(672, 800, SHORT_BODY).errorLines).toBe(4);
     expect(triggersPlan(672, 800, SHORT_BODY - 1).errorLines).toBe(2);
   });
+  it("spends less on spacing below a 22rem body", () => {
+    expect(triggersPlan(672, 800, SHORT_BODY).density).toBe("roomy");
+    expect(triggersPlan(672, 800, SHORT_BODY - 1).density).toBe("compact");
+  });
   it("gives the ladder in the brief", () => {
     const ladder = [[672, 1440, 852], [672, 932, 505], [667, 704, 735], [672, 711, 326], [443, 475, 590], [320, 352, 735], [248, 280, 552]] as const;
     expect(ladder.map(([column, header, body]) => { const plan = triggersPlan(column, header, body); return `${plan.row.tier} ${plan.primary} ${String(plan.errorLines)}`; }))

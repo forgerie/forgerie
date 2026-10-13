@@ -9,6 +9,9 @@
   margin: 0 0 calc(var(--space-2) - var(--hairline) / 2) var(--space-1); background: var(--line); }
 /* The first group under the page top or a list's tools needs no room above its label. */
 .record-group:first-of-type .record-group-toggle { min-block-size: 2rem; }
+/* Short: the room between groups shrinks to the heading's own height. */
+.record-group[data-compact] + .record-group[data-compact] { margin-block-start: 0; }
+.record-group[data-compact] .record-group-toggle { min-block-size: 2rem; }
 .record-group-toggle:hover { color: var(--foreground); }
 .record-group-chevron { flex: none; inline-size: 0.75rem; block-size: 1rem; transition: transform 150ms; }
 .record-group-toggle[aria-expanded="false"] .record-group-chevron { transform: rotate(-90deg); }

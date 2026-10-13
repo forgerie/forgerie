@@ -132,6 +132,8 @@ export interface TriggersPlan {
   row: { tier: RowTier; marks: number; stateAction: "inline" | "menu" };
   primary: "header" | "menu";
   errorLines: 2 | 4;
+  /** A short scroll region spends less on spacing: a smaller top margin and less room between groups. */
+  density: "roomy" | "compact";
 }
 export function triggersPlan(column: number, header: number, body: number): TriggersPlan {
   const tier: RowTier = column >= ROW_WIDE ? "wide" : column >= ROW_NARROW ? "medium" : "narrow";
@@ -139,6 +141,7 @@ export function triggersPlan(column: number, header: number, body: number): Trig
     row: { tier, marks: tier === "narrow" ? 5 : 7, stateAction: tier === "wide" ? "inline" : "menu" },
     primary: header >= HEADER_TIGHT ? "header" : "menu",
     errorLines: body < SHORT_BODY ? 2 : 4,
+    density: body < SHORT_BODY ? "compact" : "roomy",
   };
 }
 /** Until the containers are measured, the plan assumes the roomy case. */

@@ -81,7 +81,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `Excerpt` (molecule): long content cut to its first few lines (a number the host may set) with a fade and a Show more toggle that appears only when it is cut; opened, it scrolls inside a share of the pane.
 - `MarkStrip` (atom): past outcomes in a line, oldest first: a dot for one that went as planned, a square for a failure, a ring for one that never happened, a pulsing ring for one under way; past a limit the oldest fold into a count in the worst tone they hide.
 - `RecordRow` (molecule): one record as one press target: a trouble mark, a two-line title, a time slot, meta parts that truncate from the end (or wrap to a second line when narrow), a foot with an outcome strip and words, and an inline action and ⋯ above the press target.
-- `RecordGroup` (molecule): a counted group of records under a heading with a rule to the edge, opened and closed from the heading, its name in full ink when it wants the reader.
+- `RecordGroup` (molecule): a counted group of records under a heading with a rule to the edge, opened and closed from the heading, its name in full ink when it wants the reader. `compact` takes less room above the heading in a short list.
 - `PropertyList` (molecule): a document's property rows between two rules, under its title.
 - `EmptyState` (molecule): an empty list as an invitation: an icon, a title, what goes here, and the action that adds the first one.
 - `LoadingLines` (atom): a first read in progress: pulsing bars of different lengths and one line that says what is being read.

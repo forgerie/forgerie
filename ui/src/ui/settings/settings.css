@@ -6,6 +6,8 @@
 
 .settings-scroll { flex: 1; min-block-size: 0; overflow-y: auto; scrollbar-gutter: stable both-edges;
   padding: var(--thread-top-space) var(--gutter) calc(4 * var(--space-8)); }
+/* A short page keeps its rows: the space above the column shrinks first. */
+.settings-shell[data-density="compact"] .settings-scroll { padding-block-start: var(--space-2); }
 .settings-column { container: settings / inline-size; max-inline-size: var(--thread-max-width); margin-inline: auto; }
 .settings-hint { margin: var(--space-3) 0; color: var(--muted-foreground); font-size: var(--small-text); }
 .settings-lede { margin: 0 0 var(--space-6); color: var(--muted-foreground); font-size: var(--small-text); line-height: var(--line-height); }

@@ -11,10 +11,12 @@ export interface FrameRoom { header: number; column: number; body: number }
  * header, where scrolling cannot take it away. A page whose layout depends on
  * its room passes `onRoom`, which hears each change of it.
  */
-export function SettingsFrame({ back, title, status, actions, error, recovery, notice, onRoom, children }: {
+export function SettingsFrame({ back, title, status, actions, error, recovery, notice, onRoom, density = "roomy", children }: {
   back?: ReactNode; title: string; status?: string | undefined; actions?: ReactNode;
   error?: string | undefined; recovery?: ReactNode; notice?: ReactNode;
   onRoom?: ((room: FrameRoom) => void) | undefined;
+  /** `compact`: the page's plan found the scroll region short, so the space above the column shrinks. */
+  density?: "roomy" | "compact" | undefined;
   children: ReactNode;
 }) {
   const leading = useContext(SessionFrameLeading);
@@ -39,7 +41,7 @@ export function SettingsFrame({ back, title, status, actions, error, recovery, n
     for (const part of parts) if (part) observer.observe(part);
     return () => observer.disconnect();
   }, [measuring]);
-  return <main className="session-shell settings-shell">
+  return <main className="session-shell settings-shell" data-density={density === "compact" ? density : undefined}>
     <header className="session-header" ref={header}>
       {leading}
       {back}

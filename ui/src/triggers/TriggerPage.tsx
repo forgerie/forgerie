@@ -134,7 +134,7 @@ export function TriggerPage({ load, draft, dirty, problems, save, conflict, fail
     <p>This trigger changed while you were editing. Forgerie cannot save over that change. Reload shows the new version and discards your changes.</p>
     <button type="button" onClick={actions.onReload}>Reload</button>
   </> : undefined;
-  return <SettingsFrame back={<BackButton label="Triggers" onPress={actions.onBack} />} title={title} status={status} onRoom={setRoom}
+  return <SettingsFrame back={<BackButton label="Triggers" onPress={actions.onBack} />} title={title} status={status} onRoom={setRoom} density={plan.density}
     actions={<>
       {primary && plan.primary === "header" ? <HeaderButton label={primary.label} icon={primary.icon} disabled={saving} onPress={primary.run} /> : null}
       {commands.length ? <MenuButton label="Trigger commands" commands={commands} /> : null}
