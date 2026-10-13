@@ -17,7 +17,7 @@ import type { SessionModel } from "../contracts";
 import { RUN_LATE_CHOICES } from "./triggersModel";
 import { thinkingLevelOf } from "./triggerWire";
 import { inputFields, type DraftProblems, type TriggerDraft } from "./triggerDraft";
-import { clockChangeHint, DAY_SHORT, graceWords, runLateHint, WEEK, type Weekday } from "./triggerWords";
+import { clockChangeHint, zoneLabel, DAY_SHORT, graceWords, runLateHint, WEEK, type Weekday } from "./triggerWords";
 
 /** The project's saved workflows, as the server lists them for a folder. */
 export type WorkflowsLoad = { type: "loading" } | { type: "ready"; workflows: readonly TriggerWorkflow[] } | { type: "failed"; message: string };
@@ -93,9 +93,9 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
       </SettingsField>
       <SettingsField label="Time zone" problem={problems.timezone}
         hint={draft.timezone !== hostZone ? `Forgerie's host uses ${hostZone}.` : undefined}>
-        <OptionPicker label="Time zone" value={draft.timezone} placeholder="Choose a time zone" search="Find a time zone" disabled={disabled}
+        <OptionPicker label="Time zone" value={zoneLabel(draft.timezone)} placeholder="Choose a time zone" search="Find a time zone" disabled={disabled}
           options={(timezones.includes(draft.timezone) ? timezones : [draft.timezone, ...timezones]).map((zone) =>
-            ({ id: zone, name: zone, current: zone === draft.timezone, ...zone === hostZone ? { variant: "host" } : {} }))}
+            ({ id: zone, name: zoneLabel(zone), current: zone === draft.timezone, ...zone === hostZone ? { variant: "host" } : {} }))}
           onChoose={(timezone) => set({ timezone, zoneChosen: true })} />
       </SettingsField>
       <SettingsField label="Model" problem={problems.model}>

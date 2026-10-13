@@ -3,7 +3,7 @@ import type { TriggerFire } from "@shared/triggers";
 import type { TriggerSchedule } from "@shared/triggerSchedules";
 import {
   clockChangeHint, graceWords, lastRunWords, missedWords, nextIfResumed, outcomeWords, relativeLong, relativeShort, rowLabel, runLateHint, runRecorded,
-  scheduleOf, scheduleWords, skippedWords, stripMarks, stripWords, whenLong, whenShort, type WordClock,
+  scheduleOf, scheduleWords, skippedWords, storeOffWords, stripMarks, stripWords, whenLong, whenShort, zoneLabel, type WordClock,
 } from "./triggerWords";
 import { digest, docs, HOST_ZONE, NOW, nightly, triage } from "./fixtures/triggers";
 
@@ -30,6 +30,14 @@ describe("schedule words", () => {
     expect(weekly(["mon", "tue", "wed", "thu", "fri", "sat", "sun"], "03:00")).toEqual(daily("03:00"));
     expect(scheduleWords({ kind: "weekly", at: "03:00", timezone: HOST_ZONE, on: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as never[] }, HOST_ZONE, LOCALE))
       .toBe("Every night at 3:00 AM");
+  });
+  it("words the store being off as two sentences", () => {
+    expect(storeOffWords("database is locked.")).toBe("Triggers are off. Database is locked. No trigger runs until sessiond can open its store. Check the sessiond log, then restart sessiond.");
+  });
+  it("labels a zone chip by its city and its name", () => {
+    expect(zoneLabel("America/New_York")).toBe("New York (America/New_York)");
+    expect(zoneLabel("America/Argentina/Buenos_Aires")).toBe("Buenos Aires (America/Argentina/Buenos_Aires)");
+    expect(zoneLabel("UTC")).toBe("UTC");
   });
   it("names a zone that is not the host's", () => {
     expect(scheduleWords(daily("03:00", "America/New_York"), HOST_ZONE, LOCALE)).toBe("Every night at 3:00 AM New York time");

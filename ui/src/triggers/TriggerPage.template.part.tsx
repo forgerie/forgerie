@@ -39,6 +39,6 @@ export function Refused() {
 }
 export function Conflict() { return <Page trigger={nightly} start={{ ...draftOf(nightly), name: "Nightly backlog refinement" }} conflict />; }
 export function Unknown() { return <Page load={{ type: "missing" }} />; }
-export function ReadFailed() { return <Page load={{ type: "failed", message: "Triggers are off: database is locked" }} />; }
+export function ReadFailed() { return <Page load={{ type: "failed", message: "Request failed: HTTP 500" }} />; }
 export function Loading() { return <Page load={{ type: "loading" }} />; }
 export function PauseFailed() { return <Page trigger={nightly} failure="Could not pause “Nightly refinement”: Another change came first." />; }

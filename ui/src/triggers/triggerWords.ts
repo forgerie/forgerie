@@ -43,6 +43,13 @@ export function timeOfDay(at: string, locale?: string): string {
   return format(locale, "UTC", TIME).format(Date.UTC(2026, 0, 5, hour ?? 0, minute ?? 0));
 }
 
+/** "New York (America/New_York)" for the zone chip and its options; "UTC" for UTC. */
+export function zoneLabel(zone: string): string {
+  if (zone === "UTC" || zone === "Etc/UTC") return zone;
+  const city = (zone.split("/").at(-1) ?? zone).replaceAll("_", " ");
+  return city === zone ? zone : `${city} (${zone})`;
+}
+
 /** "New York time" for America/New_York, "UTC" for UTC. */
 export function zoneWords(zone: string): string {
   if (zone === "UTC" || zone === "Etc/UTC") return "UTC";
@@ -252,5 +259,6 @@ export function missedWords(fire: TriggerFire, zone: string, grace: number, cloc
 
 /** The store is unavailable (503): what is wrong, what stops, and what to do. */
 export function storeOffWords(message: string): string {
-  return `Triggers are off: ${message.trim().replace(/\.+$/u, "")}. No trigger runs until sessiond can open its store. Check the sessiond log, then restart sessiond.`;
+  const sentence = message.trim().replace(/\.+$/u, "");
+  return `Triggers are off. ${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}. No trigger runs until sessiond can open its store. Check the sessiond log, then restart sessiond.`;
 }

@@ -145,7 +145,7 @@ describe("the list", () => {
 
   it("says when the store is off and keeps New trigger", async () => {
     await render({ view: "list" }, [], "database is locked");
-    expect(text()).toContain("Triggers are off: database is locked. No trigger runs until sessiond can open its store. Check the sessiond log, then restart sessiond.");
+    expect(text()).toContain("Triggers are off. Database is locked. No trigger runs until sessiond can open its store. Check the sessiond log, then restart sessiond.");
     expect(button("New trigger")).toBeDefined();
   });
 
@@ -269,7 +269,7 @@ describe("the create page", () => {
     await press(/^Workflow:/);
     await press(/^docs-sweep/);
     await press("Create");
-    expect(text()).toContain("Triggers are off: database is locked. No trigger runs until sessiond can open its store.");
+    expect(text()).toContain("Triggers are off. Database is locked. No trigger runs until sessiond can open its store.");
     expect((document.querySelector<HTMLInputElement>('input[aria-label="Trigger name"]'))?.value).toBe("Nightly docs");
     // Drafts outlive the page, so this one goes before the next test opens the create page.
     await press("Trigger commands");
