@@ -8,6 +8,7 @@ import { useTriggerList } from "./useTriggerList";
 import type { TriggerPlace } from "./triggersModel";
 import { audit, digest, docs, HOST_ZONE, manyList, NOW, nightly, notes, triage } from "./fixtures/triggers";
 import { memoryApi, memoryDirectory, type MemoryStore } from "./fixtures/memoryApi";
+import type { TriggersApi } from "./triggersApi";
 
 let root: Root;
 let store: MemoryStore;
@@ -15,10 +16,16 @@ let place: TriggerPlace = { view: "list" };
 const moves: (TriggerPlace | undefined)[] = [];
 const opened: { id: string; cwd: string }[] = [];
 let ids = 0;
+/** The machine socket's `triggers.changed`, as the app hands it to the list. */
+const changeListeners = new Set<() => void>();
+const changes = (listener: () => void) => { changeListeners.add(listener); return () => { changeListeners.delete(listener); }; };
+const triggersChanged = () => act(async () => { for (const listener of changeListeners) listener(); });
+/** The client the screen reads through: the store's, unless a test holds a read back. */
+let api: TriggersApi;
 
 function Harness() {
-  const list = useTriggerList(store.api);
-  return <TriggersScreen list={list} api={store.api} directory={memoryDirectory} now={() => NOW} zone={HOST_ZONE} locale="en-US"
+  const list = useTriggerList(api, changes);
+  return <TriggersScreen list={list} api={api} directory={memoryDirectory} now={() => NOW} zone={HOST_ZONE} locale="en-US"
     requestId={() => `req${String(++ids)}`}
     args={{ place, onPlace: (next) => { moves.push(next); if (next) place = next; }, onOpenSession: (session) => opened.push(session), sessionName: () => "Lockfile review" }} />;
 }
@@ -26,6 +33,7 @@ const flush = () => act(async () => { for (let index = 0; index < 4; index++) aw
 const render = async (at: TriggerPlace, triggers: Trigger[] = [nightly, triage, notes, docs, audit, digest], off?: string) => {
   place = at;
   store = memoryApi(triggers, { now: NOW, off });
+  api = store.api;
   await act(async () => root.render(<Harness />));
   await flush();
 };
@@ -51,7 +59,7 @@ const type = async (label: string, value: string) => {
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   root = createRoot(document.body.appendChild(document.createElement("div")));
-  moves.length = 0; opened.length = 0; ids = 0;
+  moves.length = 0; opened.length = 0; ids = 0; changeListeners.clear();
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
@@ -102,6 +110,39 @@ describe("the list", () => {
     expect(text()).toContain("Started Oct 12, 6:00 PM by Run now");
   });
 
+  it("says it is reading until the first list arrives, and New trigger works meanwhile", async () => {
+    place = { view: "list" };
+    store = memoryApi([nightly], { now: NOW });
+    api = { ...store.api, list: () => new Promise(() => undefined) };
+    await act(async () => root.render(<Harness />));
+    await flush();
+    expect(text()).toContain("Reading triggers…");
+    await press("New trigger");
+    expect(moves).toEqual([{ view: "create" }]);
+  });
+
+  it("says when the list cannot be read, and Retry reads it again", async () => {
+    place = { view: "list" };
+    store = memoryApi([triage], { now: NOW });
+    api = store.api;
+    store.failNext("list", new Error("Request failed: HTTP 500"));
+    await act(async () => root.render(<Harness />));
+    await flush();
+    expect(text()).toContain("Could not read triggers: Request failed: HTTP 500");
+    await press("Retry");
+    expect(text()).not.toContain("Could not read triggers");
+    expect(text()).toContain("Weekday triage");
+  });
+
+  it("reads the list again on triggers.changed", async () => {
+    await render({ view: "list" }, [triage]);
+    store.set([triage, { ...notes, name: "Weekly notes" }]);
+    await triggersChanged();
+    await flush();
+    expect(text()).toContain("Weekly notes");
+    expect(store.calls.filter((call) => call[0] === "list")).toHaveLength(2);
+  });
+
   it("says when the store is off and keeps New trigger", async () => {
     await render({ view: "list" }, [], "database is locked");
     expect(text()).toContain("Triggers are off: database is locked. No trigger runs until sessiond can open its store. Check the sessiond log, then restart sessiond.");
@@ -145,6 +186,48 @@ describe("a trigger's page", () => {
     expect(text()).toContain("This trigger changed while you were editing");
     await press("Reload");
     expect((document.querySelector<HTMLInputElement>('input[aria-label="Trigger name"]'))?.value).toBe("Theirs");
+  });
+
+  it("says when a paused trigger would run next, and resumes it", async () => {
+    await render({ view: "trigger", id: "docs-sweep" });
+    expect(text()).toContain("Paused since Oct 10. If you resume now, the next run is Sun, Oct 18 at 4:00 AM New York time.");
+    expect(text()).toContain("Last run Oct 4 at 4:00 AM New York time was missed.");
+    await press("Resume");
+    expect(store.calls).toContainEqual(["resume", "docs-sweep"]);
+    expect(text()).toContain("Next run Tue, Oct 13 at 5:00 AM New York time, in 9 hours.");
+  });
+
+  it("shows a run the server has started as Starting…, across a reload", async () => {
+    await render({ view: "trigger", id: "inbox-digest" });
+    expect(text()).toContain("Last run Oct 12 at 5:58 PM is starting.");
+    expect([...document.querySelectorAll(".action-row-status")].map((node) => node.textContent)).toEqual(["Starting…", "Started"]);
+  });
+
+  it("warns at once when another change reaches the fields being edited, and the save is refused", async () => {
+    await render({ view: "trigger", id: "weekday-triage" });
+    await type("Trigger name", "Mine");
+    store.set([{ ...triage, schedule: { ...triage.schedule, at: "10:00" }, revision: 13 }]);
+    await triggersChanged();
+    await flush();
+    expect(text()).toContain("This trigger changed while you were editing");
+    await press("Save");
+    expect(store.calls.filter((call) => call[0] === "update")).toEqual([["update", "weekday-triage", expect.objectContaining({ baseRevision: 12 })]]);
+    expect(store.triggers()[0]?.name).toBe("Weekday triage");
+    // Drafts outlive the page, so this one goes before the next test reads the same trigger.
+    await press("Reload");
+    expect(text()).not.toContain("Unsaved changes");
+  });
+
+  it("keeps the draft and saves when only a run or a pause raised the revision", async () => {
+    await render({ view: "trigger", id: "weekday-triage" });
+    await type("Trigger name", "Mine");
+    store.set([{ ...triage, state: { kind: "paused", pausedAt: NOW }, revision: 13 }]);
+    await triggersChanged();
+    await flush();
+    expect(text()).not.toContain("This trigger changed while you were editing");
+    await press("Save");
+    expect(store.calls).toContainEqual(["update", "weekday-triage", { baseRevision: 13, name: "Mine" }]);
+    expect(text()).toContain("Saved");
   });
 
   it("says when no trigger has the ID", async () => {

@@ -27,10 +27,11 @@ const newRequestId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((
 const CREATE = "create";
 
 /**
- * A draft and the saved settings it started from. Drafts outlive the page, so Back, a fold, or a visit elsewhere
- * keeps them. `refused` is set when the server refused a save because another change came first.
+ * A draft, the saved settings it started from, and the revision it read them at. Drafts outlive the page, so Back,
+ * a fold, or a visit elsewhere keeps them. `refused` is set when the server refused a save because another change
+ * came first.
  */
-interface Draft { draft: TriggerDraft; start: TriggerDraft; refused: boolean }
+interface Draft { draft: TriggerDraft; start: TriggerDraft; revision: number; refused: boolean }
 const drafts = new Map<string, Draft>();
 /** Run now requests this browser sent that their trigger's history does not show yet. */
 const pendingRuns = new Map<string, PendingRun>();
@@ -117,11 +118,15 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
   // Until the reader picks a zone, a new trigger follows the host's zone once the list says what it is.
   const draft = !trigger && !raw.zoneChosen && host && raw.timezone !== host ? { ...raw, timezone: host } : raw;
   const dirty = trigger ? isDirty(draft, start) : isDirty(draft, emptyDraft(draft.timezone));
-  // A change elsewhere to what this form edits is a conflict. A pause, a mark as seen, or a recorded run is not.
-  const conflict = Boolean(trigger && stored && (stored.refused || isDirty(stored.start, start)));
+  // A change elsewhere to what this form edits is a conflict. A pause, a mark as seen, or a recorded run also raises
+  // the revision, but it leaves the form's fields alone, so the draft moves onto the newer revision without a word.
+  // A refused save stays a conflict until the newer trigger has been read.
+  const conflict = Boolean(trigger && stored && (isDirty(stored.start, start) || (stored.refused && trigger.revision <= stored.revision)));
   const setDraft = (next: TriggerDraft) => {
     const base = stored?.start ?? start;
-    if (trigger ? isDirty(next, base) : isDirty(next, emptyDraft(next.timezone))) drafts.set(key, { draft: next, start: base, refused: stored?.refused ?? false });
+    if (trigger ? isDirty(next, base) : isDirty(next, emptyDraft(next.timezone))) {
+      drafts.set(key, { draft: next, start: base, revision: stored?.revision ?? trigger?.revision ?? 0, refused: stored?.refused ?? false });
+    }
     else drafts.delete(key);
     touch();
   };
@@ -232,7 +237,9 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
         go({ view: "trigger", id: created.id }, { replace: true });
         return;
       }
-      const updated = await api.update(trigger.id, updateOf(trigger, draft, workflow, trigger.revision));
+      // Against the revision the draft started from while another change to its fields is unseen, so the server says so.
+      const base = conflict && stored ? stored.revision : trigger.revision;
+      const updated = await api.update(trigger.id, updateOf(trigger, draft, workflow, base));
       drafts.delete(trigger.id);
       setDetail({ id: updated.id, load: { type: "ready", trigger: updated } });
       setSave({ key, state: { type: "saved" } });
@@ -240,7 +247,7 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
     } catch (error) {
       if (error instanceof TriggerRefusal && error.status === 409 && trigger) {
         // Someone else changed it first. The draft stays until the reader reloads.
-        drafts.set(key, { draft, start: stored?.start ?? start, refused: true });
+        drafts.set(key, { draft, start: stored?.start ?? start, revision: trigger.revision, refused: true });
         setSave({ key, state: { type: "idle" } });
         readDetail(trigger.id);
         return;

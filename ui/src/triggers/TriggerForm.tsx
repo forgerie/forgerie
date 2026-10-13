@@ -15,6 +15,7 @@ import { WorkflowInputFields } from "../workflows/WorkflowInputFields";
 import { thinkingLevelsFor, type Project, type Workspace } from "../newSession";
 import type { SessionModel } from "../contracts";
 import { RUN_LATE_CHOICES } from "./triggersModel";
+import { thinkingLevelOf } from "./triggerWire";
 import { inputFields, type DraftProblems, type TriggerDraft } from "./triggerDraft";
 import { clockChangeHint, DAY_SHORT, graceWords, runLateHint, WEEK, type Weekday } from "./triggerWords";
 
@@ -57,7 +58,7 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
     model, thinkingLevel: draft.thinkingLevel, disabled, emptyLabel: "Default for new sessions",
     listModels, listThinkingLevels: async () => thinkingLevelsFor(model),
     onModel: async (provider, id) => set({ model: `${provider}/${id}` }),
-    onThinkingLevel: async (level) => set({ thinkingLevel: level }),
+    onThinkingLevel: async (level) => set({ thinkingLevel: thinkingLevelOf(level) }),
   };
   const workflowStatus = workflows.type === "loading" ? { tone: "status" as const, text: "Reading the project's workflows…" }
     : workflows.type === "failed" ? { tone: "alert" as const, text: `Could not read the project's workflows: ${workflows.message}` }
@@ -70,7 +71,7 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
           listProjects: projects.list, listWorkspaces: projects.workspaces,
           onChoose: (cwd) => { if (cwd !== draft.cwd) set({ cwd, workflow: "", inputs: {} }); } }} />
       </SettingsField>
-      <SettingsField label="Workflow" problem={problems.workflow} hint={workflow ? workflow.hasLandStop
+      <SettingsField label="Workflow" problem={problems.workflow} hint={!draft.cwd ? "Choose a project to see its workflows." : workflow ? workflow.hasLandStop
         ? "Ends at a land stop, so each run waits for you to land it."
         : "This workflow has no land stop. Its runs do not wait for your review." : undefined}>
         <OptionPicker label="Workflow" value={draft.workflow || undefined} placeholder="Choose a workflow" search="Find a workflow"
