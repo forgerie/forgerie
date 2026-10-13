@@ -156,9 +156,9 @@ backlog components. This provider cannot edit Azure items or post comments.
 
 ## Pull requests
 
-Azure Repos pull requests can now be linked and watched read-only. This replaces
-the earlier backlog-only limitation above. A human creates and merges the PR
-in Azure DevOps. Forgerie cannot create, merge, complete, vote, comment, or
+Azure Repos pull requests can be linked and watched read-only. A human creates
+and merges the PR in Azure DevOps. Forgerie cannot create, merge, complete,
+vote, comment, or
 abandon an Azure PR. Its panel has no merge action.
 
 Use the same organization PAT file described above, with **Code: Read**
@@ -170,7 +170,8 @@ The session's `origin` remote selects the provider and repository. HTTPS
 `ssh.dev.azure.com:v3`, and legacy `vs-ssh.visualstudio.com:v3` origins are
 supported. Project and repository names are percent-decoded. Link a PR number
 or Azure PR URL in the existing pull request panel. A URL supplies the number;
-the session's origin still selects the repository.
+the session's origin still selects the repository. For Azure PRs, backlog
+source settings, Area Path, and Mine/Everyone do not change this selection.
 
 Azure sessions have an `azure_pr` agent tool with `read`, `link`, `watch`, and
 `stop` actions. Give a PR number, or omit it to select the one active PR whose
