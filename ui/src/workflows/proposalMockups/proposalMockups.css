@@ -1,11 +1,12 @@
-/* Mockup only. Three layouts for a workflow proposal whose plan renders with
-   the chat's blocks.
+/* Mockup only. Candidate A, "document first", for the workflow proposal sheet.
 
    Layout is a function of the sheet's own size (container "sheet"):
-   - PANES   sheet inline-size >= 50rem: two panes side by side. Below it, one column.
-   - SHORT   sheet block-size  <  30rem: tighter header and footer.
-   Both thresholds are guesses until measured. Every control stays reachable
-   at every size; only its place changes. */
+   - TWO PANES  sheet inline-size >= 50rem: the plan, and a rail beside it with
+                the route, the inputs and the decision. Below it, one column.
+   - SHORT      sheet block-size < 30rem: a one-line header; in one column the
+                inputs line and the buttons share a row, and the note yields.
+   Both thresholds are guesses until measured. Start, Ask for changes and
+   Dismiss are in view at every size; only their place changes. */
 
 /* ---------- The sheet ---------- */
 .pm-sheet {
@@ -23,9 +24,10 @@
   border: var(--hairline) solid var(--line); border-radius: min(var(--radius-thread), var(--room-inline), var(--room-block));
   background: var(--modal-surface); color: var(--foreground); box-shadow: var(--modal-shadow);
 }
-.pm-frame:focus { outline: none; }
 .pm-sheet::backdrop { background: var(--scrim); backdrop-filter: var(--modal-backdrop); }
-.pm-frame { block-size: 100%; display: grid; grid-template: "head" auto "body" minmax(0, 1fr) "foot" auto / minmax(0, 1fr); min-inline-size: 0; }
+.pm-frame { block-size: 100%; }
+.pm-frame:focus { outline: none; }
+.pm-a { block-size: 100%; display: grid; grid-template: "head" auto "body" minmax(0, 1fr) "foot" auto / minmax(0, 1fr); min-inline-size: 0; }
 
 /* ---------- Header: the plan's title outweighs everything in the body ---------- */
 .pm-head { grid-area: head; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-2) var(--space-3) var(--pad);
@@ -46,172 +48,163 @@
 }
 
 /* ---------- The plan: the chat's renderer, set as a page ---------- */
-.pm-measure { max-inline-size: 40rem; }
+.pm-body { grid-area: body; overflow-y: auto; overscroll-behavior: contain; }
+.pm-doc { padding: var(--space-6) var(--pad); }
+.pm-measure { max-inline-size: 40rem; counter-reset: stage; }
 .pm-doc-thread, .pm-doc-message { display: block; }
 .pm-doc-message .markdown-content { font-size: var(--text-size); line-height: 1.625; }
-.pm-doc-message .markdown-content h2 { margin-block: 2rem 0.5rem; font-size: 1.0625rem; font-weight: 600; }
+/* A stage's section: its heading carries the stage's number, as the route does. */
+.pm-sec { counter-increment: stage; scroll-margin-block-start: var(--space-4); }
+.pm-sec .markdown h2 { display: flex; align-items: center; gap: var(--space-2); margin-block: 2.25rem 0.625rem; font-size: 1.125rem; }
+.pm-sec .markdown h2::before { content: counter(stage); flex: none; display: grid; place-items: center; inline-size: 1.5rem; block-size: 1.5rem;
+  border: var(--hairline) solid var(--line-focus); border-radius: 50%; font-family: var(--code-font); font-size: var(--label-text); font-weight: 500;
+  font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+.pm-reading { display: grid; gap: var(--space-4); }
+.pm-skeleton { display: grid; gap: var(--space-3); padding-block: var(--space-2); }
+.pm-skeleton span { block-size: 0.75rem; border-radius: var(--radius-pill); background: var(--muted); }
+.pm-skeleton span:nth-child(1) { inline-size: 92%; } .pm-skeleton span:nth-child(2) { inline-size: 100%; } .pm-skeleton span:nth-child(3) { inline-size: 64%; }
+.pm-skeleton span:nth-child(4) { inline-size: 0; block-size: var(--space-3); } .pm-skeleton span:nth-child(5) { inline-size: 38%; block-size: 1rem; }
 
-/* ---------- Shared pieces ---------- */
+/* ---------- The rail ---------- */
+.pm-rail { display: grid; gap: var(--space-6); align-content: start; padding: var(--space-6) var(--pad); border-block-start: var(--hairline) solid var(--line);
+  background: var(--tint-surface); }
+/* In one column the inputs live in the footer, folded; the rail keeps the route. */
+.pm-rail-inputs { display: none; }
+.pm-rail:not(:has(.pm-route)) { display: none; }
 .pm-section-label { margin: 0 0 var(--space-2); font-size: var(--label-text); font-weight: 600; color: var(--muted-foreground); }
 .pm-note { margin: 0; color: var(--muted-foreground); font-size: var(--small-text); }
+.pm-note-bad { color: var(--ink-bad); }
+
+/* Route */
+.pm-route { list-style: none; margin: 0; padding: 0; display: grid; }
+.pm-route li + li { border-block-start: var(--hairline) solid var(--line); }
+.pm-route-stage { display: flex; align-items: flex-start; gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-2) var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--foreground); font-size: var(--small-text); text-align: start; }
+button.pm-route-stage { cursor: pointer; }
+button.pm-route-stage:hover { background: var(--hover-surface); }
+.pm-route-stage[aria-current] { background: var(--background); box-shadow: 0 0 0 var(--hairline) var(--line); }
+.pm-route-stage[aria-current] .pm-route-num { color: var(--foreground); }
+.pm-route-stage:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 1px; }
+.pm-route-num { flex: none; inline-size: 1.125rem; padding-block-start: 0.0625rem; font-family: var(--code-font); font-size: var(--label-text);
+  color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.pm-route-text { flex: 1; min-inline-size: 0; display: grid; gap: 0.125rem; }
+.pm-route-name { font-weight: 500; line-height: 1.35; }
+.pm-route-who { display: grid; color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.45; }
+.pm-route-who code { font-family: var(--code-font); font-size: var(--label-text); color: var(--foreground); }
+.pm-marks { flex: none; display: inline-flex; align-items: center; gap: var(--space-2); padding-block-start: 0.25rem; }
+.pm-blocks { display: inline-flex; gap: var(--mark-gap); }
 .pm-block { flex: none; display: inline-block; inline-size: var(--mark); block-size: var(--mark); border-radius: calc(var(--mark) / 4);
   box-shadow: inset 0 0 0 var(--hairline) var(--muted-foreground); }
-.pm-marks { flex: none; display: inline-flex; align-items: center; gap: var(--space-2); margin-inline-start: auto; }
-.pm-blocks { display: inline-flex; gap: var(--mark-gap); }
 .pm-you { flex: none; padding: 0.0625rem var(--space-2); border-radius: var(--radius-pill); background: var(--live-wash); color: var(--ink-live, var(--live));
   font-size: var(--meta-text); font-weight: 600; line-height: 1.4; }
-.pm-route-num { flex: none; inline-size: 1.25rem; font-family: var(--code-font); font-size: var(--label-text); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.pm-route-name { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pm-stage-num { flex: none; display: grid; place-items: center; inline-size: 1.5rem; block-size: 1.5rem; border: var(--hairline) solid var(--line-focus);
-  border-radius: 50%; font-family: var(--code-font); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
-.pm-stage-head, .pm-card-head { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; }
-.pm-stage-title { margin: 0; flex: 0 1 auto; min-inline-size: 0; font-size: 1.0625rem; font-weight: 600; line-height: 1.35; }
-.pm-workers { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: var(--space-2) 0 var(--space-3); color: var(--muted-foreground); font-size: var(--small-text); }
-.pm-worker { display: inline-flex; align-items: center; gap: var(--space-2); }
-.pm-worker code { font-family: var(--code-font); font-size: var(--small-text); color: var(--foreground); }
+.pm-marks .pm-you { margin-block-start: -0.1875rem; }
 
 /* Inputs */
 .pm-fields { display: grid; gap: var(--space-4); }
-.pm-field { display: grid; gap: var(--space-1); min-inline-size: 0; }
+.pm-field { display: grid; gap: var(--space-1); min-inline-size: 0; justify-items: start; }
+.pm-field > .pm-textarea { justify-self: stretch; }
+.pm-field-head { display: flex; align-items: center; gap: var(--space-2); }
 .pm-field-label { font-size: var(--label-text); font-weight: 600; color: var(--muted-foreground); }
 .pm-field-hint { font-size: var(--label-text); color: var(--muted-foreground); }
+.pm-edited { padding: 0 var(--space-2); border-radius: var(--radius-pill); background: var(--warn-wash); color: var(--ink-warn, var(--tone-warn));
+  font-size: var(--meta-text); font-weight: 600; line-height: 1.5; }
+.pm-reset { position: relative; margin-inline-start: var(--space-2); padding: 0; border: 0; background: none; color: var(--foreground); font: inherit;
+  text-decoration: underline; text-decoration-color: var(--line-focus); text-underline-offset: 0.2em; cursor: pointer; }
+.pm-reset::after { content: ""; position: absolute; inset: -0.875rem -0.5rem; }
 .pm-textarea { inline-size: 100%; resize: vertical; padding: var(--space-2) var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
   background: var(--background); color: var(--foreground); font: inherit; font-size: var(--small-text); line-height: 1.5; }
 .pm-textarea:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 1px; }
-.pm-segments { display: inline-flex; inline-size: fit-content; padding: 0.1875rem; gap: 0.1875rem; border-radius: calc(var(--radius-control) + 0.1875rem); background: var(--muted); }
+.pm-textarea:disabled { background: transparent; color: var(--muted-foreground); resize: none; }
+.pm-segments { display: inline-flex; padding: 0.1875rem; gap: 0.1875rem; border-radius: calc(var(--radius-control) + 0.1875rem); background: var(--muted); }
 .pm-segment { min-block-size: 2.25rem; min-inline-size: 4.5rem; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent;
   color: var(--muted-foreground); }
 .pm-segment code { font-family: var(--code-font); font-size: var(--small-text); }
 .pm-segment[aria-checked="true"] { background: var(--background); color: var(--foreground); box-shadow: 0 0 0 var(--hairline) var(--line-focus); }
-.pm-stepper { display: inline-flex; align-items: center; inline-size: fit-content; border: var(--hairline) solid var(--line); border-radius: var(--radius-control); background: var(--background); }
+.pm-segment:disabled { cursor: default; }
+.pm-stepper { display: inline-flex; align-items: center; border: var(--hairline) solid var(--line); border-radius: var(--radius-control); background: var(--background); }
 .pm-stepper button { display: grid; place-items: center; inline-size: 2.5rem; block-size: 2.5rem; border: 0; background: transparent; color: var(--muted-foreground); border-radius: var(--radius-control); }
 .pm-stepper button:disabled { opacity: 0.4; }
 .pm-stepper button svg { inline-size: 1rem; block-size: 1rem; }
 .pm-stepper output { min-inline-size: 2rem; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+.pm-field[data-edited] .pm-segment[aria-checked="true"], .pm-field[data-edited] .pm-stepper, .pm-field[data-edited] .pm-textarea { border-color: color-mix(in oklab, var(--tone-warn) 55%, transparent); }
+/* Compact: the branch and the rounds share a row under the task while they fit. */
+.pm-fields[data-compact] { display: flex; flex-wrap: wrap; align-items: start; gap: var(--space-3) var(--space-4); }
+.pm-fields[data-compact] [data-field="task"] { flex-basis: 100%; }
+.pm-fields[data-compact] .pm-textarea { resize: none; }
 
-/* Buttons */
-.pm-actions { display: flex; flex-wrap: wrap; flex-direction: row-reverse; justify-content: flex-end; gap: var(--space-2); }
-.pm-button { min-block-size: var(--control-size); padding-inline: var(--space-4); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
-  background: var(--background); color: var(--foreground); font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
-.pm-button:hover { border-color: var(--line-focus); }
-.pm-button[data-tone="primary"] { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
-.pm-foot { grid-area: foot; display: grid; gap: var(--space-2); padding: var(--space-3) var(--pad); border-block-start: var(--hairline) solid var(--line); background: var(--modal-surface); }
-@container sheet (max-height: 30rem) {
-  .pm-foot { padding-block: var(--space-2); }
-}
-/* One column: the note and the buttons share a row while it fits. */
-.pm-foot:not(.pm-c-launch) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-@container sheet (max-width: 40rem) {
-  .pm-foot:not(.pm-c-launch) { grid-template-columns: minmax(0, 1fr); }
-}
-
-/* ================= A: document first ================= */
-.pm-a-body { grid-area: body; overflow-y: auto; overscroll-behavior: contain; }
-.pm-a-doc { padding: var(--space-6) var(--pad) var(--space-6); }
-.pm-a-rail { display: grid; gap: var(--space-6); align-content: start; padding: var(--space-6) var(--pad); border-block-start: var(--hairline) solid var(--line);
-  background: var(--tint-surface); }
-.pm-route { list-style: none; margin: 0; padding: 0; display: grid; }
-.pm-route-stage { display: flex; align-items: center; gap: var(--space-2); min-block-size: 2.25rem; font-size: var(--small-text); border-block-end: var(--hairline) solid var(--line); }
-.pm-route-stage:last-child { border-block-end: 0; }
-@container sheet (min-width: 50rem) {
-  [data-variant="a"] .pm-frame { grid-template: "head head" auto "doc rail" minmax(0, 1fr) "doc foot" auto / minmax(0, 1fr) var(--rail); }
-  .pm-a-body { display: contents; }
-  .pm-a-doc { grid-area: doc; overflow-y: auto; overscroll-behavior: contain; padding-inline: clamp(1.5rem, 5cqi, 4rem); }
-  .pm-a-rail { grid-area: rail; overflow-y: auto; overscroll-behavior: contain; border-block-start: 0; border-inline-start: var(--hairline) solid var(--line); }
-  .pm-foot.pm-a-foot { grid-area: foot; grid-template-columns: minmax(0, 1fr); border-inline-start: var(--hairline) solid var(--line); background: var(--tint-surface); }
-  .pm-a-foot .pm-note { order: 2; font-size: var(--label-text); }
-  .pm-actions[data-layout="rail"] { display: grid; grid-template-columns: 1fr 1fr; }
-  .pm-actions[data-layout="rail"] .pm-button[data-tone="primary"] { grid-column: 1 / -1; }
-  .pm-actions[data-layout="rail"] .pm-button:nth-child(2) { order: 1; }
-  .pm-actions[data-layout="rail"] .pm-button:nth-child(3) { order: 0; }
-  .pm-actions[data-layout="rail"] .pm-button { padding-inline: var(--space-2); }
-}
-
-/* ================= B: route as spine ================= */
-.pm-b-body { grid-area: body; overflow-y: auto; overscroll-behavior: contain; position: relative; }
-.pm-b-spine { position: sticky; top: 0; z-index: 1; background: var(--modal-surface); border-block-end: var(--hairline) solid var(--line); }
-.pm-b-spine ol { list-style: none; margin: 0; display: flex; gap: var(--space-1); padding: var(--space-2) var(--pad); overflow-x: auto; scrollbar-width: none; }
-.pm-spine-item { display: flex; align-items: center; gap: var(--space-2); min-block-size: 2.25rem; padding-inline: var(--space-2) var(--space-3); border: 0;
-  border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); white-space: nowrap; text-align: start; }
-.pm-spine-item:hover { color: var(--foreground); background: var(--hover-surface); }
-.pm-spine-item[aria-current] { color: var(--foreground); background: var(--muted); font-weight: 550; }
-.pm-spine-item .pm-route-num:empty { display: none; }
-.pm-spine-item .pm-route-num { inline-size: auto; }
-.pm-spine-item .pm-marks { margin-inline-start: var(--space-1); }
-.pm-spine-meta { display: none; }
-.pm-b-doc { padding: var(--space-2) var(--pad) var(--space-6); }
-.pm-b-section { padding-block: var(--space-6); scroll-margin-top: 3.5rem; }
-.pm-b-section + .pm-b-section { border-block-start: var(--hairline) solid var(--line); }
-.pm-b-section .pm-stage-head { margin-block-end: var(--space-1); }
-.pm-b-section .pm-workers { margin-block-end: var(--space-4); }
-@container sheet (min-width: 50rem) {
-  .pm-b-body { display: grid; grid-template-columns: 15rem minmax(0, 1fr); align-items: start; }
-  .pm-b-spine { block-size: 100%; border-block-end: 0; border-inline-end: var(--hairline) solid var(--line); background: var(--tint-surface); }
-  .pm-b-spine ol { position: sticky; top: 0; flex-direction: column; gap: 0.125rem; padding: var(--space-4) var(--space-2); overflow: visible; }
-  .pm-spine-item { inline-size: 100%; padding-inline: var(--space-2); white-space: normal; }
-  .pm-spine-item .pm-route-num { inline-size: 1.25rem; }
-  .pm-spine-item .pm-route-num:empty { display: block; }
-  .pm-spine-item .pm-route-name { white-space: normal; }
-  .pm-spine-item[aria-current] { background: var(--muted); }
-  .pm-spine-meta { display: block; margin-inline-start: auto; color: var(--muted-foreground); font-size: var(--label-text); white-space: nowrap; }
-  .pm-spine-meta code { font-family: var(--code-font); font-size: var(--label-text); }
-  .pm-b-doc { padding: 0 clamp(1.5rem, 5cqi, 4rem) var(--space-6); }
-  .pm-b-section { scroll-margin-top: 0; }
-}
-
-/* ================= C: card deck ================= */
-.pm-c-board { grid-area: body; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4) var(--pad) var(--space-6); background: var(--tint-surface);
-  display: grid; gap: var(--space-3); align-content: start; }
-.pm-card { min-inline-size: 0; padding: var(--space-4) clamp(0.875rem, 2cqi, 1.25rem); border: var(--hairline) solid var(--line); border-radius: var(--radius-surface);
-  background: var(--modal-surface); }
-.pm-card .pm-card-head { margin-block-end: var(--space-1); }
-.pm-card .pm-marks { margin-inline-start: auto; }
-.pm-c-launch { gap: var(--space-3); }
-.pm-c-inputs-inline { display: none; }
-.pm-c-inputs-folded { display: grid; gap: var(--space-3); }
-.pm-c-decide { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2) var(--space-4); }
-.pm-input-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3); inline-size: 100%;
+/* Folded inputs, in the footer in one column */
+.pm-input-summary { display: flex; align-items: center; gap: var(--space-3); inline-size: 100%;
   min-block-size: var(--control-size); padding: 0 var(--space-2) 0 var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
   background: var(--background); color: var(--foreground); font-size: var(--small-text); text-align: start; }
-.pm-input-summary-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-input-summary > * { flex: none; }
+.pm-input-summary-text { flex: 1 1 0; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pm-input-summary-meta { color: var(--muted-foreground); white-space: nowrap; }
 .pm-input-summary-meta code { font-family: var(--code-font); font-size: var(--small-text); }
 .pm-chevron { inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); transition: rotate 150ms; }
 .pm-input-summary[aria-expanded="true"] .pm-chevron { rotate: 180deg; }
-.pm-fields[data-layout="bar"] { gap: var(--space-3); }
-.pm-fields[data-layout="bar"] .pm-textarea { resize: none; }
-/* Open inputs never push the buttons out: they take at most 45% of the sheet and scroll. The branch and the rounds share a row. */
-.pm-c-inputs-folded .pm-fields { grid-template-columns: auto auto minmax(0, 1fr); max-block-size: 45cqh; overflow-y: auto; overscroll-behavior: contain; }
-.pm-c-inputs-folded .pm-field-task { grid-column: 1 / -1; }
-/* A short sheet: the inputs line and the buttons share one row, and the note yields. */
-@container sheet (max-height: 30rem) and (max-width: 49.99rem) {
-  .pm-c-launch:not([data-open]) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-  .pm-c-decide { grid-template-columns: auto; }
-  .pm-c-decide .pm-note { display: none; }
-  .pm-c-launch:not([data-open]) .pm-input-summary-meta { display: none; }
-  .pm-c-launch:not([data-open]) .pm-input-summary { grid-template-columns: auto minmax(0, 1fr) auto; }
-}
+@media (prefers-reduced-motion: reduce) { .pm-chevron { transition: none; } }
+
+/* ---------- The decision ---------- */
+.pm-foot { grid-area: foot; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); padding: var(--space-3) var(--pad); border-block-start: var(--hairline) solid var(--line);
+  background: var(--modal-surface); }
+.pm-foot-inputs { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); min-inline-size: 0; }
+/* Open inputs never push the buttons out: they take at most 45% of the sheet and scroll. */
+.pm-foot-inputs .pm-fields { max-block-size: 45cqh; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1) 0.125rem; }
+.pm-decide { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2) var(--space-4); }
+.pm-decide:has(.pm-changes) { grid-template-columns: minmax(0, 1fr); }
+.pm-actions { display: flex; flex-wrap: wrap; flex-direction: row-reverse; justify-content: flex-end; gap: var(--space-2); }
+.pm-button { min-block-size: var(--control-size); padding-inline: var(--space-4); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
+  background: var(--background); color: var(--foreground); font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
+.pm-button:hover:not(:disabled) { border-color: var(--line-focus); }
+.pm-button[data-tone="primary"] { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+.pm-button:disabled { color: var(--muted-foreground); background: var(--muted); border-color: var(--line); cursor: not-allowed; }
+.pm-changes { display: grid; gap: var(--space-2); }
+.pm-changes .pm-textarea { resize: none; }
+.pm-decided { display: grid; gap: var(--space-2); grid-column: 1 / -1; }
+.pm-decided-line { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); margin: 0; font-size: var(--small-text); }
+.pm-decided-line svg { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
+.pm-decided-note { margin: 0; padding: var(--space-2) var(--space-3); border-inline-start: 2px solid var(--line-focus); color: var(--muted-foreground);
+  font-size: var(--small-text); line-height: 1.5; }
 @container sheet (max-width: 40rem) {
-  .pm-c-decide { grid-template-columns: minmax(0, 1fr); }
-  .pm-input-summary { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .pm-decide { grid-template-columns: minmax(0, 1fr); }
   .pm-input-summary-meta { display: none; }
 }
-@container sheet (min-width: 50rem) {
-  .pm-c-board { grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); align-items: start; padding-inline: var(--pad); }
-  .pm-card-overview { grid-column: 1 / -1; }
-  .pm-card-overview .markdown-content { max-inline-size: none; }
-  .pm-c-inputs-inline { display: block; }
-  .pm-c-inputs-folded { display: none; }
-  .pm-c-launch { grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-4); }
-  .pm-fields[data-layout="bar"] { grid-template-columns: minmax(12rem, 1fr) auto auto; align-items: end; }
-  .pm-c-decide { grid-template-columns: minmax(0, 1fr); justify-items: end; }
-  .pm-c-decide .pm-note { font-size: var(--label-text); text-align: end; }
+/* A short single column: the inputs line and the buttons share a row, and the note yields. */
+@container sheet (max-height: 30rem) and (max-width: 49.99rem) {
+  .pm-foot { padding-block: var(--space-2); }
+  .pm-foot:not([data-open]):has(.pm-foot-inputs) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .pm-foot .pm-decide { grid-template-columns: auto; }
+  .pm-foot .pm-decide > .pm-note:not(:has([role="alert"])) { display: none; }
+  .pm-foot:not([data-open]) .pm-input-summary-meta { display: none; }
 }
-/* A wide but short sheet cannot afford the full bar: the inputs fold to one line beside the buttons, as in one column. */
+
+/* ================= Two panes ================= */
+@container sheet (min-width: 50rem) {
+  .pm-a { grid-template: "head head" auto "doc rail" minmax(0, 1fr) "doc foot" auto / minmax(0, 1fr) var(--rail); }
+  .pm-body { display: contents; }
+  .pm-doc { grid-area: doc; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-6) clamp(1.5rem, 5cqi, 4rem) 4rem; }
+  .pm-rail { grid-area: rail; overflow-y: auto; overscroll-behavior: contain; border-block-start: 0; border-inline-start: var(--hairline) solid var(--line); }
+  .pm-rail:not(:has(.pm-route)) { display: grid; }
+  .pm-rail-inputs { display: block; }
+  .pm-foot { grid-template-columns: minmax(0, 1fr); border-inline-start: var(--hairline) solid var(--line); background: var(--tint-surface); }
+  .pm-foot-inputs { display: none; }
+  /* The rail's foot: Start across the full width, then the two quiet actions, then the note. */
+  .pm-decide { grid-template-columns: minmax(0, 1fr); }
+  .pm-decide > .pm-note { order: 2; font-size: var(--label-text); }
+  .pm-decide > .pm-note:has([role="alert"]), .pm-decide > .pm-note[data-blocked] { order: 0; font-size: var(--small-text); }
+  .pm-actions[data-decide] { display: grid; grid-template-columns: 1fr 1fr; }
+  .pm-actions[data-decide] .pm-button[data-tone="primary"] { grid-column: 1 / -1; }
+  .pm-actions[data-decide] .pm-button:nth-child(2) { order: 1; }
+  .pm-actions[data-decide] .pm-button:nth-child(3) { order: 0; }
+  .pm-actions .pm-button { padding-inline: var(--space-2); }
+  .pm-changes .pm-actions { display: grid; grid-template-columns: 1fr 1fr; flex-direction: row; }
+  .pm-changes .pm-actions .pm-button[data-tone="primary"] { order: 1; }
+}
+
+/* A wide but short sheet: the rail keeps the route, and the inputs fold to one line above the buttons, as in one column. */
 @container sheet (min-width: 50rem) and (max-height: 36rem) {
-  .pm-c-inputs-inline { display: none; }
-  .pm-c-inputs-folded { display: grid; }
-  .pm-c-launch { align-items: center; }
-  .pm-c-launch[data-open] { grid-template-columns: minmax(0, 1fr); }
-  .pm-c-decide .pm-note { display: none; }
+  .pm-rail:has(.pm-route) .pm-rail-inputs { display: none; }
+  .pm-a:has(.pm-route) .pm-foot-inputs { display: grid; }
+  .pm-input-summary-meta { display: none; }
+  .pm-foot { gap: var(--space-2); padding-block: var(--space-2); }
 }
