@@ -165,3 +165,12 @@ it("Pi replaces real user image blocks with an explicit omission for text-only m
   expect(transformMessages(messages, model)[0]).toMatchObject({ content: [{ type: "text", text: "Examine this image" }, { type: "text", text: "(image omitted: model does not support images)" }] });
   expect(transformMessages(messages, { ...model, input: ["text", "image"] })).toEqual(messages);
 });
+
+it("does not restore entity-encoded image placeholders from untrusted text", async () => {
+  const provider = createAzureDevopsBacklogProvider({ assignedItems: () => Promise.resolve({ ok: true, truncated: false, items: [{ ...workItem(7, {
+    "System.Description": '<p>&#xE000;AZUREIMAGE1&#xE001;<img src="data:image/png;base64,aGVsbG8=" alt="real">&#57344;AZUREIMAGE1&#57345;</p>',
+  }), category: "InProgress", assignedToMe: true }] }), workItemImages: () => Promise.resolve({ attached: [], skipped: [] }) });
+  const scan = await provider.scan(project, "/code", { azureDevops: azureConfig });
+  expect(scan.entries[0]?.body.match(/\[Image 1: real\]/gu)).toHaveLength(1);
+  expect(scan.entries[0]?.azureImages?.refs).toHaveLength(1);
+});

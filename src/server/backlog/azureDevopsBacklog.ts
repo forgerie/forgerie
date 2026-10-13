@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { convert } from "html-to-text";
 import type { BacklogConfig, BacklogWarning, Project } from "../../shared/apiTypes.js";
 import type { AzureDevopsClient, AzureWorkItem, AzureImagesResult } from "../azureDevops/azureDevopsClient.js";
@@ -12,6 +13,11 @@ const imageName = (name: string) => Array.from(name, (character) => character.ch
 
 /** Parse HTML images while converting the surrounding text to inert Markdown. No I/O. */
 function description(html: string, section: string, refs: AzureWorkItemImageRef[]): string {
+  // Check both source HTML and its entity-decoded text. Only this conversion's
+  // formatter can introduce a token from the opaque namespace we restore.
+  const decoded = convert(html, { wordwrap: false, selectors: [{ selector: "img", format: "skip" }] });
+  let namespace: string;
+  do { namespace = `AZUREIMAGE${randomUUID().replaceAll("-", "")}`; } while (html.includes(namespace) || decoded.includes(namespace));
   const markers = new Map<string, string>();
   const text = convert(html, { wordwrap: false, selectors: [
     { selector: "a", options: { ignoreHref: true } }, { selector: "img", format: "workItemImage" },
@@ -27,11 +33,11 @@ function description(html: string, section: string, refs: AzureWorkItemImageRef[
     const index = refs.length + 1;
     const name = imageName(attr("alt") || fileName) || `image-${String(index)}`;
     refs.push({ url, name, section, index });
-    const token = `\uE000AZUREIMAGE${String(index)}\uE001`;
+    const token = `\uE000${namespace}${String(index)}\uE001`;
     markers.set(token, `[Image ${String(index)}: ${escapeMarkdown(name)}]`);
-    builder.addInline(token);
+    builder.addInline(token, { noWordTransform: true });
   } } });
-  return escapeMarkdown(text).replace(/\uE000AZUREIMAGE\d+\uE001/gu, (token) => markers.get(token) ?? token);
+  return escapeMarkdown(text).replace(new RegExp(`\\uE000${namespace}\\d+\\uE001`, "gu"), (token) => markers.get(token) ?? token);
 }
 function bodyOf(item: AzureWorkItem): { body: string; refs: AzureWorkItemImageRef[] } {
   const fields = item.fields;
