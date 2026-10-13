@@ -178,8 +178,10 @@ project. A team or board name is not an Area Path.
   `https://dev.azure.com/<configured organization>/`. Paths must be exactly
   `/<organization>/<project-guid-or-name>/_apis/wit/attachments/<guid>` or
   `/<organization>/_apis/wit/attachments/<guid>`. Organization and host matching
-  ignore case. Paths with encoded slashes, backslashes, or dots, literal
-  backslashes, or dot segments are refused before URL normalization. Other
+  ignore case. Paths with encoded percent signs (`%25`), slashes, backslashes,
+  or dots, literal backslashes, or dot segments are refused before URL
+  normalization. Project names containing a literal `%` are not supported in
+  attachment URLs; project-GUID URLs work instead. Other
   hosts, organizations, paths, ports, HTTP URLs, and URL credentials are
   refused before Azure credentials are read. Reads use GET, the existing CLI
   token or PAT, one 401 retry, and no redirects. No write is sent to Azure.

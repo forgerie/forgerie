@@ -32,6 +32,7 @@ describe("Azure attachment reads through the client", () => {
     url.replace("project-guid", "%2e%2e/amazeinsights/project-guid"), url.replace("project-guid", "project%2Ename"),
     url.replace("project-guid", "../amazeinsights/project-guid"), url.replace("project-guid", "project/nested"),
     url.replace("project-guid", "project//nested"), url.replace("project-guid", "project\\nested"),
+    ...["project%252fother", "project%252Fother", "project%255cother", "%252e%252e%252fother", "%25"].map((path) => url.replace("project-guid", path)),
   ])("never fetches or reads credentials for a rejected source: %s", async (source) => {
     const f = client(); let credentialsRead = 0;
     f.credentials.read = () => { credentialsRead++; return Promise.resolve({ ok: true, authorization: "Bearer secret" }); };
@@ -48,7 +49,8 @@ describe("Azure attachment reads through the client", () => {
     expect(new Headers(f.calls[0]?.init.headers).get("authorization")).toMatch(/^Basic /u);
   });
 
-  it.each([url.replace("/project-guid/", "/"), url.replace("project-guid", "Amaze%20Insights")])("allows only the documented organization and optional project path shape: %s", async (source) => {
+  it.each([url.replace("/project-guid/", "/"), url.replace("project-guid", "Amaze%20Insights"),
+    url.replace("project-guid", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")])("allows only the documented organization and optional project path shape: %s", async (source) => {
     const f = client();
     expect((await f.reader.workItemImages("amazeinsights", [ref(source)])).attached).toHaveLength(1);
     expect(f.calls).toHaveLength(1);

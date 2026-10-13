@@ -21,7 +21,7 @@ export function azureImageSource(source: string, organization: string): AzureIma
     const segments = path.split("/");
     if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "dev.azure.com" || url.port !== ""
       || url.username !== "" || url.password !== "" || segments[1]?.toLowerCase() !== organization.toLowerCase()
-      || /%(?:2f|5c|2e)/iu.test(path) || path.includes("\\") || segments.some((segment) => segment === ".." || segment === ".")
+      || /%(?:25|2f|5c|2e)/iu.test(path) || path.includes("\\") || segments.some((segment) => segment === ".." || segment === ".")
       || !/^\/[^/]+\/(?:[^/]+\/)?_apis\/wit\/attachments\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(path)) {
       return { kind: "skipped", reason: "not an allowed Azure attachment URL for this organization" };
     }
