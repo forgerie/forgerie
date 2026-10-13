@@ -157,3 +157,48 @@ it("fails only trigger calls with 503 when another daemon owns the store", async
   await service.close();
   expect(await http("GET", "")).toMatchObject({ status: 503 });
 });
+
+it.each([
+  ["GET", "", "list"], ["GET", "/night", "get"], ["GET", "/workflows?cwd=/workspace", "workflows"],
+  ["POST", "", "create"], ["PATCH", "/night", "update"], ["POST", "/night/pause", "pause"],
+  ["POST", "/night/resume", "resume"], ["POST", "/night/acknowledge", "acknowledge"], ["POST", "/night/run", "run"],
+])("refuses a malformed %s %s response before sending", async (method, path, operation) => {
+  const server = Fastify();
+  const adapted = {
+    list: () => service.list(), get: (id: string) => service.get(id), workflows: (path: string) => service.workflows(path),
+    create: (value: unknown) => service.create(value), update: (id: string, value: unknown) => service.update(id, value),
+    pause: (id: string) => service.pause(id), resume: (id: string) => service.resume(id), acknowledge: (id: string) => service.acknowledge(id),
+    run: (id: string, value: unknown) => service.run(id, value), remove: (id: string) => service.remove(id),
+    [operation]: () => Promise.resolve({ unexpected: "payload" }),
+  };
+  registerTriggerRoutes(server, adapted);
+  const address = await server.listen({ port: 0, host: "127.0.0.1" });
+  try {
+    const response = await fetch(`${address}/triggers${path}`, { method, ...(method === "GET" ? {} : { headers: { "content-type": "application/json" }, body: "{}" }) });
+    expect(response.status).toBe(500);
+    const value: unknown = await response.json();
+    expect(Check(TriggerErrorResponseSchema, value)).toBe(true);
+    expect(value).not.toHaveProperty("unexpected");
+  } finally { await server.close(); }
+});
+
+it("does not send an invalid error envelope", async () => {
+  const server = Fastify();
+  const { TriggerError } = await import("./durableTriggers.js");
+  const error = new TriggerError("Invalid field", 400, "action.cwd");
+  Object.defineProperty(error, "field", { value: 42 });
+  const adapted = {
+    list: () => Promise.reject(error), get: (id: string) => service.get(id), workflows: (path: string) => service.workflows(path),
+    create: (value: unknown) => service.create(value), update: (id: string, value: unknown) => service.update(id, value),
+    pause: (id: string) => service.pause(id), resume: (id: string) => service.resume(id), acknowledge: (id: string) => service.acknowledge(id),
+    run: (id: string, value: unknown) => service.run(id, value), remove: (id: string) => service.remove(id),
+  };
+  registerTriggerRoutes(server, adapted);
+  const address = await server.listen({ port: 0, host: "127.0.0.1" });
+  try {
+    const response = await fetch(`${address}/triggers`);
+    expect(response.status).toBe(500);
+    const value: unknown = await response.json();
+    expect(Check(TriggerErrorResponseSchema, value)).toBe(true);
+  } finally { await server.close(); }
+});
