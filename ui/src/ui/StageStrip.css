@@ -1,29 +1,36 @@
-/* The process as bars: done in the done colour, work in the live colour (moving), the reader's turn solid live. */
-.stage-strip { container-type: inline-size; display: grid; gap: var(--space-2); inline-size: 100%; padding: var(--space-2) var(--space-3);
+/* The process as one row: a block grid where an icon would be, then the title, the status, the waiting count and the chevron.
+   The grid is the tally's block: a column per stage, a block per lane, stacked from the floor. Its geometry is mirrored in stageStripPlan.ts. */
+.stage-strip {
+  /* The tally's mark and gap (TallyRow.css). stageStripPlan.ts assumes these sizes; change both together. */
+  --tally-mark: 0.4375rem;
+  --tally-gap: 0.1875rem;
+  container-type: inline-size; display: flex; align-items: center; gap: var(--space-2);
+  inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-1) var(--space-3);
   border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--tint-surface); color: var(--foreground);
-  font: inherit; text-align: start; cursor: pointer; }
+  font: inherit; font-size: var(--small-text); text-align: start; cursor: pointer; }
 .stage-strip:hover { border-color: var(--line-focus); }
-.stage-strip-bars { display: flex; gap: 0.25rem; }
-.stage-strip-segment { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 0.125rem; block-size: 0.5rem; }
-.stage-strip-bar { block-size: 0.25rem; border-radius: 0.125rem; background: var(--line-focus); }
-.stage-strip-segment[data-lanes] .stage-strip-bar { block-size: 0.1875rem; }
-.stage-strip-bar[data-state="done"] { background: var(--ink-good); }
-.stage-strip-bar[data-state="waiting"] { background: var(--live); }
-.stage-strip-bar[data-state="working"] { background: linear-gradient(90deg, var(--live) 40%, var(--live-edge) 50%, var(--live) 60%) 0 0 / 250% 100%;
-  animation: stage-strip-flow 2s linear infinite; }
-@keyframes stage-strip-flow { to { background-position: -250% 0; } }
-@media (prefers-reduced-motion: reduce) { .stage-strip-bar[data-state="working"] { animation: none; background: var(--live); } }
-.stage-strip-text { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; font-size: var(--small-text); }
-.stage-strip-icon { display: grid; flex: none; color: var(--muted-foreground); }
+.stage-strip:active { background: var(--hover-surface); }
+.stage-strip-grid { flex: none; display: flex; align-items: flex-end; gap: var(--tally-gap); margin-inline-end: var(--space-1); }
+.stage-strip-column { display: flex; flex-direction: column-reverse; gap: var(--tally-gap); }
+.stage-strip-block { inline-size: var(--tally-mark); block-size: var(--tally-mark); border-radius: calc(var(--tally-mark) / 4); background: var(--meter-ink); }
+.stage-strip-block[data-state="working"] { background: var(--tone-live); animation: stage-strip-blink 1.2s ease-in-out infinite; }
+.stage-strip-block[data-state="waiting"] { background: var(--tone-live); box-shadow: 0 0 0 0.125rem var(--live-wash); }
+.stage-strip-block[data-state="failed"] { background: var(--tone-bad); }
+.stage-strip-block[data-state="next"] { background: none; box-shadow: inset 0 0 0 var(--hairline) var(--muted-foreground); }
+.stage-strip-block[data-state="empty"] { background: none; }
+@keyframes stage-strip-blink { 50% { opacity: 0.35; } }
+/* As wide as stageStripPlan.ts reserves for it (STRIP_FOLD_WIDTH), so the grid stays inside its share. */
+.stage-strip-fold { align-self: center; inline-size: 1.25rem; text-align: end; font-family: var(--code-font); font-size: var(--meta-text); line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--muted-foreground); white-space: nowrap; }
+.stage-strip-fold[data-tone="bad"] { color: var(--ink-bad); }
+.stage-strip-fold[data-tone="live"] { color: var(--ink-live); }
+.stage-strip-icon { display: grid; flex: none; margin-inline-end: var(--space-1); color: var(--muted-foreground); }
 .stage-strip-icon svg { inline-size: 1rem; block-size: 1rem; }
 .stage-strip-title { flex: none; font-weight: 600; }
 .stage-strip-status { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
 .stage-strip-count { flex: none; display: grid; place-items: center; min-inline-size: 1.25rem; block-size: 1.25rem; padding-inline: 0.3125rem; border-radius: 0.625rem;
   background: var(--live); color: var(--primary-foreground); font-size: var(--label-text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .stage-strip-open { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
-/* A narrow strip drops the title first: the bars and the status carry the state. */
+/* A narrow strip drops the title first: the grid and the status carry the state. */
 @container (inline-size < 30rem) { .stage-strip-title { display: none; } }
-/* A short session spends width instead of height: the bars move beside the text. */
-@container (block-size < 28rem) {
-  .stage-strip { grid-template-columns: minmax(4rem, 28%) minmax(0, 1fr); align-items: center; gap: var(--space-3); padding-block: var(--space-1); }
-}
+@media (prefers-reduced-motion: reduce) { .stage-strip-block[data-state="working"] { animation: none; } }
