@@ -238,6 +238,20 @@ describe("a trigger's page", () => {
     expect(text()).toContain("Saved");
   });
 
+  it("never turns a save of a deleted trigger into a create", async () => {
+    await render({ view: "trigger", id: "weekday-triage" }, [triage, notes]);
+    await type("Trigger name", "Mine");
+    store.set([notes]);
+    await triggersChanged();
+    await flush();
+    expect(text()).toContain("No trigger has this ID. It may have been deleted.");
+    expect(button("Save")).toBeUndefined();
+    await saveKey();
+    await flush();
+    expect(store.calls.filter((call) => call[0] === "create" || call[0] === "update")).toEqual([]);
+    expect(store.triggers().map((trigger) => trigger.id)).toEqual(["release-notes"]);
+  });
+
   it("says when no trigger has the ID", async () => {
     await render({ view: "trigger", id: "gone" });
     expect(text()).toContain("No trigger has this ID. It may have been deleted.");

@@ -117,7 +117,7 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
   const raw = stored?.draft ?? start;
   // Until the reader picks a zone, a new trigger follows the host's zone once the list says what it is.
   const draft = !trigger && !raw.zoneChosen && host && raw.timezone !== host ? { ...raw, timezone: host } : raw;
-  const dirty = trigger ? isDirty(draft, start) : isDirty(draft, emptyDraft(draft.timezone));
+  const dirty = place.view === "create" ? isDirty(draft, emptyDraft(draft.timezone)) : trigger ? isDirty(draft, start) : false;
   // A change elsewhere to what this form edits is a conflict. A pause, a mark as seen, or a recorded run also raises
   // the revision, but it leaves the form's fields alone, so the draft moves onto the newer revision without a word.
   // A refused save stays a conflict until the newer trigger has been read.
@@ -227,11 +227,14 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
   // two requests would make two triggers. The ref answers at once; the save state reaches the page a render later.
   const inFlight = useRef(false);
   async function submit() {
-    if (inFlight.current) return;
+    // Create only from the create page, and update only a trigger read in full. A trigger that went missing or
+    // cannot be read has nothing to save onto, so its leftover draft never becomes a new trigger.
+    const updating = place.view === "trigger" && pageLoad.type === "ready" ? trigger : undefined;
+    if (inFlight.current || (place.view !== "create" && !updating)) return;
     inFlight.current = true;
     setSave({ key, state: { type: "saving" } });
     try {
-      if (!trigger) {
+      if (!updating) {
         const created = await api.create(createOf(draft, workflow));
         drafts.delete(CREATE);
         setSave({ key: created.id, state: { type: "idle" } });
@@ -243,18 +246,18 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
         return;
       }
       // Against the revision the draft started from while another change to its fields is unseen, so the server says so.
-      const base = conflict && stored ? stored.revision : trigger.revision;
-      const updated = await api.update(trigger.id, updateOf(trigger, draft, workflow, base));
-      drafts.delete(trigger.id);
+      const base = conflict && stored ? stored.revision : updating.revision;
+      const updated = await api.update(updating.id, updateOf(updating, draft, workflow, base));
+      drafts.delete(key);
       setDetail({ id: updated.id, load: { type: "ready", trigger: updated } });
       setSave({ key, state: { type: "saved" } });
       refresh();
     } catch (error) {
-      if (error instanceof TriggerRefusal && error.status === 409 && trigger) {
+      if (error instanceof TriggerRefusal && error.status === 409 && updating) {
         // Someone else changed it first. The draft stays until the reader reloads.
-        drafts.set(key, { draft, start: stored?.start ?? start, revision: trigger.revision, refused: true });
+        drafts.set(key, { draft, start: stored?.start ?? start, revision: updating.revision, refused: true });
         setSave({ key, state: { type: "idle" } });
-        readDetail(trigger.id);
+        readDetail(updating.id);
         return;
       }
       const refusal = error instanceof TriggerRefusal ? error : undefined;

@@ -94,7 +94,10 @@ export function TriggerPage({ load, draft, dirty, problems, save, conflict, fail
   // Ctrl or Cmd + S saves, as in the agent editor.
   const latest = useRef(submit);
   latest.current = submit;
-  const savable = fresh || dirty;
+  // Only a new trigger or one read in full can be saved: while the trigger is loading, unknown, or unreadable, a
+  // draft left from before has nothing to save onto.
+  const edited = trigger !== undefined && dirty;
+  const savable = fresh || edited;
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
@@ -106,9 +109,9 @@ export function TriggerPage({ load, draft, dirty, problems, save, conflict, fail
   }, [savable, saving]);
 
   const title = load.type === "missing" ? "Trigger" : fresh ? "New trigger" : trigger?.name ?? "Trigger";
-  const status = fresh ? (saving ? "Creating…" : undefined) : saving ? "Saving…" : dirty ? "Unsaved changes" : save.type === "saved" ? "Saved" : undefined;
+  const status = fresh ? (saving ? "Creating…" : undefined) : saving ? "Saving…" : edited ? "Unsaved changes" : save.type === "saved" ? "Saved" : undefined;
   const primary = fresh ? { label: saving ? "Creating…" : "Create", icon: <PlusIcon aria-hidden size={16} />, run: submit }
-    : dirty ? { label: saving ? "Saving…" : "Save", icon: <SaveIcon aria-hidden size={16} />, run: submit }
+    : edited ? { label: saving ? "Saving…" : "Save", icon: <SaveIcon aria-hidden size={16} />, run: submit }
     : trigger ? { label: "Run now…", icon: <ZapIcon aria-hidden size={16} />, run: actions.onRunNow } : undefined;
   const commands: (MenuCommand | "separator")[] = fresh ? [
     ...plan.primary === "menu" && primary ? [{ label: primary.label, icon: primary.icon, disabled: saving, onSelect: primary.run }] : [],
