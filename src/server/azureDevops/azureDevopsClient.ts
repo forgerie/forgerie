@@ -15,6 +15,7 @@ const WorkItemSchema = Type.Object({ id, fields: Type.Object({
   "Microsoft.VSTS.TCM.ReproSteps": Type.Optional(Type.String()),
   "Microsoft.VSTS.Common.Priority": Type.Optional(Type.Integer()),
   "System.CreatedDate": Type.Optional(Type.String()), "System.Tags": Type.Optional(Type.String()),
+  "Microsoft.VSTS.Common.ClosedDate": Type.Optional(Type.Union([Type.String(), Type.Null()])),
 }) });
 const BatchSchema = Type.Object({ value: Type.Array(WorkItemSchema, { maxItems: 200 }) });
 const TypesSchema = Type.Object({ value: Type.Array(Type.Object({ name: Type.String() }), { maxItems: 32 }) });
@@ -67,13 +68,14 @@ export class AzureDevopsClient {
         const types = await read("workitemtypes?api-version=7.1", TypesSchema);
         for (const type of types.value) await readStates(type.name);
         const closed = [...new Set([...categories.values()].flatMap((states) => [...states].filter(([, category]) => category === "Completed" || category === "Removed").map(([name]) => name)))];
-        query = wiql([project, ...area, ...(closed.length === 0 ? [] : [`[System.State] NOT IN (${closed.map(quote).join(", ")})`])]);
+        query = wiql([project, ...area, ...(closed.length === 0 ? [] : [`[System.State] NOT IN (${closed.map(quote).join(", ")})`]), "[Microsoft.VSTS.Common.ClosedDate] = ''"]);
       }
       const result = await read("wiql?api-version=7.1&$top=501", QuerySchema, { query });
       const ids = [...new Set(result.workItems.map((item) => item.id))].slice(0, 500);
       const items: Static<typeof WorkItemSchema>[] = [];
       for (let i = 0; i < ids.length; i += 200) {
-        // Omit `fields`: requested fields that do not exist for a custom process cause Azure to reject a batch.
+        // Omitting `fields` requests all fields, including ClosedDate. A restrictive list can
+        // make Azure reject optional fields that do not exist for a custom process.
         const batch = await read("workitemsbatch?api-version=7.1", BatchSchema, { ids: ids.slice(i, i + 200), errorPolicy: "Fail" });
         items.push(...batch.value);
       }

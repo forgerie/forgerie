@@ -1,7 +1,7 @@
 # Azure DevOps backlog
 
 Forgerie can list Azure work items for a project and Area Path. **Mine** lists
-items assigned to the signed-in Azure CLI user or PAT owner. **Everyone** lists
+items assigned to the signed-in Azure DevOps user. **Everyone** lists
 open items for that same project and Area Path. An item can start a session
 with its description, acceptance criteria, and reproduction steps. The same claim, resume, release, and archive flow used
 for GitHub issues applies.
@@ -114,8 +114,8 @@ You can also configure the repo file. In its canonical checkout, add this
 }
 ```
 
-Mine lists every work-item type assigned to the signed-in user or PAT owner in that Azure
-project, not only Stories or the current sprint. It does not list items from
+Mine lists every work-item type assigned to the signed-in Azure DevOps user in
+that Azure project, not only Stories or the current sprint. It does not list items from
 other Azure projects automatically. Refresh the backlog after changing config.
 
 If several repositories share the Azure project, add `azureDevops.areaPath`
@@ -140,8 +140,10 @@ asks you to set one. The trusted-author filter applies in both scopes. The 21
 migrated Forgerie GitHub issues have no assignees, so they do not appear in Mine
 until someone assigns them.
 
-Azure Everyone removes `System.AssignedTo = @Me` and excludes `Completed` and
-`Removed` states in WIQL, before applying the 500-item cap. It makes one extra
+Azure Everyone removes `System.AssignedTo = @Me` and excludes current
+`Completed` and `Removed` state names in WIQL. It also requires
+`[Microsoft.VSTS.Common.ClosedDate] = ''`, so historical closed states that no
+longer exist in the current process do not consume the 500-item cap. It makes one extra
 id-only `@Me` WIQL call to mark your items. It also reads all work-item type
 state definitions before the broad query to discover the closed-state names;
 Mine reads definitions only for types in your result. No `connectionData`
@@ -151,12 +153,22 @@ project. A team or board name is not an Area Path.
 
 ## Behavior and limits
 
-- Mine uses `System.AssignedTo = @Me`, so "me" is the signed-in user or PAT owner. It is not
-  the agent, a guessed email address, or the person who opened the browser.
-- State categories come from Azure's work-item type definitions. `Completed`
-  and `Removed` items are closed. Unknown categories block session launch.
-  Mine hides closed items until **Show done items** is selected. Everyone
-  excludes them at the server, so that control cannot reveal them.
+- Mine uses `System.AssignedTo = @Me`, so "me" is the signed-in Azure DevOps
+  user. It is not the agent, a guessed email address, or the person who opened
+  the browser.
+- State categories come from the type's current definitions. `Completed` and
+  `Removed` items are closed. When a state has no current category, a non-empty
+  `Microsoft.VSTS.Common.ClosedDate` also marks it closed. This covers old
+  process states such as `Done` without guessing from the state name or Reason.
+  Without ClosedDate, an unknown state stays visible and blocked; it cannot
+  launch. One warning per project and provider gives the count and at most five
+  example IDs, instead of one warning per item.
+- Mine keeps the `@Me` query without a ClosedDate predicate. Its closed items
+  remain available under **Show done items**. A known open category still wins
+  over an old ClosedDate when mapping an item. Everyone excludes closed state
+  names and non-empty ClosedDate values before the cap. A stale ClosedDate on
+  a reopened item can therefore exclude it from Everyone even if Mine shows
+  it as open.
 - Descriptions, acceptance criteria, and reproduction steps convert from HTML
   to inert text. Images and link targets are not fetched. The session receives
   quoted content with an instruction not to obey commands inside it. This
@@ -166,7 +178,9 @@ project. A team or board name is not an Area Path.
   after batch retrieval. Azure can still change after the final read.
 - A scan reads at most 500 items (including closed items in Mine), in batches
   of 200. A truncated scan warns and refuses launch rather than implying that
-  it read every item. Narrow the Area Path if you reach this limit.
+  it read every item. Its warning describes items assigned to you for Mine,
+  or open items in this project/Area Path for Everyone. Narrow the Area Path
+  if you reach this limit.
 - A scan has a 30-second deadline, an 8 MiB response limit, and at most 32 work
   item types. It honors HTTP 429 `Retry-After`. A failure does not hide items
   from the project's other providers.

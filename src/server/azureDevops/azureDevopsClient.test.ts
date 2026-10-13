@@ -7,7 +7,7 @@ afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(
 async function server() { const service = await azureServer(); cleanups.push(service.close); return service; }
 
 describe("assigned Azure work items", () => {
-  it("uses the PAT owner's identity, reads all types and custom states, and makes no mutation request", async () => {
+  it("uses the signed-in Azure DevOps identity, reads all types and custom states, and makes no mutation request", async () => {
     const s = await server();
     s.state.items = [workItem(), workItem(8, { "System.WorkItemType": "Bug", "System.State": "Shipped" }), workItem(9, { "System.WorkItemType": "Task" })];
     s.state.assigned = [7, 8, 9];
@@ -88,6 +88,8 @@ it("Everyone excludes closed states in WIQL and marks only @Me ids without conne
   const queries = s.requests.filter((r) => r.url.includes("/wiql")).map((r) => JSON.stringify(r.body));
   expect(queries).toHaveLength(3);
   expect(queries[0]).not.toContain("@Me"); expect(queries[0]).toContain("[System.State] NOT IN ('Shipped', 'Rejected')");
+  expect(queries[0]).toContain("[Microsoft.VSTS.Common.ClosedDate] = ''");
+  expect(queries[2]).not.toContain("ClosedDate");
   expect(queries[0]).toContain("[System.AreaPath] UNDER"); expect(queries[2]).toContain("@Me"); expect(queries[2]).toContain("[System.Id] IN (7, 8)");
   expect(s.requests.some((r) => r.url.includes("connectionData"))).toBe(false);
 });
@@ -108,8 +110,32 @@ it.each(["$&", "$`", "$'", " ORDER BY"].flatMap((token) => ["project", "area", "
     const area = `[System.AreaPath] UNDER ${literal(areaPath)}`;
     const select = "SELECT [System.Id] FROM WorkItems WHERE ";
     const order = " ORDER BY [System.ChangedDate] DESC";
-    const everyone = select + bounds + " AND " + area + ` AND [System.State] NOT IN (${literal(closed)}, 'Rejected')` + order;
+    const everyone = select + bounds + " AND " + area + ` AND [System.State] NOT IN (${literal(closed)}, 'Rejected') AND [Microsoft.VSTS.Common.ClosedDate] = ''` + order;
     const identity = select + bounds + " AND [System.AssignedTo] = @Me AND " + area + " AND [System.Id] IN (7)" + order;
     expect(queries).toEqual([{ query: everyone }, { query: everyone }, { query: identity }]);
   },
 );
+
+it("requests all batch fields, including ClosedDate, while Mine keeps its @Me query", async () => {
+  const s = await server(); const remote = workItem(7, { "System.State": "Done" });
+  Object.assign(remote.fields, { "Microsoft.VSTS.Common.ClosedDate": "2023-09-11T14:57:11.553Z" });
+  s.state.items = [remote];
+  const result = await s.client.assignedItems(azureConfig, "mine");
+  expect(result).toMatchObject({ ok: true, items: [{ id: 7, fields: { "Microsoft.VSTS.Common.ClosedDate": "2023-09-11T14:57:11.553Z" } }] });
+  expect(s.requests.filter((r) => r.url.includes("/wiql")).every((r) => !JSON.stringify(r.body).includes("ClosedDate"))).toBe(true);
+  // Omitting a fields allow-list requests all fields, including process-specific optional fields.
+  expect(s.requests.find((r) => r.url.includes("workitemsbatch"))?.body).toEqual({ ids: [7], errorPolicy: "Fail" });
+});
+
+it("Everyone excludes legacy ClosedDate records before its 500-item cap", async () => {
+  const s = await server();
+  s.state.items = Array.from({ length: 501 }, (_, index) => {
+    const remote = workItem(index + 1, { "System.State": "Done" });
+    Object.assign(remote.fields, { "Microsoft.VSTS.Common.ClosedDate": "2023-09-11T14:57:11.553Z" });
+    return remote;
+  });
+  s.state.items.push(workItem(502)); s.state.everyone = s.state.items.map((item) => item.id); s.state.assigned = [502];
+  const result = await s.client.assignedItems(azureConfig, "everyone");
+  expect(result).toMatchObject({ ok: true, truncated: false, items: [{ id: 502, assignedToMe: true }] });
+  if (result.ok) expect(result.items).toHaveLength(1);
+});

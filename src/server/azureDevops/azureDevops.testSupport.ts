@@ -18,6 +18,7 @@ export const workItem = (id = 7, fields: Partial<AzureWorkItem["fields"]> = {}) 
 } });
 
 const BatchRequest = Type.Object({ ids: Type.Array(Type.Integer()) });
+const QueryRequest = Type.Object({ query: Type.String() });
 interface ServerState {
   items: ReturnType<typeof workItem>[]; everyone: number[] | undefined; assigned: number[]; status: number; retryAfter: string; redirect: boolean;
   malformed: boolean; incomplete: boolean; category: string; closedState: string; afterQuery: (() => void) | undefined;
@@ -38,7 +39,12 @@ export async function azureServer() {
     if (state.malformed) return { surprise: PAT };
     const path = new URL(request.url, "http://local").pathname;
     if (path.endsWith("/wiql")) {
-      const result = { workItems: (JSON.stringify(request.body).includes("@Me") ? state.assigned : state.everyone ?? state.assigned).slice(0, 501).map((id) => ({ id })) };
+      if (!Check(QueryRequest, request.body)) return reply.code(400).send();
+      const query = request.body.query;
+      let ids = query.includes("@Me") ? state.assigned : state.everyone ?? state.assigned;
+      if (query.includes("[Microsoft.VSTS.Common.ClosedDate] = ''")) ids = ids.filter((id) => (state.items.find((item) => item.id === id)?.fields["Microsoft.VSTS.Common.ClosedDate"] ?? "").trim() === "");
+      if (query.includes("[System.State] NOT IN (")) ids = ids.filter((id) => ![state.closedState, "Rejected"].includes(state.items.find((item) => item.id === id)?.fields["System.State"] ?? ""));
+      const result = { workItems: ids.slice(0, 501).map((id) => ({ id })) };
       state.afterQuery?.();
       return result;
     }
