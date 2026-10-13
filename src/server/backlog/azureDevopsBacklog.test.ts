@@ -33,7 +33,7 @@ async function fixture() {
     sessions: { stop: () => undefined }, isArchived: () => Promise.resolve(false), providers: [markdownBacklogProvider, provider] });
   const app = Fastify(); registerBacklogRoutes(app, service); cleanups.push(() => app.close());
   const itemPath = `/backlog/${project.id}/items/amazeinsights%3A7`;
-  return { root, repo, configPath, project, azure, provider, claims, started, app, itemPath };
+  return { root, repo, configPath, project, azure, provider, claims, started, app, itemPath, projects, session };
 }
 
 describe("Azure backlog through the existing routes", () => {
@@ -184,4 +184,37 @@ it("keeps list, detail and launch in Everyone; Mine cannot read or launch anothe
   const payload = { requestId: "everyone", start: { cwd: f.repo } };
   expect((await f.app.inject({ method: "POST", url: `${f.itemPath}/launch?provider=azure-devops&scope=mine`, payload })).statusCode).toBe(404);
   expect((await f.app.inject({ method: "POST", url: `${f.itemPath}/launch?provider=azure-devops&scope=everyone`, payload })).statusCode).toBe(200);
+});
+
+it("places markers across all sections and attaches images only on launch, including retries", async () => {
+  const f = await fixture();
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+  f.azure.state.items = [workItem(7, {
+    "System.Description": `<p>Before<img src="data:image/png;base64,${png}" alt="first">After</p>`,
+    "Microsoft.VSTS.Common.AcceptanceCriteria": '<p>Accept<img src="https://evil.invalid/secret" alt="second"></p>',
+    "Microsoft.VSTS.TCM.ReproSteps": `<p>Repro<img src="data:image/png;base64,${png}" alt="third"></p>`,
+  })];
+  const detail = (await f.app.inject({ method: "GET", url: `${f.itemPath}?provider=azure-devops` })).json<BacklogDetailResponse>();
+  expect(detail.body).toContain("Before[Image 1: first]After");
+  expect(detail.body).toContain("Accept[Image 2: second]");
+  expect(detail.body).toContain("Repro[Image 3: third]");
+  const launch = () => f.app.inject({ method: "POST", url: `${f.itemPath}/launch?provider=azure-devops`, payload: { requestId: "images", start: { cwd: f.repo } } });
+  const first = (await launch()).json<BacklogLaunchResponse>();
+  expect(first.images?.map((image) => image.name)).toEqual(["first", "third"]);
+  expect(first.initialPrompt).toContain("2 images are attached");
+  expect(first.initialPrompt).toContain("Examine every image before you plan or change code");
+  expect(first.initialPrompt).toContain("Image 2 (second) could not be attached");
+  expect(first.initialPrompt).toContain("[Image 1], [Image 3]");
+  f.azure.state.items = [workItem(7)];
+  const retry = (await launch()).json<BacklogLaunchResponse>();
+  expect(retry.images).toEqual(first.images);
+  expect(retry.initialPrompt).toBe(first.initialPrompt);
+  const restartedClaims = new BacklogClaimStore(join(f.root, "claims.json")); await restartedClaims.initialize();
+  const restarted = new BacklogService({ projects: f.projects, claims: restartedClaims,
+    userSessions: { start: () => { throw new Error("Retry must not start another session"); } }, sessions: { stop: () => undefined },
+    isArchived: () => Promise.resolve(false), providers: [f.provider] });
+  const app = Fastify(); registerBacklogRoutes(app, restarted); cleanups.push(() => app.close());
+  const afterRestart = (await app.inject({ method: "POST", url: `${f.itemPath}/launch?provider=azure-devops`, payload: { requestId: "images", start: { cwd: f.repo } } })).json<BacklogLaunchResponse>();
+  expect(afterRestart).toEqual({ ...first, reused: true });
+  expect(JSON.stringify(await restartedClaims.list())).not.toContain(png);
 });

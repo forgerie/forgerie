@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { deliverPrompt, promptDelivery } from "./promptDelivery";
 import { errorSchema, sessionModelSchema, sessionSchema, type Session, type SessionModel } from "./contracts";
-import type { PromptAttachment } from "./attachments";
+import { MAX_ATTACHMENTS, type PromptAttachment } from "./attachments";
 import { workspaceOf } from "./workspaceOf";
 import type { NewSessionDestination } from "./worktrees/worktreeApi";
 import { BacklogRefusal, createBacklogApi, type BacklogClaim } from "./backlog/backlogApi";
@@ -195,6 +195,7 @@ export function createNewSessionApi(fetchFn: Fetch) {
       const prompt: FirstPrompt = typeof first === "string" ? { text: first } : first;
       let session: Session;
       let text = prompt.text;
+      let promptImages = prompt.images ?? [];
       const modelSpec = choice.model?.provider && choice.model.id ? `${choice.model.provider}/${choice.model.id}` : undefined;
       const start = { cwd, ...(modelSpec ? { modelSpec } : {}), ...(choice.thinkingLevel ? { thinkingLevel: choice.thinkingLevel } : {}),
         ...(options.destination ? { destination: options.destination } : {}), ...(options.setupId ? { setupId: options.setupId } : {}) };
@@ -204,6 +205,7 @@ export function createNewSessionApi(fetchFn: Fetch) {
           const launched = await backlog.launch(options.item, options.startupToken ?? newStartupToken(), start);
           session = launched.session;
           text = firstMessage(launched.initialPrompt, prompt.text, prompt.command !== undefined);
+          promptImages = [...(launched.images ?? []), ...promptImages].slice(0, MAX_ATTACHMENTS);
         } else {
           session = await call("/api/sessions", sessionSchema, post({ ...start, ...(options.startupToken ? { startupToken: options.startupToken } : {}) }));
         }
@@ -223,7 +225,7 @@ export function createNewSessionApi(fetchFn: Fetch) {
             post({ cwd: session.cwd, attachments: prompt.files }));
           text = [text, ...saved.attachments.map((file) => `@${file.path}`)].join("\n");
         }
-        const images = prompt.images?.length ? { attachments: prompt.images } : {};
+        const images = promptImages.length ? { attachments: promptImages } : {};
         if (prompt.command) await call(`${root}/prompt-resource-command`, z.object({ accepted: z.literal(true) }),
           promptDelivery({ cwd: session.cwd, text, identity: prompt.command, ...images }), true);
         else await call(`${root}/prompt`, z.object({ accepted: z.literal(true) }), promptDelivery({ cwd: session.cwd, text, ...images }), true);

@@ -3,10 +3,12 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
-import { BacklogClaimSchema, type BacklogClaim, type BacklogProviderId } from "../../shared/backlog.js";
+import { BacklogClaimSchema, BacklogLaunchContentSchema, type BacklogClaim, type BacklogProviderId, type BacklogLaunchContent } from "../../shared/backlog.js";
 import { BacklogError, isMissingFile } from "./backlogError.js";
 
-const FileSchema = Type.Object({ version: Type.Literal(1), claims: Type.Array(BacklogClaimSchema) }, { additionalProperties: false });
+const FileSchema = Type.Object({ version: Type.Literal(1), claims: Type.Array(BacklogClaimSchema),
+  launchContents: Type.Optional(Type.Record(Type.String(), BacklogLaunchContentSchema)),
+}, { additionalProperties: false });
 type Reservation = Extract<BacklogClaim, { kind: "launching" }>;
 /** An item's identity across providers. The same id from two providers is two items. */
 export interface BacklogItemKey { repo: string; provider: BacklogProviderId; itemId: string }
@@ -20,6 +22,7 @@ const withProvider = (value: unknown): unknown => {
 /** Single daemon owner; serialize mutations and publish only after atomic disk replacement. */
 export class BacklogClaimStore {
   private claims: BacklogClaim[] = [];
+  private launchContents: Record<string, BacklogLaunchContent> = {};
   private queue: Promise<void> = Promise.resolve();
   constructor(private readonly path?: string) {}
 
@@ -32,6 +35,7 @@ export class BacklogClaimStore {
     const identities = value.claims.map((claim) => JSON.stringify([claim.repo, claim.provider, claim.itemId]));
     if (new Set(identities).size !== identities.length || new Set(value.claims.map((claim) => claim.claimId)).size !== identities.length) throw new Error("Duplicate backlog claims");
     this.claims = value.claims;
+    this.launchContents = value.launchContents ?? {};
     // A killed launch is not still running. Retain ownership until explicit guarded recovery.
     if (this.claims.some((claim) => claim.kind === "launching")) {
       await this.persist(this.claims.map((claim) => claim.kind === "launching" ? { ...claim, kind: "interrupted" } : claim));
@@ -50,12 +54,14 @@ export class BacklogClaimStore {
       return structuredClone(claim);
     });
   }
-  bind(claimId: string, sessionId: string, cwd: string, branch?: string): Promise<Extract<BacklogClaim, { kind: "claimed" }>> {
+  /** Private launch snapshot. Never included in list/detail claims. */
+  launchContent(claimId: string): BacklogLaunchContent | undefined { return structuredClone(this.launchContents[claimId]); }
+  bind(claimId: string, sessionId: string, cwd: string, branch?: string, content?: BacklogLaunchContent): Promise<Extract<BacklogClaim, { kind: "claimed" }>> {
     return this.exclusive(async () => {
       const reservation = this.claims.find((claim) => claim.claimId === claimId);
       if (reservation?.kind !== "launching") throw new BacklogError("conflict", "Launch reservation changed");
       const claim = { ...reservation, kind: "claimed" as const, sessionId, cwd, ...(branch === undefined ? {} : { branch }) };
-      await this.persist(this.claims.map((record) => record.claimId === claimId ? claim : record));
+      await this.persist(this.claims.map((record) => record.claimId === claimId ? claim : record), content === undefined ? this.launchContents : { ...this.launchContents, [claimId]: content });
       return structuredClone(claim);
     });
   }
@@ -82,16 +88,23 @@ export class BacklogClaimStore {
     await previous;
     try { return await run(); } finally { release(); }
   }
-  private async persist(claims: BacklogClaim[]): Promise<void> {
-    if (!Check(FileSchema, { version: 1, claims })) throw new Error("Invalid backlog claim mutation");
+  private async persist(claims: BacklogClaim[], contents = this.launchContents): Promise<void> {
+    const launchContents: Record<string, BacklogLaunchContent> = {};
+    for (const claim of claims) {
+      const content = contents[claim.claimId];
+      if (content !== undefined) launchContents[claim.claimId] = content;
+    }
+    const value = { version: 1, claims, ...(Object.keys(launchContents).length === 0 ? {} : { launchContents }) };
+    if (!Check(FileSchema, value)) throw new Error("Invalid backlog claim mutation");
     if (this.path !== undefined) {
       await mkdir(dirname(this.path), { recursive: true });
       const temporary = `${this.path}.${randomUUID()}.tmp`;
       try {
-        await writeFile(temporary, `${JSON.stringify({ version: 1, claims }, null, 2)}\n`, { mode: 0o600 });
+        await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
         await rename(temporary, this.path);
       } catch (error) { await unlink(temporary).catch(() => undefined); throw error; }
     }
     this.claims = structuredClone(claims);
+    this.launchContents = structuredClone(launchContents);
   }
 }

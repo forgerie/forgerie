@@ -97,8 +97,21 @@ export const BacklogListResponseSchema = Type.Object({
   items: Type.Array(BacklogItemSchema), warnings: Type.Array(BacklogWarningSchema), generatedAt: text,
 });
 export type BacklogListResponse = Static<typeof BacklogListResponseSchema>;
+export const BacklogImageSummarySchema = Type.Object({
+  count: Type.Integer({ minimum: 0 }), eligibleCount: Type.Integer({ minimum: 0 }),
+  skipped: Type.Array(Type.Object({ index: Type.Integer({ minimum: 1 }), name: Type.String(), reason: Type.String() })),
+});
+export const BacklogPromptImageSchema = Type.Object({
+  kind: Type.Literal("image"), mimeType: Type.Union([Type.Literal("image/png"), Type.Literal("image/jpeg"), Type.Literal("image/gif"), Type.Literal("image/webp")]),
+  data: Type.String(), name: Type.Optional(Type.String()),
+});
+export const BacklogLaunchContentSchema = Type.Object({
+  initialPrompt: Type.String(), images: Type.Optional(Type.Array(BacklogPromptImageSchema, { maxItems: 10 })),
+});
+export type BacklogLaunchContent = Static<typeof BacklogLaunchContentSchema>;
+export type BacklogImageSummary = Static<typeof BacklogImageSummarySchema>;
 export const BacklogDetailResponseSchema = Type.Object({
-  item: BacklogItemSchema, body: Type.String(), initialPrompt: Type.String(),
+  item: BacklogItemSchema, body: Type.String(), initialPrompt: Type.String(), imageSummary: Type.Optional(BacklogImageSummarySchema),
 });
 export type BacklogDetailResponse = Static<typeof BacklogDetailResponseSchema>;
 export const BacklogLaunchRequestSchema = Type.Object({
@@ -109,7 +122,7 @@ export type BacklogLaunchRequest = Static<typeof BacklogLaunchRequestSchema>;
 export const BacklogLaunchResponseSchema = Type.Object({
   session: Type.Object({ id: text, cwd: text }, { additionalProperties: false }),
   claim: BacklogClaimSchema,
-  initialPrompt: Type.String(), reused: Type.Boolean(),
+  ...BacklogLaunchContentSchema.properties, reused: Type.Boolean(),
 });
 export type BacklogLaunchResponse = Static<typeof BacklogLaunchResponseSchema>;
 export const BacklogReleaseRequestSchema = Type.Object({ claimId: text }, { additionalProperties: false });

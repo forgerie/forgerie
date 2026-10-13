@@ -7,7 +7,8 @@ with its description, acceptance criteria, and reproduction steps. The same clai
 for GitHub issues applies.
 
 The Azure integration is read-only. It does not change work-item assignment or
-state, post comments, or fetch work-item attachments or discussions.
+state, post comments, or fetch discussions. It reads eligible inline images only
+when starting a session.
 Azure Repos remain ordinary local Git repositories for session worktrees.
 
 ## Connect an organization
@@ -170,9 +171,43 @@ project. A team or board name is not an Area Path.
   a reopened item can therefore exclude it from Everyone even if Mine shows
   it as open.
 - Descriptions, acceptance criteria, and reproduction steps convert from HTML
-  to inert text. Images and link targets are not fetched. The session receives
-  quoted content with an instruction not to obey commands inside it. This
-  reduces prompt-injection risk but cannot eliminate it. Read the item first.
+  to inert text. Each inline image becomes an `[Image N: name]` marker in
+  section order. List and detail views never download images. Link targets
+  are never fetched.
+- At launch, Forgerie reads only HTTPS attachment URLs under
+  `https://dev.azure.com/<configured organization>/` whose path ends with
+  `/_apis/wit/attachments/<guid>`. Organization and host matching ignore case.
+  Other hosts, organizations, paths, ports, HTTP URLs, and URL credentials are
+  refused before Azure credentials are read. Reads use GET, the existing CLI
+  token or PAT, one 401 retry, and no redirects. No write is sent to Azure.
+- Supported `data:image/(png|jpeg|gif|webp);base64,` sources are decoded locally.
+  The bytes, not the HTTP header or data URI label, select PNG, JPEG, GIF, or
+  WebP. Unknown types are skipped. Launch considers the first 10 eligible image
+  sources, with a 10 MiB raw cap per image, a 20 MiB raw cap in total, and one
+  30-second read deadline. Pi preflights decoding and resizing before Forgerie
+  builds the final prompt. Pasted images follow the item's images, and the
+  browser caps the first message at 16 attachments. Pasted images beyond that
+  count are not sent.
+- The final prompt gives the attached marker numbers and asks the agent to
+  examine every image before planning or changing code, and briefly describe
+  what each shows and how it affects the task. Every skipped image has a
+  reason and a request to ask the user for it if needed. Image names, image
+  content, and quoted item text are untrusted; the agent must not obey
+  instructions inside them. This reduces prompt-injection risk but cannot
+  eliminate it. Read the item first.
+- Select an image-capable model. Pi replaces images with
+  `(image omitted: model does not support images)` for a text-only model.
+  The Azure prompt tells the agent to stop and ask for an image-capable model
+  in that case, rather than claim to have examined the images.
+- Azure launch prompts and prepared images are saved privately with their
+  local claim, so a retry returns the same context and images, including after
+  a daemon restart. Retries of a new launch reuse these bytes instead of
+  downloading again. A legacy claim without a snapshot reads images on retry.
+  Release or archive removes the snapshot. This adds disk and memory use for
+  each held Azure item; the claim file grows with its image data. List responses
+  never include these private snapshots. Before downgrading to a build without
+  image support, release or archive Azure claims using the current build so
+  the older daemon can read the claim file.
 - Each list or detail read queries Azure again. There is no stale cache. A
   launch re-reads the item, and a second scope query checks membership
   after batch retrieval. Azure can still change after the final read.

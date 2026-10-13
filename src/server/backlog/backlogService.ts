@@ -41,6 +41,10 @@ export class BacklogService {
     return { projects: projects.map((project, index) => ({ projectId: project.id, providers: scans[index]?.sources ?? [] })), items: scans.flatMap((scan) => scan.entries.map((entry) => entry.item)), warnings: warnings.filter((warning) => warning.provider !== "github" || warning.message !== GITHUB_LOGIN_WARNING || warning === loginWarning), generatedAt: new Date().toISOString() };
   }
   async detail(projectId: string, itemId: string, provider: BacklogProviderId = DEFAULT_PROVIDER, scope: BacklogScope = "mine"): Promise<BacklogDetailResponse> {
+    const { entry, selected } = await this.readEntry(projectId, itemId, provider, scope);
+    return { item: entry.item, body: entry.body, initialPrompt: selected.prompt(entry), ...(entry.imageSummary === undefined ? {} : { imageSummary: entry.imageSummary }) };
+  }
+  private async readEntry(projectId: string, itemId: string, provider: BacklogProviderId, scope: BacklogScope) {
     const selected = this.providers.find((candidate) => candidate.id === provider);
     if (selected === undefined) throw new BacklogError("not-found", `Backlog provider ${provider} is not enabled`);
     const project = await this.requireProject(projectId);
@@ -51,7 +55,7 @@ export class BacklogService {
     if (failure !== undefined) throw new BacklogError("unavailable", failure.message);
     const entry = scan.entries.find(({ item }) => item.id === itemId);
     if (entry === undefined) throw new BacklogError("not-found", "Backlog item not found or invalid");
-    return { ...entry, initialPrompt: selected.prompt(entry) };
+    return { entry, selected };
   }
   launch(projectId: string, itemId: string, input: BacklogLaunchRequest, provider: BacklogProviderId = DEFAULT_PROVIDER, scope: BacklogScope = "mine"): Promise<BacklogLaunchResponse> {
     const key = JSON.stringify([projectId, provider, itemId, input.requestId, scope]);
@@ -90,8 +94,8 @@ export class BacklogService {
     }
   }
   private async launchOnce(projectId: string, provider: BacklogProviderId, itemId: string, input: BacklogLaunchRequest, fingerprint: string, scope: BacklogScope): Promise<BacklogLaunchResponse> {
-    const detail = await this.detail(projectId, itemId, provider, scope);
-    const { item, initialPrompt } = detail;
+    const { entry, selected } = await this.readEntry(projectId, itemId, provider, scope);
+    const { item } = entry;
     const key = { repo: item.repo, provider, itemId };
     const existing = await this.deps.claims.get(key);
     if (existing !== undefined) {
@@ -100,13 +104,16 @@ export class BacklogService {
           await this.deps.claims.releaseSessions([existing.sessionId]);
           throw new BacklogError("conflict", "Launch session was archived; use a new requestId");
         }
-        return { session: { id: existing.sessionId, cwd: existing.cwd }, claim: existing, initialPrompt, reused: true };
+        const content = this.deps.claims.launchContent(existing.claimId)
+          ?? await selected.prepareLaunch?.(entry) ?? { initialPrompt: selected.prompt(entry) };
+        return { session: { id: existing.sessionId, cwd: existing.cwd }, claim: existing, ...content, reused: true };
       }
       throw new BacklogError("conflict", existing.kind === "interrupted" ? "Launch was interrupted. Inspect the setup/session and release the exact claim before retrying." : "Backlog item is already claimed", existing);
     }
     if (item.readiness !== "ready") throw new BacklogError("conflict", "Only open, unblocked backlog items can launch");
     const cwd = await realpath(input.start.cwd);
     if (await canonicalBacklogRoot(cwd) !== item.repo) throw new BacklogError("invalid-request", "Session destination must belong to the backlog item's project");
+    const content = await selected.prepareLaunch?.(entry) ?? { initialPrompt: selected.prompt(entry) };
     const reservation = await this.deps.claims.reserve({ ...key, projectId, cwd, requestId: input.requestId, fingerprint });
     let session;
     try {
@@ -117,7 +124,7 @@ export class BacklogService {
       throw error;
     }
     let claim;
-    try { claim = await this.deps.claims.bind(reservation.claimId, session.id, session.cwd, session.worktree?.branch); }
+    try { claim = await this.deps.claims.bind(reservation.claimId, session.id, session.cwd, session.worktree?.branch, provider === "azure-devops" ? content : undefined); }
     catch (error) {
       await this.deps.sessions.stop(session);
       // Keep the durable reservation. Restart marks it interrupted; explicit recovery cannot double-launch silently.
@@ -128,6 +135,6 @@ export class BacklogService {
       throw new BacklogError("conflict", "Session was archived during launch");
     }
     // The existing composer sends the returned prompt through the normal prompt endpoint.
-    return { session: { id: session.id, cwd: session.cwd }, claim, initialPrompt, reused: false };
+    return { session: { id: session.id, cwd: session.cwd }, claim, ...content, reused: false };
   }
 }

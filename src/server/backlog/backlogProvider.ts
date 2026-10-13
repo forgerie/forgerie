@@ -1,8 +1,14 @@
+import type { AzureWorkItemImageRef } from "../azureDevops/azureWorkItemImages.js";
+import type { BacklogImageSummary, BacklogLaunchContent } from "../../shared/backlog.js";
 import type { BacklogScope } from "../../shared/backlog.js";
 import type { BacklogConfig, BacklogItem, BacklogProviderId, BacklogWarning, Project } from "../../shared/apiTypes.js";
 
 export interface BacklogScanContext { scope: BacklogScope; githubLogin?: string }
-export interface ScannedBacklogItem { item: BacklogItem; body: string }
+export interface ScannedBacklogItem {
+  item: BacklogItem; body: string;
+  azureImages?: { organization: string; refs: AzureWorkItemImageRef[] };
+  imageSummary?: BacklogImageSummary;
+}
 export interface BacklogProviderScan { entries: ScannedBacklogItem[]; warnings: BacklogWarning[]; sources?: BacklogProviderId[] }
 
 /**
@@ -18,4 +24,6 @@ export interface BacklogProvider {
   scan(project: Project, repo: string, config: BacklogConfig | undefined, context?: BacklogScanContext): Promise<BacklogProviderScan>;
   /** The first prompt for a session dedicated to this item. */
   prompt(entry: ScannedBacklogItem): string;
+  /** Launch-only I/O. Scans and detail reads never download attachments. */
+  prepareLaunch?(entry: ScannedBacklogItem): Promise<BacklogLaunchContent>;
 }

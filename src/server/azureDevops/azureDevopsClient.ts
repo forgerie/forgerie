@@ -1,5 +1,8 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Check } from "typebox/value";
+import { AZURE_IMAGE_BYTES, AZURE_LAUNCH_IMAGE_BYTES, AZURE_LAUNCH_IMAGES, azureImageMime, azureImageSource, type AzureWorkItemImageRef } from "./azureWorkItemImages.js";
+import { base64ByteLength } from "../../shared/promptAttachments.js";
+import type { BacklogLaunchContent } from "../../shared/backlog.js";
 import type { BacklogAzureDevopsConfig, BacklogScope } from "../../shared/backlog.js";
 import type { AzureCredentialSource } from "./azureDevopsCredentials.js";
 import { azureDevopsRequest } from "./azureDevopsRequest.js";
@@ -24,6 +27,10 @@ export type AzureWorkItem = Static<typeof WorkItemSchema> & { category: string |
 export type AzureItemsResult = { ok: true; items: AzureWorkItem[]; truncated: boolean }
   | { ok: false; kind: "auth" | "unavailable"; message: string };
 
+export interface AzureImagesResult {
+  attached: { ref: AzureWorkItemImageRef; image: NonNullable<BacklogLaunchContent["images"]>[number] }[];
+  skipped: { ref: AzureWorkItemImageRef; reason: string }[];
+}
 interface Dependencies {
   credentials: AzureCredentialSource;
   fetch: (url: string, init: RequestInit) => Promise<Response>;
@@ -103,10 +110,64 @@ export class AzureDevopsClient {
     }
   }
 
-  private async request<T extends TSchema>(url: string, schema: T, organization: string, init: RequestInit): Promise<Static<T>> {
+  async workItemImages(organization: string, refs: readonly AzureWorkItemImageRef[]): Promise<AzureImagesResult> {
+    const result: AzureImagesResult = { attached: [], skipped: [] };
+    const signal = AbortSignal.timeout(30_000);
+    let total = 0;
+    let candidates = 0;
+    for (const ref of refs) {
+      const source = azureImageSource(ref.url, organization);
+      if (source.kind === "skipped") { result.skipped.push({ ref, reason: source.reason }); continue; }
+      if (candidates++ >= AZURE_LAUNCH_IMAGES) { result.skipped.push({ ref, reason: "10-image launch limit" }); continue; }
+      const remaining = Math.max(0, AZURE_LAUNCH_IMAGE_BYTES - total);
+      const cap = Math.min(AZURE_IMAGE_BYTES, remaining);
+      const limitReason = remaining < AZURE_IMAGE_BYTES ? "20 MiB launch size limit" : "10 MiB image size limit";
+      try {
+        signal.throwIfAborted();
+        if (cap === 0) throw new Error(limitReason);
+        let bytes: Buffer;
+        if (source.kind === "data") {
+          if (base64ByteLength(source.data) > cap) { result.skipped.push({ ref, reason: limitReason }); continue; }
+          bytes = Buffer.from(source.data, "base64");
+        } else {
+          const response = await this.response(source.url, organization.toLowerCase(), { method: "GET", redirect: "error", signal });
+          if (Number(response.headers.get("content-length")) > cap) { await response.body?.cancel(); result.skipped.push({ ref, reason: limitReason }); continue; }
+          const reader = response.body?.getReader();
+          if (reader === undefined) throw new Error("empty image response");
+          const chunks: Uint8Array[] = [];
+          let length = 0;
+          let tooLarge = false;
+          try {
+            for (;;) {
+              const next = await reader.read();
+              if (next.done) break;
+              length += next.value.length;
+              total += next.value.length;
+              if (length > cap) { tooLarge = true; break; }
+              chunks.push(next.value);
+            }
+          } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
+          if (tooLarge) { result.skipped.push({ ref, reason: limitReason }); continue; }
+          bytes = Buffer.concat(chunks);
+        }
+        if (source.kind === "data") total += bytes.length;
+        const mimeType = azureImageMime(bytes);
+        if (mimeType === undefined) { result.skipped.push({ ref, reason: "unsupported or unknown image type" }); continue; }
+        result.attached.push({ ref, image: { kind: "image", name: ref.name, mimeType, data: bytes.toString("base64") } });
+      } catch (error) {
+        result.skipped.push({ ref, reason: error instanceof AzureReadError ? error.message : signal.aborted ? "30-second image read deadline" : cap === 0 ? limitReason : "image read failed" });
+      }
+    }
+    return result;
+  }
+
+  private async response(url: string, organization: string, init: RequestInit): Promise<Response> {
+    const until = this.limitedUntil.get(organization) ?? 0;
+    if (until > this.now()) throw new AzureReadError("unavailable", "Azure DevOps rate limit reached; try again later.");
     const result = await azureDevopsRequest(this.deps.credentials, organization, url, init, this.deps.fetch);
     if (!result.ok) throw new AzureReadError("auth", result.message);
     const response = result.response;
+    if (response.redirected) { await response.body?.cancel(); throw new AzureReadError("unavailable", "Attachment redirects are not allowed."); }
     if (!response.ok) {
       await response.body?.cancel();
       if (response.status === 403) throw new AzureReadError("auth", `Azure DevOps denied access. Check your project permissions and the PAT's Work Items: Read scope if using a PAT. ${this.deps.credentials.fixMessage(organization)}`);
@@ -120,6 +181,11 @@ export class AzureDevopsClient {
       }
       throw new AzureReadError("unavailable", `Azure DevOps answered HTTP ${String(response.status)}. Check the organization and project, then refresh the backlog.`);
     }
+    return response;
+  }
+
+  private async request<T extends TSchema>(url: string, schema: T, organization: string, init: RequestInit): Promise<Static<T>> {
+    const response = await this.response(url, organization, init);
     // Bound memory even when a proxy returns an HTML login page or an unexpectedly large description.
     const reader = response.body?.getReader();
     if (reader === undefined) throw new AzureReadError("unavailable", "Azure DevOps returned an empty response.");

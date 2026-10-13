@@ -61,7 +61,11 @@ export const backlogListSchema = z.object({
 });
 export type BacklogList = z.infer<typeof backlogListSchema>;
 
-export const backlogDetailSchema = z.object({ item: backlogItemSchema, body: z.string(), initialPrompt: z.string() });
+export const backlogDetailSchema = z.object({ item: backlogItemSchema, body: z.string(), initialPrompt: z.string(),
+  imageSummary: z.object({ count: z.number().int().nonnegative(), eligibleCount: z.number().int().nonnegative(),
+    skipped: z.array(z.object({ index: z.number().int().positive(), name: z.string(), reason: z.string() })),
+  }).optional(),
+});
 export type BacklogDetail = z.infer<typeof backlogDetailSchema>;
 
 export const backlogLaunchSchema = z.object({
@@ -69,6 +73,7 @@ export const backlogLaunchSchema = z.object({
   claim: backlogClaimSchema,
   initialPrompt: z.string(),
   reused: z.boolean().catch(false),
+  images: z.array(z.object({ kind: z.literal("image"), mimeType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"]), data: z.string(), name: z.string().optional() })).max(10).optional(),
 });
 
 export const backlogErrorSchema = z.object({

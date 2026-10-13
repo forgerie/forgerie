@@ -61,3 +61,16 @@ describe("durable backlog claims", () => {
     expect((await claims.list())[0]?.kind).toBe("launching");
   });
 });
+
+it("keeps private launch images across restart, never includes them in claims, and removes them with ownership", async () => {
+  const file = await path(); const claims = new BacklogClaimStore(file); await claims.initialize();
+  const reservation = await claims.reserve({ ...input, provider: "azure-devops" });
+  const content = { initialPrompt: "Examine every image", images: [{ kind: "image" as const, mimeType: "image/png" as const, data: "aGVsbG8=", name: "image.png" }] };
+  await claims.bind(reservation.claimId, "image-session", "/repo", undefined, content);
+  const restarted = new BacklogClaimStore(file); await restarted.initialize();
+  expect(restarted.launchContent(reservation.claimId)).toEqual(content);
+  expect(JSON.stringify(await restarted.list())).not.toContain("aGVsbG8=");
+  await restarted.releaseSessions(["image-session"]);
+  expect(restarted.launchContent(reservation.claimId)).toBeUndefined();
+  expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ version: 1, claims: [] });
+});

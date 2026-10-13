@@ -296,6 +296,10 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
   return <SettingsFrame back={back} title={item.title} actions={<>{primary}{commands}<CloseButton onClose={onClose} /></>}
     error={typeof release === "object" ? `Could not release the item: ${release.error}` : undefined}>
     <article className="bl-item">
+      {azure && !claim && detail.value.imageSummary && detail.value.imageSummary.count > 0 ? <div>
+        <p className="settings-hint">{detail.value.imageSummary.eligibleCount} {detail.value.imageSummary.eligibleCount === 1 ? "image" : "images"} will be given to the agent if Azure can read them and Pi can decode them. Size and read failures are reported in the first message. Select an image-capable model.</p>
+        {detail.value.imageSummary.skipped.map((image) => <p className="settings-hint" key={image.index}>Image {image.index} ({image.name}) cannot be attached: {image.reason}.</p>)}
+      </div> : null}
       {holder && claim ? <div className="bl-claim" data-state={holder.state}>
         <Mark holder={holder} />
         <div className="bl-claim-text">

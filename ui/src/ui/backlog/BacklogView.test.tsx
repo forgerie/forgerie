@@ -317,3 +317,15 @@ it("persists the scope control and shows You and assignees in Everyone", async (
   expect(button("Everyone")!.getAttribute("aria-pressed")).toBe("true");
   window.localStorage.clear();
 });
+
+it("shows Azure image delivery and known omissions beside the session action without loading images", async () => {
+  const entry = item({ id: "amazeinsights:7", provider: "azure-devops" });
+  const { b } = binding(list([entry]));
+  b.api.detail = async () => ({ item: entry, body: "Before [Image 1: screenshot] after", initialPrompt: "", imageSummary: { count: 2, eligibleCount: 1,
+    skipped: [{ index: 2, name: "external", reason: "not an allowed Azure attachment URL for this organization" }] } });
+  await render({ item: { projectId: "p1", itemId: entry.id, provider: "azure-devops" } }, b);
+  expect(document.body.textContent).toContain("1 image will be given to the agent");
+  expect(document.body.textContent).toContain("Image 2 (external) cannot be attached");
+  expect(document.body.textContent).toContain("Select an image-capable model");
+  expect(document.querySelector("img")).toBeNull(); expect(button("Start session")).toBeDefined();
+});
