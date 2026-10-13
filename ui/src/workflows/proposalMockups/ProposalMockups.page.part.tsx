@@ -1,4 +1,5 @@
-import { workflowProposalSchema } from "../workflowsModel";
+import { workflowProposalSchema, type WorkflowStage } from "../workflowsModel";
+import { withModel, withWorkers } from "./routeEdits";
 import { CHANGES_NOTE, FLAKY_HUNT, fromRecord, type MockProposal } from "./planDocument";
 import { PlanPage, ProposalSheet } from "./ProposalSheet";
 
@@ -20,6 +21,16 @@ const REWRITTEN = "unzen-nzbfast-switch.rewritten";
 const missing = <p style={{ padding: 24 }}>Copy a proposal record into proposalMockups/local/ to see it here.</p>;
 const real = (key: string, show: (proposal: MockProposal) => React.ReactNode) => { const proposal = local[key]; return proposal === undefined ? missing : show(proposal); };
 
+/** The reader's route edits, as a function of the agent's route. */
+const setModel = (stage: string, worker: string, model: string) => (stages: readonly WorkflowStage[]) => stages.map((s) => s.id !== stage ? s
+  : withWorkers(s, (s.workers ?? []).map((w) => w.name === worker ? withModel(w, model) : w)));
+const RESHAPED = (stages: readonly WorkflowStage[]): WorkflowStage[] => {
+  const modelled = setModel("port", "api", "anthropic/claude-opus-4-5:high")(stages);
+  const withScout = modelled.map((s) => s.id === "shape" ? withWorkers(s, [{ name: "scout", agent: "scout", model: "anthropic/claude-haiku-4-5" }]) : s);
+  const at = withScout.findIndex((s) => s.id === "review") + 1;
+  return [...withScout.slice(0, at), { id: "docs", name: "Docs", does: "This chat updates the settings docs to match the store." }, ...withScout.slice(at)];
+};
+
 export default function Review() { return <ProposalSheet />; }
 export function RealOriginal() { return real(ORIGINAL, (p) => <ProposalSheet proposal={p} />); }
 export function RealRewritten() { return real(REWRITTEN, (p) => <ProposalSheet proposal={p} />); }
@@ -27,6 +38,14 @@ export function RealOriginalAtTrial() { return real(ORIGINAL, (p) => <ProposalSh
 export function RealRewrittenAtTrial() { return real(REWRITTEN, (p) => <ProposalSheet proposal={p} at="trial" />); }
 export function RealPlanOriginal() { return real(ORIGINAL, (p) => <PlanPage proposal={p} />); }
 export function RealPlanRewritten() { return real(REWRITTEN, (p) => <PlanPage proposal={p} />); }
+export function ModelChanged() { return <ProposalSheet route={setModel("port", "api", "anthropic/claude-opus-4-5:high")} />; }
+export function RouteEditing() { return <ProposalSheet route={RESHAPED} editing />; }
+export function RouteChanged() { return <ProposalSheet route={RESHAPED} />; }
+export function RouteChangedAtShape() { return <ProposalSheet route={RESHAPED} at="shape" />; }
+export function UpdateThePlan() { return <ProposalSheet route={RESHAPED} changing />; }
+export function RealRewrittenEdited() { return real(REWRITTEN, (p) => <ProposalSheet proposal={p} editing
+  route={(stages) => setModel("build", "build", "anthropic/claude-opus-4-5:high")(stages).map((s) => s.id === "recon"
+    ? withWorkers(s, (s.workers ?? []).filter((w) => w.name !== "upstream-scout")) : s)} />); }
 export function AtAStage() { return <ProposalSheet at="port" />; }
 export function EditedInputs() { return <ProposalSheet edits={{ base: "next", rounds: "3" }} />; }
 export function InputsOpen() { return <ProposalSheet inputsOpen edits={{ rounds: "3" }} />; }
