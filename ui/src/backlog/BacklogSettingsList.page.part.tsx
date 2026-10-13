@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ChevronLeftIcon, XIcon } from "lucide-react";
 import type { StateChecks } from "@simonwjackson/caliper/checks";
 import { BacklogSettingsList } from "./BacklogSettingsList";
 import { catalogWith, notRoutedSource, overlapping, routedSource } from "./fixtures/backlogSources";
@@ -16,10 +17,13 @@ export const checks = {
   },
 } satisfies StateChecks;
 
+// The page's real header neighbours, so the frame shows whether Add still fits beside them.
+const back = <button type="button" className="settings-back"><ChevronLeftIcon aria-hidden size={16} />Settings</button>;
+const close = <button type="button" className="picker-icon" aria-label="Close settings"><XIcon aria-hidden size={16} /></button>;
 function Stateful({ catalog }: { catalog: BacklogSettingsCatalog }) {
   const [login, setLogin] = useState(catalog.settings.githubLogin ?? "");
   const [opened, setOpened] = useState<string>();
-  return <BacklogSettingsList back={null} close={null} load={{ type: "ready", value: catalog }} error={opened ? `Opens ${opened}` : undefined} busy={false}
+  return <BacklogSettingsList back={back} close={close} load={{ type: "ready", value: catalog }} error={opened ? `Opens ${opened}` : undefined} busy={false}
     login={login} onLogin={setLogin} onSaveLogin={() => undefined} onOpen={setOpened} onReload={() => setOpened(undefined)} />;
 }
 export default function RoutedSource() { return <Stateful catalog={catalogWith([routedSource])} />; }

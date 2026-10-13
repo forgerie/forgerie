@@ -8,7 +8,7 @@ import { SettingsInput } from "../ui/settings/SettingsInput";
 import { Lede } from "../ui/Lede";
 import { ListSection } from "../ui/ListSection";
 import { ActionFooter } from "../ui/ActionFooter";
-import { TextButton } from "../ui/TextButton";
+import { HeaderButton } from "../ui/HeaderButton";
 import { backlogSettingsOrigin, sourceBoard, sourceDestinationText, sourceSelection } from "./backlogSettingsModel";
 
 /**
@@ -19,13 +19,16 @@ export function BacklogSettingsList({ back, close, load, error, busy, login, onL
   back: ReactNode; close: ReactNode; load: { type: "loading" } | { type: "failed"; message: string } | { type: "ready"; value: BacklogSettingsCatalog };
   error: string | undefined; busy: boolean; login: string; onLogin: (login: string) => void; onSaveLogin: () => void; onOpen: (id: string) => void; onReload: () => void;
 }) {
-  return <SettingsFrame title="Backlog" back={back} actions={close} error={error ?? (load.type === "failed" ? load.message : undefined)} recovery={<button onClick={onReload}>Reload</button>}>
+  // Adding a source is the page's one main action, so it sits in the header, where scrolling cannot take it away.
+  return <SettingsFrame title="Backlog" back={back} actions={<>
+    <HeaderButton label="Add Azure DevOps source" icon={<PlusIcon aria-hidden size={16} />} disabled={busy || load.type !== "ready"} onPress={() => onOpen(sourceSelection(undefined))} />
+    {close}
+  </>} error={error ?? (load.type === "failed" ? load.message : undefined)} recovery={<button onClick={onReload}>Reload</button>}>
     {load.type === "loading" ? <Lede>Reading backlog settings…</Lede> : load.type === "ready" ? <>
       <SettingsField label="GitHub username" hint="Mine shows issues assigned to this username. This is not a credential."><SettingsInput label="GitHub username" value={login} onChange={onLogin} disabled={busy} /></SettingsField>
       <ActionFooter actions={[{ label: "Save username", disabled: busy || login === (load.value.settings.githubLogin ?? ""), onPress: onSaveLogin }]} />
       <Lede>An Azure DevOps board is a source of its own: each work item shows once, and its session starts in the source's destination. Markdown files and GitHub issues belong to their project. Credentials stay in private files on the server.</Lede>
-      <ListSection title="Sources" empty="No Azure DevOps boards yet."
-        foot={<TextButton label="Add Azure DevOps source" icon={<PlusIcon aria-hidden size={16} />} disabled={busy} onPress={() => onOpen(sourceSelection(undefined))} />}>
+      <ListSection title="Sources" empty="No Azure DevOps boards yet. Use Add Azure DevOps source to list one.">
         {load.value.settings.sources.map((source) => <SettingsRow key={source.id} name={source.project} meta={sourceBoard(source)}
           description={sourceDestinationText(source, load.value.projects)}
           flags={source.warnings.length ? source.warnings.map((warning) => <span key={warning} data-tone="error">{warning}</span>) : undefined}
