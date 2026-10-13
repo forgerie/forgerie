@@ -146,7 +146,22 @@ export async function gateToolCall(options: GatedActionsExtensionOptions, call: 
   return blocked(id);
 }
 const blocked = (id: string) => `Blocked until the user approves (gate ${id}). Keep working on anything that does not depend on it; you will get the result as a message.`;
-function preview(tool: string, args: Record<string, unknown>): string { return (typeof args["command"] === "string" ? args["command"] : `${tool} ${JSON.stringify(args)}`).slice(0, 4000); }
+function preview(tool: string, args: Record<string, unknown>): string {
+  const command = typeof args["command"] === "string" ? redactPreviewText(args["command"]) : `${tool} ${JSON.stringify(redactPreviewValue(args))}`;
+  return command.slice(0, 4000);
+}
+function redactPreviewText(text: string): string {
+  return text.replace(/(https?:\/\/)[^@\s/"']+@/giu, "$1[redacted]@")
+    .replace(/(--(?:password|passwd|token|api[-_]?key|access[-_]?token|secret)(?:=|\s+))(?:'[^']*'|"[^"]*"|[^\s;|&]+)/giu, "$1[redacted]")
+    .replace(/(Authorization:\s*)(?:(?:Bearer|Basic)\s+)?[^\s'";\\]+/giu, "$1[redacted]");
+}
+function redactPreviewValue(value: unknown): unknown {
+  if (typeof value === "string") return redactPreviewText(value);
+  if (Array.isArray(value)) return value.map(redactPreviewValue);
+  if (typeof value === "object" && value !== null) return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key,
+    /^(?:password|passwd|token|api[-_]?key|access[-_]?token|authorization|secret)$/iu.test(key) ? "[redacted]" : redactPreviewValue(entry)]));
+  return value;
+}
 export async function decideGatedAction(harness: Harness, parent: Conversation, id: string, choice: "approved" | "refused", context: Context): Promise<GatedAction> {
   const record = await parent.commit(async tx => {
     const doc = await tx.doc(Gates, parent.id);

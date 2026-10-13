@@ -10,6 +10,8 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { AssistantEntry, ToolTask, createRegistry, defineExtension, defineTool, UsageDoc, type ConversationId, type TaskId } from "@earendil-works/pi-durable";
+import { Check } from "typebox/value";
+import { GatedActionEntrySchema } from "../../shared/gatedActions.js";
 import { Type } from "typebox";
 import { afterEach, expect, it, vi } from "vitest";
 import { defaultAutonomyPolicy } from "../../shared/autonomyPolicy.js";
@@ -198,4 +200,20 @@ it("records approved tool spend on the originating conversation once", async () 
   await vi.waitFor(async () => { expect((await f.journal.harness.snapshot(UsageDoc, f.journal.conversation.id, context))?.tools["mcp_ebay_seller_update"]?.totalTokens).toBe(3); });
   await f.reopen(); f.journal.harness.resume(); await sleep(30);
   expect((await f.journal.harness.snapshot(UsageDoc, f.journal.conversation.id, context))?.tools["mcp_ebay_seller_update"]?.totalTokens).toBe(3);
+});
+
+it("redacts obvious secrets only in the card preview, preserving exact saved arguments", async () => {
+  const f = await fixture();
+  const value = `https://user:URL_SECRET@example.invalid/path --password="PASSWORD SECRET" --token=TOKEN_SECRET Authorization: Bearer HEADER_SECRET`;
+  const task = await call(f.journal, "mcp_ebay_seller_update", {value}); f.journal.harness.resume(); await f.journal.harness.waitForTask(task, context);
+  const gate = (await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0];
+  expect(gate?.args).toEqual({value});
+  const entry = (await f.journal.conversation.context(context)).entries.find(item => item.kind === "forgerie.gated-action");
+  if (!Check(GatedActionEntrySchema, entry?.data)) throw new Error("Missing gated preview");
+  expect(entry.data.command).toContain("[redacted]"); expect(entry.data.command).toContain("example.invalid/path");
+  for (const secret of ["URL_SECRET", "PASSWORD SECRET", "TOKEN_SECRET", "HEADER_SECRET"]) expect(entry.data.command).not.toContain(secret);
+  if (gate === undefined) throw new Error("Missing gate");
+  await decideGatedAction(f.journal.harness, f.journal.conversation, gate.id, "approved", context);
+  await vi.waitFor(async () => { expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.state.kind).toBe("ran"); });
+  expect(await readFile(join(f.root, "effect"), "utf8")).toBe(value);
 });

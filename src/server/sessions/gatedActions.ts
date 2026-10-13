@@ -31,33 +31,37 @@ export async function gatedAction(name: string, args: Record<string, unknown>, c
 }
 
 async function shellAction(command: string, cwd: string, reads: GatedActionReads, depth: number): Promise<GatedActionMatch | undefined> {
-  let folder = cwd;
-  for (let tokens of shellCommands(command)) {
-    let overriddenGitState = tokens.some(token => /^(?:GIT_DIR|GIT_WORK_TREE|GIT_CONFIG_COUNT)=/u.test(token));
-    while (tokens[0] !== undefined && /^[A-Za-z_][A-Za-z_0-9]*=/u.test(tokens[0])) tokens = tokens.slice(1);
-    while (["command", "exec", "env"].includes(tokens[0] ?? "")) {
-      tokens = tokens.slice(1);
-      while (tokens[0] !== undefined && (/^[A-Za-z_][A-Za-z_0-9]*=/u.test(tokens[0]) || tokens[0] === "--")) tokens = tokens.slice(1);
-    }
+  let folder = cwd; let uncertainCwd = false;
+  for (const words of shellCommands(command)) {
+    const normalized = normalizeCommand(words, folder);
+    if (normalized === undefined) continue;
+    const tokens = normalized.tokens;
+    let overriddenGitState = normalized.unknownGitState;
+    const commandCwd = normalized.cwd;
     const executable = tokens.shift()?.split("/").at(-1);
-    if (executable === "cd" && tokens[0] !== undefined) { folder = resolve(folder, tokens[0]); continue; }
+    if (executable === "cd") {
+      uncertainCwd ||= tokens[0] === undefined || normalized.unknownGitState || /[|&()`]/u.test(command);
+      if (tokens[0] !== undefined) folder = resolve(commandCwd, tokens[0]);
+      continue;
+    }
     if ((executable === "bash" || executable === "sh") && depth === 0) {
       const index = tokens.findIndex(t => /^-[^-]*c/u.test(t));
       const script = tokens[index + 1];
-      if (index >= 0 && script !== undefined) { const found = await shellAction(script, folder, reads, depth + 1); if (found !== undefined) return found; }
+      if (index >= 0 && script !== undefined) { const found = await shellAction(script, commandCwd, reads, depth + 1); if (found !== undefined) return found; }
     }
-    if (executable === "npm" && operands(tokens, ["--prefix", "--workspace", "-w", "--registry", "--userconfig"])[0] === "publish") return match("publish", "Publish an npm package (including dry-run)");
+    if (executable === "npm" && npmCommand(tokens) === "publish") return match("publish", "Publish an npm package (including dry-run)");
     if (executable === "git") {
-      let gitCwd = folder;
+      let gitCwd = commandCwd;
       while (tokens[0]?.startsWith("-") === true) {
         const option = tokens.shift();
         if (option === "-C") { gitCwd = resolve(gitCwd, tokens.shift() ?? "."); }
         else if (option?.startsWith("-C") === true) gitCwd = resolve(gitCwd, option.slice(2));
         else if (option === "-c" || option === "--git-dir" || option === "--work-tree") { overriddenGitState = true; tokens.shift(); }
+        else if (option?.startsWith("-c") === true) overriddenGitState = true;
         else if (option?.startsWith("--git-dir=") === true || option?.startsWith("--work-tree=") === true || option?.startsWith("--config-env=") === true) overriddenGitState = true;
       }
       const action = tokens.shift();
-      const found = await gitAction(action, tokens, gitCwd, overriddenGitState ? {...reads, git: unavailableReads.git.bind(unavailableReads)} : reads);
+      const found = await gitAction(action, tokens, gitCwd, (overriddenGitState || uncertainCwd) ? {...reads, git: unavailableReads.git.bind(unavailableReads)} : reads);
       if (found !== undefined) return found;
     }
     if (executable === "gh") {
@@ -72,19 +76,72 @@ async function shellAction(command: string, cwd: string, reads: GatedActionReads
         const hostIndex = tokens.indexOf("--hostname");
         const host = hostIndex < 0 ? tokens.find(t => t.startsWith("--hostname="))?.slice(11) : tokens[hostIndex + 1];
         if (host !== undefined && host !== "github.com") return match("github-merge-close", "Close an issue on an unconfirmed GitHub host");
-        try { if ((await reads.issueLabels(folder, words[2] ?? "", repo)).includes("agent-filed")) continue; } catch { /* Gate unknown ownership. */ }
+        try { if ((await reads.issueLabels(commandCwd, words[2] ?? "", repo)).includes("agent-filed")) continue; } catch { /* Gate unknown ownership. */ }
         return match("github-merge-close", `Close issue ${words[2] ?? ""}`.trim());
       }
     }
   }
   return undefined;
 }
+const WRAPPERS = new Set(["command", "exec", "env", "nice", "nohup", "time", "sudo", "!"]);
+const WRAPPER_VALUES: Record<string, readonly string[]> = {
+  command: [], exec: ["-a"], env: ["-u", "--unset", "-C", "--chdir", "-S", "--split-string"],
+  nice: ["-n", "--adjustment"], nohup: [], time: ["-f", "--format", "-o", "--output"],
+  sudo: ["-u", "--user", "-g", "--group", "-h", "--host", "-p", "--prompt", "-C", "--close-from", "-T", "--command-timeout", "-R", "--chroot", "-D", "--chdir", "-r", "--role", "-t", "--type"],
+};
+function normalizeCommand(words: readonly string[], cwd: string): {tokens: string[]; cwd: string; unknownGitState: boolean} | undefined {
+  let tokens = [...words]; let folder = cwd; let unknownGitState = words.some(word => word.includes("<substitution>") || word.includes("$"));
+  for (;;) {
+    while (tokens[0] !== undefined && /^[A-Za-z_][A-Za-z_0-9]*=/u.test(tokens[0])) {
+      unknownGitState ||= tokens[0].startsWith("GIT_"); tokens.shift();
+    }
+    const wrapper = tokens[0]?.split("/").at(-1) ?? "";
+    if (!WRAPPERS.has(wrapper)) return {tokens, cwd: folder, unknownGitState};
+    tokens.shift();
+    if (wrapper === "sudo") unknownGitState = true;
+    while (tokens[0]?.startsWith("-") === true) {
+      const option = tokens.shift() ?? "";
+      if (option === "--") break;
+      if (option === "--help" || option === "--version" || (wrapper === "command" && /^-[^-]*[vV]/u.test(option))) return undefined;
+      const valued = (WRAPPER_VALUES[wrapper] ?? []).find(key => option === key || option.startsWith(`${key}=`) || (key.length === 2 && option.startsWith(key)));
+      const value = valued === undefined ? undefined : option === valued ? tokens.shift() : option.slice(valued.length).replace(/^=/u, "");
+      if (wrapper === "env") {
+        if (option === "-i" || option === "--ignore-environment" || ((valued === "-u" || valued === "--unset") && value?.startsWith("GIT_") === true)) unknownGitState = true;
+        if ((valued === "-C" || valued === "--chdir") && value !== undefined) folder = resolve(folder, value);
+        if ((valued === "-S" || valued === "--split-string") && value !== undefined) tokens = [...shellCommands(value).flat(), ...tokens];
+      }
+      if (wrapper === "sudo" && (valued === "-D" || valued === "--chdir") && value !== undefined) folder = resolve(folder, value);
+    }
+  }
+}
+const NPM_VALUE_OPTIONS = new Set(["--access", "--tag", "--otp", "--prefix", "--workspace", "-w", "--registry", "--userconfig", "--globalconfig", "--cache", "--loglevel", "--scope", "--auth-type", "--fetch-retries", "--fetch-timeout", "--proxy", "--https-proxy", "--node-options", "--script-shell"]);
+const NPM_BOOLEAN_OPTIONS = new Set(["--dry-run", "--force", "--global", "-g", "--silent", "-s", "--verbose", "--json", "--ignore-scripts", "--foreground-scripts", "--workspaces", "--include-workspace-root", "--audit", "--fund", "--package-lock", "--package-lock-only", "--save", "--save-dev", "--save-exact", "--legacy-peer-deps", "--offline", "--prefer-offline", "--prefer-online", "--yes", "-y", "--color", "--unicode", "--timing", "--progress"]);
+function npmCommand(tokens: readonly string[]): string | undefined {
+  for (let i = 0; i < tokens.length; i++) {
+    const option = tokens[i] ?? "";
+    if (option === "--") return tokens[i + 1];
+    if (!option.startsWith("-")) return option;
+    if (option.includes("=") || option.startsWith("--no-") || (option.startsWith("-w") && option !== "-w") || /^-[gsfy]+$/u.test(option) || NPM_BOOLEAN_OPTIONS.has(option)) continue;
+    // Unknown boolean flags must not consume a visible publish command as an option value.
+    if (NPM_VALUE_OPTIONS.has(option) || (tokens[i + 1] !== "publish" && tokens[i + 1]?.startsWith("-") === false)) i++;
+  }
+  return undefined;
+}
+function optionValue(tokens: readonly string[], name: string): string | undefined {
+  let value: string | undefined;
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] === name) value = tokens[++i];
+    else if (tokens[i]?.startsWith(`${name}=`) === true) value = tokens[i]?.slice(name.length + 1);
+  }
+  return value;
+}
 function operands(tokens: readonly string[], valued: readonly string[] = []): string[] {
-  const result: string[] = [];
+  const result: string[] = []; let afterSeparator = false;
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]; if (t === undefined) continue;
-    if (valued.includes(t)) { i++; continue; }
-    if (!t.startsWith("-") || t === "-") result.push(t);
+    if (t === "--" && !afterSeparator) { afterSeparator = true; continue; }
+    if (!afterSeparator && valued.includes(t)) { i++; continue; }
+    if (afterSeparator || !t.startsWith("-") || t === "-") result.push(t);
   }
   return result;
 }
@@ -93,29 +150,44 @@ async function gitAction(action: string | undefined, tokens: string[], cwd: stri
     const words = operands(tokens, ["--repo", "--receive-pack", "--exec", "--push-option", "-o"]);
     if (flag(tokens, "--delete", "d") || words.some(t => t.startsWith(":"))) return match("delete-remote", "Delete a remote Git ref");
     if (flag(tokens, "--force", "f") || flag(tokens, "--force-with-lease") || flag(tokens, "--force-if-includes") || words.some(t => t.startsWith("+"))) return match("force-push", "Force-push Git refs");
-    if (flag(tokens, "--all") || flag(tokens, "--mirror")) return match("force-push", "Push all branches, including the default branch");
-    if (flag(tokens, "--tags")) return undefined;
+    if (flag(tokens, "--all") || flag(tokens, "--branches") || flag(tokens, "--mirror")) return match("force-push", "Push all branches, including the default branch");
+    const remoteOption = optionValue(tokens, "--repo");
+    const remote = remoteOption ?? words[0] ?? "origin";
+    const refs = remoteOption === undefined ? words.slice(1) : words;
+    if (refs.length === 0) return flag(tokens, "--tags") ? undefined : match("force-push", "Push Git refs with unknown implicit destination");
     try {
-      const remote = words[0] ?? "origin";
-      let defaultBranch: string;
-      try { defaultBranch = (await reads.git(cwd, ["symbolic-ref", `refs/remotes/${remote}/HEAD`])).trim().replace(`refs/remotes/${remote}/`, ""); }
-      catch {
-        defaultBranch = (await reads.git(cwd, ["for-each-ref", "--format=%(refname:short)", "refs/heads/main", "refs/heads/master"])).trim().split("\n")[0] ?? "";
-      }
+      const prefix = `refs/remotes/${remote}/`;
+      const remoteHead = (await reads.git(cwd, ["symbolic-ref", `${prefix}HEAD`])).trim();
+      if (!remoteHead.startsWith(prefix) || remoteHead === `${prefix}HEAD`) throw new Error("Default branch unknown");
+      const defaultBranch = remoteHead.slice(prefix.length);
       if (defaultBranch === "") throw new Error("Default branch unknown");
-      const refs = words.slice(1);
-      const branch = refs.length === 0 || refs.includes("HEAD") ? (await reads.git(cwd, ["symbolic-ref", "--short", "HEAD"])).trim() : "";
-      if ((refs.length === 0 ? [branch] : refs).some(ref => {
+      const branch = refs.includes("HEAD") ? (await reads.git(cwd, ["symbolic-ref", "--short", "HEAD"])).trim() : "";
+      if (refs.includes("HEAD") && branch === "") throw new Error("HEAD destination unknown");
+      if (refs.some(ref => {
         const destination = (ref.includes(":") ? ref.split(":")[1] : ref)?.replace(/^refs\/heads\//u, "");
-        return destination === defaultBranch || (destination === "HEAD" && branch === defaultBranch) || destination?.includes("*") === true;
+        return destination === "" || destination === defaultBranch || (destination === "HEAD" && branch === defaultBranch) || destination?.includes("*") === true;
       })) return match("force-push", `Push to default branch ${defaultBranch}`);
     } catch { return match("force-push", "Push Git refs with unknown default branch"); }
   }
   if (action === "reset" && flag(tokens, "--hard")) return match("destroy-local", "Discard local changes with git reset --hard");
   // ADR 0003 gates git clean, including an interactive clean. Preview-only clean is read-only.
   if (action === "clean" && !flag(tokens, "--dry-run", "n")) return match("destroy-local", "Remove untracked files with git clean");
-  if (action === "restore" || (action === "checkout" && tokens.includes("--"))) {
-    const paths = tokens.includes("--") ? tokens.slice(tokens.indexOf("--") + 1) : operands(tokens, ["--source", "-s"]);
+  if (action === "restore" || action === "checkout") {
+    let paths: string[];
+    if (action === "checkout" && (flag(tokens, "--force", "f") || flag(tokens, "--patch", "p"))) paths = [];
+    else if (tokens.includes("--")) paths = tokens.slice(tokens.indexOf("--") + 1);
+    else {
+      paths = operands(tokens, ["--source", "-s", "-b", "-B", "--orphan"]);
+      if (action === "checkout") {
+        if (paths.length === 0) return undefined;
+        try {
+          if ((await reads.git(cwd, ["rev-parse", "--verify", "--quiet", "--end-of-options", `${paths[0] ?? ""}^{tree}`])).trim() !== "") {
+            if (paths.length === 1) return undefined; // Ordinary branch/tree-ish switch, without force.
+            paths = paths.slice(1);
+          }
+        } catch { /* Non-revisions may be checkout pathspecs; status must prove them clean. */ }
+      }
+    }
     try { if ((await reads.git(cwd, ["status", "--porcelain", "--", ...paths])).trim() === "") return undefined; } catch { /* Unknown is not clean. */ }
     return match("destroy-local", `Discard changes with git ${action}`);
   }
@@ -125,9 +197,9 @@ async function gitAction(action: string | undefined, tokens: string[], cwd: stri
     try { if (path !== undefined && (await reads.git(resolve(cwd, path), ["status", "--porcelain"])).trim() === "") return undefined; } catch { /* Gate unreadable worktrees. */ }
     return match("destroy-local", "Remove a dirty or unreadable Git worktree");
   }
-  if (action === "branch" && tokens.some(t => /^-[^-]*D/u.test(t))) {
+  if (action === "branch" && (tokens.some(t => /^-[^-]*D/u.test(t)) || (flag(tokens, "--delete", "d") && flag(tokens, "--force", "f")))) {
     try {
-      const merged = (await reads.git(cwd, ["branch", "--merged", "--format=%(refname:short)"])).trim().split("\n");
+      const merged = (await reads.git(cwd, ["branch", "--format=%(refname:short)", "--merged", "HEAD"])).trim().split("\n");
       if (operands(tokens).every(t => merged.includes(t))) return undefined;
     } catch { /* Unknown is not merged. */ }
     return match("destroy-local", "Delete an unmerged Git branch");
@@ -135,22 +207,27 @@ async function gitAction(action: string | undefined, tokens: string[], cwd: stri
   return undefined;
 }
 
-/** Quote-aware tokenisation, not shell execution. Heredoc bodies are data, not executable command lines. */
-function shellCommands(script: string): string[][] {
-  const lines = script.split("\n"); const code: string[] = []; const delimiters: string[] = [];
-  const shellBodies: string[][] = []; let executesBody = false; let body: string[] = [];
+/** Quote-aware recognition, not shell execution. Only unquoted heredocs expand substitutions. */
+function shellCommands(script: string, readSubstitutions = true): string[][] {
+  const lines = script.split("\n"); const code: string[] = [];
+  const delimiters: {word: string; quoted: boolean; shell: boolean}[] = [];
+  const shellBodies: string[][] = []; const substitutions: string[][] = []; let body: string[] = [];
   for (const line of lines) {
-    if (delimiters.length > 0) {
-      if (line.replace(/^\t+/u, "") === delimiters[0]) {
-        delimiters.shift();
-        if (executesBody) shellBodies.push(["bash", "-c", body.join("\n")]);
-        executesBody = false; body = [];
+    const delimiter = delimiters[0];
+    if (delimiter !== undefined) {
+      if (line.replace(/^\t+/u, "") === delimiter.word) {
+        delimiters.shift(); const content = body.join("\n");
+        if (delimiter.shell) shellBodies.push(["bash", "-c", content]);
+        if (!delimiter.quoted && readSubstitutions) substitutions.push(...heredocSubstitutions(content));
+        body = [];
       } else body.push(line);
       continue;
     }
     code.push(line);
-    executesBody = /^\s*(?:bash|sh)\s+.*<</u.test(line);
-    for (const found of line.matchAll(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z_0-9]*)\1/gu)) if (found[2] !== undefined) delimiters.push(found[2]);
+    const shell = /^\s*(?:bash|sh)\s+.*<</u.test(line);
+    for (const found of line.matchAll(/(?<!<)<<-?\s*(['"]?)([A-Za-z_][A-Za-z_0-9]*)\1(?=$|[\s;|&<>])/gu)) {
+      if (found[2] !== undefined) delimiters.push({word: found[2], quoted: found[1] !== "", shell});
+    }
   }
   const result: string[][] = []; let tokens: string[] = []; let word = ""; let quote = ""; let started = false;
   const flush = () => { if (started) tokens.push(word); word = ""; started = false; };
@@ -158,13 +235,51 @@ function shellCommands(script: string): string[][] {
   const text = code.join("\n");
   for (let i = 0; i < text.length; i++) {
     const c = text[i] ?? "";
-    if (c === "\\" && quote !== "'") { word += text[++i] ?? ""; started = true; continue; }
+    if (c === "\\" && quote !== "'") {
+      const escaped = text[++i] ?? "";
+      if (escaped !== "\n") { word += escaped; started = true; }
+      continue;
+    }
+    if (quote !== "'" && (c === "`" || (c === "$" && text[i + 1] === "("))) {
+      const endIndex = substitutionEnd(text, i);
+      const inner = text.slice(i + (c === "`" ? 1 : 2), endIndex);
+      if (readSubstitutions) substitutions.push(...shellCommands(inner, false));
+      word += "<substitution>"; started = true; i = endIndex; continue;
+    }
     if (quote !== "") { if (c === quote) quote = ""; else word += c; started = true; continue; }
     if (c === "'" || c === '"') { quote = c; started = true; continue; }
     if (c === "#" && !started) { while (i < text.length && text[i] !== "\n") i++; end(); continue; }
-    if (";|&\n".includes(c)) { end(); continue; }
+    if (";|&\n(){}".includes(c)) { end(); continue; }
     if (/\s/u.test(c)) { flush(); continue; }
     word += c; started = true;
   }
-  end(); return [...result, ...shellBodies];
+  end(); return [...result, ...shellBodies, ...substitutions];
+}
+function substitutionEnd(text: string, start: number): number {
+  const backtick = text[start] === "`"; let depth = 1; let quote = "";
+  for (let i = start + (backtick ? 1 : 2); i < text.length; i++) {
+    const c = text[i];
+    if (c === "\\" && quote !== "'") { i++; continue; }
+    if (backtick && c === "`") return i;
+    if (quote !== "'") {
+      if (c === "$" && text[i + 1] === "(") { i = substitutionEnd(text, i); continue; }
+      if (!backtick && c === "`") { i = substitutionEnd(text, i); continue; }
+    }
+    if (quote !== "") { if (c === quote) quote = ""; continue; }
+    if (c === "'" || c === '"') { quote = c; continue; }
+    if (!backtick && c === "(") depth++;
+    if (!backtick && c === ")" && --depth === 0) return i;
+  }
+  return text.length;
+}
+function heredocSubstitutions(text: string): string[][] {
+  const result: string[][] = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\\") { i++; continue; }
+    if (text[i] === "`" || (text[i] === "$" && text[i + 1] === "(")) {
+      const end = substitutionEnd(text, i);
+      result.push(...shellCommands(text.slice(i + (text[i] === "`" ? 1 : 2), end), false)); i = end;
+    }
+  }
+  return result;
 }
