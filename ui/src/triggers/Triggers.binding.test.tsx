@@ -150,6 +150,17 @@ describe("the list", () => {
     expect(store.calls.filter((call) => call[0] === "list")).toHaveLength(2);
   });
 
+  it("draws no rows once the store goes off, even after a good read", async () => {
+    await render({ view: "list" }, [triage]);
+    expect(text()).toContain("Weekday triage");
+    store.failNext("list", new TriggerRefusal("database is locked", 503));
+    await triggersChanged();
+    await flush();
+    expect(text()).toContain("Triggers are off. Database is locked.");
+    expect(text()).not.toContain("Weekday triage");
+    expect(document.querySelector(".record-row")).toBeNull();
+  });
+
   it("says when the store is off and keeps New trigger", async () => {
     await render({ view: "list" }, [], "database is locked");
     expect(text()).toContain("Triggers are off. Database is locked. No trigger runs until sessiond can open its store. Check the sessiond log, then restart sessiond.");

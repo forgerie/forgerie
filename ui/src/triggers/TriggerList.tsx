@@ -37,7 +37,9 @@ export function TriggerList({ load, clock, projectLabel, starting, failure, onDi
   const plan = triggersPlan(room.column, room.header, room.body);
   const [query, setQuery] = useState("");
   const [closed, setClosed] = useState<ReadonlySet<TriggerGroupKey>>(new Set());
-  const list = listOf(load);
+  // While the store is off no trigger runs, so the rows of an older read would say things that are not true: the
+  // body stays empty under the notice. A plain failed read keeps the last list under its notice.
+  const list = load.type === "off" ? undefined : listOf(load);
   const triggers = list?.triggers ?? [];
   const filtering = triggers.length >= FILTER_FROM;
   const shown = filtering ? triggers.filter((trigger) => matchesFilter(trigger, query, projectLabel(trigger.action.cwd))) : triggers;
