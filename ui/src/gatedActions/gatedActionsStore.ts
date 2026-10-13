@@ -3,7 +3,7 @@
 // POST /api/sessions/:id/gated-actions/:gid/approve|refuse { cwd }, which answer the record.
 // A change fires the session's `workflow_runs_changed` event; the binding calls refresh() on it.
 import { z } from "zod";
-import { gatedActionSchema, gatedActionsSchema, sortGated, type GatedAction, type GatedChoice } from "./gatedActionsModel";
+import { gatedActionSchema, gatedActionsSchema, isSettled, sortGated, type GatedAction, type GatedChoice } from "./gatedActionsModel";
 
 export type Request = (path: string, init: RequestInit) => Promise<Response>;
 export interface SessionRef { id: string; cwd: string }
@@ -59,12 +59,21 @@ export function createGatedActionsStore(request: Request, ref: () => SessionRef 
     // Keep what was read before: a card that was open stays open while the read is retried.
     catch (error) { if (mine === generation) update({ ...state, readError: message(error) }); }
   }
-  const replace = (record: GatedAction) => sortGated((state.records ?? []).some((candidate) => candidate.id === record.id)
-    ? (state.records ?? []).map((candidate) => candidate.id === record.id ? record : candidate) : [record, ...state.records ?? []]);
+  /**
+   * The records with a choice's answer in them. The answer says only that the choice was admitted ("approved" or
+   * "refused"); a read can already hold the outcome by the time a slow answer lands, and a known outcome is never undone.
+   */
+  const admit = (record: GatedAction) => {
+    const known = (state.records ?? []).find((candidate) => candidate.id === record.id);
+    if (known !== undefined && isSettled(known)) return state.records;
+    return sortGated(known !== undefined ? (state.records ?? []).map((candidate) => candidate.id === record.id ? record : candidate)
+      : [record, ...state.records ?? []]);
+  };
 
   /**
    * Sends one choice. Resolves true once the server recorded it. A failure stays on the action's card, and the records
-   * are read again, since another tab may have decided first.
+   * are read again, since another tab may have decided first. After a success the records are read once more: reads
+   * that were on their way are retired with the answer, and one of them may have held the outcome.
    */
   async function decide(id: string, choice: GatedChoice): Promise<boolean> {
     const session = ref();
@@ -73,7 +82,8 @@ export function createGatedActionsStore(request: Request, ref: () => SessionRef 
     try {
       const record = await call(`${base(session)}/${encodeURIComponent(id)}/${choice}`, gatedActionSchema, { cwd: session.cwd });
       generation += 1;
-      update({ ...state, deciding: undefined, records: replace(record) });
+      update({ ...state, deciding: undefined, records: admit(record) });
+      void read();
       return true;
     } catch (error) {
       update({ ...state, deciding: undefined, error: { id, message: message(error) } });

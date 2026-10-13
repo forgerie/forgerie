@@ -13,11 +13,13 @@ export type WaitingItem =
 /**
  * The open items, oldest first. `messages` are folded, so an answered question already carries its answer. A proposal
  * pins only once the session's records say it is open, so an old one never flashes in the dock while they load; a gated
- * action likewise pins only once its record says it waits.
+ * action likewise pins only once its record says it waits. While the gated actions cannot be read, a gated action pins
+ * unless a record read earlier says it was decided: a real wait must stay in reach, and one that was already decided
+ * shows until a read answers.
  */
 export function waitingItems(messages: readonly { id: string; childEntry?: ChildEntry | undefined; workflowEntry?: WorkflowEntry | undefined;
   gatedAction?: GatedActionEntry | undefined }[], runs: readonly WorkflowRun[], proposals: readonly WorkflowProposal[] = [],
-  gated: readonly GatedAction[] = []): WaitingItem[] {
+  gated: { records?: readonly GatedAction[] | undefined; readFailed?: boolean | undefined } = {}): WaitingItem[] {
   const items: WaitingItem[] = [];
   for (const message of messages) {
     const child = message.childEntry;
@@ -28,7 +30,8 @@ export function waitingItems(messages: readonly { id: string; childEntry?: Child
       items.push({ kind: "proposal", id: message.id, entry: flow });
     }
     const action = message.gatedAction;
-    if (action !== undefined && gated.some((record) => record.id === action.id && record.state.kind === "waiting")) {
+    const record = action === undefined ? undefined : gated.records?.find((candidate) => candidate.id === action.id);
+    if (action !== undefined && (record === undefined ? gated.readFailed === true : record.state.kind === "waiting")) {
       items.push({ kind: "gated", id: message.id, entry: action });
     }
   }

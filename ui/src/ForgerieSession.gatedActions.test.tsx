@@ -39,8 +39,8 @@ const messages: PiMessage[] = [
 ];
 
 /** A Durable session with a blocked call. The routes answer from `state`, which a test changes as the server would. */
-async function sessionWithGate(status: SessionStatus, options: { records?: GatedAction[]; refusal?: string } = {}) {
-  const state = { records: options.records ?? [PUSH], refusal: options.refusal };
+async function sessionWithGate(status: SessionStatus, options: { records?: GatedAction[]; refusal?: string; readFails?: boolean } = {}) {
+  const state = { records: options.records ?? [PUSH], refusal: options.refusal, readFails: options.readFails ?? false };
   const posts: { path: string; body: unknown }[] = [];
   server = new WebSocketServer({ port: 0 });
   await new Promise<void>((resolve) => server!.once("listening", resolve));
@@ -56,7 +56,7 @@ async function sessionWithGate(status: SessionStatus, options: { records?: Gated
       state.records = [PUSH_RUNNING];
       return Response.json(PUSH_RUNNING);
     }
-    if (path.includes("/gated-actions?")) return Response.json(state.records);
+    if (path.includes("/gated-actions?")) return state.readFails ? Response.json({ error: "Durable storage is unavailable." }, { status: 500 }) : Response.json(state.records);
     if (path.includes("/decisions?") || path.includes("/children?")) return Response.json([]);
     if (path.includes("/workflow-proposals?") || path.includes("/workflow-runs?")) return Response.json([]);
     if (path.includes("/messages?")) return Response.json({ messages, start: 0, total: messages.length });
@@ -100,6 +100,31 @@ describe("a gated action in a session", () => {
     await act(async () => { dockButton("Approve and run")?.click(); });
     await until(() => document.querySelector(".pinned-dock [role='alert']")?.textContent === "This action is not waiting.");
     expect(document.querySelector(".pinned-dock .decision-card")?.hasAttribute("data-open")).toBe(true);
+  });
+
+  it("keeps a waiting gate pinned when its records cannot be read, says why, and Retry recovers", async () => {
+    const api = await sessionWithGate(idle, { readFails: true });
+    await until(() => document.querySelector(".pinned-dock .alert-card") !== null);
+    const dock = document.querySelector(".pinned-dock")!;
+    expect(dock.querySelector(".alert-card")?.textContent).toContain("Durable storage is unavailable.");
+    expect(dock.querySelector(".decision-card")?.getAttribute("aria-label")).toBe("Force-push feat/run-export to origin");
+    expect(dockButton("Approve and run")).toBeDefined();
+    expect(document.querySelector(".pinned-dock-label")?.textContent).toBe("1 waiting for you");
+    // The thread keeps one line for it, so the card is only in the dock.
+    expect(document.querySelectorAll(".decision-card")).toHaveLength(1);
+    api.state.readFails = false;
+    await act(async () => { dockButton("Retry")?.click(); });
+    await until(() => document.querySelector(".pinned-dock .alert-card") === null);
+    expect(dockButton("Approve and run")).toBeDefined();
+  });
+
+  it("drops the pin once a read that answers says the gate was decided", async () => {
+    const api = await sessionWithGate(idle, { readFails: true, records: [PUSH_RAN] });
+    await until(() => dockButton("Retry") !== undefined);
+    api.state.readFails = false;
+    await act(async () => { dockButton("Retry")?.click(); });
+    await until(() => document.querySelector(".pinned-dock") === null);
+    expect(document.querySelector(".decision-card-closed")?.textContent).toBe("Approved — ran");
   });
 
   it("offers no choice in a read-only session, and pins nothing", async () => {

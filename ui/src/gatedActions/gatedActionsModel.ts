@@ -128,6 +128,11 @@ export function gatedIsWaiting(record: GatedAction | undefined, read: boolean): 
   return record === undefined ? !read : record.state.kind === "waiting";
 }
 
+/** Whether a gated action has its final outcome: it ran, failed, or was refused. Nothing changes it after that. */
+export function isSettled(record: GatedAction): boolean {
+  return record.state.kind === "ran" || record.state.kind === "failed" || record.state.kind === "refused";
+}
+
 /** The first line of a text, cut to a length that fits one line of a card. */
 export function firstLine(text: string, length = 160): string {
   const line = text.trim().split("\n").find((candidate) => candidate.trim() !== "")?.trim() ?? "";

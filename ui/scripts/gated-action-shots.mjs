@@ -27,6 +27,8 @@ const parts = (process.env.PARTS ?? [
   "src/ui/CommandBlock.molecule.part.tsx#default",
   "src/ui/CommandBlock.molecule.part.tsx#LongCommand",
   "src/ui/CommandBlock.molecule.part.tsx#CutOutput",
+  "src/gatedActions/GatedActionsReadProblem.molecule.part.tsx#default",
+  "src/gatedActions/GatedActionsReadProblem.molecule.part.tsx#Pinned",
   "src/ui/DecisionCard.molecule.part.tsx#PinnedChoices",
   "src/ui/DecisionCard.molecule.part.tsx#ClosedFailed",
 ].join(" ")).split(" ");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createGatedActionsStore, type Request } from "./gatedActionsStore";
-import { PUSH, PUSH_RAN, PUSH_REFUSED, PUSH_RUNNING, REPLY, RESET } from "./fixtures/gatedActions";
+import { PUSH, PUSH_FAILED, PUSH_RAN, PUSH_REFUSED, PUSH_RUNNING, REPLY, RESET } from "./fixtures/gatedActions";
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const SESSION = { id: "s 1", cwd: "/srv/app" };
@@ -110,15 +110,79 @@ describe("approving and refusing", () => {
     expect(store.getSnapshot().deciding).toEqual({ id: PUSH.id, choice: "approve" });
     reply.release(json(200, PUSH_RUNNING));
     expect(await sent).toBe(true);
-    expect(calls.at(-1)).toEqual({ path: "/api/sessions/s%201/gated-actions/g%3A21%3A184/approve", method: "POST", body: { cwd: "/srv/app" } });
+    expect(calls.filter((call) => call.method === "POST")).toEqual([{ path: "/api/sessions/s%201/gated-actions/g%3A21%3A184/approve", method: "POST", body: { cwd: "/srv/app" } }]);
     expect(store.getSnapshot()).toMatchObject({ deciding: undefined, error: undefined, records: [PUSH_RUNNING, RESET] });
+  });
+
+  it("keeps an outcome a read brought while the approval's answer was on its way", async () => {
+    // The order the server allows: the POST admits the run, the run finishes, a read brings `ran`, and only then does the
+    // POST's own answer, `approved`, land. The last change event has already come, so no later read would fix it.
+    const answer = held();
+    let reads = 0;
+    const { calls, store } = routes((_path, init) => {
+      if (init.method === "POST") return answer.promise;
+      reads += 1;
+      return json(200, [reads === 1 ? PUSH : PUSH_RAN]);
+    });
+    await store.retry();
+    const sent = store.approve(PUSH.id);
+    await store.retry();
+    expect(store.getSnapshot().records).toEqual([PUSH_RAN]);
+    answer.release(json(200, PUSH_RUNNING));
+    expect(await sent).toBe(true);
+    expect(store.getSnapshot().records).toEqual([PUSH_RAN]);
+    await settle();
+    expect(store.getSnapshot().records).toEqual([PUSH_RAN]);
+    expect(calls.filter((call) => call.method === "GET")).toHaveLength(3);
+  });
+
+  it("never lets an admission undo any outcome: failed or refused stays", async () => {
+    for (const outcome of [PUSH_FAILED, PUSH_REFUSED]) {
+      const answer = held();
+      let reads = 0;
+      const { store } = routes((_path, init) => {
+        if (init.method === "POST") return answer.promise;
+        reads += 1;
+        return json(200, [reads === 1 ? PUSH : outcome]);
+      });
+      await store.retry();
+      const sent = store.approve(PUSH.id);
+      await store.retry();
+      answer.release(json(200, PUSH_RUNNING));
+      await sent;
+      expect(store.getSnapshot().records).toEqual([outcome]);
+      await settle();
+      expect(store.getSnapshot().records).toEqual([outcome]);
+    }
+  });
+
+  it("reads once more after a choice, so an outcome in a read the answer retired still arrives", async () => {
+    // A read that started after the POST holds `ran`, but the POST's answer lands first and retires it.
+    const answer = held();
+    const inFlight = held();
+    let reads = 0;
+    const { calls, store } = routes((_path, init) => {
+      if (init.method === "POST") return answer.promise;
+      reads += 1;
+      return reads === 1 ? json(200, [PUSH]) : reads === 2 ? inFlight.promise : json(200, [PUSH_RAN]);
+    });
+    await store.retry();
+    const sent = store.approve(PUSH.id);
+    const retired = store.retry();
+    answer.release(json(200, PUSH_RUNNING));
+    expect(await sent).toBe(true);
+    inFlight.release(json(200, [PUSH_RAN]));
+    await retired;
+    await settle();
+    expect(store.getSnapshot().records).toEqual([PUSH_RAN]);
+    expect(calls.map((call) => call.method)).toEqual(["GET", "POST", "GET", "GET"]);
   });
 
   it("refuses with the cwd", async () => {
     const { calls, store } = routes((_path, init) => init.method === "POST" ? json(200, PUSH_REFUSED) : json(200, [PUSH]));
     await store.retry();
     expect(await store.refuse(PUSH.id)).toBe(true);
-    expect(calls.at(-1)).toEqual({ path: "/api/sessions/s%201/gated-actions/g%3A21%3A184/refuse", method: "POST", body: { cwd: "/srv/app" } });
+    expect(calls.filter((call) => call.method === "POST")).toEqual([{ path: "/api/sessions/s%201/gated-actions/g%3A21%3A184/refuse", method: "POST", body: { cwd: "/srv/app" } }]);
     expect(store.getSnapshot().records).toEqual([PUSH_REFUSED]);
   });
 

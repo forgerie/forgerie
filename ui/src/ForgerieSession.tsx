@@ -84,6 +84,7 @@ import { WorkflowRunStrip } from "./workflows/WorkflowRunStrip";
 import { pinKey, waitingItems, waitingLabel } from "./waitingOnYou";
 import { createGatedActionsStore } from "./gatedActions/gatedActionsStore";
 import { GatedActionCard } from "./gatedActions/GatedActionCard";
+import { GatedActionsReadProblem } from "./gatedActions/GatedActionsReadProblem";
 import { askerOf, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
 import { PinnedDock } from "./ui/PinnedDock";
 import { EventLine } from "./ui/EventLine";
@@ -306,15 +307,18 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   // What waits on the reader is pinned above the composer; its place in the thread keeps one quiet line.
   const proposals = flows.proposals;
   const records = held.records;
-  const waiting = useMemo(() => readOnly ? [] : waitingItems(folded, runs, proposals, records), [folded, runs, proposals, records, readOnly]);
+  // A failed read must not hide a real wait: the transcript's gated actions pin unless a record says they were decided.
+  const gatedReadFailed = held.readError !== undefined;
+  const waiting = useMemo(() => readOnly ? [] : waitingItems(folded, runs, proposals, { records, readFailed: gatedReadFailed }),
+    [folded, runs, proposals, records, gatedReadFailed, readOnly]);
   const pinned = useMemo(() => new Set(waiting.map(pinKey)), [waiting]);
   // A gated action's card renders from its entry at once; the session's record says what became of it.
   const gatedView = useCallback((entry: GatedActionEntry, key?: string) => <GatedActionCard key={key} entry={entry}
-    record={records?.find((record) => record.id === entry.id)} read={records !== undefined}
+    record={records?.find((record) => record.id === entry.id)} read={records !== undefined && !gatedReadFailed}
     deciding={held.deciding?.id === entry.id ? held.deciding.choice : undefined}
     problem={held.error?.id === entry.id ? held.error.message : undefined}
     onApprove={readOnly ? undefined : () => { void gated.approve(entry.id); }}
-    onRefuse={readOnly ? undefined : () => { void gated.refuse(entry.id); }} />, [records, held.deciding, held.error, readOnly, gated]);
+    onRefuse={readOnly ? undefined : () => { void gated.refuse(entry.id); }} />, [records, gatedReadFailed, held.deciding, held.error, readOnly, gated]);
   // A proposal card renders from its entry at once; the session's record decides whether it is still open.
   const proposalView = useCallback((entry: ProposalEntry, key?: string) => <WorkflowEntryView key={key} entry={entry}
     proposal={proposals?.find((candidate) => candidate.id === entry.proposalId)} proposalsRead={proposals !== undefined}
@@ -473,7 +477,12 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
             onStep={found.type === "message" ? found.onStep : () => undefined} />}
           {sendError && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{sendError}</p></Consequence>}
           {flows.error !== undefined && workflowSheet === undefined && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{flows.error}</p></Consequence>}
-          {waiting.length > 0 && <PinnedDock label={waitingLabel(waiting.length)}>{waiting.map(renderWaiting)}</PinnedDock>}
+          {waiting.length > 0 && <PinnedDock label={waitingLabel(waiting.length)}>
+            {waiting.map(renderWaiting)}
+            {/* After the cards, so a short dock still shows the first card's choices without a scroll. */}
+            {held.readError !== undefined && waiting.some((item) => item.kind === "gated")
+              && <GatedActionsReadProblem error={held.readError} onRetry={() => { void gated.retry(); }} />}
+          </PinnedDock>}
           {running !== undefined && <WorkflowRunStrip run={running} onOpen={() => setWorkflowSheet({ type: "run" })} />}
         </>}
         head={setup && <WorktreeSetupCard setup={setup} hookSeen={setup.log !== ""} branch={worktree?.branch} />}

@@ -36,13 +36,24 @@ describe("a gated action that waits on the reader", () => {
   it("pins only while its record says it waits, in the thread's order, under its own key", async () => {
     const { PUSH, PUSH_ENTRY, PUSH_RAN, PUSH_REFUSED, PUSH_RUNNING } = await import("./gatedActions/fixtures/gatedActions");
     const messages = [question("1"), { id: "8", gatedAction: PUSH_ENTRY }];
-    const items = waitingItems(messages, [], [], [PUSH]);
+    const items = waitingItems(messages, [], [], { records: [PUSH] });
     expect(items).toEqual([expect.objectContaining({ kind: "question", id: "1" }), { kind: "gated", id: "8", entry: PUSH_ENTRY }]);
     expect(items.map(pinKey)).toEqual(["q:q:1", `g:${PUSH.id}`]);
     // Before the records are read, and once it is decided, it does not pin.
     expect(waitingItems(messages, [])).toHaveLength(1);
-    for (const record of [PUSH_RUNNING, PUSH_RAN, PUSH_REFUSED]) expect(waitingItems(messages, [], [], [record])).toHaveLength(1);
-    // Another action's record does not pin this one.
-    expect(waitingItems(messages, [], [], [{ ...PUSH, id: "g-9" }])).toHaveLength(1);
+    for (const record of [PUSH_RUNNING, PUSH_RAN, PUSH_REFUSED]) expect(waitingItems(messages, [], [], { records: [record] })).toHaveLength(1);
+    // A read that answered without this action does not pin it.
+    expect(waitingItems(messages, [], [], { records: [{ ...PUSH, id: "g:9:9" }] })).toHaveLength(1);
+  });
+
+  it("pins from the transcript while the records cannot be read, unless a record read earlier says it was decided", async () => {
+    const { PUSH, PUSH_ENTRY, PUSH_RAN, PUSH_RUNNING } = await import("./gatedActions/fixtures/gatedActions");
+    const messages = [{ id: "8", gatedAction: PUSH_ENTRY }];
+    // Never read: the first read failed.
+    expect(waitingItems(messages, [], [], { readFailed: true })).toEqual([{ kind: "gated", id: "8", entry: PUSH_ENTRY }]);
+    // Read before, without this action, and the latest read failed.
+    expect(waitingItems(messages, [], [], { records: [], readFailed: true })).toHaveLength(1);
+    expect(waitingItems(messages, [], [], { records: [PUSH], readFailed: true })).toHaveLength(1);
+    for (const record of [PUSH_RUNNING, PUSH_RAN]) expect(waitingItems(messages, [], [], { records: [record], readFailed: true })).toEqual([]);
   });
 });
