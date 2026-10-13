@@ -3,6 +3,7 @@
 // part fixes them. Copy talks about times and runs, never cron words.
 import { triggerManualRequestId, type Trigger, type TriggerFire } from "@shared/triggers";
 import { nextOccurrence, type TriggerSchedule } from "@shared/triggerSchedules";
+import { daysOf, WEEK, wireDays, type Weekday } from "./triggerWire";
 
 /** What every time word needs: the instant now, the browser's locale and zone, and the host's zone. */
 export interface WordClock {
@@ -18,9 +19,7 @@ export interface WordClock {
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
-export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
-/** Monday first, as the day buttons and the schedule words read. */
-export const WEEK: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+export { WEEK, type Weekday };
 export const DAY_SHORT: Record<Weekday, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
 const DAY_PLURAL: Record<Weekday, string> = { mon: "Mondays", tue: "Tuesdays", wed: "Wednesdays", thu: "Thursdays", fri: "Fridays", sat: "Saturdays", sun: "Sundays" };
 
@@ -50,21 +49,15 @@ export function zoneWords(zone: string): string {
   return `${(zone.split("/").at(-1) ?? zone).replaceAll("_", " ")} time`;
 }
 
-/**
- * The days of a weekly schedule. The shared schema builds its day union from an array, so its static type for
- * `on` is `never[]`; the values are weekday strings, and this reads them as such.
- */
+/** The days a schedule runs on, Monday first. */
 export function scheduleDays(schedule: TriggerSchedule): Weekday[] {
-  if (schedule.kind === "daily") return [...WEEK];
-  const on: readonly string[] = schedule.on;
-  return WEEK.filter((day) => on.includes(day));
+  return schedule.kind === "daily" ? [...WEEK] : daysOf(schedule);
 }
 /** A schedule from the form's choices. Seven days, or none chosen yet, is every day. */
 export function scheduleOf(days: readonly string[], at: string, timezone: string): TriggerSchedule {
   const on = WEEK.filter((day) => days.includes(day));
   if (on.length === 0 || on.length === 7) return { kind: "daily", at, timezone };
-  // The schema's static type for `on` is `never[]` (see scheduleDays); the server checks the values.
-  return { kind: "weekly", at, timezone, on: on as never[] };
+  return { kind: "weekly", at, timezone, on: wireDays(on) };
 }
 
 const listWords = (items: readonly string[]) => items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")}, and ${items.at(-1) ?? ""}`;

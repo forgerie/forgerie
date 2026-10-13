@@ -2,7 +2,8 @@
 // Pure. The page holds a draft; nothing reaches the server until Save or Create.
 import { DEFAULT_MISSED_GRACE_MINUTES, type Trigger, type TriggerAction, type TriggerCreate, type TriggerUpdate, type TriggerWorkflow } from "@shared/triggers";
 import { launchInputs, proposalInputs, type WorkflowInput } from "../workflows/workflowsModel";
-import { scheduleDays, scheduleOf, WEEK, type Weekday } from "./triggerWords";
+import { scheduleDays, scheduleOf } from "./triggerWords";
+import { thinkingLevelOf, WEEK, wireThinkingLevel, type ThinkingLevel, type Weekday } from "./triggerWire";
 
 export interface TriggerDraft {
   name: string;
@@ -16,7 +17,7 @@ export interface TriggerDraft {
   zoneChosen: boolean;
   /** `provider/model-id`, or absent for the new-session default. */
   model?: string | undefined;
-  thinkingLevel?: string | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
   grace: number;
   /** Typed input values, as text until the request reads them. */
   inputs: Record<string, string>;
@@ -32,7 +33,7 @@ export function draftOf(trigger: Trigger): TriggerDraft {
   return {
     name: trigger.name, cwd: trigger.action.cwd, workflow: trigger.action.workflow,
     repeat: trigger.schedule.kind === "daily" ? "daily" : "days", days, at: trigger.schedule.at, timezone: trigger.schedule.timezone, zoneChosen: true,
-    model: trigger.action.model, thinkingLevel: trigger.action.thinkingLevel, grace: trigger.missedGraceMinutes,
+    model: trigger.action.model, thinkingLevel: thinkingLevelOf(trigger.action.thinkingLevel), grace: trigger.missedGraceMinutes,
     inputs: Object.fromEntries(Object.entries(trigger.action.inputs).map(([name, value]) => [name, String(value)])),
   };
 }
@@ -88,7 +89,7 @@ function actionOf(draft: TriggerDraft, workflow: TriggerWorkflow | undefined): T
   // Without the workflow's declaration, keep what was typed as text: the server checks it against the workflow.
   const inputs = typed && "inputs" in typed ? typed.inputs : Object.fromEntries(Object.entries(draft.inputs).filter(([, value]) => value.trim() !== ""));
   return { kind: "workflow", cwd: draft.cwd, workflow: draft.workflow, inputs,
-    ...(draft.model ? { model: draft.model } : {}), ...(draft.model && draft.thinkingLevel ? { thinkingLevel: draft.thinkingLevel as NonNullable<TriggerAction["thinkingLevel"]> } : {}) };
+    ...(draft.model ? { model: draft.model } : {}), ...(draft.model && draft.thinkingLevel ? { thinkingLevel: wireThinkingLevel(draft.thinkingLevel) } : {}) };
 }
 const scheduleOfDraft = (draft: TriggerDraft) => scheduleOf(draft.repeat === "daily" ? WEEK : draft.days, draft.at, draft.timezone);
 

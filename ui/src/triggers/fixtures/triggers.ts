@@ -3,6 +3,7 @@
 import type { Trigger, TriggerFire, TriggerListResponse, TriggerWorkflow } from "@shared/triggers";
 import type { Project } from "../../newSession";
 import type { SessionModel } from "../../contracts";
+import { wireDays, wireThinkingLevel } from "../triggerWire";
 
 export const HOST_ZONE = "America/Denver";
 /** Mon, Oct 12 2026, 6:00 PM in Denver (UTC−6). */
@@ -78,7 +79,7 @@ export const audit: Trigger = {
 
 export const triage: Trigger = {
   ...base("weekday-triage", "Weekday triage"),
-  schedule: { kind: "weekly", at: "09:00", timezone: HOST_ZONE, on: ["mon", "tue", "wed", "thu", "fri"] as never[] },
+  schedule: { kind: "weekly", at: "09:00", timezone: HOST_ZONE, on: wireDays(["mon", "tue", "wed", "thu", "fri"]) },
   action: { kind: "workflow", cwd: PI_MONO, workflow: "triage-issues", inputs: { task: "Triage new issues.", label: "any" } },
   state: { kind: "active", nextFireAt: night(13, 9) },
   attention: null,
@@ -87,7 +88,7 @@ export const triage: Trigger = {
 
 export const notes: Trigger = {
   ...base("release-notes", "Release notes"),
-  schedule: { kind: "weekly", at: "17:00", timezone: HOST_ZONE, on: ["fri"] as never[] },
+  schedule: { kind: "weekly", at: "17:00", timezone: HOST_ZONE, on: wireDays(["fri"]) },
   action: { kind: "workflow", cwd: FORGERIE, workflow: "release-notes", inputs: {} },
   state: { kind: "active", nextFireAt: night(16, 17) },
   attention: null,
@@ -98,7 +99,7 @@ export const notes: Trigger = {
 export const digest: Trigger = {
   ...base("inbox-digest", "Inbox digest"),
   schedule: { kind: "daily", at: "07:30", timezone: HOST_ZONE },
-  action: { kind: "workflow", cwd: FORGERIE, workflow: "refine-backlog", inputs: { task: "Summarize the inbox." }, model: "anthropic/claude-sonnet-4-5", thinkingLevel: "high" as never },
+  action: { kind: "workflow", cwd: FORGERIE, workflow: "refine-backlog", inputs: { task: "Summarize the inbox." }, model: "anthropic/claude-sonnet-4-5", thinkingLevel: wireThinkingLevel("high") },
   state: { kind: "active", nextFireAt: night(13, 7, 30) },
   attention: null,
   history: [
@@ -109,7 +110,7 @@ export const digest: Trigger = {
 
 export const docs: Trigger = {
   ...base("docs-sweep", "Docs sweep"),
-  schedule: { kind: "weekly", at: "04:00", timezone: "America/New_York", on: ["sun"] as never[] },
+  schedule: { kind: "weekly", at: "04:00", timezone: "America/New_York", on: wireDays(["sun"]) },
   action: { kind: "workflow", cwd: FORGERIE, workflow: "docs-sweep", inputs: {} },
   state: { kind: "paused", pausedAt: Date.UTC(2026, 9, 10, 16) },
   attention: null,
