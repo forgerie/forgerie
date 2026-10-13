@@ -1,6 +1,7 @@
 import { Check } from "typebox/value";
 import { BacklogSettingsResponseSchema, type BacklogSettingsResponse } from "@shared/backlogSettings";
 import type { BacklogConfig } from "@shared/backlog";
+import type { BacklogSourceInput } from "@shared/backlogSources";
 import { projectSchema, type Fetch } from "../newSession";
 import { z } from "zod";
 export interface BacklogSettingsCatalog { settings: BacklogSettingsResponse; projects: z.infer<typeof projectSchema>[] }
@@ -21,6 +22,11 @@ export function createBacklogSettingsApi(fetchFn: Fetch) {
     save: (projectId: string, backlog: BacklogConfig, baseRevision: number) => call(`/api/backlog/settings/projects/${encodeURIComponent(projectId)}`, json("PUT", { backlog, baseRevision })),
     remove: (projectId: string, baseRevision: number) => call(`/api/backlog/settings/projects/${encodeURIComponent(projectId)}`, json("DELETE", { baseRevision })),
     githubLogin: (githubLogin: string | null) => call("/api/backlog/settings/github-login", json("PUT", { githubLogin })),
+    /** A new Azure DevOps source. The server refuses one that overlaps another source's board (409). */
+    createSource: (input: BacklogSourceInput) => call("/api/backlog/settings/sources", json("POST", input)),
+    saveSource: (id: string, input: BacklogSourceInput, baseRevision: number) => call(`/api/backlog/settings/sources/${encodeURIComponent(id)}`, json("PUT", { ...input, baseRevision })),
+    /** Live claims on the source's items stay, and can still be released from the backlog. */
+    removeSource: (id: string, baseRevision: number) => call(`/api/backlog/settings/sources/${encodeURIComponent(id)}`, json("DELETE", { baseRevision })),
   };
 }
 export type BacklogSettingsApi = ReturnType<typeof createBacklogSettingsApi>;
