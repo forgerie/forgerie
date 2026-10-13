@@ -251,6 +251,19 @@ describe("machine catalog", () => {
     await until(store, () => store.getSnapshot().statuses["a"]?.blocked === false);
   });
 
+  it("counts flagged decisions without marking the session blocked", async () => {
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    api.emit({ type: "status.update", status: { sessionId: "a", ...idle, flaggedDecisions: 2 } });
+    await until(store, () => store.getSnapshot().statuses["a"]?.flaggedDecisions === 2);
+    expect(store.getSnapshot().statuses["a"]).toMatchObject({ blocked: false, flaggedDecisions: 2 });
+    // A malformed count drops out; the status still applies.
+    api.emit({ type: "status.update", status: { sessionId: "a", ...idle, isStreaming: true, flaggedDecisions: "two" } });
+    await until(store, () => store.getSnapshot().statuses["a"]?.isStreaming === true);
+    expect(store.getSnapshot().statuses["a"]?.flaggedDecisions).toBeUndefined();
+  });
+
   it("applies live events after the join", async () => {
     const api = await machine();
     const store = start(api);

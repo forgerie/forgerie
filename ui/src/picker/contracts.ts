@@ -27,6 +27,8 @@ export const wireStatusSchema = z.object({
   workingAgents: z.number().optional(),
   runningProcesses: z.number().optional(),
   waitingOnYou: z.number().optional(),
+  /** Flagged guesses in the session's decision log that still stand. Nothing waits on them. */
+  flaggedDecisions: z.number().optional().catch(undefined),
   watchingPullRequest: z.boolean().optional(),
   ...blockers,
   response: sessionResponseSchema.optional(),

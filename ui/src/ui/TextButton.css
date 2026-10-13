@@ -6,5 +6,6 @@
   inline-size: max(100%, var(--control-size)); block-size: var(--control-size); translate: -50% -50%; }
 .text-button:not(:disabled):hover { background: var(--hover-surface); }
 .text-button:not(:disabled):active { background: var(--active-surface); }
+.text-button[aria-pressed="true"] { background: var(--active-surface); }
 .text-button[data-tone="danger"] { color: var(--destructive); }
 .text-button svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; color: var(--muted-foreground); }

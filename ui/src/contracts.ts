@@ -106,6 +106,8 @@ export const statusSchema = z.object({
   /** A session whose worktree was landed or discarded. Its transcript is saved; Pi does not run. */
   readOnly: z.boolean().optional().catch(undefined),
   worktree: worktreeInfoSchema.optional().catch(undefined),
+  /** Flagged guesses in the session's decision log that still stand (docs/adr/0005). A malformed count drops out. */
+  flaggedDecisions: z.number().optional().catch(undefined),
 });
 export type SessionStatus = z.infer<typeof statusSchema>;
 export const abortResultSchema = z.object({

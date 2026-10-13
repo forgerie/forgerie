@@ -17,3 +17,7 @@ export function WithInput() {
   return <ActionFooter note={note} actions={[]} input={<ReplyBox label="What should change?" placeholder="Say what to change" sendLabel="Send changes"
     secondary={{ label: "Back", onPress: () => setNote("Back to the choices") }} onSend={async (text) => { setNote(`Sent: ${text}`); }} />} />;
 }
+export function Failed() {
+  return <ActionFooter note="Say what should change. The rest stays as it is." problem="The server is unavailable. Try again in a moment."
+    actions={[]} input={<ReplyBox label="What should change?" placeholder="Say what to change" sendLabel="Send changes" onSend={() => Promise.reject(new Error("Not sent"))} />} />;
+}

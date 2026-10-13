@@ -61,6 +61,20 @@ describe("picker", () => {
     expect(running?.querySelector('[aria-label="1 process running"]')?.textContent).toBe("1");
   });
 
+  it("marks flagged decisions quietly and never files the session under Needs your response", () => {
+    render(view([S("guessed"), S("both")], { statuses: { guessed: { ...idle, flaggedDecisions: 2 }, both: { ...idle, workingAgents: 1, flaggedDecisions: 1 } } }));
+    const labels = [...host.querySelectorAll(".picker-group-label")].map((node) => node.textContent);
+    expect(labels).not.toContain("Needs your response");
+    const guessed = host.querySelector('[data-session="guessed"]');
+    expect(guessed?.getAttribute("data-state")).toBe("open");
+    const mark = guessed?.querySelector('[aria-label="2 flagged decisions to look at"]');
+    expect(mark?.textContent).toBe("2");
+    // A readout in muted ink, not a live count.
+    expect(mark?.classList.contains("icon-count")).toBe(true);
+    expect(host.querySelector('[data-session="both"] [aria-label="1 flagged decision to look at"]')?.textContent).toBe("1");
+    expect(host.querySelector('[data-session="both"] [aria-label="1 agent working"]')?.textContent).toBe("1");
+  });
+
   it("shows no chat text: an unnamed session reads Untitled session", () => {
     render(view([S("x", { name: undefined })]));
     expect(host.querySelector('[data-session="x"] .picker-title')?.textContent).toBe("Untitled session");

@@ -46,9 +46,21 @@ export const CHILD_QUESTION_TYPE = "forgerie.child-question";
 export const CHILD_ANSWER_TYPE = "forgerie.child-answer";
 export const CHILD_NOTE_TYPE = "forgerie.child-note";
 
+/**
+ * Why the parent passed a child's question on to the reader (docs/adr/0001): only an irreversible action or one
+ * outside the project in the reader's name reaches the reader. `guess` and `why` are what the parent would choose.
+ * The other two kinds never reach the reader as a card; the child goes on with the guess and the log flags it.
+ */
+export const escalationSchema = z.object({
+  kind: z.enum(["irreversible", "external", "contradicts", "stuck"]),
+  guess: z.string(),
+  why: z.string(),
+});
+export type Escalation = z.infer<typeof escalationSchema>;
+
 /** Something a child did, as the parent's transcript records it. */
 export type ChildEntry =
-  | { kind: "question"; questionId: string; child: number; childName: string; question: string; answer?: string; cancelled?: boolean }
+  | { kind: "question"; questionId: string; child: number; childName: string; question: string; answer?: string; cancelled?: boolean; escalation?: Escalation }
   | { kind: "answer"; questionId: string; answer: string }
   | { kind: "note"; child: number; childName: string; action: "message" | "stop"; text: string }
   | { kind: "report"; childName: string; outcome: "answered" | "failed"; text: string };
@@ -63,8 +75,12 @@ export function childEntryOf(message: PiMessage): ChildEntry | undefined {
   if (message.role !== "custom") return undefined;
   const details = recordOf(message.details);
   switch (message.customType) {
-    case CHILD_QUESTION_TYPE: return { kind: "question", questionId: str(details, "questionId"), child: num(details, "child"),
-      childName: str(details, "childName") || "child", question: str(details, "question") };
+    case CHILD_QUESTION_TYPE: {
+      // A malformed escalation drops out, not the question: the reader can still answer it.
+      const escalation = escalationSchema.safeParse(details["escalation"]);
+      return { kind: "question", questionId: str(details, "questionId"), child: num(details, "child"),
+        childName: str(details, "childName") || "child", question: str(details, "question"), ...(escalation.success ? { escalation: escalation.data } : {}) };
+    }
     case CHILD_ANSWER_TYPE: return { kind: "answer", questionId: str(details, "questionId"), answer: str(details, "answer") };
     case CHILD_NOTE_TYPE: return { kind: "note", child: num(details, "child"), childName: str(details, "childName"),
       action: str(details, "action") === "stop" ? "stop" : "message", text: str(details, "text").replace(/^\[[^\]]*\]\s*/u, "") };

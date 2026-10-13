@@ -33,6 +33,8 @@ export interface PickerStatus {
   needsResponse?: boolean | undefined;
   /** The agent watches a pull request: an idle session stays in Working, not the inbox. */
   watchingPullRequest?: boolean | undefined;
+  /** Flagged guesses in the decision log. A readout only: it never makes the session blocked. */
+  flaggedDecisions?: number | undefined;
 }
 export interface PickerActivity {
   phase: "active" | "idle" | "error";
@@ -88,6 +90,8 @@ export interface Row {
   busy: boolean;
   agents: number;
   processes: number;
+  /** Flagged guesses to look at when the reader likes; never a reason to respond. */
+  flagged: number;
 }
 export interface Section {
   key: string;
@@ -195,6 +199,7 @@ export function rows(input: BoardInput): Row[] {
       time: shortAge(since, input.now),
       agents: status?.workingAgents ?? 0,
       processes: status?.runningProcesses ?? 0,
+      flagged: status?.flaggedDecisions ?? 0,
     };
   });
 }

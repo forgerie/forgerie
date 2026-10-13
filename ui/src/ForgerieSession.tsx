@@ -76,6 +76,10 @@ import { WorkflowPicker } from "./workflows/WorkflowPicker";
 import { WorkflowPlanSheet } from "./workflows/WorkflowPlanSheet";
 import { WorkflowProposalSheet } from "./workflows/WorkflowProposalSheet";
 import { WorkflowRunSheet } from "./workflows/WorkflowRunSheet";
+import { createDecisionsStore } from "./decisions/decisionsStore";
+import { DecisionsOpener } from "./decisions/DecisionsOpener";
+import { DecisionsSheet } from "./decisions/DecisionsSheet";
+import { flaggedCount, type DecisionLogActions } from "./decisions/decisionsModel";
 import { WorkflowRunStrip } from "./workflows/WorkflowRunStrip";
 import { waitingItems, waitingLabel } from "./waitingOnYou";
 import { PinnedDock } from "./ui/PinnedDock";
@@ -117,12 +121,16 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   // Workflows: the saved ones this session can start, and its runs. Refreshed on the same kind of change events.
   const [workflows] = useState(() => createWorkflowsStore(browserTransport.request, () => sessionRef.current, () => crypto.randomUUID()));
   const flows = useSyncExternalStore(workflows.subscribe, workflows.getSnapshot);
+  // The decision log: what the agents settled without the reader. It changes with the workflow records, on the same event.
+  const [decisions] = useState(() => createDecisionsStore(browserTransport.request, () => sessionRef.current));
+  const log = useSyncExternalStore(decisions.subscribe, decisions.getSnapshot);
+  const [decisionsOpen, setDecisionsOpen] = useState(false);
   const [workflowSheet, setWorkflowSheet] = useState<{ type: "picker" } | { type: "plan"; name: string; task?: string } | { type: "run" }
     | { type: "proposal"; entry: ProposalEntry }>();
   const [store] = useState(() => createSessionStore(id, browserTransport, {}, known, createReadTracker(browserTransport, { subscribe: onUnread, isVisible: () => document.visibilityState === "visible", afterRender: afterTranscriptPaint }),
     (eventType) => {
       if (eventType === CHILDREN_CHANGED_EVENT) { childAgents.refresh(); workflows.refresh(); }
-      if (eventType === WORKFLOW_RUNS_CHANGED_EVENT) workflows.refresh();
+      if (eventType === WORKFLOW_RUNS_CHANGED_EVENT) { workflows.refresh(); decisions.refresh(); }
     }));
   const children = useSyncExternalStore(childAgents.subscribe, childAgents.getSnapshot);
   const [childrenOpen, setChildrenOpen] = useState(false);
@@ -137,8 +145,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   sessionRef.current = sessionId && cwd ? { id: sessionId, cwd } : undefined;
   const connected = state.connection.type === "ready";
   // Read the children on every join: a reconnect may have missed their change events.
-  useEffect(() => { if (connected && sessionId) { childAgents.refresh(); workflows.refresh(); } }, [childAgents, workflows, connected, sessionId]);
-  useEffect(() => () => { childAgents.dispose(); workflows.dispose(); }, [childAgents, workflows]);
+  useEffect(() => { if (connected && sessionId) { childAgents.refresh(); workflows.refresh(); decisions.refresh(); } }, [childAgents, workflows, decisions, connected, sessionId]);
+  useEffect(() => () => { childAgents.dispose(); workflows.dispose(); decisions.dispose(); }, [childAgents, workflows, decisions]);
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
     [sessionId, cwd]);
   const [attachments] = useState(() => createAttachmentAdapter(store.saveAttachment));
@@ -332,6 +340,14 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     return <ProcessEventView event={event} onLoadOutput={onLoadOutput} />;
   }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned, proposalView]);
   const running = activeRun(runs);
+  // Flagged guesses never pin in the dock and never ask for a response; the header counts them quietly.
+  // Before the log is read, the session's status says how many there are.
+  const flagged = log.decisions === undefined ? state.status?.flaggedDecisions ?? 0 : flaggedCount(log.decisions);
+  const logActions: DecisionLogActions = {
+    onRetry: () => { void decisions.retry(); }, onDismissError: decisions.dismissError,
+    // A landed or discarded session has no agent left to take a correction.
+    onOverturn: readOnly ? undefined : decisions.overturn,
+  };
   const startWorkflow = async (name: string, inputs: WorkflowInputs, task: string | undefined) => {
     if (!await workflows.launch(name, inputs)) return;
     setWorkflowSheet(undefined);
@@ -414,6 +430,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           onOpen={() => { pull.clearNotice(); setPullSelected(firstToShow(pullItems)); setPullOpen(true); }} />}
         {childrenAvailable && !readOnly && <WorkflowOpener waiting={waitingStops(running)} running={running !== undefined}
           onOpen={() => { void workflows.readSaved(); setWorkflowSheet({ type: "picker" }); }} />}
+        {/* Like the child agents, the log's button appears once there is something in it. */}
+        {childrenAvailable && ((log.decisions?.length ?? 0) > 0 || flagged > 0 || decisionsOpen) && <DecisionsOpener flagged={flagged}
+          onOpen={() => { decisions.refresh(); setDecisionsOpen(true); }} />}
         {childrenAvailable && (children.children.length > 0 || childrenOpen) && <ChildAgentsOpener children={children.children}
           onOpen={() => { childAgents.refresh(); setChildrenOpen(true); }} />}
         {changes && !readOnly && <ChangesOpener notes={notes.length} onOpen={() => setReview({})} />}
@@ -514,7 +533,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
       })()}
       {workflowSheet?.type === "run" && running !== undefined && <WorkflowRunSheet run={running}
         workers={children.children.map((child) => ({ name: child.name, agent: child.agent, branch: child.worktree?.branch, asking: child.questions.length > 0, retry: child.retry }))}
-        onOpenChild={(name) => { setWorkflowSheet(undefined); openChildByName(name); }} onClose={() => setWorkflowSheet(undefined)} />}
+        decisions={{ log, actions: logActions }}
+        onOpenChild={(name) => { setWorkflowSheet(undefined); openChildByName(name); }} onClose={() => { decisions.dismissError(); setWorkflowSheet(undefined); }} />}
+      {decisionsOpen && <DecisionsSheet log={log} actions={logActions} onClose={() => { decisions.dismissError(); setDecisionsOpen(false); }} />}
       {pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
         notice={pull.notice} writing={pull.writing} now={Date.now()}
         onRefresh={pull.refresh} onWatch={(number, on) => { void pull.setWatch(number, on); }} onLink={pull.linkNumber}

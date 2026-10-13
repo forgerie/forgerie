@@ -1,0 +1,35 @@
+/* A settled decision as a log row. The margin holds the flag, so flagged rows read down one column; the words hang
+   from one edge. A hairline divides one record from the next. */
+.decision-record { display: grid; grid-template-columns: 0.875rem minmax(0, 1fr) auto;
+  grid-template-areas: "mark head end" ". question question" ". answer answer" ". correction correction";
+  column-gap: var(--space-2); row-gap: var(--space-1); align-items: start; min-inline-size: 0; padding: var(--space-3);
+  scroll-margin-block: var(--space-2);
+  font-size: var(--small-text); line-height: 1.5; }
+.decision-record + .decision-record { border-block-start: var(--hairline) solid var(--line); }
+.decision-record-mark { grid-area: mark; display: grid; place-items: center; block-size: 1lh; color: var(--foreground); }
+.decision-record-mark svg { inline-size: 0.875rem; block-size: 0.875rem; }
+/* Who and when. The phrase gives way before the name, and the time keeps its line's end. */
+.decision-record-head { grid-area: head; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); min-inline-size: 0; margin: 0;
+  color: var(--muted-foreground); }
+.decision-record-subject { min-inline-size: 0; overflow-wrap: anywhere; font-family: var(--code-font); font-size: var(--label-text); color: var(--foreground); }
+.decision-record-status { color: var(--foreground); font-weight: 550; }
+.decision-record-time { margin-inline-start: auto; font-size: var(--label-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The action is drawn taller than the line; it overhangs the line equally above and below, so the first line keeps its height. */
+.decision-record-end { grid-area: end; display: flex; align-items: center; margin-block: calc((1lh - var(--icon-size)) / 2); }
+.decision-record-question { grid-area: question; margin: 0; color: var(--foreground); overflow-wrap: anywhere; }
+/* The choice and its reason share one rule: a quiet one at rest, full ink on a flagged record. */
+.decision-record-answer { grid-area: answer; display: grid; gap: 0.125rem; min-inline-size: 0; padding-inline-start: var(--space-3);
+  border-inline-start: 0.125rem solid var(--line-focus); }
+.decision-record[data-flagged] .decision-record-answer { border-inline-start-color: var(--foreground); }
+.decision-record-choice { display: block; margin: 0; color: var(--foreground); font-weight: 600; overflow-wrap: anywhere; text-decoration: none; }
+.decision-record-reason { margin: 0; color: var(--muted-foreground); overflow-wrap: anywhere; }
+/* Overturned: the old answer steps back and is struck; the reader's correction takes the strong rule under it. */
+.decision-record[data-struck] .decision-record-answer { border-inline-start-color: var(--line); }
+.decision-record[data-struck] .decision-record-choice { color: var(--muted-foreground); font-weight: 500; text-decoration: line-through;
+  text-decoration-color: var(--muted-foreground); }
+.decision-record[data-struck] .decision-record-reason { color: var(--faint-foreground); }
+.decision-record[data-struck] .decision-record-mark { color: var(--muted-foreground); }
+.decision-record-correction { grid-area: correction; display: grid; gap: 0.125rem; min-inline-size: 0; margin: 0; padding-inline-start: var(--space-3);
+  border-inline-start: 0.125rem solid var(--foreground); }
+.decision-record-correction-head { display: flex; align-items: baseline; gap: var(--space-2); color: var(--muted-foreground); }
+.decision-record-correction-text { color: var(--foreground); overflow-wrap: anywhere; white-space: pre-line; }

@@ -7,6 +7,13 @@ export default function Question() {
   return <ChildEntryView entry={{ kind: "question", questionId: "q:40", child: 21, childName: "ui", question: "Should the empty state show the last run, or stay blank?" }}
     onAnswer={() => Promise.resolve()} onOpen={() => {}} />;
 }
+/** The parent passed the question on: it would be irreversible. The card says what the parent would choose. */
+export function Escalated() {
+  return <ChildEntryView entry={{ kind: "question", questionId: "q:41", child: 22, childName: "build",
+    question: "The rebase rewrote three pushed commits on feat/run-export-api. Force-push the branch?",
+    escalation: { kind: "irreversible", guess: "Yes, with --force-with-lease", why: "only this worker has pushed to the branch, and the lease refuses if anyone else did." } }}
+    onAnswer={() => Promise.resolve()} onOpen={() => {}} />;
+}
 export function Answered() {
   return <ChildEntryView entry={{ kind: "question", questionId: "q:40", child: 21, childName: "ui",
     question: "Should the empty state show the last run, or stay blank?", answer: "Show the last run." }} onOpen={() => {}} />;

@@ -1,4 +1,4 @@
-import { ArchiveIcon, CalendarClockIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, HashIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+import { ArchiveIcon, CalendarClockIcon, FlagIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, HashIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -12,6 +12,7 @@ import { LogoMark } from "./LogoMark";
 import { WorktreeRowMark } from "./WorktreeChip";
 import { PullRequestRowMark } from "./PullRequestReview";
 import { FilterChip } from "./FilterChip";
+import { IconCount } from "./IconCount";
 import { footerPlan, FOOTER_ALL_LABELS, FOOTER_ICONS_ONLY } from "./pickerFooter";
 
 /** What the picker draws. Built by the binding; the view does no I/O. */
@@ -151,9 +152,11 @@ function PickerRow({ row, selected, pending, held, showPin, menuOpen, onSelect, 
       {session.worktree ? <WorktreeRowMark info={session.worktree} /> : null}
       {session.pullRequests?.length ? <PullRequestRowMark links={session.pullRequests} /> : null}
       {held ? <span className="picker-from-backlog" title="Holds a backlog item" aria-label="Holds a backlog item"><ListTodoIcon aria-hidden /></span> : null}
-      {row.agents || row.processes ? <span className="picker-work">
+      {row.agents || row.processes || row.flagged ? <span className="picker-work">
         {row.agents ? <span title={`${count(row.agents, "agent", "agents")} working`} aria-label={`${count(row.agents, "agent", "agents")} working`}>{AGENTS}{row.agents}</span> : null}
         {row.processes ? <span title={`${count(row.processes, "process", "processes")} running`} aria-label={`${count(row.processes, "process", "processes")} running`}>{TERMINAL}{row.processes}</span> : null}
+        {/* Flagged guesses: a muted readout, never the live tone. Nothing waits on them. */}
+        {row.flagged ? <IconCount icon={<FlagIcon aria-hidden />} count={row.flagged} label={`${count(row.flagged, "flagged decision", "flagged decisions")} to look at`} /> : null}
       </span> : null}
     </span>
     {hasCommands && <button className="picker-row-more" aria-label="Session commands" aria-haspopup="menu" aria-expanded={menuOpen}

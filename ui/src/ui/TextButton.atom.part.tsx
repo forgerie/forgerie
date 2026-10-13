@@ -14,3 +14,6 @@ export function Danger() {
 export function Disabled() {
   return <TextButton label="Open session" disabled onPress={() => undefined} />;
 }
+export function Pressed() {
+  return <TextButton label="Overturn" pressed onPress={() => undefined} />;
+}

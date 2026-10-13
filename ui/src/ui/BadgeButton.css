@@ -9,7 +9,13 @@
 .badge-button-count { position: absolute; inset-block-start: -0.1875rem; inset-inline-end: -0.375rem; min-inline-size: 1rem; block-size: 1rem;
   padding-inline: 0.25rem; border-radius: 0.5rem; background: var(--live); color: var(--primary-foreground);
   font-size: var(--meta-text); font-weight: 600; line-height: 1rem; font-variant-numeric: tabular-nums; text-align: center; pointer-events: none; }
+/* A quiet count: no signal colour, since nothing waits on it; a muted chip with a hairline, in the text's ink. */
+.badge-button[data-quiet] .badge-button-count { border: var(--hairline) solid var(--line-focus); background: var(--muted); color: var(--foreground);
+  line-height: calc(1rem - 2 * var(--hairline)); font-weight: 550; }
 .badge-button-dot { position: absolute; inset-block-start: 0.125rem; inset-inline-end: 0.125rem; inline-size: 0.4375rem; block-size: 0.4375rem;
   border-radius: 50%; background: var(--live); pointer-events: none; animation: badge-button-pulse 1.6s ease-in-out infinite; }
 @keyframes badge-button-pulse { 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) { .badge-button-dot { animation: none; } }
+@media (prefers-reduced-motion: reduce) { /* A quiet count: no signal colour, since nothing waits on it; a muted chip with a hairline, in the text's ink. */
+.badge-button[data-quiet] .badge-button-count { border: var(--hairline) solid var(--line-focus); background: var(--muted); color: var(--foreground);
+  line-height: calc(1rem - 2 * var(--hairline)); font-weight: 550; }
+.badge-button-dot { animation: none; } }

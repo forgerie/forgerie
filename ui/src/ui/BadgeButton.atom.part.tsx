@@ -1,4 +1,4 @@
-import { BotIcon } from "lucide-react";
+import { BotIcon, ScaleIcon } from "lucide-react";
 import { BadgeButton } from "./BadgeButton";
 
 export const name = "Badge button";
@@ -12,4 +12,7 @@ export function Working() {
 }
 export function Quiet() {
   return <BadgeButton icon={<BotIcon aria-hidden />} label="Child agents" onPress={() => {}} />;
+}
+export function QuietCount() {
+  return <BadgeButton icon={<ScaleIcon aria-hidden />} label="Decisions, 3 flagged guesses to look at" count={3} quiet onPress={() => {}} />;
 }

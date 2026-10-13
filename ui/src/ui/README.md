@@ -8,7 +8,7 @@ The gates in `ui/gates/` enforce the rules.
 
 One line per component: the name in backticks, its layer, and what it decides.
 
-- `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions; an input such as a reply box can take the actions' place under the reason.
+- `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions; an input such as a reply box can take the actions' place under the reason; a failed action's problem shows in the failure ink above them.
 - `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays, and a refusal may offer one follow-up (such as Create) to confirm in place.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place; inside a list it opens at window level, above the button when the room below is short.
@@ -57,12 +57,14 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `OptionRow` (atom): one choice as a button: a name, a variant, a leading mark, short details (their own line, or the name's line giving way at the end), and a check on the choice in effect.
 - `OptionList` (molecule): choices in named groups with search, one status line and a foot command; rows take focus, or follow a text field's highlight.
 - `Shelf` (organism): a section at the foot of a list that opens and closes from a group header (closed, the header alone), scrolls on its own, and reports the room it sits in.
-- `BadgeButton` (atom): an icon button drawn small with a control-sized hit area, a live-colour count of what waits on the reader, and a working dot.
+- `BadgeButton` (atom): an icon button drawn small with a control-sized hit area, a live-colour count of what waits on the reader (or a quiet count of what can wait), and a working dot.
+- `IconCount` (atom): a quiet count beside a small icon, as a readout in a row; muted, never a signal.
 - `SheetDialog` (organism): a modal sheet that is a card while the window has room and meets each edge as the room runs out, with back, title, text or icon actions, close, a scrolling body, and a footer.
 - `StatusRow` (molecule): one pressable row for a running thing: a tone dot, a name, a detail, and a status that wraps under the name when the row is narrow.
 - `ExchangeLog` (molecule): one worker's record, oldest first: words with the speaker in a margin, one line per action, and folded output.
 - `ReplyBox` (molecule): a short text field with send and an optional second action; Enter sends and the text stays until the send succeeds.
-- `QuestionCard` (molecule): a question that waits on the reader, with a reply box while open and the answer once given.
+- `QuestionCard` (molecule): a question that waits on the reader, with optional context under it (such as what someone else would answer), a reply box while open, and the answer once given.
+- `DecisionRecord` (molecule): one decision made without the reader, as a log row: who and when, the question, the choice and its reason on one rule, a flag in the margin for the reader, a struck choice with its correction under it, and one quiet action at the first line's end.
 - `Glyph` (atom): a one-colour mark from an SVG path on a 24-unit grid, at the size and colour of the text beside it.
 - `Toast` (molecule): a short message that does not stop the reader: the message at full width with dismiss in its corner, and a foot row with the detail's first words (cut, they open the whole text) and one action; it always shows in the page's `ToastRegion`.
 - `ToastRegion` (organism): the one place toasts appear, at the window's top end under the header, above the sheet and the thread; mounted once at the entry.
@@ -87,7 +89,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `EmptyState` (molecule): an empty list as an invitation: an icon, a title, what goes here, and the action that adds the first one.
 - `LoadingLines` (atom): a first read in progress: pulsing bars of different lengths and one line that says what is being read.
 - `ReadoutLine` (molecule): one sentence about a state with the action that changes it at the line's end; the action wraps under the sentence first.
-- `TextButton` (atom): a quiet action drawn as words at the text's size, with a control-sized target and a danger tone.
+- `TextButton` (atom): a quiet action drawn as words at the text's size, with a control-sized target, a danger tone, and a pressed state for a toggle.
 - `TimeField` (atom): a time of day as `HH:mm`, typed or picked with the browser's control in the reader's locale.
 - `OptionPicker` (molecule): one choice as a chip that opens searchable options at window level; a blocked option stays visible and says why.
 - `HeaderIcon` (atom): an icon-only header control, such as Close, muted until hovered, with a control-sized target and its label as name and tooltip.

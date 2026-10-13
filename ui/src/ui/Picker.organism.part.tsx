@@ -1,0 +1,34 @@
+import { useState } from "react";
+import { Picker, type PickerView } from "./Picker";
+import type { Row, Section } from "../picker/board";
+import type { PickerPrefs } from "../picker/prefs";
+
+export const name = "Picker";
+export const note = "The session list: triage groups, each row's place, age, and live work";
+
+const location = { projectKey: "/code/forgerie", project: "forgerie" };
+const row = (id: string, name: string, state: Row["state"], time: string, work: Partial<Pick<Row, "agents" | "processes" | "flagged">> = {}): Row => ({
+  session: { id, cwd: "/code/forgerie", name, modified: "2026-10-13T12:00:00.000Z" }, state, group: state === "open" ? "open" : state, location, time,
+  working: state === "working", busy: state === "working", agents: 0, processes: 0, flagged: 0, ...work,
+});
+/** A session asks; one works with two agents and a flagged guess; one has only flagged guesses, and stays in its age band. */
+const SECTIONS: Section[] = [
+  { key: "blocked", label: "Needs your response", kind: "blocked", rows: [row("ask", "Release notes for 1.2", "blocked", "3m")] },
+  { key: "working", label: "Working", kind: "working", rows: [row("run", "Export run history as CSV", "working", "1m", { agents: 2, flagged: 1 })] },
+  { key: "hour", label: "Last hour", kind: "band", rows: [
+    row("guessed", "Port the settings page to the shared store", "open", "20m", { flagged: 3 }),
+    row("idle", "Why does the dock flicker on resume?", "open", "40m"),
+  ] },
+];
+const PREFS: PickerPrefs = { grouping: "state", showArchived: false, allPinned: false, collapsed: new Set(["week", "month", "older"]) };
+
+/** The list with its own prefs and selection, as the shell's binding keeps them. */
+function Stateful() {
+  const [prefs, setPrefs] = useState(PREFS);
+  const [selected, setSelected] = useState<string>();
+  const view: PickerView = { connection: { type: "ready" }, machines: 1, selectedId: selected, archivedCount: 0, sections: SECTIONS };
+  return <Picker view={view} prefs={prefs} onPrefs={setPrefs} actions={{ onSelect: (picked) => setSelected(picked.session.id), onRetry: () => {} }} />;
+}
+export default function Triage() {
+  return <Stateful />;
+}
