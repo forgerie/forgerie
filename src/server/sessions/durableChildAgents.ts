@@ -40,11 +40,14 @@ export const isChildEntryKind = (kind: string): boolean => CHILD_ENTRY_KINDS.has
 type ChildRecord = { conversationId: ConversationId; reported: EntryId[]; agent: string | null; createdAt: number; worktreeId?: string; agentFile?: { path: string; sha256: string } };
 type ChildQuestion = { child: ConversationId; childName: string; question: string; answer: string | null; askedAt: number; closed?: boolean };
 type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean; worktreeId?: string };
-type ReporterState = { phase: "deliver"; attempt?: number; error?: string } | { phase: "retry"; attempt: number; error: string; until: number } | { phase: "report"; report?: string; suppressed?: "duplicate" | "aborted" };
+type ReporterState = { phase: "deliver"; attempt?: number; error?: string } | { phase: "retry"; attempt: number; error: string; until: number; run?: string }
+  | { phase: "observe"; run: string; owner: TaskId } | { phase: "report"; report?: string; suppressed?: "duplicate" | "aborted" };
+type ChildRetryOwner = { owner: TaskId; conversationId: ConversationId; requestId: string };
 /* eslint-enable @typescript-eslint/consistent-type-definitions */
 
 export const CHILD_AGENTS_DOC_KIND = "forgerie.durable-children";
 const Children = defineDoc<{ agents: Record<string, ChildRecord>; reporters: Record<string, TaskId>;
+  failureRuns?: Record<string, string>; retryOwners?: Record<string, ChildRetryOwner>;
   continuations?: Record<string, { from: number; text: string; conversationId: number }> }>({
   kind: CHILD_AGENTS_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial",
   initial: () => ({ agents: {}, reporters: {} }),
@@ -94,9 +97,24 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
       const settled = await submission.wait(context);
       const detail = settled.status === "unanswered" && settled.detail !== undefined ? (typeof settled.detail === "string" ? settled.detail : JSON.stringify(settled.detail)) : undefined;
       const delay = CHILD_RETRY_DELAYS[attempt];
-      if (settled.status === "unanswered" && settled.reason === "model_error" && detail !== undefined && transientChildError(detail) && delay !== undefined) {
-        await runtime.commit(() => ({ status: "running", checkpoint: { phase: "retry", attempt: attempt + 1, error: detail, until: runtime.now() + delay } }), context);
-        return;
+      if (settled.status === "unanswered" && settled.reason === "model_error") {
+        const progress = { delegated: false };
+        await runtime.commit(async (tx) => {
+          const doc = await tx.doc(Children, runtime.conversationId);
+          const run = doc.failureRuns?.[String(settled.id)] ?? `input:${String(settled.id)}`;
+          const claim = doc.retryOwners?.[run];
+          if (claim !== undefined && claim.owner !== reporter.id) {
+            progress.delegated = true;
+            return { status: "running", checkpoint: { phase: "observe", run, owner: claim.owner } };
+          }
+          if (claim === undefined) doc.retryOwners = { ...doc.retryOwners, [run]: { owner: reporter.id, conversationId, requestId: `child:${String(reporter.id)}` } };
+          if (detail !== undefined && transientChildError(detail) && delay !== undefined) {
+            progress.delegated = true;
+            return { status: "running", checkpoint: { phase: "retry", attempt: attempt + 1, error: detail, until: runtime.now() + delay, run } };
+          }
+          return undefined;
+        }, context);
+        if (progress.delegated) return;
       }
       // Ancillary accounting/reporting must not replace the child's durable submission outcome.
       await runtime.commit(async (tx) => { await settleWorkflowChild(tx, runtime.conversationId, reporter.id, settled); }, context);
@@ -116,9 +134,33 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
       }, context);
     },
     retry: async (reporter, runtime, context) => {
-      const { attempt, error, until } = reporter.state.checkpoint;
+      const { attempt, error, until, run } = reporter.state.checkpoint;
       await runtime.sleep(until, context);
-      await runtime.commit(() => ({ status: "running", checkpoint: { phase: "deliver", attempt, error } }), context);
+      await runtime.commit(async (tx) => {
+        const claim = run === undefined ? undefined : (await tx.doc(Children, runtime.conversationId)).retryOwners?.[run];
+        // Publish the next receipt before admission. A steer joining that retry inherits this owner and budget.
+        if (claim !== undefined) claim.requestId = `child:${String(reporter.id)}:retry:${String(attempt)}`;
+        return { status: "running", checkpoint: { phase: "deliver", attempt, error } };
+      }, context);
+    },
+    observe: async (reporter, runtime, context) => {
+      const { run, owner } = reporter.state.checkpoint;
+      const finished = await runtime.waitForTask(owner, context);
+      const progress = { pending: false };
+      await runtime.commit(async (tx) => {
+        const claim = (await tx.doc(Children, runtime.conversationId)).retryOwners?.[run];
+        const submission = claim === undefined ? undefined : await tx.submissionByRequest(claim.conversationId, claim.requestId);
+        const accepted = await tx.submissionByRequest(runtime.conversationId, `child-report:${String(owner)}`);
+        if (accepted === undefined && finished.state.outcome.status === "aborted") {
+          await undeliveredWorkflowChild(tx, runtime.conversationId, reporter.id, "aborted");
+          return { status: "terminal", outcome: { status: "completed", result: null } };
+        }
+        // An ancillary reporter failure need not have stopped its admitted child input.
+        if (submission?.status === "queued" || submission?.status === "placed") { progress.pending = true; return undefined; }
+        if (submission !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, submission);
+        return { status: "running", checkpoint: { phase: "report", suppressed: accepted === undefined ? "aborted" : "duplicate" } };
+      }, context);
+      if (progress.pending) await runtime.sleep(runtime.now() + 250, context);
     },
     report: async (reporter, runtime, context) => {
       const checkpoint = reporter.state.checkpoint;
@@ -219,6 +261,8 @@ export interface DurableChildExtensionOptions {
   childToolsDeny?: readonly string[];
   worktrees?: DurableChildWorktrees;
   flushRunRecords?: () => Promise<void>;
+  /** Built-in hooks are read-only; the owning host supplies its Durable mutation line for shared retry receipts. */
+  commit?: (change: (tx: Tx) => Promise<void>, context: Context) => Promise<void>;
   /** Composition resolves the owning adapter for tools, reporter tasks, and child hooks. */
   resolveOptions?: (conversationId: ConversationId, context: Context) => Promise<DurableChildExtensionOptions>;
 }
@@ -249,7 +293,29 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
     name: "forgerie.child-tools",
     // Save the accounting boundary before any generation or compaction can spend money.
     hooks: [
-      hook(GenerationTask, { beforeRequest: async (_request, api, ctx) => { await (await resolve(api.conversationId, ctx)).flushRunRecords?.(); return undefined; } }),
+      hook(GenerationTask, {
+        beforeRequest: async (_request, api, ctx) => { await (await resolve(api.conversationId, ctx)).flushRunRecords?.(); return undefined; },
+        afterResponse: async (message, api, ctx) => {
+          if (message.stopReason !== "error") return;
+          // Submission IDs differ for spawn and steer, but Durable settles all inputs of one failed generation together.
+          const selected = await resolve(api.conversationId, ctx);
+          await selected.commit?.(async (tx) => {
+            const parent = (await tx.conversation(api.conversationId))?.owner?.conversationId;
+            if (parent === undefined) return;
+            const live = (await tx.doc(LiveDoc, api.conversationId)).run;
+            if (live?.taskId !== api.taskId) return;
+            const inputs = live.inputs;
+            const doc = await tx.doc(Children, parent);
+            let run = `generation:${String(api.taskId)}`;
+            for (const [key, claim] of Object.entries(doc.retryOwners ?? {})) {
+              if (claim.conversationId !== api.conversationId) continue;
+              const retry = await tx.submissionByRequest(api.conversationId, claim.requestId);
+              if (retry !== undefined && inputs.includes(retry.id)) { run = key; break; }
+            }
+            doc.failureRuns = { ...doc.failureRuns, ...Object.fromEntries(inputs.map((id) => [String(id), run])) };
+          }, ctx);
+        },
+      }),
       hook(CompactionTask, { beforeCompact: async (_request, api, ctx) => { await (await resolve(api.conversationId, ctx)).flushRunRecords?.(); return undefined; } }),
     ],
     tools: [askHumanTool, ...codingTools, watchdogDiffTool, ...extraTools, ...sharedTools],

@@ -26,7 +26,7 @@ afterEach(async () => {
   await Promise.all(journals.splice(0).map((journal) => journal.close()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-async function fixture(errors: string[] = []) {
+async function fixture(errors: string[] = [], holdAt?: number) {
   const root = await mkdtemp(join(tmpdir(), "forgerie-child-autonomy-")); roots.push(root);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
   git("init", "-b", "main"); git("config", "user.name", "Autonomy test"); git("config", "user.email", "test@example.invalid");
@@ -41,12 +41,17 @@ async function fixture(errors: string[] = []) {
   const manager = SessionManager.create(root, join(root, "sessions"));
   const models = createModels(); const provider = fauxProvider({ tokensPerSecond: 100000 }); models.setProvider(provider.provider);
   let childCalls = 0;
+  let held = false;
   const parentInputs: string[] = [];
   provider.setResponses(Array.from({ length: 100 }, () => (request) => {
     const last = request.messages.at(-1);
     const text = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content);
     if (getCurrentSystemPrompt(request.messages).includes("You are the child agent")) {
       if (text.includes("HOLD")) return fauxAssistantMessage([fauxToolCall("ask_human", { question: "Wait?" })], { stopReason: "toolUse" });
+      if (!held && childCalls === holdAt) {
+        held = true;
+        return fauxAssistantMessage([fauxToolCall("ask_human", { question: "Wait?" })], { stopReason: "toolUse" });
+      }
       const error = errors[childCalls++];
       return error === undefined ? fauxAssistantMessage("CHILD-SUCCESS") : fauxAssistantMessage("", { stopReason: "error", errorMessage: error });
     }
@@ -57,7 +62,7 @@ async function fixture(errors: string[] = []) {
     }
     return fauxAssistantMessage("PARENT-DONE");
   }));
-  const registry = createRegistry(); registry.install(workflowExtension()); const extensions = durableChildExtensions({ catalog, worktrees });
+  const registry = createRegistry(); registry.install(workflowExtension()); const extensions = durableChildExtensions({ catalog, worktrees, commit: (change, ctx) => journal.harness.commit(change, ctx) });
   for (const extension of [...extensions.parent, ...extensions.childOnly]) registry.install(extension);
   let now = 1000000;
   async function open() {
@@ -170,6 +175,70 @@ it("stops a retrying child without restarting it after the wait", async () => {
   expect(run.calls()).toBe(1);
 });
 
+
+it.each(["success", "exhausted", "stop"] as const)("shares one durable retry owner after spawn plus steer: %s", async (outcome) => {
+  const errors = outcome === "exhausted" ? ["overloaded", "HTTP 503", "WebSocket closed", "stream disconnected: final error"] : ["overloaded"];
+  const run = await fixture(errors);
+  await run.startWorkflow();
+  await run.spawn({ name: "retry", agent: "reader", message: "HOLD" });
+  await vi.waitFor(async () => { expect((await run.children())[0]?.questions).toHaveLength(1); });
+  await run.spawn({ action: "send", name: "retry", message: "Steer" });
+  await run.answer();
+  await vi.waitFor(async () => { expect((await run.children())[0]?.retry).toMatchObject({ attempt: 1, until: 1030000 }); });
+  expect((await run.runs())[0]?.children.map((child) => child.state)).toEqual([{ kind: "working" }, { kind: "working" }]);
+  expect(run.parentInputs.filter((text) => text.includes("[subagent retry"))).toHaveLength(0);
+  if (outcome === "stop") {
+    await run.stop((await run.children())[0]?.conversationId ?? 0);
+    await run.restart(1030000);
+    expect((await run.children())[0]?.retry).toBeUndefined();
+    expect((await run.runs())[0]?.children.map((child) => child.state)).toEqual([
+      { kind: "settled", outcome: "stopped", result: "aborted", delivered: "aborted" },
+      { kind: "settled", outcome: "stopped", result: "aborted", delivered: "aborted" },
+    ]);
+    expect(run.calls()).toBe(1);
+    expect(run.parentInputs.filter((text) => text.includes("[subagent retry"))).toHaveLength(0);
+    return;
+  }
+  let at = 1000000;
+  for (const [index, delay] of (outcome === "exhausted" ? [30000, 120000, 300000] : [30000]).entries()) {
+    at += delay;
+    await vi.waitFor(async () => { expect((await run.children())[0]?.retry).toMatchObject({ attempt: index + 1, until: at }); });
+    await run.restart(at);
+  }
+  const result = outcome === "success" ? "CHILD-SUCCESS" : "stream disconnected: final error";
+  await vi.waitFor(async () => {
+    const states = (await run.runs())[0]?.children.map((child) => child.state);
+    expect(states).toHaveLength(2);
+    expect(states?.map((state) => state.kind === "settled" ? state.delivered : false).sort()).toEqual(["duplicate", true].sort());
+    expect(states?.every((state) => state.kind === "settled" && state.outcome === (outcome === "success" ? "answered" : "failed") && state.result === result)).toBe(true);
+  });
+  expect(run.calls()).toBe(outcome === "success" ? 2 : 4);
+  expect(run.parentInputs.filter((text) => text.includes("[subagent retry"))).toHaveLength(1);
+  expect(run.parentInputs.find((text) => text.includes("[subagent retry"))).toContain(result);
+  expect((await run.children())[0]?.retry).toBeUndefined();
+});
+
+it("keeps the remaining retry budget when a new steer joins a retry run", async () => {
+  const run = await fixture(["overloaded", "HTTP 503", "WebSocket closed", "stream disconnected: final error"], 1);
+  await run.startWorkflow();
+  await run.spawn({ name: "retry", agent: "reader" });
+  await vi.waitFor(async () => { expect((await run.children())[0]?.retry).toMatchObject({ attempt: 1, until: 1030000 }); });
+  await run.restart(1030000);
+  await vi.waitFor(async () => { expect((await run.children())[0]?.questions).toHaveLength(1); });
+  await run.spawn({ action: "send", name: "retry", message: "Steer" });
+  await run.answer();
+  for (const [attempt, until] of [[2, 1150000], [3, 1450000]] as const) {
+    await vi.waitFor(async () => { expect((await run.children())[0]?.retry).toMatchObject({ attempt, until }); });
+    await run.restart(until);
+  }
+  await vi.waitFor(async () => {
+    const states = (await run.runs())[0]?.children.map((child) => child.state);
+    expect(states?.every((state) => state.kind === "settled" && state.outcome === "failed" && state.result === "stream disconnected: final error")).toBe(true);
+    expect(states?.map((state) => state.kind === "settled" ? state.delivered : false).sort()).toEqual(["duplicate", true].sort());
+  });
+  expect(run.calls()).toBe(4);
+  expect(run.parentInputs.filter((text) => text.includes("[subagent retry"))).toHaveLength(1);
+});
 
 it("records duplicate answers and stopped-before-reporting as distinct non-error delivery states", async () => {
   const run = await fixture();

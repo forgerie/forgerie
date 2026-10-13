@@ -56,6 +56,8 @@ Each `send` from the parent reads the child's agent file again and applies the c
 
 After Durable's own generation retries end, Forgerie retries transient child `model_error` failures at most three more times: after 30 seconds, 2 minutes, and 5 minutes. Transient errors include overloaded providers, 5xx, `auth_unavailable`, closed WebSockets, disconnected streams, rate limits, and transport failures. Invalid credentials, quota or billing limits, and context limits are not retried. Other failures reach the parent at once.
 
+Spawn and send inputs can belong to the same child run. That failed run has one durable retry owner, claimed in the parent's Children document. Other reporters wait for that owner, keep the same final outcome, and suppress their duplicate report. A steer that joins a retry keeps its existing owner and remaining budget. Stop cancels the owner and its observers.
+
 Each retry submits “Continue where you stopped; the last request failed with: <detail>” with its own durable request ID. The reporter saves `{phase: "retry", attempt, error, until}` and sleeps with Durable's clock. Restart keeps the original deadline and does not repeat an admitted retry. `/children` exposes the pending retry as `{attempt, max: 3, error, until}`. The child remains busy during backoff. Stop cancels the pending retry too. When the retry budget ends, the parent report includes the actual error text, not just `model_error`.
 
 A retry is a new child run in run history, not another turn of the failed run. Each retry can also incur Durable's normal generation retries and model costs. The schedule is reporter backoff, not an upper bound on total elapsed time.

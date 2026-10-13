@@ -413,6 +413,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     const sessionSkills = this.resourceLoader.getSkills().skills.filter((skill) => !skill.disableModelInvocation)
       .map((skill) => ({ name: skill.name, description: skill.description, path: skill.filePath }));
     const source = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext, sessionSkills, sessionTools: () => this.tools,
+      commit: (change, ctx) => this.journal.harness.commit(change, ctx),
       ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
       ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
     const workflow = workflowExtension();
