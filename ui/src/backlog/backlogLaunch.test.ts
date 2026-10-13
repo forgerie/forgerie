@@ -15,6 +15,7 @@ function server(reply: (call: Call) => { status?: number; body: unknown }) {
   };
   return { calls, fetchFn };
 }
+const projectOwned = { owner: { kind: "project", projectId: "p1", projectName: "forgerie", repo: "/r" }, destination: { kind: "routed", projectId: "p1", reason: "project-owned" } };
 const claim = { kind: "claimed", claimId: "c1", requestId: "r", fingerprint: "f", projectId: "p1", itemId: "01A", repo: "/code/forgerie",
   cwd: "/code/forgerie/.worktree/s-1", claimedAt: "2026-10-07T10:00:00Z", sessionId: "s-held" };
 
@@ -66,7 +67,7 @@ describe("starting a session from a backlog item", () => {
 
 describe("the backlog client", () => {
   it("keeps the readable items when one is malformed, and reads an unknown readiness as blocked", async () => {
-    const good = { id: "01A", title: "Fix", projectId: "p1", projectName: "forgerie", repo: "/r", path: "a.md", status: "To Do", labels: [], blocked_by: [],
+    const good = { id: "01A", title: "Fix", projectId: "p1", projectName: "forgerie", repo: "/r", ...projectOwned, path: "a.md", status: "To Do", labels: [], blocked_by: [],
       open: true, readiness: "ready", blockingIds: [] };
     const { fetchFn } = server(() => ({ body: { items: [good, { id: "bad" }, { ...good, id: "02B", readiness: "someday" }], warnings: [], generatedAt: "now" } }));
     const list = await createBacklogApi(fetchFn).list();
@@ -84,20 +85,38 @@ describe("the backlog client", () => {
     await createBacklogApi(paths.fetchFn).release({ projectId: "p1", itemId: "01A", provider: "markdown" }, "c2");
     expect(paths.calls.map((call) => call.path)).toEqual(["/api/backlog/p1/items/7/release?provider=github", "/api/backlog/p1/items/01A/release"]);
   });
-  it("keeps Azure's organization-qualified identity through launch and release", async () => {
+  it("reads, launches, and releases a source's item through its source, with Azure's organization-qualified identity", async () => {
     const { calls, fetchFn } = server(({ path }) => path.includes("/launch")
-      ? { body: { session: { id: "s1", cwd: "/code/amaze" }, claim: { ...claim, provider: "azure-devops", itemId: "amazeinsights:7", sessionId: "s1" }, initialPrompt: "Azure work item context", reused: false } }
+      ? { body: { session: { id: "s1", cwd: "/code/storefront" }, claim: { ...claim, provider: "azure-devops", itemId: "contoso:7", sourceId: "src-1", sessionId: "s1" }, initialPrompt: "Azure work item context", reused: false } }
       : { body: { accepted: true } });
-    await createNewSessionApi(fetchFn).start("/code/amaze", { text: "Check the totals." }, {},
-      { startupToken: "azure-7", item: { projectId: "p1", itemId: "amazeinsights:7", provider: "azure-devops" } });
-    expect(calls[0]!.path).toBe("/api/backlog/p1/items/amazeinsights%3A7/launch?provider=azure-devops");
+    await createNewSessionApi(fetchFn).start("/code/storefront", { text: "Check the totals." }, {},
+      { startupToken: "azure-7", item: { sourceId: "src-1", itemId: "contoso:7", provider: "azure-devops", scope: "everyone" } });
+    expect(calls[0]).toEqual({ path: "/api/backlog/sources/src-1/items/contoso%3A7/launch?scope=everyone", body: { requestId: "azure-7", start: { cwd: "/code/storefront" } } });
     expect(calls[1]!.body).toMatchObject({ text: "Azure work item context\n\nCheck the totals." });
     const paths = server(() => ({ body: { released: true } }));
-    await createBacklogApi(paths.fetchFn).release({ projectId: "p1", itemId: "amazeinsights:7", provider: "azure-devops" }, "c1");
-    expect(paths.calls[0]!.path).toBe("/api/backlog/p1/items/amazeinsights%3A7/release?provider=azure-devops");
+    await createBacklogApi(paths.fetchFn).release({ sourceId: "src-1", itemId: "contoso:7", provider: "azure-devops" }, "c1");
+    await createBacklogApi(paths.fetchFn).detail({ sourceId: "src-1", itemId: "contoso:7" }).catch(() => undefined);
+    expect(paths.calls.map((call) => call.path)).toEqual(["/api/backlog/sources/src-1/items/contoso%3A7/release", "/api/backlog/sources/src-1/items/contoso%3A7"]);
+  });
+  it("keeps a source's Azure rows, which name no project, and the sources with their destinations", async () => {
+    const azure = { id: "contoso:7", title: "Totals", provider: "azure-devops", owner: { kind: "source", sourceId: "src-1", label: "Fabrikam Web" },
+      destination: { kind: "not-routed", reason: "unset" }, path: "contoso/Fabrikam Web#7", status: "Active", labels: [], blocked_by: [], open: true, readiness: "claimed", blockingIds: [],
+      assignedToMe: true, assignees: [], claim: { ...claim, provider: "azure-devops", itemId: "contoso:7", sourceId: "src-1" },
+      contested: { claims: [claim, { ...claim, claimId: "c2", sessionId: "s-other" }], message: "Held twice" } };
+    const overlap = { sourceId: "src-1", provider: "azure-devops", path: "contoso/Fabrikam Web", kind: "source-overlap", message: "Overlaps" };
+    const { fetchFn } = server(() => ({ body: { items: [azure, { ...azure, id: "contoso:8", owner: { kind: "source" } }],
+      sources: [{ sourceId: "src-1", label: "Fabrikam Web", provider: "azure-devops", organization: "contoso", areaPath: "Fabrikam Web\\Checkout",
+        destination: { kind: "routed", projectId: "p2", reason: "source-destination" }, warnings: [overlap] }],
+      warnings: [overlap], generatedAt: "now" } }));
+    const list = await createBacklogApi(fetchFn).list();
+    expect(list.items.map((item) => [item.id, item.owner.kind, item.destination.kind, item.contested?.claims.length])).toEqual([["contoso:7", "source", "not-routed", 2]]);
+    expect(list.items[0]).not.toHaveProperty("projectId");
+    expect(list.sources).toEqual([{ sourceId: "src-1", label: "Fabrikam Web", provider: "azure-devops", organization: "contoso", areaPath: "Fabrikam Web\\Checkout",
+      destination: { kind: "routed", projectId: "p2", reason: "source-destination" }, warnings: [overlap] }]);
+    expect(list.warnings).toEqual([overlap]);
   });
   it("reads an item from a server older than providers as markdown", async () => {
-    const { fetchFn } = server(() => ({ body: { items: [{ id: "01A", title: "Fix", projectId: "p1", projectName: "forgerie", repo: "/r", path: "a.md", status: "To Do",
+    const { fetchFn } = server(() => ({ body: { items: [{ id: "01A", title: "Fix", projectId: "p1", projectName: "forgerie", repo: "/r", ...projectOwned, path: "a.md", status: "To Do",
       labels: [], open: true, readiness: "ready", blockingIds: [], claim: { ...claim, provider: undefined } }], warnings: [], generatedAt: "now" } }));
     const list = await createBacklogApi(fetchFn).list();
     expect(list.items[0]).toMatchObject({ provider: "markdown", claim: { provider: "markdown" } });
@@ -135,7 +154,7 @@ describe("the backlog client", () => {
 });
 
 it("keeps Everyone on list, detail, and launch requests", async () => {
-  const service = server(({ path }) => path.includes("/launch") ? { body: { session: { id: "s1", cwd: "/r" }, claim, initialPrompt: "context", reused: false } } : path.includes("/items/") ? { body: { item: { id: "7", title: "Work", provider: "github", projectId: "p1", projectName: "Project", repo: "/r", path: "org/repo#7", status: "Open", labels: [], open: true, readiness: "ready", blockingIds: [] }, body: "", initialPrompt: "" } } : { body: { items: [], warnings: [], generatedAt: "now" } });
+  const service = server(({ path }) => path.includes("/launch") ? { body: { session: { id: "s1", cwd: "/r" }, claim, initialPrompt: "context", reused: false } } : path.includes("/items/") ? { body: { item: { id: "7", title: "Work", provider: "github", projectId: "p1", projectName: "Project", repo: "/r", ...projectOwned, path: "org/repo#7", status: "Open", labels: [], open: true, readiness: "ready", blockingIds: [] }, body: "", initialPrompt: "" } } : { body: { items: [], warnings: [], generatedAt: "now" } });
   const api = createBacklogApi(service.fetchFn); const ref = { projectId: "p1", itemId: "7", provider: "github", scope: "everyone" as const };
   await api.list(undefined, "everyone"); await api.detail(ref); await api.launch(ref, "r", { cwd: "/r" });
   expect(service.calls.map((call) => call.path)).toEqual(["/api/backlog?scope=everyone", "/api/backlog/p1/items/7?provider=github&scope=everyone", "/api/backlog/p1/items/7/launch?provider=github&scope=everyone"]);
@@ -148,7 +167,7 @@ it.each([[1, 0, 1], [1, 1, 2], [10, 0, 10], [10, 10, 16]])("keeps %i Azure image
   const { calls, fetchFn } = server(({ path }) => path.includes("/launch")
     ? { body: { session: { id: "s1", cwd: "/r" }, claim, initialPrompt, images, reused: false } }
     : { body: { accepted: true } });
-  await createNewSessionApi(fetchFn).start("/r", { text: "go", images: pasted }, {}, { item: { projectId: "p1", itemId: "7", provider: "azure-devops" } });
+  await createNewSessionApi(fetchFn).start("/r", { text: "go", images: pasted }, {}, { item: { sourceId: "src-1", itemId: "contoso:7", provider: "azure-devops" } });
   const sentPasted = total - itemCount;
   const note = sentPasted === 0 ? "" : `\n\nThe user also attached ${sentPasted} more ${sentPasted === 1 ? "image" : "images"} after the work item's images.`;
   expect(calls[1]!.body).toMatchObject({ text: `${initialPrompt}${note}\n\ngo`, attachments: [...images, ...pasted.slice(0, sentPasted)] });

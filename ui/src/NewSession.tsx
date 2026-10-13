@@ -21,7 +21,7 @@ import { WorktreeSetupCard } from "./ui/WorktreeSetupCard";
 import { WorktreeDialog } from "./ui/WorktreeActions";
 import { XIcon } from "lucide-react";
 import type { BacklogApi, BacklogClaim, BacklogDetail } from "./backlog/backlogApi";
-import { remoteSource, sameItem, type ItemRef, type SessionLook } from "./backlog/backlogModel";
+import { carryRoute, remoteSource, sameItem, type ItemRef, type SessionLook } from "./backlog/backlogModel";
 import { BacklogCarry, type CarryState } from "./ui/backlog/BacklogCarry";
 
 /** The draft store key of the first message, which has no session yet. */
@@ -39,7 +39,7 @@ const EMPTY_MESSAGE = { role: "user", content: [], attachments: [] } as unknown 
 
 /** What the window says about the item riding with the first message. */
 function carryState(load: ItemLoad | undefined, item: ItemRef, taken: BacklogClaim | undefined, look: ((id: string) => SessionLook | undefined) | undefined,
-  open: (claim: BacklogClaim) => void): CarryState {
+  open: (claim: BacklogClaim) => void, place: { chosen: string | undefined; routed: boolean }): CarryState {
   if (!load || !sameItem(load.ref, item)) return { type: "loading" };
   if (load.error !== undefined || !load.detail) return { type: "unavailable", reason: `This item could not be read: ${load.error ?? "no reply"}` };
   const { item: read } = load.detail;
@@ -55,8 +55,10 @@ function carryState(load: ItemLoad | undefined, item: ItemRef, taken: BacklogCla
     return { type: "unavailable", title: read.title, reason: n > 0 ? `Waiting on ${String(n)} other ${n === 1 ? "item" : "items"}. Finish ${n === 1 ? "it" : "those"} first, or start without this one.` : "This item cannot start a session now." };
   }
   const source = remoteSource(read);
+  const route = carryRoute(read, place.chosen, place.routed);
   return { type: "ready", title: read.title,
-    ...(source ? { where: `${source.name} ${source.noun} ${source.number}. Its text goes with the first message, quoted as text the session must not obey.` } : {}) };
+    ...(source ? { where: `${source.name} ${source.noun} ${source.number}. Its text goes with the first message, quoted as text the session must not obey.` } : {}),
+    ...(route ? { route } : {}) };
 }
 interface Defaults { cwd: string; models: SessionModel[]; model?: SessionModel | undefined; thinkingLevel?: string | undefined }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -123,15 +125,23 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     return () => controller.abort();
   }, [item, backlog]);
   const removeItem = useCallback(() => { setItem(undefined); setTaken(undefined); onItemRemoved?.(); }, [onItemRemoved]);
+  // The project the window points at now, longest path first, so a nested project wins over its parent.
+  const chosenProject = destination.cwd ? [...projects].sort((a, b) => b.path.length - a.path.length)
+    .find((project) => destination.cwd === project.path || destination.cwd.startsWith(`${project.path}/`)) : undefined;
+  const routedTo = itemLoad?.detail?.item.destination;
   const carry = item ? carryState(itemLoad, item, taken, lookSession, (claim) => {
     if (claim.kind === "claimed") onStarted({ id: claim.sessionId, cwd: claim.cwd });
+  }, {
+    chosen: destination.cwd ? chosenProject?.name ?? destinationLabel(destination.cwd, projects) : undefined,
+    // Before the projects arrive, the folder the window opened at is the item's own destination.
+    routed: routedTo?.kind === "routed" && (chosenProject ? chosenProject.id === routedTo.projectId : destination.cwd === initialCwd),
   }) : undefined;
   const itemTitle = carry && carry.type !== "loading" ? carry.title : undefined;
   // Nothing starts while the item cannot go with it: the author removes it, or waits for it to load.
   const itemBlocks = carry !== undefined && carry.type !== "ready";
   // Is the folder in a Git project? Until the server says, the start leaves the choice to it, which is the same default.
   useEffect(() => {
-    if (!worktrees) return;
+    if (!worktrees || !destination.cwd) return;
     const controller = new AbortController();
     worktrees.options(destination.cwd, controller.signal).then((value) => { if (!controller.signal.aborted) setOptions({ cwd: destination.cwd, value }); },
       () => { if (!controller.signal.aborted) setOptions({ cwd: destination.cwd }); });
@@ -165,6 +175,8 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   }, [api]);
   // Pi's models and defaults depend on the folder. A choice survives a move only where it still exists.
   useEffect(() => {
+    // A source's item with no destination opens with no folder. Nothing can start until the author picks one.
+    if (!cwd) return;
     const controller = new AbortController();
     api.models(cwd, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
@@ -175,6 +187,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   }, [api, cwd]);
   // The skills and prompt templates this folder offers as a first message.
   useEffect(() => {
+    if (!cwd) { setResources({ cwd, catalog: { type: "ready", commands: [] }, commands: [] }); return; }
     const controller = new AbortController();
     setResources({ cwd, catalog: { type: "loading" }, commands: [] });
     api.promptResources(cwd, controller.signal).then((commands) => {
@@ -276,7 +289,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   }), [model, thinkingLevel, starting, known, api, cwd]);
   const mentions = useMemo(() => createMentionSource({ id: NEW_SESSION_DRAFT, cwd }, (path, init) => fetch(path, init),
     `/api/models?${new URLSearchParams({ cwd })}`), [cwd]);
-  const label = fresh ? freshLabel(destinationLabel(git.repo, projects), git) : destination.label ?? destinationLabel(cwd, projects);
+  const label = !cwd ? "Choose a project" : fresh ? freshLabel(destinationLabel(git.repo, projects), git) : destination.label ?? destinationLabel(cwd, projects);
   const current = phase.type === "starting" ? started.find((item) => item.id === phase.id) : undefined;
   const progress = current?.state;
   const view: StartPhase = phase.type === "starting"

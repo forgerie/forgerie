@@ -11,7 +11,8 @@ const text = z.string().min(1);
 /** Where an item comes from. A server older than providers sends none, and all its items are markdown. */
 const provider = z.string().min(1).catch("markdown");
 
-const claimIdentity = { claimId: text, projectId: text, provider, itemId: text, repo: text, cwd: text, claimedAt: text };
+/** For an Azure item, `projectId`, `repo` and `cwd` say where its session runs; `sourceId` names the board it came from. */
+const claimIdentity = { claimId: text, projectId: text, provider, itemId: text, repo: text, cwd: text, claimedAt: text, sourceId: text.optional().catch(undefined) };
 export const backlogClaimSchema = z.discriminatedUnion("kind", [
   z.object({ ...claimIdentity, kind: z.literal("launching") }),
   z.object({ ...claimIdentity, kind: z.literal("interrupted") }),
@@ -19,8 +20,21 @@ export const backlogClaimSchema = z.discriminatedUnion("kind", [
 ]);
 export type BacklogClaim = z.infer<typeof backlogClaimSchema>;
 
-export const backlogItemSchema = z.object({
-  id: text, title: text, provider, projectId: text, projectName: text, repo: text,
+/** Who lists the item: a project (its Markdown files, its GitHub issues), or a backlog source that no project owns (an Azure board). */
+const projectOwner = z.object({ kind: z.literal("project"), projectId: text, projectName: text, repo: text });
+const sourceOwner = z.object({ kind: z.literal("source"), sourceId: text, label: text });
+/**
+ * Where a session for the item starts. A source with no destination, or one whose project is no longer
+ * registered, is not routed. An unknown shape reads as not routed: this client never guesses a project.
+ */
+export const destinationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("routed"), projectId: text, reason: z.enum(["source-destination", "project-owned"]) }),
+  z.object({ kind: z.literal("not-routed"), reason: z.enum(["unset", "missing-project"]).catch("unset") }),
+]).catch({ kind: "not-routed", reason: "unset" });
+export type Destination = z.infer<typeof destinationSchema>;
+
+const itemFields = {
+  id: text, title: text, provider, destination: destinationSchema,
   /** A repo-relative file for markdown; `owner/name#42` for a GitHub issue. */
   path: text,
   /** The item's own web page, when its provider has one. Only https. */
@@ -35,28 +49,44 @@ export const backlogItemSchema = z.object({
   readiness: z.enum(["ready", "blocked", "claimed", "closed"]).catch("blocked"),
   blockingIds: z.array(z.string()).catch([]),
   claim: backlogClaimSchema.optional().catch(undefined),
-});
+  /** Two or more live claims for one Azure item, from before an item had one claim. It stays held until one remains. */
+  contested: z.object({ claims: z.array(backlogClaimSchema).min(2), message: z.string() }).optional().catch(undefined),
+};
+/** A project's item names its project; a source's item has no project of its own, only a destination. */
+export const backlogItemSchema = z.union([
+  z.object({ ...itemFields, owner: projectOwner, projectId: text, projectName: text, repo: text }),
+  z.object({ ...itemFields, owner: sourceOwner }),
+]);
 export type BacklogItem = z.infer<typeof backlogItemSchema>;
+export type BacklogOwner = BacklogItem["owner"];
 
 export const backlogWarningSchema = z.object({
-  projectId: text, path: z.string(),
-  kind: z.enum(["ignored-directory", "invalid-item", "project-error", "scan-limit", "provider-auth", "provider-install", "provider-unavailable", "items-hidden"]).or(z.string()),
+  /** The project or the source the warning is about. A warning names at most one. */
+  projectId: text.optional().catch(undefined), sourceId: text.optional().catch(undefined), path: z.string(),
+  kind: z.enum(["ignored-directory", "invalid-item", "project-error", "scan-limit", "provider-auth", "provider-install", "provider-unavailable", "items-hidden",
+    "source-overlap", "contested-claim", "retired-repo-azure"]).or(z.string()),
   provider: z.string().optional().catch(undefined),
   message: z.string(),
 });
 export type BacklogWarning = z.infer<typeof backlogWarningSchema>;
 
+/** One malformed entry drops out, not the list. */
+const readable = <T>(schema: z.ZodType<T>) => z.array(z.unknown()).transform((values) => values.flatMap((value) => {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? [parsed.data] : [];
+}));
+/** A backlog source as the list sees it: its board, its destination, and what went wrong reading it. */
+export const backlogSourceSummarySchema = z.object({
+  sourceId: text, label: text, provider: z.string().catch("azure-devops"), organization: text, areaPath: text.optional().catch(undefined),
+  destination: destinationSchema, warnings: readable(backlogWarningSchema).catch([]),
+});
+export type BacklogSourceSummary = z.infer<typeof backlogSourceSummarySchema>;
+
 export const backlogListSchema = z.object({
   projects: z.array(z.object({ projectId: text, providers: z.array(z.string()) })).optional(),
-  // One malformed item drops out, not the list.
-  items: z.array(z.unknown()).transform((items) => items.flatMap((item) => {
-    const parsed = backlogItemSchema.safeParse(item);
-    return parsed.success ? [parsed.data] : [];
-  })),
-  warnings: z.array(z.unknown()).transform((warnings) => warnings.flatMap((warning) => {
-    const parsed = backlogWarningSchema.safeParse(warning);
-    return parsed.success ? [parsed.data] : [];
-  })),
+  sources: readable(backlogSourceSummarySchema).catch([]),
+  items: readable(backlogItemSchema),
+  warnings: readable(backlogWarningSchema),
   generatedAt: z.string(),
 });
 export type BacklogList = z.infer<typeof backlogListSchema>;
@@ -95,15 +125,24 @@ export class BacklogRefusal extends Error {
   }
 }
 
-/** One item. The same id from two providers is two items, so a reference always says which provider; absent means markdown. */
-export interface BacklogRef { projectId: string; itemId: string; provider?: string | undefined; scope?: BacklogScope | undefined }
+interface RefFields { itemId: string; provider?: string | undefined; scope?: BacklogScope | undefined }
+/**
+ * One item. A project's item is addressed through its project; a source's item through its source.
+ * The same id from two providers is two items, so a reference always says which provider; absent means markdown.
+ */
+export type BacklogRef = (RefFields & { projectId: string; sourceId?: undefined }) | (RefFields & { sourceId: string; projectId?: undefined });
 export const MARKDOWN = "markdown";
-export const providerOf = (ref: Pick<BacklogRef, "provider">) => ref.provider ?? MARKDOWN;
+/** The one provider a source lists in this version. */
+export const AZURE_DEVOPS = "azure-devops";
+export const providerOf = (ref: Pick<RefFields, "provider">) => ref.provider ?? MARKDOWN;
 /** Markdown items keep the bare path, so this client still works against a server older than providers. */
-const itemPath = (ref: BacklogRef) => `/api/backlog/${encodeURIComponent(ref.projectId)}/items/${encodeURIComponent(ref.itemId)}`;
+const itemPath = (ref: BacklogRef) => ref.sourceId !== undefined
+  ? `/api/backlog/sources/${encodeURIComponent(ref.sourceId)}/items/${encodeURIComponent(ref.itemId)}`
+  : `/api/backlog/${encodeURIComponent(ref.projectId)}/items/${encodeURIComponent(ref.itemId)}`;
 const providerQuery = (ref: BacklogRef) => {
   const params = new URLSearchParams();
-  if (providerOf(ref) !== MARKDOWN) params.set("provider", providerOf(ref));
+  // A source's route lists one provider, so it needs no name.
+  if (ref.sourceId === undefined && providerOf(ref) !== MARKDOWN) params.set("provider", providerOf(ref));
   if (ref.scope !== undefined) params.set("scope", ref.scope);
   return params.size ? `?${params.toString()}` : "";
 };

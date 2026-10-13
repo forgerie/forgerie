@@ -7,7 +7,7 @@ import type { BacklogApi } from "./backlogApi";
 it("keys reads by scope and never falls back to another scope's snapshot", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); window.localStorage.clear();
   const calls: string[] = []; let failMine = false;
-  const api: Pick<BacklogApi, "list"> = { list: async (_signal, scope = "mine") => { calls.push(scope); if (failMine && scope === "mine") throw new Error("offline"); return { items: [], warnings: [], generatedAt: scope }; } };
+  const api: Pick<BacklogApi, "list"> = { list: async (_signal, scope = "mine") => { calls.push(scope); if (failMine && scope === "mine") throw new Error("offline"); return { items: [], warnings: [], sources: [], generatedAt: scope }; } };
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
   function Screen() { const { scope, setScope, load } = useBacklogList(api); return <><button onClick={() => setScope(scope === "mine" ? "everyone" : "mine")}>Scope</button><p>{load.type === "ready" ? load.value.generatedAt : load.type === "failed" ? load.last?.generatedAt ?? "failed" : "loading"}</p></>; }
   const settle = () => act(async () => { for (let i = 0; i < 4; i++) await new Promise((resolve) => setTimeout(resolve, 0)); });

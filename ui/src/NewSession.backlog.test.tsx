@@ -7,37 +7,47 @@ import { createDeferredFiles, type NewSessionApi, type StartFailure } from "./ne
 import type { Session, SessionModel } from "./contracts";
 import { createDraftStore } from "./draftStore";
 import { createLaunchStore } from "./launches";
-import type { BacklogApi, BacklogClaim, BacklogDetail, BacklogItem } from "./backlog/backlogApi";
+import type { BacklogApi, BacklogClaim, BacklogDetail, BacklogItem, BacklogRef } from "./backlog/backlogApi";
 import type { ComposerInputElement } from "./ui/ComposerEditor";
 
 let root: Root;
 const opus: SessionModel = { provider: "p", id: "opus", name: "Opus", reasoning: true };
 type StartArgs = Parameters<NewSessionApi["start"]>;
 type StartResult = Awaited<ReturnType<NewSessionApi["start"]>>;
-const item = (extra: Partial<BacklogItem> = {}): BacklogItem => ({ id: "01A", title: "Fix the nested transcript", provider: "markdown", projectId: "p1", projectName: "forgerie",
-  repo: "/code/forgerie", path: "work/items/a.md", status: "To Do", labels: [], assignedToMe: true, assignees: [], open: true, readiness: "ready", blockingIds: [], ...extra });
+const fields = { title: "Fix the nested transcript", path: "work/items/a.md", status: "To Do", labels: [], assignedToMe: true, assignees: [], open: true,
+  readiness: "ready" as const, blockingIds: [] };
+const item = (extra: Partial<BacklogItem> = {}): BacklogItem => ({ id: "01A", provider: "markdown", projectId: "p1", projectName: "forgerie", repo: "/code/forgerie", ...fields,
+  owner: { kind: "project", projectId: "p1", projectName: "forgerie", repo: "/code/forgerie" }, destination: { kind: "routed", projectId: "p1", reason: "project-owned" },
+  ...extra } as BacklogItem);
+/** An Azure board's work item, routed to the storefront project unless a test says otherwise. */
+const sourceItem = (extra: Partial<BacklogItem> = {}): BacklogItem => ({ ...fields, id: "contoso:7", provider: "azure-devops", path: "contoso/Fabrikam Web#7",
+  title: "Checkout total ignores the second code", owner: { kind: "source", sourceId: "src-1", label: "Fabrikam Web" },
+  destination: { kind: "routed", projectId: "p2", reason: "source-destination" }, ...extra } as BacklogItem);
+const projects = [{ id: "p1", name: "forgerie", path: "/code/forgerie" }, { id: "p2", name: "storefront", path: "/code/storefront" }];
 const held: BacklogClaim = { kind: "claimed", claimId: "c1", projectId: "p1", provider: "markdown", itemId: "01A", repo: "/code/forgerie", cwd: "/code/forgerie/.worktree/s-9",
   claimedAt: "2026-10-07T10:00:00Z", sessionId: "s-held" };
 
-function harness(options: { detail?: Partial<BacklogItem>; outcome?: (args: StartArgs) => StartResult } = {}) {
+function harness(options: { detail?: Partial<BacklogItem>; read?: BacklogItem; outcome?: (args: StartArgs) => StartResult } = {}) {
   const starts: StartArgs[] = [];
+  const models: string[] = [];
   const api: NewSessionApi = {
-    projects: async () => [{ id: "p1", name: "forgerie", path: "/code/forgerie" }],
-    workspaces: async () => [],
-    models: async () => ({ models: [opus], model: opus, thinkingLevel: "high" }),
+    projects: async () => projects,
+    // Each project has one checkout, so choosing a project chooses its folder.
+    workspaces: async (projectId) => projects.filter((project) => project.id === projectId).map((project) => ({ id: `w-${project.id}`, path: project.path, label: project.name, isMain: true })),
+    models: async (cwd) => { models.push(cwd); return { models: [opus], model: opus, thinkingLevel: "high" }; },
     promptResources: async () => [],
     start: async (...args) => { starts.push(args); return options.outcome?.(args) ?? { type: "started", session: { id: "s-new", cwd: args[0] } }; },
   };
   const backlog: Pick<BacklogApi, "detail"> = {
-    detail: async (): Promise<BacklogDetail> => ({ item: item(options.detail), body: "# Fix", initialPrompt: "This is backlog item 01A.\n\n# Fix" }),
+    detail: async (): Promise<BacklogDetail> => ({ item: options.read ?? item(options.detail), body: "# Fix", initialPrompt: "This is backlog item 01A.\n\n# Fix" }),
   };
   const launches = createLaunchStore<LaunchDraft>(api);
-  return { api, backlog, launches, starts };
+  return { api, backlog, launches, starts, models };
 }
 const settle = () => act(async () => { for (let index = 0; index < 6; index++) await new Promise((resolve) => setTimeout(resolve, 0)); });
-async function render(h: ReturnType<typeof harness>, extra: { onStarted?: (session: Session) => void; onItemRemoved?: () => void } = {}) {
-  await act(async () => root.render(<NewSession cwd="/code/forgerie" api={h.api} launches={h.launches} deferred={createDeferredFiles()} drafts={createDraftStore(undefined)}
-    item={{ projectId: "p1", itemId: "01A" }} backlog={h.backlog} lookSession={(id) => id === "s-held" ? { state: "working", name: "Atomic deploys", time: "41m" } : undefined}
+async function render(h: ReturnType<typeof harness>, extra: { onStarted?: (session: Session) => void; onItemRemoved?: () => void; cwd?: string; item?: BacklogRef } = {}) {
+  await act(async () => root.render(<NewSession cwd={extra.cwd ?? "/code/forgerie"} api={h.api} launches={h.launches} deferred={createDeferredFiles()} drafts={createDraftStore(undefined)}
+    item={extra.item ?? { projectId: "p1", itemId: "01A" }} backlog={h.backlog} lookSession={(id) => id === "s-held" ? { state: "working", name: "Atomic deploys", time: "41m" } : undefined}
     onStarted={extra.onStarted ?? (() => {})} onClose={() => {}} onItemRemoved={extra.onItemRemoved} />));
   await settle();
 }
@@ -68,7 +78,7 @@ describe("a new session with a backlog item", () => {
   });
 
   it("names an Azure work item and explains that its context goes with the first message", async () => {
-    await render(harness({ detail: { id: "amazeinsights:7", provider: "azure-devops" } }));
+    await render(harness({ read: sourceItem() }), { cwd: "/code/storefront", item: { sourceId: "src-1", itemId: "contoso:7" } });
     expect(document.querySelector(".bl-carry")!.textContent).toContain("Azure DevOps work item #7");
     expect(document.querySelector(".bl-carry")!.textContent).toContain("quoted as text the session must not obey");
   });
@@ -123,5 +133,51 @@ describe("a new session with a backlog item", () => {
     await send();
     expect(h.starts).toHaveLength(0);
     expect(button("Start session")!.disabled).toBe(true);
+  });
+});
+
+describe("a new session with a source's work item", () => {
+  const ref = { sourceId: "src-1", itemId: "contoso:7", provider: "azure-devops" };
+  const route = () => document.querySelector(".bl-carry-route")?.textContent;
+  const destination = () => document.querySelector<HTMLButtonElement>(".destination-trigger")!;
+  async function choose(project: string) {
+    await click(destination());
+    await click([...document.querySelectorAll<HTMLButtonElement>(".option-row")].find((row) => row.textContent?.includes(project)));
+  }
+
+  it("opens at the source's destination, says so, and the destination picker changes it", async () => {
+    const h = harness({ read: sourceItem() });
+    await render(h, { cwd: "/code/storefront", item: ref });
+    expect(route()).toBe("Starts in storefront · source destination");
+    expect(destination().textContent).toBe("storefront");
+    await choose("forgerie");
+    expect(destination().textContent).toBe("forgerie");
+    expect(route()).toBe("Starts in forgerie · chosen here");
+    await click(button("Start session"));
+    expect(h.starts).toHaveLength(1);
+    expect(h.starts[0]![0]).toBe("/code/forgerie");
+    expect(h.starts[0]![3]).toMatchObject({ item: ref });
+  });
+
+  it("with no destination: asks for a project, and Start waits for the pick", async () => {
+    const h = harness({ read: sourceItem({ destination: { kind: "not-routed", reason: "unset" } }) });
+    await render(h, { cwd: "", item: ref });
+    expect(route()).toBe("This source has no destination. Choose a project, or set one in Settings → Backlog.");
+    expect(document.querySelector(".bl-carry-route")!.hasAttribute("data-attention")).toBe(true);
+    expect(destination().textContent).toBe("Choose a project");
+    expect(button("Start session")!.disabled).toBe(true);
+    // Nothing asks the server about a folder that is not chosen.
+    expect(h.models).toEqual([]);
+    await type("Check the totals.");
+    await send();
+    expect(h.starts).toHaveLength(0);
+    await choose("storefront");
+    expect(route()).toBe("Starts in storefront · chosen here");
+    expect(button("Start session")!.disabled).toBe(false);
+    await send();
+    expect(h.starts).toHaveLength(1);
+    expect(h.starts[0]![0]).toBe("/code/storefront");
+    expect(h.starts[0]![1]).toMatchObject({ text: "Check the totals." });
+    expect(h.starts[0]![3]).toMatchObject({ item: ref });
   });
 });

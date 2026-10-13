@@ -5,8 +5,11 @@ import "./backlog.css";
 /** What the window knows about the item riding with the first message. */
 export type CarryState =
   | { type: "loading" }
-  /** `where` replaces the default line, for an item that is not a file. */
-  | { type: "ready"; title: string; where?: string | undefined }
+  /**
+   * `where` replaces the default line, for an item that is not a file. `route` says where the session starts, when the
+   * caller has something to say about it; `attention` marks a route the reader must settle before Start.
+   */
+  | { type: "ready"; title: string; where?: string | undefined; route?: { text: string; attention: boolean } | undefined }
   /** The item cannot start a session now: it is done, blocked, or could not be read. */
   | { type: "unavailable"; title?: string | undefined; reason: string }
   /** Another session holds it. `name` and `when` come from the session list when it knows that session. */
@@ -30,6 +33,7 @@ export function BacklogCarry({ state, onRemove }: { state: CarryState; onRemove:
       <span className="bl-carry-text">
         <span className="bl-carry-title">{title}</span>
         <span className="bl-carry-where">{where}</span>
+        {state.type === "ready" && state.route ? <span className="bl-carry-route" data-attention={state.route.attention || undefined}>{state.route.text}</span> : null}
       </span>
       <button type="button" className="icon-button quiet-button" aria-label="Start without this item" title="Start without this item" onClick={onRemove}>
         <XIcon aria-hidden size={16} /></button>

@@ -3,18 +3,31 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BacklogView, type BacklogBinding } from "./BacklogView";
-import type { BacklogClaim, BacklogItem, BacklogList, BacklogWarning } from "../../backlog/backlogApi";
-import type { BacklogPlace } from "../../backlog/backlogModel";
+import type { BacklogClaim, BacklogItem, BacklogList, BacklogSourceSummary, BacklogWarning } from "../../backlog/backlogApi";
+import { refOf, sameItem, type BacklogPlace } from "../../backlog/backlogModel";
 import type { GitHubAppState, GitHubSetup } from "../../backlog/githubApi";
 import type { GitHubAppPage } from "../../backlog/useGitHubApp";
 
 let root: Root;
-const item = (extra: Partial<BacklogItem> = {}): BacklogItem => ({ id: "01A", title: "Fix the nested transcript", provider: "markdown", projectId: "p1", projectName: "forgerie",
-  repo: "/code/forgerie", path: "work/items/a.md", status: "To Do", priority: "high", labels: ["agents"], created: "2026-09-01", assignedToMe: true, assignees: [], open: true, readiness: "ready",
-  blockingIds: [], ...extra });
+type ProjectItem = Extract<BacklogItem, { owner: { kind: "project" } }>;
+type SourceItem = Extract<BacklogItem, { owner: { kind: "source" } }>;
+const fields = { title: "Fix the nested transcript", path: "work/items/a.md", status: "To Do", priority: "high", labels: ["agents"], created: "2026-09-01", assignedToMe: true,
+  assignees: [], open: true, readiness: "ready" as const, blockingIds: [] };
+/** A project's own item. Its owner follows `projectId`, `projectName` and `repo`. */
+const item = (extra: Partial<ProjectItem> = {}): BacklogItem => {
+  const base = { id: "01A", provider: "markdown", projectId: "p1", projectName: "forgerie", repo: "/code/forgerie", ...fields, ...extra };
+  return { ...base, owner: { kind: "project", projectId: base.projectId, projectName: base.projectName, repo: base.repo },
+    destination: { kind: "routed", projectId: base.projectId, reason: "project-owned" } };
+};
+/** An Azure board's work item: listed under its source, with a destination instead of a project. */
+const sourceItem = (extra: Partial<SourceItem> = {}): BacklogItem => ({ ...fields, id: "contoso:7", provider: "azure-devops", path: "contoso/Fabrikam Web#7", labels: [],
+  title: "Checkout total ignores the second code", owner: { kind: "source", sourceId: "src-1", label: "Fabrikam Web" },
+  destination: { kind: "routed", projectId: "p2", reason: "source-destination" }, ...extra });
+const summary = (extra: Partial<BacklogSourceSummary> = {}): BacklogSourceSummary => ({ sourceId: "src-1", label: "Fabrikam Web", provider: "azure-devops", organization: "contoso",
+  areaPath: "Fabrikam Web\\Checkout", destination: { kind: "routed", projectId: "p2", reason: "source-destination" }, warnings: [], ...extra });
 const held: BacklogClaim = { kind: "claimed", claimId: "c1", projectId: "p1", provider: "markdown", itemId: "02B", repo: "/code/forgerie", cwd: "/code/forgerie/.worktree/s-9",
   claimedAt: "2026-10-07T10:00:00Z", sessionId: "s-held", branch: "feat/atomic-deploys" };
-const list = (items: BacklogItem[], warnings: BacklogList["warnings"] = []): BacklogList => ({ items, warnings, generatedAt: "now" });
+const list = (items: BacklogItem[], warnings: BacklogList["warnings"] = [], sources: BacklogSourceSummary[] = []): BacklogList => ({ items, warnings, sources, generatedAt: "now" });
 
 function binding(value: BacklogList, extra: Partial<BacklogBinding> = {}) {
   const places: BacklogPlace[] = [];
@@ -25,7 +38,7 @@ function binding(value: BacklogList, extra: Partial<BacklogBinding> = {}) {
     load: { type: "ready", value }, onRefresh: () => {},
     api: {
       detail: async (ref) => {
-        const found = value.items.find((entry) => entry.projectId === ref.projectId && entry.id === ref.itemId && entry.provider === (ref.provider ?? "markdown"));
+        const found = value.items.find((entry) => sameItem(refOf(entry), ref));
         if (!found) throw Object.assign(new Error("Backlog item not found or invalid"), { kind: "not-found" });
         return { item: found, body: "## Why it matters\n\nThe scanner lists **8,946** files.", initialPrompt: "" };
       },
@@ -172,7 +185,7 @@ describe("an item", () => {
 
 const configured: GitHubAppState = { state: "configured", app: { slug: "forgerie-zao", owner: "simonwjackson", url: "https://github.com/apps/forgerie-zao" },
   installUrl: "https://github.com/apps/forgerie-zao/installations/new" };
-const issue = (extra: Partial<BacklogItem> = {}) => item({ id: "7", provider: "github", title: "Crash on boot", path: "korri-os/korri#7",
+const issue = (extra: Partial<ProjectItem> = {}) => item({ id: "7", provider: "github", title: "Crash on boot", path: "korri-os/korri#7",
   url: "https://github.com/korri-os/korri/issues/7", status: "Open", priority: undefined, labels: ["bug"], ...extra });
 const notSetUp: BacklogWarning = { projectId: "p1", provider: "github", path: "korri-os/korri", kind: "provider-auth", message: "Set up GitHub in the backlog to list issues for korri-os/korri." };
 const notInstalled: BacklogWarning = { projectId: "p1", provider: "github", path: "korri-os/korri", kind: "provider-install", message: "Not installed." };
@@ -263,13 +276,12 @@ describe("GitHub issues", () => {
   });
 
   it("shows Azure work-item links and actions without GitHub or file labels", async () => {
-    const azure = item({ id: "amazeinsights:7", provider: "azure-devops", path: "amazeinsights/Amaze Insights#7",
-      url: "https://dev.azure.com/amazeinsights/Amaze%20Insights/_workitems/edit/7", status: "Active" });
+    const azure = sourceItem({ url: "https://dev.azure.com/contoso/Fabrikam%20Web/_workitems/edit/7", status: "Active" });
     const { b, launched } = binding(list([azure]));
     await render({}, b);
     expect(document.querySelector(".bl-issue")!.textContent).toBe("#7");
     expect(document.querySelector(".bl-issue")!.getAttribute("title")).toBe("Azure DevOps work item");
-    await render({ item: { projectId: "p1", itemId: azure.id, provider: azure.provider } }, b);
+    await render({ item: refOf(azure) }, b);
     expect(document.querySelector<HTMLAnchorElement>(".bl-issue-link")!.href).toBe(azure.url);
     expect(document.body.textContent).toContain("Status on Azure DevOps");
     expect(document.body.textContent).toContain("does not change its Azure assignment or status");
@@ -281,7 +293,7 @@ describe("GitHub issues", () => {
   });
 
   it("keeps Azure access failures out of GitHub setup and visible with no items", async () => {
-    const { b } = binding(list([], [{ projectId: "p1", provider: "azure-devops", path: "amazeinsights/Amaze Insights", kind: "provider-auth",
+    const { b } = binding(list([], [{ sourceId: "src-1", provider: "azure-devops", path: "contoso/Fabrikam Web", kind: "provider-auth",
       message: "Azure DevOps rejected the PAT. Replace it on the server." }]));
     await render({}, b);
     expect(document.querySelector(".bl-github")).toBeNull();
@@ -292,7 +304,7 @@ describe("GitHub issues", () => {
 
   it("explains that Azure items can leave the assigned list", async () => {
     const { b } = binding(list([]));
-    await render({ item: { projectId: "p1", itemId: "amazeinsights:7", provider: "azure-devops" } }, b);
+    await render({ item: { sourceId: "src-1", itemId: "contoso:7", provider: "azure-devops" } }, b);
     expect(document.querySelector(".notice")!.textContent).toContain("It was reassigned");
     expect(document.querySelector(".notice")!.textContent).not.toContain("front matter");
   });
@@ -319,13 +331,77 @@ it("persists the scope control and shows You and assignees in Everyone", async (
 });
 
 it("shows Azure image delivery and known omissions beside the session action without loading images", async () => {
-  const entry = item({ id: "amazeinsights:7", provider: "azure-devops" });
+  const entry = sourceItem();
   const { b } = binding(list([entry]));
   b.api.detail = async () => ({ item: entry, body: "Before [Image 1: screenshot] after", initialPrompt: "", imageSummary: { count: 2, eligibleCount: 1,
     skipped: [{ index: 2, name: "external", reason: "not an allowed Azure attachment URL for this organization" }] } });
-  await render({ item: { projectId: "p1", itemId: entry.id, provider: "azure-devops" } }, b);
+  await render({ item: refOf(entry) }, b);
   expect(document.body.textContent).toContain("1 image will be given to the agent");
   expect(document.body.textContent).toContain("Image 2 (external) cannot be attached");
   expect(document.body.textContent).toContain("Select an image-capable model");
   expect(document.querySelector("img")).toBeNull(); expect(button("Start session")).toBeDefined();
+});
+
+describe("Azure DevOps sources", () => {
+  const projects = [{ id: "p1", name: "forgerie" }, { id: "p2", name: "storefront" }];
+  it("gives each source one group with its board and destination, after the held items", async () => {
+    const support = summary({ sourceId: "src-2", label: "Support Desk", areaPath: undefined, destination: { kind: "not-routed", reason: "unset" } });
+    const { b } = binding(list([item(), sourceItem(), sourceItem({ id: "contoso:8", title: "Refund button stays grey" }),
+      sourceItem({ id: "contoso:9", title: "Reply macro drops the signature", owner: { kind: "source", sourceId: "src-2", label: "Support Desk" }, destination: support.destination }),
+      sourceItem({ id: "contoso:10", title: "Held work item", claim: { ...held, provider: "azure-devops", itemId: "contoso:10", sourceId: "src-1" }, readiness: "claimed" })],
+    [], [summary(), support]), { projects });
+    await render({}, b);
+    expect(groups()).toEqual(["In a session", "Fabrikam Web", "forgerie", "Support Desk"]);
+    const fabrikam = document.querySelector('[aria-label="Fabrikam Web"]')!;
+    expect(fabrikam.querySelector(".bl-source-board")!.textContent).toBe("contoso · Fabrikam Web\\Checkout");
+    expect(fabrikam.querySelector(".bl-destination")!.textContent).toBe("→ storefront");
+    expect(fabrikam.querySelectorAll(".bl-title")).toHaveLength(2);
+    expect(document.querySelector('[aria-label="Support Desk"] .bl-destination')!.textContent).toBe("Not routed");
+    expect(document.querySelector('[aria-label="forgerie"] .bl-source')).toBeNull();
+    // A held source item names its source where a project's would name its project.
+    expect(document.querySelector('[aria-label="In a session"] .bl-held')!.textContent).toBe("Fabrikam WebWorking in Atomic deploys");
+    expect(document.querySelector(".bl-total")!.textContent).toBe("5 items in 1 project and 2 sources");
+  });
+
+  it("says when a source's destination project left Forgerie, and keeps its overlap note in its group", async () => {
+    const overlap: BacklogWarning = { sourceId: "src-1", provider: "azure-devops", path: "contoso/Fabrikam Web", kind: "source-overlap",
+      message: "Overlaps contoso / Fabrikam Web (no Area Path). Give both sources Area Paths that do not overlap." };
+    const gone = summary({ destination: { kind: "not-routed", reason: "missing-project" }, warnings: [overlap] });
+    const { b } = binding(list([sourceItem({ destination: gone.destination })], [overlap], [gone]), { projects });
+    await render({}, b);
+    const group = document.querySelector('[aria-label="Fabrikam Web"]')!;
+    expect(group.querySelector(".bl-destination")!.textContent).toBe("Not routed");
+    expect(group.textContent).toContain("destination project is no longer registered");
+    expect(group.textContent).toContain("Give both sources Area Paths that do not overlap");
+    expect(document.querySelector(".bl-problems")).toBeNull();
+  });
+
+  it("shows a contested item as held, with every session that holds it", async () => {
+    const other: BacklogClaim = { ...held, claimId: "c2", sessionId: "s-other" };
+    const message = "Azure work item has contested claims held by: s-held, s-other.";
+    const contested = sourceItem({ claim: held, readiness: "claimed", contested: { claims: [held, other], message } });
+    const { b } = binding(list([contested], [{ sourceId: "src-1", provider: "azure-devops", path: contested.path, kind: "contested-claim", message }], [summary()]), { projects });
+    await render({}, b);
+    expect(groups()).toEqual(["In a session"]);
+    expect(document.querySelector(".bl-contested")!.textContent).toBe("Held by 2 sessions: Atomic deploys, a session not in the list. Archive or release them until one holds it.");
+    expect(document.querySelector(".bl-problems")).toBeNull();
+    await render({ item: refOf(contested) }, b);
+    expect(document.querySelector(".bl-claim")!.textContent).toContain("Held by 2 sessions");
+    expect(button("Open session")).toBeDefined();
+  });
+
+  it("an item page names its source and where its session starts, and starts like any item", async () => {
+    const entry = sourceItem();
+    const { b, launched } = binding(list([entry], [], [summary()]), { projects });
+    await render({ item: refOf(entry) }, b);
+    const properties = [...document.querySelectorAll(".agent-field")].map((node) => node.textContent);
+    expect(properties).toContain("SourceFabrikam Web");
+    expect(properties).toContain("Destinationstorefront");
+    expect(properties.some((text) => text?.startsWith("Project"))).toBe(false);
+    await click(button("Start session"));
+    expect(launched).toEqual([entry]);
+    const unrouted = sourceItem({ destination: { kind: "not-routed", reason: "unset" } });
+    await render({ item: refOf(unrouted) }, binding(list([unrouted], [], [summary()]), { projects }).b);
+    expect(document.body.textContent).toContain("Not routed. You choose a project when you start a session");
+  });
 });

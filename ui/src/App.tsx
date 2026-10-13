@@ -26,7 +26,7 @@ import { SearchBox } from "./search/SearchBox";
 import { SearchResults } from "./search/SearchResults";
 import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
 import { createBacklogApi, type BacklogItem } from "./backlog/backlogApi";
-import { heldSessions, itemParam, listOf, openCount, readBacklogPlace, readItemParam, refOf, type BacklogPlace } from "./backlog/backlogModel";
+import { heldSessions, itemParam, launchFolder, listOf, openCount, readBacklogPlace, readItemParam, refOf, type BacklogPlace } from "./backlog/backlogModel";
 import { createGitHubApi, readSetupReturn, submitToGitHub } from "./backlog/githubApi";
 import type { GitHubAppPage } from "./backlog/useGitHubApp";
 import { useBacklogList } from "./backlog/useBacklogList";
@@ -38,8 +38,14 @@ const SettingsView = lazy(() => import("./ui/settings/SettingsView").then((modul
 const BacklogView = lazy(() => import("./ui/backlog/BacklogView").then((module) => ({ default: module.BacklogView })));
 
 const readSelected = () => new URLSearchParams(window.location.search).get("session")?.trim() || undefined;
-/** `?new=<folder>` keeps the new-session dialog open across a reload, over whatever is open. */
-const readNew = () => new URLSearchParams(window.location.search).get("new")?.trim() || undefined;
+/**
+ * `?new=<folder>` keeps the new-session dialog open across a reload, over whatever is open. `?new=&item=…` is a
+ * backlog item with no destination yet: the dialog opens with no folder, and the author picks one.
+ */
+const readNew = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("new")?.trim() || (params.has("new") && params.has("item") ? "" : undefined);
+};
 /** `&place=existing` keeps an explicit "this folder, not a new worktree" across a reload. Absent: the default. */
 const readPlace = (): Placement | undefined => { const place = new URLSearchParams(window.location.search).get("place"); return place === "existing" || place === "fresh" ? place : undefined; };
 /** `?settings=<section>&agent=<target>` keeps a settings page open across a reload. */
@@ -58,7 +64,7 @@ const readSettings = (): SettingsPlace | undefined => {
 const readBacklog = () => readBacklogPlace(new URLSearchParams(window.location.search));
 /** `?triggers` keeps the triggers open across a reload; `?triggers=<id>` one trigger, `?triggers&create` a new one. */
 const readTriggers = () => readTriggersPlace(new URLSearchParams(window.location.search));
-/** `&item=<projectId>/<itemId>` keeps a backlog item riding with the new-session dialog across a reload. */
+/** `&item=<projectId>/<itemId>` or `&item=source:<sourceId>/<itemId>` keeps a backlog item riding with the new-session dialog across a reload. */
 const readItem = () => { const ref = readItemParam(new URLSearchParams(window.location.search).get("item")); return ref ? { ...ref, scope: new URLSearchParams(window.location.search).get("itemScope") === "everyone" ? "everyone" as const : "mine" as const } : undefined; };
 /** Settings, the backlog, and the triggers all take the thread's place, so opening one closes the others. */
 const clearSettings = (url: URL) => {
@@ -230,12 +236,16 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const startNew = useCallback(async (mode: LaunchMode = "switch", item?: BacklogItem) => {
     setOpen(false);
     if (opening.current) return;
-    // A backlog item starts in its own project. Over an open dialog, it replaces that dialog's destination and item.
+    // A backlog item starts at its destination: its own project, or its source's destination project. A source with
+    // no destination opens the dialog with no folder. Over an open dialog, it replaces that dialog's destination and item.
     if (item) {
       const ref = { ...refOf(item), scope: backlogScope };
+      opening.current = true;
+      const projects = await newSessionApi.projects().catch(() => []).finally(() => { opening.current = false; });
+      const cwd = launchFolder(item, projects) ?? "";
       const url = new URL(window.location.href);
       const reopen = readNew() !== undefined;
-      url.searchParams.set("new", item.repo);
+      url.searchParams.set("new", cwd);
       url.searchParams.delete("place");
       url.searchParams.set("item", itemParam(ref));
       url.searchParams.set("itemScope", ref.scope);
@@ -243,7 +253,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       setComposeKey((key) => key + 1);
       setComposeMode(mode);
       setComposeItem(ref);
-      setComposing(item.repo);
+      setComposing(cwd);
       return;
     }
     if (readNew() !== undefined) {
@@ -380,6 +390,15 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     refreshBacklog();
   }, [settled, archived, refreshBacklog]);
   const held = useMemo(() => backlogItems ? heldSessions(backlogItems) : undefined, [backlogItems]);
+  // A source's destination reads as a project name. The list holds ids, so the open backlog reads the projects too.
+  const [backlogProjects, setBacklogProjects] = useState<readonly Project[]>();
+  const backlogOpen = backlog !== undefined;
+  useEffect(() => {
+    if (!backlogOpen) return;
+    const controller = new AbortController();
+    newSessionApi.projects(controller.signal).then(setBacklogProjects, () => { /* Names fall back to the list's own project items. */ });
+    return () => controller.abort();
+  }, [backlogOpen]);
   const pickerView = useMemo(() => held ? { ...picker.view, held } : picker.view, [picker.view, held]);
   // A handoff door knows only the id and workspace. The catalog may also know the title.
   const known = !selectedId ? undefined : commandSelection?.session.id === selectedId
@@ -416,7 +435,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     return true;
   };
   const sessionFound = search && found && found.hit.sessionId === selectedId ? foundBinding(found, search.actions) : undefined;
-  const dialog = composing === undefined ? null : composing
+  const dialog = composing === undefined ? null : composing || composeItem
     ? <NewSession key={composeKey} cwd={composing} initialPlacement={readPlace()} initialMode={composeMode} api={newSessionApi} worktrees={worktreeApi}
       item={composeItem} backlog={backlogApi} lookSession={picker.look} onItemRemoved={dropComposeItem}
       launches={launches} deferred={deferred} drafts={drafts}
@@ -432,12 +451,13 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} projects={projectSettings} resources={resourceSettings} backlog={backlogSettings} /></Suspense>
     : backlog ? <Suspense fallback={<SessionFrame name="Backlog" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
       <BacklogView place={backlog} binding={{ scope: backlogScope, onScope: setBacklogScope, load: backlogList.load, onRefresh: refreshBacklog, api: backlogApi, look: picker.look,
+        projects: projectCatalog ?? backlogProjects,
         onPlace: placeBacklog, onClose: () => placeBacklog(undefined),
         onLaunch: (item) => { void startNew("switch", item); },
         onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }), github: githubApi, githubPage }} /></Suspense>
     : triggerPlace && triggers ? triggers.render({ place: triggerPlace, onPlace: placeTriggers,
       onOpenSession: (session) => switchSession(session), sessionName: (id) => picker.find(id)?.name })
-    : composing === "" && !selectedId
+    : composing === "" && !composeItem && !selectedId
       ? <SessionFrame name="New session" status={<StatusChip label="No project" tone="bad" panel={{ title: "No project", children: <p>Forgerie knows no project yet, and this app cannot add one yet.</p> }} />}><div className="thread-empty" /></SessionFrame>
     : selectedId ? <ForgerieSession key={selectedId} id={selectedId} onUnread={picker.onUnread} found={sessionFound}
       known={known} relatedWork={relatedWork} resourceLens={resourceLens}
