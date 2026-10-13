@@ -37,6 +37,12 @@ export const BUILDING: WorkflowRun = { ...base, state: { kind: "running" },
     { conversationId: 21, reporterId: 5, name: "build", stage: "build", state: { kind: "working" } },
   ] };
 
+export const FAILED: WorkflowRun = { ...BUILDING, state: { kind: "finished", outcome: "failed", result: "The build worker failed.", finishedAt: AT + 1_200_000 },
+  children: [
+    { conversationId: 15, reporterId: 4, name: "design", stage: "build", state: { kind: "settled", outcome: "answered", result: "Done.", delivered: true } },
+    { conversationId: 21, reporterId: 5, name: "build", stage: "build", state: { kind: "settled", outcome: "failed", result: "Build failed.", delivered: true } },
+  ] };
+
 export const LAND_WAITING: WorkflowRun = { ...base, state: { kind: "running" },
   stops: { contract: { state: "approved", round: 1 }, land: { state: "waiting", summary: "Two branches are ready.", round: 0 } },
   children: [

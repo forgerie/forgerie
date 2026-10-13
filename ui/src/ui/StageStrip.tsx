@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import "./StageStrip.css";
 
-/** done: finished. working: at work now. waiting: waits on the reader. next: not reached. */
-export type StageStripState = "done" | "working" | "waiting" | "next";
+/** done: finished. working: at work now. waiting: waits on the reader. failed: its worker failed. next: not reached. */
+export type StageStripState = "done" | "working" | "waiting" | "failed" | "next";
 /** One stage as a bar. A stage with several lanes, such as parallel workers, is stacked bars. */
 export interface StageStripSegment { key: string; lanes: readonly StageStripState[] }
 

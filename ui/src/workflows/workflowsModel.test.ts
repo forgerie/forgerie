@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { activeRun, launchInputs, routeSteps, runStatus, stopIsOpen, stopOutcome, stripSegments, waitingStops, workflowEntryOf, type WorkflowRun } from "./workflowsModel";
-import { BUILDING, CHILD_LOOKS, CONTRACT_STOP, CONTRACT_WAITING, LAND_STOP, LAND_WAITING, LANDED, SAVED, STAGES } from "./fixtures/runs";
+import { BUILDING, CHILD_LOOKS, CONTRACT_STOP, CONTRACT_WAITING, FAILED, LAND_STOP, LAND_WAITING, LANDED, SAVED, STAGES } from "./fixtures/runs";
 
 const RUN_ID = "a".repeat(64);
 describe("workflow transcript entries", () => {
@@ -52,6 +52,53 @@ describe("a run at a glance", () => {
     expect(stripSegments(BUILDING)).toEqual([
       { key: "contract", lanes: ["done"] }, { key: "build", lanes: ["working", "working"] }, { key: "review", lanes: ["next"] }, { key: "land", lanes: ["next"] }]);
     expect(stripSegments(LANDED).flatMap((segment) => segment.lanes)).toEqual(["done", "done", "done", "done", "done"]);
+  });
+
+  it("marks a failed parallel worker without changing the other lanes", () => {
+    expect(stripSegments(FAILED)).toEqual([
+      { key: "contract", lanes: ["done"] }, { key: "build", lanes: ["done", "failed"] }, { key: "review", lanes: ["next"] }, { key: "land", lanes: ["next"] }]);
+    expect(stripSegments({ ...FAILED, state: { kind: "running" } })[1]?.lanes).toEqual(["done", "failed"]);
+  });
+
+  it.each([{ workers: [] }, { workers: [{ name: "review" }] }])("marks a failed single-lane stage with workers $workers", ({ workers }) => {
+    const run: WorkflowRun = { ...FAILED, stages: STAGES.map((stage) => stage.id === "review" ? { ...stage, workers } : stage),
+      children: [...FAILED.children,
+        { conversationId: 33, reporterId: 9, name: "review", stage: "review", state: { kind: "settled", outcome: "failed", result: "Review failed.", delivered: true } }] };
+    expect(stripSegments(run)[2]?.lanes).toEqual(["failed"]);
+  });
+
+  it.each(["build", "review"])("shows done when the latest %s child answered after a failure", (stage) => {
+    const run: WorkflowRun = { ...LAND_WAITING, children: [...LAND_WAITING.children,
+      { conversationId: 40, reporterId: 10, name: stage, stage, state: { kind: "settled", outcome: "failed", result: "Failed.", delivered: true } },
+      { conversationId: 41, reporterId: 11, name: stage, stage, state: { kind: "settled", outcome: "answered", result: "Done.", delivered: true } }] };
+    expect(stripSegments(run).find((segment) => segment.key === stage)?.lanes).toEqual(stage === "build" ? ["done", "done"] : ["done"]);
+  });
+
+  it.each(["build", "review"])("shows working when the latest %s child is retrying after a failure", (stage) => {
+    const run: WorkflowRun = { ...LAND_WAITING, children: [...LAND_WAITING.children,
+      { conversationId: 40, reporterId: 10, name: stage, stage, state: { kind: "settled", outcome: "failed", result: "Failed.", delivered: true } },
+      { conversationId: 41, reporterId: 11, name: stage, stage, state: { kind: "working" } }] };
+    expect(stripSegments(run).find((segment) => segment.key === stage)?.lanes).toEqual(stage === "build" ? ["done", "working"] : ["working"]);
+  });
+
+  it("uses the latest parallel child even when an older child is still working", () => {
+    const run: WorkflowRun = { ...BUILDING, children: [...BUILDING.children,
+      { conversationId: 40, reporterId: 10, name: "build", stage: "build", state: { kind: "settled", outcome: "answered", result: "Done.", delivered: true } }] };
+    expect(stripSegments(run)[1]?.lanes).toEqual(["working", "done"]);
+  });
+
+  it("keeps a single-lane stage working while another child is still working", () => {
+    const run: WorkflowRun = { ...BUILDING, children: [...BUILDING.children,
+      { conversationId: 33, reporterId: 9, name: "review", stage: "review", state: { kind: "working" } },
+      { conversationId: 40, reporterId: 10, name: "review", stage: "review", state: { kind: "settled", outcome: "failed", result: "Failed.", delivered: true } }] };
+    expect(stripSegments(run)[2]?.lanes).toEqual(["working"]);
+  });
+
+  it("keeps the current lane rules when no child has started", () => {
+    expect(stripSegments(CONTRACT_WAITING)).toEqual([
+      { key: "contract", lanes: ["waiting"] }, { key: "build", lanes: ["next", "next"] }, { key: "review", lanes: ["next"] }, { key: "land", lanes: ["next"] }]);
+    expect(stripSegments({ ...BUILDING, children: [] })[1]?.lanes).toEqual(["next", "next"]);
+    expect(stripSegments({ ...LANDED, children: [] }).flatMap((segment) => segment.lanes)).toEqual(["done", "done", "done", "done", "done"]);
   });
 
   it("puts declared workers on the route before they start, and opens only started ones", () => {

@@ -216,10 +216,16 @@ export function stripSegments(run: WorkflowRun): StageStripSegment[] {
   return (run.stages ?? []).map((stage) => {
     const view = views[stage.id] ?? "next";
     const workers = stage.workers ?? [];
-    if (workers.length < 2) return { key: stage.id, lanes: [view] };
+    if (workers.length < 2) {
+      const latest = run.children.filter((child) => child.stage === stage.id).at(-1);
+      const failed = view !== "working" && latest?.state.kind === "settled" && latest.state.outcome === "failed";
+      return { key: stage.id, lanes: [failed ? "failed" : view] };
+    }
     return { key: stage.id, lanes: workers.map((worker) => {
-      const mine = run.children.filter((child) => child.name === worker.name);
-      return mine.some((child) => child.state.kind === "working") ? "working" : mine.length > 0 || view === "done" ? "done" : view === "working" ? "next" : view;
+      const latest = run.children.filter((child) => child.name === worker.name).at(-1);
+      if (latest?.state.kind === "working") return "working";
+      if (latest?.state.kind === "settled") return latest.state.outcome === "failed" ? "failed" : "done";
+      return view === "done" ? "done" : view === "working" ? "next" : view;
     }) };
   });
 }
