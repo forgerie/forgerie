@@ -28,7 +28,7 @@ export function TriggerAttention({ trigger, clock, errorLines, onAcknowledge, on
     ...failed?.sessionId && failed.cwd ? [{ label: "Open session", onPress: () => onOpenSession({ id: failed.sessionId ?? "", cwd: failed.cwd ?? "" }) }] : [],
   ];
   return <AlertCard tone={failed ? "bad" : "warn"} label={failed ? "Run failed" : "Run missed"} subject={failed ? "Failed" : "Missed"}
-    title={failed ? `The ${when} run failed.` : `The ${when} run was missed.`}
+    title={when}
     code={failed?.error} codeLabel="Error" codeLines={errorLines} actions={actions}>
     <p>{failed ? "Fix the cause, then run it now or wait for the next run." : missedWords(latest, zone, trigger.missedGraceMinutes, clock)}</p>
     {problems.length > 1 ? <p>{problems.length} runs had problems since {dateOnly(trigger.attention.since, zone, clock)}.</p> : null}

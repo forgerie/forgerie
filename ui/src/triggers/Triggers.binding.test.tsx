@@ -161,7 +161,7 @@ describe("a trigger's page", () => {
   it("leads with the attention card and opens the last session from Runs", async () => {
     await render({ view: "trigger", id: "nightly-refinement" });
     expect(store.calls).toContainEqual(["get", "nightly-refinement"]);
-    expect(text()).toContain("The Oct 12, 3:00 AM run failed.");
+    expect(document.querySelector(".alert-card-title")?.textContent).toBe("Failed Oct 12, 3:00 AM");
     expect(text()).toContain("2 runs had problems since Oct 11.");
     expect(text()).toContain("Next run Tue, Oct 13 at 3:00 AM, in 9 hours.");
     expect(text()).toContain("Also covers 2 earlier runs that passed while Forgerie was off.");
@@ -238,7 +238,7 @@ describe("a trigger's page", () => {
   it("names an agent's trigger and links its session", async () => {
     await render({ view: "trigger", id: "dependency-audit" });
     expect(text()).toContain("Created by an agent in “Lockfile review”.");
-    expect(text()).toContain("The Oct 12, 2:30 AM run was missed.");
+    expect(document.querySelector(".alert-card-title")?.textContent).toBe("Missed Oct 12, 2:30 AM");
   });
 
   it("asks before deleting, then goes back to the list", async () => {
