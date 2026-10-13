@@ -78,6 +78,10 @@ function publicAction(action: Readonly<TriggerAction>): TriggerAction {
   return plain;
 }
 
+function assertProject(action: TriggerAction, scope?: readonly string[]): void {
+  if (scope !== undefined && !scope.includes(action.cwd)) throw new TriggerError("Triggers are limited to the calling session's project", 400, "action.cwd");
+}
+
 function recordFire(record: Trigger, fire: TriggerFire): void {
   const previous = record.history.findIndex((entry) => entry.requestId === fire.requestId);
   if (previous >= 0) record.history.splice(previous, 1);
@@ -190,8 +194,9 @@ export function durableTriggers(options: DurableTriggerOptions) {
     extension: defineExtension({ name: "forgerie.triggers", tasks: [task, manualTask] }),
 
     /** Validate, store, and arm a trigger in one commit. `anchor` is the conversation that owns trigger tasks. */
-    create: async (harness: Harness, anchor: ConversationId, input: unknown, context: Context, createdBy: TriggerCreator = { kind: "user" }): Promise<Trigger> => {
+    create: async (harness: Harness, anchor: ConversationId, input: unknown, context: Context, createdBy: TriggerCreator = { kind: "user" }, scope?: readonly string[]): Promise<Trigger> => {
       if (!Check(TriggerCreateSchema, input)) throw new TriggerError("Invalid trigger. Give name, schedule, and a workflow action.");
+      assertProject(input.action, scope);
       const schedule = parseTriggerSchedule(input.schedule);
       return harness.commit(async (tx) => {
         const doc = await tx.doc(Triggers);
@@ -212,28 +217,31 @@ export function durableTriggers(options: DurableTriggerOptions) {
     },
 
     /** Stop future fires. A fire already in progress finishes and is recorded. */
-    pause: (harness: Harness, id: string, context: Context): Promise<Trigger> => harness.commit(async (tx) => {
+    pause: (harness: Harness, id: string, context: Context, scope?: readonly string[]): Promise<Trigger> => harness.commit(async (tx) => {
       const record = recordAt((await tx.doc(Triggers)).records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
+      assertProject(record.action, scope);
       if (record.state.kind === "active") { record.state = { kind: "paused", pausedAt: now() }; record.revision += 1; }
       return publicTrigger(record);
     }, context),
 
     /** Arm a paused trigger from the current time. Occurrences that passed while it was paused do not fire. */
-    resume: (harness: Harness, anchor: ConversationId, id: string, context: Context): Promise<Trigger> => harness.commit(async (tx) => {
+    resume: (harness: Harness, anchor: ConversationId, id: string, context: Context, scope?: readonly string[]): Promise<Trigger> => harness.commit(async (tx) => {
       const record = recordAt((await tx.doc(Triggers)).records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
+      assertProject(record.action, scope);
       if (record.state.kind === "paused") { await arm(tx, anchor, record, now()); record.revision += 1; }
       return publicTrigger(record);
     }, context),
 
-    update: (harness: Harness, anchor: ConversationId, id: string, input: unknown, context: Context): Promise<Trigger> => harness.commit(async (tx) => {
+    update: (harness: Harness, anchor: ConversationId, id: string, input: unknown, context: Context, scope?: readonly string[]): Promise<Trigger> => harness.commit(async (tx) => {
       if (!Check(TriggerUpdateSchema, input)) throw new TriggerError("Invalid trigger update");
       const record = recordAt((await tx.doc(Triggers)).records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
+      assertProject(record.action, scope);
       if (record.revision !== input.baseRevision) throw new TriggerError(`Trigger revision is ${String(record.revision)}; read it again before editing.`, 409, "baseRevision");
       if (input.name !== undefined) record.name = input.name;
-      if (input.action !== undefined) record.action = input.action;
+      if (input.action !== undefined) { assertProject(input.action, scope); record.action = input.action; }
       if (input.schedule !== undefined) record.schedule = parseTriggerSchedule(input.schedule);
       if (input.missedGraceMinutes !== undefined) record.missedGraceMinutes = input.missedGraceMinutes;
       if ((input.schedule !== undefined || input.action !== undefined) && record.state.kind === "active") await arm(tx, anchor, record, now());
@@ -241,17 +249,19 @@ export function durableTriggers(options: DurableTriggerOptions) {
       return publicTrigger(record);
     }, context),
 
-    acknowledge: (harness: Harness, id: string, context: Context): Promise<Trigger> => harness.commit(async (tx) => {
+    acknowledge: (harness: Harness, id: string, context: Context, scope?: readonly string[]): Promise<Trigger> => harness.commit(async (tx) => {
       const record = recordAt((await tx.doc(Triggers)).records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
+      assertProject(record.action, scope);
       if (record.attention !== null) { record.attention = null; record.revision += 1; }
       return publicTrigger(record);
     }, context),
 
-    run: (harness: Harness, anchor: ConversationId, id: string, clientRequestId: string, context: Context): Promise<{ requestId: string }> => harness.commit(async (tx) => {
+    run: (harness: Harness, anchor: ConversationId, id: string, clientRequestId: string, context: Context, scope?: readonly string[]): Promise<{ requestId: string }> => harness.commit(async (tx) => {
       const doc = await tx.doc(Triggers);
       const record = recordAt(doc.records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
+      assertProject(record.action, scope);
       const requestId = triggerManualRequestId(id, clientRequestId);
       if (doc.manualRequests[requestId] === undefined) {
         doc.manualRequests[requestId] = id;
@@ -261,9 +271,11 @@ export function durableTriggers(options: DurableTriggerOptions) {
     }, context),
 
     /** Delete the trigger and its history. Its task stops at its next phase. */
-    remove: (harness: Harness, id: string, context: Context): Promise<void> => harness.commit(async (tx) => {
+    remove: (harness: Harness, id: string, context: Context, scope?: readonly string[]): Promise<void> => harness.commit(async (tx) => {
       const doc = await tx.doc(Triggers);
-      if (recordAt(doc.records, id) === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
+      const record = recordAt(doc.records, id);
+      if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
+      assertProject(record.action, scope);
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Records are keyed by trigger ID.
       delete doc.records[id];
       for (const [requestId, triggerId] of Object.entries(doc.manualRequests)) if (triggerId === id) {

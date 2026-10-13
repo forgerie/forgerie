@@ -29,7 +29,7 @@ function nextFire(trigger: Trigger): string {
 export function createWorkflowScheduleTool(cwd: string, service: () => TriggerService) {
   return defineTool({
     name: "workflow_schedule", label: "Workflow schedule", executionMode: "sequential",
-    description: "List, create, update, pause, resume, delete, or run scheduled saved prose workflows. Create directly; each fire costs a full workflow run. Create uses trigger, update uses changes and baseRevision. Defaults cwd to this session and timezone to the host. Run now also works when paused and leaves the next scheduled run unchanged. Deleting removes history but keeps sessions.",
+    description: "List, create, update, pause, resume, delete, or run scheduled saved prose workflows of the calling session's project only. Create directly; each fire costs a full workflow run. Create uses trigger, update uses changes and baseRevision. Defaults cwd to this session and timezone to the host. Run now also works when paused and leaves the next scheduled run unchanged. Deleting removes history but keeps sessions.",
     parameters,
     async execute(callId, params, signal, _onUpdate, ctx) {
       signal?.throwIfAborted();
@@ -37,18 +37,18 @@ export function createWorkflowScheduleTool(cwd: string, service: () => TriggerSe
       let value: unknown;
       let words = "";
       if (params.action === "list") {
-        const list = await triggers.list();
+        const list = await triggers.list(cwd);
         value = list;
         words = list.triggers.map((trigger) => `${trigger.name}: ${nextFire(trigger)}`).join("\n");
-      } else if (params.action === "delete") { await triggers.remove(params.id); value = { ok: true }; }
+      } else if (params.action === "delete") { await triggers.remove(params.id, cwd); value = { ok: true }; }
       else if (params.action === "run") {
-        value = await triggers.run(params.id, { requestId: params.requestId ?? createHash("sha256").update(callId).digest("hex") });
-        words = nextFire(await triggers.get(params.id));
+        value = await triggers.run(params.id, { requestId: params.requestId ?? createHash("sha256").update(callId).digest("hex") }, cwd);
+        words = nextFire(await triggers.get(params.id, cwd));
       } else {
         let trigger: Trigger;
-        if (params.action === "create") trigger = await triggers.create({ ...params.trigger, action: { ...params.trigger.action, cwd: params.trigger.action.cwd ?? cwd }, schedule: { ...params.trigger.schedule, timezone: params.trigger.schedule.timezone ?? triggers.timezone } }, { kind: "agent", sessionId: ctx.sessionManager.getSessionId(), cwd });
-        else if (params.action === "update") trigger = await triggers.update(params.id, params.changes);
-        else trigger = await triggers[params.action](params.id);
+        if (params.action === "create") trigger = await triggers.create({ ...params.trigger, action: { ...params.trigger.action, cwd: params.trigger.action.cwd ?? cwd }, schedule: { ...params.trigger.schedule, timezone: params.trigger.schedule.timezone ?? triggers.timezone } }, { kind: "agent", sessionId: ctx.sessionManager.getSessionId(), cwd }, cwd);
+        else if (params.action === "update") trigger = await triggers.update(params.id, params.changes, cwd);
+        else trigger = await triggers[params.action](params.id, cwd);
         value = trigger;
         words = nextFire(trigger);
       }

@@ -90,13 +90,16 @@ export class TriggerService {
     store.unsubscribe();
     try { await store.harness.close(context); } finally { await store.ownership.release(); }
   }
-  async list(): Promise<TriggerListResponse> {
-    const records = await listTriggers(this.opened().harness, context);
+  async list(actorCwd?: string): Promise<TriggerListResponse> {
+    const scope = await this.projectScope(actorCwd);
+    const records =  (await listTriggers(this.opened().harness, context)).filter((record) => scope === undefined || scope.includes(record.action.cwd));
     return { triggers: records.map((record) => ({ ...record, history: record.history.slice(0, TRIGGER_LIST_HISTORY) })), attentionCount: records.filter((record) => record.attention !== null).length, timezone: this.timezone, timezones: this.timezones };
   }
-  async get(id: string): Promise<Trigger> {
+  async get(id: string, actorCwd?: string): Promise<Trigger> {
+    const scope = await this.projectScope(actorCwd);
     const record = (await listTriggers(this.opened().harness, context)).find((record) => record.id === id);
     if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
+    if (scope !== undefined && !scope.includes(record.action.cwd)) throw new TriggerError("Triggers are limited to the calling session's project", 400, "action.cwd");
     return record;
   }
   async workflows(cwd: string): Promise<TriggerWorkflowsResponse> {
@@ -132,29 +135,37 @@ export class TriggerService {
     try { workflowInputs(workflow.definition, action.inputs); } catch (error) { throw new TriggerError(error instanceof Error ? error.message : String(error), 400, "action.inputs"); }
     return action;
   }
-  async create(value: unknown, creator: TriggerCreator = { kind: "user" }): Promise<Trigger> {
+  private async projectScope(actorCwd?: string): Promise<string[] | undefined> {
+    if (actorCwd === undefined) return undefined;
+    const canonical = await this.requireWorkspace(actorCwd);
+    const locator = this.options.workspaces;
+    const paths = locator.canonicalForCwd === undefined ? await locator.forCwd(canonical) : await locator.canonicalForCwd(canonical);
+    if (paths === undefined) throw new TriggerError("The calling session's project is no longer registered", 400, "action.cwd");
+    return Promise.all(paths.map((path) => this.requireWorkspace(path)));
+  }
+  async create(value: unknown, creator: TriggerCreator = { kind: "user" }, actorCwd?: string): Promise<Trigger> {
     const { harness, anchor } = this.opened();
     const input: TriggerCreate = triggerBody(TriggerCreateSchema, value);
     if (input.name.trim() === "") throw new TriggerError("Give the trigger a name", 400, "name");
     this.schedule(input.schedule);
     const action = await this.validateAction(input.action);
-    return this.core.create(harness, anchor, { ...input, action }, context, creator);
+    return this.core.create(harness, anchor, { ...input, action }, context, creator, await this.projectScope(actorCwd));
   }
-  async update(id: string, value: unknown): Promise<Trigger> {
+  async update(id: string, value: unknown, actorCwd?: string): Promise<Trigger> {
     const { harness, anchor } = this.opened();
     const input: TriggerUpdate = triggerBody(TriggerUpdateSchema, value);
-    const current = await this.get(id);
+    const current = await this.get(id, actorCwd);
     if (input.name?.trim() === "") throw new TriggerError("Give the trigger a name", 400, "name");
     if (input.schedule !== undefined) this.schedule(input.schedule);
     const action = await this.validateAction(input.action ?? current.action);
-    return this.core.update(harness, anchor, id, { ...input, ...(input.action === undefined && action.cwd === current.action.cwd ? {} : { action }) }, context);
+    return this.core.update(harness, anchor, id, { ...input, ...(input.action === undefined && action.cwd === current.action.cwd ? {} : { action }) }, context, await this.projectScope(actorCwd));
   }
   private schedule(value: unknown): void {
     try { parseTriggerSchedule(value); } catch (error) { throw new TriggerError(error instanceof Error ? error.message : String(error), 400, "schedule.timezone"); }
   }
-  pause(id: string): Promise<Trigger> { return this.core.pause(this.opened().harness, id, context); }
-  resume(id: string): Promise<Trigger> { const { harness, anchor } = this.opened(); return this.core.resume(harness, anchor, id, context); }
-  acknowledge(id: string): Promise<Trigger> { return this.core.acknowledge(this.opened().harness, id, context); }
-  remove(id: string): Promise<void> { return this.core.remove(this.opened().harness, id, context); }
-  run(id: string, value: unknown): Promise<TriggerRunResponse> { const { harness, anchor } = this.opened(); const input = triggerBody(TriggerRunRequestSchema, value); return this.core.run(harness, anchor, id, input.requestId, context); }
+  async pause(id: string, actorCwd?: string): Promise<Trigger> { return this.core.pause(this.opened().harness, id, context, await this.projectScope(actorCwd)); }
+  async resume(id: string, actorCwd?: string): Promise<Trigger> { const { harness, anchor } = this.opened(); return this.core.resume(harness, anchor, id, context, await this.projectScope(actorCwd)); }
+  async acknowledge(id: string, actorCwd?: string): Promise<Trigger> { return this.core.acknowledge(this.opened().harness, id, context, await this.projectScope(actorCwd)); }
+  async remove(id: string, actorCwd?: string): Promise<void> { return this.core.remove(this.opened().harness, id, context, await this.projectScope(actorCwd)); }
+  async run(id: string, value: unknown, actorCwd?: string): Promise<TriggerRunResponse> { const { harness, anchor } = this.opened(); const input = triggerBody(TriggerRunRequestSchema, value); return this.core.run(harness, anchor, id, input.requestId, context, await this.projectScope(actorCwd)); }
 }

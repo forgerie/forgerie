@@ -28,7 +28,7 @@ it("hosts all seven tool operations, defaults cwd and zone, and records the call
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
   const provider = fauxProvider(); models.registerNativeProvider(provider.provider);
   let command: JsonObject = { action: "list" };
-  provider.setResponses(Array.from({ length: 40 }, () => (transcript) => {
+  provider.setResponses(Array.from({ length: 80 }, () => (transcript) => {
     const last = transcript.messages.at(-1);
     if (last?.role === "user") return fauxAssistantMessage([fauxToolCall("workflow_schedule", command)], { stopReason: "toolUse" });
     return fauxAssistantMessage("Schedule operation complete");
@@ -42,16 +42,31 @@ it("hosts all seven tool operations, defaults cwd and zone, and records the call
     fire: (request) => Promise.resolve({ sessionId: "manual-session", cwd, runId: request.requestId }), publish: () => { hub.publishGlobal({ type: "triggers.changed" }); }, onError: (error) => { throw error; },
   });
   try {
+    const otherCwd = join(root, "other-project");
+    await mkdir(join(otherCwd, ".pi", "prompts"), { recursive: true });
+    await writeFile(join(otherCwd, ".pi", "prompts", "nightly.md"), "---\nworkflow: { version: 1 }\n---\nOther project task.\n");
+    await projects.add({ path: otherCwd });
+    const foreign = await triggers.create({ id: "foreign-night", name: "Foreign night", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", cwd: otherCwd, workflow: "nightly", inputs: {} } });
     const caller = await sessions.start(cwd);
     await sessions.nameTriggerSession(caller, "Calling session");
     let request = 0;
     const invoke = async (value: JsonObject) => {
       command = value;
+      const previous = await readFile(caller.path, "utf8").catch(() => "");
       const count = provider.state.callCount;
       await sessions.prompt(caller, "Schedule operation", undefined, undefined, { requestId: `tool-${String(request++)}` });
       await vi.waitFor(async () => { expect(provider.state.callCount).toBeGreaterThan(count); expect((await sessions.status(caller)).isStreaming).toBe(false); }, { timeout: 5000 });
+      return (await readFile(caller.path, "utf8")).slice(previous.length);
     };
     await invoke({ action: "create", trigger: { name: "Agent night", schedule: { kind: "daily", at: "03:00" }, action: { kind: "workflow", workflow: "nightly", inputs: {} } } });
+    expect(await invoke({ action: "list" })).not.toContain(foreign.id);
+    for (const action of ["pause", "resume", "delete", "run"]) {
+      expect(await invoke({ action, id: foreign.id })).toContain("calling session's project");
+    }
+    expect(await invoke({ action: "update", id: foreign.id, changes: { baseRevision: 1, name: "Hijacked" } })).toContain("calling session's project");
+    expect(await invoke({ action: "create", trigger: { name: "Foreign create", schedule: { kind: "daily", at: "03:00" }, action: { kind: "workflow", cwd: otherCwd, workflow: "nightly", inputs: {} } } })).toContain("calling session's project");
+    expect(await invoke({ action: "update", id: "agent-night", changes: { baseRevision: 1, action: { kind: "workflow", cwd: otherCwd, workflow: "nightly", inputs: {} } } })).toContain("calling session's project");
+    expect(await triggers.get(foreign.id)).toEqual(foreign);
     const created = await triggers.get("agent-night");
     expect(created).toMatchObject({ createdBy: { kind: "agent", sessionId: caller.id, cwd }, action: { cwd }, schedule: { timezone: triggers.timezone } });
     const transcript = await readFile(caller.path, "utf8");
@@ -68,7 +83,7 @@ it("hosts all seven tool operations, defaults cwd and zone, and records the call
     await invoke({ action: "resume", id: created.id });
     expect((await triggers.get(created.id)).state.kind).toBe("active");
     await invoke({ action: "delete", id: created.id });
-    expect((await triggers.list()).triggers).toEqual([]);
+    expect((await triggers.list()).triggers).toEqual([foreign]);
     expect(hub.globalEvents.filter((event) => event.type === "triggers.changed").length).toBeGreaterThan(6);
   } finally { await triggers.close(); await sessions.dispose(); await rm(root, { recursive: true, force: true }); }
 });

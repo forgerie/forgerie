@@ -57,7 +57,7 @@ Status codes: 400 invalid input or action; 404 unknown trigger; 409 duplicate ID
 
 ## Agent tool
 
-Hosted sessions receive `workflow_schedule`. It creates triggers directly, without a confirmation card. All calls use one object with `action`: `list`, `create`, `update`, `pause`, `resume`, `delete`, or `run`.
+Hosted sessions receive `workflow_schedule`. Every operation is limited to the calling session's registered project, including its other workspaces. List hides other projects. Create checks the destination; update checks both the existing and proposed destinations. Run, pause, resume, and delete refuse other projects' triggers. Browser routes remain daemon-wide. The tool creates triggers directly, without a confirmation card. All calls use one object with `action`: `list`, `create`, `update`, `pause`, `resume`, `delete`, or `run`.
 
 - Create: `{action:"create", trigger:{name,schedule,action,missedGraceMinutes?}}`. The nested action is the workflow action above. Its cwd defaults to the calling session's cwd; schedule timezone defaults to the host's.
 - Update: `{action:"update",id,changes:{baseRevision,...changedFields}}`.
