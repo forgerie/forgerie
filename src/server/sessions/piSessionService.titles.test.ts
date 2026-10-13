@@ -143,6 +143,33 @@ describe("PiSessionService work-item titles", () => {
     } finally { await fixture.dispose(); }
   });
 
+  it.each([
+    ["error", "Please implement", hoverTask, "Goal Templates full role"],
+    ["error", "Please fix this", rosterTask, "Team Roster No Plan"],
+    ["no-model", "Please implement", rosterTask, "Team Roster No Plan"],
+    ["no-model", "Please fix this", hoverTask, "Goal Templates full role"],
+  ] as const)("keeps the task fallback for %s with generic author text %s", async (mode, author, task, expected) => {
+    const fixture = await titleFixture("error");
+    if (mode === "no-model") fixture.runtime.session.model = undefined;
+    try {
+      await fixture.service.prompt(fixture.ref, workItem(task, author));
+      if (mode === "error") {
+        await vi.waitFor(() => { expect(fixture.logger.info).toHaveBeenCalledWith(
+          { sessionId: "title-session", outcome: "fallback", failureKind: "stream_error" },
+          "session title generation returned no usable name",
+        ); });
+        assertTaskContext(fixture.stream.context, task, author);
+      }
+      expect(fixture.runtime.session.sessionName).toBe(expected);
+      await fixture.service.prompt(fixture.ref, "Later unrelated task");
+      expect(fixture.runtime.session.sessionName).toBe(expected);
+      expect(fixture.stream.calls).toBe(mode === "error" ? 1 : 0);
+      expect(fixture.hub.sessionEvents.filter(({ event }) => event.type === "session.name").map(({ event }) => event)).toEqual([
+        { type: "session.name", sessionId: "title-session", name: expected },
+      ]);
+    } finally { await fixture.dispose(); }
+  });
+
   it("uses the task fallback without a selected model", async () => {
     const fixture = await titleFixture("throw");
     fixture.runtime.session.model = undefined;
