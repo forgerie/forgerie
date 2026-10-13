@@ -1,2 +1,6 @@
 /* The controls sit closer to each other than to the list they choose for. */
 .list-tools { display: flex; flex-direction: column; gap: var(--space-3); margin-block-end: var(--space-6); }
+/* A control and its readout share a row; the readout wraps under the control before the control gets narrow. */
+.list-tools-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.list-tools-row > :first-child { flex: 1 1 14rem; min-inline-size: 0; }
+.list-tools-readout { flex: none; color: var(--muted-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums; }

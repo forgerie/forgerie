@@ -18,3 +18,9 @@ export default function SwitchAndSearch() {
     <SearchField label={kind === "fruit" ? "Search fruit" : "Search vegetables"} value={query} onChange={setQuery} />
   </ListTools>;
 }
+export function SearchWithTotal() {
+  const [query, setQuery] = useState("");
+  return <ListTools label="Find produce" readout="23 kinds, 4 out of season">
+    <SearchField label="Filter by name or kind" value={query} onChange={setQuery} />
+  </ListTools>;
+}

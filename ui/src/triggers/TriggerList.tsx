@@ -66,9 +66,9 @@ export function TriggerList({ load, clock, projectLabel, starting, failure, onDi
     {load.type === "loading" ? <LoadingLines label="Reading triggers…" /> : null}
     {list && triggers.length === 0 && load.type === "ready"
       ? <EmptyState icon={<CalendarClockIcon />} title="No triggers yet" action={<HeaderButton label="New trigger" onPress={onNew} />}>{EMPTY_TEXT}</EmptyState> : null}
-    {filtering ? <ListTools label="Find a trigger">
+    {filtering ? <ListTools label="Find a trigger" readout={totalWords(triggers)}>
       <SearchField label="Filter by name, project, or workflow" value={query} onChange={setQuery}
-        clear={{ label: "Clear the filter", onClear: () => setQuery("") }} hint={totalWords(triggers)} />
+        clear={{ label: "Clear the filter", onClear: () => setQuery("") }} />
     </ListTools> : null}
     {filtering && query.trim() && shown.length === 0 ? <p>No triggers match “{query.trim()}”.</p> : null}
     {groups.map((group) => <RecordGroup key={group.key} label={group.label} count={group.triggers.length} emphasis={group.key === "attention"}

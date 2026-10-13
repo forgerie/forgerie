@@ -14,3 +14,8 @@ export default function Rows() {
 export function Empty() {
   return <ListSection title="Folders" empty="No folders yet. Use New folder to add one." />;
 }
+export function InDocument() {
+  return <ListSection title="Runs" placement="document" empty="No runs yet." note="Forgerie keeps the last 50 runs.">
+    <ActionRow name="Mon, Oct 12, 3:00 AM" status="Started" detail="Scheduled" />
+  </ListSection>;
+}

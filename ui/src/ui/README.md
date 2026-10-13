@@ -13,7 +13,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place; inside a list it opens at window level, above the button when the room below is short.
 - `ChoiceList` (molecule): pick any number of rows; the legend counts the choice, a long list gets a search field, and a chosen id with no row stays visible.
-- `ListSection` (molecule): a titled list of `<li>` rows on a settings-style page, with an optional readout beside the title, an empty text, a control under the rows, and a note on where the items live.
+- `ListSection` (molecule): a titled list of `<li>` rows on a settings-style page, with an optional readout beside the title, an empty text, a control under the rows, and a note on where the items live. `placement="document"` lines it up under a document page's fields.
 - `ActionRow` (molecule): a list item that is not a link: name and status on one line, a detail under them, its commands at the end.
 - `TitleField` (atom): a document title typed in place, in the title face, with its standfirst under it.
 - `Lede` (atom): the one quiet paragraph that opens a page.
@@ -69,7 +69,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `HitRow` (molecule): one item a search found, as one press target: name and age, where it lives with quiet labels, the matched passage with its words marked (fewer lines in a short room), and a count of what else matched.
 - `ResultList` (molecule): a search's answers scrolling in the room they get: skeleton rows before the first answer, a busy sweep over old rows, a progress line with a meter, an inline failure with retry, an empty text, a foot control for more; arrow keys move between rows.
 - `FindBar` (molecule): a slim bar for stepping through found places ("2 of 7", previous, next, close; arrows and Escape), or one note about a found place with an optional action.
-- `ListTools` (molecule): the controls that choose what a list shows, such as a switch and a search box, stacked and set apart from the list.
+- `ListTools` (molecule): the controls that choose what a list shows, such as a switch and a search box, stacked and set apart from the list. An optional readout, such as a total, sits beside the last control and wraps under it when the row is narrow.
 - `FileFrame` (organism): one file to read or edit: facts and notices above it, then the file on a framed surface that grows with its text, with an optional bar of tools along its top.
 - `StatusChip` (molecule): a header's one status word as a toned pill, announced while it is quiet and hidden; with a panel it is a button that opens the long story under the header at the window's end, with a count that rides along and a ring for each new arrival.
 - `RouteMap` (molecule): a process as steps on one rail, oldest first: the reader's own steps are rings, finished steps are checked, and each step's workers are tracks that sit side by side while there is room and can open their worker.

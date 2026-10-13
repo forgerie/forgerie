@@ -4,10 +4,13 @@ import "./ListSection.css";
 /**
  * Molecule: a titled list on a settings-style page. Rows come in as `<li>`
  * children. With no rows it says what goes here and how to add one. A note
- * under the list says where the items live.
+ * under the list says where the items live. In a document page (`placement`
+ * "document"), the section follows the page's fields: its words line up with
+ * theirs, and the page's largest gap sets it apart from them.
  */
-export function ListSection({ title, aside, empty, note, foot, children }: {
+export function ListSection({ title, aside, empty, note, foot, placement = "list", children }: {
   title: string;
+  placement?: "list" | "document";
   /** A readout beside the title, such as a count or a summary mark. */
   aside?: ReactNode;
   empty: ReactNode; note?: ReactNode;
@@ -17,7 +20,7 @@ export function ListSection({ title, aside, empty, note, foot, children }: {
 }) {
   const id = useId();
   const rows = Children.toArray(children);
-  return <section className="list-section" aria-labelledby={id}>
+  return <section className="list-section" data-placement={placement === "document" ? placement : undefined} aria-labelledby={id}>
     {aside ? <div className="list-section-head"><h2 className="list-section-title" id={id}>{title}</h2><span className="list-section-aside">{aside}</span></div>
       : <h2 className="list-section-title" id={id}>{title}</h2>}
     {rows.length ? <ul className="list-section-rows">{rows}</ul> : <p className="list-section-empty">{empty}</p>}
