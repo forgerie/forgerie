@@ -2,12 +2,12 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Trigger } from "@shared/triggers";
+import type { Trigger, TriggerFire } from "@shared/triggers";
 import { TriggersScreen } from "./Triggers.binding";
 import { useTriggerList } from "./useTriggerList";
 import type { TriggerPlace } from "./triggersModel";
 import { audit, digest, docs, HOST_ZONE, manyList, NOW, nightly, notes, triage } from "./fixtures/triggers";
-import { memoryApi, memoryDirectory, type MemoryStore } from "./fixtures/memoryApi";
+import { memoryApi, memoryDirectory, serverRunId, type MemoryStore } from "./fixtures/memoryApi";
 import { TriggerRefusal, type TriggersApi } from "./triggersApi";
 import { createTriggerMemory, type TriggerMemory } from "./triggerMemory";
 
@@ -109,12 +109,24 @@ describe("the list", () => {
     expect(store.calls.filter((call) => call[0] === "run")).toEqual([["run", "release-notes", "req1"]]);
     expect(text()).toContain("“Release notes” is starting. Its session shows under Runs once it opens.");
     expect(text()).toContain("Starting…");
-    // The server records the fire with the manual request ID: the local mark gives way to the history.
-    store.set([{ ...notes, history: [{ occurrence: NOW, requestId: "trigger-release-notes-run-req1", cause: "manual", recordedAt: NOW, skippedBefore: 0,
-      outcome: { kind: "started", sessionId: "s1", cwd: notes.action.cwd, runId: "r1" } }] }]);
+    // An entry whose ID the browser could have built from its own request is not this run: the mark stays.
+    const manual = (requestId: string, outcome: TriggerFire["outcome"]): TriggerFire =>
+      ({ occurrence: NOW, requestId, cause: "manual", recordedAt: NOW, skippedBefore: 0, outcome });
+    store.set([{ ...notes, history: [manual("trigger-release-notes-run-req1", { kind: "started", sessionId: "s0", cwd: notes.action.cwd, runId: "r0" })] }]);
+    await press("Trigger commands");
+    await press("Read triggers again");
+    expect(document.querySelector(".record-row-outcome")?.textContent).toBe("Starting…");
+    // The server's running entry carries the ID its 202 answer returned: the history takes over from the local mark.
+    store.set([{ ...notes, history: [manual(serverRunId("release-notes", "req1"), { kind: "running", startedAt: NOW })] }]);
+    await press("Trigger commands");
+    await press("Read triggers again");
+    expect(document.querySelector(".record-row-outcome")?.textContent).toBe("Starting…");
+    expect(document.querySelectorAll('.mark-strip-mark[data-tone="live"]')).toHaveLength(1);
+    store.set([{ ...notes, history: [manual(serverRunId("release-notes", "req1"), { kind: "started", sessionId: "s1", cwd: notes.action.cwd, runId: "r1" })] }]);
     await press("Trigger commands");
     await press("Read triggers again");
     expect(text()).toContain("Started Oct 12, 6:00 PM by Run now");
+    expect(text()).not.toContain("Starting…");
   });
 
   it("says it is reading until the first list arrives, and New trigger works meanwhile", async () => {

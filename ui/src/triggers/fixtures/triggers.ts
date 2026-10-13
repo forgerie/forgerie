@@ -33,6 +33,12 @@ export const models: SessionModel[] = [
   { provider: "openai", id: "gpt-5", name: "GPT-5", reasoning: true },
 ];
 
+/**
+ * The request ID the server records for a Run now, in a length-prefixed form the browser cannot build. The browser
+ * learns it only from the 202 answer, as from the real server.
+ */
+export const serverRunId = (triggerId: string, requestId: string) => `trigger-run:${String(triggerId.length)}:${triggerId}:${String(requestId.length)}:${requestId}`;
+
 export const NOT_FOUND = `Workflow "refine-backlog" was not found in ${FORGERIE}.
 The workflow library lists: release-notes, triage-issues, docs-sweep.
 Forgerie looked in .forgerie/workflows and ~/.forgerie/workflows.
@@ -59,7 +65,7 @@ export const nightly: Trigger = {
     fire("nightly-refinement", night(12), { kind: "failed", error: NOT_FOUND }),
     fire("nightly-refinement", night(11), { kind: "failed", error: NOT_FOUND }),
     fire("nightly-refinement", night(10), started("nightly-refinement", 10)),
-    fire("nightly-refinement", night(9, 14, 41), started("nightly-refinement", 9), { cause: "manual", requestId: "trigger-nightly-refinement-run-4f7d" }),
+    fire("nightly-refinement", night(9, 14, 41), started("nightly-refinement", 9), { cause: "manual", requestId: serverRunId("nightly-refinement", "4f7d") }),
     fire("nightly-refinement", night(9), started("nightly-refinement", 8)),
     fire("nightly-refinement", night(8), { kind: "missed" }, { skippedBefore: 2 }),
     fire("nightly-refinement", night(5), started("nightly-refinement", 5)),
@@ -103,7 +109,7 @@ export const digest: Trigger = {
   state: { kind: "active", nextFireAt: night(13, 7, 30) },
   attention: null,
   history: [
-    fire("inbox-digest", NOW - 2 * 60_000, { kind: "running", startedAt: NOW - 2 * 60_000 }, { cause: "manual", requestId: "trigger-inbox-digest-run-a1b2" }),
+    fire("inbox-digest", NOW - 2 * 60_000, { kind: "running", startedAt: NOW - 2 * 60_000 }, { cause: "manual", requestId: serverRunId("inbox-digest", "a1b2") }),
     fire("inbox-digest", night(12, 7, 30), started("inbox-digest", 31)),
   ],
 };

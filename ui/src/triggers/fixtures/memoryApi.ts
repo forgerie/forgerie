@@ -2,7 +2,8 @@
 // page hand it to the binding in the client's place: no request leaves the page, and nothing is intercepted.
 import type { Trigger, TriggerCreate } from "@shared/triggers";
 import { TriggerRefusal, type TriggersApi } from "../triggersApi";
-import { HOST_ZONE, workflows as savedWorkflows } from "./triggers";
+import { HOST_ZONE, serverRunId, workflows as savedWorkflows } from "./triggers";
+export { serverRunId };
 import type { TriggerDirectory } from "../Triggers.binding";
 import { models, projects } from "./triggers";
 
@@ -65,7 +66,7 @@ export function memoryApi(initial: readonly Trigger[], options: { now: number; o
     pause: async (id) => { check("pause"); calls.push(["pause", id]); return change(id, (trigger) => ({ ...trigger, state: { kind: "paused", pausedAt: options.now } })); },
     resume: async (id) => { check("resume"); calls.push(["resume", id]); return change(id, (trigger) => ({ ...trigger, state: { kind: "active", nextFireAt: options.now + 9 * 3_600_000 } })); },
     acknowledge: async (id) => { check("acknowledge"); calls.push(["acknowledge", id]); return change(id, (trigger) => ({ ...trigger, attention: null })); },
-    run: async (id, requestId) => { check("run"); calls.push(["run", id, requestId]); find(id); return { requestId }; },
+    run: async (id, requestId) => { check("run"); calls.push(["run", id, requestId]); find(id); return { requestId: serverRunId(id, requestId) }; },
     remove: async (id) => { check("remove"); calls.push(["remove", id]); find(id); triggers = triggers.filter((trigger) => trigger.id !== id); return { ok: true as const }; },
   };
   const holds = new Map<string, Promise<void>>();

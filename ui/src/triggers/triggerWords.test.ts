@@ -5,7 +5,7 @@ import {
   clockChangeHint, graceWords, lastRunWords, missedWords, nextIfResumed, outcomeWords, relativeLong, relativeShort, rowLabel, runLateHint, runRecorded,
   scheduleOf, scheduleWords, skippedWords, storeOffWords, stripMarks, stripWords, whenLong, whenShort, zoneLabel, type WordClock,
 } from "./triggerWords";
-import { digest, docs, HOST_ZONE, NOW, nightly, triage } from "./fixtures/triggers";
+import { digest, docs, HOST_ZONE, NOW, nightly, serverRunId, triage } from "./fixtures/triggers";
 
 const LOCALE = "en-US";
 const clock: WordClock = { now: NOW, locale: LOCALE, browserZone: HOST_ZONE, hostZone: HOST_ZONE };
@@ -99,11 +99,11 @@ describe("outcomes", () => {
 });
 
 describe("a Run now from this browser", () => {
-  it("stays starting until a history entry carries its request ID", () => {
-    const pending = { triggerId: "inbox-digest", requestId: "a1b2" };
-    expect(runRecorded(digest, pending)).toBe(true);
-    expect(runRecorded(digest, { ...pending, requestId: "ffff" })).toBe(false);
-    expect(runRecorded(nightly, { triggerId: "nightly-refinement", requestId: "4f7d" })).toBe(true);
+  it("stays starting until a history entry carries the ID the server answered with", () => {
+    expect(runRecorded(digest, { triggerId: "inbox-digest", recordedId: serverRunId("inbox-digest", "a1b2") })).toBe(true);
+    // A browser request ID is not the recorded one, even when the recorded one happens to contain it.
+    expect(runRecorded(digest, { triggerId: "inbox-digest", recordedId: "a1b2" })).toBe(false);
+    expect(runRecorded(digest, { triggerId: "inbox-digest", recordedId: "trigger-inbox-digest-run-a1b2" })).toBe(false);
   });
 });
 

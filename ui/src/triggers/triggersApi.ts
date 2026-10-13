@@ -37,6 +37,15 @@ function readTrigger(value: unknown): Trigger {
   if (!looksLikeTrigger(value)) throw new Error("Forgerie sent a trigger this app cannot read.");
   return value;
 }
+/**
+ * The 202 answer to Run now. Its `requestId` is the ID the run's history entry carries, in a form the browser cannot
+ * build, so an answer without it cannot be followed. The same browser request ID sent again starts nothing new and
+ * returns the same answer, so refusing an unreadable one is safe.
+ */
+function readRun(value: unknown): TriggerRunResponse {
+  if (!isRecord(value) || typeof value["requestId"] !== "string" || !value["requestId"]) throw new Error("Forgerie sent a run answer this app cannot read.");
+  return { requestId: value["requestId"] };
+}
 function readWorkflows(value: unknown): TriggerWorkflowsResponse {
   if (!isRecord(value) || !Array.isArray(value["workflows"])) throw new Error("Forgerie sent a workflow list this app cannot read.");
   const workflows = value["workflows"].filter((item): item is TriggerWorkflowsResponse["workflows"][number] => isRecord(item)
@@ -77,9 +86,7 @@ export function createTriggersApi(fetchFn: Fetch) {
      * Start one run now. The same `requestId` starts nothing new, so a request
      * whose answer was lost can be sent again with it.
      */
-    run: (id: string, requestId: string) => call(`${at(id)}/run`, (value): TriggerRunResponse => ({
-      requestId: isRecord(value) && typeof value["requestId"] === "string" ? value["requestId"] : requestId,
-    }), send("POST", { requestId })),
+    run: (id: string, requestId: string) => call(`${at(id)}/run`, readRun, send("POST", { requestId })),
     remove: (id: string) => call(at(id), () => ({ ok: true as const }), { method: "DELETE" }),
   };
 }

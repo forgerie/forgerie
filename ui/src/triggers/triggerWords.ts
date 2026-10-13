@@ -1,7 +1,7 @@
 // The triggers screen's words: schedules, times, outcomes, and the run strip.
 // Pure. Every function takes the clock and the zones it needs, so a test or a
 // part fixes them. Copy talks about times and runs, never cron words.
-import { triggerManualRequestId, type Trigger, type TriggerFire } from "@shared/triggers";
+import type { Trigger, TriggerFire } from "@shared/triggers";
 import { nextOccurrence, type TriggerSchedule } from "@shared/triggerSchedules";
 import { daysOf, WEEK, wireDays, type Weekday } from "./triggerWire";
 
@@ -219,11 +219,14 @@ export function rowLabel(trigger: Trigger, clock: WordClock): string {
   return `${trigger.name}. ${scheduleWords(trigger.schedule, clock.hostZone, clock.locale)}. ${next} ${stripWords(trigger.history)}`;
 }
 
-/** A Run now the browser started. It shows as starting until a history entry carries its request ID. */
-export interface PendingRun { triggerId: string; requestId: string }
+/**
+ * A Run now the browser started. `recordedId` is the request ID the server's 202 answer returned: the one its
+ * history entry carries. The browser cannot build it from its own request ID, so it never tries.
+ */
+export interface PendingRun { triggerId: string; recordedId: string }
+/** The run's history entry has arrived (running or done), so the history shows it from here on. */
 export function runRecorded(trigger: Trigger, pending: PendingRun): boolean {
-  const recorded = triggerManualRequestId(pending.triggerId, pending.requestId);
-  return trigger.history.some((fire) => fire.requestId === recorded);
+  return trigger.history.some((fire) => fire.requestId === pending.recordedId);
 }
 
 /** "Also covers 2 earlier runs that passed while Forgerie was off." */

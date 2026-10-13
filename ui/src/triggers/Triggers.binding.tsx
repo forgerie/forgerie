@@ -191,8 +191,9 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
       const id = runRequest.current ?? requestId();
       runRequest.current = id;
       try {
-        await api.run(target.id, id);
-        pendingRuns.set(target.id, { triggerId: target.id, requestId: id });
+        // The history entry carries the ID the answer returns, not one built from `id`.
+        const answer = await api.run(target.id, id);
+        pendingRuns.set(target.id, { triggerId: target.id, recordedId: answer.requestId });
         runRequest.current = undefined;
         setQuestion(undefined);
         setNote({ text: `“${target.name}” is starting. Its session shows under Runs once it opens.` });

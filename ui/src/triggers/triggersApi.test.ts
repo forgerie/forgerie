@@ -36,12 +36,16 @@ describe("the trigger routes", () => {
     ]);
   });
   it("runs with the browser's request ID and deletes", async () => {
-    const run = served(202, { requestId: "abc123" });
-    expect(await run.api.run("nightly-refinement", "abc123")).toEqual({ requestId: "abc123" });
+    // The answer's request ID is the server's, in a form the browser does not build: it is read, never derived.
+    const run = served(202, { requestId: "trigger-run:18:nightly-refinement:6:abc123" });
+    expect(await run.api.run("nightly-refinement", "abc123")).toEqual({ requestId: "trigger-run:18:nightly-refinement:6:abc123" });
     expect(run.calls).toEqual([{ path: "/api/triggers/nightly-refinement/run", method: "POST", body: { requestId: "abc123" } }]);
     const remove = served(200, { ok: true });
     expect(await remove.api.remove("nightly-refinement")).toEqual({ ok: true });
     expect(remove.calls).toEqual([{ path: "/api/triggers/nightly-refinement", method: "DELETE" }]);
+  });
+  it("refuses a run answer without the server's request ID instead of guessing it", async () => {
+    await expect(served(202, {}).api.run("nightly-refinement", "abc123")).rejects.toThrow("Forgerie sent a run answer this app cannot read.");
   });
   it("reads a project's workflows by folder", async () => {
     const { api, calls } = served(200, { workflows: [{ name: "a", kind: "prose", inputs: {}, hasLandStop: true }, { name: "b" }], diagnostics: [] });
