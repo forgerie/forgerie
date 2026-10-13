@@ -133,10 +133,15 @@ it("adds an Azure DevOps source with a destination, refuses an overlapping board
   };
   await show();
   expect(document.body.textContent).toContain("No Azure DevOps boards yet.");
+  // The page's main action sits in the header, where scrolling cannot take it away.
+  expect(document.querySelector("header")!.contains(button("Add Azure DevOps source"))).toBe(true);
 
   await press(button("Add Azure DevOps source"));
   expect(document.querySelector("h1")!.textContent).toBe("New Azure DevOps source");
   expect(button("Add source").disabled).toBe(true);
+  // The editor's hints use the readable tone, so they meet 4.5:1.
+  expect([...document.querySelectorAll(".agent-field")].filter((field) => field.querySelector(".agent-field-hint"))
+    .map((field) => field.getAttribute("data-hint-tone"))).toEqual(["readable", "readable", "readable"]);
   await typeInto("Organization", "contoso"); await typeInto("Azure project", "Fabrikam Web");
   await choose("Destination", "storefront");
   await press(button("Add source"));

@@ -39,14 +39,14 @@ export function BacklogSourceSettings({ fresh, title, back, close, busy, error, 
         confirm: "Delete? Sessions keep its work items", onSelect: onDelete }]} />}{close}</>}>
     <Lede>{fresh ? "List one Azure DevOps board in the backlog. Each work item shows once, and starts its session in the destination project. Credentials stay in private files on the server."
       : "Each work item on this board shows once in the backlog, and starts its session in the destination project."}</Lede>
-    <SettingsField label="Organization" hint="The name in the board's address: dev.azure.com/organization." problem={problems.organization}>
+    <SettingsField hintTone="readable" label="Organization" hint="The name in the board's address: dev.azure.com/organization." problem={problems.organization}>
       <SettingsInput label="Organization" value={draft.organization} disabled={busy} onChange={(organization) => onDraft({ ...draft, organization })} /></SettingsField>
-    <SettingsField label="Azure project" problem={problems.project}>
+    <SettingsField hintTone="readable" label="Azure project" problem={problems.project}>
       <SettingsInput label="Azure project" value={draft.project} disabled={busy} onChange={(project) => onDraft({ ...draft, project })} /></SettingsField>
-    <SettingsField label="Area Path" problem={problems.areaPath}
+    <SettingsField hintTone="readable" label="Area Path" problem={problems.areaPath}
       hint="Optional. The exact Area Path; work items under it are included. Two sources on one board need Area Paths that do not overlap.">
       <SettingsInput label="Area Path" value={draft.areaPath} disabled={busy} onChange={(areaPath) => onDraft({ ...draft, areaPath })} /></SettingsField>
-    <SettingsField label="Destination" problem={problems.destination}
+    <SettingsField hintTone="readable" label="Destination" problem={problems.destination}
       hint={draft.destination === NO_DESTINATION ? "Each start asks you for a project." : chosen ? "Sessions start in this project. You can choose another one at each start." : undefined}>
       <OptionPicker label="Destination" value={destination} placeholder="Choose a project" search={projects.length > 8 ? "Find a project" : undefined} disabled={busy}
         icon={<FolderIcon aria-hidden size={14} />}
