@@ -46,7 +46,6 @@ const READ_FAILED = "The server did not answer in time.";
  * reader's route. A stage the reader removed stays, struck; a stage they added has a section the agent will write.
  */
 export type StageProgress = "done" | "current" | "waiting" | "next";
-const PROGRESS: Record<StageProgress, string | undefined> = { done: "Done", current: "Now", waiting: "Waits for you", next: undefined };
 
 export function PlanBody({ proposal, stages = proposal.stages, changes = [], progress }: {
   proposal: MockProposal; stages?: readonly WorkflowStage[]; changes?: readonly RouteChange[];
@@ -77,8 +76,7 @@ export function PlanBody({ proposal, stages = proposal.stages, changes = [], pro
           style={number === undefined ? undefined : { "--stage": number }}>
           <div className="markdown pm-sec-head"><h2><span className="pm-sec-title"><MarkdownFragment inline text={s.title} /></span>
             {removed && <span className="pm-removed">Removed</span>}
-            {s.stage !== undefined && progress?.[s.stage] !== undefined && PROGRESS[progress[s.stage] as StageProgress] !== undefined
-              && <span className="pm-progress" data-progress={progress[s.stage]}>{PROGRESS[progress[s.stage] as StageProgress]}</span>}</h2></div>
+</h2></div>
           {removed && <p className="pm-sec-flag">You removed this stage. The agent takes it out when it updates the plan.</p>}
           {workerLines.length > 0 && <p className="pm-sec-flag">{workerLines.map((change) => <span key={changeLine(change, stages)} className={change.kind === "add-worker" ? "pm-new" : "pm-removed"}>
             {change.kind === "add-worker" ? "+" : "−"} {"worker" in change ? change.worker : ""}</span>)}The agent updates this section to match.</p>}

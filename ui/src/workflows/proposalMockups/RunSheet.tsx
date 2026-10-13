@@ -10,14 +10,14 @@ import { MarkdownFragment } from "../../ui/MarkdownFragment";
 import { ArrowLeftIcon, CheckIcon } from "lucide-react";
 import { ExchangeLog, type ExchangeLine } from "../../ui/ExchangeLog";
 import { ReplyBox } from "../../ui/ReplyBox";
-import { WorkflowEntryView } from "../WorkflowEntryView";
 import { Sheet, SheetHead } from "./mockupParts";
 import { PlanBody, type StageProgress } from "./ProposalSheet";
 import { WorkerModel } from "./RouteEditor";
 import { modelName } from "./routeEdits";
 import type { LiveRun, LiveStage, LiveWorker } from "./liveRun";
 
-const STAGE_NOTE: Record<StageProgress, string | undefined> = { done: undefined, current: "Now", waiting: "Waits for you", next: undefined };
+/** A stop's block: hollow until reached, solid live while it waits on the reader, ink once passed. */
+const stopState = (progress: StageProgress) => progress === "waiting" ? "waiting" : progress === "done" ? "done" : "next";
 
 function Blocks({ runs }: { runs: readonly LiveWorker["runs"][number][] }) {
   const done = runs.filter((state) => state === "done").length;
@@ -44,11 +44,10 @@ function LiveRoute({ run, selected, models, onStage, onWorker }: {
       {run.stages.map((live, index) => {
         const stage = run.proposal.stages.find((candidate) => candidate.id === live.id);
         if (stage === undefined) return null;
-        const note = STAGE_NOTE[live.progress];
         const open = expanded(live);
         const status = live.status ?? (live.workers.length === 0 ? stage.does : undefined);
         return <li key={live.id} className="pm-route-item" data-progress={live.progress}
-          data-current={live.progress === "current" || live.progress === "waiting" || undefined}>
+>
           <div className="pm-route-row">
             <button type="button" className="pm-route-stage" aria-expanded={live.workers.length === 0 ? undefined : open} onClick={() => {
               if (live.workers.length > 0 && live.progress !== "current" && live.progress !== "waiting") setOpened((current) => {
@@ -58,12 +57,13 @@ function LiveRoute({ run, selected, models, onStage, onWorker }: {
             }}>
               <span className="pm-route-num">{live.progress === "done" ? <CheckIcon aria-label="Done" /> : index + 1}</span>
               <span className="pm-route-text">
-                <span className="pm-route-name">{stage.name}{note !== undefined && <span className="pm-progress" data-progress={live.progress}>{note}</span>}</span>
+                <span className="pm-route-name">{stage.name}</span>
                 {status !== undefined && <span className="pm-route-who"><MarkdownFragment inline text={status} /></span>}
               </span>
               <span className="pm-marks">
                 {!open && live.workers.length > 0 && <Blocks runs={live.workers.flatMap((worker) => worker.runs)} />}
-                {stage.stop !== undefined && <span className="pm-you" data-waiting={live.progress === "waiting" || undefined}>You</span>}
+                {stage.stop !== undefined && <span className="pm-blocks"><span className="pm-block" data-s={stopState(live.progress)} data-stop
+                  title={stage.stop === "land" ? "You land" : "You approve"} /></span>}
               </span>
             </button>
           </div>
@@ -128,6 +128,26 @@ function WorkerPane({ worker, model, onModel, onBack }: {
   </div>;
 }
 
+/**
+ * A stop that waits on the reader, as the left pane shows it: a live rule on its start edge, then what to decide
+ * and the two choices. No box, wash or icon; the rule and the stop's block in the route carry the state.
+ */
+function Decision({ place, stop }: { place: string; stop: NonNullable<LiveRun["stop"]> }) {
+  const [decided, setDecided] = useState<"approved" | "changes">();
+  const verb = stop.entry.stop === "land" ? "Land" : "Approve";
+  return <section className={`pm-decision ${place}`} aria-label={`${stop.entry.stageName} waits for you`}>
+    <p className="pm-decision-label">{stop.entry.stageName} waits for you</p>
+    <div className="pm-decision-body"><MarkdownFragment text={stop.entry.summary} /></div>
+    {decided === undefined
+      ? <div className="pm-decision-actions">
+        <button type="button" className="pm-button" data-tone="primary" onClick={() => setDecided("approved")}>{verb}</button>
+        <button type="button" className="pm-button" onClick={() => setDecided("changes")}>Ask for changes</button>
+        <span className="pm-note">Later stages start when you {verb.toLowerCase()}. The same choice is in the chat.</span>
+      </div>
+      : <p className="pm-note" role="status">{decided === "approved" ? `${verb}d. The run goes on.` : "The agent reads your note and revises."}</p>}
+  </section>;
+}
+
 export function RunSheet({ run, select, at, models: initialModels }: {
   run: LiveRun;
   /** The worker shown in the left pane, as "stage/name". Without one, the plan. */
@@ -160,10 +180,7 @@ export function RunSheet({ run, select, at, models: initialModels }: {
   }, [target, worker, frame, at]);
 
   // A waiting stop leads the plan beside the route; in one column it leads the route itself.
-  const stopCard = (place: string) => run.stop === undefined || worker !== undefined ? null : <section className={`pm-stop ${place}`} aria-label="Waiting for you">
-    <WorkflowEntryView entry={run.stop.entry} run={run.stop.run} onDecide={async () => true} />
-    <p className="pm-note">The same card is in the chat. Decide in either place.</p>
-  </section>;
+  const stopCard = (place: string) => run.stop === undefined || worker !== undefined ? null : <Decision place={place} stop={run.stop} />;
 
   return <Sheet label={run.proposal.title}>
     <div ref={setFrame} className="pm-a pm-run" data-view={worker === undefined ? "plan" : "worker"}>

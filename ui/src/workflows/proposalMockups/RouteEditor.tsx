@@ -62,7 +62,7 @@ const Blocks = ({ stage }: { stage: WorkflowStage }) => {
   const workers = stage.workers ?? [];
   return <span className="pm-marks">
     {workers.length > 0 && <span className="pm-blocks" aria-hidden>{workers.map((worker) => <span key={worker.name} className="pm-block" />)}</span>}
-    {stage.stop !== undefined && <span className="pm-you">You</span>}
+    {stage.stop !== undefined && <span className="pm-block" data-stop title={stage.stop === "land" ? "You land" : "You approve"} />}
   </span>;
 };
 
