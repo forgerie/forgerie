@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
-import { PullLinkSchema } from "../../shared/pullRequests.js";
+import { PullLinkSchema, type PullLink } from "../../shared/pullRequests.js";
 import { canonicalizeStoredCwd } from "../workingDirectory.js";
 
 export const WatchCursorSchema = Type.Object({ headSha: Type.String(), failed: Type.Array(Type.String()), passed: Type.Array(Type.String()), conflicting: Type.Boolean(), remarksThrough: Type.String(), remarkIds: Type.Array(Type.String()), commentWakes: Type.Integer({ minimum: 0 }) });
@@ -32,6 +32,13 @@ export class PullRequestStore {
     try { text = await readFile(this.path, "utf8"); }
     catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return; throw error; }
     const data: unknown = JSON.parse(text);
+    // v1/v2 files predate providers. Normalize only the missing field, then validate.
+    if (typeof data === "object" && data !== null && "records" in data && Array.isArray(data.records)) {
+      const records: unknown[] = data.records;
+      for (const record of records) {
+        if (typeof record === "object" && record !== null && !("provider" in record)) Object.assign(record, { provider: "github" });
+      }
+    }
     if (!Check(FileSchema, data)) throw new Error("Invalid pull request state file. Restore it before starting the daemon.");
     if (new Set(data.records.map((record) => keyText(keyOf(record)))).size !== data.records.length) throw new Error("Duplicate pull request session links.");
     this.records = data.records;
@@ -45,16 +52,16 @@ export class PullRequestStore {
   isWatching(id: string): boolean { return this.records.some((record) => record.session.id === id && record.watch.kind === "watching"); }
 
   /** Adds a link, or returns the existing one. Never replaces another pull request's link. */
-  link(input: { id: string; cwd: string; repo: string; number: number }): Promise<PullRecord> {
+  link(input: { id: string; cwd: string; repo: string; number: number; provider?: PullLink["provider"] }): Promise<PullRecord> {
     return this.exclusive(async () => {
       const cwd = canonicalizeStoredCwd(input.cwd);
       // A chat may link PRs from several owned workspaces. The workspace of an
       // existing PR link stays immutable; a different PR is an independent key.
       const other = this.records.find((record) => sameKey(record, input));
-      if (other !== undefined && other.session.cwd !== cwd) throw new Error("Session link belongs to another workspace.");
+      if (other !== undefined && (other.session.cwd !== cwd || other.provider !== (input.provider ?? "github"))) throw new Error("Session link belongs to another workspace.");
       const current = this.get(input);
       if (current !== undefined) return current;
-      const next: PullRecord = { session: { id: input.id, cwd }, repo: input.repo, number: input.number, watch: { kind: "off" }, revision: 0 };
+      const next: PullRecord = { provider: input.provider ?? "github", session: { id: input.id, cwd }, repo: input.repo, number: input.number, watch: { kind: "off" }, revision: 0 };
       await this.persist([...this.records, next]);
       return structuredClone(next);
     });
@@ -76,7 +83,7 @@ export class PullRequestStore {
       const current = this.get(key);
       if (current?.revision !== revision) return undefined;
       const next = { ...change(current), revision: current.revision + 1 };
-      if (!Check(RecordSchema, next) || !sameKey(next, key) || next.session.cwd !== current.session.cwd) throw new Error("Invalid pull request state update.");
+      if (!Check(RecordSchema, next) || !sameKey(next, key) || next.session.cwd !== current.session.cwd || next.provider !== current.provider) throw new Error("Invalid pull request state update.");
       await this.persist(this.records.map((record) => sameKey(record, key) ? next : record));
       return structuredClone(next);
     });

@@ -39,6 +39,7 @@ export interface SessionServiceDependencyInput {
   durableChildAgents?: NonNullable<PiSessionServiceDependencies["durableChildAgents"]>;
   /** GitHub work on each session's own repo, as Forgerie's GitHub App. */
   github: NonNullable<PiSessionServiceDependencies["github"]>;
+  azurePr?: PiSessionServiceDependencies["azurePr"];
   pullRequestWatches?: PiSessionServiceDependencies["pullRequestWatches"];
   /** Auto-cancel delay for extension dialogs whose extension set no timeout; `0` waits forever. */
   extensionDialogsTimeoutMs: number;
@@ -76,6 +77,7 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
     codemodeEnabled: input.codemodeEnabled,
     ...(input.durableChildAgents === undefined ? {} : { durableChildAgents: input.durableChildAgents }),
     github: input.github,
+    ...(input.azurePr === undefined ? {} : { azurePr: input.azurePr }),
     ...(input.pullRequestWatches === undefined ? {} : { pullRequestWatches: input.pullRequestWatches }),
     extensionDialogsTimeoutMs: input.extensionDialogsTimeoutMs,
     ...(input.sessionTitleModel === undefined ? {} : { sessionTitleModel: input.sessionTitleModel }),

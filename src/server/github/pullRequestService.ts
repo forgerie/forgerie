@@ -1,3 +1,4 @@
+import type { PullRequestReader } from "./pullRequestReader.js";
 import { randomUUID } from "node:crypto";
 import type { PullLink, PullRequest, PullSessionRef } from "../../shared/pullRequests.js";
 import type { GitHubAgent } from "./githubAgent.js";
@@ -18,6 +19,7 @@ export interface PullSessionGateway {
 export interface PullNote { text: string; details: { kind: "merged"; repo: string; number: number; headSha: string; method: "rebase" | "squash" | "merge"; base: string; url?: string } }
 export interface PullServiceDependencies {
   github: Pick<GitHubAgent, "repo" | "pull" | "mergePull">;
+  readerFor?: (cwd: string) => Promise<PullRequestReader>;
   sessions: PullSessionGateway;
   store: PullRequestStore;
   now?: () => number;
@@ -30,7 +32,7 @@ export interface PullServiceDependencies {
 export interface PullItem { link: PullLink; pull: PullRequest | null; error?: string }
 const POLL_MS = 60_000;
 const UNREADABLE_MS = 15 * 60_000;
-export function publicLink(record: PullRecord): PullLink { return { session: record.session, repo: record.repo, number: record.number, watch: record.watch }; }
+export function publicLink(record: PullRecord): PullLink { return { provider: record.provider, session: record.session, repo: record.repo, number: record.number, watch: record.watch }; }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 const pollKey = (key: PullKey) => `${key.id}\n${key.repo.toLowerCase()}\n${String(key.number)}`;
 
@@ -60,7 +62,7 @@ export class PullRequestService {
     const items = await Promise.all(records.map(async (record): Promise<PullItem> => {
       try {
         await this.requireRepo(record);
-        const snapshot = await this.deps.github.pull(ref.cwd, record.number, true);
+        const snapshot = await (await this.reader(ref.cwd)).pull(ref.cwd, record.number, true);
         return { link: publicLink(this.deps.store.get(keyOf(record)) ?? record), pull: snapshot.pull };
       } catch (error) { return { link: publicLink(record), pull: null, error: messageOf(error) }; }
     }));
@@ -71,7 +73,7 @@ export class PullRequestService {
     await this.requireSession(ref);
     const record = this.resolve(ref, number);
     await this.requireRepo(record);
-    const snapshot = await this.deps.github.pull(ref.cwd, record.number, true);
+    const snapshot = await (await this.reader(ref.cwd)).pull(ref.cwd, record.number, true);
     const current = this.deps.store.get(keyOf(record));
     if (current === undefined) throw new Error(`Pull request #${String(number)} was unlinked during the read.`);
     return { link: publicLink(current), pull: snapshot.pull };
@@ -81,8 +83,9 @@ export class PullRequestService {
   async link(ref: PullSessionRef, number: number) {
     const session = await this.requireSession(ref);
     if (!session.available) throw new Error("Only a writable, unarchived session can link a PR.");
-    const snapshot = await this.deps.github.pull(ref.cwd, number);
-    const linked = await this.deps.store.link({ ...ref, repo: snapshot.pull.repo, number });
+    const reader = await this.reader(ref.cwd);
+    const snapshot = await reader.pull(ref.cwd, number);
+    const linked = await this.deps.store.link({ ...ref, provider: reader.provider, repo: snapshot.pull.repo, number });
     this.publish(linked);
     return { link: publicLink(linked), pull: snapshot.pull };
   }
@@ -105,7 +108,7 @@ export class PullRequestService {
     await this.requireRepo(record);
     if (record.watch.kind === "watching") return publicLink(record);
     const now = this.iso();
-    const snapshot = await this.deps.github.pull(ref.cwd, record.number);
+    const snapshot = await (await this.reader(ref.cwd)).pull(ref.cwd, record.number);
     if (snapshot.pull.state === "merged" || snapshot.pull.state === "closed") throw new Error("A merged or closed PR cannot be watched.");
     if (!snapshot.pull.complete) throw new Error("The PR read is incomplete. Try again before watching.");
     const next = await this.deps.store.update(keyOf(record), record.revision, (current) => {
@@ -147,8 +150,9 @@ export class PullRequestService {
     if (!session.available) throw new Error("This session is not writable.");
     const record = this.records(ref).find((item) => item.number === confirmed.number && item.repo.toLowerCase() === confirmed.repo.toLowerCase());
     if (record === undefined) throw new Error("The linked PR changed after confirmation. Refresh and confirm again.");
+    if (record.provider !== "github") throw new Error("Azure DevOps pull requests are read-only. Merge in Azure DevOps.");
     await this.requireRepo(record);
-    const snapshot = await this.deps.github.pull(ref.cwd, record.number);
+    const snapshot = await (await this.reader(ref.cwd)).pull(ref.cwd, record.number);
     if (snapshot.pull.headSha !== headSha) throw new Error("The PR head changed. Refresh and confirm again.");
     if (snapshot.pull.merge.kind === "blocked") throw new Error(snapshot.pull.merge.reason);
     if (this.deps.store.get(keyOf(record)) === undefined) throw new Error("The linked PR changed during confirmation. Refresh and confirm again.");
@@ -208,14 +212,14 @@ export class PullRequestService {
       }
       if (record.pending !== undefined) { await this.deliver(record); return; }
       await this.requireRepo(record);
-      const snapshot = await this.deps.github.pull(record.session.cwd, record.number);
+      const snapshot = await (await this.reader(record.session.cwd)).pull(record.session.cwd, record.number);
       if (this.disposed) return;
       if (snapshot.pull.repo.toLowerCase() !== record.repo.toLowerCase()) throw new Error("The session repository changed during the read.");
       if (snapshot.pull.state === "merged" || snapshot.pull.state === "closed") {
         await this.stopCurrent(record, `Pull request ${snapshot.pull.state}.`);
         return;
       }
-      const report = evaluateWatch(record.cursor ?? initialCursor(record.watch.kind === "watching" ? record.watch.since : this.iso()), snapshot);
+      const report = evaluateWatch(record.cursor ?? initialCursor(record.watch.kind === "watching" ? record.watch.since : this.iso()), snapshot, record.provider);
       const next = await this.deps.store.update(key, record.revision, (current) => {
         if (current.watch.kind !== "watching") return current;
         return { ...current, cursor: report.cursor, lastReadAt: this.iso(),
@@ -283,8 +287,12 @@ export class PullRequestService {
     return state;
   }
   private async requireRepo(record: PullRecord): Promise<void> {
-    const repo = await this.deps.github.repo(record.session.cwd);
-    if (repo.slug.toLowerCase() !== record.repo.toLowerCase()) throw new Error("The session's GitHub repository changed. Link its PR again.");
+    const reader = await this.reader(record.session.cwd);
+    const repo = await reader.repo(record.session.cwd);
+    if (reader.provider !== record.provider || repo.slug.toLowerCase() !== record.repo.toLowerCase()) throw new Error(`The session's ${record.provider === "github" ? "GitHub" : "Azure DevOps"} repository changed. Link its PR again.`);
+  }
+  private reader(cwd: string): Promise<PullRequestReader> {
+    return this.deps.readerFor?.(cwd) ?? Promise.resolve({ provider: "github", repo: (target) => this.deps.github.repo(target), pull: (target, number, annotations) => this.deps.github.pull(target, number, annotations) });
   }
   private isDisposed(): boolean { return this.disposed; }
   private iso(): string { return new Date(this.now()).toISOString(); }

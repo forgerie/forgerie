@@ -15,7 +15,7 @@ const pull = (number: number, extra: Partial<PullRequest> = {}): PullRequest => 
   merge: { kind: "allowed" }, ...extra });
 const failing = (number: number) => pull(number, { checks: [{ id: "run:1", name: "tests", state: "failed", url: "https://ci/1", required: true, logTail: "boom", logSource: "annotations" }],
   merge: { kind: "blocked", reason: "Every check must pass on this head commit." } });
-const link = (number: number, watch: PullLink["watch"] = { kind: "off" }): PullLink => ({ session: { id: "s1", cwd: "/repo" }, repo: "o/r", number, watch });
+const link = (number: number, watch: PullLink["watch"] = { kind: "off" }): PullLink => ({ provider: "github", session: { id: "s1", cwd: "/repo" }, repo: "o/r", number, watch });
 
 /** A fake server that holds links the way the real one does: per pull request, never replacing another. */
 function fakeApi(initial: PullItem[]) {
@@ -177,5 +177,24 @@ describe("session row mark", () => {
     const mark = document.querySelector(".pr-row-mark")!;
     expect(mark.getAttribute("aria-label")).toBe("3 pull requests: #9, #10, #11, 1 watched by the agent");
     expect(mark.textContent).toBe("#11+2");
+  });
+});
+
+describe("Azure pull requests", () => {
+  it("labels the source and hides merge even if a response accidentally allows it", async () => {
+    const azureLink: PullLink = { ...link(9), provider: "azure-devops" };
+    const { api } = fakeApi([{ link: azureLink, pull: pull(9, { url: "https://dev.azure.com/o/p/_git/r/pullrequest/9" }) }]);
+    await act(async () => root.render(<Harness api={api} catalog={[azureLink]} />));
+    expect(document.querySelector(".pr-facts")?.textContent).toContain("Azure DevOps");
+    expect(document.querySelector('a[aria-label="Open on Azure DevOps"]')).not.toBeNull();
+    expect(button("Merge")).toBeUndefined();
+    expect(document.querySelector(".pr-foot")).toBeNull();
+    expect(button("Watch")).toBeDefined();
+  });
+  it("links the number from an Azure PR URL through the same API", async () => {
+    const { api } = fakeApi([]);
+    await act(async () => root.render(<Harness api={api} />));
+    await typeNumber("https://dev.azure.com/o/Amaze%20Insights/_git/r/pullrequest/12");
+    expect(api.link).toHaveBeenCalledWith({ id: "s1", cwd: "/repo" }, 12);
   });
 });

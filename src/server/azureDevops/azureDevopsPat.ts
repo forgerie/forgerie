@@ -11,7 +11,7 @@ export class AzureDevopsPatStore {
   async read(organization: string): Promise<AzureCredential> {
     if (!/^[a-z0-9][a-z0-9-]{0,49}$/iu.test(organization)) return { ok: false, message: "Invalid Azure DevOps organization." };
     const path = join(this.directory, `${organization.toLowerCase()}.pat`);
-    const fix = `Store an organization-scoped PAT with Work Items: Read permission in ${path}, owned by the Forgerie user with mode 0600. Never put it in project config or chat.`;
+    const fix = `Store an organization-scoped PAT with Work Items: Read and Code: Read permissions in ${path}, owned by the Forgerie user with mode 0600. Never put it in project config or chat.`;
     try {
       // O_NONBLOCK also prevents an accidentally supplied FIFO from hanging the daemon.
       const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);

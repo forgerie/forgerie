@@ -54,6 +54,7 @@ export const pullRequestSchema = z.object({
 export type PullRequest = z.infer<typeof pullRequestSchema>;
 
 export const pullLinkSchema = z.object({
+  provider: z.enum(["github", "azure-devops"]),
   session: z.object({ id: text, cwd: text }),
   repo: text, number: z.number().int().min(1), watch: pullWatchSchema,
 });

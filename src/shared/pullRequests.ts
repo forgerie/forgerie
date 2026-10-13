@@ -37,9 +37,10 @@ export const PullRequestSchema = Type.Object({
   merge: Type.Union([Type.Object({ kind: Type.Literal("allowed") }), Type.Object({ kind: Type.Literal("blocked"), reason: text })]),
 });
 export type PullRequest = Static<typeof PullRequestSchema>;
-export const PullLinkSchema = Type.Object({ session: PullRefSchema, repo: text, number: Type.Integer({ minimum: 1 }), watch: PullWatchSchema });
+export const PullProviderSchema = Type.Union([Type.Literal("github"), Type.Literal("azure-devops")]);
+export const PullLinkSchema = Type.Object({ provider: PullProviderSchema, session: PullRefSchema, repo: text, number: Type.Integer({ minimum: 1 }), watch: PullWatchSchema });
 export type PullLink = Static<typeof PullLinkSchema>;
-/** One linked pull request and its GitHub read. */
+/** One linked pull request and its provider read. */
 export const SessionPullResponseSchema = Type.Object({ link: PullLinkSchema, pull: PullRequestSchema });
 /** Every pull request linked to a session, oldest first. A failed read keeps its link, with `pull: null` and the reason. */
 export const SessionPullsResponseSchema = Type.Object({ items: Type.Array(Type.Object({ link: PullLinkSchema, pull: Type.Union([PullRequestSchema, Type.Null()]), error: Type.Optional(text) })) });

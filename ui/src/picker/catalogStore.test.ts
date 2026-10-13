@@ -102,7 +102,7 @@ function start(api: Awaited<ReturnType<typeof machine>>) {
 
 describe("pull request links", () => {
   const watching = { kind: "watching", since: "2026-10-07T21:00:00.000Z", wakes: 0 };
-  const link = { session: { id: "a", cwd: "/code/forgerie" }, repo: "o/r", number: 142, watch: { kind: "off" } };
+  const link = { provider: "github", session: { id: "a", cwd: "/code/forgerie" }, repo: "o/r", number: 142, watch: { kind: "off" } };
   it("joins every link a session has, then follows link, watch, and unlink events one pull request at a time", async () => {
     const second = { ...link, number: 143 };
     const api = await machine({ pulls: [link, second] });

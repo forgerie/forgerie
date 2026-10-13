@@ -10,7 +10,7 @@ const pull: PullRequest = { repo: "owner/repo", number: 9, title: "Fix tests", u
   reviews: [{ reviewer: "jordan", state: "approved", updatedAt: TIME }],
   comments: [{ id: "c1", kind: "comment", author: "jordan", body: "Rename it.", updatedAt: TIME, url: "https://github.com/c/1", path: "a.ts", line: 3 }],
   complete: true, merge: { kind: "blocked", reason: "Every check must pass on this head commit." } };
-const link: PullLink = { session: { id: "s1", cwd: "/repo" }, repo: "owner/repo", number: 9, watch: { kind: "watching", since: TIME, wakes: 1, lastWake: TIME } };
+const link: PullLink = { provider: "github", session: { id: "s1", cwd: "/repo" }, repo: "owner/repo", number: 9, watch: { kind: "watching", since: TIME, wakes: 1, lastWake: TIME } };
 
 function fake(routes: Record<string, { status?: number; body: unknown }>) {
   const calls: { path: string; method: string; body: unknown }[] = [];

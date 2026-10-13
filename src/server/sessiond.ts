@@ -7,6 +7,8 @@ import { BacklogSettingsStore } from "./backlog/backlogSettingsStore.js";
 import { registerBacklogSettingsRoutes } from "./backlog/backlogSettingsRoutes.js";
 import { resolveBacklogConfig } from "./backlog/backlogConfig.js";
 import { canonicalBacklogRoot } from "./backlog/backlogScanner.js";
+import { AzurePullReader } from "./azureDevops/azurePullReader.js";
+import { originAzureRepo } from "./azureDevops/azureRemote.js";
 import { SessionSearchService } from "./sessions/sessionSearchService.js";
 import { registerSessionSearchRoutes } from "./sessions/sessionSearchRoutes.js";
 import { mkdir, rm } from "node:fs/promises";
@@ -148,6 +150,8 @@ async function createSessionDaemonRuntime() {
   const githubIssues = new GitHubIssueClient({ app: github, fetch: fetchGitHub, trust: githubTrust });
   const pullStore = new PullRequestStore(join(piWebDataDir(daemonEnvironment), "pull-requests.json"));
   await pullStore.initialize();
+  const azureCredentials = new AzureDevopsPatStore(join(piWebDataDir(daemonEnvironment), "azure-devops"));
+  const azurePulls = new AzurePullReader({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlogSettings = new BacklogSettingsStore(join(piWebDataDir(daemonEnvironment), "backlog-settings.json"));
   const githubAgent: GitHubAgent = new GitHubAgent({ app: github, fetch: fetchGitHub, trust: githubTrust, backlogConfig: async (root) => {
     const projects = await projectWorkspaceDeps.projects.list();
@@ -264,6 +268,16 @@ async function createSessionDaemonRuntime() {
       createIssue: (repo, id, input) => githubAgent.createIssue(repo, id, input),
       watch: (cwd, id, action, number) => action === "start" ? pulls.watch({ id, cwd }, number) : pulls.stopRef({ id, cwd }, number),
     },
+    azurePr: { execute: async (cwd, id, action, number) => {
+      // The session gateway validates ownership before even a read or branch lookup.
+      const state = await sessions.inspectPullSession({ cwd, id });
+      if (state.ref.id !== id || state.ref.cwd !== cwd) throw new Error("Use the session's own workspace.");
+      const selected = number ?? await azurePulls.activeNumber(cwd);
+      if (action === "read") return azurePulls.pull(cwd, selected);
+      if (action === "link") return pulls.link({ cwd, id }, selected);
+      if (action === "watch") return pulls.watch({ cwd, id }, selected);
+      return pulls.stopRef({ cwd, id }, selected);
+    } },
     pullRequestWatches: { isWatching: (id) => pullStore.isWatching(id), stop: (id, reason) => pulls.stop(id, reason) },
     extensionDialogsTimeoutMs: config.extensionDialogsTimeoutMs,
     // Settings > Models writes this key while the daemon runs, so read it for each title.
@@ -282,6 +296,7 @@ async function createSessionDaemonRuntime() {
     }),
   }));
   const pulls: PullRequestService = new PullRequestService({ github: githubAgent, store: pullStore,
+    readerFor: async (cwd) => await originAzureRepo(cwd) === undefined ? { provider: "github", repo: (target) => githubAgent.repo(target), pull: (target, number, annotations) => githubAgent.pull(target, number, annotations) } : azurePulls,
     sessions: relatedPullSessions(relatedWork, {
       inspect: (ref) => sessions.inspectPullSession(ref),
       wake: (ref, notice, current) => sessions.wakePullSession(ref, notice, current),
@@ -333,7 +348,6 @@ async function createSessionDaemonRuntime() {
     },
     onError: (error) => { app.log.warn({ err: error }, "worktree cleanup failed"); },
   });
-  const azureCredentials = new AzureDevopsPatStore(join(piWebDataDir(daemonEnvironment), "azure-devops"));
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ settings: backlogSettings, projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });

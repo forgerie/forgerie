@@ -18,7 +18,7 @@ choice. It requires manual renewal and cannot use company sign-in to renew it.
 
 1. Open your organization's personal access token settings. For Amaze Insights,
    use <https://dev.azure.com/amazeinsights/_usersSettings/tokens>.
-2. Create a token scoped to **amazeinsights**, with **Work Items: Read** only.
+2. Create a token scoped to **amazeinsights**, with **Work Items: Read** and **Code: Read** (`vso.code`).
    Choose a short expiry permitted by your company. Do not choose full access.
 3. On the Forgerie server, as the user who runs Forgerie, create the credential
    directory and open the token file in an editor:
@@ -153,3 +153,50 @@ backlog components. This provider cannot edit Azure items or post comments.
 - [Microsoft authentication guidance](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/authentication-guidance?view=azure-devops).
 - [Assigned-to queries and WIQL](https://learn.microsoft.com/en-us/azure/devops/boards/queries/wiql-syntax?view=azure-devops).
 - [Work-item state categories](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/work-item-type-states/list?view=azure-devops-rest-7.1).
+
+## Pull requests
+
+Azure Repos pull requests can now be linked and watched read-only. This replaces
+the earlier backlog-only limitation above. A human creates and merges the PR
+in Azure DevOps. Forgerie cannot create, merge, complete, vote, comment, or
+abandon an Azure PR. Its panel has no merge action.
+
+Use the same organization PAT file described above, with **Code: Read**
+(`vso.code`) as well as **Work Items: Read**. No token goes into chat or project
+configuration. Replacing the file applies on the next read.
+
+The session's `origin` remote selects the provider and repository. HTTPS
+`dev.azure.com` (including userinfo), legacy `visualstudio.com`,
+`ssh.dev.azure.com:v3`, and legacy `vs-ssh.visualstudio.com:v3` origins are
+supported. Project and repository names are percent-decoded. Link a PR number
+or Azure PR URL in the existing pull request panel. A URL supplies the number;
+the session's origin still selects the repository.
+
+Azure sessions have an `azure_pr` agent tool with `read`, `link`, `watch`, and
+`stop` actions. Give a PR number, or omit it to select the one active PR whose
+source branch is the session's branch. If none or several match, give a number.
+The tool does not receive the PAT. GitHub tools and watches keep their behavior.
+
+A watch polls every 60 seconds, with about four Azure requests per PR. It reports
+failed policies and statuses, passing required policies, new commits, new human
+comments, and conflicts. Policy blocking flags become required checks. Reviewer
+votes become approvals or requests for changes. Deleted and system comments are
+excluded. External text is data, not an instruction or permission to write to
+Azure. Each wake can use agent tokens. Stop watching when handing work back.
+
+A failed policy, status, or thread read marks the result incomplete. It does not
+advance the watch checkpoint. Rate limits honor `Retry-After`; reads back off
+without another request until that time. A PR unreadable for 15 minutes stops
+its watch. Closed or completed PRs and unavailable sessions also stop watches.
+The existing limit of 10 consecutive comment-only wakes still applies.
+
+File, addition, and deletion counts are shown as 0 because this reader does not
+fetch the extra diffs needed to compute them. Azure does not provide a general
+PR modification timestamp here; the summary uses its creation or closing date.
+Resolved thread comments remain watch activity, but only active threads appear
+in the panel's open comments. Truncated responses are incomplete, not a claim
+that all checks passed.
+
+Policy evaluations use `api-version=7.1-preview.1`, as specified by Microsoft's
+[Evaluations - List reference](https://learn.microsoft.com/en-us/rest/api/azure/devops/policy/evaluations/list?view=azure-devops-rest-7.1).
+The PR, status, and thread reads use `7.1`.

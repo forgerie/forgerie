@@ -180,3 +180,24 @@ export function firstToShow(items: readonly { link: { number: number }; pull: Pu
   const live = items.flatMap((item) => item.pull && (item.pull.state === "open" || item.pull.state === "draft") ? [item.pull] : []);
   return worstOf(live)?.pr.number ?? items.at(-1)?.link.number;
 }
+
+/** URLs supply only the number; the server always selects the session's origin repository. */
+export function pullRequestNumber(value: string): number | undefined {
+  const text = value.trim();
+  let digits = text;
+  if (!/^[1-9]\d{0,9}$/.test(text)) {
+    let url: URL;
+    try { url = new URL(text); } catch { return undefined; }
+    if (url.protocol !== "https:" || url.port || url.username || url.password) return undefined;
+    const azure = url.hostname === "dev.azure.com" && /^\/[^/]+\/[^/]+\/_git\/[^/]+\/pullrequest\/([1-9]\d{0,9})\/?$/.exec(url.pathname);
+    const legacy = /^[a-z0-9-]+\.visualstudio\.com$/i.test(url.hostname) && /^\/(?:DefaultCollection\/)?[^/]+\/_git\/[^/]+\/pullrequest\/([1-9]\d{0,9})\/?$/.exec(url.pathname);
+    digits = (azure || legacy || undefined)?.[1] ?? "";
+  }
+  const number = Number(digits);
+  return Number.isSafeInteger(number) && number > 0 ? number : undefined;
+}
+
+export const pullRequestCopy = {
+  loading: "Reading pull requests…",
+  empty: "No pull request is linked to this session. Link a PR created on the repository provider.",
+};

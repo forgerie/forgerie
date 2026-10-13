@@ -6,7 +6,7 @@ import {
   PlusIcon, RefreshCwIcon, TriangleAlertIcon, XIcon,
 } from "lucide-react";
 import {
-  ago, approvals, clock, commentsPrompt, duration, failedChecks, markOf, mergeBlock, sortedChecks, verdict, verdictAction, worstOf,
+  pullRequestNumber, pullRequestCopy, ago, approvals, clock, commentsPrompt, duration, failedChecks, markOf, mergeBlock, sortedChecks, verdict, verdictAction, worstOf,
   type CheckState, type PullCheck, type PullComment, type PullLink, type PullRequest, type PullReview, type PullTone, type PullWatch,
 } from "../pullRequests/pullRequestModel";
 import type { PullItem } from "../pullRequests/pullRequestApi";
@@ -115,6 +115,7 @@ function Review({ load, selected, onSelect, reading, notice, writing, now, onRef
   const [adding, setAdding] = useState(false);
   const item = adding ? undefined : items.find((candidate) => candidate.link.number === selected) ?? items.at(-1);
   const pr = item?.pull ?? undefined;
+  const source = item?.link.provider === "azure-devops" ? "Azure DevOps" : "GitHub";
   const ask = (message: string) => { onClose(); onAsk(message); };
   const link = async (number: number) => { if (await onLink(number)) { setAdding(false); onSelect(number); } };
   return <dialog ref={dialog} className="tree-dialog pr-dialog" aria-labelledby={titleId}
@@ -129,7 +130,7 @@ function Review({ load, selected, onSelect, reading, notice, writing, now, onRef
           : item ? <b>#{item.link.number}</b> : null}</span>
         <button type="button" className="icon-button quiet-button" aria-label={items.length > 1 ? "Read the pull requests again" : "Read the pull request again"} title="Read again"
           disabled={load.type === "loading"} onClick={onRefresh}><RefreshCwIcon aria-hidden size={18} /></button>
-        {pr && <a className="icon-button quiet-button" href={pr.url} target="_blank" rel="noreferrer" aria-label="Open on GitHub" title="Open on GitHub">
+        {pr && <a className="icon-button quiet-button" href={pr.url} target="_blank" rel="noreferrer" aria-label={`Open on ${source}`} title={`Open on ${source}`}>
           <ExternalLinkIcon aria-hidden size={18} /></a>}
         <button type="button" className="icon-button quiet-button" aria-label="Close pull request" title="Close" onClick={onClose}>
           <XIcon aria-hidden size={18} /></button>
@@ -138,7 +139,7 @@ function Review({ load, selected, onSelect, reading, notice, writing, now, onRef
         onSelect={(number) => { setAdding(false); onSelect(number); }} onAdd={() => setAdding(true)} />}
       <div className="pr-body">
         {notice && <p className="pr-notice" data-tone={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-        {load.type === "loading" && <p className="changes-message" role="status">Reading pull requests from GitHub…</p>}
+        {load.type === "loading" && <p className="changes-message" role="status">{pullRequestCopy.loading}</p>}
         {load.type === "failed" && <div className="changes-message" role="alert"><p>{load.message}</p>
           <button type="button" onClick={onRefresh}>Try again</button></div>}
         {load.type === "ready" && (items.length === 0 || adding) && <LinkForm writing={writing} first={items.length === 0}
@@ -146,11 +147,11 @@ function Review({ load, selected, onSelect, reading, notice, writing, now, onRef
         {item && !item.pull && <div className="changes-message" role="alert">
           <p>Forgerie could not read pull request #{item.link.number}. {item.error ?? ""}</p>
           <button type="button" onClick={onRefresh}>Try again</button></div>}
-        {item && pr && <PullBody key={item.link.number} pr={pr} watch={item.link.watch} now={now} writing={writing} onAsk={ask}
+        {item && pr && <PullBody key={item.link.number} pr={pr} watch={item.link.watch} now={now} writing={writing} source={source} onAsk={ask}
           onWatch={(on) => onWatch(item.link.number, on)} />}
         {item && <UnlinkRow number={item.link.number} watching={item.link.watch.kind === "watching"} writing={writing} onUnlink={onUnlink} />}
       </div>
-      {item && pr && <MergeFoot key={item.link.number} pr={pr} writing={writing} onMerge={() => onMerge(item.link.number)} />}
+      {item && pr && item.link.provider !== "azure-devops" && <MergeFoot key={item.link.number} pr={pr} writing={writing} onMerge={() => onMerge(item.link.number)} />}
     </div>
   </dialog>;
 }
@@ -192,34 +193,35 @@ function UnlinkRow({ number, watching, writing, onUnlink }: { number: number; wa
 function LinkForm({ writing, first, onLink, onCancel }: { writing: boolean; first: boolean; onLink: (number: number) => void; onCancel?: (() => void) | undefined }) {
   const inputId = useId();
   const [value, setValue] = useState("");
-  const number = /^\d+$/.test(value.trim()) ? Number(value.trim()) : undefined;
+  const number = pullRequestNumber(value);
   return <form className="pr-link" onSubmit={(event) => { event.preventDefault(); if (number && number > 0) onLink(number); }}>
-    {first ? <p>No pull request is linked to this session. When the agent opens one, it links it here.</p>
+    {first ? <p>{pullRequestCopy.empty}</p>
       : <p>A session can follow several pull requests. Each keeps its own watch.</p>}
     <label htmlFor={inputId}>Link an open pull request from this project's repository</label>
     <div className="pr-link-row">
       <span aria-hidden>#</span>
-      <input id={inputId} inputMode="numeric" autoComplete="off" placeholder="142" value={value} autoFocus={!first} onChange={(event) => setValue(event.target.value)} />
+      <input id={inputId} autoComplete="off" placeholder="142 or Azure PR URL" value={value} autoFocus={!first} onChange={(event) => setValue(event.target.value)} />
       <button type="submit" className="pr-button primary" disabled={!number || writing}>{writing ? "Linking…" : "Link"}</button>
       {onCancel && <button type="button" className="pr-button" onClick={onCancel}>Cancel</button>}
     </div>
   </form>;
 }
 
-function PullBody({ pr, watch, now, writing, onAsk, onWatch }: { pr: PullRequest; watch: PullWatch; now: number; writing: boolean;
+function PullBody({ pr, watch, now, writing, source, onAsk, onWatch }: { source: string; pr: PullRequest; watch: PullWatch; now: number; writing: boolean;
   onAsk: (message: string) => void; onWatch: (on: boolean) => void }) {
   const { tone, sentence } = verdict(pr);
+  const sourceSentence = source === "Azure DevOps" ? sentence.replaceAll("GitHub", "Azure DevOps") : sentence;
   const Icon = TONE_ICON[tone];
   const live = pr.state === "open" || pr.state === "draft";
   const action = verdictAction(pr);
   return <>
     <section className="pr-summary" aria-label="Summary">
       <p className="pr-title" title={pr.title}>{pr.title}</p>
-      <p className="pr-facts"><span className="pr-state" data-state={pr.state}>{STATE_WORD[pr.state]}</span>
+      <p className="pr-facts"><span>{source}</span><span className="pr-state" data-state={pr.state}>{STATE_WORD[pr.state]}</span>
         <span>{pr.author}, updated {ago(pr.updatedAt, now)} ago</span>
         <span className="pr-size">{pr.files} {pr.files === 1 ? "file" : "files"} <ins>+{pr.additions}</ins> <del>−{pr.deletions}</del></span></p>
       {/* The fix sits on the line that names the problem, so it is in view at every height. */}
-      <div className="pr-verdict" data-tone={tone}><p role="status"><Icon aria-hidden size={20} /><span>{sentence}</span></p>
+      <div className="pr-verdict" data-tone={tone}><p role="status"><Icon aria-hidden size={20} /><span>{sourceSentence}</span></p>
         {action && <button type="button" className="pr-button primary" onClick={() => onAsk(action.message)}>{action.label}</button>}</div>
     </section>
     {(live || watch.kind !== "off") && <WatchRow watch={watch} live={live} now={now} writing={writing} onWatch={onWatch} />}
@@ -263,7 +265,7 @@ function Checks({ pr }: { pr: PullRequest }) {
       <h3 id={headId}>Checks</h3>
       <span className="pr-section-count">{pr.checks.length === 0 ? "none ran" : `${String(passed)} of ${String(pr.checks.length)} passed`}</span>
     </div>
-    {checks.length === 0 ? <p className="pr-empty">GitHub reports no checks on {pr.head}.</p>
+    {checks.length === 0 ? <p className="pr-empty">The provider reports no checks on {pr.head}.</p>
       : <ul className="pr-checks">{shown.map((check) => <CheckRow key={check.id} check={check} open={open.has(check.id)} onToggle={() => toggle(check.id)} />)}
         {(folded > 0 || showPassed) && passed > 0 && <li className="pr-check" data-state="passed">
           <button type="button" className="pr-check-line pr-check-fold" aria-expanded={showPassed} onClick={() => setShowPassed(!showPassed)}>

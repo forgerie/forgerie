@@ -37,7 +37,7 @@ describe("row state", () => {
     expect(rowState(waiting, { ...idle, needsResponse: false }, undefined, true)).toBe("unread");
   });
   it("keeps an idle session whose pull request the agent watches in Working, unless it asks for a response", () => {
-    const off = { session: { id: "a", cwd: "/code/forgerie" }, repo: "o/r", number: 1, watch: { kind: "off" as const } };
+    const off = { provider: "github" as const, session: { id: "a", cwd: "/code/forgerie" }, repo: "o/r", number: 1, watch: { kind: "off" as const } };
     // One watched pull request among several is enough.
     const watched = session("a", { pullRequests: [off, { ...off, number: 2, watch: { kind: "watching", since: ago(10), wakes: 0 } }] });
     expect(rowState(watched, idle, undefined, true)).toBe("working");

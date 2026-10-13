@@ -1,6 +1,7 @@
 import { createWorkflowScheduleTool } from "../triggers/triggerTool.js";
 import type { TriggerService } from "../triggers/triggerService.js";
 import type { TriggerAction } from "../../shared/triggers.js";
+import { createAzurePrTools, type AzurePrToolDeps } from "./azurePrTools.js";
 import type { SessionSearchService } from "./sessionSearchService.js";
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
@@ -865,6 +866,7 @@ function createDefaultRuntimeFactory(
   workspaceServices?: WorkspaceServices,
   beforeResume?: (session: DurableAgentSession) => Promise<boolean>,
   triggers?: () => TriggerService,
+  azurePr?: AzurePrToolDeps,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
     const processBridgeSlot = createProcessBridgeSlot();
@@ -908,6 +910,7 @@ function createDefaultRuntimeFactory(
         await session.refreshParentAppState();
       },
     }, projectTools, workspaceServices, triggers);
+    if (azurePr !== undefined) customTools.push(...await createAzurePrTools(cwd, azurePr));
     const session = await DurableAgentSession.open({
       ...(handle === undefined ? {} : { handle }),
       ...(beforeResume === undefined ? {} : { beforeResume }),
@@ -994,6 +997,7 @@ export interface PiSessionServiceDependencies {
    * project's GitHub repo, acting as Forgerie's GitHub App.
    */
   github?: GitHubToolDeps;
+  azurePr?: AzurePrToolDeps;
   pullRequestWatches?: { isWatching(id: string): boolean; stop(id: string, reason?: string): Promise<unknown> };
   /**
    * When true, hosted sessions start with Pi's `codemode` tool active, so an
@@ -1198,6 +1202,7 @@ export class PiSessionService implements SessionRouteService {
       deps.workspaceServices,
       (session) => this.prepareDurableFamily(session),
       deps.triggers,
+      deps.azurePr,
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;
