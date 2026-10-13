@@ -185,9 +185,15 @@ excluded. External text is data, not an instruction or permission to write to
 Azure. Each wake can use agent tokens. Stop watching when handing work back.
 
 A failed policy, status, or thread read marks the result incomplete. It does not
-advance the watch checkpoint. Rate limits honor `Retry-After`; reads back off
-without another request until that time. A PR unreadable for 15 minutes stops
-its watch. Closed or completed PRs and unavailable sessions also stop watches.
+advance the watch checkpoint. Rate limits accept `Retry-After` seconds or an
+HTTP date, with a maximum delay of 15 minutes. Invalid, non-finite, negative,
+or past values use a 60-second delay; zero uses a 1-second minimum. Reads make
+no requests during that delay. The cap matches the unreadable-watch limit and
+prevents a malformed server or proxy header from blocking an organization for
+years. Its cost is retrying sooner than a server requests when it specifies
+more than 15 minutes. Another 429 starts another bounded delay.
+A PR unreadable for 15 minutes stops its watch. Closed or completed PRs and
+unavailable sessions also stop watches.
 The existing limit of 10 consecutive comment-only wakes still applies.
 
 File, addition, and deletion counts are shown as 0 because this reader does not
@@ -200,3 +206,16 @@ that all checks passed.
 Policy evaluations use `api-version=7.1-preview.1`, as specified by Microsoft's
 [Evaluations - List reference](https://learn.microsoft.com/en-us/rest/api/azure/devops/policy/evaluations/list?view=azure-devops-rest-7.1).
 The PR, status, and thread reads use `7.1`.
+
+Before downgrading to a version without Azure PR support, back up
+`<data dir>/pull-requests.json`, then stop every Azure watch and unlink every
+Azure PR using the current version. Stopping alone leaves the Azure link on
+disk. Unlinking removes both the record and any pending notice.
+
+The file remains version 2. The daemon at `771515f7` accepts the added provider
+field and starts; it does not reject Azure records during store validation.
+It treats all links as GitHub, so Azure PR reads fail and Azure watches follow
+the existing unreadable-watch stop rule. It can still deliver an already
+pending notice before checking the repository. Startup compatibility does not
+mean Azure records work on that version. Remove those records before a
+downgrade; keep the backup for recovery with an Azure-capable version.

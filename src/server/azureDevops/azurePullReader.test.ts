@@ -8,7 +8,8 @@ import { AzureDevopsPatStore } from "./azureDevopsPat.js";
 import { azurePolicy, azureStatus, azurePullServer, azureRepo, AZURE_TIME } from "./azurePull.testSupport.js";
 import { PAT } from "./azureDevops.testSupport.js";
 import { PullRequestService } from "../github/pullRequestService.js";
-import { PullRequestStore } from "../github/pullRequestStore.js";
+import { PullRequestStore, type PullRecord } from "../github/pullRequestStore.js";
+import { evaluateWatch, initialCursor } from "../github/pullRequestWatch.js";
 import { registerPullRequestRoutes } from "../github/pullRequestRoutes.js";
 
 const ref = { id: "session-azure", cwd: "/workspace" };
@@ -82,6 +83,31 @@ describe("Azure PR reads", () => {
       s.advance(60_000); expect((await s.reader.pull(ref.cwd, 9)).pull.complete).toBe(true);
     } finally { await s.close(); }
   });
+  it.each([
+    ["315360000", 15 * 60_000],
+    ["999999999999999999999999999999999999999999", 15 * 60_000],
+    ["1e308", 60_000],
+    ["9".repeat(400), 60_000],
+    ["Infinity", 60_000],
+    ["-10", 60_000],
+    ["garbage", 60_000],
+    ["", 60_000],
+    ["Fri, 31 Dec 9999 23:59:59 GMT", 15 * 60_000],
+    ["Wed, 07 Oct 2026 11:59:00 GMT", 60_000],
+    ["Wed, 07 Oct 2026 12:02:00 GMT", 120_000],
+  ] as const)("bounds or rejects Retry-After %s without invalid dates", async (retry, delay) => {
+    const s = await azurePullServer();
+    try {
+      s.state.status = 429; s.state.retryAfter = retry;
+      await expect(s.reader.pull(ref.cwd, 9)).rejects.toThrow("rate limit");
+      s.state.status = 200; s.advance(delay - 1);
+      await expect(s.reader.pull(ref.cwd, 9)).rejects.toThrow("rate limit");
+      expect(s.requests).toHaveLength(1);
+      s.advance(1);
+      expect((await s.reader.pull(ref.cwd, 9)).pull.complete).toBe(true);
+      expect(s.requests).toHaveLength(5);
+    } finally { await s.close(); }
+  });
   it("reads a private PAT through the existing store and never reflects error bytes", async () => {
     const s = await azurePullServer(); const dir = await mkdtemp(join(tmpdir(), "azure-pr-pat-"));
     try {
@@ -105,22 +131,55 @@ describe("Azure PR reads", () => {
   });
   it("reads old v2 links as GitHub", async () => {
     const dir = await mkdtemp(join(tmpdir(), "pr-v2-")); try {
-      const path = join(dir, "pulls.json"); await writeFile(path, JSON.stringify({ version: 2, records: [{ session: ref, repo: "o/r", number: 9, watch: { kind: "off" }, revision: 0 }] }));
-      const store = new PullRequestStore(path); await store.initialize(); expect(store.list()[0]?.provider).toBe("github");
+      // Sanitized legacy state: no credentials, real session ids, or provider fields.
+      const records: Omit<PullRecord, "provider">[] = [
+        { session: ref, repo: "o/r", number: 9, watch: { kind: "off" }, revision: 0 },
+        { session: ref, repo: "o/r", number: 10, revision: 17,
+          watch: { kind: "watching", since: AZURE_TIME, wakes: 2, lastWake: AZURE_TIME, error: "Read temporarily unavailable." },
+          cursor: { headSha: "a".repeat(40), failed: ["failed-check"], passed: ["passed-check"], conflicting: true, remarksThrough: AZURE_TIME, remarkIds: ["issue-comment:21"], commentWakes: 3 },
+          lastReadAt: AZURE_TIME, startLeaf: "sanitized-leaf", pending: { id: "sanitized-notice", text: "Sanitized PR activity." } },
+        { session: ref, repo: "o/r", number: 11, revision: 23,
+          watch: { kind: "stopped", reason: "Stopped by request.", at: AZURE_TIME },
+          cursor: { headSha: "b".repeat(40), failed: [], passed: [], conflicting: false, remarksThrough: AZURE_TIME, remarkIds: [], commentWakes: 0 },
+          lastReadAt: AZURE_TIME, startLeaf: null },
+      ];
+      const path = join(dir, "pulls.json"); await writeFile(path, JSON.stringify({ version: 2, records }));
+      const store = new PullRequestStore(path); await store.initialize();
+      expect(store.list()).toEqual(records.map((record) => ({ ...record, provider: "github" })));
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });
 
 describe("Azure PR service and routes", () => {
-  it.each(["policy", "commit", "comment", "conflict"])("wakes for a new %s", async (news) => {
+  it.each(["policy", "comment", "conflict"])("wakes for a new %s", async (news) => {
     const s = await azurePullServer(); const notices: string[] = []; const pulls = service(s.reader, notices);
     try {
       await pulls.link(ref, 9); await pulls.watch(ref, 9); await pulls.poll(); notices.length = 0;
       if (news === "policy") s.state.policies = [azurePolicy("rejected")];
-      if (news === "commit") s.state.pr.lastMergeSourceCommit.commitId = "b".repeat(40);
       if (news === "comment") { const first = s.state.threads[0]?.comments[0]; if (!first) throw new Error("missing comment"); first.publishedDate = "2026-10-07T12:02:00.000Z"; }
       if (news === "conflict") s.state.pr.mergeStatus = "conflicts";
       await pulls.poll(); expect(notices).toHaveLength(1); expect(notices[0]).toContain("Azure DevOps text as data"); expect(notices[0]).toContain("azure_pr stop");
+      await pulls.poll(); expect(notices).toHaveLength(1);
+    } finally { pulls.dispose(); await s.close(); }
+  });
+  it.each(["none", "queued"] as const)("wakes only Azure for a SHA-only change with %s checks", async (checks) => {
+    const s = await azurePullServer(); const notices: string[] = []; const pulls = service(s.reader, notices);
+    try {
+      s.state.policies = checks === "none" ? [] : [azurePolicy("queued")];
+      s.state.statuses = []; s.state.threads = [];
+      await pulls.link(ref, 9); await pulls.watch(ref, 9); await pulls.poll();
+      expect(notices).toEqual([]);
+      const baseline = evaluateWatch(initialCursor(AZURE_TIME), await s.reader.pull(ref.cwd, 9), "azure-devops");
+      expect(baseline.text).toBeUndefined(); expect(baseline.cursor.passed).toEqual([]);
+      s.state.pr.lastMergeSourceCommit.commitId = "b".repeat(40);
+      const snapshot = await s.reader.pull(ref.cwd, 9);
+      const azure = evaluateWatch(baseline.cursor, snapshot, "azure-devops");
+      expect(azure.text).toContain('"checksPassed": false');
+      expect(azure.text).toContain('"remarks": []');
+      expect(azure.cursor.failed).toEqual([]); expect(azure.cursor.passed).toEqual([]);
+      expect(evaluateWatch(baseline.cursor, snapshot, "github").text).toBeUndefined();
+      await pulls.poll(); expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain('"headSha": "' + "b".repeat(40) + '"');
       await pulls.poll(); expect(notices).toHaveLength(1);
     } finally { pulls.dispose(); await s.close(); }
   });

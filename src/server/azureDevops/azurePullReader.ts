@@ -20,6 +20,24 @@ const list = <T extends TSchema>(schema: T) => Type.Object({ value: Type.Array(s
 const policyStates: Record<string, PullCheck["state"] | undefined> = { queued: "queued", running: "running", approved: "passed", rejected: "failed", broken: "failed" };
 const statusStates: Record<string, PullCheck["state"] | undefined> = { pending: "running", succeeded: "passed", failed: "failed", error: "failed" };
 class AzurePullError extends Error {}
+const MAX_RETRY_DELAY_MS = 15 * 60_000;
+const DEFAULT_RETRY_DELAY_MS = 60_000;
+
+/** Bound untrusted headers before multiplication or timestamp addition. */
+function retryDelay(header: string | null, now: number): number {
+  const value = header?.trim() ?? "";
+  let delay = DEFAULT_RETRY_DELAY_MS;
+  if (/^\d+$/u.test(value)) {
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0) delay = Math.min(seconds, MAX_RETRY_DELAY_MS / 1000) * 1000;
+  } else if (/^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/u.test(value)) {
+    const difference = Date.parse(value) - now;
+    if (Number.isFinite(difference) && difference >= 0) delay = Math.min(difference, MAX_RETRY_DELAY_MS);
+  }
+  // A malformed or extreme header must not lock out the organization indefinitely.
+  // Fifteen minutes matches the existing unreadable-watch limit; 1 second avoids a tight retry loop.
+  return Math.max(1000, delay);
+}
 interface Dependencies {
   credential: (organization: string) => Promise<AzureCredential>;
   fetch: (url: string, init: RequestInit) => Promise<Response>;
@@ -109,20 +127,17 @@ export class AzurePullReader implements PullRequestReader {
   }
   private async read<T extends TSchema>(repo: AzureRepo, url: string, schema: T): Promise<Static<T>> {
     const organization = repo.organization.toLowerCase();
-    const until = this.limitedUntil.get(organization) ?? 0;
-    if (until > this.now()) throw new AzurePullError(`Azure DevOps rate limit reached. Retry after ${new Date(until).toISOString()}.`);
-    const credential = await this.deps.credential(organization);
-    if (!credential.ok) throw new AzurePullError(credential.message);
     try {
+      const until = this.limitedUntil.get(organization) ?? 0;
+      if (until > this.now()) throw new AzurePullError("Azure DevOps rate limit reached. Retry later.");
+      const credential = await this.deps.credential(organization);
+      if (!credential.ok) throw new AzurePullError(credential.message);
       const response = await this.deps.fetch(url, { method: "GET", redirect: "error", signal: AbortSignal.timeout(30_000), headers: { Authorization: `Basic ${Buffer.from(`:${credential.token}`).toString("base64")}`, Accept: "application/json" } });
       if (!response.ok) {
         await response.body?.cancel();
         if (response.status === 429) {
-          const retry = response.headers.get("retry-after");
-          const seconds = retry === null ? NaN : Number(retry);
-          const date = retry === null ? NaN : Date.parse(retry);
-          const next = Number.isFinite(seconds) && seconds >= 0 ? this.now() + seconds * 1000 : Number.isFinite(date) && date > this.now() ? date : this.now() + 60_000;
-          this.limitedUntil.set(organization, Math.max(this.now() + 1000, next));
+          const now = this.now();
+          this.limitedUntil.set(organization, now + retryDelay(response.headers.get("retry-after"), now));
           throw new AzurePullError("Azure DevOps rate limit reached. Retry later.");
         }
         throw new AzurePullError(`Azure DevOps answered HTTP ${String(response.status)}. Check the PAT's Code: Read scope and project access.`);
