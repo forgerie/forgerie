@@ -26,6 +26,7 @@ import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { planChildRuntime, runtimeGaps, childIsWriter, missingToolsRefusal, type ChildRuntimePlan, type ChildSkill } from "./durableChildRuntime.js";
 import { readsImages, watchdogDiffTool } from "./durableChildTools.js";
 import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild, workflowChildRefusal, workflowWorkerModel } from "./durableWorkflowRuns.js";
+import { deliverInputUntilPlaced, type InputPlacementState } from "./durableInputPlacement.js";
 import { logDecision } from "./durableDecisions.js";
 import { WorkflowError } from "../resources/workflowLibrary.js";
 
@@ -209,17 +210,17 @@ async function parentOf(api: CommitApi, context: Context): Promise<ConversationI
   return parent;
 }
 
-/** A durable outbox: saving the question and delivery task is atomic; submit deduplicates restart replay. */
-const QuestionDelivery = defineTask<{ questionId: string; text: string }, { phase: "deliver" }, null>({
+/** Saving the question and outbox is atomic. Queued questions stay pending until placement, including across aborts. */
+const QuestionDelivery = defineTask<{ questionId: string; text: string }, InputPlacementState, null>({
   name: "forgerie.child-question-delivery", version: 1, initial: () => ({ phase: "deliver" }),
   phases: { deliver: async (task, runtime, context) => {
-    const parent = await runtime.conversation(runtime.conversationId, context);
-    if (parent === undefined) throw new Error("Child question parent is missing");
     const question = (await runtime.snapshot(Questions, runtime.conversationId, context))?.items[task.input.questionId];
-    if (question?.closed !== true && question?.answer === null) {
-      await parent.submit({ type: "input", content: task.input.text, whenBusy: "followUp", requestId: `child-question:${task.input.questionId}` }, context);
+    if (question?.closed === true || question?.answer !== null) {
+      await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+      return;
     }
-    await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+    await deliverInputUntilPlaced(runtime, task.state.checkpoint, { requestId: `child-question:${task.input.questionId}`, content: task.input.text,
+      previousRecipient: runtime.conversationId, selectRecipient: () => Promise.resolve(runtime.conversationId) }, context);
   } },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });

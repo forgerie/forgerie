@@ -11,7 +11,7 @@ import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { durableChildExtensions, listChildren, childMessages } from "./durableChildAgents.js";
 import { decisions, decisionExtension, logDecision, overturnDecision, DECISIONS_DOC_KIND } from "./durableDecisions.js";
 
-it("logs future slice kinds once and restarts between correction admission and the outbox's final commit", async () => {
+it("logs future slice kinds once and does not duplicate a placed correction after abort/reopen", async () => {
   const root = await mkdtemp(join(tmpdir(), "forgerie-decisions-replay-"));
   const manager = SessionManager.create(root, join(root, "sessions"));
   const models = createModels(); const provider = fauxProvider({tokensPerSecond: 100000}); models.setProvider(provider.provider);
@@ -44,6 +44,10 @@ it("logs future slice kinds once and restarts between correction admission and t
     // This is the crash window, not merely a reopen after normal completion.
     const task = await journal.harness.commit(async (tx) => (await tx.scanTasks({kind: "forgerie.decision-correction"}, 10)).items[0], context);
     expect(task?.state.status).not.toBe("terminal");
+    await journal.conversation.abort(context);
+    const receipt = await journal.harness.commit((tx) => tx.submissionByRequest(journal.conversation.id, "decision-overturn:d:issue"), context);
+    expect(receipt?.status).toBe("unanswered");
+    expect(receipt?.entry).toBeDefined();
     journal.harness.resume();
     await vi.waitFor(async () => {
       const task = await journal.harness.commit(async (tx) => (await tx.scanTasks({kind: "forgerie.decision-correction"}, 10)).items[0], context);

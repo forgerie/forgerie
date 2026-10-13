@@ -41,7 +41,7 @@ Taste and scope growth are not escalations. There is no timeout that forwards a 
 
 The decision log records parent answers and provisional guesses, not every choice an agent judges notable. User answers to escalated child questions record `by: "user"`. `by: "parent"` identifies parent answers and guesses. Each record includes the active workflow run ID, if one exists when the decision commits. A parent's own `record_decision({question, choice, reason, guess: true})` is only for guesses in place of an escalation. `guess: false` is refused; ADR 0005 excludes ordinary choices. The parent uses `ask_user` only for escalations that must wait for you.
 
-Overturning a decision records your correction and sends it once to the affected child if it still has a live run. Otherwise it wakes the parent. Delivery uses a follow-up; it does not interrupt a tool already running. Answers, routing receipts, decisions, and pending correction deliveries survive restart. The log has no expiry in this slice. A wrong answer can affect work before you overturn it; correction costs model turns and may throw away work.
+Overturning a decision records your correction and sends it once to the affected child if it still has a live run. Otherwise it wakes the parent. Delivery uses a follow-up; it does not interrupt a tool already running. Answers, routing receipts, decisions, and pending correction deliveries survive restart. Question and correction outboxes stay pending until Durable places their input in the target transcript, not merely in its queue. If Stop or another withdrawal removes an unplaced input, the outbox retries with a fresh receipt. A correction retry checks whether the affected child is still live; otherwise it goes to the parent. An input already placed is never resent, even if its run is stopped or the parent ignores its question. The log has no expiry in this slice. A wrong answer can affect work before you overturn it; correction costs model turns and may throw away work.
 
 ## Agent files
 
@@ -292,6 +292,8 @@ Completed records expire 90 days after `finishedAt`. Unfinished records remain. 
 Server slices record `gated`, `auto-stop`, and `issue` through `logDecision(tx, parent, input, recipient?)` in `durableDecisions.ts`, within the action's own commit. `input.id` must be stable for that action. The helper sets time, active run ID, and standing state, and reuses the saved record on replay. Recipient is internal routing metadata, not part of the wire record.
 
 ## Verification
+
+`durableInputPlacement.test.ts` holds real Durable tools, reopens queued deliveries, withdraws individual receipts, and aborts/reopens parent and child targets. It checks fresh receipts, live-child versus parent redelivery, and no duplicate transcript entries after placement. `durableDecisions.test.ts` also stops a placed correction before outbox completion and verifies replay does not resend it.
 
 `parentAnswers.test.ts` checks parent answers, all four escalation kinds, busy-parent follow-ups, waiting and flagged counts, restart receipts, and one correction to live children or their parents. `PARENT_ANSWERS_REAL=1 ./scripts/parent-answers-real.ts` uses real parent and child models in an isolated temporary profile. It checks that the parent answers from its task, the child finishes, one decision is recorded, and no user action is needed. It removes its temporary workspace and copied credentials on exit. Model calls incur costs.
 

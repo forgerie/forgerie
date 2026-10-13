@@ -2,6 +2,7 @@ import { defineDoc, defineExtension, defineTask, defineTool, LiveDoc, type Commi
 import type { Context } from "@earendil-works/chord";
 import { Check } from "typebox/value";
 import { DecisionSchema, RecordDecisionSchema, type Decision } from "../../shared/decisions.js";
+import { deliverInputUntilPlaced, type InputPlacementState } from "./durableInputPlacement.js";
 import { activeWorkflowRunInTx } from "./durableWorkflowRuns.js";
 import { WorkflowError } from "../resources/workflowLibrary.js";
 
@@ -32,14 +33,16 @@ export async function decisions(harness: Harness, parent: ConversationId, contex
 export async function flaggedDecisions(harness: Harness, parent: ConversationId, context: Context): Promise<number> {
   return (await decisions(harness, parent, context)).filter((decision) => decision.flagged && decision.state.kind === "standing").length;
 }
-const Correction = defineTask<{ id: string; recipient: ConversationId; text: string }, { phase: "deliver" }, null>({
+async function correctionRecipient(tx: Tx, parent: ConversationId, id: string): Promise<ConversationId> {
+  const child = (await tx.doc(Decisions, parent)).recipients[id];
+  return child !== undefined && (await tx.conversation(child)) !== undefined && (await tx.doc(LiveDoc, child)).run !== undefined ? child : parent;
+}
+const Correction = defineTask<{ id: string; recipient: ConversationId; text: string }, InputPlacementState, null>({
   name: "forgerie.decision-correction", version: 1, initial: () => ({ phase: "deliver" }),
-  phases: { deliver: async (task, runtime, context) => {
-    const recipient = await runtime.conversation(task.input.recipient, context) ?? await runtime.conversation(runtime.conversationId, context);
-    if (recipient === undefined) throw new Error("Decision correction parent is missing");
-    await recipient.submit({ type: "input", content: task.input.text, whenBusy: "followUp", requestId: `decision-overturn:${task.input.id}` }, context);
-    await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
-  } },
+  phases: { deliver: (task, runtime, context) => deliverInputUntilPlaced(runtime, task.state.checkpoint, {
+    requestId: `decision-overturn:${task.input.id}`, content: task.input.text, previousRecipient: task.input.recipient,
+    selectRecipient: (tx) => correctionRecipient(tx, runtime.conversationId, task.input.id),
+  }, context) },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });
 export async function overturnDecision(harness: Harness, parent: Conversation, id: string, note: string, context: Context): Promise<Decision> {
@@ -50,9 +53,7 @@ export async function overturnDecision(harness: Harness, parent: Conversation, i
     if (decision === undefined) throw new WorkflowError(404, "Decision not found in this session");
     if (decision.state.kind === "overturned") throw new WorkflowError(409, "Decision already overturned");
     decision.state = { kind: "overturned", note: note.trim(), at: Date.now() };
-    const child = doc.recipients[id];
-    // Finished children do not own live work. The parent must redo it, including work in removed checkouts.
-    const recipient = child !== undefined && (await tx.conversation(child)) !== undefined && (await tx.doc(LiveDoc, child)).run !== undefined ? child : parent.id;
+    const recipient = await correctionRecipient(tx, parent.id, id);
     await tx.createTask(Correction, { id, recipient, text: `[decision ${id} overturned by the user] Question: ${decision.question} Your choice: ${decision.choice} Correction: ${note.trim()}. Redo the affected work.` }, { ownership: { kind: "conversation" }, background: true });
     return publicDecision(decision);
   }, context);
