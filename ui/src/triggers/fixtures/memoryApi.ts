@@ -15,6 +15,8 @@ export interface MemoryStore {
   set: (triggers: Trigger[]) => void;
   /** The next call of this name fails with this error once. */
   failNext: (name: keyof TriggersApi, error: Error) => void;
+  /** The next call of this name waits until `release` is called, as a slow server would. */
+  hold: (name: keyof TriggersApi) => { release: () => void };
   triggers: () => Trigger[];
 }
 
@@ -37,7 +39,7 @@ export function memoryApi(initial: readonly Trigger[], options: { now: number; o
     triggers = triggers.map((trigger) => trigger.id === id ? { ...next, revision: trigger.revision + 1 } : trigger);
     return find(id);
   };
-  const api: TriggersApi = {
+  const inner: TriggersApi = {
     list: async () => {
       check("list"); calls.push(["list"]);
       return { triggers: triggers.map((trigger) => ({ ...trigger, history: trigger.history.slice(0, 7) })),
@@ -66,8 +68,19 @@ export function memoryApi(initial: readonly Trigger[], options: { now: number; o
     run: async (id, requestId) => { check("run"); calls.push(["run", id, requestId]); find(id); return { requestId }; },
     remove: async (id) => { check("remove"); calls.push(["remove", id]); find(id); triggers = triggers.filter((trigger) => trigger.id !== id); return { ok: true as const }; },
   };
+  const holds = new Map<string, Promise<void>>();
+  const api = Object.fromEntries(Object.entries(inner).map(([name, call]) => [name, async (...args: unknown[]) => {
+    const held = holds.get(name);
+    if (held) { holds.delete(name); await held; }
+    return (call as (...values: unknown[]) => Promise<unknown>)(...args);
+  }])) as unknown as TriggersApi;
   return {
     api, calls, triggers: () => triggers,
+    hold: (name) => {
+      let release = () => undefined as void;
+      holds.set(name, new Promise<void>((resolve) => { release = resolve; }));
+      return { release: () => release() };
+    },
     set: (next) => { triggers = [...next]; },
     failNext: (name, error) => { failures.set(name, error); },
   };

@@ -99,11 +99,11 @@ export function TriggerPage({ load, draft, dirty, problems, save, conflict, fail
     const onKey = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
       event.preventDefault();
-      if (savable) latest.current();
+      if (savable && !saving) latest.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [savable]);
+  }, [savable, saving]);
 
   const title = load.type === "missing" ? "Trigger" : fresh ? "New trigger" : trigger?.name ?? "Trigger";
   const status = fresh ? (saving ? "Creating…" : undefined) : saving ? "Saving…" : dirty ? "Unsaved changes" : save.type === "saved" ? "Saved" : undefined;

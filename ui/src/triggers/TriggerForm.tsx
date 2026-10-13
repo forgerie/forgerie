@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { WorkflowIcon } from "lucide-react";
 import type { TriggerWorkflow } from "@shared/triggers";
 import { PropertyList } from "../ui/PropertyList";
+import { FormLock } from "../ui/FormLock";
 import { SettingsField } from "../ui/settings/SettingsField";
 import { DestinationPicker } from "../ui/DestinationPicker";
 import { OptionPicker } from "../ui/OptionPicker";
@@ -64,7 +65,8 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
     : workflows.type === "failed" ? { tone: "alert" as const, text: `Could not read the project's workflows: ${workflows.message}` }
     : listed.length === 0 ? { tone: "status" as const, text: "This project has no saved workflows. Add one in Settings, under Skills and prompts." } : undefined;
   const lateChoices = RUN_LATE_CHOICES.includes(draft.grace as (typeof RUN_LATE_CHOICES)[number]) ? [...RUN_LATE_CHOICES] : [...RUN_LATE_CHOICES, draft.grace].sort((a, b) => a - b);
-  return <>
+  // While a save is in flight every control is locked, so nothing typed during the request is lost when it lands.
+  return <FormLock locked={disabled}>
     <PropertyList label="Trigger settings">
       <SettingsField label="Project" hint="Each run starts a new session in this folder." problem={problems.project}>
         <DestinationPicker binding={{ cwd: draft.cwd, label: draft.cwd ? projectLabel : "Choose a project", lead: "Runs in", disabled,
@@ -113,5 +115,5 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
       <WorkflowInputFields inputs={fields.inputs} values={fields.values} onChange={(name, value) => set({ inputs: { ...draft.inputs, [name]: value } })} />
       {problems.inputs ? <div data-problem=""><ProblemList label="Input problem" problems={[problems.inputs]} /></div> : null}
     </PageSection> : null}
-  </>;
+  </FormLock>;
 }

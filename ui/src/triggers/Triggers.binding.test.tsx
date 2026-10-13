@@ -47,10 +47,14 @@ const press = async (name: string | RegExp) => {
   await act(async () => { target.click(); });
   await flush();
 };
+/** The field named `label`: an input by its accessible name, or a text box by its label. */
+const field = (label: string) => document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)
+  ?? [...document.querySelectorAll("label")].find((node) => node.textContent === label)?.control as HTMLInputElement | HTMLTextAreaElement | null | undefined;
 const type = async (label: string, value: string) => {
-  const input = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+  const input = field(label);
+  if (!input) throw new Error(`No field ${label}`);
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input) as object, "value")!.set!.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
   await flush();
@@ -259,7 +263,36 @@ describe("a trigger's page", () => {
   });
 });
 
+/** Disabled itself, or inside a disabled fieldset, as a browser reads `:disabled`. */
+const locked = (control: Element) => (control as HTMLButtonElement).disabled || control.closest("fieldset")?.disabled === true;
+/** Ctrl+S, as the page's shortcut hears it. */
+const saveKey = () => act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true })); });
+
 describe("the create page", () => {
+  it("sends one create for repeated saves, and locks the form while it is in flight", async () => {
+    await render({ view: "create" }, []);
+    await type("Trigger name", "Nightly docs");
+    await press("Choose a project");
+    await press(/^forgerie/);
+    await press(/^Workflow:/);
+    await press(/^triage-issues/);
+    await type("Task", "Triage the new issues.");
+    const held = store.hold("create");
+    await saveKey();
+    await saveKey();
+    expect(button("Creating…")?.disabled).toBe(true);
+    // Every control that edits the draft is locked until the answer comes.
+    for (const name of ["Some days", "1 day", "bug", "Nightly docs"]) {
+      const control = button(name) ?? document.querySelector<HTMLInputElement>(`input[value="${name}"]`);
+      expect(control ? locked(control) : undefined, name).toBe(true);
+    }
+    expect(locked(document.querySelector("textarea")!)).toBe(true);
+    await act(async () => held.release());
+    await flush();
+    expect(store.calls.filter((call) => call[0] === "create")).toHaveLength(1);
+    expect(store.triggers()).toHaveLength(1);
+  });
+
   it("fails with the store's own words when the store is off", async () => {
     await render({ view: "create" }, []);
     store.failNext("create", new TriggerRefusal("database is locked", 503));

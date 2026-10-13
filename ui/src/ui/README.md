@@ -28,6 +28,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `TreeItem` (atom): one row of an ARIA tree, indented by level, with a chevron on a branch or a toned mark on a leaf, a count, and a dot.
 - `ToggleGroup` (molecule): a few choices of one setting as quiet pressed buttons, each with an optional count, a control-sized hit area, and an optional disabled state; as a form field it shows its label above them; with `multiple`, any number can be pressed (such as days of the week) and the buttons wrap.
 - `FileTile` (atom): one file as a square: a picture fills it and any other file shows its type, the name under it, a note only for what the tile cannot show, and a corner remove.
+- `FormLock` (atom): form controls that lock together, such as while a save is in flight: a fieldset with no frame of its own.
 - `TileStrip` (molecule): one row of tiles that keeps its height and scrolls sideways, with each failure in full below.
 - `SplitButton` (molecule): an action and the one setting that changes what it does, in one chip; the second half shows the setting in effect and opens its choices, each explained, at window level.
 - `NoticeBar` (molecule): a full-width bar that stops the reader until they choose: a message and its actions, in a plain or alert tone.

@@ -223,7 +223,12 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
     } catch (error) { setQuestion({ ...question, busy: false, error: messageOf(error) }); }
   }
 
+  // A second Save (a double press, a held Ctrl+S) while one is in flight sends nothing: a create carries no ID, so
+  // two requests would make two triggers. The ref answers at once; the save state reaches the page a render later.
+  const inFlight = useRef(false);
   async function submit() {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setSave({ key, state: { type: "saving" } });
     try {
       if (!trigger) {
@@ -254,7 +259,7 @@ export function TriggersScreen({ args, list, api, directory, now: clockNow = Dat
       }
       const refusal = error instanceof TriggerRefusal ? error : undefined;
       setSave({ key, state: { type: "refused", message: messageOf(error), off: refusal?.status === 503 }, field: refusal?.field });
-    }
+    } finally { inFlight.current = false; }
   }
 
   const sharedRow = {
