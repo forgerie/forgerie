@@ -4,7 +4,8 @@ import "./QuestionCard.css";
 
 /**
  * Molecule: a question that waits on the reader, in the flow of a
- * conversation. Who asks, the question, and a reply box while it is open;
+ * conversation. Like the decision card, it is not a box: a rule on its start
+ * edge marks it, live while open and quiet once answered. Who asks, the question, and a reply box while it is open;
  * once answered, the answer in place of the box. A link can open the asker.
  * Context, such as what someone else would answer, sits under the question
  * on a quiet rule while the question is open.
@@ -29,7 +30,6 @@ export function QuestionCard({ asker, question, context, answer, replyLabel, pla
   const open = answer === undefined && closedReason === undefined;
   return <section className="question-card" data-open={open || undefined} aria-label={`${asker} asks`}>
     <header className="question-card-head">
-      <span className="question-card-dot" aria-hidden />
       <span className="question-card-asker">{asker}</span>
       {link && <button type="button" className="question-card-link" onClick={link.onPress}>{link.label}</button>}
     </header>

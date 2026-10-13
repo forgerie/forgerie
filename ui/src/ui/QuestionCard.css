@@ -1,23 +1,21 @@
-/* The one thing in a thread that waits on the reader: the live colour on its edge,
-   quiet once answered. */
-.question-card { display: grid; gap: var(--space-2); min-inline-size: 0; margin-block: var(--space-2); padding: var(--space-3);
-  border: var(--hairline) solid var(--line); border-inline-start: 0.1875rem solid var(--muted-foreground); border-radius: var(--radius-surface);
-  font-size: var(--small-text); }
-.question-card[data-open] { border-inline-start-color: var(--live); background: var(--live-wash); }
-.question-card-head { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; }
-.question-card-dot { flex: none; inline-size: 0.5rem; block-size: 0.5rem; border-radius: 50%; background: var(--muted-foreground); }
-.question-card[data-open] .question-card-dot { background: var(--live); }
+/* The decision card's rule, for a question: no border, no wash, no dot. A rule on the start edge marks it,
+   live while open with the asker in live ink; quiet once answered, with the answer in muted ink. */
+.question-card { display: grid; gap: var(--space-2); min-inline-size: 0; margin-block: var(--space-3); padding: var(--space-1) 0 var(--space-1) var(--space-4);
+  border-inline-start: 0.125rem solid var(--line-focus); font-size: var(--small-text); }
+.question-card[data-open] { border-inline-start-color: var(--live); }
+.question-card-head { display: flex; align-items: baseline; gap: var(--space-2); min-inline-size: 0; }
 .question-card-asker { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--code-font); font-size: var(--label-text); color: var(--muted-foreground); }
-.question-card[data-open] .question-card-asker { color: var(--foreground); }
+  font-family: var(--code-font); font-size: var(--label-text); font-weight: 600; color: var(--muted-foreground); }
+.question-card[data-open] .question-card-asker { color: var(--ink-live); }
 .question-card-link { position: relative; flex: none; padding: 0; border: 0; background: transparent; color: var(--ink-live);
   font-size: var(--label-text); text-decoration: underline; text-underline-offset: 0.2em; }
 .question-card-link::before { content: ""; position: absolute; inset: calc(-1 * var(--space-3)) calc(-1 * var(--space-2)); }
 .question-card-question { font-size: var(--text-size); line-height: var(--line-height); overflow-wrap: anywhere; }
 .question-card-question > p { margin: 0; }
-/* What helps the answer: muted on a quiet rule, so the question stays the strongest line. A stressed word keeps full ink. */
-.question-card-context { display: grid; gap: var(--space-1); padding-inline-start: var(--space-3); border-inline-start: 0.125rem solid var(--live-edge);
-  color: var(--quiet-foreground); overflow-wrap: anywhere; }
+.question-card:not([data-open]) .question-card-question { color: var(--muted-foreground); }
+/* What helps the answer: muted, so the question stays the strongest line. No rule of its own; the card's rule
+   already marks the block. A stressed word keeps full ink. */
+.question-card-context { display: grid; gap: var(--space-1); color: var(--quiet-foreground); overflow-wrap: anywhere; }
 .question-card-context p { margin: 0; }
 .question-card-context strong { color: var(--foreground); font-weight: 600; }
-.question-card-answer { margin: 0; padding-inline-start: var(--space-3); border-inline-start: 0.125rem solid var(--line); color: var(--muted-foreground); }
+.question-card-answer { margin: 0; color: var(--foreground); overflow-wrap: anywhere; }

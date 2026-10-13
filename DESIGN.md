@@ -340,6 +340,11 @@ from the rule.
 The same card shows the same decision wherever it appears, such as in the
 chat and in a workflow's sheet. (`DecisionCard`)
 
+A question that waits on the reader uses the same rule: the asker in the
+code font, live while open, then the question and a reply box. Once
+answered, the question turns muted and the answer follows it.
+(`QuestionCard`)
+
 ### Status chip
 
 A header's one status word, as a pill with a dot. A healthy status draws
