@@ -3,17 +3,18 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
-import { BacklogClaimSchema, BacklogLaunchContentSchema, type BacklogClaim, type BacklogProviderId, type BacklogLaunchContent } from "../../shared/backlog.js";
+import { BacklogClaimSchema, BacklogLaunchContentSchema, type BacklogClaim, type BacklogLaunchContent } from "../../shared/backlog.js";
 import { BacklogLaunchSnapshots } from "./backlogLaunchSnapshots.js";
 import { BacklogError, isMissingFile } from "./backlogError.js";
+
+import { claimKeyOf, type BacklogItemKey } from "../../shared/backlogClaimKey.js";
 
 const FileSchema = Type.Object({ version: Type.Literal(1), claims: Type.Array(BacklogClaimSchema),
   launchContents: Type.Optional(Type.Record(Type.String(), BacklogLaunchContentSchema)),
 }, { additionalProperties: false });
 type Reservation = Extract<BacklogClaim, { kind: "launching" }>;
 /** An item's identity across providers. The same id from two providers is two items. */
-export interface BacklogItemKey { repo: string; provider: BacklogProviderId; itemId: string }
-const sameItem = (claim: BacklogClaim, key: BacklogItemKey) => claim.repo === key.repo && claim.provider === key.provider && claim.itemId === key.itemId;
+const sameItem = (claim: BacklogClaim, key: BacklogItemKey) => claimKeyOf(claim) === claimKeyOf(key);
 /** Claims written before providers existed carry no provider; every one of them was markdown. */
 const withProvider = (value: unknown): unknown => {
   if (typeof value !== "object" || value === null || !("claims" in value) || !Array.isArray(value.claims)) return value;
@@ -33,8 +34,9 @@ export class BacklogClaimStore {
     try { value = withProvider(JSON.parse(await readFile(this.path, "utf8"))); }
     catch (error) { if (isMissingFile(error)) { await this.snapshots.initialize([]); return; } throw error; }
     if (!Check(FileSchema, value)) throw new Error("Invalid backlog claim file");
-    const identities = value.claims.map((claim) => JSON.stringify([claim.repo, claim.provider, claim.itemId]));
-    if (new Set(identities).size !== identities.length || new Set(value.claims.map((claim) => claim.claimId)).size !== identities.length) throw new Error("Duplicate backlog claims");
+    const identities = value.claims.filter((claim) => claim.provider !== "azure-devops").map(claimKeyOf);
+    // Old Azure claims are all retained. The scan marks duplicate identity groups contested.
+    if (new Set(identities).size !== identities.length || new Set(value.claims.map((claim) => claim.claimId)).size !== value.claims.length) throw new Error("Duplicate backlog claims");
     this.claims = value.claims;
     // Finish every snapshot write before removing the legacy inline payloads.
     // A failed migration leaves the old metadata intact and is safe to retry.
@@ -84,9 +86,10 @@ export class BacklogClaimStore {
   }
   release(key: BacklogItemKey, claimId: string, allowLaunching = false): Promise<void> {
     return this.exclusive(async () => {
-      const current = await this.get(key);
-      if (current === undefined) return;
-      if (current.claimId !== claimId) throw new BacklogError("conflict", "Claim changed; refresh before releasing", current);
+      const matches = this.claims.filter((claim) => sameItem(claim, key));
+      if (matches.length === 0) return;
+      const current = matches.find((claim) => claim.claimId === claimId);
+      if (current === undefined) throw new BacklogError("conflict", "Claim changed; refresh before releasing", matches[0]);
       if (current.kind === "launching" && !allowLaunching) throw new BacklogError("conflict", "Wait for the launch to finish", current);
       await this.persist(this.claims.filter((record) => record.claimId !== claimId));
     });

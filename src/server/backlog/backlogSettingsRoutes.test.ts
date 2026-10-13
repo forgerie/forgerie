@@ -18,7 +18,7 @@ it("validates settings routes, guards revisions, shows origins, and restores the
     for (const backlog of [{}, { providers: [] }, { providers: ["azure-devops"], azureDevops: { organization: "x", project: "y", pat: "secret" } }, { providers: ["markdown"], dir: "../secrets" }]) {
       expect((await app.inject({ method: "PUT", url, payload: { backlog, baseRevision: 0 } })).statusCode).toBe(400);
     }
-    expect((await app.inject({ method: "PUT", url, payload: { backlog: { providers: ["azure-devops"] }, baseRevision: 0 } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "PUT", url, payload: { backlog: { providers: ["github"] }, baseRevision: 0 } })).statusCode).toBe(200);
     expect((await get()).json()).toMatchObject({ projects: [{ source: "forgerie", revision: 1 }] });
     expect((await app.inject({ method: "PUT", url, payload: { backlog: { providers: ["markdown"] }, baseRevision: 0 } })).statusCode).toBe(409);
     expect((await app.inject({ method: "DELETE", url, payload: { baseRevision: 0 } })).statusCode).toBe(409);
@@ -43,7 +43,7 @@ it("isolates inaccessible repo settings and returns stored overrides without ope
     await writeFile(join(invalid.path, ".forgerie/config.json"), "invalid-json-must-not-be-reflected");
     const projects = [good, missing, stored, invalid];
     const store = new BacklogSettingsStore(join(root, "backlog-settings.json"));
-    await store.setGitHubLogin("octocat"); await store.save(stored.id, { providers: ["azure-devops"] }, 0);
+    await store.setGitHubLogin("octocat"); await store.save(stored.id, { providers: ["github"] }, 0);
     registerBacklogSettingsRoutes(app, store, { list: () => Promise.resolve(projects), requireProject: (id) => { const project = projects.find((p) => p.id === id); return project === undefined ? Promise.reject(new Error("Project not found")) : Promise.resolve(project); } });
     const response = await app.inject({ method: "GET", url: "/backlog/settings" });
     expect(response.statusCode).toBe(200);
@@ -51,7 +51,7 @@ it("isolates inaccessible repo settings and returns stored overrides without ope
     expect(response.json()).toMatchObject({ githubLogin: "octocat", projects: [
       { projectId: "good", source: "default", backlog: { providers: ["markdown"] } },
       { projectId: "missing", error: readError },
-      { projectId: "stored", source: "forgerie", revision: 1, backlog: { providers: ["azure-devops"] } },
+      { projectId: "stored", source: "forgerie", revision: 2, backlog: { providers: ["github"] } },
       { projectId: "invalid", error: readError },
     ] });
     expect(response.body).not.toContain("invalid-json-must-not-be-reflected");

@@ -12,6 +12,7 @@ import { BacklogClaimStore } from "./backlogClaimStore.js";
 import { registerBacklogRoutes } from "./backlogRoutes.js";
 import { BacklogService } from "./backlogService.js";
 import { createAzureDevopsBacklogProvider } from "./azureDevopsBacklog.js";
+import { BacklogSettingsStore } from "./backlogSettingsStore.js";
 import { markdownBacklogProvider } from "./markdownBacklog.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -20,28 +21,30 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "azure-backlog-")); cleanups.push(() => rm(root, { recursive: true, force: true }));
   const repo = join(root, "code"); await mkdir(join(repo, ".forgerie/backlog"), { recursive: true });
   const configPath = join(repo, ".forgerie/config.json");
-  await writeFile(configPath, JSON.stringify({ backlog: { providers: ["markdown", "azure-devops"], azureDevops: azureConfig } }));
+  await writeFile(configPath, JSON.stringify({ backlog: { providers: ["markdown"] } }));
   await writeFile(join(repo, ".forgerie/backlog/7.md"), "---\nid: amazeinsights:7\ntitle: Local seven\n---\nLocal text");
   const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
   const project = await projects.add({ path: repo });
   const azure = await azureServer(); cleanups.push(azure.close);
   const provider = createAzureDevopsBacklogProvider(azure.client);
   const claims = new BacklogClaimStore(join(root, "claims.json")); await claims.initialize();
+  const settings = new BacklogSettingsStore(join(root, "backlog-settings.json"), { projects: () => projects.list() });
+  const source = await settings.createSource(azureConfig);
   const started: string[] = [];
   const session: SessionInfo = { id: "s-azure", cwd: repo, path: join(root, "session.jsonl"), created: "2026-10-08", modified: "2026-10-08", messageCount: 0, firstMessage: "" };
   const service = new BacklogService({ projects, claims, userSessions: { start: () => { started.push(session.id); return Promise.resolve(session); } },
-    sessions: { stop: () => undefined }, isArchived: () => Promise.resolve(false), providers: [markdownBacklogProvider, provider] });
+    sessions: { stop: () => undefined }, isArchived: () => Promise.resolve(false), providers: [markdownBacklogProvider], sourceProvider: provider, settings });
   const app = Fastify(); registerBacklogRoutes(app, service); cleanups.push(() => app.close());
-  const itemPath = `/backlog/${project.id}/items/amazeinsights%3A7`;
-  return { root, repo, configPath, project, azure, provider, claims, started, app, itemPath, projects, session };
+  const itemPath = `/backlog/sources/${source.id}/items/amazeinsights%3A7`;
+  return { root, repo, configPath, project, source, settings, azure, provider, claims, started, app, itemPath, projects, session };
 }
 
 describe("Azure backlog through the existing routes", () => {
   it("lists beside files, carries safe context, launches once, keeps claims separate and releases", async () => {
     const f = await fixture();
     const listing = (await f.app.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>();
-    expect(listing.items.map((item) => [item.provider, item.id])).toEqual([["markdown", "amazeinsights:7"], ["azure-devops", "amazeinsights:7"]]);
-    expect(listing.items[1]).toMatchObject({ priority: "high", labels: ["User Story", "incentives", "database"], readiness: "ready", status: "Active",
+    expect(listing.items.map((item) => [item.provider, item.id])).toEqual([["azure-devops", "amazeinsights:7"], ["markdown", "amazeinsights:7"]]);
+    expect(listing.items[0]).toMatchObject({ priority: "high", labels: ["User Story", "incentives", "database"], readiness: "ready", status: "Active",
       url: "https://dev.azure.com/amazeinsights/Amaze%20Insights/_workitems/edit/7" });
     const detail = (await f.app.inject({ method: "GET", url: `${f.itemPath}?provider=azure-devops` })).json<BacklogDetailResponse>();
     expect(detail.body).toContain("Compare current totals & adjustments");
@@ -55,8 +58,8 @@ describe("Azure backlog through the existing routes", () => {
     expect((await launch()).json<BacklogLaunchResponse>()).toMatchObject({ reused: true });
     expect(f.started).toHaveLength(1);
     const held = (await f.app.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>();
-    expect(held.items.map((item) => item.readiness)).toEqual(["ready", "claimed"]);
-    const claim = held.items[1]?.claim;
+    expect(held.items.map((item) => item.readiness)).toEqual(["claimed", "ready"]);
+    const claim = held.items[0]?.claim;
     expect((await f.app.inject({ method: "POST", url: `${f.itemPath}/release?provider=azure-devops`, payload: { claimId: claim?.claimId } })).json()).toEqual({ released: true });
     expect(JSON.stringify([listing, detail, held])).not.toContain(PAT);
   });
@@ -126,13 +129,13 @@ describe("Azure backlog through the existing routes", () => {
     f.azure.state.items.push(legacyClosed, workItem(14)); f.azure.state.assigned = f.azure.state.items.map((item) => item.id);
     const listing = (await f.app.inject({ method: "GET", url: "/backlog?scope=mine" })).json<BacklogListResponse>();
     expect(listing.warnings).toHaveLength(1);
-    expect(listing.warnings[0]).toMatchObject({ projectId: f.project.id, provider: "azure-devops", kind: "provider-unavailable" });
+    expect(listing.warnings[0]).toMatchObject({ sourceId: f.source.id, provider: "azure-devops", kind: "provider-unavailable" });
     expect(listing.warnings[0]?.message).toContain("6 work items");
     expect(listing.warnings[0]?.message).toContain("#7, #8, #9, #10, #11");
     expect(listing.warnings[0]?.message).not.toContain("#12");
     expect(listing.warnings[0]?.message).not.toContain("#13");
-    const other = await f.provider.scan({ ...f.project, id: "other-project" }, f.repo, { azureDevops: azureConfig }, { scope: "mine" });
-    expect(other.warnings).toHaveLength(1); expect(other.warnings[0]?.projectId).toBe("other-project");
+    const other = await f.provider.scan({ ...f.source, id: "other-source" }, { scope: "mine" });
+    expect(other.warnings).toHaveLength(1); expect(other.warnings[0]?.sourceId).toBe("other-source");
   });
 
   it.each(["mine", "everyone"] as const)("uses scope-correct scan-limit wording for %s", async (scope) => {
@@ -165,6 +168,7 @@ describe("Azure backlog through the existing routes", () => {
 
   it("validates Azure routing config and refuses credentials and arbitrary hosts in the repo", async () => {
     const f = await fixture();
+    await writeFile(f.configPath, JSON.stringify({ backlog: { providers: ["azure-devops"], azureDevops: azureConfig } }));
     expect((await loadProjectPiWebConfig(f.repo)).config.backlog?.azureDevops).toEqual(azureConfig);
     for (const azureDevops of [{ ...azureConfig, token: PAT }, { ...azureConfig, organization: "../other" }, { ...azureConfig, baseUrl: "https://evil.invalid" }]) {
       await writeFile(f.configPath, JSON.stringify({ backlog: { providers: ["azure-devops"], azureDevops } }));
@@ -212,9 +216,82 @@ it("places markers across all sections and attaches images only on launch, inclu
   const restartedClaims = new BacklogClaimStore(join(f.root, "claims.json")); await restartedClaims.initialize();
   const restarted = new BacklogService({ projects: f.projects, claims: restartedClaims,
     userSessions: { start: () => { throw new Error("Retry must not start another session"); } }, sessions: { stop: () => undefined },
-    isArchived: () => Promise.resolve(false), providers: [f.provider] });
+    isArchived: () => Promise.resolve(false), sourceProvider: f.provider, settings: f.settings });
   const app = Fastify(); registerBacklogRoutes(app, restarted); cleanups.push(() => app.close());
   const afterRestart = (await app.inject({ method: "POST", url: `${f.itemPath}/launch?provider=azure-devops`, payload: { requestId: "images", start: { cwd: f.repo } } })).json<BacklogLaunchResponse>();
   expect(afterRestart).toEqual({ ...first, reused: true });
   expect(JSON.stringify(await restartedClaims.list())).not.toContain(png);
+});
+
+it.each(["mine", "everyone"] as const)("scans one standalone source once for four projects in %s", async (scope) => {
+  const f = await fixture();
+  for (let index = 0; index < 3; index++) { const path = join(f.root, `code-${String(index)}`); await mkdir(path); await f.projects.add({ path }); }
+  const list = (await f.app.inject({ method: "GET", url: `/backlog?scope=${scope}` })).json<BacklogListResponse>();
+  expect(list.items.filter((item) => item.provider === "azure-devops")).toHaveLength(1);
+  expect(list.sources).toMatchObject([{ sourceId: f.source.id, destination: { kind: "not-routed", reason: "unset" } }]);
+  expect(list.projects).toHaveLength(4);
+  expect(f.azure.requests.filter((request) => request.url.includes("workitemsbatch"))).toHaveLength(1);
+  expect(list.items[0]).toMatchObject({ owner: { kind: "source", sourceId: f.source.id, label: azureConfig.project }, destination: { kind: "not-routed", reason: "unset" } });
+  expect(list.items[0]).not.toHaveProperty("repo"); expect(list.items[0]).not.toHaveProperty("projectId");
+});
+it("launches Azure into any registered project and rejects all unregistered destinations and old project routes", async () => {
+  const f = await fixture();
+  const path = join(f.root, "another-code"); await mkdir(path); const other = await f.projects.add({ path });
+  // The session boundary reports the selected destination, as the real worktree launcher does.
+  const service = new BacklogService({ projects: f.projects, claims: f.claims, settings: f.settings, sourceProvider: f.provider,
+    userSessions: { start: (start) => Promise.resolve({ ...f.session, cwd: start.cwd }) }, sessions: { stop: () => undefined }, isArchived: () => Promise.resolve(false) });
+  const app = Fastify(); registerBacklogRoutes(app, service); cleanups.push(() => app.close());
+  const launch = (cwd: string) => app.inject({ method: "POST", url: `${f.itemPath}/launch`, payload: { requestId: "override", start: { cwd } } });
+  expect((await launch(f.root)).statusCode).toBe(400);
+  expect((await launch(join(f.root, "absent"))).statusCode).toBe(400);
+  const launched = await launch(path); expect(launched.statusCode).toBe(200);
+  expect(launched.json<BacklogLaunchResponse>().claim).toMatchObject({ projectId: other.id, repo: path, cwd: path, sourceId: f.source.id });
+  for (const suffix of ["", "/launch", "/release"]) {
+    const response = await app.inject({ method: suffix === "" ? "GET" : "POST", url: `/backlog/${f.project.id}/items/amazeinsights%3A7${suffix}?provider=azure-devops`, ...(suffix === "/launch" ? { payload: { requestId: "old", start: { cwd: f.repo } } } : suffix === "/release" ? { payload: { claimId: "old" } } : {}) });
+    expect(response.statusCode).toBe(404); expect(response.json()).toMatchObject({ error: "Azure items are listed under their source" });
+  }
+  await f.settings.removeSource(f.source.id, f.source.revision);
+  expect((await app.inject({ method: "POST", url: `${f.itemPath}/release`, payload: { claimId: launched.json<BacklogLaunchResponse>().claim.claimId } })).statusCode).toBe(200);
+  expect(await f.claims.list()).toEqual([]);
+});
+it("keeps migrated overlaps visible, deduplicates items by global identity and gives the earliest source ownership", async () => {
+  const f = await fixture();
+  const original = { version: 1, projects: { first: { backlog: { providers: ["azure-devops"], azureDevops: azureConfig }, revision: 1, updatedAt: "today" }, second: { backlog: { providers: ["azure-devops"], azureDevops: { ...azureConfig, areaPath: "Area" } }, revision: 2, updatedAt: "today" } } };
+  await writeFile(join(f.root, "backlog-settings.json"), JSON.stringify(original));
+  const list = (await f.app.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>();
+  expect(list.sources).toHaveLength(2); expect(list.sources.every((source) => source.warnings.some((warning) => warning.kind === "source-overlap"))).toBe(true);
+  const azure = list.items.filter((item) => item.provider === "azure-devops"); expect(azure).toHaveLength(1);
+  expect(azure[0]?.owner).toMatchObject({ sourceId: list.sources[0]?.sourceId });
+});
+it("shows every legacy holding session as contested and refuses retries until one exact claim is released", async () => {
+  const f = await fixture();
+  const claim = { kind: "claimed", projectId: f.project.id, provider: "azure-devops", itemId: "amazeinsights:7", requestId: "r", fingerprint: "hash", cwd: f.repo, claimedAt: "today" };
+  await writeFile(join(f.root, "legacy-claims.json"), JSON.stringify({ version: 1, claims: [{ ...claim, repo: f.repo, claimId: "one", sessionId: "holding-one" }, { ...claim, repo: "/old-destination", claimId: "two", sessionId: "holding-two" }] }));
+  const claims = new BacklogClaimStore(join(f.root, "legacy-claims.json")); await claims.initialize();
+  const service = new BacklogService({ projects: f.projects, claims, settings: f.settings, sourceProvider: f.provider, userSessions: { start: () => { throw new Error("Must not launch"); } }, sessions: { stop: () => undefined }, isArchived: () => Promise.resolve(false) });
+  const list = await service.list(); const held = list.items[0];
+  expect(held?.readiness).toBe("claimed"); expect(held?.contested?.claims).toHaveLength(2);
+  expect(held?.contested?.message).toContain("holding-one"); expect(held?.contested?.message).toContain("holding-two");
+  await expect(service.launchSource(f.source.id, "amazeinsights:7", { requestId: "r", start: { cwd: f.repo } })).rejects.toThrow("contested");
+  await service.releaseSource(f.source.id, "amazeinsights:7", { claimId: "two" });
+  expect((await service.list()).items[0]?.contested).toBeUndefined();
+  expect(await claims.list()).toHaveLength(1);
+});
+it("resolves missing destinations without clearing settings and warns about retired repo-file Azure", async () => {
+  const f = await fixture();
+  const source = await f.settings.saveSource(f.source.id, { ...azureConfig, destinationProjectId: f.project.id }, f.source.revision);
+  expect((await f.app.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>().items[0]?.destination).toEqual({ kind: "routed", projectId: f.project.id, reason: "source-destination" });
+  await writeFile(f.configPath, JSON.stringify({ backlog: { providers: ["azure-devops"], azureDevops: azureConfig } }));
+  const list = (await f.app.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>();
+  expect(list.warnings.some((warning) => warning.kind === "retired-repo-azure")).toBe(true);
+  await f.projects.close(f.project.id);
+  const missing = (await f.app.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>();
+  expect(missing.items[0]?.destination).toEqual({ kind: "not-routed", reason: "missing-project" });
+  expect((await f.settings.read()).sources[source.id]?.destinationProjectId).toBe(f.project.id);
+});
+it("racing manual launches into two destinations create only one Azure session", async () => {
+  const f = await fixture(); const path = join(f.root, "second-destination"); await mkdir(path); await f.projects.add({ path });
+  const responses = await Promise.all([f.repo, path].map((cwd, index) => f.app.inject({ method: "POST", url: `${f.itemPath}/launch`, payload: { requestId: `race-${String(index)}`, start: { cwd } } })));
+  expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+  expect(f.started).toHaveLength(1); expect(await f.claims.list()).toHaveLength(1);
 });

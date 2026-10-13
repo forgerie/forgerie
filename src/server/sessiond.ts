@@ -154,7 +154,7 @@ async function createSessionDaemonRuntime() {
   const azureCredentials = new AzureDevopsCredentials({ directory: join(piWebDataDir(daemonEnvironment), "azure-devops"), azureCliCommand: config.azureDevops?.azureCliCommand ?? "az", env: daemonEnvironment,
     onCleanupWarning: (message) => { app.log.warn(message); } });
   const azurePulls = new AzurePullReader({ credentials: azureCredentials, fetch });
-  const backlogSettings = new BacklogSettingsStore(join(piWebDataDir(daemonEnvironment), "backlog-settings.json"));
+  const backlogSettings = new BacklogSettingsStore(join(piWebDataDir(daemonEnvironment), "backlog-settings.json"), { projects: () => projectWorkspaceDeps.projects.list() });
   const githubAgent: GitHubAgent = new GitHubAgent({ app: github, fetch: fetchGitHub, trust: githubTrust, backlogConfig: async (root) => {
     const projects = await projectWorkspaceDeps.projects.list();
     for (const project of projects) {
@@ -353,7 +353,7 @@ async function createSessionDaemonRuntime() {
   });
   const azureItems = new AzureDevopsClient({ credentials: azureCredentials, fetch });
   const backlog = new BacklogService({ settings: backlogSettings, projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
-    providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
+    providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues })], sourceProvider: createAzureDevopsBacklogProvider(azureItems) });
   return { triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 

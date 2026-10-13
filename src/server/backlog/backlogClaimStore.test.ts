@@ -151,3 +151,28 @@ it("keeps inline migration data intact if its private snapshot cannot be saved",
   await expect(new BacklogClaimStore(file).initialize()).rejects.toThrow();
   expect(await readFile(file, "utf8")).toBe(original);
 });
+
+it("serializes one Azure claim across two destination repositories, but keeps Markdown repo identities", async () => {
+  const store = new BacklogClaimStore();
+  const input = { projectId: "p", repo: "/a", cwd: "/a", provider: "azure-devops", itemId: "org:1", requestId: "request", fingerprint: "hash" };
+  const results = await Promise.allSettled([store.reserve(input), store.reserve({ ...input, projectId: "q", repo: "/b", cwd: "/b" })]);
+  expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+  await store.reserve({ ...input, provider: "markdown" });
+  await store.reserve({ ...input, provider: "markdown", repo: "/b" });
+  expect(await store.list()).toHaveLength(3);
+});
+it("keeps legacy duplicate Azure claims releasable by either exact claimId", async () => {
+  const root = await mkdtemp(join(tmpdir(), "contested-claims-"));
+  try {
+    const path = join(root, "claims.json");
+    const claim = { kind: "claimed", projectId: "p", provider: "azure-devops", itemId: "org:1", requestId: "r", fingerprint: "hash", cwd: "/a", claimedAt: "today" };
+    await writeFile(path, JSON.stringify({ version: 1, claims: [{ ...claim, repo: "/a", claimId: "a", sessionId: "session-a" }, { ...claim, repo: "/b", claimId: "b", sessionId: "session-b" }] }));
+    const store = new BacklogClaimStore(path); await store.initialize();
+    expect(await store.list()).toHaveLength(2);
+    await expect(store.reserve({ projectId: "q", repo: "/c", cwd: "/c", provider: "azure-devops", itemId: "org:1", requestId: "new", fingerprint: "hash" })).rejects.toThrow("claim");
+    await store.release({ repo: "/ignored", provider: "azure-devops", itemId: "org:1" }, "b");
+    expect((await store.list()).map((held) => held.claimId)).toEqual(["a"]);
+    await store.releaseSessions(["session-a"]);
+    expect(await store.list()).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

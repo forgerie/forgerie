@@ -153,3 +153,20 @@ it("offers the missing GitHub username fix once for the whole Mine list", async 
   expect(await service.list()).toMatchObject({ items: [], warnings: [{ kind: "items-hidden", message: "Set your GitHub username in Settings → Backlog to see issues assigned to you." }] });
   expect((await service.list()).warnings).toHaveLength(1);
 });
+it("keeps GitHub launch confined to the owning repository even when another project is registered", async () => {
+  const f = await fixture(); const path = join(f.root, "other"); await mkdir(path);
+  const project = { ...f.project, id: "other", path };
+  const { markdownBacklogProvider } = await import("./markdownBacklog.js");
+  const { BacklogSettingsStore } = await import("./backlogSettingsStore.js");
+  const settings = new BacklogSettingsStore(join(f.root, "backlog-settings.json"));
+  await settings.save(f.project.id, { providers: ["github"] }, 0);
+  const service = new BacklogService({ projects: { list: () => Promise.resolve([f.project, project]), requireProject: () => Promise.resolve(f.project) }, claims: f.claims, settings,
+    providers: [{ id: "github", prompt: () => "GitHub context", scan: async (scanned, repo) => {
+      const result = await markdownBacklogProvider.scan(scanned, repo, { providers: ["markdown"] });
+      return { ...result, entries: result.entries.map((entry) => ({ ...entry, item: { ...entry.item, provider: "github" } })) };
+    } }], userSessions: { start: () => Promise.resolve(f.session) }, sessions: { stop: () => undefined }, isArchived: () => Promise.resolve(false) });
+  const app = Fastify(); registerBacklogRoutes(app, service); cleanups.push(() => app.close());
+  const launch = (cwd: string) => app.inject({ method: "POST", url: `${f.base}/launch?provider=github`, payload: { requestId: "github", start: { cwd } } });
+  expect((await launch(path)).statusCode).toBe(400); expect(await f.claims.list()).toEqual([]);
+  expect((await launch(f.projectRoot)).json<BacklogLaunchResponse>().claim).toMatchObject({ provider: "github", projectId: f.project.id, repo: f.projectRoot });
+});

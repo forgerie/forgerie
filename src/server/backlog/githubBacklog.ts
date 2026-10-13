@@ -39,6 +39,7 @@ export function createGitHubBacklogProvider(deps: GitHubBacklogDependencies): Ba
       const entries = shown.filter((issue) => context.scope === "everyone" || assigned(issue)).map((issue): ScannedBacklogItem => ({ body: issue.body ?? "", item: {
         id: String(issue.number), title: issue.title.trim() === "" ? `#${String(issue.number)}` : issue.title,
         provider: "github", projectId: project.id, projectName: project.name, repo,
+          owner: { kind: "project", projectId: project.id, projectName: project.name, repo }, destination: { kind: "routed", projectId: project.id, reason: "project-owned" },
         path: `${slug}#${String(issue.number)}`, url: issue.html_url,
         status: "Open", ...priorityOf(issue.labels), created: issue.created_at, blocked_by: [],
         assignedToMe: assigned(issue), assignees: (issue.assignees ?? []).map((person) => person.login).slice(0, 10), open: true, readiness: "ready", blockingIds: [],

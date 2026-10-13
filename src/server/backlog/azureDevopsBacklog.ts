@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { convert } from "html-to-text";
-import type { BacklogConfig, BacklogWarning, Project } from "../../shared/apiTypes.js";
+import type { BacklogWarning } from "../../shared/apiTypes.js";
 import type { AzureDevopsClient, AzureWorkItem, AzureImagesResult } from "../azureDevops/azureDevopsClient.js";
-import type { BacklogProvider, BacklogProviderScan, ScannedBacklogItem, BacklogScanContext } from "./backlogProvider.js";
+import type { BacklogSourceProvider, BacklogProviderScan, ScannedBacklogItem, BacklogScanContext } from "./backlogProvider.js";
 
 import { azureImageSource, AZURE_LAUNCH_IMAGES, type AzureWorkItemImageRef } from "../azureDevops/azureWorkItemImages.js";
 import { isSupportedImageMimeType } from "../../shared/promptAttachments.js";
@@ -78,18 +78,16 @@ function prompt({ item, body, azureImages }: ScannedBacklogItem, result?: AzureI
   ].join("\n");
 }
 
-export function createAzureDevopsBacklogProvider(client: Pick<AzureDevopsClient, "assignedItems" | "workItemImages">): BacklogProvider {
+export function createAzureDevopsBacklogProvider(client: Pick<AzureDevopsClient, "assignedItems" | "workItemImages">): BacklogSourceProvider {
   return {
     id: "azure-devops",
-    async scan(project: Project, repo: string, config: BacklogConfig | undefined, context: BacklogScanContext = { scope: "mine" }): Promise<BacklogProviderScan> {
-      const selected = config?.azureDevops;
-      const path = selected === undefined ? project.path : `${selected.organization}/${selected.project}`;
-      const warning = (kind: BacklogWarning["kind"], message: string): BacklogWarning => ({ projectId: project.id, provider: "azure-devops", path, kind, message });
-      if (selected === undefined) return { entries: [], warnings: [warning("provider-unavailable", "Set backlog.azureDevops.organization and project in this repository's .forgerie/config.json. Use areaPath to route items when several repositories share an Azure project.")] };
-      const result = await client.assignedItems(selected, context.scope);
+    async scan(selected, context: BacklogScanContext = { scope: "mine" }): Promise<BacklogProviderScan> {
+      const path = `${selected.organization}/${selected.project}`;
+      const warning = (kind: BacklogWarning["kind"], message: string): BacklogWarning => ({ sourceId: selected.id, provider: "azure-devops", path, kind, message });
+      const result = await client.assignedItems({ organization: selected.organization, project: selected.project, ...(selected.areaPath === undefined ? {} : { areaPath: selected.areaPath }) }, context.scope);
       if (!result.ok) return { entries: [], warnings: [warning(result.kind === "auth" ? "provider-auth" : "provider-unavailable", result.message)] };
       const population = context.scope === "everyone" ? "open work items in this project/Area Path" : "work items assigned to you";
-      const warnings: BacklogWarning[] = result.truncated ? [warning("scan-limit", `Azure DevOps returned more than 500 ${population}. Only the newest 500 are shown. Narrow backlog.azureDevops.areaPath before starting a session.`)] : [];
+      const warnings: BacklogWarning[] = result.truncated ? [warning("scan-limit", `Azure DevOps returned more than 500 ${population}. Only the newest 500 are shown. Narrow the source Area Path in Settings → Backlog → Sources before starting a session.`)] : [];
       const unknownIds: number[] = [];
       const entries = result.items.map((remote): ScannedBacklogItem => {
         const fields = remote.fields;
@@ -112,7 +110,7 @@ export function createAzureDevopsBacklogProvider(client: Pick<AzureDevopsClient,
         return { body, azureImages: { organization: selected.organization, refs },
           imageSummary: { count: refs.length, eligibleCount: refs.length - skipped.length, skipped }, item: {
           id, provider: "azure-devops", title: fields["System.Title"].trim() || `Work item #${String(remote.id)}`,
-          projectId: project.id, projectName: project.name, repo, path: `${path}#${String(remote.id)}`,
+          owner: { kind: "source", sourceId: selected.id, label: selected.project }, destination: { kind: "not-routed", reason: "unset" }, path: `${path}#${String(remote.id)}`,
           url: `https://dev.azure.com/${encodeURIComponent(selected.organization.toLowerCase())}/${encodeURIComponent(selected.project)}/_workitems/edit/${String(remote.id)}`,
           status: fields["System.State"], ...(priorityName === undefined ? {} : { priority: priorityName }),
           ...(fields["System.CreatedDate"] === undefined ? {} : { created: fields["System.CreatedDate"] }),

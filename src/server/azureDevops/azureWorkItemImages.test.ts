@@ -5,7 +5,7 @@ import { AzureDevopsClient } from "./azureDevopsClient.js";
 import { azureConfig, patCredentialSource, workItem } from "./azureDevops.testSupport.js";
 import { AZURE_IMAGE_BYTES, type AzureWorkItemImageRef } from "./azureWorkItemImages.js";
 import { createAzureDevopsBacklogProvider } from "../backlog/azureDevopsBacklog.js";
-import type { Project } from "../../shared/apiTypes.js";
+import type { BacklogSource } from "../../shared/backlogSources.js";
 
 const url = "https://dev.azure.com/amazeinsights/project-guid/_apis/wit/attachments/11111111-2222-3333-4444-555555555555?fileName=image.png";
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
@@ -17,7 +17,7 @@ function client(reply: (url: string, init: RequestInit) => Response | Promise<Re
   return { reader, calls, credentials };
 }
 
-const project: Project = { id: "p", name: "Code", path: "/code", createdAt: "now" };
+const source: BacklogSource = { ...azureConfig, id: "source", provider: "azure-devops", revision: 1, updatedAt: "now" };
 
 describe("Azure attachment reads through the client", () => {
   it.each([
@@ -148,7 +148,7 @@ it("scans all HTML sections without fetching, records refs and marker positions,
     "Microsoft.VSTS.Common.AcceptanceCriteria": `<p>Accept<img src="data:image/png;base64,${png.toString("base64")}" alt="data &amp; image"></p>`,
     "Microsoft.VSTS.TCM.ReproSteps": '<p>Repro<img src="https://dev.azure.com/amazeinsights/p/_apis/wit/attachments/11111111-2222-3333-4444-555555555555" alt="broken"></p>',
   }), category: "InProgress", assignedToMe: true }] }), workItemImages: f.reader.workItemImages.bind(f.reader) });
-  const scan = await provider.scan(project, "/code", { azureDevops: azureConfig });
+  const scan = await provider.scan(source);
   const entry = scan.entries[0];
   if (entry === undefined) throw new Error("Expected scanned work item");
   expect(f.calls).toEqual([]);
@@ -183,7 +183,7 @@ it("does not restore entity-encoded image placeholders from untrusted text", asy
   const provider = createAzureDevopsBacklogProvider({ assignedItems: () => Promise.resolve({ ok: true, truncated: false, items: [{ ...workItem(7, {
     "System.Description": '<p>&#xE000;AZUREIMAGE1&#xE001;<img src="data:image/png;base64,aGVsbG8=" alt="real">&#57344;AZUREIMAGE1&#57345;</p>',
   }), category: "InProgress", assignedToMe: true }] }), workItemImages: () => Promise.resolve({ attached: [], skipped: [] }) });
-  const scan = await provider.scan(project, "/code", { azureDevops: azureConfig });
+  const scan = await provider.scan(source);
   expect(scan.entries[0]?.body.match(/\[Image 1: real\]/gu)).toHaveLength(1);
   expect(scan.entries[0]?.azureImages?.refs).toHaveLength(1);
 });
@@ -192,7 +192,7 @@ it("describes the work item's single attached image, not the entire message's at
   const f = client(); const provider = createAzureDevopsBacklogProvider({ assignedItems: () => Promise.resolve({ ok: true, truncated: false, items: [{ ...workItem(7, {
     "System.Description": `<p><img src="data:image/png;base64,${png.toString("base64")}" alt="real"></p>`,
   }), category: "InProgress", assignedToMe: true }] }), workItemImages: f.reader.workItemImages.bind(f.reader) });
-  const entry = (await provider.scan(project, "/code", { azureDevops: azureConfig })).entries[0];
+  const entry = (await provider.scan(source)).entries[0];
   if (entry === undefined || provider.prepareLaunch === undefined) throw new Error("Expected work item and launch preparation");
   const launch = await provider.prepareLaunch(entry);
   expect(launch.images).toHaveLength(1);

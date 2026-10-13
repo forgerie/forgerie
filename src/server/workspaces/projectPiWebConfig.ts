@@ -26,9 +26,10 @@ export interface LoadedProjectPiWebConfig {
    * must not stop the project's workspaces from opening.
    */
   backlogError?: string;
+  retiredBacklogAzure?: boolean;
 }
 
-export async function loadProjectPiWebConfig(projectPath: string): Promise<LoadedProjectPiWebConfig> {
+export async function loadProjectPiWebConfig(projectPath: string, options: { retireAzure?: boolean } = {}): Promise<LoadedProjectPiWebConfig> {
   const path = join(projectPath, PROJECT_PI_WEB_CONFIG_PATH);
   try {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
@@ -36,8 +37,19 @@ export async function loadProjectPiWebConfig(projectPath: string): Promise<Loade
     const { backlog, ...rest } = parsed;
     const config = parseProjectPiWebConfig(rest, path);
     if (backlog === undefined) return { path, exists: true, config };
-    try { return { path, exists: true, config: { ...config, backlog: parseBacklogConfig(backlog, path) } }; }
-    catch (error) { return { path, exists: true, config, backlogError: error instanceof Error ? error.message : String(error) }; }
+    let selected = backlog;
+    let retiredBacklogAzure = false;
+    if (options.retireAzure === true && isRecord(backlog)) {
+      const { azureDevops, ...projectBacklog } = backlog;
+      const providers: unknown = projectBacklog["providers"];
+      retiredBacklogAzure = azureDevops !== undefined || Array.isArray(providers) && providers.includes("azure-devops");
+      if (retiredBacklogAzure) {
+        const enabled = Array.isArray(providers) ? providers.filter((provider: unknown) => provider !== "azure-devops") : providers;
+        selected = { ...projectBacklog, ...(Array.isArray(enabled) ? { providers: enabled.length === 0 ? ["markdown"] : enabled } : {}) };
+      }
+    }
+    try { return { path, exists: true, config: { ...config, backlog: parseBacklogConfig(selected, path) }, ...(retiredBacklogAzure ? { retiredBacklogAzure } : {}) }; }
+    catch (error) { return { path, exists: true, config, backlogError: error instanceof Error ? error.message : String(error), ...(retiredBacklogAzure ? { retiredBacklogAzure } : {}) }; }
   } catch (error) {
     if (isNodeErrorWithCode(error, "ENOENT")) return { path, exists: false, config: {} };
     throw error;

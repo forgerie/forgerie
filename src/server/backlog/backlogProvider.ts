@@ -27,3 +27,9 @@ export interface BacklogProvider {
   /** Launch-only I/O. Scans and detail reads never download attachments. */
   prepareLaunch?(entry: ScannedBacklogItem): Promise<BacklogLaunchContent>;
 }
+
+/** Standalone boards never receive a local project or repository. */
+export interface BacklogSourceProvider extends Pick<BacklogProvider, "prompt" | "prepareLaunch"> {
+  readonly id: "azure-devops";
+  scan(source: import("../../shared/backlogSources.js").BacklogSource, context?: BacklogScanContext): Promise<BacklogProviderScan>;
+}

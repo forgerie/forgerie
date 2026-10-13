@@ -10,6 +10,30 @@ export function registerBacklogRoutes(app: FastifyInstance, backlog: BacklogServ
   app.get<{ Querystring: unknown }>(`${prefix}/backlog`, { schema: { response: { 200: BacklogListResponseSchema, ...errors } } }, async (request, reply) => {
     try { if (!Check(BacklogListQuerySchema, request.query)) throw new BacklogError("invalid-request", "Invalid backlog scope"); return await backlog.list(request.query.scope); } catch (error) { return sendError(reply, error); }
   });
+  const sourcePath = `${prefix}/backlog/sources/:sourceId/items/:itemId`;
+  const sourceQuery = (query: unknown) => {
+    const provider = providerOf(query);
+    if (provider !== undefined && provider !== "azure-devops") throw new BacklogError("not-found", "This source lists Azure DevOps items only");
+    return scopeOf(query);
+  };
+  app.get<{ Params: { sourceId: string; itemId: string }; Querystring: unknown }>(sourcePath, { schema: { response: { 200: BacklogDetailResponseSchema, ...errors } } }, async (request, reply) => {
+    try { return await backlog.detailSource(request.params.sourceId, request.params.itemId, sourceQuery(request.query)); }
+    catch (error) { return sendError(reply, error); }
+  });
+  app.post<{ Params: { sourceId: string; itemId: string }; Querystring: unknown; Body: unknown }>(`${sourcePath}/launch`, { schema: { response: { 200: BacklogLaunchResponseSchema, ...errors } } }, async (request, reply) => {
+    try {
+      const scope = sourceQuery(request.query);
+      if (!Check(BacklogLaunchRequestSchema, request.body)) throw new BacklogError("invalid-request", "Invalid backlog launch request");
+      return await backlog.launchSource(request.params.sourceId, request.params.itemId, request.body, scope);
+    } catch (error) { return sendError(reply, error); }
+  });
+  app.post<{ Params: { sourceId: string; itemId: string }; Querystring: unknown; Body: unknown }>(`${sourcePath}/release`, { schema: { response: { 200: BacklogReleaseResponseSchema, ...errors } } }, async (request, reply) => {
+    try {
+      sourceQuery(request.query);
+      if (!Check(BacklogReleaseRequestSchema, request.body)) throw new BacklogError("invalid-request", "claimId is required to release a claim");
+      return await backlog.releaseSource(request.params.sourceId, request.params.itemId, request.body);
+    } catch (error) { return sendError(reply, error); }
+  });
   // `?provider=` selects where the item comes from. Omitted means markdown, so pre-provider clients keep working.
   const itemPath = `${prefix}/backlog/:projectId/items/:itemId`;
   app.get<{ Params: { projectId: string; itemId: string }; Querystring: unknown }>(itemPath, { schema: { response: { 200: BacklogDetailResponseSchema, ...errors } } }, async (request, reply) => {

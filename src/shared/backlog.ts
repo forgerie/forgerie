@@ -13,7 +13,7 @@ export const BacklogGitHubConfigSchema = Type.Object({
 export const BacklogAzureDevopsConfigSchema = Type.Object({
   organization: Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9-]{0,49}$" }),
   project: Type.String({ minLength: 1, maxLength: 128, pattern: "^(?!\\.{1,2}$)[^\\u0000-\\u001f/\\\\]+$" }),
-  /** Optional routing boundary when one Azure project contains several code repositories. */
+  /** Optional exact Azure Area Path; includes descendants. */
   areaPath: Type.Optional(Type.String({ minLength: 1, maxLength: 1024, pattern: "^[^\\u0000-\\u001f]+$" })),
 }, { additionalProperties: false });
 export type BacklogAzureDevopsConfig = Static<typeof BacklogAzureDevopsConfigSchema>;
@@ -26,6 +26,14 @@ export const BacklogConfigSchema = Type.Object({
 }, { additionalProperties: false });
 export type BacklogConfig = Static<typeof BacklogConfigSchema>;
 
+/** Retire legacy Azure sections without changing the project-owned provider configuration. */
+export function projectOwnedBacklog(backlog: BacklogConfig): BacklogConfig & { providers: NonNullable<BacklogConfig["providers"]> } {
+  const { providers } = backlog;
+  const rest = { ...(backlog.dir === undefined ? {} : { dir: backlog.dir }), ...(backlog.github === undefined ? {} : { github: backlog.github }) };
+  const enabled = providers?.filter((provider) => provider !== "azure-devops");
+  return { ...rest, ...(enabled === undefined || enabled.length === 0 ? { providers: ["markdown"] } : { providers: enabled }) };
+}
+
 export const BacklogMetadataSchema = Type.Object({
   id: text, title: text,
   status: Type.Optional(text), priority: Type.Optional(text),
@@ -36,7 +44,7 @@ export const BacklogMetadataSchema = Type.Object({
 export type BacklogMetadata = Static<typeof BacklogMetadataSchema>;
 
 /**
- * Where an item comes from, such as `markdown`. An item is identified by (repo, provider, id), never by id alone.
+ * Where an item comes from, such as `markdown`. Azure identity is (provider, id); project providers use (repo, provider, id).
  * Which providers exist is a fact of the host, not of this contract. Not the frontmatter `source` field,
  * which records who captured a markdown item.
  */
@@ -50,6 +58,7 @@ export const BacklogItemQuerySchema = Type.Object({ provider: Type.Optional(Back
 const claimIdentity = {
   claimId: text, requestId: text, fingerprint: text,
   projectId: text, provider: BacklogProviderIdSchema, itemId: text, repo: text, cwd: text, claimedAt: text,
+  sourceId: Type.Optional(text),
 };
 export const BacklogClaimSchema = Type.Union([
   Type.Object({ ...claimIdentity, kind: Type.Literal("launching") }, { additionalProperties: false }),
@@ -58,10 +67,19 @@ export const BacklogClaimSchema = Type.Union([
 ]);
 export type BacklogClaim = Static<typeof BacklogClaimSchema>;
 
-export const BacklogItemSchema = Type.Object({
+const projectOwner = Type.Object({ kind: Type.Literal("project"), projectId: text, projectName: text, repo: text }, { additionalProperties: false });
+const sourceOwner = Type.Object({ kind: Type.Literal("source"), sourceId: text, label: text }, { additionalProperties: false });
+export const BacklogOwnerSchema = Type.Union([projectOwner, sourceOwner]);
+export type BacklogItemOwner = Static<typeof BacklogOwnerSchema>;
+export const DestinationSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("routed"), projectId: text, reason: Type.Union([Type.Literal("source-destination"), Type.Literal("project-owned")]) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("not-routed"), reason: Type.Union([Type.Literal("unset"), Type.Literal("missing-project")]) }, { additionalProperties: false }),
+]);
+export type Destination = Static<typeof DestinationSchema>;
+const itemFields = {
   ...BacklogMetadataSchema.properties,
   provider: BacklogProviderIdSchema,
-  projectId: text, projectName: text, repo: text,
+  destination: DestinationSchema,
   /** Where the item lives inside its provider: a repo-relative file for markdown, `owner/name#42` for GitHub. */
   path: text,
   /** A web page for the item, when the provider has one. */
@@ -72,11 +90,17 @@ export const BacklogItemSchema = Type.Object({
   readiness: Type.Union([Type.Literal("ready"), Type.Literal("blocked"), Type.Literal("claimed"), Type.Literal("closed")]),
   blockingIds: Type.Array(text),
   claim: Type.Optional(BacklogClaimSchema),
-});
+  /** Legacy duplicate Azure claims remain held until explicit release. */
+  contested: Type.Optional(Type.Object({ claims: Type.Array(BacklogClaimSchema, { minItems: 2 }), message: Type.String() })),
+};
+export const BacklogItemSchema = Type.Union([
+  Type.Object({ ...itemFields, owner: projectOwner, projectId: text, projectName: text, repo: text }),
+  Type.Object({ ...itemFields, owner: sourceOwner, projectId: Type.Optional(Type.Never()), projectName: Type.Optional(Type.Never()), repo: Type.Optional(Type.Never()) }),
+]);
 export type BacklogItem = Static<typeof BacklogItemSchema>;
 
 export const BacklogWarningSchema = Type.Object({
-  projectId: text, path: text,
+  projectId: Type.Optional(text), sourceId: Type.Optional(text), path: text,
   kind: Type.Union([
     Type.Literal("ignored-directory"), Type.Literal("invalid-item"), Type.Literal("project-error"), Type.Literal("scan-limit"),
     /** The provider is not set up on this machine, or its setup stopped working. The fix is in the backlog, not in files. */
@@ -86,14 +110,20 @@ export const BacklogWarningSchema = Type.Object({
     /** The provider could not list items: no access, no remote, rate limited, or offline. The message names the fix. */
     Type.Literal("provider-unavailable"),
     /** Some items were left out on purpose, such as issues from untrusted authors. */
-    Type.Literal("items-hidden"),
+    Type.Literal("items-hidden"), Type.Literal("source-overlap"), Type.Literal("contested-claim"), Type.Literal("retired-repo-azure"),
   ]),
   provider: Type.Optional(BacklogProviderIdSchema),
   message: Type.String(),
 });
 export type BacklogWarning = Static<typeof BacklogWarningSchema>;
+export const BacklogSourceSummarySchema = Type.Object({
+  sourceId: text, label: text, provider: Type.Literal("azure-devops"),
+  organization: text, areaPath: Type.Optional(text), destination: DestinationSchema, warnings: Type.Array(BacklogWarningSchema),
+});
+export type BacklogSourceSummary = Static<typeof BacklogSourceSummarySchema>;
 export const BacklogListResponseSchema = Type.Object({
   projects: Type.Optional(Type.Array(Type.Object({ projectId: text, providers: Type.Array(BacklogProviderIdSchema) }))),
+  sources: Type.Array(BacklogSourceSummarySchema),
   items: Type.Array(BacklogItemSchema), warnings: Type.Array(BacklogWarningSchema), generatedAt: text,
 });
 export type BacklogListResponse = Static<typeof BacklogListResponseSchema>;

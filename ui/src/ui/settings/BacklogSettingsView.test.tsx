@@ -11,12 +11,12 @@ const click = async (node: HTMLElement) => { await act(async () => node.click())
 beforeEach(() => { vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); const host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 it("saves explicit sources and restores the repo; shows a 409 without losing the edit", async () => {
-  let catalog: BacklogSettingsCatalog = { settings: { projects: [{ projectId: "p", source: "default", backlog: { providers: ["markdown"] } }] }, projects: [{ id: "p", name: "Project", path: "/repo" }] };
+  let catalog: BacklogSettingsCatalog = { settings: { sources: [], projects: [{ projectId: "p", source: "default", backlog: { providers: ["markdown"] } }] }, projects: [{ id: "p", name: "Project", path: "/repo" }] };
   const saves: unknown[] = []; let conflict = false;
   const api: BacklogSettingsApi = { list: async () => catalog, githubLogin: async () => ({}), save: async (id, backlog, baseRevision) => {
     saves.push({ id, backlog, baseRevision }); if (conflict) throw new BacklogSettingsRefusal("changed", 409);
-    catalog = { ...catalog, settings: { projects: [{ projectId: id, source: "forgerie", backlog, revision: 1 }] } }; return {};
-  }, remove: async () => { catalog = { ...catalog, settings: { projects: [{ projectId: "p", source: "default", backlog: { providers: ["markdown"] } }] } }; return {}; } };
+    catalog = { ...catalog, settings: { sources: [], projects: [{ projectId: id, source: "forgerie", backlog, revision: 1 }] } }; return {};
+  }, remove: async () => { catalog = { ...catalog, settings: { sources: [], projects: [{ projectId: "p", source: "default", backlog: { providers: ["markdown"] } }] } }; return {}; } };
   await act(async () => root.render(<BacklogSettingsView selected="p" api={api} onOpen={() => {}} back={null} close={null} />)); await settle();
   expect(document.body.textContent).toContain("Default: Markdown");
   await click(document.querySelector<HTMLInputElement>('.choice-list-rows li:nth-child(2) input')!);
@@ -30,7 +30,7 @@ it("saves explicit sources and restores the repo; shows a 409 without losing the
 });
 it("shows the project list and saves a GitHub username", async () => {
   const logins: (string | null)[] = [];
-  const api: BacklogSettingsApi = { list: async () => ({ settings: { projects: [{ projectId: "p", source: "repo-file", backlog: { providers: ["github"] } }] }, projects: [{ id: "p", name: "Project", path: "/repo" }] }), save: async () => ({}), remove: async () => ({}), githubLogin: async (login) => { logins.push(login); return {}; } };
+  const api: BacklogSettingsApi = { list: async () => ({ settings: { sources: [], projects: [{ projectId: "p", source: "repo-file", backlog: { providers: ["github"] } }] }, projects: [{ id: "p", name: "Project", path: "/repo" }] }), save: async () => ({}), remove: async () => ({}), githubLogin: async (login) => { logins.push(login); return {}; } };
   const opened: (string | undefined)[] = [];
   await act(async () => root.render(<BacklogSettingsView api={api} onOpen={(id) => opened.push(id)} back={null} close={null} />)); await settle();
   const input = document.querySelector<HTMLInputElement>('[aria-label="GitHub username"]')!;
@@ -42,7 +42,7 @@ it("shows the project list and saves a GitHub username", async () => {
 it("shows a project read error while the GitHub username and healthy project's settings stay editable", async () => {
   const { createBacklogSettingsApi } = await import("../../backlog/backlogSettingsApi");
   const saves: unknown[] = []; const logins: unknown[] = [];
-  const settings = { githubLogin: "octocat", projects: [
+  const settings = { sources: [], githubLogin: "octocat", projects: [
     { projectId: "good", source: "default", backlog: { providers: ["markdown"] } },
     { projectId: "missing", error: "Cannot read this project's backlog settings. Check its project folder and .forgerie/config.json, then reload." },
   ] };

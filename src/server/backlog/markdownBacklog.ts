@@ -55,6 +55,7 @@ async function scanMarkdownBacklog(project: Project, repo: string, config: Backl
         const { metadata, body } = parseBacklogItem(content);
         const status = metadata.status ?? "To Do";
         entries.push({ body, item: { ...metadata, provider: "markdown", projectId: project.id, projectName: project.name, repo,
+          owner: { kind: "project", projectId: project.id, projectName: project.name, repo }, destination: { kind: "routed", projectId: project.id, reason: "project-owned" },
           path: relative(repo, path), status, labels: metadata.labels ?? [], blocked_by: metadata.blocked_by ?? [],
           assignedToMe: true, assignees: [], open: isOpenBacklogStatus(status), readiness: "ready", blockingIds: [] } });
       } catch (error) { warn("invalid-item", path, backlogErrorMessage(error)); }

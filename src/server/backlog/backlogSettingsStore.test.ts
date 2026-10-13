@@ -18,16 +18,16 @@ it("round trips private atomic snapshots and serializes stale writes", async () 
   await f.store.setGitHubLogin("octocat");
   const writes = await Promise.allSettled([f.store.save("p", { providers: ["github"] }, 0), f.store.save("p", { providers: ["markdown"] }, 0)]);
   expect(writes.map((w) => w.status)).toEqual(["fulfilled", "rejected"]);
-  expect((await new BacklogSettingsStore(f.path).read()).projects["p"]).toMatchObject({ revision: 1, backlog: { providers: ["github"] } });
+  expect((await new BacklogSettingsStore(f.path).read()).projects["p"]).toMatchObject({ revision: 2, backlog: { providers: ["github"] } });
   expect((await stat(f.path)).mode & 0o777).toBe(0o600);
   expect((await readdir(f.root)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   await expect(f.store.remove("p", 0)).rejects.toThrow("changed");
   const inode = (await stat(f.path)).ino;
-  await f.store.remove("p", 1);
+  await f.store.remove("p", 2);
   expect((await stat(f.path)).ino).not.toBe(inode);
-  expect(await f.store.read()).toEqual({ version: 1, revision: 1, githubLogin: "octocat", projects: {} });
+  expect(await f.store.read()).toEqual({ version: 2, revision: 3, githubLogin: "octocat", projects: {}, sources: {} });
 });
-it("prefers the whole stored section, then the repo, then markdown; Azure-only never scans files", async () => {
+it("prefers the whole stored section, then the repo, then markdown; GitHub-only never scans files", async () => {
   const f = await fixture();
   expect(await resolveBacklogConfig(f.project, f.root, f.store)).toMatchObject({ source: "default", backlog: { providers: ["markdown"] } });
   await mkdir(join(f.root, ".forgerie"));
@@ -35,9 +35,9 @@ it("prefers the whole stored section, then the repo, then markdown; Azure-only n
   expect(await resolveBacklogConfig(f.project, f.root, f.store)).toMatchObject({ source: "repo-file", backlog: { dir: "work/items" } });
   await mkdir(join(f.root, "work/items"), { recursive: true });
   await writeFile(join(f.root, "work/items/item.md"), "---\nid: one\ntitle: One\n---\n");
-  await f.store.save("p", { providers: ["azure-devops"] }, 0);
+  await f.store.save("p", { providers: ["github"] }, 0);
   await writeFile(join(f.root, ".forgerie/config.json"), "{ invalid ignored config");
-  expect(await resolveBacklogConfig(f.project, f.root, f.store)).toMatchObject({ source: "forgerie", backlog: { providers: ["azure-devops"] }, revision: 1 });
+  expect(await resolveBacklogConfig(f.project, f.root, f.store)).toMatchObject({ source: "forgerie", backlog: { providers: ["github"] }, revision: 1 });
   expect((await scanProjectBacklog(f.project, [], undefined, { settings: f.store })).entries).toEqual([]);
   await writeFile(join(f.root, ".forgerie/config.json"), JSON.stringify({ backlog: { dir: "work/items", providers: ["markdown", "github"] } }));
   await f.store.remove("p", 1);
@@ -67,6 +67,6 @@ it("never accepts a deleted entry's revision after the project override is recre
   delete file.revision; await writeFile(f.path, JSON.stringify(file));
   await f.store.remove("p", old);
   const restarted = new BacklogSettingsStore(f.path); await restarted.save("p", { providers: ["github"] }, 0);
-  expect((await restarted.read()).projects["p"]?.revision).toBe(old + 1);
+  expect((await restarted.read()).projects["p"]?.revision).toBe(old + 2);
   await expect(restarted.save("p", { providers: ["markdown"] }, old)).rejects.toThrow("changed");
 });

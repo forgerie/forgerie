@@ -17,6 +17,12 @@ import { UserSessionWorktrees } from "../workspaces/sessionWorktreeRoutes.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
 import { BacklogClaimStore } from "./backlogClaimStore.js";
 import { BacklogService } from "./backlogService.js";
+import Fastify from "fastify";
+import type { BacklogLaunchResponse } from "../../shared/backlog.js";
+import { azureConfig, azureServer } from "../azureDevops/azureDevops.testSupport.js";
+import { createAzureDevopsBacklogProvider } from "./azureDevopsBacklog.js";
+import { BacklogSettingsStore } from "./backlogSettingsStore.js";
+import { registerBacklogRoutes } from "./backlogRoutes.js";
 import { withBacklogClaimRelease } from "./backlogArchive.js";
 
 const execute = promisify(execFile);
@@ -53,8 +59,9 @@ async function fixture() {
   const sessions = new PiSessionService(events, { agentDir, modelRuntime, archiveStore: withBacklogClaimRelease(archives, claims), sessionWorktrees: worktrees,
     sessionManager: createPiSessionManagerGateway({ agentDir, env: {}, sessionDirEnvKeys: [] }), heartbeatIntervalMs: 60_000 });
   services.push(sessions);
-  const backlog = new BacklogService({ projects, claims, sessions, userSessions: new UserSessionWorktrees(worktrees, sessions), isArchived: (id) => archives.isArchived(id) });
-  return { root, repo, source, itemPath, project, backlog, claims, sessions, events, git };
+  const userSessions = new UserSessionWorktrees(worktrees, sessions);
+  const backlog = new BacklogService({ projects, claims, sessions, userSessions, isArchived: (id) => archives.isArchived(id) });
+  return { root, repo, source, itemPath, project, projects, userSessions, archives, backlog, claims, sessions, events, git };
 }
 
 describe("hosted backlog lifecycle", () => {
@@ -79,3 +86,33 @@ describe("hosted backlog lifecycle", () => {
     expect(await f.git("status", "--porcelain")).toBe("");
   }, 20_000);
 });
+
+
+it("launches a source item through HTTP into a different registered repo's real worktree and archives its claim", async () => {
+  const f = await fixture(); const azure = await azureServer(); const app = Fastify();
+  try {
+    const destination = join(f.root, "destination"); await mkdir(destination);
+    const git = async (...args: string[]) => (await execute("git", ["-C", destination, ...args], { env: sanitizedGitEnv() })).stdout.trim();
+    await git("init", "-b", "main"); await writeFile(join(destination, "README.md"), "Destination");
+    await git("add", "."); await git("-c", "user.name=Acceptance", "-c", "user.email=acceptance@example.invalid", "commit", "-m", "Base");
+    const project = await f.projects.add({ path: destination });
+    const settings = new BacklogSettingsStore(join(f.root, "backlog-settings.json"), { projects: () => f.projects.list() });
+    const source = await settings.createSource(azureConfig);
+    const backlog = new BacklogService({ projects: f.projects, claims: f.claims, userSessions: f.userSessions, sessions: f.sessions, settings,
+      sourceProvider: createAzureDevopsBacklogProvider(azure.client), isArchived: (id) => f.archives.isArchived(id) });
+    registerBacklogRoutes(app, backlog);
+    const response = await app.inject({ method: "POST", url: `/backlog/sources/${source.id}/items/amazeinsights%3A7/launch`, payload: {
+      requestId: "azure-confirmed", start: { cwd: destination, modelSpec: "acceptance/local", destination: { kind: "fresh-worktree" } },
+    } });
+    expect(response.statusCode).toBe(200); const launched = response.json<BacklogLaunchResponse>();
+    expect(launched.claim).toMatchObject({ kind: "claimed", sourceId: source.id, projectId: project.id, repo: destination });
+    expect(launched.session.cwd).not.toBe(destination);
+    expect((await backlog.list()).items.find((item) => item.provider === "azure-devops")).toMatchObject({ readiness: "claimed", owner: { kind: "source", sourceId: source.id } });
+    await f.sessions.prompt(launched.session, launched.initialPrompt);
+    await vi.waitFor(() => { expect(f.events.sessionEvents.some(({ event }) => event.type === "agent.end")).toBe(true); }, { timeout: 10_000 });
+    expect(JSON.stringify((await f.sessions.messages(launched.session)).messages)).toContain("Compare current totals");
+    await f.sessions.archive(launched.session); expect(await f.claims.list()).toEqual([]);
+    expect(await readFile(f.itemPath, "utf8")).toBe(f.source);
+    expect(await git("status", "--porcelain")).toBe(""); expect(await f.git("status", "--porcelain")).toBe("");
+  } finally { await app.close(); await azure.close(); }
+}, 20_000);
