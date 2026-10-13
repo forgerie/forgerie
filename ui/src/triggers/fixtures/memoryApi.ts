@@ -57,7 +57,7 @@ export function memoryApi(initial: readonly Trigger[], options: { now: number; o
     update: async (id, body) => {
       check("update"); calls.push(["update", id, body]);
       if (find(id).revision !== body.baseRevision) throw new TriggerRefusal("Another change came first. Read the trigger again.", 409);
-      const { baseRevision: _base, ...fields } = body;
+      const fields = Object.fromEntries(Object.entries(body).filter(([key]) => key !== "baseRevision")) as Partial<Trigger>;
       return change(id, (trigger) => ({ ...trigger, ...fields }));
     },
     pause: async (id) => { check("pause"); calls.push(["pause", id]); return change(id, (trigger) => ({ ...trigger, state: { kind: "paused", pausedAt: options.now } })); },
