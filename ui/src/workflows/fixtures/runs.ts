@@ -65,3 +65,23 @@ export const LAND_STOP: StopEntry = { kind: "stop", runId: RUN_ID, stage: "land"
   summary: "Review passed in round 2. Two branches are ready: `feat/run-export-api` (5 commits) and `design/run-export` (5 commits)." };
 export const STARTED: WorkflowEntry = { kind: "started", runId: RUN_ID, text: "Agree a contract, build the interface and the endpoint at the same time, then review." };
 export const DECIDED: WorkflowEntry = { kind: "decided", workflow: "design-build-review", text: "The user approved \"Contract\"." };
+
+/** The preview's clock for a retry countdown. */
+export const RUN_NOW = AT + 600_000;
+
+/**
+ * design waits to retry a model error; build answered, but the parent already had that answer, so the report was
+ * not sent again; docs, a child the agent added, was stopped before it reported.
+ */
+export const UNSENT: WorkflowRun = { ...BUILDING,
+  children: [
+    { conversationId: 15, reporterId: 4, name: "design", stage: "build", state: { kind: "working" } },
+    { conversationId: 21, reporterId: 5, name: "build", stage: "build", state: { kind: "settled", outcome: "answered", result: "Done.", delivered: "duplicate" } },
+    { conversationId: 33, reporterId: 9, name: "docs", stage: "build", state: { kind: "settled", outcome: "stopped", result: "aborted", delivered: "aborted" } },
+  ] };
+
+export const RETRY_LOOKS = [
+  { ...CHILD_LOOKS[0]!, retry: { attempt: 2, max: 3, until: RUN_NOW + 100_000,
+    error: '529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_011CUyb5k8Yx2Q3r"}' } },
+  CHILD_LOOKS[1]!,
+];

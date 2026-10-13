@@ -5,6 +5,11 @@ import { cleanupSchema } from "../worktrees/worktreeApi";
 import { partsOf, piMessageSchema, textOf, type PiMessage } from "../contracts";
 
 export const childQuestionSchema = z.object({ questionId: z.string(), question: z.string(), askedAt: z.number() });
+/**
+ * Forgerie retries a child's model error itself before the parent hears of it. `attempt` is the try that waits,
+ * counted from 1, of `max`; `error` is the provider's own text; `until` is when the try starts, in epoch ms.
+ */
+export const childRetrySchema = z.object({ attempt: z.number().int().positive(), max: z.number().int().positive(), error: z.string(), until: z.number() });
 export const childSummarySchema = z.object({
   name: z.string(),
   conversationId: z.number(),
@@ -12,6 +17,7 @@ export const childSummarySchema = z.object({
   busy: z.boolean(),
   createdAt: z.number(),
   questions: z.array(childQuestionSchema),
+  retry: childRetrySchema.optional(),
   worktree: z.object({
     repo: z.string().optional(), defaultBranch: z.string().optional(), cleanup: cleanupSchema.optional(), cleanupRetryToken: z.string().optional(), statusError: z.string().optional(),
     path: z.string(), branch: z.string(), state: z.enum(["active", "landed", "discarded"]),
@@ -25,6 +31,7 @@ export const childTranscriptSchema = z.object({
   partial: piMessageSchema.optional(),
 });
 export type ChildSummary = z.infer<typeof childSummarySchema>;
+export type ChildRetry = z.infer<typeof childRetrySchema>;
 export type ChildTranscript = z.infer<typeof childTranscriptSchema>;
 
 /** The tool a child calls to ask the reader. Its call carries the question; its result, the answer. */
@@ -64,13 +71,14 @@ export function childEntryOf(message: PiMessage): ChildEntry | undefined {
   }
 }
 
-const REPORT = /^\[subagent (\S+) (answered, no reply needed|failed: [^\]]*)\]\s?([\s\S]*)$/u;
+// A failure carries the provider's own error, which can hold brackets and line breaks, so it runs to the last "]".
+const REPORT = /^\[subagent (\S+) (?:answered, no reply needed\]\s?([\s\S]*)|failed: ([\s\S]*)\])$/u;
 /** A child's answer or failure, which the server posts to the parent model as a user message. */
 export function reportOf(text: string): ChildEntry | undefined {
   const match = REPORT.exec(text);
   if (!match) return undefined;
-  const failed = match[2]!.startsWith("failed");
-  return { kind: "report", childName: match[1]!, outcome: failed ? "failed" : "answered", text: failed ? match[2]!.slice("failed: ".length) : match[3]!.trim() };
+  const failed = match[3] !== undefined;
+  return { kind: "report", childName: match[1]!, outcome: failed ? "failed" : "answered", text: failed ? match[3]! : match[2]!.trim() };
 }
 
 /** One line of a child's transcript for the child view. */
@@ -107,20 +115,51 @@ export function childLines(transcript: ChildTranscript): ChildLine[] {
   return lines;
 }
 
-/** Children with an open question come first, then working ones, then the rest, each oldest first. */
+/** Children with an open question come first, then working ones and ones that wait to retry, then the rest, each oldest first. */
 export function orderChildren(children: readonly ChildSummary[]): ChildSummary[] {
-  const rank = (child: ChildSummary) => child.questions.length > 0 ? 0 : child.busy ? 1 : 2;
+  const rank = (child: ChildSummary) => child.questions.length > 0 ? 0 : child.busy || child.retry ? 1 : 2;
   return [...children].sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt);
 }
 
 export function childStatus(child: ChildSummary): string {
   if (child.questions.length > 0) return child.questions.length === 1 ? "Waiting for your answer" : `${String(child.questions.length)} questions for you`;
+  if (child.retry) return retryCount(child.retry);
   if (child.busy) return "Working";
   if (child.worktree?.state === "landed") return "Landed";
   if (child.worktree?.state === "discarded") return "Discarded";
   if (child.worktree?.statusError) return "Cannot read worktree";
   if (child.worktree?.dirty) return "Uncommitted changes";
   return child.worktree && child.worktree.ahead > 0 ? "Ready to land" : "Idle";
+}
+
+/** "Retrying 2 of 3". */
+export function retryCount(retry: ChildRetry): string {
+  return `Retrying ${String(retry.attempt)} of ${String(retry.max)}`;
+}
+
+/**
+ * "Retrying 2 of 3: <the provider's error>", on one line, the error cut to `length` characters. It is for a row or
+ * a card that opens the child, whose own view shows the whole error.
+ */
+export function retryLine(retry: ChildRetry, length: number): string {
+  const error = retry.error.replace(/\s+/gu, " ").trim();
+  return `${retryCount(retry)}: ${error.length > length ? `${error.slice(0, length - 1)}…` : error}`;
+}
+
+/** "Next try in 1 min 40 s", or "Trying again now" once the wait is over. Whole seconds, rounded up. */
+export function retryWait(retry: ChildRetry, now: number): string {
+  const seconds = Math.ceil((retry.until - now) / 1000);
+  if (seconds <= 0) return "Trying again now";
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  const time = minutes === 0 ? `${String(rest)} s` : rest === 0 ? `${String(minutes)} min` : `${String(minutes)} min ${String(rest)} s`;
+  return `Next try in ${time}`;
+}
+
+/** The soonest try any child waits for, so a clock ticks only while there is a wait to count. */
+export function nextRetry(children: readonly { retry?: ChildRetry | undefined }[]): number | undefined {
+  const times = children.flatMap((child) => child.retry ? [child.retry.until] : []);
+  return times.length === 0 ? undefined : Math.min(...times);
 }
 
 /**

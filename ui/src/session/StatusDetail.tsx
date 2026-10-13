@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useNow } from "../ui/useNow";
 import { AlertCard, type AlertAction } from "../ui/AlertCard";
 import type { Problem } from "../sessionStore";
 
@@ -7,18 +7,6 @@ export type ConnectionTrouble =
   | { type: "failed"; reason: string };
 
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-/** Time until the next try, in words. Ticks once a second only while there is a wait to count. */
-function useNow(clockNow: () => number, until: number | undefined) {
-  const [now, setNow] = useState(clockNow);
-  useEffect(() => {
-    if (until === undefined) return;
-    setNow(clockNow());
-    const timer = setInterval(() => setNow(clockNow()), 1000);
-    return () => clearInterval(timer);
-  }, [clockNow, until]);
-  return now;
-}
 
 /**
  * Shape: what the session's status chip opens. Connection trouble first, as

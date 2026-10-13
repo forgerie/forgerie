@@ -5,6 +5,10 @@ import { stageViews, type StageView } from "@shared/workflowStops";
 import { textOf, type PiMessage } from "../contracts";
 import type { RouteState, RouteStep, RouteTrack } from "../ui/RouteMap";
 import type { StageStripSegment } from "../ui/StageStrip";
+import { retryLine, retryWait, type ChildRetry } from "../childAgents/childAgentsModel";
+
+/** A track is a card in a column: the provider's error is cut there, and read whole in the child's own view. */
+const ROUTE_ERROR_LENGTH = 120;
 
 const valueSchema = z.union([z.string(), z.boolean(), z.number()]);
 const workerSchema = z.object({ name: z.string(), agent: z.string().optional(), model: z.string().optional() });
@@ -18,6 +22,13 @@ const stopStateSchema = z.object({
   state: z.enum(["open", "waiting", "approved"]), summary: z.string().optional(), note: z.string().optional(),
   requestedAt: z.number().optional(), decidedAt: z.number().optional(), landed: z.array(z.string()).optional(), round: z.number().optional(),
 });
+/**
+ * Whether the child's report reached the parent. `duplicate`: the parent already had this answer, so it was not sent
+ * again. `aborted`: the child was stopped before it reported. Neither is a failure. A record written before these
+ * values carries `delivered: false` with a `deliveryError` string, or a string here; both read as `false`, and the
+ * `deliveryError` field is dropped.
+ */
+const deliveredSchema = z.union([z.literal(true), z.literal(false), z.literal("duplicate"), z.literal("aborted"), z.string().transform(() => false as const)]);
 export const workflowRunSchema = z.object({
   id: z.string(), requestId: z.string(), startedAt: z.number(),
   definition: z.object({ name: z.string(), path: z.string(), sha256: z.string(), text: z.string() }),
@@ -32,7 +43,7 @@ export const workflowRunSchema = z.object({
     conversationId: z.number(), reporterId: z.number(), name: z.string(), stage: z.string().optional(),
     state: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("working") }),
-      z.object({ kind: z.literal("settled"), outcome: z.enum(["answered", "failed", "stopped"]), result: z.string(), delivered: z.boolean(), deliveryError: z.string().optional() }),
+      z.object({ kind: z.literal("settled"), outcome: z.enum(["answered", "failed", "stopped"]), result: z.string(), delivered: deliveredSchema }),
     ]),
   })),
 });
@@ -119,7 +130,10 @@ export function activeRun(runs: readonly WorkflowRun[]): WorkflowRun | undefined
 
 /** How each stage reads now. A finished run reads as done when it completed, and keeps its stops otherwise. */
 export function viewsOf(run: WorkflowRun): Record<string, StageView> {
-  const views = stageViews(run);
+  // The shared stop rules read only whether each child is working. Delivery reads as a plain yes or no there, so
+  // they accept a run whether or not the server's shared type knows "duplicate" and "aborted" yet.
+  const views = stageViews({ ...run, children: run.children.map(({ name, stage, state }) => ({ name, stage,
+    state: state.kind === "working" ? state : { ...state, delivered: state.delivered === true } })) });
   if (run.state.kind === "running") return views;
   const completed = run.state.outcome === "completed";
   return Object.fromEntries(Object.entries(views).map(([id, view]) => [id, completed ? "done" : view === "working" ? "next" : view]));
@@ -179,15 +193,21 @@ export function launchInputs(workflow: DeclaresInputs, typed: Readonly<Record<st
   return { inputs };
 }
 
-/** What a run's children look like to the route: their branch and whether they wait on the reader. */
-export interface ChildLook { name: string; agent: string | null; branch?: string | undefined; asking: boolean }
+/** What a run's children look like to the route: their branch, whether they wait on the reader, and a retry Forgerie waits to make. */
+export interface ChildLook { name: string; agent: string | null; branch?: string | undefined; asking: boolean; retry?: ChildRetry | undefined }
+
+/** What became of a settled child's report, when it was not sent and that is no failure. */
+export function deliveryNote(delivered: true | false | "duplicate" | "aborted"): string | undefined {
+  return delivered === "duplicate" ? "Duplicate report, not sent again" : delivered === "aborted" ? "Stopped before reporting" : undefined;
+}
 
 /**
  * The route as RouteMap steps. Declared workers are tracks even before they start; children the agent added are
- * tracks of the stage they joined. `open` makes a started worker's track open that child.
+ * tracks of the stage they joined. `open` makes a started worker's track open that child. A working child that
+ * waits to retry a model error says so in a notice; `now` adds the time to the next try.
  */
 export function routeSteps(stages: readonly WorkflowStage[], run: WorkflowRun | undefined, children: readonly ChildLook[] = [],
-  open?: (name: string) => void): RouteStep[] {
+  open?: (name: string) => void, now?: number): RouteStep[] {
   const views = run === undefined ? undefined : viewsOf(run);
   return stages.map((stage) => {
     const state: RouteState = views?.[stage.id] ?? "next";
@@ -202,8 +222,13 @@ export function routeSteps(stages: readonly WorkflowStage[], run: WorkflowRun | 
       const look = children.find((child) => child.name === name);
       const trackState: RouteState = look?.asking === true ? "waiting" : mine.some((child) => child.state.kind === "working") ? "working"
         : mine.length > 0 ? "done" : "next";
-      const lines = [declared?.agent ?? look?.agent ?? (mine.length > 0 ? "general helper" : undefined), declared?.model, look?.branch].filter((line) => line !== undefined);
-      return { key: name, name, state: trackState, lines, ...(mine.length > 0 && open !== undefined ? { label: `Open ${name}`, onPress: () => open(name) } : {}) };
+      const last = mine.at(-1)?.state;
+      const retry = trackState === "working" ? look?.retry : undefined;
+      const lines = [declared?.agent ?? look?.agent ?? (mine.length > 0 ? "general helper" : undefined), declared?.model, look?.branch,
+        last?.kind === "settled" ? deliveryNote(last.delivered) : undefined].filter((line) => line !== undefined);
+      const notice = retry && [retryLine(retry, ROUTE_ERROR_LENGTH), ...(now === undefined ? [] : [retryWait(retry, now)])];
+      return { key: name, name, state: trackState, lines, ...(notice ? { notice } : {}),
+        ...(mine.length > 0 && open !== undefined ? { label: `Open ${name}`, onPress: () => open(name) } : {}) };
     });
     return { key: stage.id, name: stage.name, state, ...(stage.stop === undefined ? {} : { mine: true }), ...(word === undefined ? {} : { word }),
       ...(stage.does === undefined ? {} : { does: stage.does }), ...(tracks.length === 0 ? {} : { tracks }) };

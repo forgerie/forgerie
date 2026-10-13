@@ -2,13 +2,15 @@ import type { ReactNode } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import "./StatusRow.css";
 
-export type StatusTone = "waiting" | "working" | "quiet";
+/** waiting: on the reader. working: at work now. retrying: waits to try again after an error. quiet: neither. */
+export type StatusTone = "waiting" | "working" | "retrying" | "quiet";
 
 /**
  * Molecule: one pressable row in a list of running things. A tone dot, a name
  * in the code face, a quieter detail, and a status phrase. When the row is too
  * narrow, the detail and status wrap under the name instead of vanishing. A
- * row that waits on the reader carries the live colour on its edge.
+ * row that waits on the reader carries the live colour on its edge; one that
+ * waits to retry an error takes the warn colour on its dot and status.
  */
 export function StatusRow({ tone, name, detail, status, label, onPress, below }: {
   tone: StatusTone;

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChildAgentsPanel, type ChildAgentsActions } from "./ChildAgentsPanel";
 import { ChildEntryView } from "./ChildEntryView";
 import { FINISHED, DISCARD, RUNS } from "./fixtures/childWork";
-import { CHILDREN, STREAMING, TRANSCRIPT } from "./fixtures/children";
+import { CHILDREN, NOW, OVERLOADED, RETRYING, STREAMING, TRANSCRIPT } from "./fixtures/children";
 
 let root: Root;
 beforeEach(() => {
@@ -123,5 +123,37 @@ describe("child agents panel", () => {
     expect(document.querySelector(".event-line-quote")?.textContent).toBe("Added GET /api/runs.");
     expect(document.querySelector(".event-line-quote")?.getAttribute("data-face")).toBe("text");
     expect(document.querySelector(".event-line-detail")?.textContent).toContain("Tests: 14 passed.");
+  });
+
+  it("counts down a retry in the child's row and shows the whole error in its record", async () => {
+    let now = NOW;
+    const clock = () => now;
+    vi.useFakeTimers();
+    try {
+      await act(async () => root.render(<ChildAgentsPanel children={[RETRYING, CHILDREN[2]!]} actions={actions()} now={clock} />));
+      const row = document.querySelector(".status-row");
+      expect(row?.getAttribute("data-tone")).toBe("retrying");
+      expect(row?.querySelector(".status-row-status")?.textContent).toBe("Next try in 1 min 40 s");
+      expect(row?.querySelector(".status-row-below")?.textContent).toMatch(/^Retrying 2 of 3: 529 \{"type":"error".*…$/u);
+      // The row ticks on its own while the retry waits.
+      now = NOW + 99_500;
+      await act(async () => { vi.advanceTimersByTime(1_000); });
+      expect(row?.querySelector(".status-row-status")?.textContent).toBe("Next try in 1 s");
+      now = NOW + 100_000;
+      await act(async () => { vi.advanceTimersByTime(1_000); });
+      expect(row?.querySelector(".status-row-status")?.textContent).toBe("Trying again now");
+    } finally { vi.useRealTimers(); }
+    const handlers = actions();
+    await act(async () => root.render(<ChildAgentsPanel children={[RETRYING]} openId={15} transcript={{ ...STREAMING, partial: undefined, busy: false }} actions={handlers} now={() => NOW} />));
+    expect(document.querySelector(".sheet-dialog-subtitle")?.textContent).toContain("Retrying 2 of 3");
+    const card = document.querySelector('[aria-label="api is retrying"]');
+    expect(card?.getAttribute("data-tone")).toBe("warn");
+    expect(card?.textContent).toContain("Retrying 2 of 3");
+    expect(card?.textContent).toContain("Next try in 1 min 40 s.");
+    expect(card?.querySelector("pre")?.textContent).toBe(OVERLOADED);
+    // The child is still at work between tries: the input steers it, and Stop reaches it.
+    expect(document.querySelector("textarea")?.getAttribute("placeholder")).toBe("Steer api while it works");
+    await act(async () => { button("Stop")?.click(); });
+    expect(handlers.onStop).toHaveBeenCalledWith(15);
   });
 });

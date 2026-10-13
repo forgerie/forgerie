@@ -27,6 +27,8 @@
 .alert-card-code { margin: var(--space-2) 0 0; padding-inline-start: 2ch; text-indent: -2ch; max-block-size: calc(5lh); overflow-y: auto;
   color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--code-size); line-height: 1.6;
   white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The warn wash is darker than the failure wash: muted ink on it falls under 4.5:1, so the code takes the quiet ink. */
+.alert-card[data-tone="warn"] .alert-card-code { color: var(--quiet-foreground); }
 
 /* Actions are quiet text buttons: showing output is a look, not a commitment.
    Drawn at the icon size, pressed at the control size. */

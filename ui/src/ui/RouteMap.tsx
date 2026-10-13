@@ -12,6 +12,8 @@ export interface RouteTrack {
   state: RouteState;
   /** Short facts under the name, such as who does it, on which branch, and the last thing it did. */
   lines?: readonly ReactNode[];
+  /** Trouble the worker works through on its own, such as a model error it retries: lines in the warn tone, after the plain lines. */
+  notice?: readonly string[] | undefined;
   /** Accessible name of the press, such as "Open design". */
   label?: string;
   onPress?: () => void;
@@ -58,6 +60,7 @@ export function RouteMap({ label, steps }: { label: string; steps: readonly Rout
                   {WORD[track.state] !== "" && <span className="route-map-track-word">{WORD[track.state]}</span>}
                 </span>
                 {track.lines?.map((line, index) => <span key={index} className="route-map-track-line">{line}</span>)}
+                {track.notice?.map((line, index) => <span key={`notice-${String(index)}`} className="route-map-track-notice">{line}</span>)}
               </>;
               return <li key={track.key} className="route-map-track" data-state={track.state}>
                 {track.onPress === undefined ? <div className="route-map-track-body">{inner}</div>

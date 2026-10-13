@@ -29,3 +29,15 @@ export function Waiting() {
     { key: "b", name: "Design and build", state: "next" },
   ]} />;
 }
+/** A worker that waits to retry a model error, beside one whose report was a duplicate. */
+export function Retrying() {
+  return <RouteMap label="Run" steps={[
+    { key: "a", name: "Contract", state: "done", mine: true, word: "Approved by you" },
+    { key: "b", name: "Design and build", state: "working", tracks: [
+      { key: "design", name: "design", state: "working", lines: ["design-engineer", "design/run-export"],
+        notice: ["Retrying 2 of 3: 529 overloaded_error: Overloaded", "Next try in 1 min 40 s"], label: "Open design", onPress: () => {} },
+      { key: "build", name: "build", state: "done", lines: ["full-stack-engineer", "feat/run-export-api", "Duplicate report, not sent again"], label: "Open build", onPress: () => {} },
+    ] },
+    { key: "c", name: "Land", state: "next", mine: true },
+  ]} />;
+}

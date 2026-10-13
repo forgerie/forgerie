@@ -42,4 +42,7 @@ button.route-map-track-body:hover { border-color: var(--line-focus); }
 .route-map-dot[data-state="working"] { border-color: var(--live); background: var(--live); }
 .route-map-dot[data-state="waiting"] { border-color: var(--live); }
 .route-map-dot[data-state="done"] { border-color: var(--ink-good); background: var(--ink-good); }
+/* Two lines at most: the track opens the worker, whose own view has the whole text. */
+.route-map-track-notice { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+  color: var(--ink-warn); font-size: var(--label-text); font-weight: 500; overflow-wrap: anywhere; }
 .route-map-track-line { color: var(--muted-foreground); font-size: var(--label-text); overflow-wrap: anywhere; }

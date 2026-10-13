@@ -3,7 +3,7 @@ import { ChildAgentsPanel, type ChildAgentsActions } from "./ChildAgentsPanel";
 import type { ChildSummary, ChildTranscript } from "./childAgentsModel";
 import type { ChildDetail } from "./childWorkModel";
 import type { WorktreeActionResult } from "../worktrees/worktreeApi";
-import { CHILDREN, STREAMING, TRANSCRIPT } from "./fixtures/children";
+import { CHILDREN, NOW, RETRYING, STREAMING, TRANSCRIPT } from "./fixtures/children";
 import { FINISHED, RUNS, REVIEW, DISCARD, CLEANUP } from "./fixtures/childWork";
 
 export const name = "Child agents panel";
@@ -14,6 +14,8 @@ export const composition = {
   Runs: [{ part: "src/childAgents/ChildWorkPanel.organism.part.tsx", state: "Runs" }],
   Cleanup: [{ part: "src/childAgents/ChildWorkPanel.organism.part.tsx", state: "Cleanup" }],
 };
+
+const clock = () => NOW;
 
 function Scenario({ initial = [...CHILDREN, FINISHED], open, initialDetail, initialOutcome, error }: {
   initial?: ChildSummary[]; open?: number; initialDetail?: ChildDetail; initialOutcome?: WorktreeActionResult; error?: string;
@@ -37,7 +39,7 @@ function Scenario({ initial = [...CHILDREN, FINISHED], open, initialDetail, init
   const actions: ChildAgentsActions = {
     onOpenChild: (id) => { setOpenId(id); setMessages(messagesFor(id)); setOutcome(undefined); }, onBack: () => setOpenId(undefined), onClose: () => setClosed(true),
     onSend: async (id, text) => { setMessages((items) => [...items, { role: "user", content: text }]); change(id, { busy: true }); },
-    onStop: (id) => change(id, { busy: false, questions: [] }), onAnswer: async (_id, text) => { if (selected) change(selected.conversationId, { busy: true, questions: [] }); setMessages((items) => [...items, { role: "user", content: text }]); },
+    onStop: (id) => setChildren((items) => items.map((item) => item.conversationId === id ? { ...item, busy: false, questions: [], retry: undefined } : item)), onAnswer: async (_id, text) => { if (selected) change(selected.conversationId, { busy: true, questions: [] }); setMessages((items) => [...items, { role: "user", content: text }]); },
     onReview: () => setDetail(REVIEW), onLand: () => finish("landed"), onPreviewDiscard: () => setDetail(DISCARD), onDiscard: () => finish("discarded"),
     onContinue: async (_id, text) => { const next = { ...FINISHED, name: "builder-2", conversationId: 45, busy: true }; setChildren((items) => [...items, next]); setOpenId(45); setMessages([{ role: "user", content: text }]); setOutcome(undefined); },
     onRuns: () => setDetail({ kind: "runs", data: RUNS }), onCleanup: () => setDetail(CLEANUP), onBackDetail: () => setDetail({ kind: "none" }),
@@ -46,7 +48,7 @@ function Scenario({ initial = [...CHILDREN, FINISHED], open, initialDetail, init
   };
   if (closed) return <button onClick={() => setClosed(false)}>Open child agents</button>;
   return <ChildAgentsPanel children={children} openId={openId} transcript={selected ? { messages, busy: selected.busy, ...(selected.conversationId === 15 && selected.busy ? { partial: STREAMING.partial } : {}) } : undefined}
-    detail={detail} outcome={outcome} error={failure} runs={children.length ? RUNS : { ...RUNS, records: [] }} actions={actions} />;
+    detail={detail} outcome={outcome} error={failure} runs={children.length ? RUNS : { ...RUNS, records: [] }} actions={actions} now={clock} />;
 }
 export default function List() { return <Scenario />; }
 export function ChildAsking() { return <Scenario open={21} />; }
@@ -63,5 +65,9 @@ export function Cleanup() { return <Scenario initialDetail={CLEANUP} />; }
 export function Conflict() { return <Scenario open={44} initialOutcome={{ kind: "conflict", defaultBranch: "main", files: ["actions.ts"], prompt: "Resolve actions.ts and commit." }} />; }
 export function Blocked() { return <Scenario open={44} initialOutcome={{ kind: "blocked", reason: "main-dirty", files: ["actions.ts"] }} />; }
 export function Stale() { return <Scenario open={44} initialOutcome={{ kind: "stale-preview" }} />; }
+/** api waits to retry a model error: its row counts down to the next try. */
+export function Retrying() { return <Scenario initial={[RETRYING, ...CHILDREN.slice(1), FINISHED]} />; }
+/** The retrying child open: the whole error at the end of its record, and Stop in the header. */
+export function ChildRetrying() { return <Scenario open={15} initial={[RETRYING, ...CHILDREN.slice(1)]} />; }
 export function Empty() { return <Scenario initial={[]} />; }
 export function Failed() { return <Scenario error="Question q:40 is not open" />; }

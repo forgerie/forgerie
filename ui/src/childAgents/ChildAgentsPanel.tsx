@@ -9,7 +9,9 @@ import { ExchangeLog, type ExchangeLine } from "../ui/ExchangeLog";
 import { ReplyBox } from "../ui/ReplyBox";
 import { QuestionCard } from "../ui/QuestionCard";
 import { NoticeBar } from "../ui/NoticeBar";
-import { QUESTION_TOOL, childLines, childStatus, orderChildren, type ChildSummary, type ChildTranscript } from "./childAgentsModel";
+import { AlertCard } from "../ui/AlertCard";
+import { useNow } from "../ui/useNow";
+import { QUESTION_TOOL, childLines, childStatus, nextRetry, orderChildren, retryCount, retryLine, retryWait, type ChildSummary, type ChildTranscript } from "./childAgentsModel";
 
 export interface ChildAgentsActions {
   onOpenChild: (conversationId: number) => void;
@@ -32,6 +34,8 @@ export interface ChildAgentsActions {
 }
 
 const ANSWERED = /^The user answered: ([\s\S]*)$/u;
+/** A row is one glance: the provider's error is cut there, and read whole in the child's own view. */
+const ROW_ERROR_LENGTH = 160;
 
 /**
  * The record as lines. A question the child asked is a card where it asked,
@@ -64,9 +68,10 @@ function exchange(child: ChildSummary, transcript: ChildTranscript): ExchangeLin
  * card where it was asked, and one input: the answer to its oldest open
  * question while it has one, otherwise a message that steers it while it
  * works or gives it a new task when it is idle. Stop sits in the header while
- * it works.
+ * it works. A child that waits to retry a model error counts down to the next
+ * try in its row, and shows the whole error at the end of its record.
  */
-export function ChildAgentsPanel({ children, openId, transcript, error, actions, detail = { kind: "none" }, outcome, pending, runs, drafts }: {
+export function ChildAgentsPanel({ children, openId, transcript, error, actions, detail = { kind: "none" }, outcome, pending, runs, drafts, now: clock = Date.now }: {
   children: readonly ChildSummary[];
   /** The child shown, or undefined for the list. */
   openId?: number | undefined;
@@ -78,7 +83,10 @@ export function ChildAgentsPanel({ children, openId, transcript, error, actions,
   pending?: string | undefined;
   runs?: Runs | undefined;
   drafts?: { values: Readonly<Record<string, string>>; update: (key: string, change: (text: string) => string) => void } | undefined;
+  /** The clock a retry counts down on. */
+  now?: () => number;
 }) {
+  const now = useNow(clock, nextRetry(children));
   const [localDrafts, setLocalDrafts] = useState<Record<string, string>>({});
   const draft = (key: string) => ({ value: (drafts?.values ?? localDrafts)[key] ?? "", update: (change: (text: string) => string) => {
     if (drafts) drafts.update(key, change);
@@ -97,20 +105,22 @@ export function ChildAgentsPanel({ children, openId, transcript, error, actions,
       else if (child && detail.kind === "discard") actions.onPreviewDiscard(child.conversationId); else if (child) actions.onReview(child.conversationId); else actions.onBackDetail(); }} />;
   if (!child) {
     const ordered = orderChildren(children);
-    const working = children.filter((candidate) => candidate.busy).length;
+    const working = children.filter((candidate) => candidate.busy && candidate.retry === undefined).length;
+    const retrying = children.filter((candidate) => candidate.retry !== undefined).length;
     return <SheetDialog title="Child agents" closeLabel="Close child agents" onClose={actions.onClose}
       actions={[history]} footer={<ActionFooter note={`${children.filter((item) => landBlocker(item) === undefined).length} ready to land`}
         actions={[{ label: "Worktrees", onPress: actions.onCleanup }]} />}
-      subtitle={children.length === 0 ? undefined : `${String(children.length)} in this session${working > 0 ? `, ${String(working)} working` : ""}`}>
+      subtitle={children.length === 0 ? undefined : `${String(children.length)} in this session${working > 0 ? `, ${String(working)} working` : ""}${retrying > 0 ? `, ${String(retrying)} retrying` : ""}`}>
       {alert}
       {ordered.length === 0 ? <p>No child agents yet. When the agent starts one, it shows here, and you can open, steer, and stop it.</p>
-        : ordered.map((item) => <StatusRow key={item.conversationId} tone={item.questions.length > 0 ? "waiting" : item.busy ? "working" : "quiet"}
-          name={item.name} detail={item.agent ?? undefined} status={childStatus(item)} label={`Open ${item.name}`}
+        : ordered.map((item) => <StatusRow key={item.conversationId} tone={item.questions.length > 0 ? "waiting" : item.retry ? "retrying" : item.busy ? "working" : "quiet"}
+          name={item.name} detail={item.agent ?? undefined} status={item.questions.length === 0 && item.retry ? retryWait(item.retry, now) : childStatus(item)} label={`Open ${item.name}`}
           onPress={() => actions.onOpenChild(item.conversationId)}
-          below={<>{item.questions[0] && <p>{item.questions[0].question}</p>}{item.worktree && <p><code>{item.worktree.branch}</code> · {item.worktree.ahead} commits ahead{item.worktree.dirty ? ", uncommitted files" : ""}</p>}</>} />)}
+          below={<>{item.questions[0] && <p>{item.questions[0].question}</p>}{item.questions.length === 0 && item.retry && <p>{retryLine(item.retry, ROW_ERROR_LENGTH)}</p>}{item.worktree && <p><code>{item.worktree.branch}</code> · {item.worktree.ahead} commits ahead{item.worktree.dirty ? ", uncommitted files" : ""}</p>}</>} />)}
     </SheetDialog>;
   }
-  const busy = transcript?.busy ?? child.busy;
+  // A retry waits between model calls, so the child can read as idle; it is still at work, and Stop must reach it.
+  const busy = (transcript?.busy ?? child.busy) || child.retry !== undefined;
   const question = child.questions[0];
   // One input. While the child waits on the reader, it answers the oldest open question, which the record shows as a card.
   const branch = child.worktree?.defaultBranch ?? "the default branch";
@@ -146,6 +156,10 @@ export function ChildAgentsPanel({ children, openId, transcript, error, actions,
       : writingId === child.conversationId && !closed ? [{ label: "Branch actions", onPress: () => setWritingId(undefined) }] : [])]} footer={footer}>
     {alert}
     <ExchangeLog lines={[...(transcript === undefined ? [] : exchange(child, transcript)),
+      ...(child.retry ? [{ kind: "block" as const, key: "retry", content: <AlertCard label={`${child.name} is retrying`} tone="warn" title={retryCount(child.retry)}
+        code={child.retry.error} codeLabel="Error" codeLines={6}>
+        The model call failed. Forgerie tries again on its own, up to {child.retry.max} times. <strong>{retryWait(child.retry, now)}.</strong>
+      </AlertCard> }] : []),
       ...(child.worktree?.cleanup?.kind === "failed" ? [{ kind: "block" as const, key: "cleanup-failed", content: <NoticeBar tone="alert" message={`The branch is ${child.worktree.state}, but folder cleanup failed: ${child.worktree.cleanup.error}`} actions={[]} /> }] : []),
       ...(outcome ? [{ kind: "block" as const, key: "worktree-result", content: <NoticeBar tone={outcome.kind === "landed" || outcome.kind === "discarded" ? "plain" : "alert"}
         message={resultText(outcome, branch)} actions={[{ label: "Dismiss", onPress: actions.onDismissOutcome },

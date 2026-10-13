@@ -2,6 +2,8 @@
 .status-row { --status-tone: var(--muted-foreground); position: relative; border-radius: var(--radius-surface); }
 .status-row[data-tone="working"] { --status-tone: var(--live); }
 .status-row[data-tone="waiting"] { --status-tone: var(--live); background: var(--live-wash); }
+/* Trouble that may still clear on its own: a steady dot, because nothing moves until the next try. */
+.status-row[data-tone="retrying"] { --status-tone: var(--tone-warn); }
 .status-row + .status-row { margin-block-start: var(--space-1); }
 .status-row-main { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); inline-size: 100%;
   min-block-size: var(--control-size); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
@@ -20,5 +22,9 @@
 .status-row-status { flex: 1 0 auto; color: var(--muted-foreground); font-size: var(--label-text); text-align: end; }
 .status-row[data-tone="waiting"] .status-row-detail { color: var(--foreground); }
 .status-row[data-tone="waiting"] .status-row-status { color: var(--ink-live); font-weight: 500; }
+.status-row[data-tone="retrying"] .status-row-status { color: var(--ink-warn); font-weight: 500; font-variant-numeric: tabular-nums; }
 .status-row-chevron { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
-.status-row-below { padding: 0 var(--space-3) var(--space-3) calc(var(--space-3) + 0.5rem + var(--space-2)); font-size: var(--small-text); }
+.status-row-below { padding: 0 var(--space-3) var(--space-3) calc(var(--space-3) + 0.5rem + var(--space-2)); font-size: var(--small-text); overflow-wrap: anywhere; }
+/* A retry's note is a glance: two lines at most, quieter than a question. The open row shows the rest. */
+.status-row[data-tone="retrying"] .status-row-below { color: var(--quiet-foreground); }
+.status-row[data-tone="retrying"] .status-row-below > p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }

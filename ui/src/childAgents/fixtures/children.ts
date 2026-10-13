@@ -24,3 +24,13 @@ export const STREAMING: ChildTranscript = {
   messages: TRANSCRIPT.messages.slice(0, 3),
   partial: { role: "assistant", content: [{ type: "text", text: "The contract returns an empty list when nothing has run, so the view" }] },
 };
+
+/** The preview's clock: a retry that waits counts down from here. */
+export const NOW = AT + 120_000;
+
+/** The provider's own error, as Forgerie passes it on: long, with brackets and a line break. */
+export const OVERLOADED = '529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_011CUyb5k8Yx2Q3r"}\n[stream disconnected before completion: upstream closed the WebSocket (code 1006)]';
+
+/** api waits to retry a model error for the second time of three. */
+export const RETRYING: ChildSummary = { name: "api", conversationId: 15, agent: "worker", busy: false, createdAt: AT, questions: [],
+  retry: { attempt: 2, max: 3, error: OVERLOADED, until: NOW + 100_000 } };

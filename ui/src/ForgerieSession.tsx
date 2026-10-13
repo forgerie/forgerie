@@ -513,7 +513,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           onClose={() => { workflows.dismissError(); setWorkflowSheet(undefined); }} />;
       })()}
       {workflowSheet?.type === "run" && running !== undefined && <WorkflowRunSheet run={running}
-        workers={children.children.map((child) => ({ name: child.name, agent: child.agent, branch: child.worktree?.branch, asking: child.questions.length > 0 }))}
+        workers={children.children.map((child) => ({ name: child.name, agent: child.agent, branch: child.worktree?.branch, asking: child.questions.length > 0, retry: child.retry }))}
         onOpenChild={(name) => { setWorkflowSheet(undefined); openChildByName(name); }} onClose={() => setWorkflowSheet(undefined)} />}
       {pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
         notice={pull.notice} writing={pull.writing} now={Date.now()}
