@@ -91,7 +91,7 @@ describe("project backlog scanner", () => {
     const second: BacklogProvider = {
       id: other, prompt: () => "",
       scan: (scanned, repo) => Promise.resolve({ warnings: [], entries: [{ body: "", item: { id: "b", title: "Remote b", provider: other, projectId: scanned.id,
-        projectName: scanned.name, repo, path: "#b", status: "open", labels: [], blocked_by: [], open: true, readiness: "ready", blockingIds: [] } }] }),
+        projectName: scanned.name, repo, path: "#b", status: "open", labels: [], blocked_by: [], assignedToMe: false, assignees: [], open: true, readiness: "ready", blockingIds: [] } }] }),
     };
     const claim: BacklogClaim = { kind: "claimed", projectId: "p1", provider: "markdown", itemId: "b", claimId: "claim", requestId: "request", fingerprint: "hash", repo: project.path, sessionId: "session", cwd: project.path, claimedAt: "2026-09-01" };
     const result = await scanProjectBacklog(project, [claim], [markdownBacklogProvider, second]);
@@ -126,7 +126,7 @@ describe("project backlog scanner", () => {
     expect(result.warnings[0]?.message).toContain("not from .forgerie/");
   });
   it("returns an empty result for a missing default directory", async () => {
-    expect(await scanProjectBacklog(await fixture(), [])).toEqual({ entries: [], warnings: [] });
+    expect(await scanProjectBacklog(await fixture(), [])).toEqual({ entries: [], warnings: [], sources: ["markdown"] });
   });
   it("rejects an oversized item", async () => {
     const project = await fixture();

@@ -79,6 +79,32 @@ Restart sessiond only in an approved idle window. Provider registrations freeze 
 
 Configure credentials in the actual Pi profile, using Pi's own login flow or profile tools. The browser OAuth and API-key login routes are retired. Credentials already stored in `auth.json` remain usable.
 
+## Backlog settings
+
+Open **Settings → Backlog** to set each project's Markdown, GitHub, and Azure
+DevOps sources. The server saves the whole section in
+`<data dir>/backlog-settings.json` (version 1, private mode 0600, atomic writes).
+This override wins over the canonical checkout's `.forgerie/config.json`
+`backlog` section. It is not a field-by-field merge. **Use the repo file**
+removes the override; the repo file applies again. With neither section,
+Forgerie reads Markdown from `.forgerie/backlog/`.
+
+A saved override always has an explicit, non-empty `providers` list. For example,
+`["azure-devops"]` never scans local Markdown, even when `work/items` contains
+files. Turning off a source leaves its files and remote items unchanged.
+Revisions prevent one open Settings page from overwriting a newer save. A
+conflict asks you to reload before saving. A file-level revision sequence
+prevents an old tab from overwriting an override that was deleted and recreated.
+Changes apply on the next read.
+
+The same file stores the optional `githubLogin` used by **Mine**. This is a
+username, not a credential. Without it, Mine shows no GitHub issues and gives a
+Settings reminder in its warning. Everyone keeps the trusted-author filter but
+lists issues regardless of assignment. The browser remembers the scope in
+localStorage. See [Azure DevOps backlog](azure-devops.md) for PAT setup, Area
+Path routing, and the cost of Everyone reads. Never put a token in Settings or
+in repository config.
+
 ## Bundled CLIProxyAPI provider
 
 

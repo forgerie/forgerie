@@ -133,3 +133,10 @@ describe("the backlog client", () => {
     await expect(createBacklogApi(fetchFn).launch({ projectId: "p1", itemId: "01A" }, "r", { cwd: "/r" })).rejects.toMatchObject({ kind: "conflict", status: 409, claim: { sessionId: "s-held" } });
   });
 });
+
+it("keeps Everyone on list, detail, and launch requests", async () => {
+  const service = server(({ path }) => path.includes("/launch") ? { body: { session: { id: "s1", cwd: "/r" }, claim, initialPrompt: "context", reused: false } } : path.includes("/items/") ? { body: { item: { id: "7", title: "Work", provider: "github", projectId: "p1", projectName: "Project", repo: "/r", path: "org/repo#7", status: "Open", labels: [], open: true, readiness: "ready", blockingIds: [] }, body: "", initialPrompt: "" } } : { body: { items: [], warnings: [], generatedAt: "now" } });
+  const api = createBacklogApi(service.fetchFn); const ref = { projectId: "p1", itemId: "7", provider: "github", scope: "everyone" as const };
+  await api.list(undefined, "everyone"); await api.detail(ref); await api.launch(ref, "r", { cwd: "/r" });
+  expect(service.calls.map((call) => call.path)).toEqual(["/api/backlog?scope=everyone", "/api/backlog/p1/items/7?provider=github&scope=everyone", "/api/backlog/p1/items/7/launch?provider=github&scope=everyone"]);
+});

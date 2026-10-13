@@ -1,3 +1,5 @@
+import { ToggleGroup } from "../ToggleGroup";
+import type { BacklogScope } from "../../backlog/backlogScope";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, InfoIcon, ListTodoIcon, RefreshCwIcon, SearchIcon, Trash2Icon, TriangleAlertIcon, UnlinkIcon, XIcon } from "lucide-react";
@@ -21,6 +23,8 @@ const GROUP_ROWS = 8;
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 export interface BacklogBinding {
+  scope?: BacklogScope;
+  onScope?: (scope: BacklogScope) => void;
   load: BacklogLoad;
   onRefresh: () => void;
   api: Pick<BacklogApi, "detail" | "release">;
@@ -62,7 +66,7 @@ function holderLine(holder: Holder) {
   return holder.name ? <>{HOLDER_WORDS[holder.state]} <em>{holder.name}</em></> : HOLDER_WORDS[holder.state];
 }
 
-function ItemRow({ item, holder, showProject, now, onOpen }: { item: BacklogItem; holder?: Holder | undefined; showProject: boolean; now: number; onOpen: () => void }) {
+function ItemRow({ item, holder, showProject, now, onOpen, scope }: { item: BacklogItem; holder?: Holder | undefined; showProject: boolean; now: number; onOpen: () => void; scope: BacklogScope }) {
   const priority = priorityWord(item.priority);
   const time = holder ? holder.time ?? "" : ageText(item.created, now);
   return <li><button type="button" className="bl-row" data-held={holder?.state} data-done={item.readiness === "closed" || undefined} onClick={onOpen}>
@@ -70,6 +74,7 @@ function ItemRow({ item, holder, showProject, now, onOpen }: { item: BacklogItem
     <span className="bl-title">{item.title}</span>
     <span className="picker-time" data-live={holder?.state === "working" || undefined}>{time}</span>
     <span className="bl-meta">
+      {scope === "everyone" ? <><span>{item.assignedToMe ? "You" : null}</span><span>{item.assignees.join(", ")}</span></> : null}
       {holder ? <span className="bl-held">{showProject ? <span className="bl-project">{item.projectName}</span> : null}{holderLine(holder)}</span>
         : <>{item.readiness === "closed" ? <span className="bl-state">Done</span> : item.readiness === "blocked" ? <span className="bl-state">Blocked</span> : null}
           {issueNumber(item) ? <span className="bl-issue" title={`${remoteSource(item)?.name ?? "Remote"} ${remoteSource(item)?.noun ?? "item"}`}>{issueNumber(item)}</span> : null}
@@ -100,8 +105,8 @@ function IgnoredWarning({ warning, project }: { warning: BacklogWarning; project
   </div>;
 }
 
-function Group({ group, collapsed, all, look, now, onToggle, onAll, onOpen }: {
-  group: BacklogGroup; collapsed: boolean; all: boolean; look: BacklogBinding["look"]; now: number;
+function Group({ group, collapsed, all, look, now, onToggle, onAll, onOpen, scope, sources }: {
+  scope: BacklogScope; sources: string[]; group: BacklogGroup; collapsed: boolean; all: boolean; look: BacklogBinding["look"]; now: number;
   onToggle: () => void; onAll: () => void; onOpen: (item: BacklogItem) => void;
 }) {
   const limited = group.kind === "project" && !all && group.items.length > GROUP_ROWS;
@@ -110,10 +115,11 @@ function Group({ group, collapsed, all, look, now, onToggle, onAll, onOpen }: {
     <button type="button" className="picker-group-header" aria-expanded={!collapsed} onClick={onToggle}>
       <ChevronDownIcon className="picker-chevron" aria-hidden /><span className="picker-group-label">{group.label}</span><span className="picker-count">{group.items.length}</span>
     </button>
+    {group.kind === "project" ? <span className="bl-chips">{sources.map((source) => <span className="bl-chip" key={source}>{source === "azure-devops" ? "Azure DevOps" : source === "github" ? "GitHub" : "Markdown"}</span>)}</span> : null}
     {collapsed ? null : <>
       {group.ignored ? <IgnoredWarning warning={group.ignored} project={group.label} /> : null}
       {group.notes?.map((note) => <p key={`${note.kind}:${note.path}`} className="bl-note-line"><InfoIcon aria-hidden size={14} />{note.message}</p>)}
-      <ul className="bl-rows">{rows.map((item) => <ItemRow key={itemParam(refOf(item))} item={item} now={now} showProject={group.kind === "held"}
+      <ul className="bl-rows">{rows.map((item) => <ItemRow key={itemParam(refOf(item))} item={item} now={now} scope={scope} showProject={group.kind === "held"}
         holder={item.claim ? holderOf(item.claim, look) : undefined} onOpen={() => onOpen(item)} />)}</ul>
       {limited ? <button type="button" className="picker-more" onClick={onAll}>Show all {group.items.length}</button> : null}
     </>}
@@ -141,16 +147,14 @@ function Problems({ warnings, projectName }: { warnings: readonly BacklogWarning
   </details>;
 }
 
-function Empty({ onClose }: { onClose?: (() => void) | undefined }) {
-  return <SettingsFrame title="Backlog" actions={<CloseButton onClose={onClose} />}>
-    <div className="bl-empty">
+function Empty() {
+  return <div className="bl-empty">
       <ListTodoIcon aria-hidden size={20} />
       <strong>No backlog items yet</strong>
       <p>No items were found in the configured backlog sources. Forgerie supports Markdown files, GitHub issues, and Azure DevOps work items assigned to you.</p>
       <p>Without provider settings, Forgerie reads each project's <code>.forgerie/backlog/</code> folder.</p>
       <p>To use another folder, set <code>backlog.dir</code> in the project's <code>.forgerie/config.json</code>.</p>
-    </div>
-  </SettingsFrame>;
+    </div>;
 }
 
 function ListPage({ binding }: { binding: BacklogBinding }) {
@@ -170,7 +174,7 @@ function ListPage({ binding }: { binding: BacklogBinding }) {
   const app = github.load.type === "ready" && github.load.value.state === "configured" ? github.load.value.app : undefined;
   // While a setup finishes, or fails, the panel must show even if nothing is listed yet.
   const githubNews = github.busy || github.error !== undefined;
-  if (load.type === "ready" && list && list.items.length === 0 && problems.length === 0 && blocked.length === 0 && !githubNews) return <Empty onClose={onClose} />;
+  const empty = load.type === "ready" && list && list.items.length === 0 && problems.length === 0 && blocked.length === 0 && !githubNews;
   const names = new Map(list?.items.map((item) => [item.projectId, item.projectName]));
   const open = list ? openCount(list.items) : 0;
   const more = <div className="settings-menu-anchor" ref={menu.anchor}>
@@ -190,19 +194,21 @@ function ListPage({ binding }: { binding: BacklogBinding }) {
     recovery={load.type === "failed" ? <button onClick={onRefresh}>Retry</button> : undefined}>
     <div className="bl-column">
       <div className="bl-toolbar">
+        <ToggleGroup label="Backlog scope" options={[{ value: "mine", label: "Mine" }, { value: "everyone", label: "Everyone" }]} value={binding.scope ?? "mine"} onChange={(scope) => binding.onScope?.(scope)} />
         <label className="bl-filter"><SearchIcon aria-hidden size={14} /><span className="sr-only">Filter items</span>
           <input type="search" placeholder="Filter by title or label" value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
         {list?.items.length ? <span className="bl-total">{open} {open === 1 ? "item" : "items"} in {projectCount(list.items)} {projectCount(list.items) === 1 ? "project" : "projects"}</span> : null}
       </div>
+      {empty ? <Empty /> : null}
       {blocked.length || githubNews ? <GitHubConnect load={github.load} warnings={blocked} busy={github.busy} error={github.error}
         onSetUp={github.setUp} onRefresh={onRefresh} /> : null}
       {!list ? <p className="settings-hint" role="status">Reading every project's backlog…</p>
         : groups.length === 0 ? list.items.length === 0 ? null
           : <p className="settings-hint">{filter.trim() ? <>No items match “{filter.trim()}”.</> : "Every item is done."}</p>
-        : groups.map((group) => <Group key={group.key} group={group} look={look} now={now}
+        : groups.map((group) => <Group key={group.key} group={group} scope={binding.scope ?? "mine"} sources={list?.projects?.find((p) => p.projectId === group.projectId)?.providers ?? [...new Set(group.items.map((item) => item.provider))]} look={look} now={now}
           collapsed={collapsed.has(group.key)} all={expanded.has(group.key) || filter.trim() !== ""}
           onToggle={() => setCollapsed(toggle(collapsed, group.key))} onAll={() => setExpanded(toggle(expanded, group.key))}
-          onOpen={(item) => onPlace({ item: refOf(item) })} />)}
+          onOpen={(item) => onPlace({ item: { ...refOf(item), scope: binding.scope ?? "mine" } })} />)}
       <Problems warnings={problems} projectName={(id) => names.get(id)} />
     </div>
   </SettingsFrame>;
@@ -234,11 +240,11 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
   const azure = ref.provider === "azure-devops";
   useEffect(() => {
     const controller = new AbortController();
-    api.detail(ref, controller.signal).then((value) => { if (!controller.signal.aborted) setDetail({ type: "ready", value }); },
+    api.detail({ ...ref, scope: binding.scope ?? "mine" }, controller.signal).then((value) => { if (!controller.signal.aborted) setDetail({ type: "ready", value }); },
       (error: unknown) => { if (!controller.signal.aborted) setDetail({ type: "failed", message: messageOf(error), missing: (error as { kind?: string }).kind === "not-found" }); });
     return () => controller.abort();
     // `ref` is rebuilt from the URL on every render; its parts are what identify the item.
-  }, [api, ref.projectId, ref.itemId, ref.provider, attempt, listedClaim]);
+  }, [api, ref.projectId, ref.itemId, ref.provider, binding.scope, attempt, listedClaim]);
   const back = <button type="button" className="settings-back" onClick={() => onPlace({})}><ChevronLeftIcon aria-hidden size={16} />Backlog</button>;
   if (detail.type !== "ready") {
     return <SettingsFrame back={back} title={listed?.title ?? "Backlog item"} actions={<CloseButton onClose={onClose} />}
@@ -300,6 +306,7 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
       <h2 className="agent-name bl-item-title">{item.title}</h2>
       <div className="agent-properties">
         <Property label="Project">{item.projectName}</Property>
+        {binding.scope === "everyone" && (item.assignedToMe || item.assignees.length > 0) ? <Property label="Assignees">{[...(item.assignedToMe ? ["You"] : []), ...item.assignees].join(", ")}</Property> : null}
         {priority ? <Property label="Priority"><span className="bl-priority" data-priority={item.priority?.toLowerCase()}>{priority}</span></Property> : null}
         {item.labels.length ? <Property label="Labels"><span className="bl-chips">{item.labels.map((label) => <span key={label} className="bl-chip">{label}</span>)}</span></Property> : null}
         {blockers.length ? <Property label="Waiting on" hint="A session can start once these items are done.">

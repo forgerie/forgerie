@@ -63,7 +63,7 @@ function AgentRow({ agent, replacedBy, onOpen }: { agent: AgentSummary; replaced
  * from the session list; each page keeps its place in the URL, so Back, a
  * reload, a fold, and a rotation return to the same page.
  */
-export function SettingsView({ place, onPlace, onClose, onPluginCatalog, projects, resources }: {
+export function SettingsView({ place, onPlace, onClose, onPluginCatalog, projects, resources, backlog }: {
   place: SettingsPlace;
   /** Go to another settings page. `replace` swaps this history entry instead of adding one. */
   onPlace: (place: SettingsPlace, replace?: boolean) => void;
@@ -74,6 +74,7 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
   projects?: SettingsPageRenderer | undefined;
   /** Settings → Skills and prompts. Without it, the page is not offered. */
   resources?: SettingsPageRenderer | undefined;
+  backlog?: SettingsPageRenderer | undefined;
 }) {
   const { load, refresh } = useAgentList();
   const close = onClose ? <button type="button" className="picker-icon" aria-label="Close settings" title="Close settings" onClick={onClose}><XIcon aria-hidden size={16} /></button> : null;
@@ -91,6 +92,11 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
     return <>{resources({ back: place.resource ? toList : back, close, item: place.resource, onOpen: (resource) => onPlace({ section: "resources", resource }) })}</>;
   }
 
+  if (place.section === "backlog" && backlog) {
+    const toList = <button className="settings-back" onClick={() => onPlace({ section: "backlog" })}><ChevronLeftIcon aria-hidden size={16} />Backlog</button>;
+    return <>{backlog({ item: place.project, onOpen: (project) => onPlace({ section: "backlog", project }), back: place.project ? toList : back, close })}</>;
+  }
+
   if (place.section === "plugins") return <PluginsView selected={place.plugin}
     onOpen={(plugin) => onPlace({ section: "plugins", plugin })} onBack={() => onPlace({ section: "root" })} onClose={onClose} onCatalog={onPluginCatalog} />;
 
@@ -101,9 +107,10 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
       onBack={() => onPlace({ section: "agents" })} onClose={onClose}
       onOpen={(agent) => onPlace({ section: "agents", agent }, true)} onSaved={() => void refresh()} />;
   }
-  if (place.section === "root" || place.section === "projects" || place.section === "resources") {
+  if (place.section === "root" || place.section === "projects" || place.section === "resources" || place.section === "backlog") {
     return <SettingsFrame title="Settings" actions={close}>
       <ul className="settings-sections">
+        {backlog ? <SettingsRow name="Backlog" description="Project sources and your GitHub username for Mine." onOpen={() => onPlace({ section: "backlog" })} /> : null}
         <SettingsRow name={<><CpuIcon aria-hidden size={16} />Models</>} description="The models the model menu offers, and the favorites Ctrl+P switches between."
           onOpen={() => onPlace({ section: "models" })} />
         <SettingsRow name={<><BotIcon aria-hidden size={16} />Agents</>} description="Roles a session can hand work to, each with its own model and instructions."

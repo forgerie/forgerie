@@ -1,14 +1,15 @@
 import { execFile } from "node:child_process";
 import { realpath } from "node:fs/promises";
-import { join } from "node:path";
 import { promisify } from "node:util";
 import type { BacklogClaim, BacklogConfig, BacklogProviderId, BacklogWarning, Project } from "../../shared/apiTypes.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
 import { isGitRepository, parseGitWorktreeList } from "../workspaces/gitWorktreeDiscovery.js";
-import { loadProjectPiWebConfig } from "../workspaces/projectPiWebConfig.js";
+import { resolveBacklogConfig } from "./backlogConfig.js";
+import type { BacklogSettingsStore } from "./backlogSettingsStore.js";
+import type { BacklogScope } from "../../shared/backlog.js";
 import { backlogErrorMessage } from "./backlogError.js";
 import type { BacklogProvider, BacklogProviderScan, ScannedBacklogItem } from "./backlogProvider.js";
-import { assertContainedFile, markdownBacklogProvider } from "./markdownBacklog.js";
+import { markdownBacklogProvider } from "./markdownBacklog.js";
 
 const execute = promisify(execFile);
 export const defaultBacklogProviders: readonly BacklogProvider[] = [markdownBacklogProvider];
@@ -31,7 +32,7 @@ export async function canonicalBacklogRoot(path: string): Promise<string> {
  * `providers` is what this host can offer; the project's `backlog.providers` picks among them.
  * One failing provider does not hide another's items.
  */
-export async function scanProjectBacklog(project: Project, claims: readonly BacklogClaim[], providers: readonly BacklogProvider[] = defaultBacklogProviders): Promise<BacklogProviderScan> {
+export async function scanProjectBacklog(project: Project, claims: readonly BacklogClaim[], providers: readonly BacklogProvider[] = defaultBacklogProviders, options: { settings?: BacklogSettingsStore; scope?: BacklogScope; githubLogin?: string } = {}): Promise<BacklogProviderScan> {
   const warnings: BacklogWarning[] = [];
   const entries: ScannedBacklogItem[] = [];
   const failed = (error: unknown, provider?: BacklogProviderId) => { warnings.push({ projectId: project.id, ...(provider === undefined ? {} : { provider }), kind: "project-error", path: project.path, message: backlogErrorMessage(error) }); };
@@ -39,18 +40,13 @@ export async function scanProjectBacklog(project: Project, claims: readonly Back
   let config: BacklogConfig | undefined;
   try {
     repo = await canonicalBacklogRoot(project.path);
-    // The config decides which paths and services the scan touches, so it must not be a link out of the repo.
-    await assertContainedFile(repo, join(repo, ".forgerie/config.json"));
-    const loaded = await loadProjectPiWebConfig(repo);
-    // A bad backlog section lists nothing rather than guessing a default folder or provider set.
-    if (loaded.backlogError !== undefined) throw new Error(loaded.backlogError);
-    config = loaded.config.backlog;
+    config = (await resolveBacklogConfig(project, repo, options.settings)).backlog;
   } catch (error) { failed(error); return { entries, warnings }; }
-  const enabled = new Set(config?.providers ?? DEFAULT_PROJECT_PROVIDERS);
+  const enabled = new Set(config.providers ?? DEFAULT_PROJECT_PROVIDERS);
   for (const provider of providers) {
     if (!enabled.has(provider.id)) continue;
     try {
-      const scan = await provider.scan(project, repo, config);
+      const scan = await provider.scan(project, repo, config, { scope: options.scope ?? "mine", ...(options.githubLogin === undefined ? {} : { githubLogin: options.githubLogin }) });
       entries.push(...scan.entries); warnings.push(...scan.warnings);
     } catch (error) { failed(error, provider.id); }
   }
@@ -60,5 +56,5 @@ export async function scanProjectBacklog(project: Project, claims: readonly Back
     item.claim = claim;
     item.readiness = "claimed";
   }
-  return { entries, warnings };
+  return { entries, warnings, sources: [...enabled] };
 }

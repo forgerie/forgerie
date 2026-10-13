@@ -1,3 +1,6 @@
+import { GITHUB_LOGIN_WARNING } from "./githubBacklog.js";
+import type { BacklogScope } from "../../shared/backlog.js";
+import type { BacklogSettingsStore } from "./backlogSettingsStore.js";
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import type { BacklogDetailResponse, BacklogLaunchRequest, BacklogLaunchResponse, BacklogListResponse, BacklogProviderId, BacklogReleaseRequest, BacklogReleaseResponse } from "../../shared/apiTypes.js";
@@ -16,6 +19,7 @@ interface BacklogDependencies {
   sessions: Pick<SessionRouteService, "stop">;
   isArchived: (sessionId: string) => Promise<boolean>;
   providers?: readonly BacklogProvider[];
+  settings?: BacklogSettingsStore;
 }
 
 /** Requests that name no provider address markdown items, as every request did before providers existed. */
@@ -26,16 +30,21 @@ export class BacklogService {
   private readonly providers: readonly BacklogProvider[];
   constructor(private readonly deps: BacklogDependencies) { this.providers = deps.providers ?? defaultBacklogProviders; }
 
-  async list(): Promise<BacklogListResponse> {
+  async list(scope: BacklogScope = "mine"): Promise<BacklogListResponse> {
     const claims = await this.deps.claims.list();
-    const scans = await Promise.all((await this.deps.projects.list()).map((project) => scanProjectBacklog(project, claims, this.providers)));
-    return { items: scans.flatMap((scan) => scan.entries.map((entry) => entry.item)), warnings: scans.flatMap((scan) => scan.warnings), generatedAt: new Date().toISOString() };
+    const options = await this.scanOptions(scope);
+    const projects = await this.deps.projects.list();
+    const scans = await Promise.all(projects.map((project) => scanProjectBacklog(project, claims, this.providers, options)));
+    const warnings = scans.flatMap((scan) => scan.warnings);
+    // The username is host-wide. Offer its fix once, not once for each GitHub project.
+    const loginWarning = warnings.find((warning) => warning.provider === "github" && warning.message === GITHUB_LOGIN_WARNING);
+    return { projects: projects.map((project, index) => ({ projectId: project.id, providers: scans[index]?.sources ?? [] })), items: scans.flatMap((scan) => scan.entries.map((entry) => entry.item)), warnings: warnings.filter((warning) => warning.provider !== "github" || warning.message !== GITHUB_LOGIN_WARNING || warning === loginWarning), generatedAt: new Date().toISOString() };
   }
-  async detail(projectId: string, itemId: string, provider: BacklogProviderId = DEFAULT_PROVIDER): Promise<BacklogDetailResponse> {
+  async detail(projectId: string, itemId: string, provider: BacklogProviderId = DEFAULT_PROVIDER, scope: BacklogScope = "mine"): Promise<BacklogDetailResponse> {
     const selected = this.providers.find((candidate) => candidate.id === provider);
     if (selected === undefined) throw new BacklogError("not-found", `Backlog provider ${provider} is not enabled`);
     const project = await this.requireProject(projectId);
-    const scan = await scanProjectBacklog(project, await this.deps.claims.list(), [selected]);
+    const scan = await scanProjectBacklog(project, await this.deps.claims.list(), [selected], await this.scanOptions(scope));
     const failure = scan.warnings.find((warning) => warning.kind === "project-error" || warning.kind === "scan-limit"
       || warning.kind === "provider-auth" || warning.kind === "provider-install"
       || warning.kind === "provider-unavailable" && scan.entries.length === 0);
@@ -44,8 +53,8 @@ export class BacklogService {
     if (entry === undefined) throw new BacklogError("not-found", "Backlog item not found or invalid");
     return { ...entry, initialPrompt: selected.prompt(entry) };
   }
-  launch(projectId: string, itemId: string, input: BacklogLaunchRequest, provider: BacklogProviderId = DEFAULT_PROVIDER): Promise<BacklogLaunchResponse> {
-    const key = JSON.stringify([projectId, provider, itemId, input.requestId]);
+  launch(projectId: string, itemId: string, input: BacklogLaunchRequest, provider: BacklogProviderId = DEFAULT_PROVIDER, scope: BacklogScope = "mine"): Promise<BacklogLaunchResponse> {
+    const key = JSON.stringify([projectId, provider, itemId, input.requestId, scope]);
     const fingerprint = createHash("sha256").update(JSON.stringify([
       input.start.cwd, input.start.modelSpec ?? null, input.start.thinkingLevel ?? null,
       input.start.destination?.kind ?? null, input.start.setupId ?? null,
@@ -55,7 +64,7 @@ export class BacklogService {
       if (pending.fingerprint !== fingerprint) return Promise.reject(new BacklogError("conflict", "requestId was reused with different session choices"));
       return pending.promise;
     }
-    const promise = this.launchOnce(projectId, provider, itemId, input, fingerprint);
+    const promise = this.launchOnce(projectId, provider, itemId, input, fingerprint, scope);
     this.pending.set(key, { projectId, provider, itemId, fingerprint, promise });
     void promise.finally(() => { if (this.pending.get(key)?.promise === promise) this.pending.delete(key); }).catch(() => undefined);
     return promise;
@@ -69,6 +78,10 @@ export class BacklogService {
     await this.deps.claims.release({ repo: await canonicalBacklogRoot(project.path), provider, itemId }, input.claimId, true);
     return { released: true };
   }
+  private async scanOptions(scope: BacklogScope) {
+    const githubLogin = (await this.deps.settings?.read())?.githubLogin;
+    return { scope, ...(this.deps.settings === undefined ? {} : { settings: this.deps.settings }), ...(githubLogin === undefined ? {} : { githubLogin }) };
+  }
   private async requireProject(projectId: string) {
     try { return await this.deps.projects.requireProject(projectId); }
     catch (error) {
@@ -76,8 +89,8 @@ export class BacklogService {
       throw error;
     }
   }
-  private async launchOnce(projectId: string, provider: BacklogProviderId, itemId: string, input: BacklogLaunchRequest, fingerprint: string): Promise<BacklogLaunchResponse> {
-    const detail = await this.detail(projectId, itemId, provider);
+  private async launchOnce(projectId: string, provider: BacklogProviderId, itemId: string, input: BacklogLaunchRequest, fingerprint: string, scope: BacklogScope): Promise<BacklogLaunchResponse> {
+    const detail = await this.detail(projectId, itemId, provider, scope);
     const { item, initialPrompt } = detail;
     const key = { repo: item.repo, provider, itemId };
     const existing = await this.deps.claims.get(key);

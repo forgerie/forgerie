@@ -93,3 +93,4 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `HeaderIcon` (atom): an icon-only header control, such as Close, muted until hovered, with a control-sized target and its label as name and tooltip.
 - `BackButton` (atom): a page header's way back, named for where it goes, divided from the title by a rule; a narrow header keeps only its chevron.
 - `PageSection` (molecule): a titled part of a document page: a small quiet heading set apart by the page's largest gap, then its content at full width, and a problem under it that describes the controls inside.
+- `SettingsInput` (atom): one typed settings value, using the existing Settings input style.

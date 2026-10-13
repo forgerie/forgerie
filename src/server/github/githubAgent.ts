@@ -2,7 +2,8 @@ import { IssueProposalInputSchema, type IssueProposalInput, type IssueProposalOu
 import { Type, type Static, type TSchema } from "typebox";
 import { Check } from "typebox/value";
 import { canonicalBacklogRoot } from "../backlog/backlogScanner.js";
-import { loadProjectPiWebConfig } from "../workspaces/projectPiWebConfig.js";
+import { resolveBacklogConfig } from "../backlog/backlogConfig.js";
+import type { BacklogConfig } from "../../shared/backlog.js";
 import { apiHeaders, GITHUB_API, type Fetch, type GitHubApp } from "./githubApp.js";
 import { originGitHubRepo } from "./githubRemote.js";
 import type { GitHubAuthor, GitHubAuthorTrust } from "./githubTrust.js";
@@ -20,6 +21,7 @@ export interface GitHubAgentDependencies {
   trust: Pick<GitHubAuthorTrust, "judge">;
   /** Injected so tests need no checkout. */
   resolveRepo?: (cwd: string) => Promise<SessionRepo>;
+  backlogConfig?: (root: string) => Promise<BacklogConfig>;
   onPullCreated?: (input: { id: string; cwd: string; repo: string; number: number }) => Promise<void>;
 }
 
@@ -78,7 +80,7 @@ const MAX_COMMENTS = 100;
  */
 export class GitHubAgent {
   private readonly resolveRepo: (cwd: string) => Promise<SessionRepo>;
-  constructor(private readonly deps: GitHubAgentDependencies) { this.resolveRepo = deps.resolveRepo ?? sessionRepo; }
+  constructor(private readonly deps: GitHubAgentDependencies) { this.resolveRepo = deps.resolveRepo ?? ((cwd) => sessionRepo(cwd, deps.backlogConfig)); }
 
   repo(cwd: string): Promise<SessionRepo> { return this.resolveRepo(cwd); }
 
@@ -360,10 +362,10 @@ export interface Caller {
 }
 
 /** The session's project repo: `backlog.github.repo` from the canonical checkout's config, else its github.com origin. */
-async function sessionRepo(cwd: string): Promise<SessionRepo> {
+async function sessionRepo(cwd: string, config?: (root: string) => Promise<BacklogConfig>): Promise<SessionRepo> {
   const root = await canonicalBacklogRoot(cwd);
-  const loaded = await loadProjectPiWebConfig(root);
-  const github = loaded.config.backlog?.github;
+  const backlog = config === undefined ? (await resolveBacklogConfig({ id: root }, root)).backlog : await config(root);
+  const github = backlog.github;
   const slug = github?.repo ?? await originGitHubRepo(root);
   if (slug === undefined) throw new GitHubToolError("This session's project has no GitHub repo. Its origin remote is not on github.com, and .forgerie/config.json sets no backlog.github.repo.");
   return { slug, everyone: github?.authors === "all" };

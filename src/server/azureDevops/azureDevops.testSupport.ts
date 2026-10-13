@@ -14,7 +14,7 @@ export const workItem = (id = 7, fields: Partial<AzureWorkItem["fields"]> = {}) 
 
 const BatchRequest = Type.Object({ ids: Type.Array(Type.Integer()) });
 interface ServerState {
-  items: ReturnType<typeof workItem>[]; assigned: number[]; status: number; retryAfter: string; redirect: boolean;
+  items: ReturnType<typeof workItem>[]; everyone: number[] | undefined; assigned: number[]; status: number; retryAfter: string; redirect: boolean;
   malformed: boolean; incomplete: boolean; category: string; afterQuery: (() => void) | undefined;
 }
 
@@ -22,7 +22,7 @@ interface ServerState {
 export async function azureServer() {
   const app = Fastify();
   const state: ServerState = {
-    items: [workItem()], assigned: [7], status: 200, retryAfter: "60", redirect: false, malformed: false, incomplete: false,
+    items: [workItem()], everyone: undefined, assigned: [7], status: 200, retryAfter: "60", redirect: false, malformed: false, incomplete: false,
     category: "InProgress", afterQuery: undefined,
   };
   const requests: { url: string; method: string; body: unknown; authorization: string | undefined }[] = [];
@@ -33,7 +33,7 @@ export async function azureServer() {
     if (state.malformed) return { surprise: PAT };
     const path = new URL(request.url, "http://local").pathname;
     if (path.endsWith("/wiql")) {
-      const result = { workItems: state.assigned.slice(0, 501).map((id) => ({ id })) };
+      const result = { workItems: (JSON.stringify(request.body).includes("@Me") ? state.assigned : state.everyone ?? state.assigned).slice(0, 501).map((id) => ({ id })) };
       state.afterQuery?.();
       return result;
     }
@@ -42,6 +42,7 @@ export async function azureServer() {
       const ids = request.body.ids;
       return { value: state.incomplete ? [] : state.items.filter((item) => ids.includes(item.id)) };
     }
+    if (path.endsWith("/workitemtypes")) return { value: [{ name: "User Story" }] };
     if (path.endsWith("/states")) return { value: [
       { name: "Active", category: state.category }, { name: "Shipped", category: "Completed" }, { name: "Rejected", category: "Removed" },
     ] };

@@ -134,3 +134,22 @@ describe("backlog HTTP contract", () => {
     expect(await service.list()).toMatchObject({ items: [{ id: "item" }], warnings: [{ projectId: "missing", kind: "project-error" }] });
   });
 });
+
+it("rejects invalid scopes on list, detail, and launch; markdown is mine in either scope", async () => {
+  const f = await fixture();
+  for (const scope of ["mine", "everyone"]) {
+    expect((await f.app.inject({ method: "GET", url: `/backlog?scope=${scope}` })).json()).toMatchObject({ items: [{ assignedToMe: true, assignees: [] }] });
+    expect((await f.app.inject({ method: "GET", url: `${f.base}?scope=${scope}` })).statusCode).toBe(200);
+  }
+  for (const url of ["/backlog", f.base]) expect((await f.app.inject({ method: "GET", url: `${url}?scope=bad` })).statusCode).toBe(400);
+  expect((await f.app.inject({ method: "POST", url: `${f.base}/launch?scope=bad`, payload: f.request })).statusCode).toBe(400);
+});
+
+it("offers the missing GitHub username fix once for the whole Mine list", async () => {
+  const f = await fixture();
+  await writeFile(join(f.projectRoot, ".forgerie/config.json"), JSON.stringify({ backlog: { providers: ["github"] } }));
+  const { createGitHubBacklogProvider } = await import("./githubBacklog.js");
+  const service = new BacklogService({ projects: { list: () => Promise.resolve([f.project, { ...f.project, id: "other" }]), requireProject: () => Promise.resolve(f.project) }, claims: f.claims, userSessions: { start: () => Promise.resolve(f.session) }, sessions: { stop: () => undefined }, isArchived: () => Promise.resolve(false), providers: [createGitHubBacklogProvider({ issues: { openIssues: () => Promise.reject(new Error("A missing login must not reach GitHub")) } })] });
+  expect(await service.list()).toMatchObject({ items: [], warnings: [{ kind: "items-hidden", message: "Set your GitHub username in Settings → Backlog to see issues assigned to you." }] });
+  expect((await service.list()).warnings).toHaveLength(1);
+});

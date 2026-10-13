@@ -1,3 +1,4 @@
+import { useBacklogScope } from "./backlogScope";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BacklogApi } from "./backlogApi";
 import type { BacklogLoad } from "./backlogModel";
@@ -12,24 +13,28 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
  * A newer read replaces an older one; a failed read keeps the last list.
  */
 export function useBacklogList(api: Pick<BacklogApi, "list">) {
+  const { scope, setScope } = useBacklogScope();
   const [load, setLoad] = useState<BacklogLoad>({ type: "loading" });
+  const loadedScope = useRef(scope);
   const current = useRef<AbortController | undefined>(undefined);
   const refresh = useCallback(() => {
     current.current?.abort();
     const controller = new AbortController();
     current.current = controller;
-    setLoad((previous) => previous.type === "ready" ? previous : previous.type === "failed" && previous.last ? { type: "ready", value: previous.last } : { type: "loading" });
-    api.list(controller.signal).then((value) => { if (!controller.signal.aborted) setLoad({ type: "ready", value }); },
+    const changed = loadedScope.current !== scope;
+    loadedScope.current = scope;
+    setLoad((previous) => changed ? { type: "loading" } : previous.type === "ready" ? previous : previous.type === "failed" && previous.last ? { type: "ready", value: previous.last } : { type: "loading" });
+    api.list(controller.signal, scope).then((value) => { if (!controller.signal.aborted) setLoad({ type: "ready", value }); },
       (error: unknown) => {
         if (controller.signal.aborted) return;
         setLoad((previous) => ({ type: "failed", message: messageOf(error), last: previous.type === "ready" ? previous.value : previous.type === "failed" ? previous.last : undefined }));
       });
-  }, [api]);
+  }, [api, scope]);
   useEffect(() => {
     refresh();
     const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
     document.addEventListener("visibilitychange", onVisible);
     return () => { document.removeEventListener("visibilitychange", onVisible); current.current?.abort(); };
   }, [refresh]);
-  return { load, refresh };
+  return { scope, setScope, load: loadedScope.current === scope ? load : { type: "loading" } as BacklogLoad, refresh };
 }

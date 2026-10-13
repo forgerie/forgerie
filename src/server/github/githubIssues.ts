@@ -17,6 +17,7 @@ const IssueSchema = Type.Object({
   author_association: Type.String(),
   user: Type.Union([Type.Object({ login: Type.String() }), Type.Null()]),
   labels: Type.Array(Type.Union([Type.String(), Type.Object({ name: Type.String() })])),
+  assignees: Type.Optional(Type.Array(Type.Object({ login: Type.String() }))),
   pull_request: Type.Optional(Type.Unknown()),
 });
 const PageSchema = Type.Array(Type.Unknown());
@@ -147,7 +148,7 @@ function stale(cached: Listing | undefined, reason: string): IssuesResult {
 function toIssue(value: Static<typeof IssueSchema>): GitHubIssue {
   return {
     number: value.number, title: value.title, body: value.body, html_url: value.html_url, created_at: value.created_at,
-    author_association: value.author_association, user: value.user,
+    author_association: value.author_association, user: value.user, assignees: value.assignees ?? [],
     labels: value.labels.map((label) => typeof label === "string" ? label : label.name),
     trusted: false,
   };

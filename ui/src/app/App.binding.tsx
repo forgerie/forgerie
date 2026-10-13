@@ -1,4 +1,6 @@
 import { lazy, Suspense, useCallback, useMemo, type ReactNode } from "react";
+import { BacklogSettingsView } from "../backlog/BacklogSettings.binding";
+import { createBacklogSettingsApi } from "../backlog/backlogSettingsApi";
 import { App } from "../App";
 import { ProjectGroupSettings, useProjectGroups } from "../projectGroups/GroupControls.binding";
 import { RelatedWorkspaces } from "../projectGroups/RelatedWorkspaces.binding";
@@ -22,6 +24,8 @@ import { createTriggerMemory } from "../triggers/triggerMemory";
 // The triggers screen carries the schedule rules and its form; the chat never pays for it.
 const TriggersScreen = lazy(() => import("../triggers/Triggers.binding").then((module) => ({ default: module.TriggersScreen })));
 const request = (path: string, init?: RequestInit) => fetch(path, init);
+const backlogApi = createBacklogSettingsApi(request);
+const backlogSettings: SettingsPageRenderer = ({ back, close, item, onOpen }) => <BacklogSettingsView api={backlogApi} selected={item} onOpen={onOpen} back={back} close={close} />;
 const api = createProjectGroupApi(request);
 const resourceApi = createResourceApi(request);
 // Session search reads through the catalog's own transport and base.
@@ -56,6 +60,6 @@ export function AppBinding({ shelves }: { shelves?: ReactNode }) {
     render: (args) => <Suspense fallback={<SessionFrame name="Triggers" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
       <TriggersScreen args={args} list={triggerList} api={triggersApi} directory={directory} memory={triggerMemory} /></Suspense>,
   }), [triggerList]);
-  return <App triggers={triggers} shelves={shelves} projectScope={groups.scope} projectCatalog={groups.loaded ? groups.catalog.projects : undefined}
+  return <App triggers={triggers} shelves={shelves} backlogSettings={backlogSettings} projectScope={groups.scope} projectCatalog={groups.loaded ? groups.catalog.projects : undefined}
     projectFilter={groups.filter} projectSettings={settings} search={search} relatedWork={related} resourceSettings={resourceSettings} resourceLens={resourceLens} />;
 }

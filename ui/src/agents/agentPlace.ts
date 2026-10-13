@@ -3,7 +3,8 @@ export type AgentTarget = { type: "new" } | { type: "home" | "user" | "builtin" 
 
 /** Where settings is open, as the URL holds it: `?settings=<section>&agent=<target>`, `&plugin=<id>`, `&group=<id>` or `&resource=<id>`. */
 export interface SettingsPlace {
-  section: "root" | "agents" | "plugins" | "models" | "projects" | "resources";
+  section: "root" | "agents" | "plugins" | "models" | "projects" | "resources" | "backlog";
+  project?: string | undefined;
   agent?: AgentTarget | undefined; plugin?: string | undefined;
   /** A project group's id, or `new`. */
   group?: string | undefined;

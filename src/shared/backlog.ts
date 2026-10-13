@@ -42,7 +42,10 @@ export type BacklogMetadata = Static<typeof BacklogMetadataSchema>;
  */
 export const BacklogProviderIdSchema = Type.String({ pattern: "^[a-z][a-z0-9-]{0,63}$" });
 export type BacklogProviderId = Static<typeof BacklogProviderIdSchema>;
-export const BacklogItemQuerySchema = Type.Object({ provider: Type.Optional(BacklogProviderIdSchema) });
+export const BacklogScopeSchema = Type.Union([Type.Literal("mine"), Type.Literal("everyone")]);
+export type BacklogScope = Static<typeof BacklogScopeSchema>;
+export const BacklogListQuerySchema = Type.Object({ scope: Type.Optional(BacklogScopeSchema) }, { additionalProperties: false });
+export const BacklogItemQuerySchema = Type.Object({ provider: Type.Optional(BacklogProviderIdSchema), scope: Type.Optional(BacklogScopeSchema) }, { additionalProperties: false });
 
 const claimIdentity = {
   claimId: text, requestId: text, fingerprint: text,
@@ -64,6 +67,7 @@ export const BacklogItemSchema = Type.Object({
   /** A web page for the item, when the provider has one. */
   url: Type.Optional(Type.String({ pattern: "^https://", maxLength: 4096 })),
   status: text, labels: Type.Array(text), blocked_by: Type.Array(text),
+  assignedToMe: Type.Boolean(), assignees: Type.Array(text, { maxItems: 10 }),
   open: Type.Boolean(),
   readiness: Type.Union([Type.Literal("ready"), Type.Literal("blocked"), Type.Literal("claimed"), Type.Literal("closed")]),
   blockingIds: Type.Array(text),
@@ -89,6 +93,7 @@ export const BacklogWarningSchema = Type.Object({
 });
 export type BacklogWarning = Static<typeof BacklogWarningSchema>;
 export const BacklogListResponseSchema = Type.Object({
+  projects: Type.Optional(Type.Array(Type.Object({ projectId: text, providers: Type.Array(BacklogProviderIdSchema) }))),
   items: Type.Array(BacklogItemSchema), warnings: Type.Array(BacklogWarningSchema), generatedAt: text,
 });
 export type BacklogListResponse = Static<typeof BacklogListResponseSchema>;

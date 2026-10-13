@@ -52,7 +52,7 @@ describe("GitHub App routes", () => {
   it("sets up the app, asks for the install, then lists the repo's issues beside markdown items and launches one", async () => {
     const f = await fixture();
     expect((await f.server.inject({ method: "GET", url: "/github/app" })).json()).toEqual({ state: "not-configured" });
-    const before = (await f.server.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>();
+    const before = (await f.server.inject({ method: "GET", url: "/backlog?scope=everyone" })).json<BacklogListResponse>();
     expect(before.items.map((item) => [item.provider, item.id])).toEqual([["markdown", "7"]]);
     expect(before.warnings).toMatchObject([{ provider: "github", kind: "provider-auth", path: "korri-os/korri" }]);
 
@@ -65,7 +65,7 @@ describe("GitHub App routes", () => {
     expect(created.body).not.toContain("PRIVATE KEY");
 
     f.github.on("GET https://api.github.com/repos/korri-os/korri/installation", json({ message: "Not Found" }, { status: 404 }));
-    const notInstalled = (await f.server.inject({ method: "GET", url: "/backlog" })).json<BacklogListResponse>();
+    const notInstalled = (await f.server.inject({ method: "GET", url: "/backlog?scope=everyone" })).json<BacklogListResponse>();
     expect(notInstalled.warnings).toMatchObject([{ provider: "github", kind: "provider-install", path: "korri-os/korri" }]);
   });
 
@@ -79,7 +79,7 @@ describe("GitHub App routes", () => {
       .always("GET https://api.github.com/repos/korri-os/korri/issues", json([issue(7, { title: "Remote seven" })]));
     await f.server.inject({ method: "POST", url: "/github/app/created", payload: { code: "code-1", state: stateOf(start.action) } });
 
-    const listing = await f.server.inject({ method: "GET", url: "/backlog" });
+    const listing = await f.server.inject({ method: "GET", url: "/backlog?scope=everyone" });
     expect(listing.body).not.toMatch(/ghs_|PRIVATE KEY/u);
     const after = listing.json<BacklogListResponse>();
     expect(after.warnings).toEqual([]);
@@ -87,9 +87,9 @@ describe("GitHub App routes", () => {
     const list = f.github.requests.find((request) => request.url.includes("/issues?"));
     expect(list?.headers["authorization"]).toBe("Bearer ghs_secret");
 
-    const detail = (await f.server.inject({ method: "GET", url: `/backlog/${f.project.id}/items/7?provider=github` })).json<BacklogDetailResponse>();
+    const detail = (await f.server.inject({ method: "GET", url: `/backlog/${f.project.id}/items/7?provider=github&scope=everyone` })).json<BacklogDetailResponse>();
     expect(detail.initialPrompt).toContain("<github-issue-7>");
-    const launch = await f.server.inject({ method: "POST", url: `/backlog/${f.project.id}/items/7/launch?provider=github`, payload: { requestId: "r1", start: { cwd: f.repo } } });
+    const launch = await f.server.inject({ method: "POST", url: `/backlog/${f.project.id}/items/7/launch?provider=github&scope=everyone`, payload: { requestId: "r1", start: { cwd: f.repo } } });
     expect(launch.json<BacklogLaunchResponse>().claim).toMatchObject({ provider: "github", itemId: "7" });
 
     expect((await f.server.inject({ method: "DELETE", url: "/github/app" })).json()).toEqual({ state: "not-configured" });

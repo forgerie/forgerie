@@ -102,3 +102,16 @@ describe("Azure backlog through the existing routes", () => {
     }
   });
 });
+
+it("keeps list, detail and launch in Everyone; Mine cannot read or launch another person's item", async () => {
+  const f = await fixture(); f.azure.state.assigned = []; f.azure.state.everyone = [7];
+  const mine = await f.app.inject({ method: "GET", url: "/backlog?scope=mine" });
+  expect(mine.json<BacklogListResponse>().items.some((item) => item.provider === "azure-devops")).toBe(false);
+  const everyone = await f.app.inject({ method: "GET", url: "/backlog?scope=everyone" });
+  expect(everyone.json<BacklogListResponse>().items.find((item) => item.provider === "azure-devops")).toMatchObject({ assignedToMe: false });
+  expect((await f.app.inject({ method: "GET", url: `${f.itemPath}?provider=azure-devops&scope=mine` })).statusCode).toBe(404);
+  expect((await f.app.inject({ method: "GET", url: `${f.itemPath}?provider=azure-devops&scope=everyone` })).statusCode).toBe(200);
+  const payload = { requestId: "everyone", start: { cwd: f.repo } };
+  expect((await f.app.inject({ method: "POST", url: `${f.itemPath}/launch?provider=azure-devops&scope=mine`, payload })).statusCode).toBe(404);
+  expect((await f.app.inject({ method: "POST", url: `${f.itemPath}/launch?provider=azure-devops&scope=everyone`, payload })).statusCode).toBe(200);
+});

@@ -10,7 +10,7 @@ import type { GitHubAppPage } from "../../backlog/useGitHubApp";
 
 let root: Root;
 const item = (extra: Partial<BacklogItem> = {}): BacklogItem => ({ id: "01A", title: "Fix the nested transcript", provider: "markdown", projectId: "p1", projectName: "forgerie",
-  repo: "/code/forgerie", path: "work/items/a.md", status: "To Do", priority: "high", labels: ["agents"], created: "2026-09-01", open: true, readiness: "ready",
+  repo: "/code/forgerie", path: "work/items/a.md", status: "To Do", priority: "high", labels: ["agents"], created: "2026-09-01", assignedToMe: true, assignees: [], open: true, readiness: "ready",
   blockingIds: [], ...extra });
 const held: BacklogClaim = { kind: "claimed", claimId: "c1", projectId: "p1", provider: "markdown", itemId: "02B", repo: "/code/forgerie", cwd: "/code/forgerie/.worktree/s-9",
   claimedAt: "2026-10-07T10:00:00Z", sessionId: "s-held", branch: "feat/atomic-deploys" };
@@ -112,7 +112,7 @@ describe("the backlog list", () => {
     const { b, places } = binding(list([item()]));
     await render({}, b);
     await click(document.querySelector<HTMLButtonElement>(".bl-row")!);
-    expect(places).toEqual([{ item: { projectId: "p1", itemId: "01A", provider: "markdown" } }]);
+    expect(places).toEqual([{ item: { projectId: "p1", itemId: "01A", provider: "markdown", scope: "mine" } }]);
   });
 });
 
@@ -302,4 +302,18 @@ describe("GitHub issues", () => {
     await render({ item: { projectId: "p1", itemId: "7", provider: "github" } }, b);
     expect(document.querySelector(".notice")!.textContent).toContain("This issue is no longer listed");
   });
+});
+
+it("persists the scope control and shows You and assignees in Everyone", async () => {
+  const { useBacklogScope } = await import("../../backlog/backlogScope");
+  window.localStorage.clear();
+  const { b } = binding(list([item({ assignees: ["Ada"], assignedToMe: true })]));
+  function Scoped() { const { scope, setScope } = useBacklogScope(); return <BacklogView place={{}} binding={{ ...b, scope, onScope: setScope }} />; }
+  await act(async () => root.render(<Scoped />)); await settle();
+  expect(button("Mine")!.getAttribute("aria-pressed")).toBe("true");
+  await click(button("Everyone"));
+  expect(document.querySelector(".bl-meta")!.textContent).toContain("YouAda");
+  await act(async () => root.render(<div />)); await act(async () => root.render(<Scoped />)); await settle();
+  expect(button("Everyone")!.getAttribute("aria-pressed")).toBe("true");
+  window.localStorage.clear();
 });

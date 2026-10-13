@@ -1,0 +1,5 @@
+.settings-input { display: block; inline-size: 100%; min-inline-size: 0; min-block-size: var(--control-size); padding: var(--space-2) var(--space-3); border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-control); background: var(--code-surface); color: var(--foreground); font-family: var(--code-font); font-size: var(--code-size);
+  transition: border-color 150ms; }
+.settings-input:focus-visible { outline: none; border-color: var(--line-focus); }
+@media (prefers-reduced-motion: reduce) { .settings-input { transition: none; } }

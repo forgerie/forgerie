@@ -5,7 +5,7 @@ import { accessWarnings, ageText, ageWords, bodyUnderTitle, findItem, firstMessa
 
 const item = (extra: Partial<BacklogItem> = {}): BacklogItem => ({
   id: "01A", title: "Fix the scanner", provider: "markdown", projectId: "p1", projectName: "forgerie", repo: "/code/forgerie", path: "work/items/a.md",
-  status: "To Do", priority: "medium", labels: [], created: "2026-09-01", open: true, readiness: "ready", blockingIds: [], ...extra,
+  status: "To Do", priority: "medium", labels: [], created: "2026-09-01", assignedToMe: true, assignees: [], open: true, readiness: "ready", blockingIds: [], ...extra,
 });
 const claimed = (sessionId: string, claimedAt = "2026-10-06T10:00:00Z"): BacklogClaim => ({ kind: "claimed", claimId: `c-${sessionId}`, projectId: "p1", provider: "markdown",
   itemId: "x", repo: "/code/forgerie", cwd: "/code/forgerie", claimedAt, sessionId });

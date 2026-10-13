@@ -1,3 +1,4 @@
+import { SettingsInput } from "./SettingsInput";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ChevronLeftIcon, EllipsisIcon, PlusIcon, RefreshCwIcon, RotateCwIcon, Trash2Icon, XIcon } from "lucide-react";
 import { createPluginsApi, type PluginsApi } from "../../plugins/pluginsApi";
@@ -232,7 +233,6 @@ function fieldOf(def: AppSettingDef, values: AppSettings, typed: Readonly<Record
   onSwitch: (id: string, value: boolean) => void, onType: (id: string, text: string) => void) {
   return <SettingsField key={def.id} label={def.label} hint={def.description}>
     {def.type === "boolean" ? <SettingsToggle label={def.label} checked={values[def.id] === true} disabled={busy} onChange={(value) => onSwitch(def.id, value)} />
-      : <input className="plugin-url" type="url" aria-label={def.label} value={typed[def.id] ?? String(values[def.id] ?? def.default)} disabled={busy} required
-        autoComplete="off" autoCapitalize="off" spellCheck={false} placeholder={def.default} onChange={(event) => onType(def.id, event.target.value)} />}
+      : <SettingsInput type="url" label={def.label} value={typed[def.id] ?? String(values[def.id] ?? def.default)} disabled={busy} required placeholder={def.default} onChange={(value) => onType(def.id, value)} />}
   </SettingsField>;
 }

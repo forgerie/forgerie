@@ -80,3 +80,14 @@ describe("assigned Azure work items", () => {
     expect(s.requests).toHaveLength(0);
   });
 });
+
+it("Everyone excludes closed states in WIQL and marks only @Me ids without connectionData", async () => {
+  const s = await server(); s.state.items = [workItem(), workItem(8)]; s.state.assigned = [7]; s.state.everyone = [7, 8];
+  const result = await s.client.assignedItems({ ...azureConfig, areaPath: "Amaze Insights\\Team" }, "everyone");
+  expect(result).toMatchObject({ ok: true, items: [{ id: 7, assignedToMe: true }, { id: 8, assignedToMe: false }] });
+  const queries = s.requests.filter((r) => r.url.includes("/wiql")).map((r) => JSON.stringify(r.body));
+  expect(queries).toHaveLength(3);
+  expect(queries[0]).not.toContain("@Me"); expect(queries[0]).toContain("[System.State] NOT IN ('Shipped', 'Rejected')");
+  expect(queries[0]).toContain("[System.AreaPath] UNDER"); expect(queries[2]).toContain("@Me"); expect(queries[2]).toContain("[System.Id] IN (7, 8)");
+  expect(s.requests.some((r) => r.url.includes("connectionData"))).toBe(false);
+});

@@ -1,6 +1,6 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Check } from "typebox/value";
-import type { BacklogAzureDevopsConfig } from "../../shared/backlog.js";
+import type { BacklogAzureDevopsConfig, BacklogScope } from "../../shared/backlog.js";
 import type { AzureCredential } from "./azureDevopsPat.js";
 
 const id = Type.Integer({ minimum: 1 });
@@ -8,6 +8,7 @@ const QuerySchema = Type.Object({ workItems: Type.Array(Type.Object({ id }), { m
 const WorkItemSchema = Type.Object({ id, fields: Type.Object({
   "System.Title": Type.String(), "System.WorkItemType": Type.String({ minLength: 1 }),
   "System.State": Type.String({ minLength: 1 }), "System.TeamProject": Type.String(),
+  "System.AssignedTo": Type.Optional(Type.Union([Type.String(), Type.Object({ displayName: Type.String() })])),
   "System.Description": Type.Optional(Type.String()),
   "Microsoft.VSTS.Common.AcceptanceCriteria": Type.Optional(Type.String()),
   "Microsoft.VSTS.TCM.ReproSteps": Type.Optional(Type.String()),
@@ -15,8 +16,9 @@ const WorkItemSchema = Type.Object({ id, fields: Type.Object({
   "System.CreatedDate": Type.Optional(Type.String()), "System.Tags": Type.Optional(Type.String()),
 }) });
 const BatchSchema = Type.Object({ value: Type.Array(WorkItemSchema, { maxItems: 200 }) });
+const TypesSchema = Type.Object({ value: Type.Array(Type.Object({ name: Type.String() }), { maxItems: 32 }) });
 const StatesSchema = Type.Object({ value: Type.Array(Type.Object({ name: Type.String(), category: Type.String() }), { maxItems: 100 }) });
-export type AzureWorkItem = Static<typeof WorkItemSchema> & { category: string | undefined };
+export type AzureWorkItem = Static<typeof WorkItemSchema> & { category: string | undefined; assignedToMe: boolean };
 export type AzureItemsResult = { ok: true; items: AzureWorkItem[]; truncated: boolean }
   | { ok: false; kind: "auth" | "unavailable"; message: string };
 
@@ -36,7 +38,7 @@ export class AzureDevopsClient {
   private readonly now: () => number;
   constructor(private readonly deps: Dependencies) { this.now = deps.now ?? Date.now; }
 
-  async assignedItems(config: BacklogAzureDevopsConfig): Promise<AzureItemsResult> {
+  async assignedItems(config: BacklogAzureDevopsConfig, scope: BacklogScope = "mine"): Promise<AzureItemsResult> {
     try {
       const organization = config.organization.toLowerCase();
       const credential = await this.deps.credential(organization);
@@ -47,9 +49,23 @@ export class AzureDevopsClient {
       // One deadline for the entire scan, not 30 seconds for each batch or type.
       const signal = AbortSignal.timeout(30_000);
       const headers = { Authorization: `Basic ${Buffer.from(`:${credential.token}`).toString("base64")}`, Accept: "application/json", "Content-Type": "application/json" };
-      const query = `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = ${quote(config.project)} AND [System.AssignedTo] = @Me${config.areaPath === undefined ? "" : ` AND [System.AreaPath] UNDER ${quote(config.areaPath)}`} ORDER BY [System.ChangedDate] DESC`;
+      const mineQuery = `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = ${quote(config.project)} AND [System.AssignedTo] = @Me${config.areaPath === undefined ? "" : ` AND [System.AreaPath] UNDER ${quote(config.areaPath)}`} ORDER BY [System.ChangedDate] DESC`;
       const read = <T extends TSchema>(path: string, schema: T, body?: unknown) => this.request(`${base}/${path}`, schema, organization,
         { headers, signal, redirect: "error", method: body === undefined ? "GET" : "POST", ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      const categories = new Map<string, Map<string, string>>();
+      const readStates = async (type: string) => {
+        const states = await read(`workitemtypes/${encodeURIComponent(type)}/states?api-version=7.1`, StatesSchema);
+        categories.set(type, new Map(states.value.map((state) => [state.name, state.category])));
+      };
+      let query = mineQuery;
+      if (scope === "everyone") {
+        // State names are process-specific. Discover all types before the broad query so closed
+        // items never consume its 500-item budget. Mine still touches only assigned items.
+        const types = await read("workitemtypes?api-version=7.1", TypesSchema);
+        for (const type of types.value) await readStates(type.name);
+        const closed = [...new Set([...categories.values()].flatMap((states) => [...states].filter(([, category]) => category === "Completed" || category === "Removed").map(([name]) => name)))];
+        query = mineQuery.replace(" AND [System.AssignedTo] = @Me", "").replace(" ORDER BY", `${closed.length === 0 ? "" : ` AND [System.State] NOT IN (${closed.map(quote).join(", ")})`} ORDER BY`);
+      }
       const result = await read("wiql?api-version=7.1&$top=501", QuerySchema, { query });
       const ids = [...new Set(result.workItems.map((item) => item.id))].slice(0, 500);
       const items: Static<typeof WorkItemSchema>[] = [];
@@ -64,18 +80,16 @@ export class AzureDevopsClient {
       }
       const types = [...new Set(items.map((item) => item.fields["System.WorkItemType"]))];
       if (types.length > 32) throw new AzureReadError("unavailable", "This Azure backlog has more than 32 work-item types. Narrow its areaPath.");
-      const categories = new Map<string, Map<string, string>>();
-      for (const type of types) {
-        const states = await read(`workitemtypes/${encodeURIComponent(type)}/states?api-version=7.1`, StatesSchema);
-        categories.set(type, new Map(states.value.map((state) => [state.name, state.category])));
-      }
+      for (const type of types) if (!categories.has(type)) await readStates(type);
       // Check membership again after reading details: a reassignment during the batch must not offer a launch.
       if (ids.length > 0) {
         const current = await read("wiql?api-version=7.1&$top=501", QuerySchema, { query });
         const assigned = new Set(current.workItems.map((item) => item.id));
+        const mine = scope === "mine" ? assigned : new Set((await read("wiql?api-version=7.1&$top=501", QuerySchema, { query: mineQuery.replace(" ORDER BY", ` AND [System.Id] IN (${ids.join(", ")}) ORDER BY`) })).workItems.map((item) => item.id));
         return { ok: true, items: items.filter((item) => assigned.has(item.id)).map((item) => ({ ...item,
-          category: categories.get(item.fields["System.WorkItemType"])?.get(item.fields["System.State"]) })), truncated: result.workItems.length > 500 || current.workItems.length > 500 };
+          assignedToMe: mine.has(item.id), category: categories.get(item.fields["System.WorkItemType"])?.get(item.fields["System.State"]) })), truncated: result.workItems.length > 500 || current.workItems.length > 500 };
       }
+      if (scope === "everyone") await read("wiql?api-version=7.1&$top=501", QuerySchema, { query: mineQuery });
       return { ok: true, items: [], truncated: false };
     } catch (error) {
       // Never reflect Azure error bodies, fetch errors, or request headers. They can contain credentials or private data.

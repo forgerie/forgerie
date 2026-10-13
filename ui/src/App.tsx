@@ -48,6 +48,7 @@ const readSettings = (): SettingsPlace | undefined => {
   const section = params.get("settings");
   if (section === null) return undefined;
   if (section === "agents") return { section, agent: readTarget(params.get("agent") ?? undefined) };
+  if (section === "backlog") return { section, project: params.get("project") ?? undefined };
   if (section === "models") return { section };
   if (section === "projects") return { section, group: params.get("group") ?? undefined };
   if (section === "resources") return { section, resource: params.get("resource") ?? undefined };
@@ -58,10 +59,10 @@ const readBacklog = () => readBacklogPlace(new URLSearchParams(window.location.s
 /** `?triggers` keeps the triggers open across a reload; `?triggers=<id>` one trigger, `?triggers&create` a new one. */
 const readTriggers = () => readTriggersPlace(new URLSearchParams(window.location.search));
 /** `&item=<projectId>/<itemId>` keeps a backlog item riding with the new-session dialog across a reload. */
-const readItem = () => readItemParam(new URLSearchParams(window.location.search).get("item"));
+const readItem = () => { const ref = readItemParam(new URLSearchParams(window.location.search).get("item")); return ref ? { ...ref, scope: new URLSearchParams(window.location.search).get("itemScope") === "everyone" ? "everyone" as const : "mine" as const } : undefined; };
 /** Settings, the backlog, and the triggers all take the thread's place, so opening one closes the others. */
 const clearSettings = (url: URL) => {
-  url.searchParams.delete("settings"); url.searchParams.delete("agent"); url.searchParams.delete("plugin"); url.searchParams.delete("group"); url.searchParams.delete("backlog");
+  url.searchParams.delete("settings"); url.searchParams.delete("agent"); url.searchParams.delete("plugin"); url.searchParams.delete("group"); url.searchParams.delete("backlog"); url.searchParams.delete("project");
   for (const param of TRIGGER_PARAMS) url.searchParams.delete(param);
 };
 const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
@@ -97,9 +98,10 @@ const DIALOG_ENTRY = { newSession: newStartupToken() };
  * `search` is session search, held by the binding above this app so its query and hits outlive every layout.
  * `triggers` is the triggers screen and its entry at the foot of the session list, held by the binding above this app.
  */
-export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, search, triggers }: {
+export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, search, triggers, backlogSettings }: {
   search?: SessionSearch | undefined; triggers?: TriggersSlot | undefined;
   shelves?: ReactNode; projectCatalog?: readonly Project[] | undefined; projectScope?: readonly string[] | undefined;
+  backlogSettings?: SettingsPageRenderer | undefined;
   projectFilter?: Omit<PickerFilter, "onManage"> | undefined; projectSettings?: SettingsPageRenderer | undefined; relatedWork?: RelatedWorkRenderer | undefined;
   resourceSettings?: SettingsPageRenderer | undefined; resourceLens?: ResourceLensRenderer | undefined;
 } = {}) {
@@ -114,6 +116,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   // The backlog item riding with the new-session dialog.
   const [composeItem, setComposeItem] = useState(readItem);
   const backlogList = useBacklogList(backlogApi);
+  const { scope: backlogScope, setScope: setBacklogScope } = backlogList;
   const backlogItems = listOf(backlogList.load)?.items;
   // Bumped when the dialog opens, so moving its destination never remounts it.
   const [composeKey, setComposeKey] = useState(0);
@@ -186,6 +189,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     const url = new URL(window.location.href);
     url.searchParams.delete("new");
     url.searchParams.delete("item");
+    url.searchParams.delete("itemScope");
     window.history.replaceState({}, "", url);
     setComposing(undefined);
     setComposeItem(undefined);
@@ -194,6 +198,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const dropComposeItem = useCallback(() => {
     const url = new URL(window.location.href);
     url.searchParams.delete("item");
+    url.searchParams.delete("itemScope");
     window.history.replaceState(window.history.state, "", url);
     setComposeItem(undefined);
   }, []);
@@ -212,6 +217,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     clearSettings(url);
     url.searchParams.delete("new");
     url.searchParams.delete("item");
+    url.searchParams.delete("itemScope");
     url.searchParams.set("session", session.id);
     // A started session replaces the dialog's entry: Back must not reopen an emptied dialog.
     if (fromComposer) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
@@ -226,12 +232,13 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     if (opening.current) return;
     // A backlog item starts in its own project. Over an open dialog, it replaces that dialog's destination and item.
     if (item) {
-      const ref = refOf(item);
+      const ref = { ...refOf(item), scope: backlogScope };
       const url = new URL(window.location.href);
       const reopen = readNew() !== undefined;
       url.searchParams.set("new", item.repo);
       url.searchParams.delete("place");
       url.searchParams.set("item", itemParam(ref));
+      url.searchParams.set("itemScope", ref.scope);
       if (reopen) window.history.replaceState(window.history.state, "", url); else window.history.pushState(DIALOG_ENTRY, "", url);
       setComposeKey((key) => key + 1);
       setComposeMode(mode);
@@ -256,7 +263,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     url.searchParams.set("new", cwd);
     window.history.pushState(DIALOG_ENTRY, "", url);
     setComposing(cwd);
-  }, [find, recent]);
+  }, [find, recent, backlogScope]);
   // Ctrl+Enter opens the dialog, Ctrl+Shift+Enter opens it in Rapidfire, as in the legacy client.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -324,6 +331,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     clearSettings(url);
     if (place) {
       url.searchParams.set("settings", place.section);
+      if (place.section === "backlog" && place.project) url.searchParams.set("project", place.project);
       if (place.section === "agents" && place.agent) url.searchParams.set("agent", targetParam(place.agent));
       if (place.section === "plugins" && place.plugin) url.searchParams.set("plugin", place.plugin);
       if (place.section === "projects" && place.group) url.searchParams.set("group", place.group);
@@ -421,9 +429,9 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} onClose={closeComposer} />
     : null;
   const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
-    <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} projects={projectSettings} resources={resourceSettings} /></Suspense>
+    <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} projects={projectSettings} resources={resourceSettings} backlog={backlogSettings} /></Suspense>
     : backlog ? <Suspense fallback={<SessionFrame name="Backlog" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
-      <BacklogView place={backlog} binding={{ load: backlogList.load, onRefresh: refreshBacklog, api: backlogApi, look: picker.look,
+      <BacklogView place={backlog} binding={{ scope: backlogScope, onScope: setBacklogScope, load: backlogList.load, onRefresh: refreshBacklog, api: backlogApi, look: picker.look,
         onPlace: placeBacklog, onClose: () => placeBacklog(undefined),
         onLaunch: (item) => { void startNew("switch", item); },
         onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }), github: githubApi, githubPage }} /></Suspense>

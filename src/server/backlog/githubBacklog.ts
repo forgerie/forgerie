@@ -1,7 +1,9 @@
 import type { BacklogConfig, BacklogWarning, Project } from "../../shared/apiTypes.js";
 import type { GitHubIssueClient } from "../github/githubIssues.js";
 import { originGitHubRepo } from "../github/githubRemote.js";
-import type { BacklogProvider, BacklogProviderScan, ScannedBacklogItem } from "./backlogProvider.js";
+import type { BacklogProvider, BacklogProviderScan, ScannedBacklogItem, BacklogScanContext } from "./backlogProvider.js";
+
+export const GITHUB_LOGIN_WARNING = "Set your GitHub username in Settings → Backlog to see issues assigned to you.";
 
 export interface GitHubBacklogDependencies {
   issues: Pick<GitHubIssueClient, "openIssues">;
@@ -14,9 +16,10 @@ export function createGitHubBacklogProvider(deps: GitHubBacklogDependencies): Ba
   const originRepo = deps.originRepo ?? originGitHubRepo;
   return {
     id: "github",
-    async scan(project: Project, repo: string, config: BacklogConfig | undefined): Promise<BacklogProviderScan> {
+    async scan(project: Project, repo: string, config: BacklogConfig | undefined, context: BacklogScanContext = { scope: "mine" }): Promise<BacklogProviderScan> {
       const warn = (kind: BacklogWarning["kind"], path: string, message: string): BacklogProviderScan =>
         ({ entries: [], warnings: [{ projectId: project.id, provider: "github", kind, path, message }] });
+      if (context.scope === "mine" && context.githubLogin === undefined) return warn("items-hidden", repo, GITHUB_LOGIN_WARNING);
       const slug = config?.github?.repo ?? await originRepo(repo);
       if (slug === undefined) {
         return warn("provider-unavailable", repo, "This project has no GitHub repo. Add a github.com origin remote, or set backlog.github.repo to owner/name in .forgerie/config.json.");
@@ -32,12 +35,13 @@ export function createGitHubBacklogProvider(deps: GitHubBacklogDependencies): Ba
       // GitHub lists pull requests with issues and has no filter for them, so the cap counts both.
       if (result.truncated) note("scan-limit", `Forgerie read only the newest 500 open issues and pull requests on ${slug}; older issues are not listed.`);
       if (result.staleSince !== undefined) note("provider-unavailable", `${result.staleReason ?? "GitHub did not answer."} Showing issues as of ${result.staleSince}.`);
-      const entries = shown.map((issue): ScannedBacklogItem => ({ body: issue.body ?? "", item: {
+      const assigned = (issue: (typeof shown)[number]) => context.githubLogin !== undefined && (issue.assignees ?? []).some((person) => person.login.toLowerCase() === context.githubLogin?.toLowerCase());
+      const entries = shown.filter((issue) => context.scope === "everyone" || assigned(issue)).map((issue): ScannedBacklogItem => ({ body: issue.body ?? "", item: {
         id: String(issue.number), title: issue.title.trim() === "" ? `#${String(issue.number)}` : issue.title,
         provider: "github", projectId: project.id, projectName: project.name, repo,
         path: `${slug}#${String(issue.number)}`, url: issue.html_url,
         status: "Open", ...priorityOf(issue.labels), created: issue.created_at, blocked_by: [],
-        open: true, readiness: "ready", blockingIds: [],
+        assignedToMe: assigned(issue), assignees: (issue.assignees ?? []).map((person) => person.login).slice(0, 10), open: true, readiness: "ready", blockingIds: [],
       } }));
       return { entries, warnings };
     },

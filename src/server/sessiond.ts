@@ -3,6 +3,10 @@ import { TriggerService } from "./triggers/triggerService.js";
 import { registerTriggerRoutes } from "./triggers/triggerRoutes.js";
 import { workflowTriggerFire } from "./triggers/triggerFire.js";
 import { WorkflowLibrary, assertProseOnly, workflowInputs } from "./resources/workflowLibrary.js";
+import { BacklogSettingsStore } from "./backlog/backlogSettingsStore.js";
+import { registerBacklogSettingsRoutes } from "./backlog/backlogSettingsRoutes.js";
+import { resolveBacklogConfig } from "./backlog/backlogConfig.js";
+import { canonicalBacklogRoot } from "./backlog/backlogScanner.js";
 import { SessionSearchService } from "./sessions/sessionSearchService.js";
 import { registerSessionSearchRoutes } from "./sessions/sessionSearchRoutes.js";
 import { mkdir, rm } from "node:fs/promises";
@@ -144,7 +148,16 @@ async function createSessionDaemonRuntime() {
   const githubIssues = new GitHubIssueClient({ app: github, fetch: fetchGitHub, trust: githubTrust });
   const pullStore = new PullRequestStore(join(piWebDataDir(daemonEnvironment), "pull-requests.json"));
   await pullStore.initialize();
-  const githubAgent: GitHubAgent = new GitHubAgent({ app: github, fetch: fetchGitHub, trust: githubTrust, onPullCreated: (input): Promise<void> => pulls.created(input) });
+  const backlogSettings = new BacklogSettingsStore(join(piWebDataDir(daemonEnvironment), "backlog-settings.json"));
+  const githubAgent: GitHubAgent = new GitHubAgent({ app: github, fetch: fetchGitHub, trust: githubTrust, backlogConfig: async (root) => {
+    const projects = await projectWorkspaceDeps.projects.list();
+    for (const project of projects) {
+      let canonical: string;
+      try { canonical = await canonicalBacklogRoot(project.path); } catch { continue; }
+      if (canonical === root) return (await resolveBacklogConfig(project, root, backlogSettings)).backlog;
+    }
+    return (await resolveBacklogConfig({ id: root }, root, backlogSettings)).backlog;
+  }, onPullCreated: (input): Promise<void> => pulls.created(input) });
   const pinStore = new SessionPinStore(defaultSessionPinFilePath(daemonEnvironment));
   const tabsStore = new SessionTabsStore(defaultSessionTabsFilePath(daemonEnvironment));
   const workspaceActivity = new WorkspaceActivityService(eventHub);
@@ -322,14 +335,15 @@ async function createSessionDaemonRuntime() {
   });
   const azureCredentials = new AzureDevopsPatStore(join(piWebDataDir(daemonEnvironment), "azure-devops"));
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
-  const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
+  const backlog = new BacklogService({ settings: backlogSettings, projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
-  return { triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
+  return { triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 
-function registerSessionDaemonRoutes({ triggers, eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ triggers, eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
   registerTriggerRoutes(app, triggers);
   registerBacklogRoutes(app, backlog);
+  registerBacklogSettingsRoutes(app, backlogSettings, projects);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);
   registerWorkspaceActivityRoutes(app, workspaceActivity);

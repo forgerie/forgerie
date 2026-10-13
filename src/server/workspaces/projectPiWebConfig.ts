@@ -70,7 +70,7 @@ function parseProjectPiWebConfig(value: Record<string, unknown>, path: string): 
   };
 }
 
-function parseBacklogConfig(value: unknown, path: string): BacklogConfig {
+export function parseBacklogConfig(value: unknown, path: string): BacklogConfig {
   const dir: unknown = isRecord(value) ? value["dir"] : undefined;
   if (dir !== undefined && (typeof dir !== "string" || isAbsolute(dir) || dir.split("/").includes("..") || /[\\\\\0]/.test(dir) || dir.trim() === "")) {
     // Someone once wrote ../work/items, reading the path as relative to .forgerie/. Say where it starts.

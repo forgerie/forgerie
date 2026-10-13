@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FakeGitHub, issue, json } from "./fakeGitHub.testSupport.js";
 import { GitHubAgent, GitHubToolError, type SessionRepo } from "./githubAgent.js";
@@ -198,4 +201,19 @@ describe("GitHub agent: merging", () => {
     failing.github.on(`GET ${REPO}/commits/${SHA}/status`, json({ state: "failure", statuses: [{ context: "ci/legacy", state: "failure" }] }));
     await expect(failing.agent.write("/repo", "s1", { action: "merge_pr", number: 9 })).rejects.toThrow("1 check failed.");
   });
+});
+
+it("uses the resolved backlog section for the session repo and trusted-author choice", async () => {
+  const { BacklogSettingsStore } = await import("../backlog/backlogSettingsStore.js");
+  const { resolveBacklogConfig } = await import("../backlog/backlogConfig.js");
+  const root = await mkdtemp(join(tmpdir(), "github-backlog-config-"));
+  try {
+    const settings = new BacklogSettingsStore(join(root, "settings.json"));
+    await settings.save("p", { providers: ["github"], github: { repo: "owner/override", authors: "all" } }, 0);
+    const github = new FakeGitHub(); github.always("GET https://api.github.com/repos/owner/override", json({ default_branch: "main" }));
+    github.always("GET https://api.github.com/repos/owner/override/issues", json([withIssue(7, { author_association: "NONE" })]));
+    const agent = new GitHubAgent({ fetch: github.fetch, app: { tokenFor: () => Promise.resolve({ ok: true, token: "test-token" }), dropToken: () => undefined, status: () => ({ state: "not-configured" }) }, trust: { judge: () => Promise.resolve(() => false) }, backlogConfig: async (canonical) => (await resolveBacklogConfig({ id: "p" }, canonical, settings)).backlog });
+    expect(await agent.read(root, { action: "issues" })).toContain("Issue 7");
+    expect(github.requests.some((request) => request.url.includes("/owner/override/issues"))).toBe(true);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -1,3 +1,4 @@
+import type { BacklogScope } from "./backlogScope";
 // The one file that knows the backlog wire contract (src/shared/backlog.ts and
 // src/shared/github.ts on Forgerie's main branch). Everything else in this client
 // reads the types below, so a contract change lands here. Only the fields this
@@ -28,6 +29,7 @@ export const backlogItemSchema = z.object({
   priority: z.string().optional().catch(undefined),
   labels: z.array(z.string()).catch([]),
   created: z.string().optional().catch(undefined),
+  assignedToMe: z.boolean().catch(false), assignees: z.array(z.string()).max(10).catch([]),
   open: z.boolean(),
   // A readiness this client does not know reads as blocked: it never offers a launch the server would refuse.
   readiness: z.enum(["ready", "blocked", "claimed", "closed"]).catch("blocked"),
@@ -45,6 +47,7 @@ export const backlogWarningSchema = z.object({
 export type BacklogWarning = z.infer<typeof backlogWarningSchema>;
 
 export const backlogListSchema = z.object({
+  projects: z.array(z.object({ projectId: text, providers: z.array(z.string()) })).optional(),
   // One malformed item drops out, not the list.
   items: z.array(z.unknown()).transform((items) => items.flatMap((item) => {
     const parsed = backlogItemSchema.safeParse(item);
@@ -88,12 +91,17 @@ export class BacklogRefusal extends Error {
 }
 
 /** One item. The same id from two providers is two items, so a reference always says which provider; absent means markdown. */
-export interface BacklogRef { projectId: string; itemId: string; provider?: string | undefined }
+export interface BacklogRef { projectId: string; itemId: string; provider?: string | undefined; scope?: BacklogScope | undefined }
 export const MARKDOWN = "markdown";
 export const providerOf = (ref: Pick<BacklogRef, "provider">) => ref.provider ?? MARKDOWN;
 /** Markdown items keep the bare path, so this client still works against a server older than providers. */
 const itemPath = (ref: BacklogRef) => `/api/backlog/${encodeURIComponent(ref.projectId)}/items/${encodeURIComponent(ref.itemId)}`;
-const providerQuery = (ref: BacklogRef) => providerOf(ref) === MARKDOWN ? "" : `?provider=${encodeURIComponent(providerOf(ref))}`;
+const providerQuery = (ref: BacklogRef) => {
+  const params = new URLSearchParams();
+  if (providerOf(ref) !== MARKDOWN) params.set("provider", providerOf(ref));
+  if (ref.scope !== undefined) params.set("scope", ref.scope);
+  return params.size ? `?${params.toString()}` : "";
+};
 
 /** The reads and writes of the backlog. Nothing here retries. */
 export function createBacklogApi(fetchFn: Fetch) {
@@ -109,7 +117,7 @@ export function createBacklogApi(fetchFn: Fetch) {
   const post = (body: unknown, signal?: AbortSignal): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     ...(signal ? { signal } : {}) });
   return {
-    list: (signal?: AbortSignal) => call("/api/backlog", backlogListSchema, signal ? { signal } : {}),
+    list: (signal?: AbortSignal, scope: BacklogScope = "mine") => call(`/api/backlog?scope=${scope}`, backlogListSchema, signal ? { signal } : {}),
     detail: (ref: BacklogRef, signal?: AbortSignal) => call(`${itemPath(ref)}${providerQuery(ref)}`, backlogDetailSchema, signal ? { signal } : {}),
     /**
      * Claim the item and start its session in one step. The same `requestId`
