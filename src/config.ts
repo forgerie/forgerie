@@ -1,3 +1,5 @@
+import { Check } from "typebox/value";
+import { AzureDevopsGlobalConfigSchema, type AzureDevopsGlobalConfig } from "./shared/azureDevopsConfig.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, normalize, resolve } from "node:path";
@@ -214,6 +216,7 @@ function readExistingConfigObject(path: string): Record<string, unknown> {
 
 function piWebConfigRecord(config: PiWebConfig): Record<string, unknown> {
   return {
+    ...(config.azureDevops !== undefined ? { azureDevops: config.azureDevops } : {}),
     ...(config.host !== undefined ? { host: config.host } : {}),
     ...(config.port !== undefined ? { port: config.port } : {}),
     ...(config.plugins !== undefined ? { plugins: config.plugins } : {}),
@@ -231,6 +234,7 @@ function piWebConfigRecord(config: PiWebConfig): Record<string, unknown> {
 
 function parsePiWebConfig(value: Record<string, unknown>, path: string): PiWebConfig {
   return {
+    ...(value["azureDevops"] !== undefined ? { azureDevops: parseAzureDevopsConfig(value["azureDevops"], path) } : {}),
     ...(value["host"] !== undefined ? { host: parseString(value["host"], "host", path) } : {}),
     ...(value["port"] !== undefined ? { port: parsePort(value["port"], "port", path) } : {}),
     ...(value["plugins"] !== undefined ? { plugins: parsePlugins(value["plugins"], path) } : {}),
@@ -375,6 +379,11 @@ export function parseAgentConfig(value: unknown, path: string, pathHost: AgentPa
     ...(command !== undefined ? { command: parseAgentCommand(command, "agent.command", path, pathHost) } : {}),
     ...(dir !== undefined ? { dir: parseAgentDir(dir, "agent.dir", path, pathHost) } : {}),
   };
+}
+
+export function parseAzureDevopsConfig(value: unknown, path: string, pathHost: AgentPathHost = "current"): AzureDevopsGlobalConfig {
+  if (!Check(AzureDevopsGlobalConfigSchema, value)) throw new Error(`Forgerie config azureDevops must contain only an optional azureCliCommand string: ${path}`);
+  return value.azureCliCommand === undefined ? {} : { azureCliCommand: parseAgentCommand(value.azureCliCommand, "azureDevops.azureCliCommand", path, pathHost) };
 }
 
 function parseAgentCommand(value: unknown, key: string, path: string, pathHost: AgentPathHost): string {

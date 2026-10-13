@@ -32,6 +32,7 @@ The inherited `PI_WEB_*` names remain supported. They do not enable upstream ins
 | --- | --- |
 | `host`, `port` | Bind address and port. The web entrypoint defaults to `127.0.0.1:8504`. |
 | `agent.command` | Pi-compatible companion executable. Defaults to `pi`. Use a bare executable name or an absolute path, not a shell command. |
+| `azureDevops.azureCliCommand` | Azure CLI executable for server-only backlog and PR credentials. Defaults to `az`. Use a bare executable name or an absolute path, not a shell command. Restart sessiond to apply. |
 | `agent.dir` | Profile containing `settings.json`, `auth.json`, `models.json`, extensions, and sessions. Defaults to `~/.pi/agent` for Pi-compatible commands. A different companion command requires an explicit profile. |
 | `spawnSessions` | Enable the session-making tool. Defaults to `true`. |
 | `askUser` | Enable the browser question tool. Defaults to `true`. Extension dialogs are separate and stay enabled. |
@@ -78,6 +79,29 @@ Changing `agent.dir` or `agent.command` saves a desired profile. It does not mov
 Restart sessiond only in an approved idle window. Provider registrations freeze at daemon startup. `/reload` does not apply provider or global extension changes. See [deployment](deployment.md).
 
 Configure credentials in the actual Pi profile, using Pi's own login flow or profile tools. The browser OAuth and API-key login routes are retired. Credentials already stored in `auth.json` remain usable.
+
+## Azure CLI
+
+Forgerie uses an existing `az login` sign-in when an organization has no PAT
+file. Set `azureDevops.azureCliCommand` in the global config if the daemon's
+PATH does not contain `az`. It is a file-level executable setting, not a token
+or project setting. Settings saves preserve it. The default is `az`.
+
+On NixOS, point it at a pinned Azure CLI store path, for example:
+
+```json
+{
+  "azureDevops": {
+    "azureCliCommand": "/nix/store/2f5gq8mb5ifwi4ir1l3qla08q2547l5z-python3.13-azure-cli-2.84.0/bin/az"
+  }
+}
+```
+
+Keep the other fields in your config. A Nix profile path that keeps the package
+reachable prevents garbage collection of a pinned store path. If the binary
+is removed, reads report an auth error; Forgerie never runs `nix run` at request
+time. Restart sessiond only in an approved idle window after changing this
+setting. See [Azure credentials and their security costs](azure-devops.md#connect-an-organization).
 
 ## Backlog settings
 

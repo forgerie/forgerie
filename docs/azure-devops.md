@@ -1,20 +1,57 @@
 # Azure DevOps backlog
 
 Forgerie can list Azure work items for a project and Area Path. **Mine** lists
-items assigned to the owner of the personal access token. **Everyone** lists
+items assigned to the signed-in Azure CLI user or PAT owner. **Everyone** lists
 open items for that same project and Area Path. An item can start a session
 with its description, acceptance criteria, and reproduction steps. The same claim, resume, release, and archive flow used
 for GitHub issues applies.
 
-This first release is read-only. It does not change Azure assignment or state,
-post comments, or fetch attachments or discussions.
+The Azure integration is read-only. It does not change work-item assignment or
+state, post comments, or fetch work-item attachments or discussions.
 Azure Repos remain ordinary local Git repositories for session worktrees.
 
 ## Connect an organization
 
-Use a PAT only if your organization permits it. Microsoft recommends Entra
-sign-in for long-lived integrations. This release uses a PAT by explicit user
-choice. It requires manual renewal and cannot use company sign-in to renew it.
+### Recommended: Azure CLI sign-in
+
+If you already use `az login` as the Forgerie user, nothing to set up. Forgerie
+uses that existing Entra sign-in for both the backlog and pull requests. If you
+need to sign in, run `az login` as the operating-system user that runs Forgerie.
+Forgerie does not read or copy the CLI's token-cache file itself.
+
+The daemon must be able to find `az`. If its PATH does not include Azure CLI,
+set `azureDevops.azureCliCommand` in the global Forgerie config to an absolute
+`bin/az` path. On NixOS, use a pinned azure-cli store path; do not configure a
+`nix run` shell command. See [Azure CLI configuration](config.md#azure-cli).
+Restart sessiond in an approved idle window after changing the command.
+
+Costs and security limits:
+
+- An Entra token carries the user's full Azure DevOps rights. It is not a
+  read-only-scoped PAT. Forgerie's Azure code only reads; that code is the
+  read-only boundary, not the token's permissions.
+- Forgerie never gives its token to agents, their environments, logs, responses,
+  or errors. It keeps the access token in memory only and refreshes five minutes
+  before expiry. An HTTP 401 drops the cached token and retries once.
+- The CLI sign-in expires according to Entra policy. When silent refresh no
+  longer works, run `az login` again. Forgerie cannot renew an interactive
+  sign-in by itself.
+- Another process running as the same operating-system user can also use the
+  CLI sign-in. This feature is not isolation from that user or that user's
+  agent shell processes.
+
+Token commands run without a shell, with a 30-second timeout and 256 KiB output
+limit. An empty temporary `AZURE_EXTENSION_DIR` prevents broken user extensions
+from breaking the core token command. Forgerie deletes that directory afterwards.
+Azure CLI owns its existing sign-in cache; Forgerie writes no token file.
+
+### Alternative: an organization PAT
+
+A PAT file takes priority for its organization. Only an absent file permits
+CLI fallback. An unreadable, public, malformed, or symlinked PAT file is an
+error; Forgerie does not silently switch identities. Use a PAT only if your
+organization permits it. It needs manual renewal and cannot use Entra sign-in
+to renew the PAT itself.
 
 1. Open your organization's personal access token settings. For Amaze Insights,
    use <https://dev.azure.com/amazeinsights/_usersSettings/tokens>.
@@ -24,9 +61,9 @@ choice. It requires manual renewal and cannot use company sign-in to renew it.
    directory and open the token file in an editor:
 
    ```sh
-   install -d -m 700 ~/.local/share/forgerie/azure-devops
+   install -d -m 700 ~/.forgerie/azure-devops
    umask 077
-   nix shell nixpkgs#nano -c nano ~/.local/share/forgerie/azure-devops/amazeinsights.pat
+   nix shell nixpkgs#nano -c nano ~/.forgerie/azure-devops/amazeinsights.pat
    ```
 
 4. Paste only the token into that file, save, and close the editor. Never paste
@@ -34,7 +71,7 @@ choice. It requires manual renewal and cannot use company sign-in to renew it.
 5. Make the file private:
 
    ```sh
-   chmod 600 ~/.local/share/forgerie/azure-devops/amazeinsights.pat
+   chmod 600 ~/.forgerie/azure-devops/amazeinsights.pat
    ```
 
 The path above uses the default Forgerie data directory. If the daemon uses
@@ -60,8 +97,7 @@ each backlog project show which sources are enabled.
 Settings shows **Set in Forgerie**, **From the repo file**, or **Default:
 Markdown**. Forgerie saves its whole backlog section in the private data-dir
 file `backlog-settings.json`; it wins over the repository section. **Use the
-repo file** removes that override. Changes apply on the next read. Credentials
-stay in the PAT file, not in Settings.
+repo file** removes that override. Changes apply on the next read. Credentials stay in the Azure CLI sign-in or PAT file, not in Settings.
 
 You can also configure the repo file. In its canonical checkout, add this
 `backlog` section to `.forgerie/config.json`. Preserve the file's other settings:
@@ -78,7 +114,7 @@ You can also configure the repo file. In its canonical checkout, add this
 }
 ```
 
-Mine lists every work-item type assigned to the PAT owner in that Azure
+Mine lists every work-item type assigned to the signed-in user or PAT owner in that Azure
 project, not only Stories or the current sprint. It does not list items from
 other Azure projects automatically. Refresh the backlog after changing config.
 
@@ -115,7 +151,7 @@ project. A team or board name is not an Area Path.
 
 ## Behavior and limits
 
-- Mine uses `System.AssignedTo = @Me`, so "me" is the PAT owner. It is not
+- Mine uses `System.AssignedTo = @Me`, so "me" is the signed-in user or PAT owner. It is not
   the agent, a guessed email address, or the person who opened the browser.
 - State categories come from Azure's work-item type definitions. `Completed`
   and `Removed` items are closed. Unknown categories block session launch.
@@ -144,7 +180,8 @@ project. A team or board name is not an Area Path.
   through the existing backlog release API. Disabling the provider does not
   prevent that release API from working.
 
-Credentials are file-based. There is no browser token-entry form.
+Credentials use the server user's Azure CLI sign-in or a private PAT file.
+There is no browser token-entry form.
 The browser shows Azure links, source labels, and errors using the existing
 backlog components. This provider cannot edit Azure items or post comments.
 
@@ -161,9 +198,12 @@ and merges the PR in Azure DevOps. Forgerie cannot create, merge, complete,
 vote, comment, or
 abandon an Azure PR. Its panel has no merge action.
 
-Use the same organization PAT file described above, with **Code: Read**
-(`vso.code`) as well as **Work Items: Read**. No token goes into chat or project
-configuration. Replacing the file applies on the next read.
+Pull requests use the same credential source as the backlog: an organization's
+PAT file first, otherwise the Azure CLI Entra sign-in described above. A PAT
+needs **Code: Read** (`vso.code`) as well as **Work Items: Read**. Entra tokens
+carry the user's full Azure DevOps rights, but this reader only reads. No token
+goes into chat or project configuration. Replacing a PAT applies on the next
+read; CLI access tokens are cached in memory until five minutes before expiry.
 
 The session's `origin` remote selects the provider and repository. HTTPS
 `dev.azure.com` (including userinfo), legacy `visualstudio.com`,
@@ -176,7 +216,7 @@ source settings, Area Path, and Mine/Everyone do not change this selection.
 Azure sessions have an `azure_pr` agent tool with `read`, `link`, `watch`, and
 `stop` actions. Give a PR number, or omit it to select the one active PR whose
 source branch is the session's branch. If none or several match, give a number.
-The tool does not receive the PAT. GitHub tools and watches keep their behavior.
+The tool does not receive either credential. GitHub tools and watches keep their behavior.
 
 A watch polls every 60 seconds, with about four Azure requests per PR. It reports
 failed policies and statuses, passing required policies, new commits, new human

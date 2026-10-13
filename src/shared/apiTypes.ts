@@ -1,4 +1,5 @@
 import type { TriggersChangedEvent } from "./triggers.js";
+import type { AzureDevopsGlobalConfig } from "./azureDevopsConfig.js";
 export type { PromptRequestOptions } from "./promptRequest.js";
 import type { SessionResponse } from "./sessionResponse.js";
 import type { PullLink } from "./pullRequests.js";
@@ -40,6 +41,8 @@ export interface PiWebAgentConfig {
 }
 
 export interface PiWebConfigValues {
+  /** Azure CLI executable for the daemon's server-only credential source. */
+  azureDevops?: AzureDevopsGlobalConfig;
   host?: string;
   port?: number;
   plugins?: PiWebPluginConfigMap;

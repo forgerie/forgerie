@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import { AzurePullReader } from "./azurePullReader.js";
-import { azureConfig, PAT } from "./azureDevops.testSupport.js";
+import { azureConfig, PAT, patCredentialSource } from "./azureDevops.testSupport.js";
 
 export const AZURE_TIME = "2026-10-07T12:00:00.000Z";
 export const azureRepo = { ...azureConfig, repository: "portal-source" };
@@ -34,6 +34,6 @@ export async function azurePullServer() {
     return fetch(`${address}${target.pathname}${target.search}`, init);
   };
   let now = Date.parse(AZURE_TIME);
-  const reader = new AzurePullReader({ credential: () => Promise.resolve({ ok: true, token: PAT }), fetch: fetchLocal, now: () => now, resolveRepo: () => Promise.resolve(azureRepo), branch: () => Promise.resolve("fix") });
+  const reader = new AzurePullReader({ credentials: patCredentialSource(), fetch: fetchLocal, now: () => now, resolveRepo: () => Promise.resolve(azureRepo), branch: () => Promise.resolve("fix") });
   return { state, requests, reader, fetch: fetchLocal, advance: (ms: number) => { now += ms; }, close: () => app.close() };
 }

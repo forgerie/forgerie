@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { AzureDevopsClient } from "./azureDevopsClient.js";
-import { azureConfig, azureServer, PAT, workItem } from "./azureDevops.testSupport.js";
+import { azureConfig, azureServer, PAT, workItem, patCredentialSource } from "./azureDevops.testSupport.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
@@ -55,7 +55,7 @@ describe("assigned Azure work items", () => {
 
   it("waits for Retry-After and reads a newly replaced token without caching the old list", async () => {
     const s = await server(); let now = 0; let token = PAT;
-    const client = new AzureDevopsClient({ credential: () => Promise.resolve({ ok: true, token }), fetch: s.fetch, now: () => now });
+    const client = new AzureDevopsClient({ credentials: patCredentialSource(() => token), fetch: s.fetch, now: () => now });
     s.state.status = 429; s.state.retryAfter = "120";
     expect(await client.assignedItems(azureConfig)).toMatchObject({ ok: false, kind: "unavailable" });
     s.state.status = 200;
@@ -75,7 +75,7 @@ describe("assigned Azure work items", () => {
 
   it("does not send any request without credentials", async () => {
     const s = await server();
-    const client = new AzureDevopsClient({ credential: () => Promise.resolve({ ok: false, message: "Store the read-only PAT on the server." }), fetch: s.fetch });
+    const client = new AzureDevopsClient({ credentials: { ...patCredentialSource(), read: () => Promise.resolve({ ok: false, message: "Store the read-only PAT on the server." }) }, fetch: s.fetch });
     expect(await client.assignedItems(azureConfig)).toMatchObject({ ok: false, kind: "auth" });
     expect(s.requests).toHaveLength(0);
   });

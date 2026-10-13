@@ -1,9 +1,14 @@
+import type { AzureCredentialSource } from "./azureDevopsCredentials.js";
 import Fastify from "fastify";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { AzureDevopsClient, type AzureWorkItem } from "./azureDevopsClient.js";
 
 export const PAT = "testOnlyReadToken1234567890";
+export const patCredentialSource = (token: () => string = () => PAT): AzureCredentialSource => ({
+  read: () => Promise.resolve({ ok: true, authorization: `Basic ${Buffer.from(`:${token()}`).toString("base64")}` }),
+  invalidate: () => undefined, fixMessage: () => "Run `az login` as the Forgerie user, or put a PAT in /private/org.pat.",
+});
 export const azureConfig = { organization: "amazeinsights", project: "Amaze Insights" };
 export const workItem = (id = 7, fields: Partial<AzureWorkItem["fields"]> = {}) => ({ id, fields: {
   "System.Title": "Check incentive totals", "System.WorkItemType": "User Story", "System.State": "Active", "System.TeamProject": "Amaze Insights",
@@ -54,6 +59,6 @@ export async function azureServer() {
     if (target.origin !== "https://dev.azure.com" || init.redirect !== "error") throw new Error("Unsafe Azure destination");
     return fetch(`${address}${target.pathname}${target.search}`, init);
   };
-  const client = new AzureDevopsClient({ credential: () => Promise.resolve({ ok: true, token: PAT }), fetch: fetchLocal });
+  const client = new AzureDevopsClient({ credentials: patCredentialSource(), fetch: fetchLocal });
   return { state, requests, client, fetch: fetchLocal, close: () => app.close() };
 }

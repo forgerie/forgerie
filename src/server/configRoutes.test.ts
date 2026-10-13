@@ -33,6 +33,17 @@ describe("config routes", () => {
     expect(response.json<PiWebConfigResponse>()).toEqual(responseFor(savedConfig, true));
   });
 
+  it("round-trips the Azure CLI command through the config contract", async () => {
+    const azureDevops = { azureCliCommand: "/nix/store/pinned-azure-cli/bin/az" };
+    const response = await app.inject({ method: "PUT", url: "/api/config", payload: { config: { azureDevops } } });
+    expect(response.statusCode).toBe(200); expect(savedConfig.azureDevops).toEqual(azureDevops);
+    expect(parsePiWebConfigResponseBody(response.json()).effectiveConfig.azureDevops).toEqual(azureDevops);
+  });
+  it.each([{ azureCliCommand: "nix run nixpkgs#azure-cli" }, { accessToken: "testOnlyAccessToken1234567890" }])("rejects Azure command strings or credentials before writing", async (azureDevops) => {
+    const response = await app.inject({ method: "PUT", url: "/api/config", payload: { config: { azureDevops } } });
+    expect(response.statusCode).toBe(400); expect(service.write).not.toHaveBeenCalled();
+    expect(response.body).not.toContain("testOnlyAccessToken1234567890");
+  });
   it("updates config through the service", async () => {
     const requestedConfig: PiWebConfigValues = {
       host: "0.0.0.0",

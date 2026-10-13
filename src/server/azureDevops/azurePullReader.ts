@@ -2,7 +2,8 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Check } from "typebox/value";
 import type { PullCheck, PullRemark, PullRequest } from "../../shared/pullRequests.js";
 import type { PullRequestReader, PullSnapshot } from "../github/pullRequestReader.js";
-import type { AzureCredential } from "./azureDevopsPat.js";
+import type { AzureCredentialSource } from "./azureDevopsCredentials.js";
+import { azureDevopsRequest } from "./azureDevopsRequest.js";
 import { azureRepoKey, azureSourceBranch, originAzureRepo, type AzureRepo } from "./azureRemote.js";
 
 const text = Type.String();
@@ -19,7 +20,9 @@ const threadSchema = Type.Object({ id: Type.Integer(), isDeleted: Type.Optional(
 const list = <T extends TSchema>(schema: T) => Type.Object({ value: Type.Array(schema, { maxItems: 2000 }) });
 const policyStates: Record<string, PullCheck["state"] | undefined> = { queued: "queued", running: "running", approved: "passed", rejected: "failed", broken: "failed" };
 const statusStates: Record<string, PullCheck["state"] | undefined> = { pending: "running", succeeded: "passed", failed: "failed", error: "failed" };
-class AzurePullError extends Error {}
+class AzurePullError extends Error {
+  constructor(message: string, readonly kind: "auth" | "unavailable" = "unavailable") { super(message); }
+}
 const MAX_RETRY_DELAY_MS = 15 * 60_000;
 const DEFAULT_RETRY_DELAY_MS = 60_000;
 
@@ -39,7 +42,7 @@ function retryDelay(header: string | null, now: number): number {
   return Math.max(1000, delay);
 }
 interface Dependencies {
-  credential: (organization: string) => Promise<AzureCredential>;
+  credentials: AzureCredentialSource;
   fetch: (url: string, init: RequestInit) => Promise<Response>;
   now?: () => number;
   resolveRepo?: (cwd: string) => Promise<AzureRepo | undefined>;
@@ -130,9 +133,9 @@ export class AzurePullReader implements PullRequestReader {
     try {
       const until = this.limitedUntil.get(organization) ?? 0;
       if (until > this.now()) throw new AzurePullError("Azure DevOps rate limit reached. Retry later.");
-      const credential = await this.deps.credential(organization);
-      if (!credential.ok) throw new AzurePullError(credential.message);
-      const response = await this.deps.fetch(url, { method: "GET", redirect: "error", signal: AbortSignal.timeout(30_000), headers: { Authorization: `Basic ${Buffer.from(`:${credential.token}`).toString("base64")}`, Accept: "application/json" } });
+      const result = await azureDevopsRequest(this.deps.credentials, organization, url, { method: "GET", redirect: "error", signal: AbortSignal.timeout(30_000), headers: { Accept: "application/json" } }, this.deps.fetch);
+      if (!result.ok) throw new AzurePullError(result.message, "auth");
+      const response = result.response;
       if (!response.ok) {
         await response.body?.cancel();
         if (response.status === 429) {
@@ -140,7 +143,7 @@ export class AzurePullReader implements PullRequestReader {
           this.limitedUntil.set(organization, now + retryDelay(response.headers.get("retry-after"), now));
           throw new AzurePullError("Azure DevOps rate limit reached. Retry later.");
         }
-        throw new AzurePullError(`Azure DevOps answered HTTP ${String(response.status)}. Check the PAT's Code: Read scope and project access.`);
+        throw new AzurePullError(`Azure DevOps answered HTTP ${String(response.status)}. Check project access and Code: Read scope if using a PAT. ${this.deps.credentials.fixMessage(organization)}`, response.status === 403 ? "auth" : "unavailable");
       }
       const reader = response.body?.getReader();
       if (reader === undefined) throw new AzurePullError("Azure DevOps returned an empty response.");

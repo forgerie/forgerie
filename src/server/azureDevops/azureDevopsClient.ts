@@ -1,7 +1,8 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Check } from "typebox/value";
 import type { BacklogAzureDevopsConfig, BacklogScope } from "../../shared/backlog.js";
-import type { AzureCredential } from "./azureDevopsPat.js";
+import type { AzureCredentialSource } from "./azureDevopsCredentials.js";
+import { azureDevopsRequest } from "./azureDevopsRequest.js";
 
 const id = Type.Integer({ minimum: 1 });
 const QuerySchema = Type.Object({ workItems: Type.Array(Type.Object({ id }), { maxItems: 501 }) });
@@ -23,7 +24,7 @@ export type AzureItemsResult = { ok: true; items: AzureWorkItem[]; truncated: bo
   | { ok: false; kind: "auth" | "unavailable"; message: string };
 
 interface Dependencies {
-  credential: (organization: string) => Promise<AzureCredential>;
+  credentials: AzureCredentialSource;
   fetch: (url: string, init: RequestInit) => Promise<Response>;
   now?: () => number;
 }
@@ -42,14 +43,12 @@ export class AzureDevopsClient {
   async assignedItems(config: BacklogAzureDevopsConfig, scope: BacklogScope = "mine"): Promise<AzureItemsResult> {
     try {
       const organization = config.organization.toLowerCase();
-      const credential = await this.deps.credential(organization);
-      if (!credential.ok) return { ok: false, kind: "auth", message: credential.message };
       const until = this.limitedUntil.get(organization) ?? 0;
       if (until > this.now()) throw new AzureReadError("unavailable", `Azure DevOps rate limit reached. Retry after ${new Date(until).toISOString()}.`);
       const base = `https://dev.azure.com/${encodeURIComponent(organization)}/${encodeURIComponent(config.project)}/_apis/wit`;
       // One deadline for the entire scan, not 30 seconds for each batch or type.
       const signal = AbortSignal.timeout(30_000);
-      const headers = { Authorization: `Basic ${Buffer.from(`:${credential.token}`).toString("base64")}`, Accept: "application/json", "Content-Type": "application/json" };
+      const headers = { Accept: "application/json", "Content-Type": "application/json" };
       const project = `[System.TeamProject] = ${quote(config.project)}`;
       const area = config.areaPath === undefined ? [] : [`[System.AreaPath] UNDER ${quote(config.areaPath)}`];
       const minePredicates = [project, "[System.AssignedTo] = @Me", ...area];
@@ -103,11 +102,12 @@ export class AzureDevopsClient {
   }
 
   private async request<T extends TSchema>(url: string, schema: T, organization: string, init: RequestInit): Promise<Static<T>> {
-    const response = await this.deps.fetch(url, init);
+    const result = await azureDevopsRequest(this.deps.credentials, organization, url, init, this.deps.fetch);
+    if (!result.ok) throw new AzureReadError("auth", result.message);
+    const response = result.response;
     if (!response.ok) {
       await response.body?.cancel();
-      if (response.status === 401) throw new AzureReadError("auth", "Azure DevOps rejected the PAT. Replace the expired or revoked token on the server, then refresh the backlog.");
-      if (response.status === 403) throw new AzureReadError("auth", "Azure DevOps denied access. Check the PAT's organization, Work Items: Read scope, and your project permissions.");
+      if (response.status === 403) throw new AzureReadError("auth", `Azure DevOps denied access. Check your project permissions and the PAT's Work Items: Read scope if using a PAT. ${this.deps.credentials.fixMessage(organization)}`);
       if (response.status === 429) {
         const retry = response.headers.get("retry-after");
         const seconds = Number(retry);

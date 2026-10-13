@@ -12,9 +12,9 @@ describe("server-only Azure PAT", () => {
   it("reads a private file and sees rotation and removal without a restart", async () => {
     const f = await fixture();
     await writeFile(f.path, "firstReadToken1234567890\n", { mode: 0o600 });
-    expect(await f.store.read("AMAZEINSIGHTS")).toEqual({ ok: true, token: "firstReadToken1234567890" });
+    expect(await f.store.read("AMAZEINSIGHTS")).toEqual({ ok: true, authorization: `Basic ${Buffer.from(":firstReadToken1234567890").toString("base64")}` });
     await writeFile(f.path, "secondReadToken1234567890\n");
-    expect(await f.store.read("amazeinsights")).toEqual({ ok: true, token: "secondReadToken1234567890" });
+    expect(await f.store.read("amazeinsights")).toEqual({ ok: true, authorization: `Basic ${Buffer.from(":secondReadToken1234567890").toString("base64")}` });
     await rm(f.path);
     expect(await f.store.read("amazeinsights")).toMatchObject({ ok: false });
   });

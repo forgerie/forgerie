@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { agentDirEnvSource, hasAgentDirEnvOverride, hasAgentSessionDirEnvOverride, loadPiWebConfig, parseAgentConfig, parseChildToolsDeny, parseUploadsConfig, resolveEffectivePiWebConfig, savePiWebConfig, type AgentPathHost, type LoadOptions, type PiWebConfig } from "../config.js";
+import { agentDirEnvSource, hasAgentDirEnvOverride, hasAgentSessionDirEnvOverride, loadPiWebConfig, parseAgentConfig, parseAzureDevopsConfig, parseChildToolsDeny, parseUploadsConfig, resolveEffectivePiWebConfig, savePiWebConfig, type AgentPathHost, type LoadOptions, type PiWebConfig } from "../config.js";
 import type { PiWebAgentDirEnvSource, PiWebConfigEnvOverrides, PiWebConfigResponse, PiWebConfigValues } from "../shared/apiTypes.js";
 import { isPiWebPluginId } from "../shared/pluginIds.js";
 
@@ -65,6 +65,7 @@ export function parsePiWebConfigResponseBody(value: unknown, source = "Forgerie 
 function parseConfigRequest(value: unknown, agentPathHost: AgentPathHost = "current"): PiWebConfig {
   if (!isRecord(value)) throw new Error("Forgerie config update must include a config object");
   const config: PiWebConfig = {};
+  if (value["azureDevops"] !== undefined) config.azureDevops = parseAzureDevopsConfig(value["azureDevops"], "request", agentPathHost);
   const host = value["host"];
   const port = value["port"];
   const plugins = value["plugins"];

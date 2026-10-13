@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
 import { AzurePullReader } from "./azurePullReader.js";
-import { AzureDevopsPatStore } from "./azureDevopsPat.js";
+import { AzureDevopsCredentials } from "./azureDevopsCredentials.js";
 import { azurePolicy, azureStatus, azurePullServer, azureRepo, AZURE_TIME } from "./azurePull.testSupport.js";
 import { PAT } from "./azureDevops.testSupport.js";
 import { PullRequestService } from "../github/pullRequestService.js";
@@ -112,11 +112,11 @@ describe("Azure PR reads", () => {
     const s = await azurePullServer(); const dir = await mkdtemp(join(tmpdir(), "azure-pr-pat-"));
     try {
       await writeFile(join(dir, "amazeinsights.pat"), PAT, { mode: 0o600 });
-      const credentials = new AzureDevopsPatStore(dir);
-      const reader = new AzurePullReader({ credential: (org) => credentials.read(org), fetch: s.fetch, resolveRepo: () => Promise.resolve(azureRepo) });
+      const credentials = new AzureDevopsCredentials({ directory: dir, runner: () => { throw new Error("PAT must take priority"); } });
+      const reader = new AzurePullReader({ credentials, fetch: s.fetch, resolveRepo: () => Promise.resolve(azureRepo) });
       expect((await reader.pull(ref.cwd, 9)).pull.complete).toBe(true);
       s.state.status = 401;
-      try { await reader.pull(ref.cwd, 9); throw new Error("read unexpectedly succeeded"); } catch (e) { expect(String(e)).toContain("Code: Read"); expect(String(e)).not.toContain(PAT); }
+      try { await reader.pull(ref.cwd, 9); throw new Error("read unexpectedly succeeded"); } catch (e) { expect(String(e)).toContain("Run `az login`"); expect(String(e)).not.toContain(PAT); }
     } finally { await s.close(); await rm(dir, { recursive: true, force: true }); }
   });
   it("resolves only one active PR for the exact source branch", async () => {

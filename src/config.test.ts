@@ -383,3 +383,17 @@ describe("offlineModeEnabled", () => {
 function testOptions(): { env: NodeJS.ProcessEnv } {
   return { env: { PI_WEB_CONFIG: configPath } };
 }
+
+describe("Azure CLI configuration", () => {
+  it("loads and persists a pinned command, preserving it across unrelated Settings saves", () => {
+    const azureDevops = { azureCliCommand: "/nix/store/pinned-azure-cli/bin/az" };
+    savePiWebConfig({ azureDevops }, testOptions());
+    expect(loadPiWebConfig(testOptions()).config.azureDevops).toEqual(azureDevops);
+    savePiWebConfig({ port: 9000 }, testOptions());
+    expect(effectivePiWebConfig(testOptions()).config.azureDevops).toEqual(azureDevops);
+  });
+  it.each([null, "az", { azureCliCommand: "nix run nixpkgs#azure-cli" }, { azureCliCommand: "./az" }, { azureCliCommand: "az; echo secret" }, { azureCliCommand: 7 }, { azureCliCommand: "" }, { token: "never allowed" }])("rejects invalid Azure CLI settings %j", async (azureDevops) => {
+    await writeFile(configPath, JSON.stringify({ azureDevops }));
+    expect(() => loadPiWebConfig(testOptions())).toThrow("Forgerie config azureDevops");
+  });
+});
