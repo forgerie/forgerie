@@ -172,9 +172,19 @@ export function runStatus(run: WorkflowRun): string {
   return `${working.map((stage) => stage.name).join(", ")}${busy > 0 ? `, ${String(busy)} working` : ""}`;
 }
 
-/** Inputs a launch needs, from the workflow's declared defaults and what the reader typed. */
 /** Declared inputs are all a launch reads, so a trigger's workflow, which has no file around it, fits too. */
 export interface DeclaresInputs { definition: { inputs?: Readonly<Record<string, WorkflowInput>> | undefined; readonly [field: string]: unknown } }
+
+function coerceLaunchInput(name: string, input: WorkflowInput, raw: string): { value: WorkflowInputs[string] } | { problem: string } {
+  if (input.type === "number") {
+    const value = Number(raw);
+    if (raw.trim() === "" || !Number.isFinite(value)) return { problem: `${name} must be a number.` };
+    return { value };
+  }
+  return { value: input.type === "boolean" ? raw === "true" : raw };
+}
+
+/** Inputs a launch needs, from the workflow's declared defaults and what the reader typed. */
 export function launchInputs(workflow: DeclaresInputs, typed: Readonly<Record<string, string>>): { inputs: WorkflowInputs } | { problem: string } {
   const inputs: WorkflowInputs = {};
   for (const [name, input] of Object.entries(workflow.definition.inputs ?? {})) {
@@ -183,9 +193,9 @@ export function launchInputs(workflow: DeclaresInputs, typed: Readonly<Record<st
       if (input.default === undefined) return { problem: `Fill in ${name}.` };
       continue;
     }
-    const value = input.type === "boolean" ? raw === "true" : input.type === "number" ? Number(raw) : raw;
-    if (typeof value === "number" && !Number.isFinite(value)) return { problem: `${name} must be a number.` };
-    inputs[name] = value;
+    const coerced = coerceLaunchInput(name, input, raw);
+    if ("problem" in coerced) return coerced;
+    inputs[name] = coerced.value;
   }
   return { inputs };
 }
@@ -329,12 +339,9 @@ export function proposalLaunchInputs(inputs: readonly (readonly [string, Workflo
       if (input.default === undefined) return { problem: `Fill in ${name}.` };
       continue;
     }
-    const raw = values[name] ?? "";
-    if (input.type === "number") {
-      const value = Number(raw);
-      if (raw.trim() === "" || !Number.isFinite(value)) return { problem: `${name} must be a number.` };
-      result[name] = value;
-    } else result[name] = input.type === "boolean" ? raw === "true" : raw;
+    const coerced = coerceLaunchInput(name, input, values[name] ?? "");
+    if ("problem" in coerced) return coerced;
+    result[name] = coerced.value;
   }
   return { inputs: result };
 }
