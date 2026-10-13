@@ -1,4 +1,4 @@
-import type { MatchedPassage } from "../../shared/sessionSearch.js";
+import { searchQueryTerms, type MatchedPassage } from "../../shared/sessionSearch.js";
 
 export type SearchMessage = Omit<MatchedPassage, "marks">;
 
@@ -9,23 +9,7 @@ export class SessionSearchError extends Error {
 }
 
 export function parseSearchQuery(query: string): { terms: string[]; fts: string } {
-  // Inside a quoted phrase, doubled quotes denote a literal quote. An unfinished
-  // phrase consumes the rest of the query; no user syntax reaches MATCH unquoted.
-  const terms: string[] = [];
-  let term = "";
-  let quoted = false;
-  for (let i = 0; i < query.length; i++) {
-    const char = query[i];
-    if (char === '"') {
-      if (quoted && query[i + 1] === '"') { term += '"'; i++; }
-      else quoted = !quoted;
-    } else if (!quoted && /\s/u.test(char ?? "")) {
-      if (Array.from(term).length >= 3) terms.push(term.toLowerCase());
-      term = "";
-    } else term += char ?? "";
-  }
-  if (Array.from(term).length >= 3) terms.push(term.toLowerCase());
-  const unique = [...new Set(terms)];
+  const unique = searchQueryTerms(query);
   if (unique.length === 0) throw new SessionSearchError("query_too_short", "Use at least one term with at least 3 characters");
   return { terms: unique, fts: unique.map((value) => `"${value.replaceAll('"', '""')}"`).join(" OR ") };
 }

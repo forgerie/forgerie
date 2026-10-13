@@ -1,32 +1,7 @@
+import { searchQueryTerms } from "@shared/sessionSearch";
 import type { SearchHit, SearchIndex } from "./searchApi";
 
-/** The shortest term the server searches. Shorter terms are ignored, so a query of them only filters titles. */
-export const MIN_TERM = 3;
-
-/**
- * The query's terms, by the server's own parser (`parseSearchQuery` in
- * `src/server/sessions/sessionSearchText.ts`), so the two never disagree on
- * whether a query searches messages. Whitespace splits terms outside quotes;
- * a quote opens or closes a phrase anywhere, and inside a phrase a doubled
- * quote is a literal quote; an unfinished phrase takes the rest of the query.
- * A term needs 3 code points, not UTF-16 units. Terms are lower-cased and unique.
- */
-export function searchTerms(query: string): string[] {
-  const terms: string[] = [];
-  let term = "";
-  let quoted = false;
-  const keep = () => { if (Array.from(term).length >= MIN_TERM) terms.push(term.toLowerCase()); term = ""; };
-  for (let index = 0; index < query.length; index++) {
-    const char = query[index] ?? "";
-    if (char === '"') {
-      if (quoted && query[index + 1] === '"') { term += '"'; index++; }
-      else quoted = !quoted;
-    } else if (!quoted && /\s/u.test(char)) keep();
-    else term += char;
-  }
-  keep();
-  return [...new Set(terms)];
-}
+export const searchTerms = searchQueryTerms;
 
 /**
  * What a query does. Empty: nothing. Title: it narrows the session list by
