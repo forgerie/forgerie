@@ -20,11 +20,14 @@ import type { ModelBinding } from "./ModelPicker";
 import type { DialogBinding } from "./DialogLayer";
 import type { NotesBinding } from "./NoteTray";
 import type { ComposerSessionKeys } from "./useComposerKeyboard";
+import type { EarlierHistory } from "../historyPaging";
 
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode. `working` says what a draft can
 // do while the session works; `queue` is what already waits.
 export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact, fileLinks, linkBase, linkError, onOpenFile, reveal }: {
+  /** Type-only parallel-builder seam. Presentation is supplied by the front-end builder. */
+  earlier?: EarlierHistory | undefined;
   /**
    * Scrolls one message into view each time `key` changes, waiting for it to
    * draw. `messageId` is the thread's id for it: a joined reply takes the id

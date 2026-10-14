@@ -200,6 +200,7 @@ Browser checks/harness:
 
 - `ui/src/sessionRegistry.test.ts` (new)
 - `ui/src/sessionPrefetch.test.ts` (new)
+- `ui/src/sessionOpen.test.ts` (architect seeds schema adapter/type tests)
 - `ui/src/sessionStore.open.test.ts` (new)
 - `ui/src/sessionStore.paging.test.ts` (new)
 - `ui/src/sessionStore.test.ts`
@@ -274,6 +275,8 @@ Root suite is timing-flaky under load on this machine. Root sources/dependencies
 | Upgrade exact focused steer test, three runs | fail (child builder timeout), pass, pass | `fast-chat-upgrade-focused-1.log`, `fast-chat-upgrade-focused-2.log`, `fast-chat-upgrade-focused-3.log` |
 | Step-1 90401251 archive, full serial suite | 2993 pass, 2 fail, 5 skip: replyFormatGuide.acceptance production-factory 5000 ms timeout; workflowRuns saved-prose workflow condition timeout. durableChildAgents passes. | `fast-chat-preupgrade-root-serial.log` |
 
+Post-upgrade real path: ran the browser measurement command on the upgraded built UI against the isolated page50 server, opening all four fixtures and revisiting small. `upgrade-path.json` and `upgrade-path.png` are in the research directory. Read the screenshot: the last-turn marker, highlighted TypeScript, source-first Mermaid and composer are visible. This is a behavior smoke, not a three-run speed comparison. All managed fixture processes were stopped.
+
 Seen test names:
 
 - `durableChildAgents.test.ts`: "lists a child, reads it, and delivers a user steer that the parent also sees" (full suite also hit its report wait).
@@ -281,3 +284,13 @@ Seen test names:
 - `workflowRuns.test.ts`: "saves, launches, snapshots, recovers, links children, explicitly finishes, and copies a variation"; upgrade parallel run also timed out temporary workflow proposal tests.
 
 `npm run verify:static` passes (`fast-chat-upgrade-static.log`). Follow-up, medium importance: diagnose root timing sensitivity and repair existing UI architectural ownership in separate work; do not lower gates in this workflow.
+
+### Architect's shared-type verification
+
+The architect implements no open route, paging store, registry, kept screen or load-earlier UI. It supplies the shared envelope/schema factory, concrete browser schemas, server type binding, EarlierHistory union, and Thread's optional **type-only** earlier prop. Schema tests reject mixed watermarks, unsafe positions/cursors, missing/invalid receipts, unsupported transient events and invalid requests. Message/status schemas remain the existing adapters.
+
+- `npm test -- src/shared/sessionOpen.test.ts src/server/sessions/sessionOpen.test.ts`: 24 pass.
+- Focused browser schema/Thread/fixture tests: 71 pass (including 66 existing Thread tests).
+- `npm run verify:static`: pass after types (root typecheck/lint/Knip and UI Knip).
+- Final `npm --prefix ui run verify`: build/lint pass; 2470 tests pass, only the same 10 known gates fail, 1 skip. Log `logs/fast-chat-contract-ui-verify.log` in the research directory.
+- Ownership check: 63 full-stack paths, 11 front-end paths, zero overlap.

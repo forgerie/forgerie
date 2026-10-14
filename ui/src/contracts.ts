@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createSessionHistoryPageSchema, createSessionOpenSchema } from "@shared/sessionOpen";
 // This shared module is the sole schema source for native replacement frames.
 export { durableBrowserSnapshotSchema } from "@shared/durableBrowserSnapshot";
 export type { DurableBrowserSnapshot } from "@shared/durableBrowserSnapshot";
@@ -123,6 +124,11 @@ export const dialogCloseResponseSchema = z.object({
   result: z.enum(["closed", "stale"]), sessionStatus: statusSchema,
 });
 export const snapshotSchema = z.object({ seq: z.number(), partial: piMessageSchema.nullable() });
+/** One consistent open read; status/message allowlists remain the existing adapters. */
+export const sessionOpenSchema = createSessionOpenSchema(piMessageSchema, statusSchema);
+export type SessionOpen = z.infer<typeof sessionOpenSchema>;
+export const sessionHistoryPageSchema = createSessionHistoryPageSchema(piMessageSchema);
+export type SessionHistoryPage = z.infer<typeof sessionHistoryPageSchema>;
 export const acceptedSchema = z.object({ accepted: z.literal(true) });
 export const errorSchema = z.object({ error: z.string() });
 const contentPartSchema = z.discriminatedUnion("type", [
