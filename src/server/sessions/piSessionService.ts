@@ -1,3 +1,4 @@
+import type { TaskActivity } from "../../shared/durableTaskActivity.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { ManagedProcessRegistry, type ManagedProcessRegistryOptions } from "../processes/managedProcessRegistry.js";
 import type { ManagedProcesses } from "../processes/managedProcesses.js";
@@ -2656,6 +2657,18 @@ export class PiSessionService implements SessionRouteService {
   }
 
   publishPullWatchStatus(id: string): void { this.publishStatusForSessionId(id); }
+
+  async durableTasks(ref: PiSessionRef): Promise<TaskActivity> {
+    const active = this.activeForRef(ref)?.runtime.session;
+    if (active instanceof DurableAgentSession) return active.taskActivity();
+    if (active !== undefined) return { kind: "unsupported" };
+    const native = await this.durableReader?.tasks(ref);
+    if (native?.kind === "ready") return native;
+    // Establish existence without opening a runtime or reading/importing a legacy transcript.
+    if (await this.getArchived(ref) === undefined && await this.sessionWorktrees?.store.readOnly(ref) === undefined
+      && await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader) === undefined) throw new Error("Session not found");
+    return { kind: "unsupported" };
+  }
 
   /** The server half of "open a child". Each call reaches the child through the parent's Durable storage. */
   async durableChildren(ref: PiSessionRef) { return (await this.durableSession(ref)).durableChildren(); }

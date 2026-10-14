@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerDurableTaskRoutes } from "./sessions/durableTaskRoutes.js";
 import { TriggerService } from "./triggers/triggerService.js";
 import { registerTriggerRoutes } from "./triggers/triggerRoutes.js";
 import { workflowTriggerFire } from "./triggers/triggerFire.js";
@@ -374,6 +375,7 @@ function registerSessionDaemonRoutes({ triggers, eventHub, workspaceActivity, se
   registerSessionRoutes(app, sessions, eventHub, "", userSessions);
   registerProcessRoutes(app, sessions);
   registerDurableChildRoutes(app, sessions);
+  registerDurableTaskRoutes(app, sessions);
   registerChildRunRoutes(app, childRuns);
   registerWorkflowRoutes(app, sessions);
   registerDecisionRoutes(app, sessions);

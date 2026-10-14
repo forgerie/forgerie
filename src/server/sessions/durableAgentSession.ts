@@ -1,3 +1,4 @@
+import { readTaskActivity, watchTaskActivity } from "./durableTaskActivity.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { acceptProcessEvents, processEventsExtension } from "./durableProcessEvents.js";
 import { execFile } from "node:child_process";
@@ -122,6 +123,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private basePrompt: BuildSystemPromptOptions;
   private closed = false;
   private bound = false;
+  private taskWatch: { stop(): Promise<void> } | undefined;
+  private childTasksLive = false;
+  private workflowLive = false;
   private childWatch: { stop(): Promise<unknown> } | undefined;
   private childrenLive: boolean | undefined;
   private childWorktrees: DurableChildWorktrees | undefined;
@@ -188,6 +192,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       return session;
     } catch (error) {
       await session.detachProcessEvents?.();
+      await session.taskWatch?.stop();
+      await session.childWatch?.stop();
       await session.stream?.stop();
       await session.parentAppWatch?.stop();
       session.sdkView?.close();
@@ -313,6 +319,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     await this.restoreAgentSelection();
     await this.startGatedActions();
     await this.startChildAgents();
+    await this.startTaskObservation();
     await this.startEventStream();
     this.detachProcessEvents = await this.processTools?.attach(summary => acceptProcessEvents(this.journal.conversation, summary, context));
   }
@@ -480,7 +487,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       this.childRunRecords = await DurableChildRunRecords.open(this.journal.harness, this.journal.conversation.id, ref, host.runRecords, context,
         (error) => { if (host.runRecordError === undefined) this.report(error); else host.runRecordError(error); }, Date.now, host.runFinished);
     }
-    await this.watchChildAgents(host, ref);
+    await this.watchChildAgents();
   }
 
   private async installChildExtensions() {
@@ -522,19 +529,29 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.installRoutedChildExtensions(source);
   }
 
-  private async watchChildAgents(host: DurableChildHost, ref: { id: string; cwd: string }): Promise<void> {
-    const watch = await this.journal.harness.watchTaskGraph(context);
-    let workflowActive = (await activeWorkflowRun(this.journal.harness, this.journal.conversation.id, context)) !== undefined;
-    const update = (graph: typeof watch.value) => {
-      // Unfinished workflows also need startup reopening, even between child runs or before launch delivery.
-      const live = workflowActive || childWorkIsLive(graph, this.journal.conversation.id);
-      this.childCount = workingChildCount(graph, this.journal.conversation.id);
-      // Every graph change can move a child between working and idle; the browser refetches the list.
+  taskActivity() { return readTaskActivity(this.journal.harness, this.journal.conversation.id, context); }
+
+  private updateChildLiveness(): void {
+    const host = this.options.childAgents;
+    if (host === undefined) return;
+    const live = this.workflowLive || this.childTasksLive;
+    if (live === this.childrenLive) return;
+    this.childrenLive = live;
+    host.liveChanged({ id: this.sessionId, cwd: this.options.services.cwd }, live);
+  }
+
+  private async startTaskObservation(): Promise<void> {
+    const parent = this.journal.conversation.id;
+    this.taskWatch = await watchTaskActivity(this.journal.harness, parent, (graph, family) => {
+      this.childCount = workingChildCount(graph, parent, family);
+      this.childTasksLive = childWorkIsLive(graph, parent, family);
+      this.updateChildLiveness();
       this.emit({ type: "durable_children_changed" });
-      if (live === this.childrenLive) return;
-      this.childrenLive = live;
-      host.liveChanged(ref, live);
-    };
+    }, error => { this.report(error); }, context);
+  }
+
+  private async watchChildAgents(): Promise<void> {
+    this.workflowLive = (await activeWorkflowRun(this.journal.harness, this.journal.conversation.id, context)) !== undefined;
     const parent = this.journal.conversation.id;
     // Child questions, workflow stops, and open proposals wait on the user; the status counts them so the session list can say so.
     const recountWaiting = async () => {
@@ -556,12 +573,10 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       }
       const change = workflowActiveFromCommit(publication, this.journal.conversation.id);
       if (change === undefined) return;
-      workflowActive = change.active !== null;
-      update(watch.value);
+      this.workflowLive = change.active !== null;
+      this.updateChildLiveness();
     });
-    this.childWatch = { stop: async () => { unsubscribe(); return watch.stop(); } };
-    update(watch.value);
-    watch.start((graph) => { update(graph); return Promise.resolve(); });
+    this.childWatch = { stop: () => { unsubscribe(); return Promise.resolve(); } };
   }
 
   subscribe(listener: (event: unknown) => void): () => void {
@@ -867,6 +882,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (selected.cancelled) return { cancelled: true };
     await this.stream?.stop();
     this.gateUnsubscribe?.();
+    await this.taskWatch?.stop();
     await this.childWatch?.stop();
     await this.childRunRecords?.close();
     this.childRunRecords = undefined;
@@ -880,6 +896,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       await this.restoreAgentSelection();
       await this.startGatedActions();
       await this.startChildAgents();
+      await this.startTaskObservation();
       await this.startEventStream();
     } catch (error) { this.bindConversation(); throw error; }
     this.preparedContextTokens = undefined;
@@ -928,6 +945,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.bashController?.abort();
     this.branchSummaryController?.abort();
     this.gateUnsubscribe?.();
+    await this.taskWatch?.stop();
     await this.childWatch?.stop();
     await this.parentAppWatch?.stop();
     this.sdkView?.close();

@@ -321,3 +321,9 @@ A SIGKILL cannot run cleanup. If that happens, remove `/tmp/forgerie-child-tools
 - Run history: `src/shared/childRuns.ts`, `src/server/sessions/durableChildRunRecords.ts`, `childRunStore.ts`, `childRunRoutes.ts`.
 - Browser: `ui/src/childAgents/`.
 - Spike and findings: `prototypes/durable-child-spike/README.md`.
+
+### Live task activity API
+
+`GET /api/sessions/:sessionId/tasks?cwd=<absolute-path>` reads live Durable tasks without starting or resuming a session. Sessiond registers the same route without `/api`. The response is `{kind: "ready", parentConversationId, backgroundAgents, agents, tasks}`, or `{kind: "unsupported"}` for a non-Durable session. Tasks include public ownership, scheduler state, start time, and restart policy. Tool subjects include only an allowed path or a short, redacted command. Saved inputs, checkpoints, arguments, transcript text, and agent provenance are private. The strict response schema is `src/shared/durableTaskActivity.ts`.
+
+Only the parent's ownership family appears, including children whose anchor has finished. `backgroundAgents` uses the same family count as session status. Family graph changes emit the existing `durable_children_changed` event with a 100 ms trailing debounce. Clients refetch on this event and on reconnect. Invalid queries return 400, unknown sessions return 404, and projection failures return 500 with `{error: string}`. This API has no task write actions or completed-task history.

@@ -1,3 +1,5 @@
+import { readTaskActivity } from "./durableTaskActivity.js";
+import type { TaskActivity } from "../../shared/durableTaskActivity.js";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { SessionRef, SessionTreeSnapshot } from "../../shared/apiTypes.js";
 import type { DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
@@ -27,6 +29,10 @@ export class DurableSessionReader {
     // just before shutdown. Rejected openings already release their candidate in openAttachment.
     await Promise.allSettled(this.opening);
     await Promise.all([...this.attachments].map((attachment) => attachment.stop()));
+  }
+
+  async tasks(ref: SessionRef): Promise<TaskActivity> {
+    return await this.read(ref, handle => readTaskActivity(handle.harness, handle.conversation.id, context)) ?? { kind: "unsupported" };
   }
 
   messages(ref: SessionRef, page?: MessagePageRequest): Promise<DurableBrowserSnapshot["history"] | undefined> {

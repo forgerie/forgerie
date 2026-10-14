@@ -7,7 +7,7 @@ import { WebSocket } from "ws";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxToolCall, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
-import { Harness, LiveDoc, UserEntry, createRegistry, defineExtension, defineTool, type EntryRecord } from "@earendil-works/pi-durable";
+import { Harness, GenerationTask, LiveDoc, UserEntry, createRegistry, defineExtension, defineTool, type EntryRecord } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +19,7 @@ import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { PiSessionService } from "./piSessionService.js";
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import { testModelRuntime } from "./piSessionService.testSupport.js";
+import { registerDurableTaskRoutes } from "./durableTaskRoutes.js";
 import { registerSessionRoutes } from "./sessionRoutes.js";
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -61,6 +62,7 @@ async function fixture(hub = new SessionEventHub()) {
     await app.register(websocket);
     service = new PiSessionService(hub, { agentDir: directory, sessionManager: gateway, modelRuntime: testModelRuntime, durableReader: reader, heartbeatIntervalMs: 60_000 });
     registerSessionRoutes(app, service, hub);
+    registerDurableTaskRoutes(app, service);
     return app.listen({ host: "127.0.0.1", port: 0 });
   }
   async function stop() { await app?.close(); await service?.dispose(); app = undefined; service = undefined; }
@@ -116,6 +118,30 @@ class CompletionGateSessionEventHub extends SessionEventHub {
 }
 
 describe("native read-model HTTP and WebSocket paths", () => {
+  it("serves live task activity through the real HTTP reader lease without opening or resuming a runtime", async () => {
+    const f = await fixture();
+    const task = await f.conversation().commit(tx => tx.createTask(GenerationTask, {}, { ownership: { kind: "conversation" } }), context);
+    const base = await f.start();
+    const response = await fetch(`${base}/sessions/logical/tasks?${new URLSearchParams({ cwd: f.directory })}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ kind: "ready", parentConversationId: f.conversation().id, backgroundAgents: 0, agents: [], tasks: [{ id: task, label: "Answering your message", status: "pending", scheduler: "ready", startedAt: null, restart: "resumes" }] });
+    expect(f.acquired()).toBe(1);
+    expect(f.leased()).toBe(0);
+    expect(await f.scheduling()).toBe("paused");
+    f.useLegacy();
+    expect(await f.reader.tasks({ id: "legacy", cwd: f.directory })).toEqual({ kind: "unsupported" });
+    expect(f.acquired()).toBe(1);
+  });
+
+  it("releases the read lease when task projection fails", async () => {
+    const f = await fixture();
+    const inspect = vi.spyOn(f.harness(), "inspect").mockRejectedValue(new Error("inspection failed"));
+    await expect(f.reader.tasks({ id: "logical", cwd: f.directory })).rejects.toThrow("inspection failed");
+    expect(f.leased()).toBe(0);
+    inspect.mockRestore();
+    expect(await f.scheduling()).toBe("paused");
+  });
+
   it("serves history without a compatibility file and late-joins a real socket during tool output", async () => {
     const f = await fixture();
     await f.user("native input");
@@ -247,6 +273,11 @@ describe("native read-model HTTP and WebSocket paths", () => {
     const response = await fetch(`${base}/sessions/${id}/messages?${new URLSearchParams({ cwd: f.directory })}`);
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ messages: [{ content: "legacy input" }] });
+    expect(f.acquired()).toBe(0);
+    const tasks = await fetch(`${base}/sessions/${id}/tasks?${new URLSearchParams({ cwd: f.directory })}`);
+    expect(tasks.status).toBe(200);
+    expect(await tasks.json()).toEqual({ kind: "unsupported" });
+    expect((await fetch(`${base}/sessions/unknown/tasks?${new URLSearchParams({ cwd: f.directory })}`)).status).toBe(404);
     expect(f.acquired()).toBe(0);
   });
 

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { ModelRuntime, SessionManager, createAgentSessionServices, createCodemodeExtension, defineTool, type SessionBeforeTreeEvent, type SessionBeforeTreeResult } from "@earendil-works/pi-coding-agent";
 import { calculateCost } from "@earendil-works/pi-ai";
-import { AssistantEntry, LiveDoc, ToolTask, UsageDoc } from "@earendil-works/pi-durable";
+import { AssistantEntry, LiveDoc, ToolTask, UsageDoc, defineTask } from "@earendil-works/pi-durable";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { durableSessionPaths } from "./durableSessionJournal.js";
@@ -74,6 +74,32 @@ function messagesOfType(events: readonly unknown[], type: "message_start" | "mes
 }
 
 describe("SDK-compatible Durable execution", () => {
+  it("observes parent task graph changes even when child hosting is disabled", async () => {
+    const { session, provider, events } = await fixture();
+    provider.setResponses([fauxAssistantMessage("done")]);
+    events.length = 0;
+    await session.prompt("one turn");
+    await vi.waitFor(() => { expect(events).toContainEqual({ type: "durable_children_changed" }); });
+    expect((await session.taskActivity()).kind).toBe("ready");
+  });
+
+  it("keeps the status child count and task projection scoped to the parent's ownership family", async () => {
+    const { session } = await fixture();
+    const harness = session.journal.harness;
+    const parent = session.journal.conversation;
+    // An unregistered kind stays live but blocked, without running model or task code.
+    const hold = defineTask<null, { phase: "hold" }, null>({ name: "test.unregistered-hold", version: 1, initial: () => ({ phase: "hold" }), phases: { hold: () => Promise.resolve() }, abort: () => Promise.resolve() });
+    const anchor = await parent.commit(tx => tx.createTask(hold, null, { ownership: { kind: "conversation" }, background: true }), context);
+    const child = await harness.createConversation({ ownership: { kind: "task", taskId: anchor } }, context);
+    await child.commit(tx => tx.createTask(hold, null, { ownership: { kind: "conversation" } }), context);
+    const sibling = await harness.createConversation({ ownership: { kind: "ownerless" } }, context);
+    await sibling.commit(tx => tx.createTask(hold, null, { ownership: { kind: "conversation" } }), context);
+    await vi.waitFor(() => { expect(session.workingDurableChildren).toBe(1); });
+    const activity = await session.taskActivity();
+    expect(activity.backgroundAgents).toBe(session.workingDurableChildren);
+    expect(activity.tasks.map(task => task.conversationId)).not.toContain(sibling.id);
+  });
+
   it("dispatches a shared-journal fork's tools and context hooks to the fork, even after its parent closes", async () => {
     const tool = defineTool({ name: "where_am_i", label: "Where", description: "Report logical session", parameters: Type.Object({}),
       execute: (_id, _args, _signal, _update, ctx) => Promise.resolve({ content: [{ type: "text" as const, text: ctx.sessionManager.getSessionId() }], details: undefined }) });

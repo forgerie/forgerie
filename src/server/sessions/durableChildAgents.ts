@@ -575,13 +575,13 @@ function requireWorktrees(worktrees: DurableChildWorktrees | undefined): Durable
   return worktrees;
 }
 
-export function workingChildCount(graph: TaskGraph, parent: ConversationId): number {
-  return new Set(Object.values(graph.tasks).filter((task) => task.conversationId !== parent).map((task) => task.conversationId)).size;
+export function workingChildCount(graph: TaskGraph, parent: ConversationId, family: ReadonlySet<ConversationId>): number {
+  return new Set(Object.values(graph.tasks).filter((task) => task.conversationId !== parent && family.has(task.conversationId)).map((task) => task.conversationId)).size;
 }
 
 /** Whether any child work is still live: a child's own task, or a reporter that has not delivered yet. */
-export function childWorkIsLive(graph: TaskGraph, parent: ConversationId): boolean {
-  return Object.values(graph.tasks).some((task) => task.kind === REPORTER_KIND || task.conversationId !== parent);
+export function childWorkIsLive(graph: TaskGraph, parent: ConversationId, family: ReadonlySet<ConversationId>): boolean {
+  return Object.values(graph.tasks).some((task) => family.has(task.conversationId) && (task.kind === REPORTER_KIND || task.conversationId !== parent));
 }
 
 // ─── Host operations: what Forgerie's server and UI call. No model turn in any of them. ───
