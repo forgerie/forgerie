@@ -374,7 +374,7 @@ button:disabled { cursor: default; opacity: 0.4; }
 .queue-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 var(--space-2); padding-inline-start: var(--space-1); color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
 .queue-head button { min-block-size: var(--control-size); padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-family: var(--body-font); font-size: var(--small-text); }
 .queue-head button:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
-.queue-items { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0; list-style: none; max-block-size: min(9rem, 22cqb); overflow-y: auto; overscroll-behavior: contain; }
+.queue-items { position: relative; display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0; list-style: none; max-block-size: min(9rem, 22cqb); overflow-y: auto; overscroll-behavior: contain; }
 .queue-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-surface); background: color-mix(in oklab, var(--muted) 30%, var(--background)); }
 .queue-kind { flex: none; min-inline-size: 4.75rem; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); }
 .queue-item[data-kind="steer"] .queue-kind { color: var(--foreground); }
