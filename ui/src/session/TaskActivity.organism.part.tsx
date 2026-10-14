@@ -61,3 +61,7 @@ export function InPanel() {
   return <StatusChip label="Running" tone="live" aside="2 agents" asideLabel="2 background agents"
     panel={{ title: "Running", children: <Stateful initial={VIEWS.busy} initialOpen={["agent:5"]} /> }} />;
 }
+/** In place: an idle session whose task read failed keeps its word; the chip draws so the panel can say why and offer Try again. */
+export function IdleReadFailedInPanel() {
+  return <StatusChip label="Connected" tone="quiet" panel={{ title: "Connected", children: <Stateful initial={VIEWS.error} running={false} /> }} />;
+}

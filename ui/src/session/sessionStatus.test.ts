@@ -67,4 +67,10 @@ describe("sessionStatus", () => {
     expect(sessionStatus({ ...idle, readOnly: "Landed", tasks: { live: 2, backgroundAgents: 1 } })).toMatchObject({ aside: undefined, hasDetail: false });
     expect(sessionStatus({ ...idle, readOnly: "Landed", problems: 1 })).toMatchObject({ hasDetail: true });
   });
+  test("a failed task read opens the panel of an idle session and keeps its word, until a read succeeds", () => {
+    expect(sessionStatus({ ...idle, tasks: { live: 0, backgroundAgents: 0, readFailed: true } }))
+      .toEqual({ label: "Connected", tone: "quiet", count: 0, countLabel: undefined, aside: undefined, asideLabel: undefined, hasDetail: true });
+    expect(sessionStatus({ ...idle, tasks: { live: 0, backgroundAgents: 0, readFailed: false } })).toMatchObject({ hasDetail: false });
+    expect(sessionStatus({ ...idle, readOnly: "Landed", tasks: { live: 0, backgroundAgents: 0, readFailed: true } })).toMatchObject({ hasDetail: false });
+  });
 });

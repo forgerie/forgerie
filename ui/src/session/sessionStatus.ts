@@ -16,11 +16,11 @@ export interface StatusFacts {
   shellRunning: boolean;
   problems: number;
   /**
-   * The session's live Durable tasks: how many, and how many child agents
-   * work in the background. `unsupported` for a session that is not Durable;
-   * undefined until the first read returns.
+   * The session's live Durable tasks: how many, how many child agents work in
+   * the background, and whether the latest read failed. `unsupported` for a
+   * session that is not Durable; undefined until the first read returns.
    */
-  tasks?: "unsupported" | { live: number; backgroundAgents: number } | undefined;
+  tasks?: "unsupported" | { live: number; backgroundAgents: number; readFailed?: boolean } | undefined;
 }
 export interface SessionStatusView {
   label: string;
@@ -43,13 +43,15 @@ export const problemsLabel = (count: number) => count === 1 ? "1 problem" : `${S
  * Problems name the chip only when the session is idle; otherwise they ride
  * along as a count, so "Running" never hides behind an old failure.
  * Background agents ride along as a quiet aside. The panel also opens while
- * the session runs or has live tasks, so the reader can see what works.
+ * the session runs or has live tasks, so the reader can see what works, and
+ * while the task list cannot be read, so the reader can try again.
  */
 export function sessionStatus(facts: StatusFacts): SessionStatusView {
   const problems = facts.problems;
   const tasks = facts.tasks === "unsupported" ? undefined : facts.tasks ?? { live: 0, backgroundAgents: 0 };
   const agents = tasks?.backgroundAgents ?? 0;
-  const working = tasks !== undefined && (facts.running || tasks.live > 0);
+  // A failed read keeps the word, but the panel opens to say so and offer Try again, until a read succeeds.
+  const working = tasks !== undefined && (facts.running || tasks.live > 0 || tasks.readFailed === true);
   const counted = (label: string, tone: StatusTone, detail = false): SessionStatusView => ({
     label, tone, count: problems, countLabel: problems > 0 ? problemsLabel(problems) : undefined,
     aside: agents > 0 ? agentsLabel(agents) : undefined, asideLabel: agents > 0 ? backgroundAgentsLabel(agents) : undefined,

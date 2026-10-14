@@ -442,7 +442,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     compaction: state.compaction.type === "running" ? "running" : state.compaction.type === "queued" ? "queued" : "idle",
     running: state.transcript.isRunning, shellRunning: isBashRunning(state), problems: problems.length,
     tasks: tasks.activity?.kind === "unsupported" ? "unsupported"
-      : tasks.activity && { live: tasks.activity.tasks.length, backgroundAgents: tasks.activity.backgroundAgents },
+      : { live: tasks.activity?.tasks.length ?? 0, backgroundAgents: tasks.activity?.backgroundAgents ?? 0, readFailed: tasks.error !== undefined },
   });
   const clipboard = typeof navigator.clipboard?.writeText === "function" ? (text: string) => navigator.clipboard.writeText(text) : undefined;
   const trouble: ConnectionTrouble | undefined = connection.type === "reconnecting"
