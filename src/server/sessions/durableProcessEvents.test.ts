@@ -10,7 +10,7 @@ import { expect, it, vi } from "vitest";
 import { Presentation } from "./durableParentDocuments.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { acceptProcessEvents, PROCESS_EVENTS_KIND, processEventsExtension } from "./durableProcessEvents.js";
-import type { ProcessEventSummary } from "../processes/processWatchState.js";
+import { processSummarySchema, type ProcessEventSummary } from "../processes/processWatchState.js";
 
 it("durably records attention, excludes ignore from context, and wakes only once for a replay summary", async () => {
   const root = await mkdtemp(join(tmpdir(), "forgerie-process-events-"));
@@ -51,5 +51,45 @@ it("durably records attention, excludes ignore from context, and wakes only once
     const entries = (await journal.conversation.entries({}, 100, undefined, context)).items.filter(entry => entry.kind === PROCESS_EVENTS_KIND);
     expect(entries).toHaveLength(2);
     expect(JSON.stringify(entries)).toContain("ignored-secret-output");
+    const capped: ProcessEventSummary = { id: "capped", seriesId: "overflow", missed: true, events: [], turnRequired: true,
+      overflow: { turn: 1, context: 0, ignore: 0, samples: 1, aggregates: 1 } };
+    await acceptProcessEvents(journal.conversation, capped, context);
+    await vi.waitFor(() => { expect(turns).toBe(2); });
+    await journal.conversation.waitForIdle(context);
+    await journal.close(); journal = await open();
+    await acceptProcessEvents(journal.conversation, { ...capped, id: "capped-retry" }, context);
+    journal.harness.resume(); await journal.conversation.waitForIdle(context);
+    expect(turns).toBe(2);
+  } finally { await journal.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+it("counts only new coalesced matches and overflow after acceptance, restart and later eviction", async () => {
+  const root = await mkdtemp(join(tmpdir(), "forgerie-process-counts-"));
+  const manager = SessionManager.create(root, join(root, "sessions"));
+  const models = createModels(); const registry = createRegistry(); registry.install(processEventsExtension());
+  const open = () => DurableSessionJournal.open({ manager, models, registry, agent: {} });
+  let journal = await open();
+  const first: ProcessEventSummary = { id: "first", seriesId: "series", missed: true, events: [
+    { processId: "one", name: "one", watchId: "watch", kind: "match", attention: "context", line: 20, count: 20, totalCount: 20, samples: [] },
+  ] };
+  const next: ProcessEventSummary = { ...first, id: "next", events: first.events.map(event => ({ ...event, line: 40, count: 40, totalCount: 40 })),
+    overflow: { turn: 0, context: 10, ignore: 0, samples: 12, aggregates: 2 } };
+  const more: ProcessEventSummary = { ...next, id: "more", overflow: { turn: 0, context: 15, ignore: 0, samples: 20, aggregates: 3 } };
+  try {
+    await acceptProcessEvents(journal.conversation, first, context);
+    await journal.close(); journal = await open();
+    await acceptProcessEvents(journal.conversation, next, context);
+    await acceptProcessEvents(journal.conversation, more, context);
+    await journal.close(); journal = await open();
+    await acceptProcessEvents(journal.conversation, { ...more, id: "retry" }, context);
+    // The previously accepted aggregate is now evicted; only the new match counts again.
+    await acceptProcessEvents(journal.conversation, { ...more, id: "eviction", events: [
+      { processId: "two", name: "two", watchId: "watch", kind: "match", attention: "context", line: 1, count: 1, totalCount: 1, samples: [] },
+    ], overflow: { turn: 0, context: 55, ignore: 0, samples: 20, aggregates: 4 } }, context);
+    const summaries = (await journal.conversation.entries({ order: "ascending" }, 100, undefined, context)).items.filter(entry => entry.kind === PROCESS_EVENTS_KIND)
+      .map(entry => processSummarySchema.parse(entry.data));
+    expect(summaries).toHaveLength(4);
+    expect(summaries.map(summary => summary.events.reduce((count, event) => count + event.count, 0) + (summary.overflow?.context ?? 0))).toEqual([20, 30, 5, 1]);
   } finally { await journal.close(); await rm(root, { recursive: true, force: true }); }
 });

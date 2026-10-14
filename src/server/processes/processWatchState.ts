@@ -7,7 +7,7 @@ const cursor = z.object({ offset: z.number().int().nonnegative(), line: z.number
 const watch = z.object({
   id: z.string(), pattern: z.string().min(1).max(500), mode: z.enum(["literal", "regex"]),
   stream: z.enum(["stdout", "stderr", "both"]), repeat: z.boolean(), on: attention,
-  line: z.number().int().nonnegative(), fired: z.boolean(), lastNotifiedAt: z.number().nonnegative().default(0),
+  line: z.number().int().nonnegative(), matched: z.number().int().nonnegative().default(0), fired: z.boolean(), lastNotifiedAt: z.number().nonnegative().default(0),
 });
 export const processWatchSchema = z.object({
   name: z.string(), onSuccess: attention, onFailure: attention, onKilled: attention,
@@ -19,9 +19,18 @@ const event = z.object({
   kind: z.enum(["match", "exit"]), line: z.number().int().nonnegative(), count: z.number().int().positive(),
   samples: z.array(z.object({ number: z.number().int().positive(), text: z.string() })),
   reason: z.string().optional(), notice: z.string().optional(),
+  result: z.string().optional(), code: z.string().optional(), status: z.string().optional(),
+  totalCount: z.number().int().nonnegative().optional(),
 });
 export type ProcessWatchEvent = z.infer<typeof event>;
-export const processSummarySchema = z.object({ id: z.string(), missed: z.boolean(), events: z.array(event) });
+export const processOverflowSchema = z.object({
+  turn: z.number().int().nonnegative(), context: z.number().int().nonnegative(), ignore: z.number().int().nonnegative(),
+  samples: z.number().int().nonnegative(), aggregates: z.number().int().nonnegative(),
+});
+export type ProcessOverflow = z.infer<typeof processOverflowSchema>;
+export const processSummarySchema = z.object({ id: z.string(), missed: z.boolean(), events: z.array(event),
+  seriesId: z.string().optional(), overflow: processOverflowSchema.optional(), turnRequired: z.boolean().optional(),
+});
 export type ProcessEventSummary = z.infer<typeof processSummarySchema>;
 export const processWatchStateSchema = z.object({
   version: z.literal(1), processes: z.record(z.string(), processWatchSchema),
@@ -40,7 +49,7 @@ function watches(items: NonNullable<NonNullable<ProcessToolArguments["notify"]>[
   return items.map(item => {
     matchPattern(item.pattern, item.mode);
     return { id: randomUUID(), pattern: item.pattern, mode: item.mode ?? "literal", stream: item.stream ?? "both", repeat: item.repeat ?? false,
-      on: item.on ?? "turn", line: 0, fired: false, lastNotifiedAt: 0 };
+      on: item.on ?? "turn", line: 0, matched: 0, fired: false, lastNotifiedAt: 0 };
   });
 }
 export function newProcessWatch(name: string, notify?: ProcessToolArguments["notify"]): ProcessWatch {

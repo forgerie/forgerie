@@ -1,3 +1,4 @@
+import { compactProcessSummary } from "./processEventOutbox.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -39,6 +40,12 @@ export class ManagedProcessTools {
     await mkdir(dirname(this.options.stateFile), { recursive: true, mode: 0o700 });
     try { this.state = processWatchStateSchema.parse(JSON.parse(await readFile(this.options.stateFile, "utf8"))); }
     catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
+    // Upgrade pre-aggregate pending batches without resetting a watch's cumulative receipt count.
+    for (const event of this.state.pending?.summary.events ?? []) {
+      if (event.kind !== "match" || event.totalCount !== undefined) continue;
+      const watch = this.state.processes[event.processId]?.watches.find(item => item.id === event.watchId);
+      if (watch !== undefined) { watch.matched += event.count; event.totalCount = watch.matched; }
+    }
     this.deliver = deliver;
     await this.dispatch(true);
   }
@@ -172,7 +179,7 @@ export class ManagedProcessTools {
     const pending = this.state.pending;
     const request = this.requestTurn;
     if (this.closed || this.deliver !== undefined || request === undefined || pending === undefined
-      || !pending.summary.events.some(event => event.attention === "turn") || this.wake !== undefined) return;
+      || (pending.summary.turnRequired !== true && !pending.summary.events.some(event => event.attention === "turn")) || this.wake !== undefined) return;
     // Never await runtime startup on the dispatcher mutation line: startup attaches to that same line.
     this.wake = Promise.resolve().then(request).catch((error: unknown) => { this.report?.(error); })
       .finally(() => { this.wake = undefined; });
@@ -185,7 +192,10 @@ export class ManagedProcessTools {
     }
     return this.state.processes[snapshot.id] = newProcessWatch(snapshot.id);
   }
-  private save(): Promise<void> { return atomicWrite(this.options.stateFile, JSON.stringify(this.state)); }
+  private save(): Promise<void> {
+    if (this.state.pending !== undefined) this.state.pending.summary = compactProcessSummary(this.state.pending.summary);
+    return atomicWrite(this.options.stateFile, JSON.stringify(this.state));
+  }
   private async finishPending(core: ManagedProcesses): Promise<void> {
     await this.acknowledgePending(core);
     await this.drainOutbox();
@@ -210,7 +220,7 @@ export class ManagedProcessTools {
   private async drainOutbox(): Promise<void> {
     const pending = this.state.pending;
     if (pending === undefined) return;
-    if (pending.summary.events.length > 0) {
+    if (pending.summary.events.length > 0 || pending.summary.overflow !== undefined || pending.summary.turnRequired === true) {
       if (this.deliver === undefined) return;
       await this.deliver(pending.summary);
     }
@@ -248,14 +258,14 @@ export class ManagedProcessTools {
               if (line.number <= item.line || (item.fired && !item.repeat)) continue;
               item.line = line.number;
               if (predicates.get(item.id)?.(line.text) !== true) continue;
-              item.fired = true; item.lastNotifiedAt = now;
+              item.fired = true; item.lastNotifiedAt = now; item.matched++;
               let event = matches.get(item.id);
               if (event === undefined) {
                 event = { processId: snapshot.id, name: watch.name, watchId: item.id, kind: "match", attention: item.on, line: line.number, count: 0, samples: [], ...(notice === undefined ? {} : { notice }) };
                 matches.set(item.id, event);
               }
-              event.line = line.number; event.count++;
-              if (event.samples.length < 20) event.samples.push({ number: line.number, text: line.text.slice(0, 2000) });
+              event.line = line.number; event.count++; event.totalCount = item.matched;
+              if (item.on !== "ignore" && event.samples.length < 20) event.samples.push({ number: line.number, text: line.text.slice(0, 2000) });
             }
           }
           if (batch.lines.length > 0 || batch.droppedLines > 0) cursors[snapshot.id] = batch.cursor;
@@ -271,7 +281,7 @@ export class ManagedProcessTools {
             const attention = result?.code === "exited" && result.status === "0" ? watch.onSuccess
               : result?.result === "timeout" ? watch.onFailure : result?.code === "killed" || result?.code === "dumped" ? watch.onKilled : watch.onFailure;
             events.push({ processId: snapshot.id, name: watch.name, watchId: "exit", kind: "exit", attention, line: cursors[snapshot.id]?.line ?? 0,
-              count: 1, samples: [], reason: snapshot.state.kind === "lost" ? "supervisor lost" : `${result?.result ?? "ended"}: ${result?.code ?? ""} ${result?.status ?? ""}`,
+              count: 1, samples: [], ...(snapshot.state.kind === "lost" ? { reason: "supervisor lost" } : { result: result?.result, code: result?.code, status: result?.status }),
               ...(notice === undefined ? {} : { notice }) });
           }
         }
@@ -283,7 +293,8 @@ export class ManagedProcessTools {
       // A previous delivery might have committed before the daemon died. New events need a fresh
       // wake receipt; unchanged retries reuse theirs. The consumer deduplicates old process/watch/lines.
       const id = events.length === pending?.summary.events.length ? pending.summary.id : randomUUID();
-      this.state.pending = { summary: { id, missed: missed || (pending?.summary.missed ?? false), events }, cursors };
+      this.state.pending = { summary: { ...pending?.summary, id, seriesId: pending?.summary.seriesId ?? pending?.summary.id ?? id,
+        missed: missed || (pending?.summary.missed ?? false), events }, cursors };
       await this.save();
     } catch (error) { this.state = previous; throw error; }
     await this.acknowledgePending(core);

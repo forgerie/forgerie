@@ -125,7 +125,8 @@ it("retains failed delivery in the fsynced outbox and merges it with later misse
   await f.open();
   expect(f.summaries).toHaveLength(1);
   expect(f.summaries[0]?.missed).toBe(true);
-  expect(f.summaries[0]?.events.map(event => event.line)).toEqual([1, 2]);
+  expect(f.summaries[0]?.events).toHaveLength(1);
+  expect(f.summaries[0]?.events[0]).toMatchObject({ line: 2, count: 2, totalCount: 2, samples: [{ number: 1, text: "ready" }, { number: 2, text: "ready" }] });
   expect(f.summaries[0]?.id).not.toBe(failedId);
   expect((await f.core().readOutput(id)).lines).toEqual([]);
 });
@@ -158,4 +159,34 @@ it("persists child ownership and keepAfterChild, lets the parent update it, and 
   await f.end(id);
   expect((await f.tool.execute({ action: "clear" })).cleared?.map(process => process.id)).toEqual([id]);
   expect((await f.tool.execute({ action: "list" })).processes?.map(process => process.name)).toEqual(["parent"]);
+});
+
+it("bounds and coalesces 40 passive dispatches, preserving exact counts after reopening", async () => {
+  const f = await fixture();
+  const started = await f.tool.execute({ action: "start", name: "busy", command: "cat", notify: { logMatches: [
+    { pattern: "hit", on: "ignore", repeat: true }, { pattern: "hit", on: "context", repeat: true },
+  ] } });
+  const id = started.process?.id;
+  if (id === undefined) throw new Error("No ID");
+  await f.tool.dispose();
+  let now = 0;
+  const open = () => new ManagedProcessTools({ sessionId: "test", cwd: f.root, stateFile: join(f.root, "watches.json"), now: () => now, getManagedProcesses: () => Promise.resolve(f.core()) });
+  let tool = open(); await tool.initialize();
+  try {
+    for (let index = 0; index < 40; index++) {
+      now += 15000;
+      await f.log(id, (`hit ${"x".repeat(1990)}\n`).repeat(20));
+      await tool.dispatch(false);
+    }
+    expect(Buffer.byteLength(await readFile(join(f.root, "watches.json"), "utf8"))).toBeLessThanOrEqual(1024 * 1024);
+    await tool.dispose(); tool = open(); await tool.initialize();
+    const summaries: ProcessEventSummary[] = [];
+    await tool.attach(summary => { summaries.push(summary); return Promise.resolve(); });
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.events).toHaveLength(2);
+    expect(summaries[0]?.events.find(event => event.attention === "ignore")).toMatchObject({ count: 800, line: 800, samples: [] });
+    expect(summaries[0]?.events.find(event => event.attention === "context")?.count).toBe(800);
+    expect(summaries[0]?.events.find(event => event.attention === "context")?.samples).toHaveLength(20);
+    expect(summaries[0]?.overflow?.samples).toBe(780);
+  } finally { await tool.dispose(); }
 });

@@ -41,6 +41,10 @@ stdout and stderr share one ordered log. The compatible `stream` selectors (`std
 
 On resume, Forgerie reports **missed events** as one session summary. Each event keeps its requested attention; any `turn` watch wakes the agent once, not once per match. Summary samples are bounded; use `output` or read the log for more. Process IDs and absolute line numbers identify output across restarts.
 
+Pending matches coalesce by process, watch, and attention. `ignore` keeps only its count and last line number, with no samples. Other watches keep at most 20 samples per aggregate, with at most 2,000 characters per sample. Pending match aggregates and sample detail are capped at **1 MiB or 1,000 aggregates per session**, whichever is reached first. Forgerie drops the oldest sample detail first, then old aggregate identities if needed. The summary gives explicit overflow counts. Those counts survive reopening, but dropped text and identities cannot be recovered from the summary; read the retained log if you need them.
+
+A required `turn` wake is never dropped. Exit receipts are also never dropped and are exempt from these caps. They keep compact process identity, result, and attention data, not output samples. Each exit requires a process start, so the number of exits is bounded by how many processes the session started. A session with many undelivered exits can therefore exceed the match budget.
+
 ## Other actions
 
 - `list`: optional `statuses` (`all`, `running`, `finished`, `failed`, `terminating`, `terminate_timeout`, `killed`), `sortBy` (`startTime_desc`, `startTime_asc`, `name_asc`, `name_desc`, `status_asc`), and `limit`.
