@@ -531,3 +531,12 @@ describe("the footer's places", () => {
     expect(triggers?.textContent).toBe("Triggers");
   });
 });
+
+it("exposes attention data for the design stage without adding a visual mark", () => {
+  const all = rows({ sessions: [S("a")], statuses: { a: { ...idle, attentionHint: { turnId: "turn-1", model: "fast", at: ago(0), likelyNeedsYou: true, kind: "review", urgency: "high" } } }, activities: {}, unread: new Set(["a"]), locate, now: NOW });
+  render({ ...view([]), sections: sections(all, { grouping: "state", showArchived: false, now: NOW }) });
+  const element = host.querySelector('[data-session="a"]');
+  expect(element?.getAttribute("data-likely-needs-you")).toBe("true");
+  expect(element?.getAttribute("data-attention-kind")).toBe("review");
+  expect(element?.getAttribute("data-attention-urgency")).toBe("high");
+});

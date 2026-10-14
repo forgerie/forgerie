@@ -28,6 +28,7 @@ const toStatus = (status: WireStatus): PickerStatus => ({
   workingAgents: status.workingAgents, runningProcesses: status.runningProcesses,
   needsResponse: status.response === undefined ? undefined : requestsResponse(status.response),
   watchingPullRequest: status.watchingPullRequest,
+  attentionHint: status.attentionHint,
   // A flagged decision waits on nobody (docs/adr/0001), so it is counted but never makes the session blocked.
   flaggedDecisions: status.flaggedDecisions,
   // A child agent's question or a workflow stop waits on the reader as much as the session's own question does.

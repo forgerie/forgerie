@@ -164,6 +164,7 @@ function PickerRow({ row, selected, pending, held, showPin, menuOpen, onSelect, 
     onMenu(session.id);
   };
   return <div id={`picker-row-${session.id}`} className="picker-row" role="option" aria-selected={selected} data-state={row.state}
+    data-likely-needs-you={row.likelyNeedsYou || undefined} data-attention-kind={row.attentionKind} data-attention-urgency={row.urgency}
     data-session={session.id} aria-busy={pending || undefined}
     onClick={() => { if (swallowClick.current) { swallowClick.current = false; return; } onSelect(row); }}
     onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={cancel} onPointerCancel={cancel} onContextMenu={onContextMenu}>

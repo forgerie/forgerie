@@ -152,3 +152,32 @@ describe("sections", () => {
     expect(attention(rows(input({ sessions: [session("o")] })))).toBeUndefined();
   });
 });
+
+describe("attention hints", () => {
+  const hint = { turnId: "turn-1", at: ago(0), model: "fast", likelyNeedsYou: true, kind: "review" as const, urgency: "high" as const };
+  it("only promotes Unread and leaves declared reply rows and other states unchanged", () => {
+    const status = { ...idle, attentionHint: hint };
+    const [promoted] = rows(input({ sessions: [session("a")], statuses: { a: status }, unread: new Set(["a"]) }));
+    expect(promoted).toMatchObject({ state: "blocked", group: "blocked", likelyNeedsYou: true, attentionKind: "review" });
+    const reply = session("b", { response: { kind: "needs-response", reason: "reply" } });
+    expect(rowState(reply, { ...status, attentionHint: { ...hint, likelyNeedsYou: false } }, undefined, false)).toBe("blocked");
+    expect(rowState(session("c"), status, undefined, false)).toBe("open");
+    expect(rowState(session("c"), status, { phase: "error" }, true)).toBe("errored");
+    expect(rowState(session("c", { archived: true }), status, undefined, true)).toBe("archived");
+    expect(rowState(session("c"), { ...status, workingAgents: 1 }, undefined, true)).toBe("working");
+    expect(rowState(session("c"), { ...status, attentionHint: { ...hint, likelyNeedsYou: false } }, undefined, true)).toBe("unread");
+  });
+  it("orders Needs your response by urgency then recency, with pins first", () => {
+    const all = rows(input({
+      sessions: [session("low", { modified: ago(1) }), session("high-old", { modified: ago(30) }), session("high-new", { modified: ago(2) }), session("normal"), session("pin", { pinned: true })],
+      statuses: Object.fromEntries(["low", "high-old", "high-new", "normal", "pin"].map((id) => [id, { ...idle, attentionHint: { ...hint, urgency: id === "low" || id === "pin" ? "low" : id === "normal" ? "normal" : "high" } }])),
+      unread: new Set(["low", "high-old", "high-new", "normal", "pin"]),
+    }));
+    expect(sections(all, { grouping: "state", showArchived: false, now: NOW }).flatMap((section) => section.rows).map((row) => row.session.id)).toEqual(["pin", "high-new", "high-old", "normal", "low"]);
+  });
+  it("ignores a previous hint while a new turn runs and clears promotion when its status arrives", () => {
+    const s = session("a");
+    expect(rows(input({ sessions: [s], statuses: { a: { ...idle, isStreaming: true, attentionHint: hint } }, unread: new Set(["a"]) }))[0]).toMatchObject({ state: "working" });
+    expect(rows(input({ sessions: [s], statuses: { a: idle }, unread: new Set(["a"]) }))[0]).toMatchObject({ state: "unread" });
+  });
+});

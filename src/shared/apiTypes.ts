@@ -1,3 +1,4 @@
+import type { AttentionHint } from "./attentionHints.js";
 import type { DecisionHintsStatus } from "./decisionHints.js";
 import type { TriggersChangedEvent } from "./triggers.js";
 import type { AzureDevopsGlobalConfig } from "./azureDevopsConfig.js";
@@ -828,6 +829,7 @@ export interface SessionAskCatalogSnapshot {
 }
 
 export interface SessionStatus {
+  attentionHint?: AttentionHint;
   sessionId: string;
   watchingPullRequest?: boolean;
   /** Completed worktrees return an inert status without starting Pi in a removed cwd. */

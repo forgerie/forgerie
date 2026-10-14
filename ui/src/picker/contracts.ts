@@ -1,3 +1,4 @@
+import { attentionHintSchema } from "@shared/attentionHints";
 import { sessionResponseSchema } from "../sessionResponse";
 import { z } from "zod";
 import { worktreeInfoSchema } from "../worktrees/worktreeApi";
@@ -20,6 +21,7 @@ const blockers = {
   pendingDialogs: z.array(z.object({ dialogId: z.string() })).optional(),
 };
 export const wireStatusSchema = z.object({
+  attentionHint: attentionHintSchema.optional().catch(undefined),
   sessionId: z.string(),
   isStreaming: z.boolean(),
   isCompacting: z.boolean(),

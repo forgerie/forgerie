@@ -2,6 +2,8 @@ import type { TaskActivity } from "../../shared/durableTaskActivity.js";
 import { durableBrowserMessageSchema } from "../../shared/durableBrowserSnapshot.js";
 import { z } from "zod";
 import { assertHistoryIdentity, PresentationHistoryIdentity, SessionOpenError, type SessionOpenPageRequest, type SessionOpenResult, type SessionOpenMessage, type SessionOpenHistoryPage } from "./sessionOpen.js";
+import { appendAttentionHint, readAttentionHint } from "./durableAttentionHints.js";
+import { AttentionHints, ATTENTION_HINT_CUSTOM_TYPE, type AttentionSession } from "../decisions/attentionHints.js";
 import type { DecisionHints } from "../decisions/decisionHints.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { ManagedProcessRegistry, type ManagedProcessRegistryOptions } from "../processes/managedProcessRegistry.js";
@@ -1160,6 +1162,8 @@ export class PiSessionService implements SessionRouteService {
   private readonly notificationGenerationBySession = new WeakMap<PiAgentSession, SessionNotificationGeneration>();
   private readonly unreadStore: SessionUnreadStore;
   private readonly sessionAsks: SessionAsks;
+  private readonly attentionHints: AttentionHints;
+  private readonly attentionSessions = new WeakMap<PiAgentSession, AttentionSession>();
   private readonly responseMemo = new WeakMap<PiSessionManager, { leafId: string | null; projection: ResponseProjection }>();
   private readonly pendingExtensionDialogStore: PendingExtensionDialogStore;
   private readonly extensionDialogsTimeoutMs: number;
@@ -1190,6 +1194,7 @@ export class PiSessionService implements SessionRouteService {
     this.sessionSearch = deps.sessionSearch;
     this.projectWorkspaces = deps.projectWorkspaces;
     this.logger = deps.logger ?? noopLogger;
+    this.attentionHints = new AttentionHints(deps.decisionHints, (err) => { this.logger.info({ err }, "attention hint persistence failed"); }, deps.now ?? (() => new Date()));
     this.managedProcesses = deps.managedProcesses === undefined ? undefined : new ManagedProcessRegistry({ ...deps.managedProcesses,
       resolveSession: async (id) => {
         if (await this.archiveStore.isArchived(id)) return undefined;
@@ -1438,6 +1443,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async dispose(): Promise<void> {
+    this.attentionHints.dispose();
     this.stopping = true;
     await this.durableReader?.close();
     this.unreadPublicationStopped = true;
@@ -3171,6 +3177,9 @@ export class PiSessionService implements SessionRouteService {
     await this.withPromptRequest(session, requestId, async () => {
       // A new chat message answers the open ask. A retry must not void an ask
       // created after the original input, so check its identity first.
+      const hadAttentionHint = this.attentionHints.read(this.attentionSession(session)) !== undefined;
+      this.attentionHints.invalidate(this.attentionSession(session));
+      if (hadAttentionHint) this.publishStatus(session);
       await this.voidOpenAskForUserMessage(session);
       const waitsForCompaction = session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
       const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : undefined;
@@ -4558,6 +4567,7 @@ export class PiSessionService implements SessionRouteService {
     if (notificationGeneration !== undefined) this.notificationGenerationBySession.set(runtime.session, notificationGeneration);
 
     try {
+      await this.restoreAttentionHint(runtime.session);
       await this.excludeVerifiedHistoricalChildFromUnread(runtime.session);
       startup.report(STARTUP_PHASE_EXTENSIONS);
       if (options.creationProvenance === "detached-handoff") this.detachedHandoffStartupSessions.add(runtime.session);
@@ -4572,7 +4582,9 @@ export class PiSessionService implements SessionRouteService {
         const priorGeneration = notificationGeneration;
         let candidateGeneration: SessionNotificationGeneration | undefined;
         try {
+          this.attentionHints.invalidate(this.attentionSession(boundSession));
           await this.prepareUnreadRuntimeRebind(boundSession, session);
+          await this.restoreAttentionHint(session);
           await this.excludeVerifiedHistoricalChildFromUnread(session);
           if (priorGeneration !== undefined) {
             candidateGeneration = this.notificationStore.beginReplacement(priorGeneration, notificationIdentityForSession(session));
@@ -4926,7 +4938,10 @@ export class PiSessionService implements SessionRouteService {
       }
     }
     active.unsubscribe = session.subscribe((event) => {
-      if (getString(event, "type") === "agent_start") this.appendResponseEvent(session, { version: 1, kind: "started" });
+      if (getString(event, "type") === "agent_start") {
+        this.attentionHints.started(this.attentionSession(session));
+        this.appendResponseEvent(session, { version: 1, kind: "started" });
+      }
       this.events.publish(session.sessionId, toClientEvent(event, session.thinkingLevel));
       this.publishActivityForEvent(session, event);
       const eventType = getString(event, "type");
@@ -4942,6 +4957,7 @@ export class PiSessionService implements SessionRouteService {
       }
       // agent_end precedes extension handlers and retries. agent_settled fires
       // after agent_end handlers and transcript projection finish.
+      if (eventType === "agent_settled") this.attentionHints.settled(this.attentionSession(session));
       if (eventType === "agent_settled" && session.sessionFile !== undefined) {
         void this.sessionSearch?.refreshFile(session.sessionFile).catch((error: unknown) => {
           this.logger.info({ err: error, sessionId: session.sessionId }, "session search refresh failed");
@@ -5473,6 +5489,34 @@ export class PiSessionService implements SessionRouteService {
         queuedMessages: this.compactionQueue.queuedMessages(session.sessionId, []) } };
   }
 
+  private async restoreAttentionHint(session: PiAgentSession): Promise<void> {
+    if (!(session instanceof DurableAgentSession) || !this.attentionHints.configured()) return;
+    try {
+      const stored = await readAttentionHint(session.journal.handle);
+      if (stored !== undefined) this.attentionHints.restore(this.attentionSession(session), stored);
+    } catch (err) { this.logger.info({ err, sessionId: session.sessionId }, "attention hint restore failed"); }
+  }
+
+  private attentionSession(session: PiAgentSession): AttentionSession {
+    let attention = this.attentionSessions.get(session);
+    if (attention === undefined) {
+      attention = {
+        branch: () => session.sessionManager.getBranch(), messages: () => session.messages,
+        awaiting: () => { const response = this.responseProjection(session).response; return response.kind === "none" ? "nothing" : response.reason === "undeclared" ? "undeclared" : "reply"; },
+        persist: async (data) => {
+          if (session instanceof DurableAgentSession) await appendAttentionHint(session.journal.handle, durableJson(data));
+          else {
+            if (session.sessionManager.appendCustomEntry === undefined) throw new Error("Session runtime cannot persist attention hints");
+            session.sessionManager.appendCustomEntry(ATTENTION_HINT_CUSTOM_TYPE, data);
+          }
+        },
+        publish: () => { this.publishStatus(session); },
+      };
+      this.attentionSessions.set(session, attention);
+    }
+    return attention;
+  }
+
   private statusFromSession(session: PiAgentSession): ClientSessionStatus {
     const stats = session.getSessionStats();
     const model = session.model === undefined ? undefined : modelToClientModel(session.model);
@@ -5482,6 +5526,7 @@ export class PiSessionService implements SessionRouteService {
     const warnings = this.warningsForSession(session);
     const pendingAsk = session instanceof DurableAgentSession ? session.parentResponseProjection.pendingAsk : this.sessionAsks.pendingAsk(session.sessionId);
     const pendingDialogs = this.pendingExtensionDialogStore.pendingDialogs(session.sessionId);
+    const attentionHint = this.attentionHints.read(this.attentionSession(session));
     return {
       sessionId: session.sessionId,
       persisted: sessionFileExists(session.sessionFile),
@@ -5501,6 +5546,7 @@ export class PiSessionService implements SessionRouteService {
       ...(warnings.length === 0 ? {} : { warnings }),
       ...(pendingAsk === undefined ? {} : { pendingAsk }),
       response: this.responseProjection(session).response,
+      ...(attentionHint === undefined ? {} : { attentionHint }),
       ...(pendingDialogs.length === 0 ? {} : { pendingDialogs }),
     };
   }

@@ -1,3 +1,4 @@
+import type { AttentionHint } from "@shared/attentionHints";
 import { requestsResponse, type SessionResponse } from "../sessionResponse";
 // Pure picker model: sessions in, grouped rows out. No I/O, no clock of its own.
 // Classification and grouping are ported from the Lit client's sessionBoard.ts
@@ -24,6 +25,7 @@ export interface PickerSession {
   pullRequests?: readonly PullLink[] | undefined;
 }
 export interface PickerStatus {
+  attentionHint?: AttentionHint | undefined;
   isStreaming: boolean;
   isCompacting: boolean;
   isBashRunning: boolean;
@@ -74,6 +76,9 @@ export interface Location {
   branch?: string;
 }
 export interface Row {
+  likelyNeedsYou?: boolean;
+  attentionKind?: AttentionHint["kind"];
+  urgency?: AttentionHint["urgency"];
   session: PickerSession;
   state: RowState;
   group: GroupKind;
@@ -118,7 +123,7 @@ export function rowState(session: PickerSession, status: PickerStatus | undefine
   // request between wakes (T3's rule), and delegated agents that are still running. A request for a response still wins.
   if (status?.watchingPullRequest === true || session.pullRequests?.some((link) => link.watch.kind === "watching") === true) return "working";
   if ((status?.workingAgents ?? 0) > 0) return "working";
-  return unread ? "unread" : "open";
+  return unread ? status?.attentionHint?.likelyNeedsYou === true ? "blocked" : "unread" : "open";
 }
 
 const HOUR = 3_600_000;
@@ -194,6 +199,10 @@ export function rows(input: BoardInput): Row[] {
     const location = input.locate(session.cwd);
     return {
       session, state, group, working, busy,
+      ...(status?.attentionHint === undefined || working || state === "archived" || state === "errored" ? {} : {
+        likelyNeedsYou: state === "blocked" && rowState(session, { ...status, attentionHint: undefined }, activity, input.unread.has(session.id)) === "unread",
+        attentionKind: status.attentionHint.kind, urgency: status.attentionHint.urgency,
+      }),
       // A session worktree's folder is a generated name; its branch is what a person reads.
       location: session.worktree ? { ...location, branch: session.worktree.branch } : location,
       time: shortAge(since, input.now),
@@ -204,9 +213,13 @@ export function rows(input: BoardInput): Row[] {
   });
 }
 
+const urgencyRank = (urgency: Row["urgency"]) => urgency === "high" ? 2 : urgency === "low" ? 0 : 1;
 const byPinnedThenRecency = (a: Row, b: Row) =>
   Number(b.session.pinned === true) - Number(a.session.pinned === true)
   || Date.parse(b.session.modified) - Date.parse(a.session.modified);
+
+const byUrgencyThenRecency = (a: Row, b: Row) =>
+  urgencyRank(b.urgency) - urgencyRank(a.urgency) || byPinnedThenRecency(a, b);
 
 /**
  * The list in drawn order. Empty groups are omitted. In state mode the Open
@@ -245,7 +258,7 @@ export function sections(all: readonly Row[], options: { grouping: Grouping; sho
   }
   const out: Section[] = [];
   for (const group of GROUPS) {
-    const groupRows = visible.filter((row) => row.group === group.kind).sort(byPinnedThenRecency);
+    const groupRows = visible.filter((row) => row.group === group.kind).sort(group.kind === "blocked" ? byUrgencyThenRecency : byPinnedThenRecency);
     if (groupRows.length === 0) continue;
     if (group.kind === "pinned" && options.allPinned !== true) {
       const capped = capPinned(groupRows, options.selectedId);
