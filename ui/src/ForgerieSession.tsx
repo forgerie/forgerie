@@ -12,7 +12,7 @@ import { useThreadMessages } from "./useThreadMessages";
 import { foldProcessEvents } from "./processes/processEvent";
 import { loadProcessOutput } from "./processes/processApi";
 import { ProcessEventView } from "./processes/ProcessEventView";
-import { markPosition, threadMessageIdAt, type ChildEntryArtifact, type GatedActionArtifact, type ProcessEventArtifact, type WorkflowEntryArtifact } from "./transcript";
+import { markPosition, threadMessageIdAt, type ChildEntryArtifact, type GatedActionArtifact, type OldIssueProposalArtifact, type ProcessEventArtifact, type WorkflowEntryArtifact } from "./transcript";
 import type { FoundBinding, MatchBarView } from "./search/found";
 import { MatchBar } from "./search/MatchBar";
 import type { SystemArtifactView } from "./ui/Messages";
@@ -88,8 +88,7 @@ import { GatedActionsReadProblem } from "./gatedActions/GatedActionsReadProblem"
 import { askerOf, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
 import { PinnedDock } from "./ui/PinnedDock";
 import { EventLine } from "./ui/EventLine";
-import { IssueProposalEntry } from "./issues/IssueProposalEntry";
-import type { IssueProposalArtifact } from "./issues/issueProposal";
+import { OldIssueProposalLine } from "./issues/OldIssueProposalLine";
 
 const pullRequests = createPullRequestApi(browserTransport.request);
 const NO_LINKS: readonly PullLink[] = [];
@@ -348,9 +347,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     if (action !== undefined) return pinned.has(`g:${action.id}`)
       ? <EventLine tone="active" subject={askerOf(action.by)} phrase="waits for your approval, pinned below the thread" quoteFace="text" quote={action.description} />
       : gatedView(action);
-    const issue = (custom as Partial<IssueProposalArtifact> | undefined)?.issueProposal;
-    if (issue !== undefined) return <IssueProposalEntry key={issue.proposalId} proposal={issue} sessionId={sessionId} cwd={cwd} readOnly={readOnly}
-      request={browserTransport.request} />;
+    // An issue proposal from before agents filed issues: its card is gone, and one line says what became of it.
+    const oldIssue = (custom as Partial<OldIssueProposalArtifact> | undefined)?.oldIssueProposal;
+    if (oldIssue !== undefined) return <OldIssueProposalLine proposal={oldIssue} />;
     const entry = (custom as Partial<ChildEntryArtifact> | undefined)?.childEntry;
     if (entry?.kind === "question" && pinned.has(`q:${entry.questionId}`)) {
       return <EventLine tone="active" subject={`${entry.childName} asks`} phrase="pinned below the thread" />;

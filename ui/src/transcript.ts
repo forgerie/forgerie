@@ -7,8 +7,8 @@ import { STEP_PREFIX } from "./ui/stepPart";
 import { PULL_NOTICE_TYPE, pullNoticeOf, type PullNotice } from "./pullRequests/pullNotice";
 import { PROCESS_EVENT_TYPE, parseProcessEvent, type ProcessEvent } from "./processes/processEvent";
 import { childEntryOf, type ChildEntry } from "./childAgents/childAgentsModel";
-import { issueProposalOf, issueProposalDecisionOf, ISSUE_PROPOSAL_OUTCOME_TYPE } from "./issues/issueProposalModel";
-import type { IssueProposal, IssueProposalArtifact } from "./issues/issueProposal";
+import { isOldIssueOutcome, oldIssueOutcomeOf, oldIssueProposalOf, type OldIssueProposal } from "./issues/oldIssueProposal";
+import { filedIssueLineOf, filedIssueOf, type FiledIssueLine } from "./issues/filedIssue";
 import { workflowEntryOf, type WorkflowEntry } from "./workflows/workflowsModel";
 import { gatedEntryOf, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
 import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCopy, reopenRun, runFromRecord, shellText, startedRun, unknownRun,
@@ -21,7 +21,7 @@ import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCo
 export type ToolState =
   | { type: "pending" }
   | { type: "running"; output: string }
-  | { type: "done"; output: string; isError: boolean; images?: readonly string[]; door?: HandoffDoor }
+  | { type: "done"; output: string; isError: boolean; images?: readonly string[]; door?: HandoffDoor; filed?: FiledIssueLine }
   | { type: "interrupted" };
 export type TranscriptPart =
   | { type: "text"; text: string }
@@ -62,8 +62,8 @@ export interface TranscriptMessage {
   position?: number;
   /** The thread marks this message, such as the search match the reader opened. */
   marked?: boolean;
-  /** A proposal and its branch-owned user decision. */
-  issueProposal?: IssueProposal;
+  /** An issue proposal from before agents filed issues themselves, with what the branch records became of it. */
+  oldIssueProposal?: OldIssueProposal;
 }
 /** Compaction replaces earlier messages with a summary; a branch summary describes the branch the session left. */
 export type HistorySummaryKind = "compaction" | "branch";
@@ -125,9 +125,9 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
   const summary = asSummary(message, id);
   if (summary) return summary;
   const role = message.role;
-  const issueProposal = issueProposalOf(message);
-  if (issueProposal) return { id, role: "system", parts: [{ type: "text", text: textOf(message) }], issueProposal, key: keyOf(message) };
-  if (role === "custom" && message.customType === ISSUE_PROPOSAL_OUTCOME_TYPE) return undefined;
+  const oldIssueProposal = oldIssueProposalOf(message);
+  if (oldIssueProposal) return { id, role: "system", parts: [{ type: "text", text: textOf(message) }], oldIssueProposal, key: keyOf(message) };
+  if (isOldIssueOutcome(message)) return undefined;
   if (role === "custom" && message.customType === PULL_NOTICE_TYPE) {
     const text = textOf(message);
     return { id, role: "system", parts: [{ type: "text", text }], pullNotice: pullNoticeOf(text, message.details), key: keyOf(message) };
@@ -182,11 +182,12 @@ function toolMessage(state: Transcript, part: ToolPart): Transcript {
   return { ...state, nextId: state.nextId + 1,
     messages: [...state.messages, { id: `tool-${state.nextId}`, role: "assistant", parts: [part] }] };
 }
-/** A finished call: its text, its images, and the session it created, if any. */
+/** A finished call: its text, its images, and the session or the issue it created, if any. */
 function settled(toolName: string, output: string, isError: boolean, content: unknown, details: unknown): ToolState {
   const images = imagesOf(content);
   const door = handoffDoorOf({ toolName, isError, details });
-  return { type: "done", output, isError, ...(images.length ? { images } : {}), ...(door ? { door } : {}) };
+  const filed = filedIssueOf({ toolName, isError, details });
+  return { type: "done", output, isError, ...(images.length ? { images } : {}), ...(door ? { door } : {}), ...(filed ? { filed } : {}) };
 }
 function finishTool(state: Transcript, id: string | undefined, name: string, done: ToolState): Transcript {
   if (!id) return state;
@@ -271,20 +272,24 @@ function reduceShell(state: Transcript, event: Extract<SessionEvent, { type: `sh
   }
 }
 
-function foldIssueDecision(state: Transcript, raw: PiMessage): Transcript | undefined {
-  if (raw.role !== "custom" || raw.customType !== ISSUE_PROPOSAL_OUTCOME_TYPE) return undefined;
-  const decision = issueProposalDecisionOf(raw);
+/**
+ * An old outcome entry is never a row: it folds into its proposal, and an
+ * unreadable one changes nothing. The first outcome on the branch wins.
+ */
+function foldOldIssueOutcome(state: Transcript, raw: PiMessage): Transcript | undefined {
+  if (!isOldIssueOutcome(raw)) return undefined;
+  const decision = oldIssueOutcomeOf(raw);
   if (!decision) return state;
-  return { ...state, messages: state.messages.map((message) => message.issueProposal?.proposalId === decision.proposalId
-    && message.issueProposal.outcome === undefined ? { ...message, issueProposal: { ...message.issueProposal, outcome: decision.outcome } } : message) };
+  return { ...state, messages: state.messages.map((message) => message.oldIssueProposal?.proposalId === decision.proposalId
+    && message.oldIssueProposal.outcome === undefined ? { ...message, oldIssueProposal: { ...message.oldIssueProposal, outcome: decision.outcome } } : message) };
 }
 
 function applyMessage(state: Transcript, raw: PiMessage, provisional: boolean): Transcript {
-  const folded = foldIssueDecision(state, raw);
+  const folded = foldOldIssueOutcome(state, raw);
   if (folded) return folded;
-  const proposal = issueProposalOf(raw);
+  const proposalId = oldIssueProposalOf(raw)?.proposalId;
   // History and buffered custom-message events can overlap without a shared timestamp.
-  if (proposal && state.messages.some((message) => message.issueProposal?.proposalId === proposal.proposalId)) return state;
+  if (proposalId !== undefined && state.messages.some((message) => message.oldIssueProposal?.proposalId === proposalId)) return state;
   if (raw.role === "toolResult") return finishResult(state, raw);
   const key = keyOf(raw);
   if (key !== undefined && state.messages.some((message) => message.key === key)) return state;
@@ -314,7 +319,7 @@ export function messageText(message: TranscriptMessage): string {
 export function fromHistory(history: readonly PiMessage[], isRunning = false): Transcript {
   let state: Transcript = { messages: [], nextId: 0, isRunning };
   history.forEach((raw, index) => {
-    const folded = foldIssueDecision(state, raw);
+    const folded = foldOldIssueOutcome(state, raw);
     if (folded) { state = folded; return; }
     const parsed = raw.role === "toolResult" ? undefined : asMessage(raw, `history-${index}`);
     state = raw.role === "toolResult" ? finishResult(state, raw)
@@ -482,13 +487,17 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
 }
 
 /** UI-only state of a tool call, carried as the part's artifact. */
-export type ToolArtifact = { state: ToolState["type"]; images?: readonly string[]; door?: HandoffDoor };
+export type ToolArtifact = { state: ToolState["type"]; images?: readonly string[]; door?: HandoffDoor; filed?: FiledIssueLine };
 /** The session a converted tool call created, read back from its artifact. */
 export function artifactDoor(artifact: unknown): HandoffDoor | undefined {
   if (typeof artifact !== "object" || artifact === null || !("door" in artifact)) return undefined;
   const door: unknown = artifact.door;
   return typeof door === "object" && door !== null && "sessionId" in door && "cwd" in door
     && typeof door.sessionId === "string" && typeof door.cwd === "string" ? { sessionId: door.sessionId, cwd: door.cwd } : undefined;
+}
+/** The issue a converted `file_issue` call filed, read back from its artifact. */
+export function artifactFiled(artifact: unknown): FiledIssueLine | undefined {
+  return typeof artifact === "object" && artifact !== null && "filed" in artifact ? filedIssueLineOf(artifact.filed) : undefined;
 }
 /** UI data of a shell row, carried as the system message's custom metadata. */
 export type ShellArtifact = { shell: ShellRun };
@@ -502,6 +511,8 @@ export type ProcessEventArtifact = { processEvent: ProcessEvent };
 export type ChildEntryArtifact = { childEntry: ChildEntry };
 /** UI data of a workflow's row, carried as the system message's custom metadata. */
 export type WorkflowEntryArtifact = { workflowEntry: WorkflowEntry };
+/** UI data of an old issue proposal's row, carried as the system message's custom metadata. */
+export type OldIssueProposalArtifact = { oldIssueProposal: OldIssueProposal };
 /** UI data of a gated action's row, carried as the system message's custom metadata. */
 export type GatedActionArtifact = { gatedAction: GatedActionEntry };
 /** UI data of a marked message, carried in its custom metadata. A joined reply is marked when any of its messages is. */
@@ -547,8 +558,8 @@ function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
     metadata: { custom: { processEvent: message.processEvent } satisfies ProcessEventArtifact } };
   if (message.childEntry) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { childEntry: message.childEntry } satisfies ChildEntryArtifact } };
-  if (message.issueProposal) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
-    metadata: { custom: { issueProposal: message.issueProposal } satisfies IssueProposalArtifact } };
+  if (message.oldIssueProposal) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
+    metadata: { custom: { oldIssueProposal: message.oldIssueProposal } satisfies OldIssueProposalArtifact } };
   if (message.workflowEntry) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { workflowEntry: message.workflowEntry } satisfies WorkflowEntryArtifact } };
   if (message.gatedAction) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
@@ -588,10 +599,13 @@ function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
     ...(message.failure ? { status: { type: "incomplete", reason: message.failure } } : {}),
   };
 }
-/** Turn-ending controls do not make their response into work narration, even before their results arrive. */
+/**
+ * Turn-ending controls do not make their response into work narration, even before their results arrive.
+ * A call that made a session or filed an issue stands apart once it has, so what it made is never folded away.
+ */
 function standsApart(part: ToolPart): boolean {
-  return part.name === "ask_user" || part.name === "end_turn"
-    || skillLoadOf(part.name, part.args) !== undefined || (part.state.type === "done" && part.state.door !== undefined);
+  return part.name === "ask_user" || part.name === "end_turn" || skillLoadOf(part.name, part.args) !== undefined
+    || (part.state.type === "done" && (part.state.door !== undefined || part.state.filed !== undefined));
 }
 /**
  * A step is one Pi assistant message that calls a tool: its thinking, the
@@ -617,7 +631,8 @@ function stepOf(message: TranscriptMessage): { members: ReadonlySet<number>; ord
 }
 function toolArtifact(state: ToolState): ToolArtifact {
   if (state.type !== "done") return { state: state.type };
-  return { state: state.type, ...(state.images ? { images: state.images } : {}), ...(state.door ? { door: state.door } : {}) };
+  return { state: state.type, ...(state.images ? { images: state.images } : {}), ...(state.door ? { door: state.door } : {}),
+    ...(state.filed ? { filed: state.filed } : {}) };
 }
 function toolResult(state: ToolState) {
   switch (state.type) {

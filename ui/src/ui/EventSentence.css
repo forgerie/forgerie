@@ -1,0 +1,21 @@
+/* The event line's quiet grammar, for words that must stay whole: the dot sits on the first line, and the words wrap
+   and hang from the text, not the dot. A one-line sentence is as tall as an event line. Only the dot carries colour. */
+.event-sentence { --event-sentence-tone: var(--muted-foreground); display: grid; grid-template-columns: 0.5rem minmax(0, 1fr); align-items: start;
+  column-gap: var(--space-2); min-inline-size: 0; margin: 0; padding-block: calc((1.75rem - 1lh) / 2);
+  color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
+/* Inside a reply, the text or work after the sentence keeps the step the trace keeps from text. */
+.event-sentence:not(:last-child) { margin-block-end: var(--space-3); }
+.event-sentence[data-tone="positive"] { --event-sentence-tone: var(--diff-add); }
+.event-sentence[data-tone="negative"] { --event-sentence-tone: var(--destructive); }
+.event-sentence[data-tone="active"] { --event-sentence-tone: var(--live); }
+.event-sentence-dot { inline-size: 0.5rem; block-size: 0.5rem; margin-block-start: calc((1lh - 0.5rem) / 2); border-radius: 50%;
+  background: var(--event-sentence-tone); }
+.event-sentence[data-hollow] .event-sentence-dot { background: transparent; border: 0.09375rem solid var(--event-sentence-tone); }
+.event-sentence-text { min-inline-size: 0; overflow-wrap: anywhere; }
+/* The thing the sentence names reads in full ink. */
+.event-sentence-text strong { font-weight: 500; color: var(--foreground); }
+/* The way to the thing. Inline padding moves nothing; it lets the press area reach the row's edges. */
+.event-sentence-text a { padding-block: calc((1.75rem - 1lh) / 2); color: var(--foreground);
+  text-decoration: underline; text-decoration-color: var(--line-focus); text-underline-offset: 0.2em; }
+.event-sentence-text a:hover { text-decoration-color: currentColor; }
+.event-sentence-text a:focus-visible { outline-offset: 0.125rem; border-radius: var(--radius-document); }

@@ -1,9 +1,10 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
 import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui, useAuiState, type GroupByContext, type PartState } from "@assistant-ui/react";
 import { useMemo, useState, type ReactNode } from "react";
-import { artifactDoor, type HistorySummaryKind, type PullNoticeArtifact, type ShellArtifact, type SummaryArtifact } from "../transcript";
+import { artifactDoor, artifactFiled, type HistorySummaryKind, type PullNoticeArtifact, type ShellArtifact, type SummaryArtifact } from "../transcript";
 import { PullNoticeRow } from "./PullNoticeRow";
 import { SessionDoorCall } from "./SessionDoor";
+import { EventSentence } from "./EventSentence";
 import { ShellRun } from "./ShellRun";
 import { MarkdownText } from "./MarkdownText";
 import type { FileLinks } from "./FileTree";
@@ -27,8 +28,9 @@ const groupActivity = groupPartByType<GroupKey>({
   "tool-call": ["group-chainOfThought"],
 });
 const skillGroup = ["group-skills"] as const;
-// A call that created a session stands outside the collapsed activity, so its
-// door is never hidden, and the activity does not count the same call again.
+// A call that created a session or filed an issue stands outside the collapsed
+// activity, so its door or its issue is never hidden, and the activity does not
+// count the same call again.
 // Skill loads also stay visible beside the activity, and adjacent loads share
 // a line. The helper groups by tool name; this branches on a call's arguments
 // and result, so it is a stable module-level function instead.
@@ -46,7 +48,7 @@ const WORK: readonly GroupKey[] = ["group-work"];
 const isStepKey = (key: string): key is StepKey => key.startsWith(STEP_GROUP);
 function activityPath(part: PartState, context: GroupByContext): readonly GroupKey[] {
   if (part.type !== "tool-call") return groupActivity(part, context);
-  if (artifactDoor(part.artifact)) return [];
+  if (artifactDoor(part.artifact) || artifactFiled(part.artifact)) return [];
   return skillLoadOf(part.toolName, part.args) ? skillGroup : groupActivity(part, context);
 }
 function groupAssistantParts(rowOf: ReadonlyMap<string, string>) {
@@ -129,7 +131,11 @@ export function AssistantMessage({ fileLinks }: { fileLinks?: FileLinks | undefi
             case "reasoning": return <div className="reasoning-text"><MarkdownText fileLinks={fileLinks} /></div>;
             case "tool-call": {
               const door = artifactDoor(part.artifact);
+              const filed = artifactFiled(part.artifact);
+              // A filed issue keeps the ordinary tool line, so its input and output stay one tap away, and adds the issue under it.
               return door ? <SessionDoorCall {...part} door={door} />
+                : filed ? <><ToolCall {...part} /><EventSentence tone="positive">Filed {filed.href === undefined ? <>#{filed.number} <strong>{filed.title}</strong></>
+                  : <a href={filed.href} target="_blank" rel="noreferrer">#{filed.number} <strong>{filed.title}</strong></a>}</EventSentence></>
                 : skillLoadOf(part.toolName, part.args) ? <SkillLoad {...part} /> : <ToolCall {...part} />;
             }
             // Images gather in the reply gallery below the text.

@@ -1,8 +1,8 @@
 // Separate dev-only entry point. This preview has no transport or network data.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ToastRegion } from "../src/ui/ToastRegion";
-import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime, type ThreadMessage } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
 import type { QueuedMessage } from "../src/queue";
 import type { ToolState, TranscriptMessage, TranscriptPart } from "../src/transcript";
 import { useThreadMessages } from "../src/useThreadMessages";
@@ -30,7 +30,7 @@ import { idleCompaction, isCompactCommand, type CompactionState } from "../src/c
 import { SessionDoorsProvider } from "../src/ui/SessionDoor";
 import type { HandoffDoor } from "../src/handoffDoor";
 import type { ShellResult, ShellRun } from "../src/shellRun";
-import { fromHistory } from "../src/transcript";
+import { fromHistory, type OldIssueProposalArtifact } from "../src/transcript";
 import { CHILD_NOTE_TYPE, CHILD_QUESTION_TYPE, foldChildEntries, type ChildEntry } from "../src/childAgents/childAgentsModel";
 import { ChildAgentsOpener } from "../src/childAgents/ChildAgentsOpener";
 import { ChildAgentsPanel } from "../src/childAgents/ChildAgentsPanel";
@@ -41,9 +41,8 @@ import { waitingItems, waitingLabel } from "../src/waitingOnYou";
 import { PinnedDock } from "../src/ui/PinnedDock";
 import { EventLine } from "../src/ui/EventLine";
 import { CHILDREN, STREAMING, TRANSCRIPT } from "../src/childAgents/fixtures/children";
-import { IssueProposalEntry, type IssueRequest } from "../src/issues/IssueProposalEntry";
-import type { IssueProposal, IssueProposalArtifact } from "../src/issues/issueProposal";
-import { CREATED, DISMISSED, GITHUB_FAILED, LONG, NO_LABELS, SHORT } from "../src/issues/fixtures/proposals";
+import { OldIssueProposalLine } from "../src/issues/OldIssueProposalLine";
+import { FILED } from "../src/issues/fixtures/issues";
 import type { ComposerInputElement } from "../src/ui/ComposerEditor";
 import { WorkflowEntryView } from "../src/workflows/WorkflowEntryView";
 import { WorkflowProposalSheet } from "../src/workflows/WorkflowProposalSheet";
@@ -469,33 +468,28 @@ const childMessages = (): TranscriptMessage[] => [...foldChildEntries(fromHistor
   { role: "custom", customType: CHILD_QUESTION_TYPE, content: "", details: { questionId: "q:40", child: 21, childName: "ui", question: "Should the empty state show the last run, or stay blank?" } },
   ...longer,
 ]).messages)];
-// Issue proposals: cards the reader creates or dismisses. Each proposal row is a system row whose metadata
-// carries an IssueProposalArtifact, as the session's transcript sets it; the preview adds the metadata after conversion.
+// Issues: the parent files one itself (its tool line, then the issue under it), between old proposals whose cards are
+// gone. The rows come from raw entries through the transcript, as a real session's history does. No network.
 const issuePreview = scenario.startsWith("issue");
-const proposals = new Map<string, IssueProposal>();
-const proposalRow = (id: string, proposal: IssueProposal): TranscriptMessage => { proposals.set(id, proposal); return say(id, "system", ""); };
-/** Gives each proposal row its artifact, the way the transcript does for a real session. */
-const withProposals = (messages: readonly ThreadMessage[]): ThreadMessage[] => messages.map((message) => {
-  const proposal = proposals.get(message.id);
-  return proposal === undefined || message.role !== "system" ? message
-    : { ...message, metadata: { ...message.metadata, custom: { issueProposal: proposal } satisfies IssueProposalArtifact } };
-});
-const issueJson = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-let issueCalls = 0;
-/** A stand-in for the issue routes: the long proposal fails once on GitHub, then succeeds. */
-const issueRequest: IssueRequest = (path) => new Promise((resolve) => {
-  issueCalls += 1;
-  const response = path.endsWith("/dismiss") ? issueJson(200, DISMISSED)
-    : path.includes(LONG.proposalId) && issueCalls === 1 ? issueJson(502, { error: GITHUB_FAILED })
-    : issueJson(200, { ...CREATED, title: path.includes(LONG.proposalId) ? LONG.title : SHORT.title });
-  setTimeout(() => resolve(response), 1_200);
-});
-/** Row ids carry the scenario name: every scenario is built up front, and each must keep its own proposals. */
-const issueMessages = (name: string, list: readonly IssueProposal[]): TranscriptMessage[] => [
-  say("issue-q", "user", "File the draft-loss bug, and the card idea we discussed."),
-  say("issue-a", "assistant", "I drafted both. Check them before they go to GitHub."),
-  ...list.map((proposal, index) => proposalRow(`${name}-${String(index)}`, proposal)),
-];
+const oldProposal = (proposalId: string, title: string) => ({ role: "custom", customType: "forgerie.issue-proposal",
+  content: `Proposed issue ${proposalId} on forgerie/forgerie: ${title}. The user decides whether to create it.`,
+  details: { proposal: { proposalId, repo: "forgerie/forgerie", title, body: "Steps to reproduce…", labels: ["bug"] }, targetCwd: previewCwd } });
+const oldOutcome = (proposalId: string, outcome: unknown) => ({ role: "custom", customType: "forgerie.issue-proposal-outcome", content: "", details: { proposalId, outcome } });
+const issueMessages = (): TranscriptMessage[] => [...fromHistory([
+  { role: "user", content: "File the draft-loss bug, and the card idea we discussed." },
+  { role: "assistant", content: [{ type: "text", text: "I drafted both. Check them before they go to GitHub." }] },
+  oldProposal("ip-3f1c", "Retry after a failed send loses the composer draft"),
+  oldProposal("ip-77a0", "Show the card idea from the design review"),
+  oldProposal("ip-51aa", "Session picker keeps a closed worktree's sessions in the list after the worktree is removed, and opening one shows an empty transcript with no way back except a reload of the whole app"),
+  { role: "custom", customType: "forgerie.issue-proposal", content: "", details: null },
+  oldOutcome("ip-3f1c", { state: "created", number: 142, title: "Retry after a failed send loses the composer draft", url: "https://github.com/forgerie/forgerie/issues/142" }),
+  oldOutcome("ip-77a0", { state: "dismissed" }),
+  { role: "user", content: "The retry bug came back. File it again, it is a different cause." },
+  { role: "assistant", content: [{ type: "text", text: "I searched open and closed issues first; only the old one matches, and it was a different cause." },
+    { type: "toolCall", id: "file-1", name: "file_issue", arguments: { title: FILED.title, body: "Steps to reproduce…", duplicates: ["retry draft", "composer draft lost"], notDuplicateOf: [142] } }] },
+  { role: "toolResult", toolCallId: "file-1", toolName: "file_issue", content: [{ type: "text", text: `Filed #${String(FILED.number)} ${FILED.url} with agent-filed.` }], details: FILED, isError: false },
+  { role: "assistant", content: [{ type: "text", text: "Filed it with the agent-filed label. I will keep working on the fix." }] },
+]).messages];
 // Workflow proposals: an earlier proposal the reader asked to change, and the agent's new one, pinned above the
 // composer while it waits. `workflow-proposal-sheet` opens its sheet; Start shows the run strip. No network.
 const proposalPreview = scenario.startsWith("workflow-proposal");
@@ -509,9 +503,7 @@ const proposalMessages = (): TranscriptMessage[] => [...fromHistory([
 ]).messages];
 const scenarios: Record<string, TranscriptMessage[]> = {
   ...proposalPreview ? { [scenario]: proposalMessages() } : {},
-  issue: issueMessages("issue", [SHORT, LONG]), "issue-long": issueMessages("issue-long", [LONG]),
-  "issue-readonly": issueMessages("issue-readonly", [NO_LABELS, LONG]),
-  "issue-decided": issueMessages("issue-decided", [{ ...SHORT, outcome: CREATED }, { ...NO_LABELS, outcome: DISMISSED }, { ...LONG, outcome: { ...CREATED, number: 1204, title: LONG.title, url: "https://github.com/forgerie/forgerie/issues/1204" } }]),
+  ...issuePreview ? { [scenario]: issueMessages() } : {},
   ...childrenPreview ? { [scenario]: childMessages() } : {},
   summary: summaryMessages, "summary-open": summaryMessages,
   shell: shellMessages(false), "shell-running": shellMessages(true), "shell-blocked": shellMessages(true),
@@ -698,8 +690,7 @@ function Preview() {
     setMessages((current) => [...current, say(`user-${current.length}`, "user", text),
       say(`reply-${current.length}`, "assistant", "This is a local preview. No prompt was sent to Pi.")]);
   }
-  const converted = useThreadMessages(messages, running);
-  const threadMessages = useMemo(() => issuePreview ? withProposals(converted) : converted, [converted]);
+  const threadMessages = useThreadMessages(messages, running);
   const runtimeRef = useRef<AssistantRuntime | null>(null);
   // Stop returns queued work to the draft in delivery order, ahead of what is typed.
   async function onCancel() {
@@ -811,8 +802,8 @@ function Preview() {
         if (proposal?.state.kind === "open") return <EventLine tone="active" subject={entry.name} phrase="waits for your review, pinned below the thread" />;
         return <WorkflowEntryView entry={entry} proposal={proposal} proposalsRead onReviewProposal={() => setFlowSheet(entry.proposalId)} />;
       } : issuePreview ? (custom) => {
-        const proposal = (custom as Partial<IssueProposalArtifact> | undefined)?.issueProposal;
-        return proposal && <IssueProposalEntry proposal={proposal} sessionId="preview" cwd={previewCwd} readOnly={scenario === "issue-readonly"} request={issueRequest} />;
+        const proposal = (custom as Partial<OldIssueProposalArtifact> | undefined)?.oldIssueProposal;
+        return proposal && <OldIssueProposalLine proposal={proposal} />;
       } : childrenPreview ? (custom) => {
         const entry = (custom as { childEntry?: ChildEntry } | undefined)?.childEntry;
         if (pinnedPreview && entry?.kind === "question" && entry.answer === undefined) return <EventLine tone="active" subject={`${entry.childName} asks`} phrase="pinned below the thread" />;
