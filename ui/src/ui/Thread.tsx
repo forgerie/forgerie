@@ -76,7 +76,10 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
     return revealId === undefined ? undefined : revealMessage(column.current, revealId, step);
   }, [revealKey, revealId]);
   return <MarkdownLinkContext.Provider value={linkScope}><ImageViewerProvider><ThreadPrimitive.Root className="thread">
-    <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top">
+    {/* Follow the tail while the reader is at the bottom, so late growth (a diagram finishing its draw) keeps the
+        last turn in view. turnAnchor="top" still holds a new turn at the top while it runs; assistant-ui defaults
+        autoScroll to false with that anchor, which let late growth push an idle transcript off its bottom. */}
+    <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top" autoScroll>
       <div ref={column} className="thread-column">
         <AuiIf condition={(s) => s.thread.isLoading && s.thread.messages.length === 0}>
           <div className="history-loading" role="status" aria-label="Loading conversation">

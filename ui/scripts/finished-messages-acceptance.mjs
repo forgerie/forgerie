@@ -161,6 +161,9 @@ try {
     assert.ok(firstVisible >= 0, "The last turn became visible");
     assert.ok(frames[firstVisible].gapToBottom <= 1, "The first frame with the last turn is pinned to the bottom");
     assert.deepEqual(unexplained, [], "Every later move of the last turn coincides with a Mermaid diagram finishing its draw");
+    // The transcript follows its tail while the reader stays at the bottom, so a late draw does not move the last turn either.
+    assert.deepEqual(markerMoves, [], "The last turn does not move after it first shows, even while diagrams finish drawing");
+    assert.ok(settled.gapToBottom <= 1, "The settled transcript is still pinned to the bottom");
     assert.deepEqual(errors, []);
   } else await recordStreaming();
   async function recordStreaming() {
