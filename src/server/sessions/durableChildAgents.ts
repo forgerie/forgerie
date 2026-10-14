@@ -17,7 +17,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Check } from "typebox/value";
-import { isKnownThinkingLevel, type ThinkingLevel } from "../../shared/thinkingLevels.js";
+import { parseModelReference, type ThinkingLevel } from "../../shared/thinkingLevels.js";
 import { ChildRetrySchema, type ChildRetry } from "../../shared/childRetry.js";
 import type { DurableSdkTools } from "./durableSdkTools.js";
 import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
@@ -553,10 +553,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
  * their own model fields strictly; this reader stays as lenient as every other spawn needs.
  */
 export function modelChoice(spec: string): { model: { provider: string; modelId: string }; thinkingLevel?: ThinkingLevel } | null {
-  const colon = spec.lastIndexOf(":");
-  const suffix = colon > 0 ? spec.slice(colon + 1) : "";
-  const level = isKnownThinkingLevel(suffix) ? suffix : undefined;
-  const id = level === undefined ? spec : spec.slice(0, colon);
+  const { model: id, thinkingLevel: level } = parseModelReference(spec);
   const slash = id.indexOf("/");
   if (slash <= 0 || slash === id.length - 1) return null;
   return { model: { provider: id.slice(0, slash), modelId: id.slice(slash + 1) }, ...(level === undefined ? {} : { thinkingLevel: level }) };

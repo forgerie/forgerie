@@ -658,6 +658,21 @@ describe("Durable-native child agents in a Forgerie session", () => {
 });
 
 describe("a model named for one spawn", () => {
+  it.each([
+    { spec: "a/b", expected: { model: { provider: "a", modelId: "b" } } },
+    { spec: "a/b:high", expected: { model: { provider: "a", modelId: "b" }, thinkingLevel: "high" } },
+    { spec: "a/b:max", expected: { model: { provider: "a", modelId: "b" }, thinkingLevel: "max" } },
+    { spec: "local/qwen:32b", expected: { model: { provider: "local", modelId: "qwen:32b" } } },
+    { spec: ":high", expected: null },
+    { spec: "a/b:", expected: { model: { provider: "a", modelId: "b:" } } },
+    { spec: "a/", expected: null },
+    { spec: "/b", expected: null },
+    { spec: "nolash", expected: null },
+    { spec: "a/b/c:low", expected: { model: { provider: "a", modelId: "b/c" }, thinkingLevel: "low" } },
+  ])("parses the spawn model reference $spec", ({ spec, expected }) => {
+    expect(modelChoice(spec)).toEqual(expected);
+  });
+
   it("reads provider/model-id with an optional thinking level and refuses anything else", () => {
     expect(modelChoice("anthropic/claude-opus-5.5")).toEqual({ model: { provider: "anthropic", modelId: "claude-opus-5.5" } });
     expect(modelChoice("cliproxyapi/gpt-6.1:high")).toEqual({ model: { provider: "cliproxyapi", modelId: "gpt-6.1" }, thinkingLevel: "high" });
