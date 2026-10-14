@@ -1,7 +1,7 @@
-/* The dot carries the state; the live colour also marks the edge of a row that waits on the reader. */
+/* The dot carries the state. Rows stay neutral, including when they wait for the reader. */
 .status-row { --status-tone: var(--muted-foreground); position: relative; border-radius: var(--radius-surface); }
 .status-row[data-tone="working"] { --status-tone: var(--live); }
-.status-row[data-tone="waiting"] { --status-tone: var(--live); background: var(--live-wash); }
+.status-row[data-tone="waiting"] { --status-tone: var(--live); }
 /* Trouble that may still clear on its own: a steady dot, because nothing moves until the next try. */
 .status-row[data-tone="retrying"] { --status-tone: var(--tone-warn); }
 .status-row + .status-row { margin-block-start: var(--space-1); }
@@ -21,7 +21,7 @@
 /* The status takes the rest of the line and wraps under the name when there is none left. */
 .status-row-status { flex: 1 0 auto; color: var(--muted-foreground); font-size: var(--label-text); text-align: end; }
 .status-row[data-tone="waiting"] .status-row-detail { color: var(--foreground); }
-.status-row[data-tone="waiting"] .status-row-status { color: var(--ink-live); font-weight: 500; }
+.status-row[data-tone="waiting"] .status-row-status { font-weight: 500; }
 .status-row[data-tone="retrying"] .status-row-status { color: var(--ink-warn); font-weight: 500; font-variant-numeric: tabular-nums; }
 .status-row-chevron { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
 .status-row-below { padding: 0 var(--space-3) var(--space-3) calc(var(--space-3) + 0.5rem + var(--space-2)); font-size: var(--small-text); overflow-wrap: anywhere; }

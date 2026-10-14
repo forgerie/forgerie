@@ -60,6 +60,7 @@ describe("machine-scoped session proxy routes", () => {
     const discovery = await app.inject({ method: "GET", url: "/api/machines/local/sessions/s1/workflows?cwd=%2Frepo" });
     const accepted = await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/workflow-runs", payload: launch });
     const history = await app.inject({ method: "GET", url: "/api/machines/local/sessions/s1/workflow-runs?cwd=%2Frepo" });
+    expect((await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/workflow-runs/r1/cancel", payload: { cwd: "/repo" } })).statusCode).toBe(200);
     const model = { cwd: "/repo", model: null };
     expect((await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/workflow-runs/r1/workers/build/model", payload: model })).statusCode).toBe(200);
     daemon.respondWith({ statusCode: 409, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Children still running" }) });
@@ -70,6 +71,7 @@ describe("machine-scoped session proxy routes", () => {
       { method: "GET", path: "/sessions/s1/workflows?cwd=%2Frepo", body: undefined },
       { method: "POST", path: "/sessions/s1/workflow-runs", body: launch },
       { method: "GET", path: "/sessions/s1/workflow-runs?cwd=%2Frepo", body: undefined },
+      { method: "POST", path: "/sessions/s1/workflow-runs/r1/cancel", body: { cwd: "/repo" } },
       { method: "POST", path: "/sessions/s1/workflow-runs/r1/workers/build/model", body: model },
       { method: "POST", path: "/sessions/s1/workflow-runs/r1/finish", body: finish },
     ]);

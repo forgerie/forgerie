@@ -1,0 +1,4 @@
+.field-edit { min-inline-size: 0; margin-block-end: var(--space-5); }
+.field-edit > :first-child { margin-block-end: 0; }
+.field-edit-note { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--space-3);
+  color: var(--muted-foreground); font-size: var(--label-text); }

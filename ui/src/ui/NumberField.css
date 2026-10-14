@@ -1,0 +1,9 @@
+.number-field { display: grid; gap: var(--space-1); min-inline-size: 0; margin-block-end: var(--space-5); }
+.number-field > label { color: var(--muted-foreground); font-size: var(--small-text); font-weight: 600; }
+.number-field-control { display: flex; gap: var(--space-1); align-items: center; }
+.number-field-control > input { flex: 1; min-inline-size: 0; inline-size: 100%; min-block-size: var(--control-size);
+  padding: var(--space-2); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
+  background: var(--tint-surface); color: var(--foreground); font: inherit; font-size: 1rem; font-variant-numeric: tabular-nums; }
+.number-field-control > button { flex: none; inline-size: var(--control-size); min-block-size: var(--control-size);
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--foreground); font: inherit; }
+.number-field-control > button:hover { background: var(--hover-surface); }

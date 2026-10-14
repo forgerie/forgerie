@@ -2647,6 +2647,11 @@ export class PiSessionService implements SessionRouteService {
     this.assertHandoffDestinationAcceptsInput(session);
     return this.runSessionEntryMutation(session, "launch a workflow", () => session.runWorkflow(name, inputs, requestId, models));
   }
+  async cancelWorkflow(ref: PiSessionRef, runId: string) {
+    await this.assertWritable(ref);
+    const session = await this.durableSession(ref);
+    return this.runSessionEntryMutation(session, "stop a workflow", () => session.cancelWorkflow(runId));
+  }
   async finishWorkflow(ref: PiSessionRef, runId: string, outcome: WorkflowOutcome, result: string) {
     await this.assertWritable(ref);
     const session = await this.durableSession(ref);

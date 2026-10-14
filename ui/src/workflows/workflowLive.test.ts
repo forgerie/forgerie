@@ -63,6 +63,14 @@ describe("a run's live route", () => {
       .toMatchObject({ busy: true, status: "Working on a follow-up" });
   });
 
+  it("keeps a finished run final despite stale child activity or an undecided gate", () => {
+    const stopped = { ...RUN_FINISHED, state: { kind: "finished" as const, outcome: "stopped" as const, result: "Stopped", finishedAt: 100 } };
+    const route = liveRoute(stopped, [{ name: "page", agent: "design-engineer", conversationId: 42, busy: true, asking: true }]);
+    expect(route[1]?.workers.find((worker) => worker.name === "page")).toMatchObject({ busy: false, status: "Done", tones: ["plain"] });
+    const atGate = liveRoute({ ...RUN_AT_STOP, state: stopped.state });
+    expect(atGate[0]).toMatchObject({ progress: "next", stopTone: "faint", status: "Not decided before the run ended" });
+  });
+
   it("lists every child of a run without stages", () => {
     expect(proseWorkers(PROSE_RUN).map((worker) => [worker.name, worker.tones, worker.status, worker.declared])).toEqual([
       ["store-hunt", ["live"], "Working", false], ["reconnect-hunt", ["plain"], "Done", false]]);

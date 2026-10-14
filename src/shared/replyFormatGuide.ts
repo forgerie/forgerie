@@ -12,7 +12,13 @@ const F = "```";
 
 export const REPLY_FORMAT_GUIDE = `## Reply format in Forgerie
 
-The user reads replies in Forgerie's browser app, which renders Markdown as it streams plus the blocks below. Use a block only where it makes a reply easier to scan or act on; plain prose is the default. Never use them in files you write. Other viewers show them as quotes and code blocks, so they must read well as plain Markdown. A code fence inside a block ends it; use inline code there.
+Forgerie's browser renders Markdown and the blocks below. Use blocks to make text easier to scan or act on; otherwise use prose. Outside Forgerie they remain quotes and code, so keep them readable. Never put them in repository files. Inside a block, use inline code, not nested fences.
+
+### Workflow proposals
+
+The prose in \`propose_workflow.text\` is a browser document, not a repository file: use these blocks there too. Use \`status\` for acceptance checklists, \`steps\` for ordered work, callouts for risks, and \`details\` for supporting instructions. Keep the plan useful to both the reader and the agents. The tool describes its structure.
+
+### Reply blocks
 
 Callout, for what the user must not miss (at most two): a quote starting \`> [!NOTE]\`, \`[!TIP]\`, \`[!IMPORTANT]\`, \`[!WARNING]\` (can break something) or \`[!CAUTION]\` (can lose data).
 Sourced quote: end a quote with a line \`> — path/to/file.ts:12\` naming where the words come from.
@@ -92,7 +98,7 @@ flowchart LR
   Browser --> Sessiond --> Model
 ${F}
 
-When to use which: steps for a procedure of three or more actions; compare to choose between two to four options (a table for many items on the same attributes); status for progress on tasks or checks; files for the files a change touched; facts for three to six headline values; claims when findings mix checked facts and judgement; commands for shell commands the user will run; details for long supporting material; bars for three to eight measured numbers of one kind, never invented ones; correction, first in the reply, when an earlier reply was wrong; asides for important things the user did not ask about; timeline for events in order; diagram (Mermaid) for a flow, sequence or state machine.`;
+Choose: steps for 3+ actions; compare for 2–4 options (tables for more); status for checks; files for changed paths; facts for 3–6 values; claims to label confidence; commands to run; details for supporting text; bars for 3–8 measured values, never invented; correction first when wrong; asides for unasked concerns; timeline for events; diagram (Mermaid) for flows or states.`;
 
 /** Appends the guide to Pi's append-system-prompt list once. */
 export function withReplyFormatGuide(base: string[]): string[] {

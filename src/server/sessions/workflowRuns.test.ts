@@ -136,10 +136,11 @@ const route: FauxResponseFactory = (context, options, _state, model) => {
   }
   if (said.startsWith("[subagent")) return autoComplete && runId !== undefined ? call("workflow_finish", { runId, outcome: "completed", result: "REVIEWED-RESULT" }) : answer("Reviewed. Await explicit finish.");
   if (said === "FAIL-CHILD") return fauxAssistantMessage("", { stopReason: "error", errorMessage: "Controlled workflow child failure" });
+  if (said === "RETRY-CHILD") return fauxAssistantMessage("", { stopReason: "error", errorMessage: "529 overloaded" });
   if (said.startsWith("CHILD-TASK") || said.startsWith("CHILD-COMMIT")) return fauxAssistantMessage([fauxToolCall("work", {})], { stopReason: "toolUse" });
   if (said.includes("WORKFLOW-TEST")) {
     if (said.includes('"task":"parallel"')) return fauxAssistantMessage(["alpha", "beta", "gamma"].map((name) => fauxToolCall("child_agent", { action: "spawn", name, message: "CHILD-TASK", isolation: "worktree" })), { stopReason: "toolUse" });
-    return call("child_agent", { action: "spawn", name: `writer${String(++sequence)}`, message: said.includes('"task":"failure"') ? "FAIL-CHILD" : "CHILD-TASK", isolation: isolate ? "worktree" : "shared" });
+    return call("child_agent", { action: "spawn", name: `writer${String(++sequence)}`, message: said.includes('"task":"failure"') ? "FAIL-CHILD" : said.includes('"task":"retry"') ? "RETRY-CHILD" : "CHILD-TASK", isolation: isolate ? "worktree" : "shared" });
   }
   return answer("Session title");
 };
@@ -181,6 +182,67 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await service.dispose(); await rm(root, { recursive: true, force: true }); expect(errors).toEqual([]); });
 
 describe("saved prose workflows through production Durable sessions and HTTP", () => {
+  it("stops the whole run, keeps its files, rejects other sessions, and accepts cancellation retries", async () => {
+    await new AgentDirPromptLibrary(agentDir).save({ name: "experiment", body: definition });
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    const run = runBody(await service.runWorkflow(ref, "experiment", {}, "cancel-running"));
+    await until(() => Promise.resolve(started > 0));
+    const server = app();
+    const url = `/sessions/${ref.id}/workflow-runs/${run.id}/cancel`;
+    try {
+      await writeFile(join(root, "keep.txt"), "Keep the user's work");
+      const other = { id: (await service.start(root)).id, cwd: root };
+      expect((await server.inject({ method: "POST", url: `/sessions/${other.id}/workflow-runs/${run.id}/cancel`, payload: { cwd: root } })).statusCode).toBe(404);
+      expect((await server.inject({ method: "POST", url, payload: { cwd: root, extra: true } })).statusCode).toBe(400);
+      const response = await server.inject({ method: "POST", url, payload: { cwd: root } });
+      expect(response.statusCode).toBe(200);
+      expect(runBody(response.json()).state).toEqual({ kind: "stopping" });
+      await expect(service.finishWorkflow(ref, run.id, "completed", "Too late")).rejects.toThrow(/stopping|already finished/);
+      const stopped = await until(async () => {
+        const current = (await service.workflowRuns(ref))[0];
+        return current?.state.kind === "finished" ? current : false;
+      });
+      expect(stopped.state).toMatchObject({ kind: "finished", outcome: "stopped" });
+      expect(stopped.children.every((child) => child.state.kind === "settled")).toBe(true);
+      expect((await service.status(ref)).isStreaming).toBe(false);
+      expect((await server.inject({ method: "POST", url, payload: { cwd: root } })).json()).toMatchObject({ state: { kind: "finished", outcome: "stopped" } });
+      expect(await readFile(join(root, "keep.txt"), "utf8")).toBe("Keep the user's work");
+      await service.dispose();
+      service = openService();
+      expect((await service.workflowRuns(ref))[0]?.state).toMatchObject({ kind: "finished", outcome: "stopped" });
+      // Cancellation released the active slot and left no delivery task to wake an old run.
+      expect(runBody(await service.runWorkflow(ref, "experiment", {}, "after-cancel")).state.kind).toBe("running");
+    } finally { await server.close(); }
+  });
+
+  it("cancels a child's background retry before marking the run stopped", async () => {
+    // Exercise the child reporter's backoff, not the model transport's own retries first.
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ retry: { enabled: false } }));
+    await new AgentDirPromptLibrary(agentDir).save({ name: "experiment", body: definition });
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    const run = runBody(await service.runWorkflow(ref, "experiment", { task: "retry" }, "cancel-retry"));
+    await until(async () => (await service.durableChildren(ref)).some((child) => child.retry !== undefined));
+    await service.cancelWorkflow(ref, run.id);
+    const stopped = await until(async () => {
+      const current = (await service.workflowRuns(ref))[0];
+      return current?.state.kind === "finished" ? current : false;
+    });
+    expect(stopped.children[0]?.state).toMatchObject({ kind: "settled", outcome: "stopped", delivered: "aborted" });
+    expect((await service.durableChildren(ref))[0]?.retry).toBeUndefined();
+  });
+
+  it("stops a run waiting at a user gate without approving or landing it", async () => {
+    await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    const run = runBody(await service.runWorkflow(ref, "staged", {}, "cancel-gate"));
+    await until(async () => (await service.workflowRuns(ref))[0]?.stops?.["contract"]?.state === "waiting");
+    expect((await service.cancelWorkflow(ref, run.id)).state).toEqual({ kind: "stopping" });
+    await service.dispose();
+    service = openService();
+    await until(async () => (await service.workflowRuns(ref))[0]?.state.kind === "finished");
+    await expect(service.decideWorkflowStop(ref, run.id, "contract", "approve", undefined)).rejects.toThrow("finished");
+    expect((await service.workflowRuns(ref))[0]?.stops?.["contract"]?.state).toBe("waiting");
+  });
   it.each([
     { source: "saved", model: "faux/faux-1:high" }, { source: "proposal", model: "faux/faux-1:high" },
     { source: "saved", model: null }, { source: "proposal", model: null },

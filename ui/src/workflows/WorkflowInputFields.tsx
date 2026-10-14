@@ -1,20 +1,28 @@
+import { FieldEdit } from "../ui/FieldEdit";
+import { NumberField } from "../ui/NumberField";
 import { TextAreaField } from "../ui/TextAreaField";
 import { ToggleGroup } from "../ui/ToggleGroup";
+import { workflowInputLabel } from "./workflowInputLabel";
 import type { WorkflowInput } from "./workflowsModel";
 
-/**
- * Shape: a workflow's inputs as fields, in the order given. A yes-or-no input
- * or one with choices is a toggle group; any other is a text box, four lines
- * for the task and one for the rest. Values are text until the launch reads them.
- */
-export function WorkflowInputFields({ inputs, values, onChange }: {
+/** Shape: typed workflow inputs, with readable labels and a way to undo each changed value. */
+export function WorkflowInputFields({ inputs, values, onChange, reset }: {
   inputs: readonly (readonly [string, WorkflowInput])[];
   values: Readonly<Record<string, string>>;
   onChange: (name: string, value: string) => void;
+  reset?: { values: Readonly<Record<string, string>>; label: string; onReset: (name: string) => void } | undefined;
 }) {
-  return <>{inputs.map(([name, input]) => input.type === "boolean" || input.choices !== undefined
-    ? <ToggleGroup key={name} field label={input.description ?? name} value={values[name] ?? ""} onChange={(value) => onChange(name, value)}
-      options={(input.choices ?? [true, false]).map((choice) => ({ value: String(choice), label: input.type === "boolean" ? (choice === true ? "Yes" : "No") : String(choice) }))} />
-    : <TextAreaField key={name} label={name === "task" ? "Task" : name} value={values[name] ?? ""} onChange={(value) => onChange(name, value)}
-      rows={name === "task" ? 4 : 1} hint={input.description} />)}</>;
+  return <>{inputs.map(([name, input]) => {
+    const label = workflowInputLabel(name, input.description);
+    const value = values[name] ?? "";
+    const onEdit = (next: string) => onChange(name, next);
+    const changed = reset !== undefined && value !== (reset.values[name] ?? "");
+    return <FieldEdit key={name} reset={changed ? { label: reset.label, title: `Reset ${label}`, onPress: () => reset.onReset(name) } : undefined}>
+      {input.type === "boolean" || input.choices !== undefined
+        ? <ToggleGroup field label={label} value={value} onChange={onEdit}
+          options={(input.choices ?? [true, false]).map((choice) => ({ value: String(choice), label: input.type === "boolean" ? (choice === true ? "Yes" : "No") : String(choice) }))} />
+        : input.type === "number" ? <NumberField label={label} value={value} onChange={onEdit} />
+          : <TextAreaField label={label} value={value} onChange={onEdit} rows={name === "task" ? 4 : 1} />}
+    </FieldEdit>;
+  })}</>;
 }

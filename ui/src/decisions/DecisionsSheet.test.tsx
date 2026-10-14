@@ -25,7 +25,7 @@ const footer = () => sheet().querySelector(".sheet-dialog-foot");
 /** The run mode of the workflow sheet, with the session's log or without one. */
 const runSheet = (decisions?: { log: DecisionLogView; actions: DecisionLogActions }) => <WorkflowSheet mode="run" run={BUILDING} looks={CHILD_LOOKS}
   models={{ known: [], list: async () => [] }} now={() => LOG_NOW} decisions={decisions} onDecide={async () => true} onOpenWorker={() => {}} onRetryRecord={() => {}}
-  onSteer={async () => {}} onStopWorker={() => {}} onDismissRecordError={() => {}} onModel={async () => true} onClose={() => {}} />;
+  onStopRun={async () => true} onSteer={async () => {}} onStopWorker={() => {}} onDismissRecordError={() => {}} onModel={async () => true} onClose={() => {}} />;
 async function type(text: string) {
   const field = sheet().querySelector<HTMLTextAreaElement>(".sheet-dialog-foot textarea, .split-sheet-foot textarea")!;
   await act(async () => {

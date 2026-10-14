@@ -48,11 +48,58 @@ const Launch = defineTask<{ runId: string; prompt: string; requestId?: string },
   phases: { deliver: async (task, runtime, context) => {
     const parent = await runtime.conversation(runtime.conversationId, context);
     if (parent === undefined) throw new Error("Workflow parent is missing");
+    const run = (await runtime.snapshot(Runs, runtime.conversationId, context))?.records[task.input.runId];
+    if (run !== undefined && run.state.kind !== "running") {
+      await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context);
+      return;
+    }
     await parent.submit({ type: "input", content: task.input.prompt, whenBusy: "followUp", requestId: task.input.requestId ?? `workflow:${task.input.runId}` }, context);
     await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
   } },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });
+
+/** Cancellation lives outside the target's ownership tree, so cancelling all background work cannot cancel itself. */
+const Cancel = defineTask<{ parent: ConversationId; runId: string }, { phase: "cancel" }, null>({
+  name: "forgerie.workflow-cancel", version: 1, initial: () => ({ phase: "cancel" }),
+  phases: { cancel: async (task, runtime, context) => {
+    const parent = await runtime.conversation(task.input.parent, context);
+    if (parent === undefined) throw new Error("Workflow parent is missing");
+    await parent.abort(context, { background: true });
+    await runtime.commit(async (tx) => {
+      const doc = await tx.doc(Runs, task.input.parent);
+      const run = doc.records[task.input.runId];
+      if (run?.state.kind !== "stopping") throw new Error("Workflow cancellation lost its stop request");
+      await reconcileReportFailures(tx, task.input.parent, run);
+      run.state = { kind: "finished", outcome: "stopped", result: "Stopped by the user. Files and commits were kept; completed actions were not undone.", finishedAt: Date.now() };
+      if (doc.active === run.id) doc.active = null;
+      await tx.appendEntry(task.input.parent, { kind: "forgerie.workflow-cancelled", model: [{ role: "user", content: `[workflow ${run.definition.name}] The user stopped the run. Do not resume it unless asked.`, timestamp: Date.now() }] });
+      return { status: "terminal", outcome: { status: "completed", result: null } };
+    }, context);
+  } },
+  abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+});
+
+/** One durable cancellation request per run. Returns immediately; the run stays active until all work stops. */
+export async function cancelWorkflow(harness: Harness, parent: Conversation, runId: string, context: Context): Promise<WorkflowRun> {
+  const run = await parent.commit(async (tx) => {
+    const doc = await tx.doc(Runs, parent.id);
+    const record = doc.records[runId];
+    if (record === undefined) throw new WorkflowError(404, "Workflow run not found in this session");
+    if (record.state.kind === "finished") {
+      if (record.state.outcome !== "stopped") throw new WorkflowError(409, "This workflow has already finished");
+      return publicRun(record);
+    }
+    if (record.state.kind === "stopping") return publicRun(record);
+    if (doc.active !== runId) throw new WorkflowError(409, "This workflow is not active");
+    record.state = { kind: "stopping" };
+    const control = await tx.createConversation({ ownership: { kind: "ownerless" } });
+    await tx.createTask(Cancel, { parent: parent.id, runId }, { conversationId: control.id, ownership: { kind: "conversation" }, background: true });
+    return publicRun(record);
+  }, context);
+  harness.resume();
+  return run;
+}
 
 const toolResult = (text: string, isError = false) => ({ content: [{ type: "text" as const, text }], ...(isError ? { isError: true } : {}) });
 async function asTool(action: () => Promise<string>) {
@@ -64,9 +111,9 @@ async function asTool(action: () => Promise<string>) {
 }
 
 export function workflowExtension() {
-  return defineExtension({ name: "forgerie.workflows", tasks: [Launch], tools: [defineTool({
+  return defineExtension({ name: "forgerie.workflows", tasks: [Launch, Cancel], tools: [defineTool({
     name: "propose_workflow",
-    description: "When you understand a task that needs several workers, a review, or the user's check, design a workflow for this task, call propose_workflow, then end your turn. Not for small tasks. Never write a workflow file into the repository for a one-off workflow. Supply complete prompt-format text with workflow version 1 frontmatter and prose, and pre-fill its inputs. Add no approve stops unless the user asked to check something. Only irreversible steps need a stop. Only the user can start the proposal, ask for changes, or dismiss it.",
+    description: "When you understand a task that needs several workers, a review, or the user's check, design a workflow for this task, call propose_workflow, then end your turn. Not for small tasks. Never write a workflow file into the repository for a one-off workflow. Supply complete prompt-format text with workflow version 1 frontmatter and prose, and pre-fill its inputs. The user reads the prose beside the route and inputs; agents then follow it. Use the reply guide's rich blocks, including status checklists, steps and details where useful. Frontmatter description is a plain title of at most 90 characters; omit a duplicate H1. Give each input a short description as its label. Open with the outcome in two or three sentences. Use one H2 per stage, named exactly as the stage, in route order. State each stage's actions and acceptance checks; call out conditions that stop or roll back work. Put supporting instructions in details. Refer to input names, not copies of their values. Add no approve stops unless the user asked to check something. Only irreversible steps need a stop. Only the user can start the proposal, ask for changes, or dismiss it.",
     parameters: WorkflowProposalToolSchema,
     // The task-keyed proposal ID reuses the committed proposal and its card.
     replay: "safe", executionMode: "sequential",
@@ -110,6 +157,7 @@ export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId:
   };
   const run = doc.records[runId];
   if (run === undefined || doc.active !== runId) throw new WorkflowError(404, "No active workflow run with this id in this session");
+  if (run.state.kind !== "running") throw new WorkflowError(409, "This workflow is stopping or finished");
   const stage = run.stages?.find((candidate) => candidate.id === stageId);
   const current = stopOf(run, stageId);
   // A replayed call, or a second ask for a stop already waiting, does not add another card.
@@ -145,6 +193,7 @@ export async function decideWorkflowStop(harness: Harness, parent: Conversation,
     const doc = await tx.doc(Runs, parent.id);
     const record = doc.records[runId];
     if (record === undefined) throw new WorkflowError(404, "Workflow run not found in this session");
+    if (record.state.kind !== "running") throw new WorkflowError(409, "This workflow is stopping or finished");
     const current = stopOf(record, stageId);
     if (current.state !== "waiting") throw new WorkflowError(409, `"${stage.name}" is not waiting for a decision`);
     const round = (current.round ?? 0) + 1;
@@ -335,6 +384,7 @@ export async function finishWorkflow(tx: Tx, parent: ConversationId, runId: stri
     if (run.state.outcome !== outcome || run.state.result !== result) throw new WorkflowError(409, "Workflow already finished with another result");
     return;
   }
+  if (run.state.kind === "stopping") throw new WorkflowError(409, "This workflow is stopping");
   if (outcome === "completed") {
     const problem = completionProblem(run);
     if (problem !== undefined) throw new WorkflowError(409, problem);
@@ -354,6 +404,7 @@ export async function workflowChildRefusal(tx: Tx, parent: ConversationId, name:
   const doc = await tx.doc(Runs, parent);
   const run = doc.active === null ? undefined : doc.records[doc.active];
   if (run === undefined) return undefined;
+  if (run.state.kind !== "running") return "This workflow is stopping; do not start or message workers.";
   const admission = admitChild(run, name);
   return admission.kind === "refused" ? admission.reason : undefined;
 }
@@ -362,6 +413,7 @@ export async function workflowChildRefusal(tx: Tx, parent: ConversationId, name:
 export async function workflowWorkerModel(tx: Tx, parent: ConversationId, name: string): Promise<string | null | undefined> {
   const doc = await tx.doc(Runs, parent);
   const run = doc.active === null ? undefined : doc.records[doc.active];
+  if (run?.state.kind === "stopping") throw new WorkflowError(409, "This workflow is stopping; wait before messaging workers");
   return run === undefined ? undefined : declaredWorker(run, name)?.model;
 }
 

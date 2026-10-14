@@ -58,7 +58,7 @@ While the run is active, a strip above the composer shows its stages as bars. Pa
 
 For a task that needs several workers, a review, or your check, the agent can call `propose_workflow({name, summary, text, inputs?})`, then end its turn. Small tasks do not need a proposal. A one-off workflow must not become a file in the repository. The tool guidance says: “Add no approve stops unless the user asked to check something. Only irreversible steps need a stop.”
 
-The **Proposed workflow** card shows the name, overview, stages, workers, and stops. An open proposal counts as **Needs your response**. Review it and change the pre-filled inputs before choosing:
+The **Proposed workflow** card shows the name, overview, stages, workers, and stops. An open proposal counts as **Needs your response**. The plan uses the chat's Markdown blocks, including checklists, steps, callouts and expandable details. New proposals receive this writing guidance; existing proposal text is not rewritten. Inputs use their descriptions as labels, with readable names as a fallback. Number inputs have step buttons. Changed inputs show **Edited** and **Use the agent's** to restore the proposed value. Review it and change the pre-filled inputs before choosing:
 
 | Action | Result |
 | --- | --- |
@@ -134,7 +134,9 @@ Transient provider failures keep the associated child request working through th
 
 Child questions start parent turns, as durable follow-ups. The parent answers first; only irreversible or external escalations create user question cards. Each normal completion report also starts a parent turn. Child outcomes come from the admitted Durable submission, independently of accounting or worktree reporting. A reporting failure preserves the child's actual answer, failure, or stop reason. An answer already claimed by another reporter records `delivered: "duplicate"` (“Duplicate report, not sent again”). A child stopped before reporting, a canceled reporter, or a missing reporting target records `delivered: "aborted"` (“Stopped before reporting”). Neither state is a delivery error. A delivered report records `true`; a report not yet delivered records `false`. Actual reporter failures still expose `deliveryError` and `delivered: false`. Old records with a string `deliveryError` still parse and read as `false`; Forgerie does not reinterpret their old text as a new label. Delivery means admission to the parent's inbox, not review or approval. Explicit completion remains possible after all child work settles.
 
-If the coordinator forgets to finish, the run stays active. Stop ongoing work before using the finish HTTP route to record a failed or stopped run. Finishing changes metadata; it does not cancel work.
+To cancel a run, open its sheet, press **Stop the run**, then **Stop now**. This stops the chat's current turn and child work, including background retries, reporters and queued messages. The run says **Stopping…** until those tasks settle, then **Stopped**. Files and commits remain. Cancellation does not undo completed actions, discard branches or stop deployed services. This is a session-wide stop: do not use it to stop just one worker.
+
+The cancellation request is durable and resumes after a daemon restart. It holds the active workflow slot and refuses new worker messages while stopping. Repeating cancellation is safe. If the coordinator only forgot to record completion, the finish HTTP route can record a failed or stopped run after work settles; that route changes metadata rather than cancelling work.
 
 ## Decision log
 
@@ -165,6 +167,7 @@ Browser URLs use `/api` before these paths. Requests identify the parent's `cwd`
 | `GET /sessions/:id/workflows` | Only query `cwd`. | `{workflows: ProseWorkflow[], diagnostics: {name, path, error}[]}`. Each definition includes `name`, `path`, `sha256`, exact `text`, stripped `body`, and parsed `definition`. |
 | `POST /sessions/:id/workflow-runs` | Exactly `{cwd, name, inputs, requestId}`. | A `WorkflowRun` after its record and delivery task commit. This is admission, not proof the model completed. |
 | `GET /sessions/:id/workflow-runs` | Only query `cwd`. | `WorkflowRun[]`, newest first. |
+| `POST /sessions/:id/workflow-runs/:runId/cancel` | Exactly `{cwd}`. | The run in `stopping` state, or its existing `stopped` result on a retry. Cancellation continues durably. A different finished outcome is refused. |
 | `POST /sessions/:id/workflow-runs/:runId/finish` | Exactly `{cwd, outcome, result}`. | `{ok: true}`. This is a human recovery operation with the same settlement checks as the coordinator tool. |
 | `POST /sessions/:id/workflow-runs/:runId/stops/:stage` | `{cwd, decision, note?}`. `decision` is `approve`, `changes` (needs a note), or `land`. | The updated `WorkflowRun`. 409 when the stop is not waiting, when the decision does not fit the stop, or when a branch cannot land. |
 
@@ -186,6 +189,8 @@ Invalid requests and input definitions return 400. Missing workflows and foreign
 ## Verification
 
 `src/server/resources/workflowLibrary.test.ts` checks discovery, precedence, input validation, exact text, and script refusal. `src/server/sessions/durableWorkflowRuns.test.ts` checks proposal replay and the single commit for Start. The HTTP tests also check proposal validation, replacement, editable inputs, blocked starts, changes delivered once, dismissal, waiting status, and reopening. `src/server/sessions/workflowRuns.test.ts` uses temporary files, real HTTP handlers, the production Durable factory, and a configured scripted provider. It checks file effects, restart recovery, launch retries, frozen provenance, explicit completion, copied variations, parallel children, stopped and failed results, and retention. A staged run checks the refused spawn before the first stop, a change request and a second round, approval, the refused early completion, and a real Git landing of the child branch. `src/shared/workflowStops.test.ts` covers the stop rules; `ui/src/workflows/` tests cover the transcript entries, the cards, and the route drawing. These tests do not establish real-model or physical-device acceptance.
+
+With the UI dev server running, `CHROMIUM=/path/to/chromium npm --prefix ui run test:workflow-browser -- http://localhost:8617 /tmp/workflow-sheet-proof` checks number edits and resets, whole-run Stop, and actual mouse selection of the last model and its thinking level. It tests six container sizes in light and dark mode and writes screenshots plus `report.json`. It uses fixture data, not a live session. These remain emulated sizes, not a physical Fold test.
 
 The opt-in `scripts/workflow-real.ts` check uses a real CLIProxyAPI model. It saves and launches a workflow, checks the child's file output, copies a variation, and checks explicit completion and both child-run links. It owns a temporary profile and workspace. It copies the live CLIProxyAPI credential into a private temporary file and removes that file on normal exit or SIGTERM. It does not restart the live daemon. Model calls incur provider costs.
 

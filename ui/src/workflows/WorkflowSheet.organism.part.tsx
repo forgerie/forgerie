@@ -86,6 +86,9 @@ function Run({ run: initial, worker, record }: { run: WorkflowRun; worker?: stri
     initialWorker={worker} now={() => SHEET_NOW}
     onDecide={async (stage) => { setRun((current) => ({ ...current, stops: { ...current.stops, [stage]: { state: "approved", round: 1 } } })); return true; }}
     onOpenWorker={() => {}} onRetryRecord={() => {}} onSteer={async (_id, text) => setSent((current) => [...current, text])} onStopWorker={() => {}}
+    onStopRun={async () => { setRun((current) => ({ ...current,
+      children: current.children.map((child) => child.state.kind === "working" ? { ...child, state: { kind: "settled", outcome: "stopped", result: "Aborted", delivered: "aborted" } } : child),
+      state: { kind: "finished", outcome: "stopped", result: "Stopped by the user. Files and commits were kept.", finishedAt: SHEET_NOW } })); return true; }}
     onDismissRecordError={() => {}} onModel={async (name, model) => {
       setRun((current) => ({ ...current, stages: setWorkerModel(current.stages ?? [], name, model ?? undefined) })); return true; }} onClose={() => {}} />;
 }

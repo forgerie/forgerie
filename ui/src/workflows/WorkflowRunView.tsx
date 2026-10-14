@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActionFooter } from "../ui/ActionFooter";
+import { ActionFooter, type FooterAction } from "../ui/ActionFooter";
 import { Lede } from "../ui/Lede";
 import { MarkdownProse } from "../ui/MarkdownProse";
 import { PageSection } from "../ui/PageSection";
@@ -17,6 +17,7 @@ import { WorkflowLiveRoute } from "./WorkflowLiveRoute";
 import { WorkflowPlan } from "./WorkflowPlan";
 import { WorkflowWorkerPane, type WorkerRecord } from "./WorkflowWorkerPane";
 import { liveRoute, proseWorkers, ranFor, startedAgo, waitingStop, type StageProgress } from "./workflowLive";
+import { workflowInputLabel } from "./workflowInputLabel";
 import { planOf, planTitle } from "./workflowPlan";
 import { runStatus, type ChildLook, type StopDecision, type WorkflowRun } from "./workflowsModel";
 
@@ -29,8 +30,8 @@ const OUTCOME = { completed: "Finished", failed: "Failed", stopped: "Stopped" } 
  * plan's place, with a box to steer it, Stop, and its model. In one column the route comes first. Under the route,
  * the decisions the run's agents made without the reader; Overturn opens a note in the foot.
  */
-export function WorkflowRunView({ run, looks, record, models, deciding = false, error, decisions, initialWorker, now: clock = Date.now,
-  onDecide, onReview, onOpenWorker, onRetryRecord, onSteer, onStopWorker, onDismissRecordError, onModel, onClose }: {
+export function WorkflowRunView({ run, looks, record, models, deciding = false, cancelling = false, error, decisions, initialWorker, now: clock = Date.now,
+  onDecide, onReview, onOpenWorker, onRetryRecord, onSteer, onStopWorker, onDismissRecordError, onModel, onStopRun, onClose }: {
   run: WorkflowRun;
   /** What the session knows about the run's children. */
   looks: readonly ChildLook[];
@@ -39,6 +40,8 @@ export function WorkflowRunView({ run, looks, record, models, deciding = false, 
   models: WorkerModels;
   /** A decision at the waiting stop is on its way. */
   deciding?: boolean;
+  cancelling?: boolean;
+  onStopRun: () => Promise<boolean>;
   /** Why the last action on the run failed. */
   error?: string | undefined;
   /** The session's decision log; the sheet lists the run's part of it. Absent: the session keeps no log. */
@@ -63,6 +66,7 @@ export function WorkflowRunView({ run, looks, record, models, deciding = false, 
   const [selected, setSelected] = useState<string | undefined>(initialWorker);
   const [target, setTarget] = useState<{ stage: string; at: number }>();
   const [chosen, setChosen] = useState<string>();
+  const [confirmStop, setConfirmStop] = useState(false);
   const stages = run.stages ?? [];
   const live = liveRoute(run, looks, now);
   const prose = stages.length === 0 ? proseWorkers(run, looks, now) : undefined;
@@ -102,7 +106,7 @@ export function WorkflowRunView({ run, looks, record, models, deciding = false, 
     <WorkflowLiveRoute stages={live} prose={prose} selected={selected} known={models.known}
       onWorker={setSelected} onStage={(stage) => { setSelected(undefined); onOpenWorker(undefined); setTarget({ stage, at: (target?.at ?? 0) + 1 }); }} />
     {inputs.length > 0 && <PageSection title="Inputs">
-      <TermList empty="Empty" terms={inputs.map(([name, value]) => ({ key: name, term: name === "task" ? "Task" : name, value: String(value) }))} />
+      <TermList empty="Empty" terms={inputs.map(([name, value]) => ({ key: name, term: workflowInputLabel(name), value: String(value) }))} />
     </PageSection>}
     {decisions !== undefined && <DecisionList title="Decisions" placement="document" decisions={mine} readError={log?.readError} now={clock()}
       target={chosenDecision?.id} busy={overturning} onRetry={decisions.actions.onRetry}
@@ -110,7 +114,15 @@ export function WorkflowRunView({ run, looks, record, models, deciding = false, 
   </>;
   const next = stages.find((stage) => stage.stop !== undefined && run.stops?.[stage.id]?.state !== "approved");
   const state = run.state;
-  const footNote = state.kind === "finished" ? `${OUTCOME[state.outcome]}. ${ranFor(run.startedAt, state.finishedAt)}.` : `${startedAgo(run.startedAt, clock())}.${stop !== undefined ? ` ${stop.stageName} waits for you.`
+  const stopping = cancelling || state.kind === "stopping";
+  const stopActions: FooterAction[] = state.kind === "finished" ? [] : confirmStop && !stopping
+    ? [{ label: "Keep running", onPress: () => setConfirmStop(false) },
+      { label: "Stop now", tone: "danger", onPress: () => { void onStopRun().then((done) => { if (done) setConfirmStop(false); }); } }]
+    : [{ label: stopping ? "Stopping…" : "Stop the run", tone: "danger", disabled: stopping || deciding,
+      onPress: () => setConfirmStop(true) }];
+  const footNote = stopping ? "Stopping this chat's current turn, children, retries and queued workflow messages…"
+    : confirmStop && running ? "Stop this chat's current turn and child work, including retries and queued messages? Files and commits stay. Completed actions and deployed services are not undone."
+    : state.kind === "finished" ? `${OUTCOME[state.outcome]}. ${ranFor(run.startedAt, state.finishedAt)}.` : `${startedAgo(run.startedAt, clock())}.${stop !== undefined ? ` ${stop.stageName} waits for you.`
     : next !== undefined ? ` The next stop for you is ${next.name}.` : ""}`;
   return <SplitSheet title={planTitle(run.definition.text, run.definition.name)}
     subtitle={<>{planTitle(run.definition.text, run.definition.name) !== run.definition.name && <code>{run.definition.name}</code>}<span>{runStatus(run)}</span></>}
@@ -119,5 +131,5 @@ export function WorkflowRunView({ run, looks, record, models, deciding = false, 
     rail={rail} railLabel="The run" foot={decisions !== undefined && overturn !== undefined && (chosenDecision !== undefined || log?.error !== undefined)
       ? <OverturnFooter target={chosenDecision} pending={overturning} error={log?.error} onCancel={closeOverturn} onDismissError={closeOverturn}
         onSend={async (text) => { if (chosenDecision === undefined) return false; const done = await overturn(chosenDecision.id, text); if (done) setChosen(undefined); return done; }} />
-      : <ActionFooter note={footNote} problem={error} actions={[]} />} />;
+      : <ActionFooter note={footNote} problem={error} actions={stopActions} />} />;
 }

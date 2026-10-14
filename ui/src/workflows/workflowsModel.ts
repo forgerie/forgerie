@@ -37,6 +37,7 @@ export const workflowRunSchema = z.object({
   inputs: z.record(z.string(), valueSchema),
   state: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("running") }),
+    z.object({ kind: z.literal("stopping") }),
     z.object({ kind: z.literal("finished"), outcome: z.enum(["completed", "failed", "stopped"]), result: z.string(), finishedAt: z.number() }),
   ]),
   stages: z.array(stageSchema).optional(),
@@ -130,15 +131,15 @@ export function workflowEntryOf(message: PiMessage): WorkflowEntry | undefined {
 
 /** The run a session has running now: the newest unfinished one. */
 export function activeRun(runs: readonly WorkflowRun[]): WorkflowRun | undefined {
-  return runs.find((run) => run.state.kind === "running");
+  return runs.find((run) => run.state.kind !== "finished");
 }
 
 /** How each stage reads now. A finished run reads as done when it completed, and keeps its stops otherwise. */
 export function viewsOf(run: WorkflowRun): Record<string, StageView> {
   const views = stageViews(run);
-  if (run.state.kind === "running") return views;
+  if (run.state.kind !== "finished") return views;
   const completed = run.state.outcome === "completed";
-  return Object.fromEntries(Object.entries(views).map(([id, view]) => [id, completed ? "done" : view === "working" ? "next" : view]));
+  return Object.fromEntries(Object.entries(views).map(([id, view]) => [id, completed ? "done" : view === "working" || view === "waiting" ? "next" : view]));
 }
 
 /** Whether a stop card is the one the run is waiting on now. An older round of the same stop is closed. */
@@ -167,6 +168,7 @@ export function stopOutcome(run: WorkflowRun | undefined, entry: StopEntry): str
 /** One line of status for the strip above the composer. */
 export function runStatus(run: WorkflowRun): string {
   if (run.state.kind === "finished") return run.state.outcome === "completed" ? "Finished" : run.state.outcome === "failed" ? "Failed" : "Stopped";
+  if (run.state.kind === "stopping") return "Stopping…";
   const stages = run.stages ?? [];
   const views = viewsOf(run);
   const waiting = stages.find((stage) => views[stage.id] === "waiting");

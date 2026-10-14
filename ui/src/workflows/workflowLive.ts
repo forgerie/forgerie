@@ -78,9 +78,11 @@ function lookOf(looks: readonly ChildLook[], name: string, last: Child | undefin
  * What a worker's runs say, with the session's child where it knows more: a settled worker that took a follow-up
  * message is busy again, so Stop reaches it, and its follow-up counts as one more block.
  */
-function workerFacts(name: string, mine: readonly Child[], looks: readonly ChildLook[], progress: StageProgress, now: number) {
+function workerFacts(name: string, mine: readonly Child[], looks: readonly ChildLook[], progress: StageProgress, now: number, active: boolean) {
   const last = mine.at(-1);
-  const look = lookOf(looks, name, last);
+  const current = lookOf(looks, name, last);
+  // A child can keep working outside this run, or its live event can arrive after the final run record.
+  const look = active || current === undefined ? current : { ...current, busy: false, asking: false, retry: undefined };
   const working = last?.state.kind === "working";
   const followUp = last !== undefined && !working && (look?.busy === true || look?.asking === true);
   const tones: BlockTone[] = mine.map((child) => toneOf(child, look));
@@ -96,6 +98,7 @@ function workerFacts(name: string, mine: readonly Child[], looks: readonly Child
 
 function stopStatus(stage: WorkflowStage, run: WorkflowRun): string {
   const stop = run.stops?.[stage.id];
+  if (run.state.kind === "finished" && stop?.state !== "approved") return "Not decided before the run ended";
   if (stop?.state === "waiting") return stage.stop === "land" ? "Waiting for you to land" : "Waiting for your approval";
   if (stop?.state === "approved") {
     if (stage.stop !== "land") return "Approved by you";
@@ -118,7 +121,7 @@ export function liveRoute(run: WorkflowRun, looks: readonly ChildLook[] = [], no
       .filter((name, index, all) => all.indexOf(name) === index);
     const workers = names.map((name): LiveWorker => {
       const declared = stage.workers?.find((worker) => worker.name === name);
-      const { look, tones, ...facts } = workerFacts(name, records.filter((child) => child.name === name), looks, progress, now);
+      const { look, tones, ...facts } = workerFacts(name, records.filter((child) => child.name === name), looks, progress, now, run.state.kind !== "finished");
       return { key: `${stage.id}/${name}`, name, agent: declared?.agent ?? look?.agent ?? undefined, model: declared?.model, declared: declared !== undefined,
         tones: tones.length === 0 ? ["faint"] : tones, ...facts };
     });
@@ -135,7 +138,7 @@ export function liveRoute(run: WorkflowRun, looks: readonly ChildLook[] = [], no
 export function proseWorkers(run: WorkflowRun, looks: readonly ChildLook[] = [], now = 0): LiveWorker[] {
   const names = run.children.map((child) => child.name).filter((name, index, all) => all.indexOf(name) === index);
   return names.map((name) => {
-    const { look, ...facts } = workerFacts(name, run.children.filter((child) => child.name === name), looks, "current", now);
+    const { look, ...facts } = workerFacts(name, run.children.filter((child) => child.name === name), looks, "current", now, run.state.kind !== "finished");
     return { key: `/${name}`, name, agent: look?.agent ?? undefined, declared: false, ...facts };
   });
 }

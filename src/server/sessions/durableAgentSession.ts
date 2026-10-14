@@ -35,7 +35,7 @@ import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { decisionExtension, decisions, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import { workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops, workflowProposals, startWorkflowProposal, decideWorkflowProposal, openWorkflowProposals } from "./durableWorkflowRuns.js";
+import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops, workflowProposals, startWorkflowProposal, decideWorkflowProposal, openWorkflowProposals } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
 import type { WorkflowModels, WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
@@ -358,6 +358,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     return decideWorkflowProposal(this.journal.harness, this.journal.conversation, id, "dismissed", undefined, context);
   }
   workflowRuns() { return workflowRuns(this.journal.harness, this.journal.conversation.id, context); }
+  cancelWorkflow(runId: string) {
+    return cancelWorkflow(this.journal.harness, this.journal.conversation, runId, context);
+  }
   finishWorkflow(runId: string, outcome: WorkflowOutcome, result: string) {
     return this.journal.conversation.commit((tx) => finishWorkflow(tx, this.journal.conversation.id, runId, outcome, result), context);
   }

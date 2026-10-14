@@ -1,12 +1,10 @@
 # Draft: guidance for writing workflow proposals
 
-Not live. Agents do not see this text yet. It is the rule the rewritten
-`unzen-nzbfast-switch` plan follows, so the two can be judged together. If it
-is accepted, part 1 replaces the `propose_workflow` description in
-`src/server/sessions/durableWorkflowRuns.ts`, and part 2 becomes a section of
-`REPLY_FORMAT_GUIDE` in `src/shared/replyFormatGuide.ts`. Every model call
-carries both, so they must stay short; `replyFormatGuide.test.ts` holds the
-guide to a budget.
+Historical draft. The live guidance now lives in the `propose_workflow`
+description in `src/server/sessions/durableWorkflowRuns.ts` and in
+`REPLY_FORMAT_GUIDE` in `src/shared/replyFormatGuide.ts`. Those sources keep
+the existing stop rules and the guide's 3,000-character budget. This draft
+records the comparison only; do not copy it over the live text.
 
 ## 1. The tool description
 

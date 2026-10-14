@@ -583,6 +583,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         record={children.open === undefined ? undefined : { transcript: children.open.transcript, readError: children.open.error, error: children.error }}
         models={workerModels} deciding={flows.deciding?.startsWith(`${sheetRun.id}/`) === true} error={flows.error} decisions={{ log, actions: logActions }}
         onDecide={(stage, decision, note) => workflows.decide(sheetRun.id, stage, decision, note)}
+        cancelling={flows.cancelling === sheetRun.id} onStopRun={() => workflows.cancel(sheetRun.id)}
         onReview={childrenAvailable ? () => { childAgents.close(); setWorkflowSheet(undefined); childAgents.refresh(); setChildrenOpen(true); } : undefined}
         onOpenWorker={(conversationId) => { if (conversationId === undefined) childAgents.close(); else childAgents.open(conversationId); }}
         onRetryRecord={(conversationId) => { childAgents.close(); childAgents.open(conversationId); }}

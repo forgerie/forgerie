@@ -19,6 +19,8 @@ export interface WorkflowsState {
   /** The stop with a decision on its way, as runId/stage. */
   deciding?: string;
   launching?: boolean;
+  /** The run whose cancellation request is on its way. */
+  cancelling?: string;
   /** The agent's proposals, newest first. Undefined until the first read answers. */
   proposals?: readonly WorkflowProposal[];
   /** Why the last read of the proposals failed. Cleared by the next read that answers. */
@@ -151,6 +153,23 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
         update({ ...state, launching: false, runs: [run, ...state.runs.filter((candidate) => candidate.id !== run.id)] });
         return true;
       } catch (error) { update({ ...state, launching: false, error: message(error) }); return false; }
+    },
+    async cancel(runId: string): Promise<boolean> {
+      const session = ref();
+      if (!session || state.cancelling !== undefined) return false;
+      update({ ...state, cancelling: runId, error: undefined });
+      try {
+        const run = await call(url(session, `workflow-runs/${encodeURIComponent(runId)}/cancel`), workflowRunSchema, { cwd: session.cwd });
+        retireReads({ runs: true, proposals: false });
+        update({ ...state, cancelling: undefined, runs: state.runs.map((candidate) => candidate.id === run.id ? run : candidate) });
+        // The durable task may finish before the HTTP reply arrives. Retire stale reads, then read the final state.
+        void readRuns();
+        return true;
+      } catch (error) {
+        update({ ...state, cancelling: undefined, error: message(error) });
+        void readRuns();
+        return false;
+      }
     },
     async decide(runId: string, stage: string, decision: StopDecision, note?: string): Promise<boolean> {
       const session = ref();

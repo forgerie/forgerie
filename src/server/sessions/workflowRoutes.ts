@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
-import { WorkflowLaunchSchema, WorkflowWorkerModelSchema, type WorkflowModels, WorkflowFinishSchema, WorkflowStopDecisionSchema, type WorkflowInputs, type WorkflowOutcome, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
+import { WorkflowCancelSchema, WorkflowLaunchSchema, WorkflowWorkerModelSchema, type WorkflowModels, WorkflowFinishSchema, WorkflowStopDecisionSchema, type WorkflowInputs, type WorkflowOutcome, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
 import { WorkflowProposalStartSchema, WorkflowProposalChangesSchema, WorkflowProposalDismissSchema, type WorkflowProposal } from "../../shared/workflowProposals.js";
 import type { WorkflowRun } from "../../shared/workflowRuns.js";
 import type { SessionRouteRef } from "./sessionService.js";
@@ -17,6 +17,7 @@ export interface WorkflowRouteService {
   dismissWorkflowProposal(ref: SessionRouteRef, id: string): Promise<WorkflowProposal>;
   runWorkflow(ref: SessionRouteRef, name: string, inputs: WorkflowInputs, requestId: string, models?: WorkflowModels): Promise<unknown>;
   setWorkflowWorkerModel(ref: SessionRouteRef, runId: string, worker: string, model: string | null): Promise<WorkflowRun>;
+  cancelWorkflow(ref: SessionRouteRef, runId: string): Promise<WorkflowRun>;
   finishWorkflow(ref: SessionRouteRef, runId: string, outcome: WorkflowOutcome, result: string): Promise<void>;
   decideWorkflowStop(ref: SessionRouteRef, runId: string, stage: string, decision: WorkflowStopDecision, note: string | undefined): Promise<unknown>;
 }
@@ -49,6 +50,10 @@ export function registerWorkflowRoutes(app: FastifyInstance, service: WorkflowRo
   app.post<{ Params: { sessionId: string; runId: string; worker: string }; Body: unknown }>(`${prefix}/sessions/:sessionId/workflow-runs/:runId/workers/:worker/model`, (request, reply) => run(reply, () => {
     if (!Check(WorkflowWorkerModelSchema, request.body)) throw new WorkflowError(400, "Invalid workflow worker model");
     return service.setWorkflowWorkerModel({ id: request.params.sessionId, cwd: normalizeRequestCwd(request.body.cwd) }, request.params.runId, request.params.worker, request.body.model);
+  }));
+  app.post<{ Params: { sessionId: string; runId: string }; Body: unknown }>(`${prefix}/sessions/:sessionId/workflow-runs/:runId/cancel`, (request, reply) => run(reply, () => {
+    if (!Check(WorkflowCancelSchema, request.body)) throw new WorkflowError(400, "Invalid workflow cancel body");
+    return service.cancelWorkflow({ id: request.params.sessionId, cwd: normalizeRequestCwd(request.body.cwd) }, request.params.runId);
   }));
   app.post<{ Params: { sessionId: string; runId: string }; Body: unknown }>(`${prefix}/sessions/:sessionId/workflow-runs/:runId/finish`, (request, reply) => run(reply, async () => {
     if (!Check(WorkflowFinishSchema, request.body) || request.body.result.trim() === "") throw new WorkflowError(400, "Invalid workflow finish body");

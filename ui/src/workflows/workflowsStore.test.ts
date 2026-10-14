@@ -21,6 +21,28 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
 afterEach(() => { vi.useRealTimers(); });
 
 describe("a session's workflow proposals", () => {
+  it("cancels once, reads the final state after the request, and reports a refusal", async () => {
+    const stopping = { ...BUILDING, state: { kind: "stopping" } };
+    const stopped = { ...BUILDING, state: { kind: "finished", outcome: "stopped", result: "Stopped", finishedAt: 100 } };
+    let cancelled = false;
+    let fail = false;
+    const { calls, store } = routes((path) => {
+      if (path.endsWith("/cancel")) { cancelled = true; return fail ? json(409, { error: "Already finished" }) : json(200, stopping); }
+      return path.includes("workflow-proposals") ? json(200, []) : json(200, [cancelled ? stopped : BUILDING]);
+    });
+    store.refresh(); await settle();
+    const pending = store.cancel(BUILDING.id);
+    expect(store.getSnapshot().cancelling).toBe(BUILDING.id);
+    expect(await store.cancel(BUILDING.id)).toBe(false);
+    expect(await pending).toBe(true);
+    await settle();
+    expect(store.getSnapshot().runs[0]).toEqual(stopped);
+    expect(calls.find((call) => call.path.endsWith("/cancel"))).toMatchObject({ method: "POST", body: { cwd: SESSION.cwd } });
+    fail = true;
+    expect(await store.cancel(BUILDING.id)).toBe(false);
+    expect(store.getSnapshot().error).toBe("Already finished");
+    store.dispose();
+  });
   it("reads runs and proposals together on a change", async () => {
     const { calls, store } = routes((path) => path.includes("workflow-proposals") ? json(200, [PROPOSAL]) : json(200, [BUILDING]));
     expect(store.getSnapshot().proposals).toBeUndefined();

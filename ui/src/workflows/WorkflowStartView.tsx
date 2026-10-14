@@ -90,6 +90,11 @@ export function WorkflowStartView({ source, blocked, pending, error, models, age
   const modelCount = changes.length - reshapes(changes).length;
 
   const set = (name: string, value: string) => { setTyped({ ...values, [name]: value }); setEdited(new Set([...edited, name])); setProblem(undefined); };
+  const resetInput = (name: string) => {
+    setTyped({ ...values, [name]: fields?.values[name] ?? "" });
+    setEdited(new Set([...edited].filter((key) => key !== name)));
+    setProblem(undefined);
+  };
   const start = () => {
     if (fields === undefined) return;
     const result = saved !== undefined ? launchInputs(saved, values)
@@ -154,7 +159,8 @@ export function WorkflowStartView({ source, blocked, pending, error, models, age
       resetLabel={saved !== undefined ? "Use the file's" : "Use the agent's"} agents={agents} />}
     {(fields === undefined || fields.inputs.length > 0) && <PageSection title="Inputs">
       {fields === undefined ? <Lede>The inputs arrive with the plan.</Lede>
-        : <FormLock locked={busy || closed !== undefined}><WorkflowInputFields inputs={fields.inputs} values={values} onChange={set} /></FormLock>}
+        : <FormLock locked={busy || closed !== undefined}><WorkflowInputFields inputs={fields.inputs} values={values} onChange={set}
+          reset={{ values: fields.values, label: saved !== undefined ? "Use the file's" : "Use the agent's", onReset: resetInput }} /></FormLock>}
     </PageSection>}
   </>;
   return <SplitSheet title={title} subtitle={<>{title !== name && <code>{name}</code>}<span>{original.length === 0 ? kind : `${kind}, ${count(original.length, "stage", "stages")}`}</span></>}

@@ -93,6 +93,20 @@ describe("a saved workflow's sheet", () => {
 });
 
 describe("a proposal's sheet", () => {
+  it("steps a number, marks only changed inputs, and restores the agent's value before starting", async () => {
+    const { element, handlers } = proposal();
+    await act(async () => root.render(element));
+    const number = sheet().querySelector<HTMLInputElement>('input[type="number"]');
+    expect(number?.value).toBe("2");
+    await press("Increase Review rounds before the run stops and reports");
+    expect(number?.value).toBe("3");
+    expect(sheet().querySelector(".field-edit-note")?.textContent).toContain("Edited");
+    await press("Use the agent's");
+    expect(number?.value).toBe("2");
+    expect(sheet().querySelector(".field-edit-note")).toBeNull();
+    await press("Start workflow");
+    expect(handlers.onStart).toHaveBeenCalledWith(expect.objectContaining({ rounds: 2 }), undefined);
+  });
   it("splits the plan into one numbered section per stage, beside the route", async () => {
     await act(async () => root.render(proposal().element));
     expect(headings()).toEqual(["1Shape", "2Port the API and the page", "3Review", "4Land"]);
@@ -245,12 +259,28 @@ describe("a proposal's sheet", () => {
 type RunProps = ComponentProps<typeof WorkflowRunView>;
 function running(props: Partial<RunProps> = {}) {
   const handlers = { onDecide: vi.fn(() => Promise.resolve(true)), onOpenWorker: vi.fn(), onRetryRecord: vi.fn(), onSteer: vi.fn(() => Promise.resolve()),
-    onStopWorker: vi.fn(), onDismissRecordError: vi.fn(), onModel: vi.fn(() => Promise.resolve(true)), onClose: vi.fn() };
+    onStopRun: vi.fn(() => Promise.resolve(true)), onStopWorker: vi.fn(), onDismissRecordError: vi.fn(), onModel: vi.fn(() => Promise.resolve(true)), onClose: vi.fn() };
   return { handlers, element: <WorkflowSheet mode="run" run={RUN_WORKING} looks={LOOKS} models={WORKER_MODELS} now={() => SHEET_NOW} {...handlers} {...props} /> };
 }
 const worker = (name: string) => [...sheet().querySelectorAll<HTMLButtonElement>("button.route-list-worker")].find((node) => node.querySelector("code")?.textContent === name);
 
 describe("a run's sheet", () => {
+  it("confirms whole-run cancellation, permits backing out, and holds the action while stopping", async () => {
+    const { element, handlers } = running();
+    await act(async () => root.render(element));
+    await press("Stop the run");
+    expect(note()).toContain("Files and commits stay");
+    expect(handlers.onStopRun).not.toHaveBeenCalled();
+    await press("Keep running");
+    expect(button("Stop now")).toBeUndefined();
+    await press("Stop the run");
+    await press("Stop now");
+    expect(handlers.onStopRun).toHaveBeenCalledOnce();
+    const stopping = running({ run: { ...RUN_WORKING, state: { kind: "stopping" } } });
+    await act(async () => root.render(stopping.element));
+    expect(button("Stopping…")?.disabled).toBe(true);
+    expect(button("Stop the run")).toBeUndefined();
+  });
   it("marks the stage at work in the plan, and lists each worker with its blocks, where it stands, and its model", async () => {
     await act(async () => root.render(running().element));
     expect(sheet().querySelector(".split-sheet-subtitle")?.textContent).toBe("settings-store-portPort the API and the page, 1 working");

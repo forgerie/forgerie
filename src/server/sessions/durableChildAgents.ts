@@ -231,6 +231,9 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
     }
     if (accepted !== undefined) await deliveredWorkflowChild(tx, runtime.conversationId, task.id);
     else await undeliveredWorkflowChild(tx, runtime.conversationId, task.id, "aborted");
+    for (const question of Object.values((await tx.doc(Questions, runtime.conversationId)).items)) {
+      if (question.child === task.input.conversationId && question.answer === null) question.closed = true;
+    }
     return { status: "terminal", outcome: { status: "aborted" } };
   }, context),
   });

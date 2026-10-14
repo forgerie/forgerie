@@ -23,7 +23,7 @@ The names are `forgerie-web.service` and `forgerie-sessiond.service`. For a sour
 
 ## Update an existing checkout
 
-A sessiond restart pauses active agents. At startup, sessiond scans the session catalog and inspects saved Durable tasks, submissions, and active workflows. It reopens unfinished work without a browser connection or another prompt. Completed and explicitly stopped runs do not restart. Archived and read-only sessions stay idle. Background children can still resume after the parent run was stopped. Workflows waiting for a user decision remain waiting.
+A sessiond restart pauses active agents. At startup, sessiond scans the session catalog and inspects saved Durable tasks, submissions, and active workflows. It reopens unfinished work without a browser connection or another prompt. Completed and explicitly stopped runs do not restart. Archived and read-only sessions stay idle. Stopping only the parent turn leaves background children resumable. A workflow's **Stop the run** cancels those too. Workflows waiting for a user decision remain waiting.
 
 Recovery opens at most four sessions at once. Discovery uses Durable's public storage API under the execution ownership lock. It does not parse full transcripts or import legacy sessions. The child live index is not the recovery authority. Unfinished child-run records also trigger reopening to repair accounting when a completion was already saved in Durable. Discovery adds disk reads, and recovered runtimes use memory. Interrupted tools still follow their replay policy; external commands are not guaranteed to survive or repeat safely.
 
@@ -40,6 +40,8 @@ curl --fail http://127.0.0.1:8504/api/pi-web/runtime
 ```
 
 Run these commands from the deployed checkout, not from another worktree. Verify that the returned daemon profile is the intended profile. Confirm that the browser loads the new UI. Built entrypoints resolve the compiled browser app; the units do not run TypeScript source.
+
+On Nix hosts, the repository's `scripts/redeploy-when-idle.sh WORKSPACE [LIMIT_MINUTES]` waits for other sessions to become idle before restarting both user units. Run it through `systemd-run --user` outside sessiond's control group, using `/bin/sh` as its interpreter so a minimal service PATH can reach its Nix bootstrap. It excludes the named workspace, defaults to 60 minutes, and refuses to restart when activity cannot be read or validated. `--check` tests its dependencies without restarting anything. It verifies unit status and `build.json` after restarting, and never removes a workspace. To publish an already verified worktree build, supply its absolute `dist` path and the deployed checkout's absolute `dist` path as the third and fourth arguments. The helper copies first, stops both units, swaps the build, and starts them together. It retains the previous build under the deployed checkout's `.forgerie/deploy.*` directory. This prevents a new UI from calling an old server while the restart waits. The helper does not build or install dependencies. Do not start new agent work during the approved deployment window.
 
 An isolated worktree build verifies source without replacing deployed `dist/` or dependencies. Landing that source is not deployment. The fork cleanup deliberately leaves deployment pending when agents are active.
 

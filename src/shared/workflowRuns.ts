@@ -69,6 +69,7 @@ export const WorkflowRunSchema = Type.Object({
   inputs: WorkflowInputsSchema,
   state: Type.Union([
     Type.Object({ kind: Type.Literal("running") }),
+    Type.Object({ kind: Type.Literal("stopping") }),
     Type.Object({ kind: Type.Literal("finished"), outcome: WorkflowOutcomeSchema, result: Type.String(), finishedAt: Type.Number() }),
   ]),
   /** The launch route with the user's current worker model overrides. Absent on runs launched before stages existed. */
@@ -93,5 +94,7 @@ export const WorkflowStopDecisionSchema = Type.Object({ cwd: Type.String({ minLe
 export type WorkflowStopDecision = Static<typeof WorkflowStopDecisionSchema>["decision"];
 export const WorkflowFinishSchema = Type.Object({ cwd: Type.String({ minLength: 1 }), outcome: WorkflowOutcomeSchema,
   result: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false });
+
+export const WorkflowCancelSchema = Type.Object({ cwd: Type.String({ minLength: 1 }) }, { additionalProperties: false });
 
 export const WorkflowWorkerModelSchema = Type.Object({ cwd: Type.String({ minLength: 1 }), model: WorkflowModelSchema }, { additionalProperties: false });

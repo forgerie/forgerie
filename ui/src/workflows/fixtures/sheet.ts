@@ -67,6 +67,13 @@ ui/src/settings/
 
 A fresh reviewer reads both branches against the shape and sends its findings back. When the review rounds run out, the run stops and reports.
 
+\`\`\`status
+Acceptance checks
+[ ] Each setting reads from the shared store
+[ ] Existing routes still answer
+[ ] No control becomes unreachable
+\`\`\`
+
 \`\`\`details
 What the reviewer checks
 - Each setting in the shape has one reader and one writer.
