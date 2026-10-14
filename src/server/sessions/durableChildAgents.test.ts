@@ -662,6 +662,8 @@ describe("a model named for one spawn", () => {
     expect(modelChoice("anthropic/claude-opus-5.5")).toEqual({ model: { provider: "anthropic", modelId: "claude-opus-5.5" } });
     expect(modelChoice("cliproxyapi/gpt-6.1:high")).toEqual({ model: { provider: "cliproxyapi", modelId: "gpt-6.1" }, thinkingLevel: "high" });
     expect(modelChoice("faux/faux-1:max")).toEqual({ model: { provider: "faux", modelId: "faux-1" }, thinkingLevel: "max" });
-    for (const bad of ["gpt-6.1", "/gpt", "anthropic/", "", "local/qwen:32b", "provider/id:bogus", "provider/id:HIGH", "provider/id:"]) expect(modelChoice(bad)).toBeNull();
+    // A colon that is not a thinking level belongs to the model id. Only the workflow routes refuse it.
+    expect(modelChoice("local/qwen:32b")).toEqual({ model: { provider: "local", modelId: "qwen:32b" } });
+    for (const bad of ["gpt-6.1", "/gpt", "anthropic/", ""]) expect(modelChoice(bad)).toBeNull();
   });
 });

@@ -17,7 +17,6 @@ import {
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Check } from "typebox/value";
-import { WorkflowModelSchema } from "../../shared/workflowRuns.js";
 import { isKnownThinkingLevel, type ThinkingLevel } from "../../shared/thinkingLevels.js";
 import { ChildRetrySchema, type ChildRetry } from "../../shared/childRetry.js";
 import type { DurableSdkTools } from "./durableSdkTools.js";
@@ -534,9 +533,12 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
   return extensions;
 }
 
-/** provider/model-id with an optional :thinking-level, as agent files write it. Null when it cannot be read. */
+/**
+ * provider/model-id with an optional :thinking-level, as agent files write it. Null when it cannot be read.
+ * A colon that is not a thinking level belongs to the model id (local/qwen:32b). The workflow routes check
+ * their own model fields strictly; this reader stays as lenient as every other spawn needs.
+ */
 export function modelChoice(spec: string): { model: { provider: string; modelId: string }; thinkingLevel?: ThinkingLevel } | null {
-  if (!Check(WorkflowModelSchema, spec)) return null;
   const colon = spec.lastIndexOf(":");
   const suffix = colon > 0 ? spec.slice(colon + 1) : "";
   const level = isKnownThinkingLevel(suffix) ? suffix : undefined;
