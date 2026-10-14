@@ -19,6 +19,8 @@ interface WorktreeEvents {
   /** Close idle runtimes and terminals only after the durable input gate is set. */
   beforeRemoval?(record: SessionWorktreeRecord): Promise<readonly SessionFile[]>;
   beforeRelatedAction?(record: SessionWorktreeRecord, actorId?: string): Promise<void>;
+  /** Session close at the destruction boundary, not on a failed Land attempt. */
+  closeManagedProcesses?(record: SessionWorktreeRecord): Promise<void>;
   /** Confirm declared service shutdown before hooks, including cleanup retries after a receipt. */
   stopServices?(record: SessionWorktreeRecord): Promise<void>;
 }
@@ -363,10 +365,12 @@ export class SessionWorktrees {
         if (!force) await git(record.repo, "merge-base", "--is-ancestor", record.branch, record.defaultBranch);
         else if (record.discardedBranchTip !== (await git(record.repo, "rev-parse", record.branch)).trim()) throw new Error("Branch changed during discard cleanup. Request a new discard preview.");
         await beforeDestruction?.("before-remove");
+        await this.events.closeManagedProcesses?.(await this.store.require(record.id));
         await git(record.repo, "worktree", "remove", ...(force ? ["--force"] : []), record.path);
       } else if (registered !== undefined) {
         throw new Error("Checkout disappeared outside Forgerie; inspect and prune its git registration before retrying cleanup");
       }
+      if (registered === undefined) await this.events.closeManagedProcesses?.(await this.store.require(record.id));
       if (await optionalGit(record.repo, "show-ref", "--verify", `refs/heads/${record.branch}`) !== undefined) {
         // A landed receipt permits deletion only while the default branch still contains its branch tip.
         if (!force) await git(record.repo, "merge-base", "--is-ancestor", record.branch, record.defaultBranch);

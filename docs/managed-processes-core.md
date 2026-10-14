@@ -1,10 +1,10 @@
 # Managed process core
 
 This is the server core for ADR 0007. It does not register the `process` tool,
-replace pi-processes, schedule watches, or connect session close to the server.
+replace pi-processes or schedule watches. Session lifecycle integration is described below.
 A managed process belongs to its originating session. It is not a workspace
 service. A child process uses the same core; the child-agent lifecycle decides
-when to stop it or hand it to its parent.
+when to stop it or keep it after its run finishes.
 
 ## Public interface
 
@@ -168,8 +168,7 @@ mixed line. That is application write framing, not a reader boundary to infer.
   a saved result, recovery reports lost; it never guesses success.
 - No reboot, OOM, physical power-loss, remote filesystem, or non-Linux proof was
   run. Unit tests cover the missing-supervisor recovery decision.
-- The later workers must add the 50-finished-record retention policy, session
-  close integration, child-process ownership/handoff, and missed event delivery.
+- The tool/watch integration must add missed event delivery.
   Watch acknowledgements must follow durable event acceptance. This core does
   not claim exactly-once event delivery or wire itself into pi-processes.
 
@@ -193,3 +192,33 @@ exit results, SIGKILL, session slice timeout/setsid containment, full stdin,
 large concurrent writes, environment/path quoting, and the attached lifeline.
 It stops only its own units and removes its empty ancestor slice if no other
 session uses it. It never restarts `forgerie-sessiond` or `forgerie-web`.
+
+## Session lifecycle
+
+`PiSessionService.getManagedProcesses(sessionId)` shares one owner per session.
+Sessiond restores every saved owner before Durable recovery and schedules
+`maintain()` every 30 seconds, including idle sessions. Runtime disposal,
+handoff, and fork do not move or stop managed processes. Daemon shutdown
+releases owners; only attached processes stop on that shutdown.
+
+Session close (archive, delete, or worktree removal) calls `closeSession()`.
+It stops the session slice, waits for terminal status, then removes records
+and logs under the owner lease. A stop or inspection failure keeps the evidence
+and fails the close. Land, Discard, archive cleanup, and scheduled/manual
+worktree cleanup share the same pre-removal hook. Workspace services keep their
+separate shutdown hook. The registry then disposes the owner and removes its
+empty directory.
+
+Version 1 records now optionally contain `child: { name, runId }` and
+`keepAfterChild`. Old records without these fields remain session-owned.
+`setKeepAfterChild(id, keep)` persists a keep decision. `stopChild(child)` stops
+only running processes from that exact child run unless kept. Durable's
+`DurableChildRunRecords` invokes the terminal callback for answered, failed,
+and stopped runs before saving completion, including recovered completions.
+A kept child process still belongs to the original session.
+
+Maintenance retains the newest 50 finished records (ended or lost), ordered
+by result/lost-record filesystem timestamp, then creation time and ID. It never
+removes running records. `clearFinished()` uses the same removal path, removes
+all finished folders, and returns their IDs. The existing 64 MiB log cap and
+its offline limits still apply. Closing a browser is not session close.

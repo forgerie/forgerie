@@ -208,8 +208,9 @@ async function createSessionDaemonRuntime() {
       if (ref === undefined || !(await sessions.inspectPullSession(ref)).available) return;
       const status = await sessions.status(ref);
       if ((actorId !== ref.id && (status.isStreaming || status.isCompacting || status.isBashRunning))
-        || (status.runningProcesses ?? 0) > 0 || (status.workingAgents ?? 0) > 0) throw new Error("Stop the owning session's run, processes and agents before removing this worktree.");
+        || (status.workingAgents ?? 0) > 0) throw new Error("Stop the owning session's run and agents before removing this worktree.");
     },
+    closeManagedProcesses: (record) => sessions.closeWorktreeManagedProcesses(record),
     stopServices: (record) => workspaceServices.beforeRemoval(record.id),
     async beforeRemoval(record) {
       const affected = await sessions.prepareWorktreeRemoval(record.path);
@@ -235,6 +236,7 @@ async function createSessionDaemonRuntime() {
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
     modelRuntime: modelRuntime,
     agentDir: activeAgentProfile.dir,
+    managedProcesses: { stateDirectory: piWebDataDir(daemonEnvironment), environment: daemonEnvironment },
     sessionSearch,
     archiveStore: withBacklogClaimRelease(archiveStore, backlogClaims),
     pinStore,
@@ -258,6 +260,7 @@ async function createSessionDaemonRuntime() {
       index: liveChildren,
       worktrees: sessionWorktrees,
       runRecords: childRuns,
+      onRunFinished: (run) => sessions.childRunFinished(run),
       onRunRecordError: (error) => { app.log.error({ err: error }, "durable child run record write failed"); },
       onIndexError: (error) => { app.log.warn({ err: error }, "durable child index write failed"); },
     }) }),
@@ -339,6 +342,7 @@ async function createSessionDaemonRuntime() {
     ...getPiWebRuntimeComponent("sessiond", SESSIOND_RUNTIME_CAPABILITIES),
     activeAgentProfile,
   });
+  await sessions.initializeManagedProcesses();
   const userSessions = new UserSessionWorktrees(sessionWorktrees, sessions);
   const worktreeCleanup = new WorktreeCleanupJob({
     worktrees: sessionWorktrees,

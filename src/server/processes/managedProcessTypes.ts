@@ -3,10 +3,12 @@ import { z } from "zod";
 const identifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/);
 const text = z.string().refine((value) => !value.includes("\0"), "NUL is not allowed");
 const absolutePath = text.refine((value) => value.startsWith("/") && !/[\r\n]/.test(value), "An absolute Unix path is required");
+const child = z.object({ name: text.min(1), runId: text.min(1) });
 const timeout = z.number().min(0.1).max(3600);
 export const managedProcessStartSchema = z.object({
   id: identifier.optional(), command: text.min(1), cwd: absolutePath,
   stopTimeoutSeconds: timeout.optional(),
+  child: child.optional(), keepAfterChild: z.boolean().optional(),
 });
 export type ManagedProcessStart = z.infer<typeof managedProcessStartSchema>;
 
@@ -18,7 +20,7 @@ export class ManagedProcessLaunchError extends Error {
   }
 }
 export const managedProcessRecordSchema = z.object({
-  version: z.literal(1), id: identifier, sessionId: identifier,
+  version: z.literal(1), child: child.optional(), keepAfterChild: z.boolean().optional(), id: identifier, sessionId: identifier,
   command: text.min(1), cwd: absolutePath, directory: absolutePath,
   environment: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), text),
   stopTimeoutSeconds: timeout, createdAt: z.iso.datetime(),

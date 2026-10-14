@@ -1,3 +1,4 @@
+import type { ChildRun } from "../../shared/childRuns.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { DurableSdkTools } from "./durableSdkTools.js";
@@ -16,6 +17,7 @@ export interface DurableChildHost {
   extensions(input: { cwd: string; agentDir: string; projectContext: string; sessionSkills?: readonly ChildSkill[]; sessionTools?: () => DurableSdkTools; worktrees?: DurableChildWorktrees; flushRunRecords?: () => Promise<void>; commit?: DurableChildExtensionOptions["commit"] }): Promise<DurableChildExtensions>;
   worktrees?: SessionWorktrees;
   runRecords?: ChildRunStore;
+  runFinished?: (run: ChildRun) => Promise<void>;
   runRecordError?: (error: unknown) => void;
   /** Called when a session gains or loses live child work, so worktree cleanup can protect its owner. */
   liveChanged(ref: DurableChildSessionRef, live: boolean): void;
@@ -83,11 +85,13 @@ export interface DurableChildHostOptions {
   childToolsDeny?: readonly string[];
   onIndexError?: (error: unknown) => void;
   runRecords?: ChildRunStore;
+  onRunFinished?: (run: ChildRun) => Promise<void>;
   onRunRecordError?: (error: unknown) => void;
 }
 
 export function createDurableChildHost(options: DurableChildHostOptions = {}): DurableChildHost {
   return {
+    ...(options.onRunFinished === undefined ? {} : { runFinished: options.onRunFinished }),
     ...(options.runRecords === undefined ? {} : { runRecords: options.runRecords }),
     ...(options.onRunRecordError === undefined ? {} : { runRecordError: options.onRunRecordError }),
     ...(options.worktrees === undefined ? {} : { worktrees: options.worktrees }),

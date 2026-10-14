@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { controlledManagedProcessLauncher } from "../processes/managedProcesses.testSupport.js";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionTreeNavigateRequest, SessionTreeSummaryChoice } from "../../shared/apiTypes.js";
 import { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
@@ -495,6 +499,31 @@ describe("PiSessionService session-tree fork-from-entry", () => {
       && event.activity.phase === "idle")).toBe(true);
 
     await service.dispose();
+  });
+
+  it("leaves managed processes with their original session when a fork changes runtime identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "managed-fork-"));
+    const control = controlledManagedProcessLauncher();
+    const { service, fake } = treeHarness({}, {}, { managedProcesses: { stateDirectory: root, prepareLauncher: () => Promise.resolve(control.launcher) } });
+    try {
+      const processes = await service.getManagedProcesses(SESSION_ID);
+      await processes.start({ id: "original", command: "cat", cwd: root });
+      const replacement = fakeRuntime("forked", { sessionManager: fakeSessionManager("/workspace", { getSessionId: () => "forked", getLeafId: () => "fork-leaf" }) });
+      let rebindSession: ((session: PiAgentSession) => Promise<void>) | undefined;
+      fake.runtime.setRebindSession = (callback) => { rebindSession = callback; };
+      fake.runtime.fork = async () => {
+        Reflect.set(fake.runtime, "session", replacement.session);
+        if (rebindSession === undefined) throw new Error("Expected runtime rebind callback");
+        await rebindSession(replacement.session);
+        return { cancelled: false };
+      };
+      expect(await service.forkFromTree(sessionRef(SESSION_ID), forkRequest())).toMatchObject({ session: { id: "forked" } });
+      expect(await service.getManagedProcesses(SESSION_ID)).toBe(processes);
+      expect((await processes.status("original")).state.kind).toBe("running");
+      expect(await (await service.getManagedProcesses("forked")).list()).toEqual([]);
+      expect(control.stopped).toEqual([]);
+      expect(control.stoppedSessions).toEqual([]);
+    } finally { await service.dispose(); await rm(root, { recursive: true, force: true }); }
   });
 
   it("clears superseded session and workspace activity when a changed-id fork spans a heartbeat", async () => {

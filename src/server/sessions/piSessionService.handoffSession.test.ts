@@ -1,8 +1,9 @@
+import { controlledManagedProcessLauncher } from "../processes/managedProcesses.testSupport.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { PiSessionService, type PiSessionManager } from "./piSessionService.js";
+import { PiSessionService, type PiSessionManager, type PiSessionServiceDependencies } from "./piSessionService.js";
 import { CapturingSessionEventHub, fakeRuntime, sessionGateway, testModelRuntime, type RuntimeCreator } from "./piSessionService.testSupport.js";
 
 const TEST_AGENT_DIR = "/tmp/pi-web-test-agent";
@@ -43,7 +44,10 @@ describe("PiSessionService handoffSession", () => {
       });
     };
     const log: { details: Record<string, unknown>; message: string }[] = [];
-    const service = handoffService([source.runtime, destination.runtime], workspace, log);
+    const control = controlledManagedProcessLauncher();
+    const service = handoffService([source.runtime, destination.runtime], workspace, log, { stateDirectory: workspace, prepareLauncher: () => Promise.resolve(control.launcher) });
+    const processes = await service.getManagedProcesses("source-1");
+    await processes.start({ id: "original", command: "cat", cwd: workspace });
     await service.start(workspace);
 
     const result = await service.handoffSession({
@@ -61,6 +65,11 @@ describe("PiSessionService handoffSession", () => {
       cwd: workspace,
       state: "preparing",
     });
+    expect(await service.getManagedProcesses("source-1")).toBe(processes);
+    expect((await processes.status("original")).state.kind).toBe("running");
+    expect(await (await service.getManagedProcesses("destination-1")).list()).toEqual([]);
+    expect(control.stoppedSessions).toEqual([]);
+    expect(control.stopped).toEqual([]);
     await preparationStarted;
     expect(promptTexts).toHaveLength(1);
     expect(promptTexts[0]).toContain(join(tmpdir(), `forgerie-handoff-${result.handoffId}.json`));
@@ -476,7 +485,7 @@ function preparableDestination(id: string, workspace: string) {
   };
 }
 
-function handoffService(runtimes: ReturnType<typeof fakeRuntime>["runtime"][], workspace: string, log: { details: Record<string, unknown>; message: string }[]) {
+function handoffService(runtimes: ReturnType<typeof fakeRuntime>["runtime"][], workspace: string, log: { details: Record<string, unknown>; message: string }[], managedProcesses?: PiSessionServiceDependencies["managedProcesses"]) {
   let index = 0;
   const createAgentRuntime: RuntimeCreator = () => {
     const runtime = runtimes[index];
@@ -486,6 +495,7 @@ function handoffService(runtimes: ReturnType<typeof fakeRuntime>["runtime"][], w
   };
   return new PiSessionService(new CapturingSessionEventHub(), {
     agentDir: TEST_AGENT_DIR,
+    ...(managedProcesses === undefined ? {} : { managedProcesses }),
     modelRuntime: testModelRuntime,
     createAgentRuntime,
     sessionManager: sessionGateway([]),

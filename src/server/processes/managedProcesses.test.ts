@@ -23,6 +23,39 @@ function controlledLauncher() {
 }
 
 describe("managed processes", () => {
+  it("persists child ownership and explicit keep updates across owners", async () => {
+    const root = await directory(); const { launcher } = controlledLauncher();
+    const manager = new ManagedProcesses({ stateDirectory: root, sessionId: "child-owner", launcher });
+    await manager.initialize();
+    try {
+      await manager.start({ id: "one", command: "cat", cwd: root, child: { name: "worker", runId: "run-1" } });
+      await manager.setKeepAfterChild("one", true);
+      await manager.dispose();
+      await manager.initialize();
+      expect(await manager.status("one")).toMatchObject({ child: { name: "worker", runId: "run-1" }, keepAfterChild: true });
+      await manager.setKeepAfterChild("one", false);
+      expect((await manager.status("one")).keepAfterChild).toBe(false);
+    } finally { await manager.dispose(); }
+  });
+  it("retains only the newest 50 finished records and clears finished folders, never running ones", async () => {
+    const root = await directory(); const { launcher, live } = controlledLauncher();
+    const manager = new ManagedProcesses({ stateDirectory: root, sessionId: "retention", launcher });
+    await manager.initialize();
+    try {
+      await manager.start({ id: "running", command: "cat", cwd: root });
+      for (let n = 0; n < 52; n++) {
+        const record = await manager.start({ id: `ended-${String(n).padStart(2, "0")}`, command: "true", cwd: root });
+        await writeFile(join(record.directory, "result"), "success\nexited\n0\n");
+        live.delete(record.id);
+      }
+      await manager.maintain();
+      expect((await manager.list()).map((item) => item.id)).toEqual([...Array.from({ length: 50 }, (_, n) => `ended-${String(n + 2).padStart(2, "0")}`), "running"]);
+      await expect(readFile(join(root, "managed-processes/retention/ended-00/command.json"))).rejects.toMatchObject({ code: "ENOENT" });
+      live.delete("ended-51");
+      expect(await manager.clearFinished()).toHaveLength(50);
+      expect((await manager.list()).map((item) => item.id)).toEqual(["running"]);
+    } finally { await manager.dispose(); }
+  });
   it("gives one owner the session lease and releases it without stopping durable processes", async () => {
     const root = await directory(); const { launcher } = controlledLauncher();
     const first = new ManagedProcesses({ stateDirectory: root, sessionId: "lease", launcher });

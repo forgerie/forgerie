@@ -1,3 +1,6 @@
+import type { ChildRun } from "../../shared/childRuns.js";
+import { ManagedProcessRegistry } from "../processes/managedProcessRegistry.js";
+import { controlledManagedProcessLauncher } from "../processes/managedProcesses.testSupport.js";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -31,7 +34,7 @@ afterEach(async () => {
   await Promise.all(journals.splice(0).map((journal) => journal.close()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-async function fixture(errors: string[] = [], holdAt?: number, recordRuns = false) {
+async function fixture(errors: string[] = [], holdAt?: number, recordRuns = false, onFinished?: (run: ChildRun) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), "forgerie-child-autonomy-")); roots.push(root);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
   git("init", "-b", "main"); git("config", "user.name", "Autonomy test"); git("config", "user.email", "test@example.invalid");
@@ -70,7 +73,8 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     return fauxAssistantMessage("PARENT-DONE");
   }));
   const recordPath = join(root, "child-runs.json");
-  const runStore = new ChildRunStore(recordPath);
+  let now = 1000000;
+  const runStore = new ChildRunStore(recordPath, () => now);
   const recordErrors: unknown[] = [];
   const runtimeErrors: unknown[] = [];
   let recorder: DurableChildRunRecords | undefined;
@@ -80,7 +84,6 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     ...(recordRuns ? { flushRunRecords: async () => { await failedWrite; await recorder?.flush(); } } : {}),
     commit: (change, ctx) => journal.harness.commit(change, ctx) });
   for (const extension of [...extensions.parent, ...extensions.childOnly]) registry.install(extension);
-  let now = 1000000;
   async function open(corruptRecords = false) {
     // Let the retry's real history write fail before either flush caller can pass the accounting boundary.
     if (corruptRecords) failedWrite = new Promise<void>((resolve) => { releaseFailedWrite = resolve; });
@@ -89,7 +92,7 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     journals.push(journal);
     if (recordRuns) {
       recorder = await DurableChildRunRecords.open(journal.harness, journal.conversation.id, { id: "parent", cwd: root }, runStore, context,
-        (error) => { recordErrors.push(error); releaseFailedWrite?.(); }, () => now);
+        (error) => { recordErrors.push(error); releaseFailedWrite?.(); }, () => now, onFinished);
       recorders.push(recorder);
     }
     // Only this private history file fails. Durable can still admit the retry and run its tools.
@@ -103,7 +106,7 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     await submission.wait(context);
     return journal.conversation.context(context);
   }
-  return { children, spawn, parentInputs, calls: () => childCalls, journal: () => journal,
+  return { root, runStore, children, spawn, parentInputs, calls: () => childCalls, journal: () => journal,
     restart: async (at: number, corruptRecords = false) => { await recorder?.close(); await journal.close(); now = at; journal = await open(corruptRecords); },
     advanceClock: (ms: number) => { now += ms; },
     recordPath, recordErrors, runtimeErrors,
@@ -121,6 +124,43 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     },
     stop: async (id: number) => stopChild(journal.harness, journal.conversation, id, context, worktrees) };
 }
+
+it.each(["answered", "failed", "stopped"] as const)("ends a managed child process on committed %s completion, unless kept", async (outcome) => {
+  const control = controlledManagedProcessLauncher();
+  const run = await fixture(outcome === "failed" ? ["Invalid API key"] : [], undefined, true, async (finished) => {
+    await registry.childFinished(finished.session.id, { name: finished.child.name, runId: finished.id });
+  });
+  const registry: ManagedProcessRegistry = new ManagedProcessRegistry({ stateDirectory: run.root, prepareLauncher: () => Promise.resolve(control.launcher), onError: (error) => { throw error; } });
+  try {
+    const owner = await registry.get("parent");
+    await run.spawn({ name: "reader", agent: "reader", message: "HOLD" });
+    await vi.waitFor(async () => { expect((await run.children())[0]?.questions).toHaveLength(1); });
+    const first = (await run.runStore.list())[0];
+    if (first === undefined) throw new Error("Missing first run");
+    const child = { name: first.child.name, runId: first.id };
+    await owner.start({ id: "temporary", command: "cat", cwd: run.root, child });
+    await owner.start({ id: "kept", command: "cat", cwd: run.root, child, keepAfterChild: true });
+    if (outcome === "stopped") await run.stop(first.child.conversationId);
+    else await run.answer();
+    await vi.waitFor(async () => { expect((await run.runStore.list())[0]?.state).toMatchObject({ kind: "finished", outcome }); });
+    expect(control.stopped).toEqual(["parent/temporary"]);
+    expect((await owner.status("temporary")).state.kind).toBe("lost");
+    expect((await owner.status("kept")).state.kind).toBe("running");
+    if (outcome === "answered") {
+      await run.spawn({ action: "send", name: "reader", message: "HOLD" });
+      await vi.waitFor(async () => { expect((await run.runStore.pending("parent"))).toHaveLength(1); });
+      const second = (await run.runStore.pending("parent"))[0]?.run;
+      if (second === undefined) throw new Error("Missing second run");
+      expect(second.id).not.toBe(first.id);
+      await owner.start({ id: "second", command: "cat", cwd: run.root, child: { name: second.child.name, runId: second.id } });
+      await registry.childFinished("parent", child); // replaying the old completion must not stop the new run
+      expect((await owner.status("second")).state.kind).toBe("running");
+      await run.stop(second.child.conversationId);
+      await vi.waitFor(() => { expect(control.stopped).toContain("parent/second"); });
+    }
+    expect(run.recordErrors).toEqual([]);
+  } finally { await registry.dispose(); }
+});
 
 it("refuses missing tools with catalog alternatives, unless explicitly allowed", async () => {
   const run = await fixture();

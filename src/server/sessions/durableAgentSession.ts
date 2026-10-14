@@ -460,7 +460,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     await this.journal.conversation.configure({extensions: [...new Map([...retained, ...extensions.parent, workflow, decision].map(item => [item.name, item])).values()]}, context);
     if (host.runRecords !== undefined) {
       this.childRunRecords = await DurableChildRunRecords.open(this.journal.harness, this.journal.conversation.id, ref, host.runRecords, context,
-        (error) => { if (host.runRecordError === undefined) this.report(error); else host.runRecordError(error); });
+        (error) => { if (host.runRecordError === undefined) this.report(error); else host.runRecordError(error); }, Date.now, host.runFinished);
     }
     await this.watchChildAgents(host, ref);
   }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import lockfile from "proper-lockfile";
 import { managedProcessEnvironment } from "./managedProcessEnvironment.js";
 import { atomicWrite, hasCode, readResult } from "./managedProcessFiles.js";
@@ -25,6 +26,7 @@ export class ManagedProcesses {
   private readonly directory: string;
   private releaseLock: (() => Promise<void>) | undefined;
   private compromised = false;
+  private closed = false;
   private operations = Promise.resolve();
   constructor(private readonly options: ManagedProcessesOptions) {
     managedProcessRecordSchema.shape.sessionId.parse(options.sessionId);
@@ -35,16 +37,19 @@ export class ManagedProcesses {
     if (this.releaseLock !== undefined) throw new Error("Managed processes already initialized");
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     this.releaseLock = await lockfile.lock(this.directory, { retries: 0, onCompromised: () => { this.compromised = true; } });
+    this.closed = false;
     try { return await this.list(); } catch (error) { await this.dispose(); throw error; }
   }
   start(input: ManagedProcessStart): Promise<ManagedProcessSnapshot> {
     return this.exclusive(async () => {
+      if (this.closed) throw new Error("Managed process session is closed");
       const spec = managedProcessStartSchema.parse(input);
       const id = spec.id ?? randomUUID();
       const record = managedProcessRecordSchema.parse({
         version: 1, id, sessionId: this.options.sessionId, directory: join(this.directory, id),
         command: spec.command, cwd: spec.cwd, stopTimeoutSeconds: spec.stopTimeoutSeconds ?? 5,
         createdAt: new Date().toISOString(), supervision: this.options.launcher.supervision,
+        child: spec.child, keepAfterChild: spec.keepAfterChild,
         environment: managedProcessEnvironment(this.options.environment ?? process.env),
       });
       // An existing directory is never reused, even after a failed launch.
@@ -59,16 +64,35 @@ export class ManagedProcesses {
     });
   }
   list(): Promise<ManagedProcessSnapshot[]> {
+    return this.exclusive(() => this.snapshots());
+  }
+  setKeepAfterChild(id: string, keep: boolean): Promise<void> {
     return this.exclusive(async () => {
-      const snapshots: ManagedProcessSnapshot[] = [];
-      for (const entry of (await readdir(this.directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-        if (!entry.isDirectory()) continue;
-        let record: ManagedProcessRecord;
-        try { record = await this.record(entry.name); }
-        catch (error) { if (hasCode(error, "ENOENT")) continue; throw error; }
-        snapshots.push(await this.classify(record));
+      const record = managedProcessRecordSchema.parse({ ...await this.record(id), keepAfterChild: keep });
+      await atomicWrite(join(record.directory, "command.json"), JSON.stringify(record));
+    });
+  }
+  stopChild(child: { name: string; runId: string }): Promise<void> {
+    return this.exclusive(async () => {
+      for (const record of await this.snapshots()) {
+        if (record.state.kind === "running" && record.child?.name === child.name && record.child.runId === child.runId && record.keepAfterChild !== true) await this.options.launcher.stop(record);
       }
-      return snapshots;
+    });
+  }
+  clearFinished(): Promise<string[]> { return this.exclusive(() => this.removeFinished(0)); }
+  /** No writes can race the stop, confirmation, and record deletion. A failed stop retains the evidence. */
+  closeSession(): Promise<void> {
+    return this.exclusive(async () => {
+      this.closed = true;
+      await this.options.launcher.stopSession(this.options.sessionId);
+      const records = await this.snapshots();
+      const deadline = Date.now() + Math.max(5, ...records.map((record) => record.stopTimeoutSeconds)) * 1000 + 10_000;
+      while ((await this.snapshots()).some((record) => record.state.kind === "running")) {
+        if (Date.now() >= deadline) throw new Error("Managed processes did not stop; session records were retained");
+        await sleep(50);
+      }
+      // Keep the leased directory until disposal. Remove incomplete preparation folders too.
+      for (const entry of await readdir(this.directory)) await rm(join(this.directory, entry), { recursive: true, force: true });
     });
   }
   status(id: string): Promise<ManagedProcessSnapshot> { return this.exclusive(async () => this.classify(await this.record(id))); }
@@ -94,12 +118,8 @@ export class ManagedProcesses {
   /** Call periodically while Forgerie is up, even when nobody reads output. */
   maintain(): Promise<void> {
     return this.exclusive(async () => {
-      for (const entry of await readdir(this.directory, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-        let record: ManagedProcessRecord;
-        try { record = await this.record(entry.name); } catch (error) { if (hasCode(error, "ENOENT")) continue; throw error; }
-        await this.log(record).maintain();
-      }
+      await this.removeFinished(50);
+      for (const record of await this.snapshots()) await this.log(record).maintain();
     });
   }
   async dispose(): Promise<void> {
@@ -107,6 +127,29 @@ export class ManagedProcesses {
     try {
       if (this.options.launcher.supervision.kind === "attached") await this.options.launcher.stopSession(this.options.sessionId);
     } finally { const release = this.releaseLock; this.releaseLock = undefined; await release?.(); }
+  }
+  private async snapshots(): Promise<ManagedProcessSnapshot[]> {
+    const snapshots: ManagedProcessSnapshot[] = [];
+    for (const entry of (await readdir(this.directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!entry.isDirectory()) continue;
+      let record: ManagedProcessRecord;
+      try { record = await this.record(entry.name); }
+      catch (error) { if (hasCode(error, "ENOENT")) continue; throw error; }
+      snapshots.push(await this.classify(record));
+    }
+    return snapshots;
+  }
+  private async removeFinished(keep: number): Promise<string[]> {
+    const finished = [];
+    for (const record of await this.snapshots()) {
+      if (record.state.kind === "running") continue;
+      const endedAt = (await stat(join(record.directory, record.state.kind === "ended" ? "result" : "lost.json"))).mtimeMs;
+      finished.push({ record, endedAt });
+    }
+    finished.sort((a, b) => a.endedAt - b.endedAt || a.record.createdAt.localeCompare(b.record.createdAt) || a.record.id.localeCompare(b.record.id));
+    const removed = finished.slice(0, Math.max(0, finished.length - keep));
+    for (const { record } of removed) await rm(record.directory, { recursive: true, force: true });
+    return removed.map(({ record }) => record.id);
   }
   private log(record: ManagedProcessRecord): ManagedProcessLog { return new ManagedProcessLog(record.directory, this.options.logCapBytes); }
   private async record(id: string): Promise<ManagedProcessRecord> {

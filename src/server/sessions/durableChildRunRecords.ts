@@ -33,12 +33,12 @@ export class DurableChildRunRecords {
   private writeFailure: Error | undefined;
   private unsubscribe: (() => void) | undefined;
   private constructor(private readonly ref: DurableChildSessionRef, private readonly store: ChildRunStore,
-    private readonly onError: (error: unknown) => void, private readonly now: () => number) {}
+    private readonly onError: (error: unknown) => void, private readonly now: () => number, private readonly onFinished?: (run: ChildRun) => Promise<void>) {}
 
   /** Must attach before the hosted session enables scheduling. Reads alone never resume the harness. */
   static async open(harness: Harness, parent: ConversationId, ref: DurableChildSessionRef, store: ChildRunStore, context: Context,
-    onError: (error: unknown) => void, now: () => number = Date.now): Promise<DurableChildRunRecords> {
-    const recorder = new DurableChildRunRecords(ref, store, onError, now);
+    onError: (error: unknown) => void, now: () => number = Date.now, onFinished?: (run: ChildRun) => Promise<void>): Promise<DurableChildRunRecords> {
+    const recorder = new DurableChildRunRecords(ref, store, onError, now, onFinished);
     recorder.workflowRunId = await activeWorkflowRun(harness, parent, context);
     const pending = await store.pending(ref.id);
     const metadata = await durableChildRunMetadata(harness, parent, context);
@@ -185,7 +185,10 @@ export class DurableChildRunRecords {
     const serialized = JSON.stringify({ run, checkpoint });
     if (active.stored === serialized) return;
     active.stored = serialized;
-    this.writes = this.writes.then(async () => { await this.store.save(run, checkpoint); this.writeFailure = undefined; })
+    this.writes = this.writes.then(async () => {
+      // Stop before publishing completion. A crash leaves a pending run to retry on recovery.
+      if (run.state.kind === "finished") await this.onFinished?.(run);
+      await this.store.save(run, checkpoint); this.writeFailure = undefined; })
       .catch((error: unknown) => { delete active.stored;
         this.writeFailure = error instanceof Error ? error : new Error("Child run persistence failed", { cause: error });
         this.onError(this.writeFailure); });
