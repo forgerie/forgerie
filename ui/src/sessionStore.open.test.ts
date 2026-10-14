@@ -132,3 +132,63 @@ it("never acknowledges a catalog-only boundary while the replacement still conta
   expect(store.getSnapshot().transcript.messages.map(messageText)).toEqual(["OLD answer"]);
   expect(server.requests.some(url => url.pathname.endsWith("/unread/acknowledge"))).toBe(false);
 });
+
+describe.each(["atomic", "sequential"] as const)("%s cold host-output seed", cut => {
+  async function openWithBuffered(options: Parameters<typeof openFixture>[0], events: unknown[], statusSeq?: number) {
+    const gate = held();
+    const server = await createOpenServer(async url => {
+      if (!url.pathname.endsWith("/open")) return [];
+      await gate.promise;
+      const open = openFixture(options);
+      return cut === "sequential" ? { ...open, cut, statusSeq: statusSeq ?? open.seq } : open;
+    }); cleanup.push(server.close); cleanup.push(gate.release);
+    server.transport.nativeReadModel = options?.readPath === "native";
+    const received = vi.fn();
+    const connect = server.transport.connect;
+    server.transport.connect = path => { const socket = connect(path); socket.addEventListener("message", received); return socket; };
+    const store = createSessionStore("known", server.transport, {}, session); cleanup.push(store.dispose);
+    const starting = store.start();
+    await vi.waitFor(() => expect(server.requests.some(url => url.pathname.endsWith("/open"))).toBe(true));
+    for (const event of events) server.emit(event);
+    await vi.waitFor(() => expect(received).toHaveBeenCalledTimes(events.length));
+    gate.release(); await starting;
+    return store;
+  }
+  const runs = (store: ReturnType<typeof createSessionStore>) => store.getSnapshot().transcript.messages.flatMap(message => message.parts.flatMap(part => part.type === "shell" ? [part.run] : []));
+  it.each(cut === "atomic" ? ["classic", "native"] as const : ["classic"] as const)("reconstructs the running command without an extra unknown placeholder (%s)", async readPath => {
+    const store = await openWithBuffered({ readPath, snapshot: { seq: 4, partial: null }, status: { isStreaming: false, isCompacting: false, isBashRunning: true },
+      transientEvents: [{ type: "shell.start", command: "sleep 30" }, { type: "shell.chunk", chunk: "hello" }] },
+    [{ type: "shell.start", command: "sleep 30", seq: 3 }, { type: "shell.chunk", chunk: "hello", seq: 4 }]);
+    expect(runs(store)).toEqual([{ command: "sleep 30", excludeFromContext: false, result: { type: "running", output: "hello" } }]);
+  });
+  it("applies a buffered completion after reconstructing host output, without a stale running row", async () => {
+    const store = await openWithBuffered({ snapshot: { seq: 1, partial: null }, status: { isStreaming: false, isCompacting: false, isBashRunning: false },
+      transientEvents: [{ type: "shell.start", command: "sleep 30" }, { type: "shell.chunk", chunk: "hello" }] },
+    [{ type: "shell.end", output: "hello FINAL", exitCode: 0, seq: 5 }]);
+    expect(runs(store)).toEqual([{ command: "sleep 30", excludeFromContext: false, result: { type: "done", output: "hello FINAL", exitCode: 0, cancelled: false, truncated: false } }]);
+  });
+  it("does not let the old idle status interrupt a newer buffered command", async () => {
+    const store = await openWithBuffered({ snapshot: { seq: 1, partial: null }, status: { isStreaming: false, isCompacting: false, isBashRunning: false },
+      transientEvents: [{ type: "shell.start", command: "old" }, { type: "shell.end", output: "old output", exitCode: 0 }] },
+    [{ type: "shell.start", command: "new", seq: 5 }, { type: "shell.chunk", chunk: "new output", seq: 6 }]);
+    expect(runs(store)).toEqual([
+      { command: "old", excludeFromContext: false, result: { type: "done", output: "old output", exitCode: 0, cancelled: false, truncated: false } },
+      { command: "new", excludeFromContext: false, result: { type: "running", output: "new output" } },
+    ]);
+  });
+  it("uses a newer buffered start instead of adding an unknown fallback", async () => {
+    const store = await openWithBuffered({ snapshot: { seq: 1, partial: null }, status: { isStreaming: false, isCompacting: false, isBashRunning: true } },
+    [{ type: "shell.start", command: "known", seq: 5 }, { type: "shell.chunk", chunk: "known output", seq: 6 }]);
+    expect(runs(store)).toEqual([{ command: "known", excludeFromContext: false, result: { type: "running", output: "known output" } }]);
+  });
+  it("keeps one unknown fallback only when host reconstruction is unavailable", async () => {
+    const store = await openWithBuffered({ status: { isStreaming: false, isCompacting: false, isBashRunning: true } }, []);
+    expect(runs(store)).toEqual([{ result: { type: "running", output: "" } }]);
+  });
+  if (cut === "sequential") it("uses the host watermark rather than the older partial watermark for shell replay", async () => {
+    const store = await openWithBuffered({ snapshot: { seq: 1, partial: null }, status: { isStreaming: false, isCompacting: false, isBashRunning: false },
+      transientEvents: [{ type: "shell.start", command: "sleep 30" }, { type: "shell.chunk", chunk: "hello" }] },
+    [{ type: "shell.start", command: "sleep 30", seq: 2 }, { type: "shell.chunk", chunk: "hello", seq: 3 }, { type: "shell.end", output: "hello FINAL", exitCode: 0, seq: 5 }], 4);
+    expect(runs(store)).toEqual([{ command: "sleep 30", excludeFromContext: false, result: { type: "done", output: "hello FINAL", exitCode: 0, cancelled: false, truncated: false } }]);
+  });
+});

@@ -286,17 +286,24 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   }
   function applyOpen(previous: SessionState, open: SessionOpen, buffered: readonly UiEvent[]): SessionState {
     const running = open.status.isStreaming || open.status.isCompacting;
+    const hostSeq = open.cut === "sequential" ? open.statusSeq ?? open.seq : open.seq;
+    const newerShell = buffered.filter(event => event.type.startsWith("shell.") && (event.seq ?? Infinity) > hostSeq);
+    // Host reconstruction belongs before replay, even when its watermark is newer than
+    // the facade's partial. Give the legacy seed a covered sequence, not a live event.
+    const hostShell = open.snapshot.transientEvents.filter(event => event.type !== "command.output").map(event => ({ ...event, seq: open.seq }));
+    const bashRunningAtSeed = open.status.isBashRunning && !newerShell.some(event => event.type === "shell.start" || event.type === "shell.end");
     if (open.cut === "sequential") {
       const transcriptEvents = buffered.filter((event): event is Exclude<UiEvent, AskEvent | OperationEvent> => !isAskEvent(event) && !isOperationEvent(event));
       // The legacy facade can publish completed messages/tools between its history and partial reads.
       // Preserve the original seedTranscript reconciliation for this explicitly non-atomic cohort.
       const seeded = seedTranscript(open.page.messages, open.snapshot.partial, open.seq, running,
-        transcriptEvents.filter(event => !event.type.startsWith("shell.") || (event.seq ?? Infinity) > open.seq), open.status.isBashRunning);
+        [...hostShell, ...transcriptEvents.filter(event => !event.type.startsWith("shell."))], bashRunningAtSeed);
       let next = withStatus({ ...previous, session: open.session,
         transcript: { ...seeded, messages: seeded.messages.map(message => message.position === undefined ? message : { ...message, position: message.position + open.page.start }) },
         ask: resyncAsk(previous.ask, open.status.pendingAsk), earlier: { type: open.page.start === 0 ? "complete" : "available" } }, open.status);
-      for (const event of open.snapshot.transientEvents) next = applyEvent(next, event);
+      for (const event of open.snapshot.transientEvents) if (isOperationEvent(event)) next = applyEvent(next, event);
       for (const event of buffered) {
+        if (event.type.startsWith("shell.") && (event.seq ?? Infinity) > hostSeq) next = applyEvent(next, event);
         if (isAskEvent(event) && (event.seq ?? Infinity) > open.seq) next = applyEvent(next, event);
         if (isOperationEvent(event) && (event.seq ?? Infinity) > (open.statusSeq ?? open.seq)) next = applyEvent(next, event);
       }
@@ -310,7 +317,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       const source = message.position === undefined ? undefined : open.page.messages[message.position - open.page.start];
       return source?.id === undefined ? message : { ...message, key: source.id };
     }) };
-    const seededPartial = seedTranscript([], open.snapshot.partial, open.seq, running, [], open.status.isBashRunning);
+    const seededPartial = seedTranscript([], open.snapshot.partial, open.seq, running, hostShell, bashRunningAtSeed);
     let transcript: Transcript = { ...initial, nextId: initial.nextId + seededPartial.nextId,
       messages: [...initial.messages, ...seededPartial.messages.map(message => ({ ...message, id: `partial-${String(open.seq)}-${message.id}` }))],
       liveId: seededPartial.liveId === undefined ? undefined : `partial-${String(open.seq)}-${seededPartial.liveId}` };
@@ -319,10 +326,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       transcript = reduceEvent(transcript, { type: "tool.start", toolCallId: tool.toolCallId, toolName: tool.toolName, args: undefined });
       transcript = reduceEvent(transcript, { type: "tool.update", toolCallId: tool.toolCallId, toolName: tool.toolName, text: tool.output });
     }
-    // Seed host output before carry/dedup. It has the same checkpoint as the transcript.
+    // Host output is already reconstructed. Apply operation output before carry/dedup.
     let next = withStatus({ ...previous, session: open.session, transcript, ask: resyncAsk(previous.ask, open.status.pendingAsk),
       earlier: { type: open.page.start === 0 ? "complete" : "available" } }, open.status);
-    for (const event of open.snapshot.transientEvents) next = applyEvent(next, event);
+    for (const event of open.snapshot.transientEvents) if (isOperationEvent(event)) next = applyEvent(next, event);
     next = { ...next, transcript: reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)) };
     for (const event of buffered) if ((event.seq ?? Infinity) > open.seq) next = applyEvent(next, event);
     page = { start: open.page.start, total: open.page.total, historyId: open.historyId, epoch: open.epoch };
