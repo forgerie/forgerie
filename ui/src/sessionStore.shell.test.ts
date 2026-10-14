@@ -1,3 +1,4 @@
+import { openFixture } from "./testing/openFixture";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -22,6 +23,10 @@ async function shellServer(options: { status?: SessionStatus; shell?: "accept" |
     const url = new URL(request.url ?? "/", "http://localhost");
     requests.push({ path: url.pathname, body });
     const send = (data: unknown, code = 200) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
+    if (new URL(request.url ?? "/", "http://localhost").pathname.endsWith("/open")) {
+      send(openFixture({ session: { id: "known", cwd: new URL(request.url ?? "/", "http://localhost").searchParams.get("cwd") ?? "/workspace" },
+        page: { messages: options.history ?? [], start: 0, total: (options.history ?? []).length }, snapshot: { seq: state.seq, partial: null }, status: state.status })); return;
+    }
     if (url.pathname.endsWith("/messages")) send({ messages: options.history ?? [], start: 0, total: options.history?.length ?? 0 });
     else if (url.pathname.endsWith("/stream-snapshot")) send({ seq: state.seq, partial: null });
     else if (url.pathname.endsWith("/status")) send(state.status);
@@ -116,7 +121,7 @@ describe("shell rows across a reconnect", () => {
     await until(() => JSON.stringify(shellRow()?.parts).includes("now"));
     const id = shellRow()!.id;
     drop();
-    const historyReads = () => requests.filter((request) => request.path.endsWith("/messages")).length;
+    const historyReads = () => requests.filter((request) => request.path.endsWith("/open")).length;
     await until(() => historyReads() === 2 && store.getSnapshot().connection.type === "ready");
     expect(store.getSnapshot().transcript.messages.filter((message) => message.role === "shell").map((message) => message.id)).toEqual([id]);
   });

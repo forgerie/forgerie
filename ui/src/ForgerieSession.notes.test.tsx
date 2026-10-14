@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { withOpenFixture } from "./testing/openFixture";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { WebSocket as Socket, WebSocketServer } from "ws";
@@ -59,7 +60,7 @@ async function sessionWithChanges(options: { status?: SessionStatus; storage?: S
   if (typeof address === "string" || !address) throw new Error("No socket port");
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
-  vi.spyOn(browserTransport, "request").mockImplementation(async (path, init) => {
+  vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     const body = init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
     requests.push({ path, ...(body ? { body } : {}) });
@@ -80,7 +81,7 @@ async function sessionWithChanges(options: { status?: SessionStatus; storage?: S
     if (path.includes("/status?")) return Response.json(status);
     if (path.includes("/commands?")) return Response.json([]);
     throw new Error(`Unexpected request ${path}`);
-  });
+  }));
   const drafts = options.storage ? createDraftStore(options.storage) : undefined;
   await act(async () => root.render(<ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} drafts={drafts} onSwitchSession={() => {}} />));
   await until(() => document.querySelector(".status-chip-live")?.textContent === (status.isStreaming ? "Running" : "Connected"));

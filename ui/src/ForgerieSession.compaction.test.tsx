@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { withOpenFixture } from "./testing/openFixture";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { WebSocket as Socket, WebSocketServer } from "ws";
@@ -43,7 +44,7 @@ it.each([false, true])("restores Stop's returned queue only to chat, with a dela
   if (typeof address === "string" || !address) throw new Error("No socket port");
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
-  const request = vi.spyOn(browserTransport, "request").mockImplementation(async (path) => {
+  const request = vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path) => {
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.endsWith("/abort")) {
       const restoredMessages = status.queuedMessages;
@@ -56,7 +57,7 @@ it.each([false, true])("restores Stop's returned queue only to chat, with a dela
     if (path.includes("/status?")) return Response.json(status);
     if (path.includes("/commands?")) return Response.json([]);
     throw new Error(`Unexpected request ${path}`);
-  });
+  }));
   await act(async () => root.render(<ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={() => {}} />));
   await until(() => document.querySelector<HTMLButtonElement>('[aria-label="Stop generating"]')?.disabled === false);
   await type("unfinished chat thought");

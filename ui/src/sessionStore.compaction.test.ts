@@ -1,3 +1,4 @@
+import { openFixture } from "./testing/openFixture";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,6 +18,7 @@ async function until(predicate: () => boolean) { await expect.poll(predicate, { 
 
 async function compactionServer(initial: SessionStatus = idle) {
   const requests: { path: string; body: unknown }[] = [];
+  const transientEvents: Extract<OperationEvent, { type: "command.output" }>[] = [];
   const state = { status: initial, seq: 0, statusReads: 0, historyReads: 0,
     historyGate: undefined as ReturnType<typeof gate> | undefined,
     statusGate: undefined as ReturnType<typeof gate> | undefined,
@@ -32,6 +34,11 @@ async function compactionServer(initial: SessionStatus = idle) {
     const url = new URL(request.url ?? "/", "http://localhost");
     requests.push({ path: url.pathname, body });
     const send = (data: unknown, code = 200) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
+    if (url.pathname.endsWith("/open")) {
+      state.historyReads++; await state.historyGate?.promise;
+      state.statusReads++; await state.statusGate?.promise; const status = state.status;
+      send(openFixture({ session: { id: "known", cwd: url.searchParams.get("cwd") ?? "/workspace" }, page: { messages: [{ role: "user", content: "existing", timestamp: 1 }], start: 0, total: 1 }, snapshot: { seq: state.seq, partial: null }, status, transientEvents })); return;
+    }
     if (url.pathname.endsWith("/messages")) { state.historyReads++; await state.historyGate?.promise; send({ messages: [{ role: "user", content: "existing", timestamp: 1 }], start: 0, total: 1 }); }
     else if (url.pathname.endsWith("/stream-snapshot")) send({ seq: state.seq, partial: null });
     else if (url.pathname.endsWith("/prompt")) send({ accepted: true });
@@ -74,6 +81,8 @@ async function compactionServer(initial: SessionStatus = idle) {
   const store = createSessionStore("test", transport, { retryDelayMs: 10 }, { id: "test", cwd: "/work tree" });
   cleanup.push(store.dispose);
   const emit = (event: OperationEvent) => {
+    if (event.type === "command.output") transientEvents.push(event);
+    if (event.type === "status.update") state.status = event.status;
     if (event.type === "status.update") state.status = event.status;
     for (const socket of ws.clients) socket.send(JSON.stringify({ ...event, seq: ++state.seq }));
   };

@@ -1,3 +1,4 @@
+import { openFixture } from "./testing/openFixture";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -22,6 +23,10 @@ async function queueServer(initial: SessionStatus) {
     const url = new URL(request.url ?? "/", "http://localhost");
     requests.push({ path: url.pathname, body });
     const send = (data: unknown, code = 200) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
+    if (new URL(request.url ?? "/", "http://localhost").pathname.endsWith("/open")) {
+      send(openFixture({ session: { id: "known", cwd: new URL(request.url ?? "/", "http://localhost").searchParams.get("cwd") ?? "/workspace" },
+        page: { messages: [{ role: "user", content: "existing", timestamp: 1 }], start: 0, total: ([{ role: "user", content: "existing", timestamp: 1 }]).length }, snapshot: { seq: state.seq, partial: null }, status: state.status })); return;
+    }
     if (url.pathname === "/api/sessiond/runtime") send({ component: "sessiond", label: "Session daemon", available: true, capabilities: state.supportsRequestIds ? ["session.prompt.requestIds"] : [] });
     else if (url.pathname.endsWith("/messages")) send({ messages: [{ role: "user", content: "existing", timestamp: 1 }], start: 0, total: 1 });
     else if (url.pathname.endsWith("/stream-snapshot")) send({ seq: state.seq, partial: null });

@@ -1,3 +1,4 @@
+import { openFixture } from "./testing/openFixture";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -43,6 +44,7 @@ async function treeServer(timing: { requestTimeoutMs?: number; treeActionTimeout
     const url = new URL(request.url ?? "/", "http://localhost");
     requests.push({ path: `${request.method ?? "GET"} ${url.pathname}${url.search}`, body });
     const send = (data: unknown, code = 200) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
+    if (url.pathname.endsWith("/open")) { state.historyReads++; send(openFixture({ session: { id: "known", cwd: url.searchParams.get("cwd") ?? "/workspace" }, page: { messages: state.history, start: 0, total: state.history.length }, status: idle })); return; }
     if (url.pathname.endsWith("/messages")) { state.historyReads++; send({ messages: state.history, start: 0, total: state.history.length }); }
     else if (url.pathname.endsWith("/stream-snapshot")) send({ seq: 0, partial: null });
     else if (url.pathname.endsWith("/status")) send(idle);

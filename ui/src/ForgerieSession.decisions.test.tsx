@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { withOpenFixture } from "./testing/openFixture";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { WebSocketServer, WebSocket as Socket } from "ws";
@@ -47,7 +48,7 @@ async function sessionWithDecisions(status: SessionStatus, options: { decisions?
   if (typeof address === "string" || !address) throw new Error("No socket port");
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
-  vi.spyOn(browserTransport, "request").mockImplementation(async (path, init) => {
+  vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
     if (init.method === "POST") posts.push({ path, body: JSON.parse(String(init.body)) });
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.endsWith(`/decisions/${GUESS.id}/overturn`)) {
@@ -67,7 +68,7 @@ async function sessionWithDecisions(status: SessionStatus, options: { decisions?
     if (path.includes("/status?")) return Response.json(status);
     if (path.includes("/commands?")) return Response.json([]);
     return Response.json({ error: "Not found" }, { status: 404 });
-  });
+  }));
   await act(async () => root.render(<ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={() => {}} />));
   await until(() => button(options.opener ?? "Decisions, 1 flagged guess to look at") !== undefined);
   const emit = (eventType: string) => { for (const socket of server!.clients) socket.send(JSON.stringify({ type: "pi.event", eventType })); };

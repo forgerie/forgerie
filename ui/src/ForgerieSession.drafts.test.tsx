@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { withOpenFixture } from "./testing/openFixture";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { WebSocket as Socket, WebSocketServer } from "ws";
@@ -54,7 +55,7 @@ beforeEach(async () => {
   if (typeof address === "string" || !address) throw new Error("No socket port");
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
-  vi.spyOn(browserTransport, "request").mockImplementation(async (path) => {
+  vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path) => {
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.includes("/messages?")) return Response.json({ messages: [], start: 0, total: 0 });
     if (path.includes("/stream-snapshot?")) return Response.json({ partial: null, seq: 0 });
@@ -62,7 +63,7 @@ beforeEach(async () => {
     if (path.includes("/commands?")) return Response.json([]);
     if (path.endsWith("/prompt")) return promptReply();
     throw new Error(`Unexpected request ${path}`);
-  });
+  }));
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => {

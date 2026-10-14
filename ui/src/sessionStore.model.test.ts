@@ -1,3 +1,4 @@
+import { openFixture } from "./testing/openFixture";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -24,6 +25,10 @@ async function runtimeServer() {
     requests.push({ method: request.method ?? "GET", path: url.pathname, body });
     const send = (data: unknown, code = 200) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
     const mutation = request.method === "POST";
+    if (new URL(request.url ?? "/", "http://localhost").pathname.endsWith("/open")) {
+      send(openFixture({ session: { id: "known", cwd: new URL(request.url ?? "/", "http://localhost").searchParams.get("cwd") ?? "/workspace" },
+        page: { messages: [], start: 0, total: ([]).length }, snapshot: { seq: state.seq, partial: null }, status: state.status })); return;
+    }
     if (mutation && state.failNext === "drop") { state.failNext = undefined; response.destroy(); return; }
     if (mutation && state.failNext === "error") { state.failNext = undefined; send({ error: "Model not found: x/y" }, 400); return; }
     if (mutation && state.failNext === "gateway") { state.failNext = undefined; send({ error: "Bad gateway" }, 502); return; }

@@ -1,3 +1,4 @@
+import { openFixture } from "./testing/openFixture";
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -35,6 +36,7 @@ async function server(options: { promptFailure?: boolean; unknownSession?: boole
     else if (url.pathname.endsWith("/commands")) {
       send(options.catalogFailure ? { error: "Discovery unavailable" } : [{ name: "session", source: "builtin", description: "Session stats" }, { name: "review", source: "prompt" }], options.catalogFailure ? 503 : 200);
     }
+    else if (url.pathname.endsWith("/open")) { send(openFixture({ session: { id: "known", cwd: "/workspace with spaces", name: "Existing conversation" }, page: { messages: [{ role: "user", content: "before", timestamp: 1 }, { role: "assistant", content: [{ type: "text", text: "history answer" }], timestamp: 2 }], start: 0, total: 2 } })); }
     else if (url.pathname.endsWith("/messages")) {
       send({ messages: [{ role: "user", content: "before", timestamp: 1 }, { role: "assistant", content: [{ type: "text", text: "history answer" }], timestamp: 2 }], start: 0, total: 2 });
     } else if (url.pathname.endsWith("/stream-snapshot")) { send({ partial: null, seq: 0 }); }

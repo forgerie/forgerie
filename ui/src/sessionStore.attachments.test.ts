@@ -1,3 +1,4 @@
+import { openFixture } from "./testing/openFixture";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,6 +16,10 @@ async function server({ uploadError = false, promptError = false, malformed = fa
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
     if (request.method === "POST") requests.push({ path, body });
     const send = (value: unknown, status = 200) => { response.writeHead(status, { "Content-Type": "application/json" }); response.end(JSON.stringify(value)); };
+    if (new URL(request.url ?? "/", "http://localhost").pathname.endsWith("/open")) {
+      send(openFixture({ session: { id: "known", cwd: new URL(request.url ?? "/", "http://localhost").searchParams.get("cwd") ?? "/workspace" },
+        page: { messages: [], start: 0, total: ([]).length }, snapshot: { seq: 0, partial: null }, status: { isStreaming: false, isCompacting: false, isBashRunning: false } })); return;
+    }
     if (path.endsWith("/messages")) send({ messages: [], start: 0, total: 0 });
     else if (path.endsWith("/stream-snapshot")) send({ partial: null, seq: 0 });
     else if (path.endsWith("/status")) send({ isStreaming: false, isCompacting: false, isBashRunning: false });

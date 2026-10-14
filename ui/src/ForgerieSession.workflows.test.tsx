@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { withOpenFixture } from "./testing/openFixture";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { WebSocketServer, WebSocket as Socket } from "ws";
@@ -49,7 +50,7 @@ async function sessionWithProposal(status: SessionStatus = idle) {
   if (typeof address === "string" || !address) throw new Error("No socket port");
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
-  vi.spyOn(browserTransport, "request").mockImplementation(async (path, init) => {
+  vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
     if (init.method === "POST") posts.push({ path, body: JSON.parse(String(init.body)) });
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.endsWith(`/workflow-proposals/${PROPOSAL.id}/start`)) {
@@ -64,7 +65,7 @@ async function sessionWithProposal(status: SessionStatus = idle) {
     if (path.includes("/status?")) return Response.json(status);
     if (path.includes("/commands?")) return Response.json([]);
     return Response.json({ error: "Not found" }, { status: 404 });
-  });
+  }));
   await act(async () => root.render(<ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={() => {}} />));
   await until(() => document.querySelector(".pinned-dock") !== null);
   return { posts };
@@ -110,7 +111,7 @@ describe("a running workflow's sheet", () => {
     if (typeof address === "string" || !address) throw new Error("No socket port");
     vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
     vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
-    vi.spyOn(browserTransport, "request").mockImplementation(async (path, init) => {
+    vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
       if (init.method === "POST") posts.push({ path, body: JSON.parse(String(init.body)) });
       if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
       if (path.endsWith("/workers/api/model")) return Response.json({ ...RUN_WORKING, stages: setWorkerModel(RUN_WORKING.stages ?? [], "api", undefined) });
@@ -124,7 +125,7 @@ describe("a running workflow's sheet", () => {
       if (path.includes("/commands?")) return Response.json([]);
       if (path.includes("/models?")) return Response.json({ models: MODELS });
       return Response.json({ error: "Not found" }, { status: 404 });
-    });
+    }));
     await act(async () => root.render(<ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={() => {}} />));
     await until(() => document.querySelector(".stage-strip") !== null);
     return { posts };

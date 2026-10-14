@@ -1,3 +1,4 @@
+import { openFixture } from "./testing/openFixture";
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -38,6 +39,12 @@ async function recoveryServer() {
     if (path === "/api/sessions/all") { send({ sessions: [{ id: "known", cwd: "/test", name: "Recovery test" }] }); return; }
     if (path.endsWith("/commands")) { send([]); return; }
     if (state.failures > 0) { state.failures--; send({ error: "Temporarily unavailable" }, state.readFailureStatus); return; }
+    if (path.endsWith("/open")) {
+      state.histories++;
+      await state.gate?.promise;
+      const history = state.history.slice();
+      send(openFixture({ session: { id: "known", cwd: "/test", name: "Recovery test" }, page: { messages: history, start: 0, total: history.length }, snapshot: { partial: state.partial, seq: state.seq }, status: { isStreaming: state.running, isCompacting: false, isBashRunning: false } })); return;
+    }
     if (path.endsWith("/messages")) {
       state.histories++;
       const history = state.history.slice();
@@ -71,6 +78,11 @@ async function recoveryServer() {
   const store = createSessionStore("known", transport, { retryDelayMs: 10, maxRetryDelayMs: 20 });
   disposals.push(store.dispose);
   const emit = (event: SessionEvent) => {
+    if (event.type === "message.end" && event.message !== undefined) {
+      const index = state.history.findIndex(message => message.role === event.message?.role && message.timestamp === event.message.timestamp);
+      if (index < 0) state.history.push(event.message); else state.history[index] = event.message;
+    }
+    if (event.type === "tool.end") state.history.push({ role: "toolResult", toolCallId: event.toolCallId, toolName: event.toolName, content: [{ type: "text", text: event.text }], isError: event.isError });
     for (const client of ws.clients) client.send(Buffer.from(JSON.stringify(event)));
   };
   return { state, store, transport, emit, emitRaw: (payload: string) => socket?.send(Buffer.from(payload)),

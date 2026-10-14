@@ -1,3 +1,4 @@
+import { openFixture } from "./testing/openFixture";
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,6 +32,10 @@ async function askServer() {
     };
     const status = () => ({ isStreaming: false, isCompacting: false, isBashRunning: false,
       ...(state.pendingAsk ? { pendingAsk: state.pendingAsk } : {}) });
+    if (new URL(request.url ?? "/", "http://localhost").pathname.endsWith("/open")) {
+      send(openFixture({ session: { id: "known", cwd: new URL(request.url ?? "/", "http://localhost").searchParams.get("cwd") ?? "/workspace" },
+        page: { messages: [], start: 0, total: ([]).length }, snapshot: { seq: 0, partial: null }, status: status() })); return;
+    }
     if (url.pathname === "/api/sessions/all") send({ sessions: [{ id: "known", cwd: "/work" }] });
     else if (url.pathname.includes("/ask/")) {
       state.closes.push({ path: url.pathname, body: JSON.parse(Buffer.concat(chunks).toString()) });

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { withOpenFixture } from "./testing/openFixture";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { WebSocket as Socket, WebSocketServer } from "ws";
@@ -47,7 +48,7 @@ async function respondingSession() {
   const emit = (event: UiEvent) => { for (const socket of server!.clients) socket.send(JSON.stringify({ ...event, seq: ++seq })); };
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
-  const request = vi.spyOn(browserTransport, "request").mockImplementation(async (path, init) => {
+  const request = vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.endsWith("/prompt")) {
       const body = JSON.parse(String(init.body)) as { text: string; streamingBehavior?: "steer" | "followUp" };
@@ -70,7 +71,7 @@ async function respondingSession() {
     if (path.includes("/status?")) return Response.json(status);
     if (path.includes("/commands?")) return Response.json([]);
     throw new Error(`Unexpected request ${path}`);
-  });
+  }));
   await act(async () => root.render(<ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={() => {}} />));
   await until(() => button("Stop generating")?.disabled === false);
   return { prompts, request };

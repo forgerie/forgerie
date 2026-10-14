@@ -1,8 +1,10 @@
+import { openFixture } from "./testing/openFixture";
+import type { ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { createSessionStore, type SessionTransport, type SessionStore } from "./sessionStore";
-import type { DurableBrowserSnapshot } from "./contracts";
+import type { DurableBrowserSnapshot, SessionOpen } from "./contracts";
 import { messageText } from "./transcript";
 
 const disposals: (() => void | Promise<void>)[] = [];
@@ -10,18 +12,26 @@ afterEach(async () => { for (const dispose of disposals.splice(0).reverse()) awa
 
 async function fixture() {
   const requests: string[] = [];
+  let seed: SessionOpen | undefined;
+  const waiting: ServerResponse[] = [];
+  const transientEvents: SessionOpen["snapshot"]["transientEvents"] = [];
   let socket: ServerSocket | undefined;
   let connections = 0;
   const ws = new WebSocketServer({ noServer: true });
   const http = createServer((request, response) => {
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
     requests.push(path);
+    if (path.endsWith("/open")) {
+      if (seed === undefined) waiting.push(response);
+      else { response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify(seed)); }
+      return;
+    }
     response.writeHead(path.endsWith("/commands") ? 200 : 503, { "Content-Type": "application/json" });
     response.end(JSON.stringify(path.endsWith("/commands") ? [] : { error: "Native joins must not read separate seeds" }));
   });
   http.on("upgrade", (request, stream, head) => {
     expect(new URL(request.url ?? "/", "http://localhost").searchParams.get("native")).toBe("1");
-    ws.handleUpgrade(request, stream, head, (client) => { socket = client; connections++; });
+    ws.handleUpgrade(request, stream, head, (client) => { socket = client; connections++; seed = undefined; });
   });
   await new Promise<void>((resolve) => { http.listen(0, "127.0.0.1", resolve); });
   const address = http.address();
@@ -37,7 +47,20 @@ async function fixture() {
   });
   disposals.push(store.dispose);
   return { store, requests, connections: () => connections,
-    emit: (frame: unknown) => socket?.send(JSON.stringify(frame)), close: () => socket?.close() };
+    emit: (frame: unknown) => {
+      if (typeof frame === "object" && frame !== null && "type" in frame && frame.type === "session.snapshot") {
+        const value = frame as DurableBrowserSnapshot;
+        seed = openFixture({ session: { id: "native", cwd: "/temporary" }, readPath: "native", epoch: value.epoch,
+          page: { ...value.history, total: Math.max(value.history.total, value.history.start + value.history.messages.length) },
+          snapshot: { seq: value.revision * 10, partial: value.partial }, tools: value.tools, transientEvents,
+          status: { isStreaming: value.isStreaming, isCompacting: value.isCompacting, isBashRunning: transientEvents.some(event => event.type === "shell.start"), queuedMessages: value.queuedMessages, pendingAsk: value.app?.pendingAsk } });
+        for (const response of waiting.splice(0)) { response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify(seed)); }
+        socket?.send(JSON.stringify({ type: "session.open", open: seed }));
+      } else {
+        if (typeof frame === "object" && frame !== null && "type" in frame && typeof frame.type === "string" && frame.type.startsWith("shell.")) transientEvents.push(frame as SessionOpen["snapshot"]["transientEvents"][number]);
+        socket?.send(JSON.stringify(frame));
+      }
+    }, close: () => socket?.close() };
 }
 
 function waitFor(store: SessionStore, predicate: () => boolean) {
@@ -68,11 +91,11 @@ async function join(f: Awaited<ReturnType<typeof fixture>>, frame = snapshot()) 
 }
 
 describe("native browser replacement", () => {
-  it("joins from one socket seed without separate history, partial, or status reads", async () => {
+  it("joins from one HTTP open seed plus the socket without separate history, partial, or status reads", async () => {
     const f = await fixture();
     await join(f);
     await waitFor(f.store, () => f.store.getSnapshot().commands.type === "ready");
-    expect(f.requests).toEqual(["/api/sessions/native/commands"]);
+    expect(f.requests).toEqual(["/api/sessions/native/open", "/api/sessions/native/commands"]);
     expect(f.store.getSnapshot().transcript.messages.map(messageText)).toEqual(["first contribution", "second contribution"]);
   });
 
@@ -122,6 +145,7 @@ describe("native browser replacement", () => {
     f.emit(snapshot(0, "new-daemon"));
     await waitFor(f.store, () => f.store.getSnapshot().connection.type === "ready");
     expect(f.store.getSnapshot().transcript.messages.map((message) => message.id)).toEqual(ids);
-    expect(f.requests.every((path) => path.endsWith("/commands"))).toBe(true);
+    expect(f.requests.filter(path => path.endsWith("/open"))).toHaveLength(2);
+    expect(f.requests.every((path) => path.endsWith("/commands") || path.endsWith("/open"))).toBe(true);
   });
 });

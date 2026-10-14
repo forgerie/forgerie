@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { withOpenFixture } from "./testing/openFixture";
 import { createServer } from "node:http";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -71,7 +72,7 @@ async function session(patch: Partial<SessionStatus> = {}) {
   const previousUrl = window.location.href;
   browser.happyDOM.setURL(origin);
   cleanup.push(async () => { browser.happyDOM.setURL(previousUrl); });
-  vi.spyOn(browserTransport, "request").mockImplementation((path, init) => fetch(origin + path, init));
+  vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture((path, init) => fetch(origin + path, init)));
   vi.spyOn(browserTransport, "connect").mockImplementation((path) => new Socket(origin.replace("http:", "ws:") + path) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
   cleanup.push(async () => {
