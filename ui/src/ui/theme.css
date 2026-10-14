@@ -297,7 +297,6 @@ button:disabled { cursor: default; opacity: 0.4; }
 .load-earlier-action { display: inline-flex; align-items: center; min-block-size: var(--control-size); padding-inline: var(--space-2); border: 0; border-radius: var(--radius-document); background: transparent; color: inherit; font: inherit; }
 .load-earlier-action:not(:disabled):hover { color: var(--foreground); }
 .load-earlier[data-state="failed"] .load-earlier-action { color: var(--foreground); }
-.load-earlier-action:focus-visible { outline: 2px solid var(--line-focus); outline-offset: -2px; }
 .load-earlier-label[data-live] { background: linear-gradient(90deg, var(--muted-foreground) 40%, var(--foreground) 50%, var(--muted-foreground) 60%) 0 0 / 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: trace-shimmer 2s linear infinite; }
 .load-earlier-end { margin: 0; }
 .load-earlier-end:empty { display: none; }
