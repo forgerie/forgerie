@@ -110,7 +110,7 @@ const isMarked = (custom: Record<string, unknown> | undefined) => custom?.["mark
 
 export function UserMessage() {
   const marked = useAuiState((s) => isMarked(s.message.metadata.custom));
-  return <MessagePrimitive.Root className="message message-user" data-role="user" aria-label="Your message" data-marked={marked || undefined}>
+  return <MessagePrimitive.Root className="message message-user" data-role="user" aria-label="Your message" data-marked={marked || undefined} data-finished>
     <UserMessageAttachments />
     <MessagePrimitive.Parts components={invocationParts} />
     <AuiIf condition={(s) => s.message.content.some((part) => part.type === "text" && part.text.length > 0)}>
@@ -133,7 +133,8 @@ export function AssistantMessage({ fileLinks }: { fileLinks?: FileLinks | undefi
   const boundary = steps.boundary;
   const closing = settled && boundary?.answered ? boundary : undefined;
   const marked = useAuiState((s) => isMarked(s.message.metadata.custom));
-  return <MessagePrimitive.Root className="message message-assistant" data-role="assistant" aria-label="Assistant reply" data-marked={marked || undefined}>
+  return <MessagePrimitive.Root className="message message-assistant" data-role="assistant" aria-label="Assistant reply" data-marked={marked || undefined}
+    data-finished={settled || undefined}>
     <div className="message-text">
       <MessagePrimitive.GroupedParts groupBy={groupBy}>
         {({ part, children }) => {
@@ -204,7 +205,7 @@ function SummaryCopy() {
  */
 function HistorySummary({ kind }: { kind: HistorySummaryKind }) {
   const [open, setOpen] = useState(false);
-  return <MessagePrimitive.Root className="message message-summary" data-role="system" data-summary={kind}>
+  return <MessagePrimitive.Root className="message message-summary" data-role="system" data-summary={kind} data-finished>
     <details className="history-summary" onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary className="history-summary-line">
         <span className="trace-marker" aria-hidden>{">"}</span>
@@ -233,13 +234,13 @@ const NO_ARTIFACT_VIEW = createLatest<SystemArtifactView | undefined>(undefined)
 export function SystemMessage({ artifact = NO_ARTIFACT_VIEW }: { artifact?: Latest<SystemArtifactView | undefined> | undefined }) {
   const custom = useAuiState((s) => s.message.metadata.custom);
   const view = useLatest(artifact)?.(custom);
-  if (view !== undefined) return <MessagePrimitive.Root className="message message-event" data-role="system">{view}</MessagePrimitive.Root>;
-  if (isShellArtifact(custom)) return <MessagePrimitive.Root className="message message-shell" data-role="shell">
+  if (view !== undefined) return <MessagePrimitive.Root className="message message-event" data-role="system" data-finished>{view}</MessagePrimitive.Root>;
+  if (isShellArtifact(custom)) return <MessagePrimitive.Root className="message message-shell" data-role="shell" data-finished={custom.shell.result.type !== "running" || undefined}>
     <ShellRun run={custom.shell} />
   </MessagePrimitive.Root>;
   if (isSummaryArtifact(custom)) return <HistorySummary kind={custom.summary} />;
   if (isPullNoticeArtifact(custom)) return <PullNoticeRow notice={custom.pullNotice} />;
-  return <MessagePrimitive.Root className="message message-system" data-role="system">
+  return <MessagePrimitive.Root className="message message-system" data-role="system" data-finished>
     <span className="system-label">System</span>
     <div className="message-text"><MessagePrimitive.Parts /></div>
   </MessagePrimitive.Root>;

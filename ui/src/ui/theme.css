@@ -43,6 +43,15 @@
   --gutter: clamp(1rem, 2.6cqi, 1.5rem);
   --thread-top-space: clamp(1rem, 3cqb, 1.5rem);
   --message-gap: clamp(1rem, 3.2cqb, 1.5rem);
+  /* The block size a finished message takes before the browser first draws it
+     (content-visibility). Once drawn, the browser keeps its real size instead.
+     A closer guess gives a steadier scrollbar for history never seen. */
+  /** @label Estimated reply height @min 4 @max 80 @step 1 */
+  --reply-estimate: 24rem;
+  /** @label Estimated message height @min 2 @max 20 @step 0.5 */
+  --user-message-estimate: 4rem;
+  /** @label Estimated event row height @min 1 @max 12 @step 0.25 */
+  --event-row-estimate: 2.75rem;
   --footer-space: clamp(0.5rem, 2.5cqb, 1.25rem);
   /* Hit area. Controls are drawn at homepage sizes (--icon-size and smaller)
      and reach this size through an invisible ::before (see .hit below). */
@@ -222,6 +231,14 @@ button:disabled { cursor: default; opacity: 0.4; }
 .message-group { display: flex; flex-direction: column; gap: var(--message-gap); margin-block-end: calc(2 * var(--message-gap)); }
 .message-group:empty { display: none; }
 .message { inline-size: 100%; min-inline-size: 0; }
+/* A finished message skips style, layout and paint while it is far from view,
+   and draws as it comes near. Its text stays in the document, so find in page
+   and assistive technology still reach it. Paint containment clips at the
+   message's edge; the clip margin keeps focus rings and the marked rail.
+   A message still streaming never skips, so it always shows its latest text. */
+.message[data-finished] { content-visibility: auto; contain-intrinsic-size: auto var(--event-row-estimate); overflow-clip-margin: var(--space-3); }
+.message-assistant[data-finished] { contain-intrinsic-size: auto var(--reply-estimate); }
+.message-user[data-finished] { contain-intrinsic-size: auto var(--user-message-estimate); }
 .message-text { font-size: var(--text-size); line-height: var(--line-height); overflow-wrap: anywhere; }
 .message-user { display: flex; flex-direction: column; align-items: flex-end; }
 .user-bubble { max-inline-size: 80%; border-radius: var(--radius-thread); background: var(--muted); padding: var(--space-2) var(--space-4); white-space: pre-wrap; }
