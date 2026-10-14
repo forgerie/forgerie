@@ -77,7 +77,7 @@ export interface Transcript {
 type ToolPart = Extract<TranscriptPart, { type: "tool" }>;
 
 function keyOf(message: PiMessage): string | undefined {
-  return message.timestamp === undefined ? undefined : `${message.role}:${message.timestamp}`;
+  return message.id ?? (message.timestamp === undefined ? undefined : `${message.role}:${message.timestamp}`);
 }
 /** Renderable images in tool output, as data URLs. Unsupported or empty parts are skipped. */
 export function imagesOf(content: unknown): readonly string[] {
@@ -316,14 +316,14 @@ export function messageText(message: TranscriptMessage): string {
   return message.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
 }
 
-export function fromHistory(history: readonly PiMessage[], isRunning = false): Transcript {
+export function fromHistory(history: readonly PiMessage[], isRunning = false, start = 0): Transcript {
   let state: Transcript = { messages: [], nextId: 0, isRunning };
   history.forEach((raw, index) => {
     const folded = foldOldIssueOutcome(state, raw);
     if (folded) { state = folded; return; }
-    const parsed = raw.role === "toolResult" ? undefined : asMessage(raw, `history-${index}`);
+    const parsed = raw.role === "toolResult" ? undefined : asMessage(raw, raw.id ?? `history-${start + index}`);
     state = raw.role === "toolResult" ? finishResult(state, raw)
-      : parsed ? { ...state, messages: [...state.messages, { ...reconcileTools(parsed, state.messages), position: index }] } : state;
+      : parsed ? { ...state, messages: [...state.messages, { ...reconcileTools(parsed, state.messages), position: start + index }] } : state;
   });
   // Only the current turn of a running session can still have open tools.
   const lastUser = state.messages.findLastIndex((message) => message.role === "user");
@@ -365,6 +365,7 @@ export function carryUnsavedShellRows(previous: Transcript, refreshed: Transcrip
 
 /** Retain persisted identities across an authoritative reload without ID collisions. */
 export function reconcileTranscriptIdentity(previous: Transcript, refreshed: Transcript): Transcript {
+  const previousById = new Map(previous.messages.map(message => [message.id, message]));
   const ids = new Map(previous.messages.flatMap((message) => message.key ? [[message.key, message.id]] : []));
   const reserved = new Set(refreshed.messages.flatMap((message) => {
     const id = message.key ? ids.get(message.key) : undefined;
@@ -376,7 +377,9 @@ export function reconcileTranscriptIdentity(previous: Transcript, refreshed: Tra
     const retained = message.key ? ids.get(message.key) : undefined;
     const id = retained ?? (reserved.has(message.id) ? `resync-${nextId++}` : message.id);
     if (message.id === refreshed.liveId) liveId = id;
-    return { ...message, id };
+    const candidate = { ...message, id };
+    const old = previousById.get(id);
+    return old !== undefined && JSON.stringify(old) === JSON.stringify(candidate) ? old : candidate;
   });
   return { ...refreshed, messages, nextId, liveId };
 }

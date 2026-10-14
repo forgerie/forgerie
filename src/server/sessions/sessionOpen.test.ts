@@ -66,7 +66,7 @@ describe("consistent open acquisition", () => {
     hub.publish("shell", { type: "shell.chunk", chunk: "hi" });
     expect(hub.transientEvents("shell")).toEqual([{ type: "shell.start", command: "printf hi", excludeFromContext: true }, { type: "shell.chunk", chunk: "hi" }]);
     hub.publish("shell", { type: "shell.end", output: "hi", exitCode: 0, fullOutputPath: "/tmp/disclosure" });
-    hub.savedHostOutput("shell", [{ role: "bashExecution", command: "printf hi", output: "hi" }]);
+    hub.savedHostOutput("shell", [{ role: "bashExecution", command: "printf hi", output: "hi", exitCode: 0 }]);
     expect(hub.transientEvents("shell")).toEqual([]);
   });
 
@@ -127,4 +127,18 @@ describe("consistent open acquisition", () => {
       expect(await harness.snapshot(ParentAsks, conversation.id, context)).toBeUndefined();
     } finally { await harness.close(context); await rm(directory, { recursive: true, force: true }); }
   });
+});
+
+it("retains several unsaved shells and does not mistake an old identical record for a new save", () => {
+  const hub = new SessionEventHub();
+  const saved = [{ id: "old", role: "bashExecution", command: "date", output: "same", exitCode: 0 }];
+  for (let index = 0; index < 2; index++) {
+    hub.prepareHostShell("s", "old");
+    hub.publish("s", { type: "shell.start", command: "date" });
+    hub.publish("s", { type: "shell.end", output: "same", exitCode: 0 });
+  }
+  hub.savedHostOutput("s", saved);
+  expect(hub.transientEvents("s").filter(event => event.type === "shell.start")).toHaveLength(2);
+  hub.savedHostOutput("s", [...saved, { ...saved[0], id: "new", role: "bashExecution", command: "date", output: "same", exitCode: 0 }]);
+  expect(hub.transientEvents("s").filter(event => event.type === "shell.start")).toHaveLength(1);
 });

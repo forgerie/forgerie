@@ -25,3 +25,28 @@ export function withOpenFixture(respond: (path: string, init: RequestInit) => Pr
     return Response.json(openFixture({ session, page: await history.json(), snapshot: await snapshot.json(), status: await status.json() }));
   };
 }
+
+import { createServer } from "node:http";
+import { WebSocketServer } from "ws";
+import type { SessionTransport } from "../sessionStore";
+
+/** Real transport with configurable fixture data, delays and errors. */
+export async function createOpenServer(respond: (url: URL) => unknown | Promise<unknown>) {
+  const requests: URL[] = [];
+  const sockets = new WebSocketServer({ noServer: true });
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", "http://fixture"); requests.push(url);
+    try {
+      const result = await respond(url);
+      if (result instanceof Response) { response.writeHead(result.status, { "content-type": "application/json" }); response.end(await result.text()); }
+      else { response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify(result)); }
+    } catch (error) { response.writeHead(503, { "content-type": "application/json" }); response.end(JSON.stringify({ error: String(error) })); }
+  });
+  server.on("upgrade", (request, socket, head) => sockets.handleUpgrade(request, socket, head, client => { sockets.emit("connection", client, request); }));
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address(); if (!address || typeof address === "string") throw new Error("No test port");
+  const origin = `http://127.0.0.1:${String(address.port)}`;
+  const transport: SessionTransport = { request: (path, init) => fetch(origin + path, init), connect: path => new WebSocket(origin.replace("http:", "ws:") + path) };
+  return { transport, requests, sockets, emit: (value: unknown) => { for (const socket of sockets.clients) socket.send(JSON.stringify(value)); },
+    close: async () => { for (const socket of sockets.clients) socket.terminate(); sockets.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
+}

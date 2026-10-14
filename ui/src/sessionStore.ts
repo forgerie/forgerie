@@ -1,6 +1,8 @@
+import type { EarlierHistory } from "./historyPaging";
+import type { ReadReceipt } from "./readReceipt";
 import type { ReadTracker } from "./readReceipt";
 import { z } from "zod";
-import { abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, dialogCloseResponseSchema, durableBrowserSnapshotSchema, errorSchema, historySchema, isAskEvent, isOperationEvent, modelsResponseSchema, parseEvent, snapshotSchema, statusSchema, thinkingLevelsResponseSchema, type DurableBrowserSnapshot, type AskAnswer, type AskEvent, type OperationEvent, type Session, type SessionEvent, type SessionStatus } from "./contracts";
+import { sessionOpenSchema, sessionHistoryPageSchema, type SessionOpen, type UiEvent, abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, dialogCloseResponseSchema, errorSchema, isAskEvent, isOperationEvent, modelsResponseSchema, parseEvent, statusSchema, thinkingLevelsResponseSchema, type AskAnswer, type OperationEvent, type Session, type SessionStatus } from "./contracts";
 import { deliverPrompt, promptDelivery } from "./promptDelivery";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
 import { carryUnsavedShellRows, fromHistory, hasRunningShell, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
@@ -21,6 +23,7 @@ export interface Problem { id: number; title: string; message: string; at: numbe
 const MAX_PROBLEMS = 20;
 export interface SessionState {
   connection: Connection;
+  earlier: EarlierHistory;
   /** When the live connection last finished a join. */
   lastReadyAt?: number;
   /** Newest first. */
@@ -78,14 +81,13 @@ interface RecoveryTiming {
 interface Join {
   controller: AbortController;
   socket?: WebSocket;
-  buffered: SessionEvent[];
-  askBuffered: AskEvent[];
-  operationBuffered: OperationEvent[];
+  buffered: UiEvent[];
   seeding: boolean;
   seq: number;
-  nativeSnapshot?: DurableBrowserSnapshot;
-  nativeReady?: () => void;
+  epoch?: string;
+  checkpoint?: SessionOpen;
 }
+class CheckpointUncertain extends Error {}
 class ReadFailure extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
@@ -126,7 +128,7 @@ export function shellAvailabilityOf(state: SessionState): ShellAvailability {
 export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session, reads?: ReadTracker,
   /** Server events the transcript does not use, by Pi event type, such as a child agent's change. */
   onPiEvent?: (eventType: string) => void) {
-  let state: SessionState = { connection: { type: "loading" }, problems: [], ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree, dialogPhase: noDialogPhase };
+  let state: SessionState = { connection: { type: "loading" }, earlier: { type: "complete" }, problems: [], ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree, dialogPhase: noDialogPhase };
   const now = timing.now ?? Date.now;
   let problemId = 0;
   /** The same words twice add nothing: a reconnect can replay the event that reported them. */
@@ -149,6 +151,19 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   let unwatch: (() => void) | undefined;
   let unwatchUnread: (() => void) | undefined;
   let readRefreshRequested = false;
+  let page: { start: number; total: number; historyId: string; epoch: string } | undefined;
+  let earlierRead: Promise<void> | undefined;
+  let pendingReceipt: ReadReceipt | undefined;
+  let activation = new AbortController();
+  let selectedVisible = reads === undefined;
+  function acknowledge() {
+    if (!reads || !pendingReceipt || !selectedVisible || !reads.isVisible()) return;
+    const receipt = pendingReceipt;
+    const signal = AbortSignal.any([activation.signal, lifetime.signal]);
+    void reads.acknowledge(receipt, signal).then(() => {
+      if (!signal.aborted && pendingReceipt === receipt) pendingReceipt = undefined;
+    }).catch((error: unknown) => { if (!signal.aborted) update(withProblem(state, "Could not mark the visible session read", messageOf(error))); });
+  }
   let started = false;
   const update = (next: SessionState) => {
     if (lifetime.signal.aborted) return;
@@ -241,36 +256,38 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (current(attempt)) recover();
     }
   }
-  function withNativeSnapshot(previous: SessionState, frame: DurableBrowserSnapshot): SessionState {
-    const running = frame.isStreaming || frame.isCompacting;
-    const seed = seedTranscript(frame.history.messages, frame.partial, -1, running, [], previous.status?.isBashRunning);
-    // The normalizer records the raw source position. Replace timestamp keys with the
-    // journal's stable presentation IDs before reconciling disclosures, including equal timestamps.
-    let transcript: Transcript = { ...seed, messages: seed.messages.map((message) => {
-      const source = message.position === undefined ? undefined : frame.history.messages[message.position];
-      return source?.id === undefined ? message : { ...message, key: source.id };
-    }) };
-    for (const tool of frame.tools) {
-      if (tool.status === "done") continue; // Completed results are already in committed history.
+  function applyEvent(previous: SessionState, event: UiEvent): SessionState {
+    if (isAskEvent(event)) return { ...previous, ask: reduceAskEvent(previous.ask, event) };
+    if (isOperationEvent(event)) return withOperation(previous, event);
+    return { ...previous, transcript: reduceEvent(previous.transcript, event) };
+  }
+  function applyOpen(previous: SessionState, open: SessionOpen, buffered: readonly UiEvent[]): SessionState {
+    const running = open.status.isStreaming || open.status.isCompacting;
+    // Absolute IDs/positions are assigned before any transient or live events are replayed.
+    const initial = fromHistory(open.page.messages, running, open.page.start);
+    const seededPartial = seedTranscript([], open.snapshot.partial, open.seq, running, [], open.status.isBashRunning);
+    let transcript: Transcript = { ...initial, nextId: initial.nextId + seededPartial.nextId,
+      messages: [...initial.messages, ...seededPartial.messages.map(message => ({ ...message, id: `partial-${String(open.seq)}-${message.id}` }))],
+      liveId: seededPartial.liveId === undefined ? undefined : `partial-${String(open.seq)}-${seededPartial.liveId}` };
+    for (const tool of open.snapshot.tools) {
+      if (tool.status === "done") continue;
       transcript = reduceEvent(transcript, { type: "tool.start", toolCallId: tool.toolCallId, toolName: tool.toolName, args: undefined });
       transcript = reduceEvent(transcript, { type: "tool.update", toolCallId: tool.toolCallId, toolName: tool.toolName, text: tool.output });
     }
-    // Shell output is not transcript authority yet. Keep it through replacements while it runs.
-    const oldRunning = previous.transcript.messages.filter((message) => message.role === "shell" && message.parts.some((part) => part.type === "shell" && part.run.result.type === "running"));
-    const carried = carryUnsavedShellRows(previous.transcript, transcript);
-    const ids = new Set(carried.messages.map((message) => message.id));
-    const merged = { ...carried, messages: [...carried.messages, ...oldRunning.filter((message) => !ids.has(message.id))] };
-    const status: SessionStatus = { ...(previous.status ?? { isBashRunning: false }), isStreaming: frame.isStreaming, isCompacting: frame.isCompacting,
-      queuedMessages: frame.queuedMessages, ...(frame.app === undefined ? {} : { pendingAsk: frame.app.pendingAsk }) };
-    const next = withStatus({ ...previous, transcript: reconcileTranscriptIdentity(previous.transcript, merged),
-      ask: frame.app === undefined ? previous.ask : resyncAsk(previous.ask, frame.app.pendingAsk),
-      ...(previous.session === undefined || frame.app === undefined ? {} : { session: { ...previous.session, name: frame.app.sessionName } }) }, status);
+    // Seed host output before carry/dedup. It has the same checkpoint as the transcript.
+    let next = withStatus({ ...previous, session: open.session, transcript, ask: resyncAsk(previous.ask, open.status.pendingAsk),
+      earlier: { type: open.page.start === 0 ? "complete" : "available" } }, open.status);
+    for (const event of open.snapshot.transientEvents) next = applyEvent(next, event);
+    next = { ...next, transcript: reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)) };
+    for (const event of buffered) if ((event.seq ?? Infinity) > open.seq) next = applyEvent(next, event);
+    page = { start: open.page.start, total: open.page.total, historyId: open.historyId, epoch: open.epoch };
+    if (open.receipt !== null) pendingReceipt = { ...open.receipt, session: open.session };
     return next;
   }
 
   async function connect() {
     if (lifetime.signal.aborted) return;
-    const attempt: Join = { controller: new AbortController(), buffered: [], askBuffered: [], operationBuffered: [], seeding: true, seq: -1 };
+    const attempt: Join = { controller: new AbortController(), buffered: [], seeding: true, seq: -1 };
     join = attempt;
     const read = <T>(path: string, schema: z.ZodType<T>) => request(path, schema, {}, attempt.controller.signal);
     try {
@@ -282,7 +299,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         if (!session) { stop(new Error(`Session ${id} was not found. Check the session ID in the URL.`)); return; }
         update({ ...state, session });
       }
-      const socket = transport.connect(`${root}/events${transport.nativeReadModel ? `?${new URLSearchParams({ cwd: session.cwd, native: "1" })}` : ""}`);
+      const socket = transport.connect(`${root}/events?${new URLSearchParams({ cwd: session.cwd, open: "1", ...(transport.nativeReadModel ? { native: "1" } : {}) })}`);
       attempt.socket = socket;
       // Decode synchronously: the proxy forwards binary frames and Blob awaits
       // can reorder deltas and completed messages.
@@ -294,14 +311,22 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
             : event.data instanceof ArrayBuffer ? new TextDecoder().decode(event.data) : undefined;
           if (payload === undefined) throw new Error("Unsupported WebSocket payload.");
           const raw: unknown = JSON.parse(payload);
-          if (typeof raw === "object" && raw !== null && "type" in raw && raw.type === "session.snapshot") {
-            const frame = durableBrowserSnapshotSchema.parse(raw);
-            const old = attempt.nativeSnapshot;
-            if (old !== undefined && frame.epoch !== old.epoch) throw new Error("Native connection epoch changed; reconnect to resync.");
-            if (old !== undefined && frame.revision <= old.revision) return;
-            attempt.nativeSnapshot = frame;
-            if (attempt.seeding) attempt.nativeReady?.();
-            else update(withNativeSnapshot(state, frame));
+          if (typeof raw === "object" && raw !== null && "type" in raw && raw.type === "session.checkpoint") {
+            const frame = z.object({ epoch: z.string().min(1), seq: z.number().int().nonnegative().safe() }).parse(raw);
+            if (attempt.epoch !== undefined && attempt.epoch !== frame.epoch) throw new CheckpointUncertain("Daemon epoch changed; reconnect to resync.");
+            attempt.epoch = frame.epoch;
+            return;
+          }
+          if (typeof raw === "object" && raw !== null && "type" in raw && raw.type === "session.open" && "open" in raw) {
+            const open = sessionOpenSchema.parse(raw.open);
+            if (attempt.epoch !== undefined && open.epoch !== attempt.epoch) throw new CheckpointUncertain("Daemon epoch changed; reconnect to resync.");
+            attempt.epoch = open.epoch;
+            if (attempt.checkpoint !== undefined && open.seq <= attempt.checkpoint.seq) return;
+            attempt.checkpoint = open;
+            if (!attempt.seeding && open.seq >= attempt.seq) {
+              attempt.seq = open.seq;
+              update(applyOpen(state, open, [])); acknowledge();
+            }
             return;
           }
           if (onPiEvent && typeof raw === "object" && raw !== null && "type" in raw && raw.type === "pi.event"
@@ -310,18 +335,19 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
             && (raw.type === "processes.update" || raw.type === "processes.output")) onPiEvent(raw.type);
           const parsed = parseEvent(raw);
           if (!parsed || parsed.seq !== undefined && parsed.seq <= attempt.seq) return;
-          if (transport.nativeReadModel && parsed.type !== "command.output" && parsed.type !== "session.error" && !parsed.type.startsWith("shell.")) return;
-          if (parsed.seq !== undefined) attempt.seq = parsed.seq;
-          if (isAskEvent(parsed)) {
-            if (attempt.seeding) attempt.askBuffered.push(parsed);
-            else update({ ...state, ask: reduceAskEvent(state.ask, parsed) });
-          } else if (isOperationEvent(parsed)) {
+          if (transport.nativeReadModel && !isOperationEvent(parsed) && parsed.type !== "session.error" && !parsed.type.startsWith("shell.")) return;
+          if (attempt.seeding) {
+            if (attempt.buffered.length >= 10_000) throw new CheckpointUncertain("Session event buffer overflow; reconnect to resync.");
+            attempt.buffered.push(parsed);
+          } else {
+            if (parsed.seq !== undefined) attempt.seq = parsed.seq;
             if (parsed.type === "status.update") statusVersion++;
-            if (attempt.seeding) attempt.operationBuffered.push(parsed);
-            else update(withOperation(state, parsed));
-          } else if (attempt.seeding) attempt.buffered.push(parsed);
-          else update({ ...state, transcript: reduceEvent(state.transcript, parsed) });
-        } catch (error) { stop(new Error(`Invalid session event: ${messageOf(error)}`)); }
+            update(applyEvent(state, parsed));
+          }
+        } catch (error) {
+          if (error instanceof CheckpointUncertain) retry(attempt, error);
+          else stop(new Error(`Invalid session event: ${messageOf(error)}`));
+        }
       });
       socket.addEventListener("close", () => retry(attempt, new Error("Live connection closed.")));
       socket.addEventListener("error", () => retry(attempt, new Error("Live connection failed.")));
@@ -337,70 +363,22 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         attempt.controller.signal.addEventListener("abort", onAbort, { once: true });
         socket.addEventListener("open", onOpen, { once: true });
       });
-      // Every connection gets its own buffer and watermark. A previous hub's
-      // sequence is meaningless after a daemon restart. Subscribe before reads.
-      // Capture the read boundary BEFORE loading history. Never acknowledge a newer unseen completion.
-      const receipt = await reads?.capture(session, attempt.controller.signal).catch((error: unknown) => { if (!attempt.controller.signal.aborted) console.warn("Could not capture the read boundary.", error); return undefined; });
+      const response = await read(`${readPath("open", session)}&limit=50`, sessionOpenSchema);
       if (!current(attempt)) return;
-      if (transport.nativeReadModel) {
-        await new Promise<void>((resolve, reject) => {
-          if (attempt.nativeSnapshot !== undefined) { resolve(); return; }
-          const finish = () => { clearTimeout(timer); attempt.controller.signal.removeEventListener("abort", abort); attempt.nativeReady = undefined; resolve(); };
-          const abort = () => { clearTimeout(timer); attempt.nativeReady = undefined; reject(new Error("Native connection attempt ended.")); };
-          const timer = setTimeout(() => { attempt.nativeReady = undefined; reject(new Error("Native Durable seed timed out.")); }, timing.openTimeoutMs ?? 15_000);
-          attempt.nativeReady = finish;
-          attempt.controller.signal.addEventListener("abort", abort, { once: true });
-        });
-        if (!current(attempt) || attempt.nativeSnapshot === undefined) return;
-        let joined = withNativeSnapshot(state, attempt.nativeSnapshot);
-        // Only unsaved shell/control output is replayed. SDK transcript and ask events are not authority.
-        for (const event of attempt.buffered) if (event.type.startsWith("shell.")) joined = { ...joined, transcript: reduceEvent(joined.transcript, event) };
-        for (const event of attempt.operationBuffered) if (event.type === "command.output") joined = withOperation(joined, event);
-        attempt.seeding = false; attempt.buffered.length = 0; attempt.askBuffered.length = 0; attempt.operationBuffered.length = 0;
-        retryDelay = initialDelay; attempts = 0;
-        update({ ...joined, connection: { type: "ready" }, lastReadyAt: now() });
-        if (receipt && reads) void reads.acknowledge(receipt, attempt.controller.signal).catch((error: unknown) => { if (!attempt.controller.signal.aborted) console.warn("Could not mark the visible session read.", error); });
-        void loadCommands();
-        return;
-      }
-      const history = await read(readPath("messages", session), historySchema);
-      if (!current(attempt)) return;
-      const snapshot = await read(readPath("stream-snapshot", session), snapshotSchema);
-      if (!current(attempt)) return;
-      const beforeStatusRead = attempt.operationBuffered.length;
-      const status = await read(readPath("status", session), statusSchema);
-      if (!current(attempt)) return;
-      const seeded = seedTranscript(history.messages, snapshot.partial, snapshot.seq,
-        status.isStreaming || status.isCompacting, attempt.buffered, status.isBashRunning);
-      // Keep persisted message identities, including messages first seen live,
-      // so existing disclosures do not remount when fresh history replaces them.
-      // Shell rows whose records Pi has not saved yet are not in the history.
-      const transcript = reconcileTranscriptIdentity(state.transcript, carryUnsavedShellRows(state.transcript, seeded));
-      // Status is read after the snapshot, so it covers every ask event up to
-      // the watermark. Later events may be older or newer than the status read;
-      // opens and closes are keyed by ask ID, so replaying them is safe.
-      const ask = attempt.askBuffered.filter((event) => (event.seq ?? Infinity) > snapshot.seq)
-        .reduce(reduceAskEvent, resyncAsk(state.ask, status.pendingAsk));
-      attempt.seq = Math.max(attempt.seq, snapshot.seq);
-      attempt.seeding = false;
-      attempt.buffered.length = 0;
-      attempt.askBuffered.length = 0;
-      // Outputs are not persisted in the transcript, so even outputs below its
-      // watermark must survive. Pre-read statuses yield to the authoritative GET.
-      let joined: SessionState = { ...state, connection: { type: "ready" }, lastReadyAt: now(), transcript, ask };
-      for (const event of attempt.operationBuffered.slice(0, beforeStatusRead)) {
-        if (event.type === "command.output") joined = withOperation(joined, event);
-      }
-      joined = withStatus(joined, status);
-      for (const event of attempt.operationBuffered.slice(beforeStatusRead)) joined = withOperation(joined, event);
-      attempt.operationBuffered.length = 0;
-      statusVersion++;
-      retryDelay = initialDelay; // A socket open alone is not a successful join.
-      attempts = 0;
-      update(joined);
-      if (receipt && reads) void reads.acknowledge(receipt, attempt.controller.signal).catch((error: unknown) => { if (!attempt.controller.signal.aborted) console.warn("Could not mark the visible session read.", error); });
-      void loadCommands(); // Discovery failure must not break history or the live connection.
-      if (readRefreshRequested && reads?.isVisible()) { readRefreshRequested = false; reload(); }
+      if (attempt.epoch !== undefined && response.epoch !== attempt.epoch) throw new Error("Open checkpoint belongs to another daemon epoch.");
+      const open = attempt.checkpoint !== undefined && attempt.checkpoint.seq > response.seq ? attempt.checkpoint : response;
+      // The HTTP receipt remains conservative even if a newer socket replacement won the race.
+      if (response.receipt !== null) pendingReceipt = { ...response.receipt, session: response.session };
+      const joined = applyOpen(state, open, attempt.buffered);
+      attempt.epoch = open.epoch;
+      attempt.seq = Math.max(open.seq, ...attempt.buffered.map(event => event.seq ?? 0));
+      attempt.checkpoint = open;
+      attempt.seeding = false; attempt.buffered.length = 0;
+      statusVersion++; retryDelay = initialDelay; attempts = 0;
+      update({ ...joined, connection: { type: "ready" }, lastReadyAt: now() });
+      acknowledge();
+      void loadCommands();
+      if (readRefreshRequested && selectedVisible && reads?.isVisible()) { readRefreshRequested = false; reload(); }
     } catch (error) {
       if (!current(attempt)) return;
       if (permanent(error)) stop(error);
@@ -425,8 +403,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     if (started || lifetime.signal.aborted) return;
     started = true;
     unwatch = transport.watchRecovery?.(() => recover());
-    unwatchUnread = reads?.observe((sessionId) => {
-      if (sessionId !== id || !reads?.isVisible()) return;
+    unwatchUnread = reads?.observe((sessionId, receipt) => {
+      if (sessionId !== id) return;
+      if (receipt !== undefined && state.session !== undefined) pendingReceipt = { ...receipt, session: state.session };
+      if (!selectedVisible || !reads?.isVisible()) { readRefreshRequested = true; return; }
       if (state.connection.type === "ready") reload();
       else readRefreshRequested = true;
     });
@@ -680,7 +660,46 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       update({ ...state, ask: whileOpen(state.ask, askId, (current) => ({ ...current, phase: { type: "answering", error: messageOf(error) } })) });
     }
   }
+  function loadEarlier(): Promise<void> {
+    if (earlierRead !== undefined) return earlierRead;
+    const window = page, attempt = join, session = state.session;
+    if (!window || window.start === 0 || !attempt || !session) return Promise.resolve();
+    update({ ...state, earlier: { type: "loading" } });
+    earlierRead = (async () => {
+      try {
+        const older = await request(`${readPath("messages", session)}&${new URLSearchParams({ before: String(window.start), limit: "50", historyId: window.historyId })}`,
+          sessionHistoryPageSchema, {}, attempt.controller.signal);
+        if (!current(attempt) || page !== window) return;
+        if (older.historyId !== window.historyId || older.epoch !== window.epoch) throw new ReadFailure("Session history changed", 409);
+        if (older.start + older.messages.length !== window.start || older.start >= window.start) throw new Error("Older page is not contiguous with the current history.");
+        const previous = fromHistory(older.messages, false, older.start);
+        page = { ...window, start: older.start, total: older.total };
+        update({ ...state, transcript: { ...state.transcript, messages: [...previous.messages, ...state.transcript.messages] }, earlier: { type: older.start === 0 ? "complete" : "available" } });
+      } catch (error) {
+        if (current(attempt)) {
+          update({ ...state, earlier: { type: "failed", message: messageOf(error) } });
+          if (error instanceof ReadFailure && error.status === 409) reload();
+        }
+        throw error;
+      } finally { earlierRead = undefined; }
+    })();
+    return earlierRead;
+  }
+  async function ensurePosition(position: number): Promise<void> {
+    if (!Number.isSafeInteger(position) || position < 0) throw new Error("Invalid message position.");
+    while (page !== undefined && position < page.start) await loadEarlier();
+    if (page === undefined || position >= page.total) throw new Error("Search position is no longer in this history. Search again.");
+  }
   return {
+    loadEarlier, ensurePosition,
+    retainedEarlierMessages: () => {
+      const lastUser = state.transcript.messages.findLast(message => message.role === "user" && message.position !== undefined);
+      return page === undefined || lastUser?.position === undefined ? 0 : lastUser.position - page.start;
+    },
+    setVisible: (visible: boolean) => {
+      activation.abort(); activation = new AbortController(); selectedVisible = visible;
+      if (visible) acknowledge();
+    },
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     start,
@@ -750,7 +769,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     cancel: () => command("abort"),
     submitAsk: (answers: AskAnswer[]) => closeAsk("submit", answers),
     dismissAsk: () => closeAsk("dismiss"),
-    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); closeJoin(); unwatch?.(); unwatchUnread?.(); listeners.clear(); },
+    dispose: () => { activation.abort(); lifetime.abort(); clearTimeout(retryTimer); closeJoin(); unwatch?.(); unwatchUnread?.(); listeners.clear(); },
   };
 }
 export type SessionStore = ReturnType<typeof createSessionStore>;

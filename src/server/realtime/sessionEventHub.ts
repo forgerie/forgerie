@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
+import type { SessionOpenResult } from "../sessions/sessionOpen.js";
 import type { Harness } from "@earendil-works/pi-durable";
 import type { SessionOpenTransientEvent } from "../../shared/sessionOpen.js";
 import type { GlobalSessionEvent, RealtimeEvent, SessionNotificationSummaryEvent, SessionUiEvent } from "../../shared/apiTypes.js";
@@ -25,7 +26,10 @@ export class SessionEventHub {
   private readonly globalSockets = new Set<RealtimeSocket>();
   private readonly seqBySession = new Map<string, number>();
   readonly epoch = randomUUID();
-  private readonly hostBySession = new Map<string, SessionOpenTransientEvent[]>();
+  private readonly hostBySession = new Map<string, { shells: { events: SessionOpenTransientEvent[]; after?: string | undefined }[]; command?: Extract<SessionOpenTransientEvent, { type: "command.output" }> }>();
+  private readonly shellAnchor = new Map<string, string | undefined>();
+
+  prepareHostShell(sessionId: string, after: string | undefined): void { this.shellAnchor.set(sessionId, after); }
   private readonly adopted = new WeakMap<Harness, Map<string, { count: number; stop: () => void }>>();
 
   /** One checkpoint per adopted native commit, independent of SDK callbacks and watch revisions. */
@@ -54,30 +58,42 @@ export class SessionEventHub {
   }
 
   transientEvents(sessionId: string): SessionOpenTransientEvent[] {
-    return structuredClone(this.hostBySession.get(sessionId) ?? []);
+    const host = this.hostBySession.get(sessionId);
+    return host === undefined ? [] : structuredClone([...host.shells.flatMap(row => row.events), ...(host.command === undefined ? [] : [host.command])]);
   }
 
-  /** Saved shell records replace their matching ephemeral command, never an unrelated run. */
-  savedHostOutput(sessionId: string, messages: readonly { role: string; command?: string | undefined; output?: string | undefined }[]): void {
-    const events = this.hostBySession.get(sessionId);
-    const start = events?.find(event => event.type === "shell.start");
-    const end = events?.find(event => event.type === "shell.end");
-    if (start?.type === "shell.start" && end?.type === "shell.end" && end.isError !== true
-      && messages.some(message => message.role === "bashExecution" && message.command === start.command && message.output === end.output)) {
-      this.hostBySession.set(sessionId, (events ?? []).filter(event => !event.type.startsWith("shell.")));
-    }
+  /** Consume only records after the command's saved-history anchor, including repeated identical commands. */
+  savedHostOutput(sessionId: string, messages: readonly { id?: string | undefined; role: string; command?: string | undefined; output?: string | undefined; exitCode?: number | null | undefined; cancelled?: boolean | undefined }[]): void {
+    const host = this.hostBySession.get(sessionId);
+    if (host === undefined) return;
+    const consumed = new Set<number>();
+    host.shells = host.shells.filter(row => {
+      const start = row.events[0], end = row.events.at(-1);
+      if (start?.type !== "shell.start" || end?.type !== "shell.end" || end.isError === true) return true;
+      const anchor = row.after === undefined ? -1 : messages.findIndex(message => message.id === row.after);
+      const index = messages.findIndex((message, index) => index > anchor && !consumed.has(index) && message.role === "bashExecution"
+        && message.command === start.command && message.output === end.output && (message.exitCode ?? undefined) === (end.exitCode ?? undefined)
+        && (message.cancelled === true) === (end.cancelled === true));
+      if (index < 0) return true;
+      consumed.add(index); return false;
+    });
   }
 
   private rememberHostOutput(sessionId: string, event: SessionUiEvent): void {
-    const events = this.hostBySession.get(sessionId) ?? [];
-    if (event.type === "shell.start") this.hostBySession.set(sessionId, [...events.filter(item => !item.type.startsWith("shell.")), event]);
-    else if (event.type === "shell.chunk") {
-      const chunk = events.find(item => item.type === "shell.chunk");
+    if (!event.type.startsWith("shell.") && event.type !== "command.output") return;
+    let host = this.hostBySession.get(sessionId);
+    if (host === undefined) { host = { shells: [] }; this.hostBySession.set(sessionId, host); }
+    if (event.type === "shell.start") {
+      host.shells.push({ events: [event], after: this.shellAnchor.get(sessionId) }); this.shellAnchor.delete(sessionId);
+    } else if (event.type === "shell.chunk") {
+      const row = host.shells.at(-1);
+      if (row === undefined) return;
+      const previous = row.events.find(item => item.type === "shell.chunk");
       // Same live tail as shellRun.LIVE_OUTPUT_LIMIT; final output retains the producer's disclosure.
-      const output = ((chunk?.type === "shell.chunk" ? chunk.chunk : "") + event.chunk).slice(-DEFAULT_MAX_BYTES);
-      this.hostBySession.set(sessionId, [...events.filter(item => item.type !== "shell.chunk"), { type: "shell.chunk", chunk: output }]);
-    } else if (event.type === "shell.end") this.hostBySession.set(sessionId, [...events.filter(item => item.type !== "shell.end"), event]);
-    else if (event.type === "command.output") this.hostBySession.set(sessionId, [...events.filter(item => item.type !== "command.output"), event]);
+      const chunk = ((previous?.type === "shell.chunk" ? previous.chunk : "") + event.chunk).slice(-DEFAULT_MAX_BYTES);
+      row.events = [row.events[0] ?? { type: "shell.start", command: "" }, { type: "shell.chunk", chunk }];
+    } else if (event.type === "shell.end") host.shells.at(-1)?.events.push(event);
+    else if (event.type === "command.output") host.command = event;
   }
 
   add(sessionId: string, socket: RealtimeSocket): void {
@@ -104,7 +120,14 @@ export class SessionEventHub {
 
   /** Called only by a serialized Durable watch. No host queue hides slow network delivery. */
   async sendDurableSnapshot(socket: RealtimeSocket, snapshot: DurableBrowserSnapshot, limits?: { maxBytes?: number; timeoutMs?: number }): Promise<void> {
-    const payload = JSON.stringify(durableBrowserSnapshotSchema.parse(snapshot));
+    return this.sendBounded(socket, JSON.stringify(durableBrowserSnapshotSchema.parse(snapshot)), limits);
+  }
+
+  sendOpenSnapshot(socket: RealtimeSocket, open: SessionOpenResult): Promise<void> {
+    return this.sendBounded(socket, JSON.stringify({ type: "session.open", open }));
+  }
+
+  private async sendBounded(socket: RealtimeSocket, payload: string, limits?: { maxBytes?: number; timeoutMs?: number }): Promise<void> {
     const bytes = Buffer.byteLength(payload);
     const maxBytes = limits?.maxBytes ?? DURABLE_SOCKET_MAX_BYTES;
     if (socket.readyState !== socket.OPEN || socket.bufferedAmount === undefined || socket.bufferedAmount + bytes > maxBytes) {

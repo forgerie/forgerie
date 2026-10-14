@@ -63,13 +63,25 @@ export class DurableParentReadModel {
     hostStatus: () => Partial<SessionStatus> = () => ({})): Promise<SessionOpenResult> {
     const { handle } = this.options;
     const id = handle.conversation.id;
-    let revision = 0;
-    const stop = handle.harness.subscribeCommits(publication => { if (publication.changes.length) revision++; });
+    let retiredRequired = 0;
+    const keys = new Set<string>();
+    const membership = new Map<string, number>();
+    const stop = handle.harness.subscribeCommits(publication => {
+      for (const change of publication.changes) {
+        if (change.type === "document" && change.conversationId === id) {
+          if (change.value === null) retiredRequired++;
+          if (change.record.kind === Presentation.definition.kind && change.record.key !== undefined) {
+            const key = change.record.key;
+            membership.set(key, (membership.get(key) ?? 0) + 1);
+            if (change.value === null) keys.delete(key); else keys.add(key);
+          }
+        }
+      }
+    });
     const unobserve = hub.observeNative(handle.address.sessionId, handle.harness, id);
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
-        const before = hub.currentSeq(handle.address.sessionId);
-        const membershipRevision = revision;
+        const membershipRevision = retiredRequired;
         const required = await Promise.all([
           handle.harness.snapshot(LiveDoc, id, context), handle.harness.snapshot(InboxDoc, id, context),
           handle.harness.snapshot(AgentDoc, id, context), handle.harness.snapshot(UsageDoc, id, context),
@@ -77,18 +89,20 @@ export class DurableParentReadModel {
           handle.harness.snapshot(SessionName, id, context),
         ]);
         if (required.some(value => value === undefined)) throw new Error("Native open requires initialized parent documents");
-        const keys: string[] = [];
         let cursor: Cursor | undefined;
         do {
           const page = await handle.conversation.entries({ order: "ascending" }, SCAN_SIZE, cursor, context);
           for (const entry of page.items) {
             const key = String(entry.id);
-            if (await handle.harness.snapshot(Presentation, id, key, context) !== undefined) keys.push(key);
+            const version = membership.get(key);
+            const document = await handle.harness.snapshot(Presentation, id, key, context);
+            if (version === membership.get(key)) { if (document === undefined) keys.delete(key); else keys.add(key); }
           }
           cursor = page.next;
         } while (cursor !== undefined);
         const cut = await handle.conversation.commit(async tx => {
-          if (membershipRevision !== revision) return undefined;
+          if (membershipRevision !== retiredRequired) return undefined;
+          const before = hub.currentSeq(handle.address.sessionId);
           const entries: EntryRecord[] = [];
           let cursor: Cursor | undefined;
           do {
@@ -108,7 +122,7 @@ export class DurableParentReadModel {
             if (!Check(PresentationSchema, detached)) throw new Error("Invalid detached native presentation");
             envelopes.set(key, detached);
           }
-          const messages = entries.flatMap(entry => this.entryMessages(entry, nativePresentation(entry, envelopes.get(String(entry.id))?.envelope)));
+          const messages = entries.flatMap(entry => this.entryMessages(entry, nativePresentation(entry, envelopes.get(String(entry.id))?.envelope), true));
           const seq = hub.currentSeq(handle.address.sessionId);
           const partial = live.generation?.message;
           const tools = (live.tools ?? []).filter(slot => projectBrowserSessionEvent({ type: "tool.start", toolName: slot.name, toolCallId: slot.callId, summary: "" }).type === "tool.start")
@@ -118,17 +132,19 @@ export class DurableParentReadModel {
           hub.savedHostOutput(handle.address.sessionId, messages);
           const status: SessionStatus = { ...hostStatus(), sessionId: handle.address.sessionId, persisted: true,
             isStreaming: live.run !== undefined, isCompacting: (live.compactions?.length ?? 0) > 0,
-            isBashRunning: hub.transientEvents(handle.address.sessionId).some(event => event.type === "shell.start") && !hub.transientEvents(handle.address.sessionId).some(event => event.type === "shell.end"),
+            isBashRunning: hub.transientEvents(handle.address.sessionId).reverse().find(event => event.type === "shell.start" || event.type === "shell.end")?.type === "shell.start",
             pendingMessageCount: queuedMessages.length, queuedMessages, messageCount: messages.length, ...durableUsageTotals(usage),
-            ...(agent.model === undefined ? {} : { model: { ...agent.model, name: agent.model.modelId } }),
+            ...(agent.model === undefined ? {} : { model: { provider: agent.model.provider, id: agent.model.modelId, name: agent.model.modelId } }),
+            ...(agent.thinkingLevel === undefined ? {} : { thinkingLevel: agent.thinkingLevel }),
             ...(asks.pending === undefined ? {} : { pendingAsk: asks.pending }),
             response: asks.pending !== undefined ? { kind: "needs-response", reason: "questions" }
               : response.intent === "nothing" ? { kind: "none" } : { kind: "needs-response", reason: response.intent === "questions" ? "reply" : response.intent } };
+          if (before !== hub.currentSeq(handle.address.sessionId)) return undefined;
           return structuredClone({ session: { id: handle.address.sessionId, cwd, ...(name.name === undefined ? {} : { name: name.name }) }, readPath: "native" as const,
             epoch: hub.epoch, seq, historyId: `native:${handle.address.journalId}:${String(id)}`, page: this.page(messages, { ...request, completeTurns: true }),
             snapshot: { seq, partial: partial === undefined ? null : durableBrowserMessageSchema.parse(projectBrowserMessage(partial)), tools, transientEvents: hub.transientEvents(handle.address.sessionId) }, status, receipt: null });
         }, context);
-        if (cut !== undefined && before === hub.currentSeq(handle.address.sessionId)) return cut;
+        if (cut !== undefined) return cut;
       }
       throw new Error("Native open could not acquire a consistent checkpoint after three attempts");
     } finally { stop(); unobserve(); }
@@ -285,15 +301,15 @@ export class DurableParentReadModel {
     return result;
   }
 
-  private entryMessages(entry: EntryRecord, committed?: readonly unknown[]): DurableBrowserMessage[] {
+  private entryMessages(entry: EntryRecord, committed?: readonly unknown[], opening = false): DurableBrowserMessage[] {
     const projected = committed ?? this.options.projectEntry?.(entry) ?? defaultEntryMessages(entry);
     const messages = projected.map((message, index) => {
-      const safe = durableBrowserMessageSchema.parse(projectBrowserMessage(message));
+      const safe = (opening ? openMessageSchema : durableBrowserMessageSchema).parse(projectBrowserMessage(message));
       return { ...safe, id: this.options.messageId(entry, index) };
     });
     // Reuse tool visibility as well as thinking-signature filtering for every read path.
     const visible = projectBrowserMessageResponse({ messages, start: 0, total: messages.length });
-    return visible.messages.map((message) => durableBrowserMessageSchema.parse(message));
+    return visible.messages.map((message) => (opening ? openMessageSchema : durableBrowserMessageSchema).parse(message));
   }
 }
 
@@ -340,3 +356,5 @@ function nativePresentation(entry: EntryRecord, envelope: Static<typeof Presenta
   if (output === undefined) throw new Error("Native shell presentation has no recoverable output");
   return [{ role: "bashExecution", ...envelope, output, ...(first === undefined ? {} : { timestamp: first.timestamp }) }];
 }
+
+const openMessageSchema = durableBrowserMessageSchema.extend({ fullOutputPath: z.string().optional() });

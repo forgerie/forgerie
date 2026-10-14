@@ -2796,6 +2796,14 @@ export class PiSessionService implements SessionRouteService {
     return positions;
   }
 
+  async attachOpenBrowser(ref: PiSessionRef, send: (open: SessionOpenResult) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment> {
+    if (this.durableReader === undefined) throw new Error("Native Durable browser reads are not configured");
+    return this.durableReader.attachOpen(ref, this.events, send, onFailure, () => {
+      const session = this.activeForRef(ref)?.runtime.session;
+      return session === undefined ? {} : this.statusFromSession(session);
+    });
+  }
+
   async attachDurableBrowser(ref: PiSessionRef, send: (snapshot: DurableBrowserSnapshot) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment> {
     if (this.durableReader === undefined) throw new Error("Native Durable browser reads are not configured");
     return this.durableReader.attach(ref, send, onFailure);
@@ -2810,15 +2818,17 @@ export class PiSessionService implements SessionRouteService {
       const unread = catalog.sessions.find(item => item.sessionId === id && item.cwd === canonicalizeStoredCwd(cwd));
       return unread === undefined ? null : { catalogId: catalog.catalogId, throughCompletionOrder: unread.completionOrder };
     };
-    const native = await this.durableReader?.open(ref, page, this.events, () => {
-      const session = this.activeForRef(ref)?.runtime.session;
-      return session === undefined ? {} : this.statusFromSession(session);
-    });
-    if (native !== undefined) return { ...native, receipt: receiptFor(native.session.id, native.session.cwd) };
     const readonly = await this.sessionWorktrees?.store.readOnly(ref);
     const archived = await this.getArchived(ref);
     const worktree = await this.sessionWorktrees?.store.forSession(ref);
     const worktreeInfo = worktree === undefined ? undefined : await this.sessionWorktrees?.info(worktree, ref.id);
+    const native = await this.durableReader?.open(ref, page, this.events, () => {
+      const session = this.activeForRef(ref)?.runtime.session;
+      return { ...(session === undefined ? {} : this.statusFromSession(session)),
+        ...(readonly === undefined && archived === undefined ? {} : { readOnly: true }),
+        ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) };
+    });
+    if (native !== undefined) return { ...native, receipt: receiptFor(native.session.id, native.session.cwd) };
     if (readonly !== undefined || archived !== undefined) {
       const path = readonly?.transcriptPath ?? archived?.archivePath;
       if (path === undefined) throw new SessionOpenError("Saved session history is unavailable", 503, "OPEN_UNAVAILABLE");
@@ -2837,6 +2847,7 @@ export class PiSessionService implements SessionRouteService {
       throw new SessionOpenError("Saved history changed during open", 503, "OPEN_UNAVAILABLE");
     }
     const session = await this.getOrOpen(ref);
+    if (session instanceof DurableAgentSession) throw new SessionOpenError("Native consistent reads are unavailable", 503, "OPEN_UNAVAILABLE");
     // Worktree/file/unread preparation is complete. All values below share one synchronous tick.
     const messages = this.openMessages(session.sessionManager);
     const streaming = session.state.streamingMessage;
@@ -3256,6 +3267,7 @@ export class PiSessionService implements SessionRouteService {
     if (session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId)) throw new Error("Cannot run a shell command while compaction is queued or running");
 
     this.publishActivity(session, "running bash", "active", command);
+    this.events.prepareHostShell(session.sessionId, this.openMessages(session.sessionManager).at(-1)?.id);
     this.events.publish(session.sessionId, { type: "shell.start", command, excludeFromContext: isExcluded });
     void this.runSessionEntryMutation(session, "run a shell command", () => session.executeBash(command, (chunk) => {
       this.events.publish(session.sessionId, { type: "shell.chunk", chunk });

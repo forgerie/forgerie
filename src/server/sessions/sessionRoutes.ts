@@ -17,6 +17,7 @@ import { composeDiffAnnotationPrompt } from "./promptDiffAnnotations.js";
 interface SessionQuery {
   cwd?: string;
   native?: string;
+  open?: string;
 }
 
 interface MessageQuery extends SessionQuery {
@@ -605,7 +606,11 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
         if (request.query.cwd === undefined || sessions.attachDurableBrowser === undefined) throw new Error("Native Durable events require cwd and a configured reader");
         const ref = { id: request.params.sessionId, cwd: normalizeRequestCwd(request.query.cwd) };
         eventHub.addDurable(request.params.sessionId, socket);
-        void sessions.attachDurableBrowser(ref, (snapshot) => eventHub.sendDurableSnapshot(socket, snapshot), fail).then(async (attached) => {
+        const opening = request.query.open === "1"
+          ? sessions.attachOpenBrowser?.(ref, (open) => eventHub.sendOpenSnapshot(socket, open), fail)
+          : sessions.attachDurableBrowser(ref, (snapshot) => eventHub.sendDurableSnapshot(socket, snapshot), fail);
+        if (opening === undefined) throw new Error("Consistent native events are unavailable");
+        void opening.then(async (attached) => {
           attachment = attached;
           if (closed) await attached.stop();
         }).catch((error: unknown) => { fail(error instanceof Error ? error : new Error(String(error))); });
@@ -615,6 +620,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     // Only the id matters for event subscription; cwd is intentionally ignored
     // so a malformed value cannot throw inside the websocket handler.
     eventHub.add(request.params.sessionId, socket);
+    if (request.query.open === "1") socket.send(JSON.stringify({ type: "session.checkpoint", epoch: eventHub.epoch, seq: eventHub.currentSeq(request.params.sessionId) }));
   });
 
   app.get(`${prefix}/sessions/events`, { websocket: true }, (socket) => {

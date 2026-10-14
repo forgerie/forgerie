@@ -1,16 +1,14 @@
 import { TerminalIcon } from "lucide-react";
 import { BadgeButton } from "./ui/BadgeButton";
-import { createProcessesStore } from "./processes/processesStore";
+import { createSessionEntry, type SessionEntry } from "./sessionRegistry";
 import { ProcessesPanel } from "./processes/ProcessesPanel";
 import type { RelatedWorkRenderer } from "./projectGroups/relatedWork";
 import { FileTextIcon } from "lucide-react";
 import type { ResourceLensRenderer } from "./resources/resourceLens";
-import { createReadTracker } from "./readReceipt";
-import { afterTranscriptPaint } from "./readPaint";
 import { contextUse } from "./contextUse";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
-import { browserTransport, createSessionStore, isBashRunning, NotSentError, shellAvailabilityOf } from "./sessionStore";
+import { browserTransport, isBashRunning, NotSentError, shellAvailabilityOf } from "./sessionStore";
 import type { Session, SessionModel } from "./contracts";
 import { agentsApi } from "./agents/agentsApi";
 import { useThreadMessages } from "./useThreadMessages";
@@ -29,7 +27,6 @@ import { CircleAlertIcon } from "lucide-react";
 import { sessionStatus } from "./session/sessionStatus";
 import { StatusDetail, type ConnectionTrouble } from "./session/StatusDetail";
 import { TaskActivity } from "./session/TaskActivity";
-import { createTaskActivityStore } from "./session/taskActivityStore";
 import type { AskBinding } from "./ui/useAskMode";
 import type { CommandResult } from "./commands";
 import { createMentionSource } from "./mentionSource";
@@ -70,26 +67,22 @@ import { createPullRequestApi, type PullLink } from "./pullRequests/pullRequestA
 import { useSessionPulls } from "./pullRequests/useSessionPull";
 import { firstToShow } from "./pullRequests/pullRequestModel";
 import { PullRequestOpener, PullRequestReview } from "./ui/PullRequestReview";
-import { createChildAgentsStore } from "./childAgents/childAgentsStore";
-import { CHILDREN_CHANGED_EVENT, foldChildEntries } from "./childAgents/childAgentsModel";
+import { foldChildEntries } from "./childAgents/childAgentsModel";
 import { ChildAgentsOpener } from "./childAgents/ChildAgentsOpener";
 import { ChildAgentsPanel } from "./childAgents/ChildAgentsPanel";
 import { ChildEntryView } from "./childAgents/ChildEntryView";
-import { createWorkflowsStore } from "./workflows/workflowsStore";
-import { activeRun, waitingStops, WORKFLOW_RUNS_CHANGED_EVENT, type ProposalEntry, type WorkflowInputs } from "./workflows/workflowsModel";
+import { activeRun, waitingStops, type ProposalEntry, type WorkflowInputs } from "./workflows/workflowsModel";
 import { WorkflowEntryView } from "./workflows/WorkflowEntryView";
 import { WorkflowOpener } from "./workflows/WorkflowOpener";
 import { WorkflowPicker } from "./workflows/WorkflowPicker";
 import { WorkflowSheet } from "./workflows/WorkflowSheet";
 import type { ModelChoices } from "./workflows/workflowRoute";
 import type { WorkerModels } from "./workflows/WorkerModelPicker";
-import { createDecisionsStore } from "./decisions/decisionsStore";
 import { DecisionsOpener } from "./decisions/DecisionsOpener";
 import { DecisionsSheet } from "./decisions/DecisionsSheet";
 import { flaggedCount, type DecisionLogActions } from "./decisions/decisionsModel";
 import { WorkflowRunStrip } from "./workflows/WorkflowRunStrip";
 import { pinKey, waitingItems, waitingLabel } from "./waitingOnYou";
-import { createGatedActionsStore } from "./gatedActions/gatedActionsStore";
 import { GatedActionCard } from "./gatedActions/GatedActionCard";
 import { GatedActionsReadProblem } from "./gatedActions/GatedActionsReadProblem";
 import { askerOf, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
@@ -101,7 +94,9 @@ const pullRequests = createPullRequestApi(browserTransport.request);
 const NO_LINKS: readonly PullLink[] = [];
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, worktrees, onNewSession, relatedWork, resourceLens, found }: {
+export function ForgerieSession({ entry: retainedEntry, visible = true, id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, worktrees, onNewSession, relatedWork, resourceLens, found }: {
+  entry?: SessionEntry | undefined;
+  visible?: boolean | undefined;
   /** The search hit the reader opened in this session: a message to mark and step from, or an off-branch entry for the history tree. */
   found?: FoundBinding | undefined;
   relatedWork?: RelatedWorkRenderer | undefined;
@@ -125,33 +120,17 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   drafts?: DraftStore | undefined;
   onSwitchSession: (session: Session, draft?: string) => void;
 }) {
-  // Child agents: their own small store, refreshed when the server says any child changed.
-  const sessionRef = useRef<{ id: string; cwd: string } | undefined>(undefined);
-  const [childAgents] = useState(() => createChildAgentsStore(browserTransport.request, () => sessionRef.current));
-  const [processes] = useState(() => createProcessesStore(browserTransport.request, () => sessionRef.current));
-  // Live Durable tasks for the status panel: read again on the same change event as the children, on reconnect, and on panel open.
-  const [taskActivity] = useState(() => createTaskActivityStore(browserTransport.request, () => sessionRef.current));
+  const [entry] = useState(() => retainedEntry ?? createSessionEntry(known ?? { id, cwd: "" }, browserTransport, { onUnread }));
+  const { store, childAgents, processes, workflows, decisions, gated, taskActivity } = entry;
   const tasks = useSyncExternalStore(taskActivity.subscribe, taskActivity.getSnapshot);
   const processState = useSyncExternalStore(processes.subscribe, processes.getSnapshot);
   const [processesOpen, setProcessesOpen] = useState(false);
-  // Workflows: the saved ones this session can start, and its runs. Refreshed on the same kind of change events.
-  const [workflows] = useState(() => createWorkflowsStore(browserTransport.request, () => sessionRef.current, () => crypto.randomUUID()));
   const flows = useSyncExternalStore(workflows.subscribe, workflows.getSnapshot);
-  // The decision log: what the agents settled without the reader. It changes with the workflow records, on the same event.
-  const [decisions] = useState(() => createDecisionsStore(browserTransport.request, () => sessionRef.current));
   const log = useSyncExternalStore(decisions.subscribe, decisions.getSnapshot);
   const [decisionsOpen, setDecisionsOpen] = useState(false);
-  // Gated actions: calls Forgerie holds until the reader approves them. They change with the workflow records, on the same event.
-  const [gated] = useState(() => createGatedActionsStore(browserTransport.request, () => sessionRef.current));
   const held = useSyncExternalStore(gated.subscribe, gated.getSnapshot);
   const [workflowSheet, setWorkflowSheet] = useState<{ type: "picker" } | { type: "plan"; name: string; task?: string } | { type: "run"; runId: string }
     | { type: "proposal"; entry: ProposalEntry }>();
-  const [store] = useState(() => createSessionStore(id, browserTransport, {}, known, createReadTracker(browserTransport, { subscribe: onUnread, isVisible: () => document.visibilityState === "visible", afterRender: afterTranscriptPaint }),
-    (eventType) => {
-      if (eventType === "processes.update" || eventType === "processes.output") processes.refresh();
-      if (eventType === CHILDREN_CHANGED_EVENT) { childAgents.refresh(); workflows.refresh(); taskActivity.refresh(); }
-      if (eventType === WORKFLOW_RUNS_CHANGED_EVENT) { workflows.refresh(); decisions.refresh(); gated.refresh(); }
-    }));
   const children = useSyncExternalStore(childAgents.subscribe, childAgents.getSnapshot);
   const [childrenOpen, setChildrenOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
@@ -162,20 +141,20 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const [chatDraft] = useState(() => createChatDraft(() => runtimeRef.current?.thread.composer, saved));
   const sessionId = state.session?.id;
   const cwd = state.session?.cwd;
-  sessionRef.current = sessionId && cwd ? { id: sessionId, cwd } : undefined;
   const connected = state.connection.type === "ready";
-  // Read the children on every join: a reconnect may have missed their change events.
-  useEffect(() => { if (connected && sessionId) { childAgents.refresh(); workflows.refresh(); decisions.refresh(); gated.refresh(); processes.refresh(); taskActivity.refresh(); } },
-    [childAgents, workflows, decisions, gated, processes, taskActivity, connected, sessionId]);
-  // While the connection is down, the task list may miss changes: keep it, marked stale, until a read after the reconnect.
-  useEffect(() => { taskActivity.setConnected(connected); }, [taskActivity, connected]);
-  useEffect(() => () => { childAgents.dispose(); workflows.dispose(); decisions.dispose(); gated.dispose(); processes.dispose(); taskActivity.dispose(); },
-    [childAgents, workflows, decisions, gated, processes, taskActivity]);
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
     [sessionId, cwd]);
-  const [attachments] = useState(() => createAttachmentAdapter(store.saveAttachment));
+  const [attachments] = useState(() => {
+    const adapter = createAttachmentAdapter(store.saveAttachment);
+    entry.onDispose(adapter.dispose);
+    return adapter;
+  });
   const [sendError, setSendError] = useState<string | undefined>(initialError);
-  useEffect(() => { void store.start(); return () => { attachments.dispose(); store.dispose(); }; }, [store, attachments]);
+  useEffect(() => {
+    if (retainedEntry) return;
+    entry.setVisible(true); void store.start();
+    return () => entry.dispose();
+  }, [entry, store, retainedEntry]);
   const applyResult = useCallback((result: CommandResult | void) => {
     if (!runtimeRef.current || result?.type !== "done") return;
     if (result.session && result.session.id !== id) onSwitchSession(result.session, result.promptDraft);
@@ -282,6 +261,12 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const folded = useMemo(() => foldChildEntries(foldProcessEvents(state.transcript.messages)), [state.transcript.messages]);
   // A search hit on the branch: the thread marks the match on show and brings it into view.
   const markAt = found?.type === "message" ? found.positions[found.current] : undefined;
+  useEffect(() => {
+    if (markAt === undefined || !connected) return;
+    void store.ensurePosition(markAt).catch((error: unknown) => {
+      if (typeof error === "object" && error !== null && "status" in error && error.status === 409) found?.onRetry();
+    });
+  }, [store, markAt, connected, state.earlier, found]);
   const shown = useMemo(() => markPosition(folded, markAt), [folded, markAt]);
   const messages = useThreadMessages(shown, state.transcript.isRunning);
   const revealId = useMemo(() => threadMessageIdAt(shown, markAt), [shown, markAt]);
@@ -415,7 +400,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   /** Closes the proposal's sheet once its decision went through, unless the reader already moved on. */
   const closeProposal = (id: string) => setWorkflowSheet((current) => current?.type === "proposal" && current.entry.proposalId === id ? undefined : current);
   const runtime = useExternalStoreRuntime({
-    messages, onNew, onCancel, adapters: { dictation, attachments },
+    messages, onNew, onCancel, hasEarlier: state.earlier.type !== "complete", onLoadEarlier: store.loadEarlier, adapters: { dictation, attachments },
     isRunning: state.transcript.isRunning,
     isLoading: state.connection.type === "loading",
     isDisabled: state.connection.type !== "ready",
@@ -428,7 +413,12 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     chatDraft.hydrate(saved.chat());
     return runtime.thread.composer.subscribe(chatDraft.sync);
   }, [runtime, chatDraft, saved]);
-  useEffect(() => { if (initialDraft !== undefined) runtime.thread.composer.setText(initialDraft); }, [initialDraft, runtime]);
+  const initialDraftApplied = useRef(false);
+  useEffect(() => {
+    if (initialDraftApplied.current) return;
+    initialDraftApplied.current = true;
+    if (initialDraft !== undefined) runtime.thread.composer.setText(initialDraft);
+  }, [initialDraft, runtime]);
   // Once joined, the store names the open ask. Answers saved for any other ask can never be sent.
   const openAskId = state.ask.type === "open" ? state.ask.ask.askId : undefined;
   const joined = state.connection.type === "ready";
@@ -482,10 +472,10 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   } : undefined;
 
   return <AssistantRuntimeProvider runtime={runtime}>
-    {processesOpen && <ProcessesPanel state={processState} onSelect={processes.select} onStop={processes.stop} onWrite={processes.write}
+    {visible && processesOpen && <ProcessesPanel state={processState} onSelect={processes.select} onStop={processes.stop} onWrite={processes.write}
       onRefresh={processes.refresh} onClose={() => setProcessesOpen(false)} />}
     <DictationProvider adapter={dictation}>
-    <SessionFrame name={state.session?.name ?? "Session"} status={statusChip}
+    <SessionFrame name={state.session?.name ?? "Session"} status={visible ? statusChip : undefined}
       actions={<>
         {/* A landed or discarded worktree has no folder left to diff. */}
         {/* Linked: always, even read-only, so a landed session still shows its pull request. Unlinked: only where the agent could still open one. */}
@@ -510,10 +500,10 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
             ? { type: "blocked", reason: "Stop the run first" } : archive.availability} />}
         {sessionId && cwd && relatedWork ? relatedWork({ ref: { id: sessionId, cwd }, busy, links: catalogPulls ?? NO_LINKS, onAsk: appendToDraft, commands: sessionCommands,
           own: worktree && worktrees && worktree.state.kind === "active" ? { info: worktree, onCommand: setWorktreeCommand } : undefined })
-          : <SessionMenu info={worktree && worktrees && worktree.state.kind === "active" ? worktree : undefined} busy={busy} onCommand={setWorktreeCommand} commands={sessionCommands} />}
+          : visible ? <SessionMenu info={worktree && worktrees && worktree.state.kind === "active" ? worktree : undefined} busy={busy} onCommand={setWorktreeCommand} commands={sessionCommands} /> : null}
       </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
-      <Thread ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
+      <Thread earlier={state.earlier} ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
         reveal={reveal}
         beforeComposer={<>
           {found && matchBar && <MatchBar view={matchBar} onClose={found.onClose} onRetry={retryFound ?? (() => undefined)}
@@ -543,7 +533,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         queue={{ items: state.status?.queuedMessages ?? [], disabled: state.sending || state.connection.type !== "ready",
           onClear: () => { void store.clearQueue().catch(() => { /* Store exposes the error. */ }); } }}
         working={workingSend(state.status, state.compaction, state.transcript.isRunning)}
-        dialog={dialog} notes={notesBinding} fileLinks={fileLinks}
+        dialog={visible ? dialog : undefined} notes={notesBinding} fileLinks={fileLinks}
         linkBase={fileBase?.type === "ready" ? fileBase.base : null} linkError={fileBase?.type === "failed" ? fileBase.error : undefined}
         onOpenFile={readOnly ? undefined : openLinkedFile}
         model={{ model: state.status?.model, thinkingLevel: state.status?.thinkingLevel, disabled: state.connection.type !== "ready",
@@ -555,16 +545,16 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           onClose: store.dismissCommand,
         } : undefined} />
       </SessionDoorsProvider>
-      {state.tree.type === "open" && <SessionTreeNavigator tree={state.tree.tree} operation={state.tree.operation} initialSelectedId={treeFor?.entryId}
+      {visible && state.tree.type === "open" && <SessionTreeNavigator tree={state.tree.tree} operation={state.tree.operation} initialSelectedId={treeFor?.entryId}
         readOnly={readOnly ? "This session is read-only. Its history shows here, and nothing in it can move or fork." : undefined}
         onContinue={(targetId, summary) => { void store.continueTree(targetId, summary).then(applyTree); }}
         onFork={(entryId) => { void store.forkTree(entryId).then(applyTree); }}
         onAbort={() => { void store.abortTree(); }} onClose={store.closeTree} />}
-      {review && changes && <ChangesReview source={changes.source} files={changes.files} notes={notes} focusNoteId={review.focusNoteId} openPath={review.path}
+      {visible && review && changes && <ChangesReview source={changes.source} files={changes.files} notes={notes} focusNoteId={review.focusNoteId} openPath={review.path}
         onAdd={tray.add} onEdit={tray.edit} onRemove={tray.remove} onClose={() => setReview(undefined)}
         markdownView={reviewView} onMarkdownView={chooseReviewView} />}
-      {resourcesOpen && sessionId && cwd && resourceLens?.({ id: sessionId, cwd, onClose: () => setResourcesOpen(false) })}
-      {childrenOpen && <ChildAgentsPanel children={children.children} openId={children.open?.conversationId}
+      {visible && resourcesOpen && sessionId && cwd && resourceLens?.({ id: sessionId, cwd, onClose: () => setResourcesOpen(false) })}
+      {visible && childrenOpen && <ChildAgentsPanel children={children.children} openId={children.open?.conversationId}
         transcript={children.open?.transcript} error={children.error ?? children.open?.error}
         drafts={{ values: children.drafts ?? {}, update: childAgents.updateDraft }}
         detail={children.detail} pending={children.pending} outcome={children.outcome} runs={children.runs} actions={{
@@ -580,13 +570,13 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           onSend: childAgents.send, onAnswer: childAgents.answer,
           onStop: (conversationId) => { void childAgents.stop(conversationId).catch(() => { /* The panel shows the error. */ }); },
         }} />}
-      {workflowSheet?.type === "picker" && <WorkflowPicker saved={flows.saved ?? []} broken={flows.broken} loading={flows.saved === undefined}
+      {visible && workflowSheet?.type === "picker" && <WorkflowPicker saved={flows.saved ?? []} broken={flows.broken} loading={flows.saved === undefined}
         error={flows.error} onClose={() => { workflows.dismissError(); setWorkflowSheet(undefined); }}
         onChoose={(name) => {
           const draft = runtimeRef.current?.thread.composer.getState().text.trim();
           setWorkflowSheet({ type: "plan", name, ...(draft === undefined || draft === "" ? {} : { task: draft }) });
         }} />}
-      {workflowSheet?.type === "plan" && (() => {
+      {visible && workflowSheet?.type === "plan" && (() => {
         const workflow = flows.saved?.find((candidate) => candidate.name === workflowSheet.name);
         return workflow && <WorkflowSheet mode="start" source={{ kind: "saved", workflow, initialTask: workflowSheet.task }} blocked={workflowBlock}
           pending={flows.launching === true ? "start" : undefined} error={flows.error} models={workerModels}
@@ -594,7 +584,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           onBack={() => { workflows.dismissError(); setWorkflowSheet({ type: "picker" }); }}
           onClose={() => { workflows.dismissError(); setWorkflowSheet(undefined); }} />;
       })()}
-      {workflowSheet?.type === "proposal" && (() => {
+      {visible && workflowSheet?.type === "proposal" && (() => {
         const id = workflowSheet.entry.proposalId;
         return <WorkflowSheet mode="start" key={id} source={{ kind: "proposal", entry: workflowSheet.entry, proposal: proposals?.find((candidate) => candidate.id === id),
           readError: flows.proposalsError }} blocked={proposalBlock} pending={flows.proposing?.id === id ? flows.proposing.action : undefined} error={flows.error}
@@ -605,7 +595,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           onDismiss={() => { void workflows.dismissProposal(id).then((done) => { if (done) closeProposal(id); }); }}
           onClose={() => { workflows.dismissError(); setWorkflowSheet(undefined); }} />;
       })()}
-      {sheetRun !== undefined && <WorkflowSheet mode="run" key={sheetRun.id} run={sheetRun}
+      {visible && sheetRun !== undefined && <WorkflowSheet mode="run" key={sheetRun.id} run={sheetRun}
         looks={children.children.map((child) => ({ name: child.name, agent: child.agent, branch: child.worktree?.branch, asking: child.questions.length > 0,
           busy: child.busy, retry: child.retry, conversationId: child.conversationId }))}
         record={children.open === undefined ? undefined : { transcript: children.open.transcript, readError: children.open.error, error: children.error }}
@@ -620,14 +610,14 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onDismissRecordError={childAgents.dismissError}
         onModel={(worker, model) => workflows.setWorkerModel(sheetRun.id, worker, model)}
         onClose={() => { decisions.dismissError(); workflows.dismissError(); childAgents.close(); setWorkflowSheet(undefined); }} />}
-      {decisionsOpen && <DecisionsSheet log={log} actions={logActions} onClose={() => { decisions.dismissError(); setDecisionsOpen(false); }} />}
-      {pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
+      {visible && decisionsOpen && <DecisionsSheet log={log} actions={logActions} onClose={() => { decisions.dismissError(); setDecisionsOpen(false); }} />}
+      {visible && pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
         notice={pull.notice} writing={pull.writing} now={Date.now()}
         onRefresh={pull.refresh} onWatch={(number, on) => { void pull.setWatch(number, on); }} onLink={pull.linkNumber}
         onUnlink={(number) => { void pull.unlink(number); }}
         onMerge={(number) => { void pull.merge(number, "rebase"); }} onClose={() => setPullOpen(false)}
         onAsk={(message) => { if (!readOnly) runtimeRef.current?.thread.composer.setText(message); }} />}
-      {worktreeCommand && worktree && worktrees && <WorktreeDialog command={worktreeCommand} info={worktree} api={worktrees}
+      {visible && worktreeCommand && worktree && worktrees && <WorktreeDialog command={worktreeCommand} info={worktree} api={worktrees}
         onAsk={readOnly ? undefined : (prompt) => send(prompt)} onDone={() => { void refreshWorktree(); }} onClose={() => setWorktreeCommand(undefined)} />}
     </SessionFrame>
     </DictationProvider>

@@ -1,4 +1,7 @@
-import { lazy, Suspense, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createSessionRegistry, type SessionRegistry } from "./sessionRegistry";
+import { createSessionPrefetch } from "./sessionPrefetch";
+import { browserTransport } from "./sessionStore";
+import { Activity, lazy, Suspense, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { RelatedWorkRenderer } from "./projectGroups/relatedWork";
 import type { ResourceLensRenderer } from "./resources/resourceLens";
 import type { SettingsPageRenderer } from "./ui/settings/SettingsView";
@@ -111,6 +114,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   projectFilter?: Omit<PickerFilter, "onManage"> | undefined; projectSettings?: SettingsPageRenderer | undefined; relatedWork?: RelatedWorkRenderer | undefined;
   resourceSettings?: SettingsPageRenderer | undefined; resourceLens?: ResourceLensRenderer | undefined;
 } = {}) {
+  const registryRef = useRef<SessionRegistry | undefined>(undefined);
   const [selectedId, setSelectedId] = useState(readSelected);
   const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string; error?: string }>();
   // The new-session dialog: the folder it starts in, over the open session.
@@ -170,13 +174,24 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     setCommandSelection(undefined);
   }, []);
   const onDeleted = useCallback((id: string) => {
-    drafts.forget(id);
+    drafts.forget(id); registryRef.current?.forget(id);
     if (readSelected() === id) closeSession();
   }, [drafts, closeSession]);
   const query = search?.state.query ?? "";
   const mode = queryMode(query);
   const picker = usePicker(selectedId, { onDeleted, starting, projectScope, projectCatalog, titleFilter: mode === "title" ? query : undefined });
   const { onStartup, onWorktree, onTriggersChanged } = picker;
+  const [registry] = useState(() => createSessionRegistry(browserTransport, { onUnread: picker.onUnread }));
+  registryRef.current = registry;
+  const kept = useSyncExternalStore(registry.subscribe, registry.getSnapshot);
+  const [prefetch] = useState(() => createSessionPrefetch(registry));
+  useEffect(() => () => { prefetch.dispose(); registry.dispose(); }, [registry, prefetch]);
+  useEffect(() => {
+    prefetch.idle(picker.view.sections.flatMap(section => section.rows));
+    const pause = () => { if (document.visibilityState !== "visible" || !navigator.onLine) prefetch.pause(); };
+    document.addEventListener("visibilitychange", pause); window.addEventListener("offline", pause);
+    return () => { prefetch.pause(); document.removeEventListener("visibilitychange", pause); window.removeEventListener("offline", pause); };
+  }, [prefetch, picker.view.sections]);
   useEffect(() => onStartup(startup.emit), [onStartup, startup]);
   const triggersChanged = triggers?.onChanged;
   useEffect(() => triggersChanged ? onTriggersChanged(triggersChanged) : undefined, [onTriggersChanged, triggersChanged]);
@@ -209,6 +224,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     setComposeItem(undefined);
   }, []);
   const switchSession = useCallback((session: Session, draft?: string, error?: string) => {
+    registryRef.current?.select(session);
     setOpen(false);
     const fromComposer = readNew() !== undefined;
     setComposing(undefined);
@@ -460,6 +476,23 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       }}
       onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} onClose={closeComposer} />
     : null;
+  const transcriptVisible = settings === undefined && backlog === undefined && triggerPlace === undefined && composing === undefined;
+  useEffect(() => { if (known) registry.select(known); }, [registry, known?.id, known?.cwd]);
+  useEffect(() => { registry.setVisible(transcriptVisible && selectedId !== undefined); }, [registry, transcriptVisible, selectedId]);
+  const chats = kept.filter(record => record.visited).map(record => {
+    const entry = record.entry;
+    const id = entry.session.id;
+    const visible = transcriptVisible && selectedId === id;
+    return <Activity key={record.key} mode={visible ? "visible" : "hidden"}>
+      <ForgerieSession entry={entry} visible={visible} id={id} known={entry.session} found={id === selectedId ? sessionFound : undefined}
+        relatedWork={relatedWork} resourceLens={resourceLens}
+        initialDraft={commandSelection?.session.id === id ? commandSelection.draft : undefined}
+        initialError={commandSelection?.session.id === id ? commandSelection.error : undefined}
+        drafts={drafts} onSwitchSession={switchSession}
+        worktree={picker.find(id)?.worktree} pullRequests={picker.find(id)?.pullRequests} worktrees={worktreeApi} onNewSession={() => { void startNew(); }}
+        archive={{ availability: picker.archiveState(id), onArchive: () => { void archiveNext(id); } }} />
+    </Activity>;
+  });
   const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
     <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} projects={projectSettings} resources={resourceSettings} backlog={backlogSettings} /></Suspense>
     : backlog ? <Suspense fallback={<SessionFrame name="Backlog" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
@@ -472,13 +505,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       onOpenSession: (session) => switchSession(session), sessionName: (id) => picker.find(id)?.name })
     : composing === "" && !composeItem && !selectedId
       ? <SessionFrame name="New session" status={<StatusChip label="No project" tone="bad" panel={{ title: "No project", children: <p>Forgerie knows no project yet, and this app cannot add one yet.</p> }} />}><div className="thread-empty" /></SessionFrame>
-    : selectedId ? <ForgerieSession key={selectedId} id={selectedId} onUnread={picker.onUnread} found={sessionFound}
-      known={known} relatedWork={relatedWork} resourceLens={resourceLens}
-      initialDraft={commandSelection?.session.id === selectedId ? commandSelection.draft : undefined}
-      initialError={commandSelection?.session.id === selectedId ? commandSelection.error : undefined}
-      drafts={drafts} onSwitchSession={switchSession}
-      worktree={picker.find(selectedId)?.worktree} pullRequests={picker.find(selectedId)?.pullRequests} worktrees={worktreeApi} onNewSession={() => { void startNew(); }}
-      archive={{ availability: picker.archiveState(selectedId), onArchive: () => { void archiveNext(selectedId); } }} />
+    : selectedId ? null
     // The picker covers this area whenever nothing is selected, so it holds no
     // message of its own: the picker is the instruction.
     : <SessionFrame name="No session open"><div className="thread-empty" /></SessionFrame>;
@@ -487,7 +514,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs}
       shelves={shelves} filter={projectFilter ? { ...projectFilter, onManage: () => placeSettings({ section: "projects" }) } : undefined}
       search={pickerSearch} results={searchResults} narrowed={mode === "title"} onEscape={clearSearch}
-      actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
+      actions={{ ...picker.actions, onPrefetch: prefetch.intent, onCancelPrefetch: prefetch.cancel, onSelect: select, onNew: () => { void startNew(); },
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
         onBacklog: () => placeBacklog(backlog ?? {}), backlogOpen: backlog !== undefined,
         backlogCount: backlogItems ? openCount(backlogItems) : undefined,
@@ -497,5 +524,5 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
         onClose: layout === "overlay" && (selectedId || settings || backlog || triggerPlace) ? () => setOpen(false) : undefined }} />}
     // `known` is read once, when the thread mounts for this id. A direct URL
     // load before the catalog arrives passes nothing and the store looks it up.
-    thread={<>{thread}{dialog}</>} />{toast}</>;
+    thread={<>{chats}{thread}{dialog}</>} />{toast}</>;
 }

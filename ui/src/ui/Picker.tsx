@@ -31,6 +31,8 @@ export interface PickerView {
   held?: ReadonlySet<string> | undefined;
 }
 export interface PickerActions {
+  onPrefetch?: ((row: Row) => void) | undefined;
+  onCancelPrefetch?: ((row: Row) => void) | undefined;
   onSelect: (row: Row) => void;
   onRetry: () => void;
   onClose?: (() => void) | undefined;
@@ -257,6 +259,8 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
 }) {
   const [menu, setMenu] = useState<"board" | undefined>();
   const [rowMenu, setRowMenu] = useState<{ id: string; confirming: boolean } | undefined>();
+  const prefetchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(prefetchTimer.current), []);
   const listRef = useRef<HTMLDivElement>(null);
   const [footer, setFooter] = useState<HTMLDivElement | null>(null);
   const plan = footerPlan(useInnerWidth(footer));
@@ -316,7 +320,7 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
       const index = order.findIndex((row) => row.session.id === view.selectedId);
       const step = key === "j" || event.key === "ArrowDown" ? 1 : -1;
       const next = order[index === -1 ? (step > 0 ? 0 : order.length - 1) : Math.min(Math.max(index + step, 0), order.length - 1)];
-      if (next && next.session.id !== view.selectedId) actions.onSelect(next);
+      if (next && next.session.id !== view.selectedId) { actions.onPrefetch?.(next); actions.onSelect(next); }
     } else if (key === "n" && actions.onNew) { event.preventDefault(); actions.onNew(); }
     else if (key === "g") change({ ...prefs, grouping: prefs.grouping === "state" ? "project" : "state" });
     else if (key === "a") change({ ...prefs, showArchived: !prefs.showArchived });
@@ -418,7 +422,11 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
             <span className="picker-count">{section.rows.length + (section.hidden ?? 0)}</span>
           </button>
           {collapsed.has(section.key) ? null : <div className="picker-group-rows" role="group" aria-label={section.label}>
-            {section.rows.map((row) => <div key={row.session.id} role="none">
+            {section.rows.map((row) => <div key={row.session.id} role="none"
+              onPointerEnter={() => { prefetchTimer.current = setTimeout(() => actions.onPrefetch?.(row), 80); }}
+              onPointerLeave={() => { clearTimeout(prefetchTimer.current); actions.onCancelPrefetch?.(row); }}
+              onFocus={() => actions.onPrefetch?.(row)}
+              onBlur={() => actions.onCancelPrefetch?.(row)}>
               <PickerRow row={row} selected={row.session.id === view.selectedId} pending={view.pending?.has(row.session.id) === true}
                 held={view.held?.has(row.session.id) === true} showPin={section.kind !== "pinned"}
                 menuOpen={rowWithMenu?.session.id === row.session.id} onSelect={actions.onSelect} onMenu={openRowMenu} onCloseMenu={closeRowMenu} />

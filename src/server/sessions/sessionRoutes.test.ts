@@ -1667,3 +1667,21 @@ function idleStatus(lookup: SessionRouteRef): SessionStatus {
 function unusedRouteMethod(name: string): Error {
   return new Error(`Route test did not expect ${name} to be called`);
 }
+
+describe("consistent open routing", () => {
+  it.each(["limit=0", "limit=501", "limit=1.5", "limit=NaN", "around=-1", "around=9007199254740992", "limit="])("rejects malformed open queries: %s", async query => {
+    const response = await app.inject({ url: `/sessions/a/open?cwd=%2Frepo&${query}` });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toHaveProperty("error");
+  });
+  it("uses the same schema for missing/relative cwd and fails unavailable cuts explicitly", async () => {
+    expect((await app.inject({ url: "/sessions/a/open" })).statusCode).toBe(400);
+    expect((await app.inject({ url: "/sessions/a/open?cwd=relative" })).statusCode).toBe(400);
+    expect((await app.inject({ url: "/sessions/absent/open?cwd=%2Frepo" })).statusCode).toBe(404);
+  });
+  it("validates older cursor identity queries before acquisition", async () => {
+    for (const query of ["historyId=h", "before=1.2&historyId=h", "before=0&historyId=", "before=-1&historyId=h"]) {
+      expect((await app.inject({ url: `/sessions/a/messages?cwd=%2Frepo&${query}` })).statusCode).toBe(400);
+    }
+  });
+});

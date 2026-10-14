@@ -330,3 +330,16 @@ function waitForOpen(socket: WebSocket): Promise<void> {
     socket.once("close", () => { reject(new Error("WebSocket closed before opening")); });
   });
 }
+
+describe("consistent read proxy compatibility", () => {
+  it("forwards open and identity-bound older pages without changing the cut or error envelope", async () => {
+    const open = "/sessions/s1/open?cwd=%2Frepo&limit=50&around=123";
+    const older = "/sessions/s1/messages?cwd=%2Frepo&limit=50&before=100&historyId=opaque";
+    await app.inject({ url: `/api/machines/local${open}` });
+    daemon.respondWith({ statusCode: 409, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "History changed", code: "HISTORY_CHANGED" }) });
+    const response = await app.inject({ url: `/api/machines/local${older}` });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: "History changed", code: "HISTORY_CHANGED" });
+    expect(daemon.requests).toEqual([{ method: "GET", path: open, body: undefined }, { method: "GET", path: older, body: undefined }]);
+  });
+});

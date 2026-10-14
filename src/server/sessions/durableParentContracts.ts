@@ -1,3 +1,4 @@
+import type { SessionOpenResult } from "./sessionOpen.js";
 import type { DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import type { DurableBrowserAttachment } from "./durableParentReadModel.js";
 import type { SessionRef, SessionTreeSnapshot } from "../../shared/apiTypes.js";
@@ -20,5 +21,6 @@ export interface DurableParentMutations {
 
 /** Opt-in transport capability while the mixed-store reader is composed at daemon startup. */
 export interface DurableBrowserSessionService {
+  attachOpenBrowser?(ref: SessionRef, send: (open: SessionOpenResult) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment>;
   attachDurableBrowser(ref: SessionRef, send: (snapshot: DurableBrowserSnapshot) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment>;
 }
