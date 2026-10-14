@@ -18,7 +18,7 @@ export function preferBundledForgerieSkills(result: {
   diagnostics: ResourceDiagnostic[];
 }): { skills: Skill[]; diagnostics: ResourceDiagnostic[] } {
   return {
-    skills: result.skills,
+    skills: result.skills.filter(skill => skill.name !== "pi-processes"),
     diagnostics: result.diagnostics.filter((diagnostic) => !isIntentionalBundledSkillCollision(diagnostic)),
   };
 }

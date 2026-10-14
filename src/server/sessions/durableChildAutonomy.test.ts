@@ -110,6 +110,7 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     restart: async (at: number, corruptRecords = false) => { await recorder?.close(); await journal.close(); now = at; journal = await open(corruptRecords); },
     advanceClock: (ms: number) => { now += ms; },
     recordPath, recordErrors, runtimeErrors,
+    activeChildRun: async (id: number) => { await recorder?.flush(); return recorder?.activeChildRun(id); },
     startWorkflow: async () => {
       const proposal = await journal.conversation.commit((tx) => proposeWorkflow(tx, journal.conversation.id, "p:autonomy", { name: "autonomy", summary: "Autonomy check", text: "---\nworkflow: {version: 1}\n---\nWait." }), context);
       await startWorkflowProposal(journal.harness, journal.conversation, root, "parent", proposal.id, {}, "start", context);
@@ -385,3 +386,20 @@ function spawnArgs(text: string) {
   if (!Check(Type.Record(Type.String(), Type.Union([Type.String(), Type.Boolean()])), value)) throw new Error("Invalid spawn arguments");
   return value;
 }
+
+
+it("resolves child process ownership only to a persisted running child run", async () => {
+  const f = await fixture([], undefined, true);
+  expect(await f.activeChildRun(f.journal().conversation.id)).toBeUndefined();
+  await f.spawn({ name: "held", agent: "reader", message: "HOLD" });
+  await vi.waitFor(async () => { expect((await f.children())[0]?.questions.length).toBe(1); });
+  const child = (await f.children())[0];
+  if (child === undefined) throw new Error("Missing held child");
+  const owner = await f.activeChildRun(child.conversationId);
+  const persisted = (await new ChildRunStore(f.recordPath).list())[0];
+  expect(owner).toEqual({ name: "held", runId: persisted?.id });
+  await f.restart(1000100);
+  expect(await f.activeChildRun(child.conversationId)).toEqual(owner);
+  await f.stop(child.conversationId);
+  await vi.waitFor(async () => { expect(await f.activeChildRun(child.conversationId)).toBeUndefined(); });
+});

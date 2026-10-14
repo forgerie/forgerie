@@ -22,7 +22,7 @@ type Usage = Static<typeof ChildRunUsageSchema>;
 type Live = Static<typeof liveSchema>["run"];
 type Metadata = Static<typeof metadataSchema>["agents"][string] & { name: string };
 interface Generation { id: TaskId; startedAt?: number; endedAt?: number; model?: NonNullable<ChildRun["model"]> }
-interface Active { run: ChildRun; checkpoint: ChildRunCheckpoint; stored?: string }
+interface Active { run: ChildRun; checkpoint: ChildRunCheckpoint; stored?: string; persisted?: boolean }
 interface Child { metadata: Metadata; usage: UsageState; live: Live; generations: Map<number, Generation>; active?: Active }
 
 /** Exact committed frames, not provider callbacks or bounded event streams. It never calls Session APIs in a listener. */
@@ -56,7 +56,7 @@ export class DurableChildRunRecords {
       }, context);
       const previous = pending.find((item) => item.run.child.conversationId === value.conversationId);
       if (previous?.checkpoint !== undefined) {
-        child.active = { run: previous.run, checkpoint: previous.checkpoint };
+        child.active = { run: previous.run, checkpoint: previous.checkpoint, persisted: true };
         const submission = await (await harness.submission(previous.checkpoint.submissionId, context))?.status(context);
         if (submission?.status === "done" || submission?.status === "unanswered") {
           const upper = submission.status === "done" && submission.type === "input" ? submission.answer : undefined;
@@ -88,6 +88,13 @@ export class DurableChildRunRecords {
 
   async close(): Promise<void> { this.unsubscribe?.(); this.unsubscribe = undefined; await this.flush(); }
   async flush(): Promise<void> { await this.writes; if (this.writeFailure !== undefined) throw this.writeFailure; }
+
+  /** Only a committed running record can own a child process. Call flush() before resolving a tool call. */
+  activeChildRun(conversationId: number): { name: string; runId: string } | undefined {
+    const active = this.children.get(conversationId)?.active;
+    return active?.persisted === true && this.writeFailure === undefined
+      ? { name: active.run.child.name, runId: active.run.id } : undefined;
+  }
 
   private child(metadata: Metadata): Child {
     let child = this.children.get(metadata.conversationId);
@@ -188,7 +195,7 @@ export class DurableChildRunRecords {
     this.writes = this.writes.then(async () => {
       // Stop before publishing completion. A crash leaves a pending run to retry on recovery.
       if (run.state.kind === "finished") await this.onFinished?.(run);
-      await this.store.save(run, checkpoint); this.writeFailure = undefined; })
+      await this.store.save(run, checkpoint); active.persisted = true; this.writeFailure = undefined; })
       .catch((error: unknown) => { delete active.stored;
         this.writeFailure = error instanceof Error ? error : new Error("Child run persistence failed", { cause: error });
         this.onError(this.writeFailure); });

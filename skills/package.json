@@ -6,7 +6,8 @@
     "skills": [
       "./ask-user",
       "./handoff",
-      "./relay"
+      "./relay",
+      "./processes"
     ]
   }
 }

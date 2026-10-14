@@ -1,3 +1,7 @@
+import { join } from "node:path";
+import type { ManagedProcesses } from "../processes/managedProcesses.js";
+import { ManagedProcessTools } from "../processes/processTool.js";
+import { acceptProcessEvents, processEventsExtension } from "./durableProcessEvents.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
@@ -41,6 +45,7 @@ import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
 import type { WorkflowModels, WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 
 export interface DurableAgentSessionOptions {
+  getManagedProcesses?: (sessionId: string) => Promise<ManagedProcesses>;
   gatedIssueLabels?: GatedActionReads["issueLabels"];
   autonomyPolicy?: AutonomyPolicySource;
   handle?: DurableSessionHandle;
@@ -130,6 +135,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private gateOptions: GatedActionsExtensionOptions | undefined;
   private gateUnsubscribe: (() => void) | undefined;
   private flaggedCount = 0;
+  private readonly processTools: ManagedProcessTools | undefined;
+  private readonly customTools: readonly ToolDefinition[];
   private childRunRecords: DurableChildRunRecords | undefined;
 
   private constructor(private readonly options: DurableAgentSessionOptions) {
@@ -156,7 +163,20 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.thinkingLevel = this.model === undefined ? "off" : clampThinkingLevel(this.model, level);
     const extensions = this.resourceLoader.getExtensions();
     this.runner = new ExtensionRunner(extensions.extensions, extensions.runtime, services.cwd, sessionManager, new ModelRegistry(this.modelRuntime));
-    this.tools = new DurableSdkTools({ cwd: services.cwd, settings: this.settingsManager, runner: this.extensionRunner, customTools: options.customTools ?? [],
+    this.processTools = options.getManagedProcesses === undefined ? undefined : new ManagedProcessTools({
+      sessionId: this.sessionId, cwd: services.cwd,
+      stateFile: join(sessionManager.getSessionDir(), `${this.sessionId}.process-watches.json`),
+      getManagedProcesses: options.getManagedProcesses,
+    });
+    this.customTools = [...options.customTools ?? [], ...this.processTools === undefined ? [] : [this.processTools.definition(async id => {
+      const caller = this.tools.caller(id);
+      if (caller.conversationId === this.journal.conversation.id) return caller;
+      await this.childRunRecords?.flush();
+      const child = this.childRunRecords?.activeChildRun(caller.conversationId);
+      if (child === undefined) throw new Error("Cannot start a child process without its persisted child run record");
+      return { ...caller, child };
+    })]];
+    this.tools = new DurableSdkTools({ cwd: services.cwd, settings: this.settingsManager, runner: this.extensionRunner, customTools: this.customTools,
       beforeCall: () => this.journal.project(), gateNested: (call, api, index, ctx) => {
         if (this.gateOptions === undefined) throw new Error("Nested gated actions are not bound");
         return gateToolCall(this.gateOptions, call, api, ctx, {index, cwd: this.options.services.cwd, extension: `forgerie.sdk-tools:${this.sessionId}:nested`});
@@ -172,6 +192,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       await session.initialize();
       return session;
     } catch (error) {
+      await session.processTools?.dispose();
       await session.stream?.stop();
       await session.parentAppWatch?.stop();
       session.sdkView?.close();
@@ -252,6 +273,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.installSdkTools();
     // Register delivery before a family can schedule a persisted accepted answer.
     this.registry.install(askDeliveryExtension());
+    this.registry.install(processEventsExtension());
     this.registry.install(defineExtension({ name: "forgerie.sdk-context", sections: [section("forgerie", (input) => this.dispatch(input.conversationId).systemPrompt, { tag: false })],
       hooks: [hook(GenerationTask, {
         beforeRequest: async (request, api) => {
@@ -297,6 +319,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     await this.startGatedActions();
     await this.startChildAgents();
     await this.startEventStream();
+    await this.processTools?.initialize(summary => acceptProcessEvents(this.journal.conversation, summary, context));
+    this.processTools?.watch(error => { this.report(error); });
   }
 
   private async startEventStream(): Promise<void> {
@@ -883,7 +907,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     runner.setUIContext(ui, "rpc");
     if (this.errorListener !== undefined) runner.onError(this.errorListener);
     this.runner = runner;
-    this.tools = new DurableSdkTools({ cwd: this.options.services.cwd, settings: this.settingsManager, runner, customTools: this.options.customTools ?? [],
+    this.tools = new DurableSdkTools({ cwd: this.options.services.cwd, settings: this.settingsManager, runner, customTools: this.customTools,
       beforeCall: () => this.journal.project(), gateNested: (call, api, index, ctx) => {
         if (this.gateOptions === undefined) throw new Error("Nested gated actions are not bound");
         return gateToolCall(this.gateOptions, call, api, ctx, {index, cwd: this.options.services.cwd, extension: `forgerie.sdk-tools:${this.sessionId}:nested`});
@@ -906,6 +930,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    await this.processTools?.dispose();
     this.bashController?.abort();
     this.branchSummaryController?.abort();
     this.gateUnsubscribe?.();

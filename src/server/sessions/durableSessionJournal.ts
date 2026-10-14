@@ -193,7 +193,8 @@ export class DurableSessionJournal {
   }
 
   isTranscriptEntry(entry: EntryRecord): boolean {
-    return isTranscriptEntry(entry.kind) && !this.customInputEntries.has(entry.id);
+    // Host entries are projected as custom cards; their model copies must not also appear as user messages.
+    return isTranscriptEntry(entry.kind) && !isHostEntryKind(entry.kind) && !this.customInputEntries.has(entry.id);
   }
 
   /** Use native admission and queue boundaries, but project the notification only in its SDK custom form. */

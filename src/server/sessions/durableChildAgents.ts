@@ -313,7 +313,7 @@ const readTool = codingTools.find((tool) => tool.name === "read");
 /** The tools a child gets: every child tool, or the ones its agent file names as `planChildRuntime` translates them. */
 function childToolsFor(plan: ChildRuntimePlan, extra: readonly ToolRegistration[], shared: readonly ToolRegistration[]): ToolRegistration[] {
   const native = [askHumanTool, ...codingTools, watchdogDiffTool, ...extra];
-  return plan.tools === undefined ? native : [...native, ...shared].filter((tool) => plan.tools?.includes(tool.name) === true);
+  return plan.tools === undefined ? [...native, ...shared.filter(tool => tool.name === "process")] : [...native, ...shared].filter((tool) => plan.tools?.includes(tool.name) === true);
 }
 
 export interface DurableChildExtensions {

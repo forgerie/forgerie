@@ -11,6 +11,7 @@ const WEB_TOOLS = new Set(["web_search", "fetch_content", "get_search_content", 
  * undo factory side effects. Warnings tell users to remove those copies.
  */
 export function preferBundledExtensions(result: LoadExtensionsResult): LoadExtensionsResult {
+  result = withoutLegacyProcessTool(result);
   const bundles = new Map([
     ["pi-web-access", bundledWebAccessPackagePath()],
   ]);
@@ -77,4 +78,18 @@ function packageName(manifest: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Keep package hooks until the surface migration removes them, but never its conflicting process tool. */
+function withoutLegacyProcessTool(result: LoadExtensionsResult): LoadExtensionsResult {
+  const packages = new Map([["@aliou/pi-processes", "forgerie-owned"]]);
+  const warnings = [...result.warnings ?? []];
+  const extensions = result.extensions.map(extension => {
+    if (bundledPackageOwner(extension, packages) === undefined || !extension.tools.has("process")) return extension;
+    const tools = new Map(extension.tools);
+    tools.delete("process");
+    warnings.push({ path: extension.path, warning: "Forgerie replaced @aliou/pi-processes' process tool with its durable managed process tool. Remove any Pi profile copy of @aliou/pi-processes." });
+    return { ...extension, tools };
+  });
+  return { ...result, extensions, warnings };
 }

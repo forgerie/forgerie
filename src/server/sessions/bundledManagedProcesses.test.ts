@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
+import { preferBundledExtensions } from "./bundledExtensions.js";
+import { bundledForgerieSkillsPackagePath, preferBundledForgerieSkills } from "./bundledForgerieSkills.js";
 import { bundledManagedProcessesPackagePath } from "./bundledManagedProcesses.js";
 
 const tempRoots: string[] = [];
@@ -54,3 +56,16 @@ function expectManagedProcessResources(loader: DefaultResourceLoader): void {
   ]);
   expect(loader.getSkills().skills.map((skill) => skill.name)).toContain("pi-processes");
 }
+
+
+it("drops the conflicting package tool and skill from hosted resources", async () => {
+  const root = await mkdtemp(join(tmpdir(), "forgerie-owned-processes-")); tempRoots.push(root);
+  const loader = new DefaultResourceLoader({ cwd: root, agentDir: join(root, "agent"), noContextFiles: true,
+    additionalExtensionPaths: [bundledManagedProcessesPackagePath(), bundledForgerieSkillsPackagePath()],
+    extensionsOverride: preferBundledExtensions, skillsOverride: preferBundledForgerieSkills });
+  await loader.reload();
+  expect(loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()])).not.toContain("process");
+  expect(loader.getExtensions().warnings?.some(warning => warning.warning.includes("Forgerie replaced"))).toBe(true);
+  expect(loader.getSkills().skills.map(skill => skill.name)).toContain("processes");
+  expect(loader.getSkills().skills.map(skill => skill.name)).not.toContain("pi-processes");
+});

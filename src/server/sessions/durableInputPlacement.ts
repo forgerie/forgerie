@@ -1,5 +1,5 @@
 import type { Context } from "@earendil-works/chord";
-import type { ConversationId, TaskRuntime, Tx } from "@earendil-works/pi-durable";
+import type { ConversationId, EntryId, TaskRuntime, Tx } from "@earendil-works/pi-durable";
 
 // Optional fields keep version-1 outboxes replayable with their original receipt. Checkpoints need a JSON-compatible alias.
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
@@ -9,6 +9,7 @@ interface InputPlacementOptions {
   content: string;
   previousRecipient: ConversationId;
   selectRecipient(tx: Tx): Promise<ConversationId>;
+  onPlaced?(tx: Tx, entry: EntryId): Promise<void>;
 }
 
 /** A queued receipt is not delivery. Keep the outbox live until an entry exists, retrying only unplaced withdrawals. */
@@ -42,8 +43,12 @@ export async function deliverInputUntilPlaced<I>(runtime: TaskRuntime<I, InputPl
   for (;;) {
     const receipt = await submission.status(context);
     // Even unanswered inputs were delivered if they have an entry (for example, a run aborted after placement).
-    if (receipt.entry !== undefined) {
-      await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+    const entry = receipt.entry;
+    if (entry !== undefined) {
+      await runtime.commit(async tx => {
+        await options.onPlaced?.(tx, entry);
+        return { status: "terminal", outcome: { status: "completed", result: null } };
+      }, context);
       return;
     }
     if (receipt.status === "unanswered") {

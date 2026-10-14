@@ -184,6 +184,13 @@ export class DurableSdkTools {
     } finally { this.invocations.delete(id); }
   }
 
+  /** The active Durable invocation, also for nested codemode calls. Never infer child ownership from a call ID. */
+  caller(callId: string): { conversationId: number; cwd?: string } {
+    const invocation = this.invocations.get(callId);
+    if (invocation === undefined) throw new Error("Process tool requires an active Durable invocation");
+    return { conversationId: invocation.api.conversationId, ...(invocation.api.env === undefined ? {} : { cwd: invocation.api.env.cwd }) };
+  }
+
   async executeNested(parentId: string, name: string, args: unknown, options: ExecuteToolOptions): Promise<AgentToolCallOutcome> {
     const invocation = this.invocations.get(parentId);
     if (invocation === undefined) throw new Error("Nested tool calls require an active Durable invocation");
