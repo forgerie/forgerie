@@ -41,26 +41,38 @@ export class ManagedProcessLog {
       let line = position.offset < state.base.offset ? state.base.line : position.line;
       let truncatedStart = offset === state.base.offset && state.partial;
       // One snapshot per call. Appends after this size belong to the next call.
-      const buffer = Buffer.alloc(size - offset);
-      let read = 0;
-      while (read < buffer.length) {
-        const { bytesRead } = await file.read(buffer, read, buffer.length - read, offset + read);
-        if (bytesRead === 0) throw new Error("Managed process log shrank while reading");
-        read += bytesRead;
-      }
+      const buffer = Buffer.alloc(Math.min(64 * 1024, size - offset));
       const lines: ManagedProcessLogBatch["lines"] = [];
-      let start = 0;
-      for (let index = 0; index < buffer.length; index++) {
-        if (buffer[index] !== 10) continue;
-        lines.push({ number: line++, text: buffer.subarray(start, index).toString("utf8"), terminated: true, truncatedStart });
-        truncatedStart = false; start = index + 1;
-        if (lines.length === maxLines) break;
+      let readOffset = offset;
+      let fragments: Buffer[] = [];
+      let fragmentBytes = 0;
+      while (readOffset < size && lines.length < maxLines) {
+        const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, size - readOffset), readOffset);
+        if (bytesRead === 0) throw new Error("Managed process log shrank while reading");
+        let start = 0;
+        for (let index = 0; index < bytesRead; index++) {
+          if (buffer[index] !== 10) continue;
+          const tail = buffer.subarray(start, index);
+          // Decode only complete lines: a chunk can split a UTF-8 code point.
+          const text = fragments.length === 0 ? tail.toString("utf8") : Buffer.concat([...fragments, tail], fragmentBytes + tail.length).toString("utf8");
+          lines.push({ number: line++, text, terminated: true, truncatedStart });
+          fragments = []; fragmentBytes = 0;
+          truncatedStart = false; start = index + 1;
+          offset = readOffset + start;
+          if (lines.length === maxLines) break;
+        }
+        if (lines.length < maxLines && start < bytesRead) {
+          // The read buffer is reused. Retain only the unfinished line, not
+          // the rest of the log; concatenate once, rather than on each chunk.
+          const fragment = Buffer.from(buffer.subarray(start, bytesRead));
+          fragments.push(fragment); fragmentBytes += fragment.length;
+        }
+        readOffset += bytesRead;
       }
-      if (ended && lines.length < maxLines && start < buffer.length) {
-        lines.push({ number: line++, text: buffer.subarray(start).toString("utf8"), terminated: false, truncatedStart });
-        start = buffer.length;
+      if (ended && lines.length < maxLines && fragmentBytes > 0) {
+        lines.push({ number: line++, text: Buffer.concat(fragments, fragmentBytes).toString("utf8"), terminated: false, truncatedStart });
+        offset = readOffset;
       }
-      offset += start;
       return { lines, cursor: { offset, line }, droppedLines: Math.max(0, state.base.line - position.line) };
     } finally { await file.close(); }
   }

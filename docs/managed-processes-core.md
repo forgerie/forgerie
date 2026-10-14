@@ -70,7 +70,7 @@ The layout is `<stateDirectory>/managed-processes/<sessionId>/<id>/`:
   writes it with fsync and atomic rename. Example: `signal\nkilled\nKILL\n`.
 - `lost.json`: durable evidence that a process was classified lost.
 - `stdin`, `stdin.eof`: mode-0600 FIFOs.
-- `keeper.sh`, `result.cjs`: copied launch helpers, independent of a Forgerie
+- `keeper.sh`, `result.sh`: copied launch helpers, independent of a Forgerie
   source/build-directory move. Temporary metadata files can remain after a crash.
 
 Directories use mode 0700; private files use 0600. Records are read from disk,
@@ -100,6 +100,15 @@ It does not use `RemainAfterExit`. `StandardInput=null` also applies to
 `ExecStopPost`, so the hook cannot hang opening stdin. Percent signs in transient
 D-Bus path properties are literal; do not double them as if writing a unit file.
 The command is passed as an argv element, not interpolated into the wrapper.
+
+The copied result hook runs with `/bin/sh`, not the Node executable from launch
+time. Launcher preparation rejects a missing or non-executable `/bin/sh`. The
+hook uses shell builtins and GNU `sync` plus `mv` from stable system paths:
+`/run/current-system/sw/bin` on NixOS, then `/usr/bin` or `/bin`. It does not use
+the command's PATH or resolve those paths to a Nix store path. GNU `sync` with a
+file operand calls fsync: the hook flushes `result.tmp`, renames it to `result`
+on the same filesystem, then flushes the containing directory. Failures stop
+the hook. The result keeps its three-line format and mode 0600.
 
 The keeper opens stdin with `exec 3<>fifo`. A helper owns that write end while
 the wrapper execs the command. Opening/closing `stdin.eof` releases the helper.
@@ -143,6 +152,14 @@ line with `terminated: false`. Acknowledging it prevents another delivery.
 Text decodes as UTF-8; a cut through a code point can yield a replacement
 character, with the truncation flag set.
 
+The reader reads at most 64 KiB per filesystem read and stops after the requested
+line count, rather than loading the remaining retained log for every batch.
+A batch can read ahead by less than one chunk. Long lines need multiple chunks;
+only an unfinished line is buffered across chunks, and UTF-8 decoding waits
+until the line is complete. A running unterminated line still needs to be read
+again on the next call because its cursor has not advanced. Retention scans
+remain separate and can read the discarded prefix when applying the cap.
+
 The reader preserves the shared file's newline order. It cannot separate
 stdout from stderr or repair application writes that interleave inside a line.
 In the real acceptance test, 50 simultaneous pairs of 100,000-byte lines, one
@@ -161,9 +178,11 @@ mixed line. That is application write framing, not a reader boundary to infer.
   Non-Linux retention needs a separate implementation and is not proven here.
 - The logical sparse-file size grows. Use allocated-size tools (`du`), and
   sparse-aware backup/copy. Do not externally rotate or truncate the log.
-- Helpers are copied into state, but `ExecStopPost` still refers to the launch
-  Node executable. Deployments must retain that executable while units use it
-  (notably across a Nix garbage collection).
+- The result hook requires GNU `sync` and `mv` at the stable system paths above.
+  It reports an error if they are unavailable; it does not publish an unflushed
+  result. No Node GC root is needed for newly launched units. Units launched
+  before this fix still use their original Node hook and need that executable
+  retained until they exit; this change does not alter live unit properties.
 - The result hook can fail if its cwd disappears or the disk is full. Without
   a saved result, recovery reports lost; it never guesses success.
 - No reboot, OOM, physical power-loss, remote filesystem, or non-Linux proof was

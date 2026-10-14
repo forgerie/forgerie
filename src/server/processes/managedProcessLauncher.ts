@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { open } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, open } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { atomicWrite, hasCode } from "./managedProcessFiles.js";
@@ -24,7 +25,7 @@ export class SystemdManagedProcessLauncher implements ManagedProcessLauncher {
   async launch(record: ManagedProcessRecord): Promise<void> {
     const { unit, slice } = managedProcessUnits(record.sessionId, record.id);
     const output = join(record.directory, "output.log");
-    const hook = [process.execPath, join(record.directory, "result.cjs"), join(record.directory, "result")].map(unitArgument).join(" ");
+    const hook = ["/bin/sh", join(record.directory, "result.sh"), record.directory].map(unitArgument).join(" ");
     // A user manager can have a different environment from Forgerie. Do not
     // accidentally reintroduce daemon-only keys through manager inheritance.
     const inherited = (await this.control(["show-environment"])).stdout.split("\n").map((line) => line.split("=")[0] ?? "");
@@ -138,6 +139,8 @@ function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 /** Same user-manager probe as LocalWorkspaceServicesLauncher.prepare(). */
 export async function prepareManagedProcessLauncher(environment: NodeJS.ProcessEnv = process.env): Promise<ManagedProcessLauncher> {
   if (process.platform === "win32") throw new Error("Managed processes require a Unix-like host");
+  try { await access("/bin/sh", constants.X_OK); }
+  catch (cause) { throw new Error("Managed processes require an executable /bin/sh", { cause }); }
   try {
     await execute("systemctl", ["--user", "show", "--property=SystemState"], { env: environment, timeout: 5000 });
     return new SystemdManagedProcessLauncher(environment);

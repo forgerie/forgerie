@@ -1,8 +1,12 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
+import { prepareProcessFiles } from "./managedProcessIo.js";
+import { readResult } from "./managedProcessFiles.js";
 import { AttachedManagedProcessLauncher, managedProcessUnits, prepareManagedProcessLauncher } from "./managedProcessLauncher.js";
 import { ManagedProcesses } from "./managedProcesses.js";
 import type { ManagedProcessInputResult, ManagedProcessSnapshot } from "./managedProcessTypes.js";
@@ -94,5 +98,35 @@ describe("attached managed process launcher", () => {
       await writeFile(join(record.directory, "result"), "success");
       await expect(manager.status("corrupt")).rejects.toThrow("Invalid managed process result");
     } finally { await manager.dispose(); }
+  });
+});
+
+
+describe("durable result hook", () => {
+  it.each([
+    ["success", "exited", "0"],
+    ["exit-code", "exited", "3"],
+    ["timeout", "killed", "KILL"],
+    ["signal", "killed", "KILL"],
+  ])("records %s/%s/%s without Node or the caller's PATH", async (result, code, status) => {
+    const directory = await mkdtemp(join(tmpdir(), 'managed-result %h $HOME "quote"-')); directories.push(directory);
+    await prepareProcessFiles({
+      version: 1, id: "result", sessionId: "hook", directory, cwd: directory,
+      command: "exit 0", environment: {}, stopTimeoutSeconds: 1,
+      createdAt: new Date().toISOString(), supervision: { kind: "systemd" },
+    });
+    // Publication must replace the previous inode, not truncate it.
+    // The hook needs no systemd manager.
+    await writeFile(join(directory, "result"), "previous\nexited\n1\n");
+    const before = await stat(join(directory, "result"));
+    await promisify(execFile)("/bin/sh", [join(directory, "result.sh"), directory], {
+      env: { PATH: "/nonexistent", SERVICE_RESULT: result, EXIT_CODE: code, EXIT_STATUS: status },
+    });
+    expect(await readFile(join(directory, "result"), "utf8")).toBe(`${result}\n${code}\n${status}\n`);
+    expect(await readResult(directory)).toEqual({ result, code, status });
+    const after = await stat(join(directory, "result"));
+    expect(after.ino).not.toBe(before.ino);
+    expect(after.mode & 0o777).toBe(0o600);
+    await expect(stat(join(directory, "result.tmp"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

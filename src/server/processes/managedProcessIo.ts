@@ -26,20 +26,33 @@ main=$$
   kill -KILL -"$main" 2>/dev/null
 } 3<&- &
 ${keeper.replace("f=$1; shift\n", "")}`;
-const resultWriter = `const fs = require('node:fs');
-const file = process.argv[2];
-const content = [process.env.SERVICE_RESULT || 'unknown', process.env.EXIT_CODE || '', process.env.EXIT_STATUS || '', ''].join('\\n');
-const fd = fs.openSync(file + '.tmp', 'w', 0o600);
-try { fs.writeFileSync(fd, content); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-fs.renameSync(file + '.tmp', file);
-const dir = fs.openSync(require('node:path').dirname(file), 'r');
-try { fs.fsyncSync(dir); } finally { fs.closeSync(dir); }
+// Resolve only stable system paths, never PATH or a Nix store path captured at
+// launch. GNU sync with file operands calls fsync (including for directories).
+const resultWriter = `set -eu
+umask 077
+for tools in /run/current-system/sw/bin /usr/bin /bin; do
+  if [ -x "$tools/sync" ] && [ -x "$tools/mv" ]; then
+    case "$("$tools/sync" --version)" in
+      *"GNU coreutils"*) break ;;
+    esac
+  fi
+  tools=
+done
+if [ -z "$tools" ]; then
+  printf '%s\\n' 'Managed process result requires GNU sync and mv at stable system paths' >&2
+  exit 1
+fi
+cd "$1"
+printf '%s\\n' "\${SERVICE_RESULT:-unknown}" "\${EXIT_CODE:-}" "\${EXIT_STATUS:-}" > result.tmp
+"$tools/sync" -- result.tmp
+"$tools/mv" -f -- result.tmp result
+"$tools/sync" -- .
 `;
 export async function prepareProcessFiles(record: ManagedProcessRecord): Promise<void> {
   await writeFile(join(record.directory, "output.log"), "", { flag: "wx", mode: 0o600 });
   await execute("mkfifo", ["-m", "600", join(record.directory, "stdin"), join(record.directory, "stdin.eof")]);
   await writeFile(join(record.directory, "keeper.sh"), record.supervision.kind === "attached" ? attachedKeeper : keeper, { mode: 0o600 });
-  await writeFile(join(record.directory, "result.cjs"), resultWriter, { mode: 0o600 });
+  await writeFile(join(record.directory, "result.sh"), resultWriter, { mode: 0o600 });
 }
 
 /** Never waits for a reader or free pipe capacity. Retry only the unwritten suffix. */

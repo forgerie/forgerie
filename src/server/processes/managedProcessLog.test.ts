@@ -12,6 +12,49 @@ async function setup(capBytes: number) {
   return { directory, file, log: new ManagedProcessLog(directory, capBytes) };
 }
 describe("managed process log retention", () => {
+  it.skipIf(process.platform !== "linux")("drains an 8 MiB log in bounded reads with unchanged offsets and line numbers", async () => {
+    const size = 8 * 1024 * 1024;
+    const { file, log } = await setup(size);
+    await writeFile(file, "x\n".repeat(size / 2));
+    const bytesRead = async () => {
+      const io = await readFile("/proc/self/io", "utf8");
+      const match = /^rchar: (\d+)$/m.exec(io);
+      if (match?.[1] === undefined) throw new Error("Missing Linux read-byte counter");
+      return Number(match[1]);
+    };
+    let cursor = { offset: 0, line: 1 };
+    while (cursor.offset < size) {
+      const maxLines = cursor.offset === 0 ? 1 : 10_000;
+      const before = await bytesRead();
+      const batch = await log.read(true, { cursor, maxLines });
+      const read = await bytesRead() - before;
+      // Include the /proc counter and metadata reads, but not the retained tail.
+      expect(read).toBeLessThanOrEqual(64 * 1024 + 4096);
+      const count = Math.min(maxLines, (size - cursor.offset) / 2);
+      expect(batch.lines.length).toBe(count);
+      expect(batch.lines.every((line, index) => line.number === cursor.line + index && line.text === "x" && line.terminated && !line.truncatedStart)).toBe(true);
+      expect(batch.cursor).toEqual({ offset: cursor.offset + count * 2, line: cursor.line + count });
+      expect(batch.droppedLines).toBe(0);
+      cursor = batch.cursor;
+    }
+    expect((await log.read(true, { cursor })).lines).toEqual([]);
+  });
+  it("joins long lines across chunks without splitting UTF-8 or advancing an unfinished line", async () => {
+    const { file, log } = await setup(1024 * 1024);
+    const first = "x".repeat(64 * 1024 - 1) + "😀" + "y".repeat(64 * 1024);
+    const tail = "é".repeat(64 * 1024);
+    await writeFile(file, first + "\n" + tail);
+    const running = await log.read(false);
+    expect(running.lines).toEqual([{ number: 1, text: first, terminated: true, truncatedStart: false }]);
+    expect(running.cursor).toEqual({ offset: Buffer.byteLength(first) + 1, line: 2 });
+    await log.acknowledge(running.cursor);
+    expect((await log.read(false)).cursor).toEqual(running.cursor);
+    const ended = await log.read(true);
+    expect(ended.lines).toEqual([{ number: 2, text: tail, terminated: false, truncatedStart: false }]);
+    expect(ended.cursor).toEqual({ offset: Buffer.byteLength(first + "\n" + tail), line: 3 });
+    await log.acknowledge(ended.cursor);
+    expect((await log.read(true)).lines).toEqual([]);
+  });
   it("lets a panel browse output without changing the durable event-reader position", async () => {
     const { file, log } = await setup(100);
     await appendFile(file, "one\ntwo\n");
