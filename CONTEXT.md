@@ -46,7 +46,7 @@ A setting, global or per workflow, under which a workflow's land stop passes wit
 ## Processes
 
 **Managed process**:
-A command that an agent or the user starts in the background from a session. The session owns it. It keeps running when Forgerie restarts, and it ends only when someone stops it, when it exits, or at session close.
+A command that an agent starts in the background from a session. The session owns it. It keeps running when Forgerie restarts, and it ends only when someone stops it, when it exits, or at session close.
 _Avoid_: Background job, background task, service
 
 **Workspace service**:
