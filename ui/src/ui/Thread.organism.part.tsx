@@ -4,6 +4,7 @@ import type { StateChecks } from "@simonwjackson/caliper/checks";
 import type { EarlierHistory } from "../historyPaging";
 import type { TranscriptMessage } from "../transcript";
 import { useThreadMessages } from "../useThreadMessages";
+import { HeaderButton } from "./HeaderButton";
 import { SessionFrame } from "./SessionFrame";
 import { Thread } from "./Thread";
 
@@ -71,8 +72,10 @@ function streamedReply(id: string, paragraphs: number): TranscriptMessage {
  * identity, older pages arrive above them, and `onLoadEarlier` settles only
  * after the prepend is drawn. Sending a message streams a reply.
  */
-function Scenario({ title, first, earlier: start, older }: {
+function Scenario({ title, first, earlier: start, older, hits }: {
   title: string;
+  /** Message ids a search would step through; the header's action reveals the next one, as a search does. */
+  hits?: readonly string[] | undefined;
   first: readonly TranscriptMessage[];
   earlier?: EarlierHistory | undefined;
   /** The pages above `first`, nearest first. An undefined page means the history ends. */
@@ -81,6 +84,7 @@ function Scenario({ title, first, earlier: start, older }: {
   const [messages, setMessages] = useState<readonly TranscriptMessage[]>(first);
   const [earlier, setEarlier] = useState<EarlierHistory | undefined>(start);
   const [running, setRunning] = useState(false);
+  const [hit, setHit] = useState<number>();
   const loaded = useRef(0);
   const drawn = useRef<(() => void) | undefined>(undefined);
   useEffect(() => { drawn.current?.(); drawn.current = undefined; }, [messages, earlier]);
@@ -111,8 +115,11 @@ function Scenario({ title, first, earlier: start, older }: {
   const threadMessages = useThreadMessages(messages, running);
   const runtime = useExternalStoreRuntime({ messages: threadMessages, isRunning: running, onNew, onCancel: async () => undefined,
     hasEarlier: earlier !== undefined && earlier.type !== "complete", onLoadEarlier: earlier === undefined ? undefined : onLoadEarlier });
+  const reveal = hits && hit !== undefined ? { messageId: hits[hit % hits.length]!, key: String(hit) } : undefined;
   return <AssistantRuntimeProvider runtime={runtime}>
-    <SessionFrame name={title}><Thread earlier={earlier} /></SessionFrame>
+    <SessionFrame name={title} actions={hits && <HeaderButton label="Next search hit" onPress={() => setHit((current) => (current ?? -1) + 1)} />}>
+      <Thread earlier={earlier} reveal={reveal} />
+    </SessionFrame>
   </AssistantRuntimeProvider>;
 }
 
@@ -140,7 +147,11 @@ export function StartOfChat() {
 export function NoPaging() {
   return <Scenario title="Paging" first={newest} />;
 }
-/** The fast-chat-open huge fixture's newest page, with 1494 more turns above it. Sending a message streams a reply. */
+/**
+ * The fast-chat-open huge fixture's newest page, with 1494 more turns above it. Sending a message streams a reply.
+ * Next search hit reveals turns 1499, 1484 and 1490 in turn, once those pages are loaded.
+ */
 export function Paging() {
-  return <Scenario title="Huge fixture" first={fixturePage(FIXTURE_TURNS)} earlier={{ type: "available" }} older={fixtureOlder} />;
+  return <Scenario title="Huge fixture" first={fixturePage(FIXTURE_TURNS)} earlier={{ type: "available" }} older={fixtureOlder}
+    hits={["user-1499", "user-1484", "user-1490"]} />;
 }
