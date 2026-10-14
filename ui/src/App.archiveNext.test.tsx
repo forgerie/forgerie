@@ -24,7 +24,7 @@ const until = async (condition: () => boolean) => {
   await act(async () => { await expect.poll(condition, { timeout: 3000 }).toBe(true); });
 };
 const openId = () => new URLSearchParams(window.location.search).get("session");
-const archiveButton = () => document.querySelector<HTMLButtonElement>('button[aria-label="Archive and next"]');
+const archiveButton = () => [...document.querySelectorAll<HTMLButtonElement>('button[aria-label="Archive and next"]')].find(node => !node.closest('[style*="display: none"]')) ?? null;
 const connected = () => document.querySelector(".status-chip-live")?.textContent === "Connected";
 const press = (node: HTMLElement | null) => act(async () => { node!.click(); });
 

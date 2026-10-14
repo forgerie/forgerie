@@ -75,7 +75,7 @@ it.each([false, true])("restores Stop's returned queue only to chat, with a dela
     await type("my current answer");
   }
   await act(async () => releaseAbort!());
-  await until(() => request.mock.calls.filter(([path]) => path.includes("/status?")).length >= 2);
+  await until(() => request.mock.calls.filter(([path]) => path.includes("/open?")).length === 1 && request.mock.calls.filter(([path]) => path.includes("/status?")).length === 1);
   if (opensAsk) {
     expect(input().value).toBe("my current answer");
     await emit({ type: "ask.closed", askId: "new-ask", reason: "cancelled" });
