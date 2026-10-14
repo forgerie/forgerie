@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket as Socket } from "ws";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ForgerieSession } from "./ForgerieSession";
 import { browserTransport } from "./sessionStore";
+import { withOpenFixture } from "./testing/openFixture";
 import type { SessionStatus } from "./contracts";
 import { EMPTY, IDLE_BACKGROUND } from "./session/fixtures/taskActivity";
 
@@ -40,7 +41,7 @@ async function idleSession(tasks: { status: number; body: unknown }) {
   if (typeof address === "string" || !address) throw new Error("No socket port");
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
-  vi.spyOn(browserTransport, "request").mockImplementation(async (path) => {
+  vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path) => {
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.startsWith("/api/sessions/test/tasks?")) { state.reads += 1; return Response.json(state.tasks.body, { status: state.tasks.status }); }
     if (path.includes("/gated-actions?") || path.includes("/decisions?") || path.includes("/children?")) return Response.json([]);
@@ -50,7 +51,7 @@ async function idleSession(tasks: { status: number; body: unknown }) {
     if (path.includes("/status?")) return Response.json(idle);
     if (path.includes("/commands?")) return Response.json([]);
     return Response.json({ error: "Not found" }, { status: 404 });
-  });
+  }));
   await act(async () => root.render(<ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={() => {}} />));
   return state;
 }

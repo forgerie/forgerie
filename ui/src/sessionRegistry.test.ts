@@ -21,7 +21,8 @@ describe("six-entry session lifetime", () => {
     await vi.waitFor(() => expect(api.registry.getSnapshot().every(record => record.state === "seeded")).toBe(true));
     expect(api.sockets.clients.size).toBe(6);
     expect(api.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(6);
-    await vi.waitFor(() => expect(api.requests).toHaveLength(48)); // All initial panel refresh timers have finished.
+    // All initial panel refresh timers have finished: six entries × (open + eight panel reads, including the task list).
+    await vi.waitFor(() => expect(api.requests).toHaveLength(54));
     expect(api.registry.select(session("s1"))).toBe(prefetched);
     const requests = api.requests.length;
     await new Promise(resolve => setTimeout(resolve, 20)); expect(api.requests).toHaveLength(requests);
