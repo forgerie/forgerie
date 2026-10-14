@@ -14,6 +14,7 @@ import { useFullscreen } from "./ui/useFullscreen";
 import { Picker, PickerToast, type PickerFilter, type PickerSearch } from "./ui/Picker";
 import { SessionFrame } from "./ui/SessionFrame";
 import { StatusChip } from "./ui/StatusChip";
+import { StatusDetail } from "./session/StatusDetail";
 import { browserStorage, createDraftStore } from "./draftStore";
 import { NewSession, type LaunchDraft, type LaunchMode, type Placement } from "./NewSession";
 import { createWorktreeApi, type WorktreeRecord } from "./worktrees/worktreeApi";
@@ -477,8 +478,21 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       onStarted={(session, unsent) => switchSession(session, unsent?.draft, unsent?.error)} onClose={closeComposer} />
     : null;
   const transcriptVisible = settings === undefined && backlog === undefined && triggerPlace === undefined && composing === undefined;
-  useEffect(() => { if (known) registry.select(known); }, [registry, known?.id, known?.cwd]);
-  useEffect(() => { registry.setVisible(transcriptVisible && selectedId !== undefined); }, [registry, transcriptVisible, selectedId]);
+  const selectedChat = kept.find(record => record.visited && record.entry.session.id === selectedId);
+  const selectedSession = known ?? selectedChat?.entry.session;
+  const hasSelectedChat = selectedChat !== undefined;
+  useEffect(() => { if (selectedSession) registry.select(selectedSession); }, [registry, selectedSession?.id, selectedSession?.cwd]);
+  // An unresolved URL must not leave the previous, now hidden store eligible to acknowledge.
+  useEffect(() => { registry.setVisible(transcriptVisible && hasSelectedChat); }, [registry, transcriptVisible, selectedId, hasSelectedChat]);
+  const selectionFailure = known ? undefined : picker.view.connection.type === "failed" ? picker.view.connection.message
+    : picker.view.connection.type === "ready" ? `Session ${selectedId ?? ""} was not found. Check the session ID in the URL.` : undefined;
+  const pendingChat = selectedId && !hasSelectedChat ? <SessionFrame name={known?.name ?? "Session"}
+    status={<StatusChip label={selectionFailure ? "Disconnected" : "Connecting"} tone={selectionFailure ? "bad" : "neutral"}
+      panel={selectionFailure ? { title: "Disconnected", children: <StatusDetail connection={{ type: "failed", reason: selectionFailure }}
+        problems={[]} draftSaved={false} onTryNow={picker.actions.onRetry} onReload={() => window.location.reload()}
+        onDismiss={() => { /* No transcript problems exist before resolution. */ }} /> } : undefined} />}>
+    <div className="thread-empty" />
+  </SessionFrame> : null;
   const chats = kept.filter(record => record.visited).map(record => {
     const entry = record.entry;
     const id = entry.session.id;
@@ -505,7 +519,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       onOpenSession: (session) => switchSession(session), sessionName: (id) => picker.find(id)?.name })
     : composing === "" && !composeItem && !selectedId
       ? <SessionFrame name="New session" status={<StatusChip label="No project" tone="bad" panel={{ title: "No project", children: <p>Forgerie knows no project yet, and this app cannot add one yet.</p> }} />}><div className="thread-empty" /></SessionFrame>
-    : selectedId ? null
+    : selectedId ? pendingChat
     // The picker covers this area whenever nothing is selected, so it holds no
     // message of its own: the picker is the instruction.
     : <SessionFrame name="No session open"><div className="thread-empty" /></SessionFrame>;
@@ -522,7 +536,6 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
         triggers: triggers ? { title: triggers.entry.title, chip: triggers.entry.chip } : undefined,
         onFullscreen: fullscreen.state.type === "unsupported" ? undefined : fullscreen.toggle, fullscreen: fullscreen.state.type === "fullscreen",
         onClose: layout === "overlay" && (selectedId || settings || backlog || triggerPlace) ? () => setOpen(false) : undefined }} />}
-    // `known` is read once, when the thread mounts for this id. A direct URL
-    // load before the catalog arrives passes nothing and the store looks it up.
+    // Direct URLs retain the frame while the catalog resolves; only resolved sessions join the registry.
     thread={<>{chats}{thread}{dialog}</>} />{toast}</>;
 }

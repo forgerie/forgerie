@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { withOpenFixture } from "./testing/openFixture";
+import { openFixture } from "./testing/openFixture";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { WebSocket as Socket, WebSocketServer } from "ws";
@@ -19,6 +19,8 @@ let refuse: (id: string) => string | undefined;
 let running: Set<string>;
 /** When set, POST /archive waits for it. */
 let hold: Promise<void> | undefined;
+/** Direct URL resolution waits for this catalog response when supplied. */
+let catalogResponse: Promise<Response> | undefined;
 
 const until = async (condition: () => boolean) => {
   await act(async () => { await expect.poll(condition, { timeout: 3000 }).toBe(true); });
@@ -44,7 +46,7 @@ beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   archived = new Set(); posts = []; running = new Set();
   refuse = () => undefined;
-  hold = undefined;
+  hold = undefined; catalogResponse = undefined;
   window.history.replaceState({}, "", "/?session=a");
   server = new WebSocketServer({ port: 0 });
   await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -52,7 +54,7 @@ beforeEach(async () => {
   if (typeof address === "string" || !address) throw new Error("No socket port");
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
-  vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
+  vi.spyOn(browserTransport, "request").mockImplementation(async (path, init) => {
     if (path.endsWith("/unread/acknowledge")) return Response.json({ catalogId: "test", sessions: [] });
     if (init.method === "POST") {
       posts.push(path);
@@ -64,17 +66,19 @@ beforeEach(async () => {
       if (id[2] === "archive") archived.add(id[1]!); else archived.delete(id[1]!);
       return Response.json({ ok: true });
     }
-    if (path === "/api/sessions/all") return Response.json(listing());
+    if (path === "/api/sessions/all") return catalogResponse ?? Response.json(listing());
     if (path === "/api/sessions/asks") return Response.json({ sessions: [{ id: "c", pendingAsk: { askId: "q" } }] });
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [{ sessionId: "b", cwd: "/w", completionOrder: 2 }, { sessionId: "a", cwd: "/w", completionOrder: 1 }] });
     if (path === "/api/machines/local/projects") return Response.json([]);
     const session = /^\/api\/sessions\/([^/]+)\//u.exec(path)?.[1];
+    if (path.includes("/open?")) return Response.json(openFixture({ session: { id: session ?? "a", cwd: "/w", name: listing().sessions.find(item => item.id === session)?.name },
+      status: { ...idle, isStreaming: running.has(session ?? ""), queuedMessages: [] } }));
     if (path.includes("/messages?")) return Response.json({ messages: [], start: 0, total: 0 });
     if (path.includes("/stream-snapshot?")) return Response.json({ partial: null, seq: 0 });
     if (path.includes("/status?")) return Response.json({ ...idle, isStreaming: running.has(session ?? ""), queuedMessages: [] });
     if (path.includes("/commands?")) return Response.json([]);
     return Response.json({ error: `Not in this fixture: ${path}` }, { status: 404 });
-  }));
+  });
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => {
@@ -159,5 +163,59 @@ describe("archive and next", () => {
     await until(() => document.querySelector(".status-chip-live")?.textContent === "Running");
     expect(archiveButton()?.disabled).toBe(true);
     expect(archiveButton()?.title).toBe("Archive and next: Stop the run first");
+  });
+});
+
+
+describe("unresolved direct session URLs", () => {
+  const activeShells = () => [...document.querySelectorAll<HTMLElement>(".app-thread .session-shell")].filter(node => !node.closest('[style*="display: none"]'));
+  const activeStatus = () => activeShells()[0]?.querySelector(".status-chip-live")?.textContent;
+  const details = () => activeShells()[0]?.querySelector<HTMLButtonElement>(".status-chip-face") ?? null;
+  it("keeps the session shell and Sessions opener while resolving, then explains a missing session", async () => {
+    window.history.replaceState({}, "", "/?session=missing");
+    let release!: (response: Response) => void;
+    catalogResponse = new Promise(resolve => { release = resolve; });
+    await act(async () => root.render(<App />));
+    await until(() => activeStatus() === "Connecting");
+    expect(activeShells()).toHaveLength(1);
+    expect(activeShells()[0]?.querySelector('button[aria-label="Sessions"]')).not.toBeNull();
+    await act(async () => { release(Response.json(listing())); });
+    await until(() => activeStatus() === "Disconnected");
+    await press(details());
+    expect(activeShells()[0]?.textContent).toContain("Session missing was not found. Check the session ID in the URL.");
+    expect(openId()).toBe("missing");
+    expect(vi.mocked(browserTransport.request).mock.calls.some(([path]) => path.startsWith("/api/sessions/missing/"))).toBe(false);
+  });
+  it("replaces the loading shell with exactly one resolved chat and one transcript open", async () => {
+    let release!: (response: Response) => void;
+    catalogResponse = new Promise(resolve => { release = resolve; });
+    await act(async () => root.render(<App />));
+    await until(() => activeStatus() === "Connecting");
+    expect(activeShells()).toHaveLength(1);
+    await act(async () => { release(Response.json(listing())); });
+    await until(() => activeStatus() === "Connected");
+    expect(activeShells()).toHaveLength(1);
+    expect(activeShells()[0]?.querySelector("h1")?.textContent).toBe("Alpha");
+    expect(vi.mocked(browserTransport.request).mock.calls.filter(([path]) => path.startsWith("/api/sessions/a/open?"))).toHaveLength(1);
+  });
+  it("shows the catalog failure instead of a blank thread or a false not-found error", async () => {
+    window.history.replaceState({}, "", "/?session=missing");
+    catalogResponse = Promise.resolve(Response.json({ sessions: "invalid catalog" }));
+    await act(async () => root.render(<App />));
+    await until(() => activeStatus() === "Disconnected");
+    await press(details());
+    expect(activeShells()[0]?.textContent).toContain("The server sent a session list this client cannot read");
+    expect(activeShells()[0]?.textContent).not.toContain("was not found");
+    expect(activeShells()[0]?.querySelector('button[aria-label="Sessions"]')).not.toBeNull();
+  });
+  it("keeps a cached chat hidden when navigation selects a missing URL", async () => {
+    await start();
+    await act(async () => {
+      window.history.pushState({}, "", "/?session=missing"); window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await until(() => activeStatus() === "Disconnected");
+    expect(activeShells()).toHaveLength(1);
+    expect(activeShells()[0]?.querySelector("h1")?.textContent).toBe("Session");
+    expect([...document.querySelectorAll(".session-shell")].some(node => node.querySelector("h1")?.textContent === "Alpha")).toBe(true);
   });
 });
