@@ -56,13 +56,42 @@ const runs = (count: number) => count > 1 ? `, ${String(count)} runs` : "";
 function workerStatus(mine: readonly Child[], look: ChildLook | undefined, progress: StageProgress, now: number): string {
   const last = mine.at(-1);
   if (last === undefined) return progress === "next" ? "Not started" : "Starts when the agent sends its task";
-  if (last.state.kind === "working") {
+  const working = last.state.kind === "working";
+  // A settled worker can take a follow-up message; the session's child says so before the run's record does.
+  if (working || look?.busy === true || look?.asking === true) {
     if (look?.asking === true) return "Waiting for your answer";
     if (look?.retry !== undefined) return `${retryCount(look.retry)}. ${retryWait(look.retry, now)}`;
+    if (!working) return "Working on a follow-up";
     return mine.length > 1 ? `Working, run ${String(mine.length)}` : "Working";
   }
-  const outcome = last.state.outcome === "failed" ? "Failed" : last.state.outcome === "stopped" ? "Stopped" : "Done";
+  const outcome = last.state.kind === "settled" && last.state.outcome === "failed" ? "Failed"
+    : last.state.kind === "settled" && last.state.outcome === "stopped" ? "Stopped" : "Done";
   return `${outcome}${runs(mine.length)}`;
+}
+
+/** The session's child for a worker's latest run: by its conversation when the session names it, else by the worker's name. */
+function lookOf(looks: readonly ChildLook[], name: string, last: Child | undefined): ChildLook | undefined {
+  return looks.find((look) => last !== undefined && look.conversationId === last.conversationId) ?? looks.find((look) => look.name === name);
+}
+
+/**
+ * What a worker's runs say, with the session's child where it knows more: a settled worker that took a follow-up
+ * message is busy again, so Stop reaches it, and its follow-up counts as one more block.
+ */
+function workerFacts(name: string, mine: readonly Child[], looks: readonly ChildLook[], progress: StageProgress, now: number) {
+  const last = mine.at(-1);
+  const look = lookOf(looks, name, last);
+  const working = last?.state.kind === "working";
+  const followUp = last !== undefined && !working && (look?.busy === true || look?.asking === true);
+  const tones: BlockTone[] = mine.map((child) => toneOf(child, look));
+  if (followUp) tones.push(look?.asking === true ? "needs" : "live");
+  return {
+    look, tones, status: workerStatus(mine, look, progress, now),
+    busy: last === undefined ? false : look?.busy ?? working, started: mine.length > 0, conversationId: last?.conversationId,
+    note: last?.state.kind === "settled" && !followUp ? deliveryNote(last.state) : undefined,
+    problem: last?.state.kind === "settled" ? deliveryProblem(last.state) : undefined,
+    retry: working || followUp ? look?.retry : undefined,
+  };
 }
 
 function stopStatus(stage: WorkflowStage, run: WorkflowRun): string {
@@ -89,19 +118,9 @@ export function liveRoute(run: WorkflowRun, looks: readonly ChildLook[] = [], no
       .filter((name, index, all) => all.indexOf(name) === index);
     const workers = names.map((name): LiveWorker => {
       const declared = stage.workers?.find((worker) => worker.name === name);
-      const mine = records.filter((child) => child.name === name);
-      const look = looks.find((candidate) => candidate.name === name);
-      const last = mine.at(-1);
-      const working = last?.state.kind === "working";
-      return {
-        key: `${stage.id}/${name}`, name, agent: declared?.agent ?? look?.agent ?? undefined, model: declared?.model, declared: declared !== undefined,
-        tones: mine.length === 0 ? ["faint"] : mine.map((child) => toneOf(child, look)),
-        status: workerStatus(mine, look, progress, now),
-        busy: working && (look?.busy ?? true), started: mine.length > 0, conversationId: last?.conversationId,
-        note: last?.state.kind === "settled" ? deliveryNote(last.state) : undefined,
-        problem: last?.state.kind === "settled" ? deliveryProblem(last.state) : undefined,
-        retry: working ? look?.retry : undefined,
-      };
+      const { look, tones, ...facts } = workerFacts(name, records.filter((child) => child.name === name), looks, progress, now);
+      return { key: `${stage.id}/${name}`, name, agent: declared?.agent ?? look?.agent ?? undefined, model: declared?.model, declared: declared !== undefined,
+        tones: tones.length === 0 ? ["faint"] : tones, ...facts };
     });
     const stopTone: BlockTone | undefined = stage.stop === undefined ? undefined : progress === "waiting" ? "needs" : progress === "done" ? "plain" : "faint";
     const status = stage.stop !== undefined ? stopStatus(stage, run) : workers.length === 0 ? stage.does : undefined;
@@ -116,14 +135,8 @@ export function liveRoute(run: WorkflowRun, looks: readonly ChildLook[] = [], no
 export function proseWorkers(run: WorkflowRun, looks: readonly ChildLook[] = [], now = 0): LiveWorker[] {
   const names = run.children.map((child) => child.name).filter((name, index, all) => all.indexOf(name) === index);
   return names.map((name) => {
-    const mine = run.children.filter((child) => child.name === name);
-    const look = looks.find((candidate) => candidate.name === name);
-    const last = mine.at(-1);
-    const working = last?.state.kind === "working";
-    return { key: `/${name}`, name, agent: look?.agent ?? undefined, declared: false, tones: mine.map((child) => toneOf(child, look)),
-      status: workerStatus(mine, look, "current", now), busy: working && (look?.busy ?? true), started: true, conversationId: last?.conversationId,
-      note: last?.state.kind === "settled" ? deliveryNote(last.state) : undefined,
-      problem: last?.state.kind === "settled" ? deliveryProblem(last.state) : undefined, retry: working ? look?.retry : undefined };
+    const { look, ...facts } = workerFacts(name, run.children.filter((child) => child.name === name), looks, "current", now);
+    return { key: `/${name}`, name, agent: look?.agent ?? undefined, declared: false, ...facts };
   });
 }
 

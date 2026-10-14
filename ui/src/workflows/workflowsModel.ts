@@ -206,10 +206,15 @@ export function launchInputs(workflow: DeclaresInputs, typed: Readonly<Record<st
 }
 
 /**
- * What a run's children look like to the route: their branch, whether they wait on the reader, whether a turn is in
- * progress, and a retry Forgerie waits to make.
+ * What a run's children look like to the route, as the session's child agents say now: their branch, whether they
+ * wait on the reader, whether a turn is in progress (a direct follow-up too, which the run's record does not show),
+ * and a retry Forgerie waits to make.
  */
-export interface ChildLook { name: string; agent: string | null; branch?: string | undefined; asking: boolean; busy?: boolean | undefined; retry?: ChildRetry | undefined }
+export interface ChildLook {
+  name: string; agent: string | null; branch?: string | undefined; asking: boolean; busy?: boolean | undefined; retry?: ChildRetry | undefined;
+  /** The child's conversation, which ties it to one run of a worker. */
+  conversationId?: number | undefined;
+}
 
 type Settled = Extract<WorkflowRun["children"][number]["state"], { kind: "settled" }>;
 /**

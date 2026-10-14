@@ -579,7 +579,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
       })()}
       {sheetRun !== undefined && <WorkflowSheet mode="run" key={sheetRun.id} run={sheetRun}
         looks={children.children.map((child) => ({ name: child.name, agent: child.agent, branch: child.worktree?.branch, asking: child.questions.length > 0,
-          busy: child.busy, retry: child.retry }))}
+          busy: child.busy, retry: child.retry, conversationId: child.conversationId }))}
         record={children.open === undefined ? undefined : { transcript: children.open.transcript, readError: children.open.error, error: children.error }}
         models={workerModels} deciding={flows.deciding?.startsWith(`${sheetRun.id}/`) === true} error={flows.error} decisions={{ log, actions: logActions }}
         onDecide={(stage, decision, note) => workflows.decide(sheetRun.id, stage, decision, note)}

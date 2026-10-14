@@ -45,6 +45,24 @@ describe("a run's live route", () => {
     expect(asking).toMatchObject({ tones: ["needs"], status: "Waiting for your answer" });
   });
 
+  it("reads a settled worker that took a follow-up message as busy again, from the session's child", () => {
+    // page settled in the run's record; a direct message started a new turn on the same conversation.
+    const followUp = [{ ...LOOKS[1]!, busy: true, conversationId: 42 }];
+    const page = liveRoute(RUN_WORKING, followUp)[1]?.workers.find((worker) => worker.name === "page");
+    expect(page).toMatchObject({ busy: true, status: "Working on a follow-up", tones: ["plain", "live"], conversationId: 42 });
+    expect(modelTiming(page!)).toBe("From its next turn. The turn in progress finishes on its current model.");
+    // A question in the follow-up waits on the reader.
+    const asking = liveRoute(RUN_WORKING, [{ ...followUp[0]!, asking: true }])[1]?.workers.find((worker) => worker.name === "page");
+    expect(asking).toMatchObject({ status: "Waiting for your answer", tones: ["plain", "needs"] });
+    // Another conversation of the same name is not this run's worker.
+    const other = liveRoute(RUN_WORKING, [{ ...followUp[0]!, conversationId: 99 }, { ...LOOKS[1]!, conversationId: 42 }])[1]?.workers.find((worker) => worker.name === "page");
+    expect(other).toMatchObject({ busy: false, status: "Done", tones: ["plain"] });
+    // Without the session's word, the record decides.
+    expect(liveRoute(RUN_WORKING)[1]?.workers.map((worker) => [worker.name, worker.busy])).toEqual([["api", true], ["page", false]]);
+    expect(proseWorkers(PROSE_RUN, [{ name: "reconnect-hunt", agent: "researcher", asking: false, busy: true, conversationId: 62 }])[1])
+      .toMatchObject({ busy: true, status: "Working on a follow-up" });
+  });
+
   it("lists every child of a run without stages", () => {
     expect(proseWorkers(PROSE_RUN).map((worker) => [worker.name, worker.tones, worker.status, worker.declared])).toEqual([
       ["store-hunt", ["live"], "Working", false], ["reconnect-hunt", ["plain"], "Done", false]]);

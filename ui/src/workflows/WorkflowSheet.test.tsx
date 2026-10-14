@@ -262,6 +262,16 @@ describe("a run's sheet", () => {
     expect(headings()).toHaveLength(4);
   });
 
+  it("offers Stop for a settled worker that took a follow-up message", async () => {
+    const { element, handlers } = running({ initialWorker: "port/page", record: { transcript: API_TRANSCRIPT },
+      looks: [LOOKS[0]!, { ...LOOKS[1]!, busy: true, conversationId: 42 }] });
+    await act(async () => root.render(element));
+    expect(sheet().querySelector(".detail-pane-status")?.textContent).toBe("Working on a follow-up");
+    expect(sheet().querySelector<HTMLTextAreaElement>("textarea[aria-label='Message page']")?.placeholder).toBe("Steer page while it works");
+    await press("Stop");
+    expect(handlers.onStopWorker).toHaveBeenCalledWith(42);
+  });
+
   it("changes a worker's model on the run, and back to the session's", async () => {
     const { element, handlers } = running({ run: { ...RUN_WORKING, stages: setWorkerModel(PROPOSAL_STAGES, "page", "openai/gpt-5") }, initialWorker: "port/page" });
     await act(async () => root.render(element));
