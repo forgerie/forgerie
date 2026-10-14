@@ -23,3 +23,11 @@ export function Failed() {
   return <ul><ActionRow name="a-folder-with-a-very-long-name-that-has-to-wrap" status="Cleanup failed" tone="danger"
     detail="The folder is still in use by another program." /></ul>;
 }
+export function QuietAndBelow() {
+  return <ul><ActionRow layout="head" name="Mon, Oct 12, 4:00 AM" status="2 of 4 done, 1 failed" tone="danger" detail="Scheduled"
+    below={<ul>
+      <ActionRow name="letters" status="Failed" tone="danger" detail="The folder is still in use by another program." />
+      <ActionRow name="photos" status="Done" actions={<TextButton label="Open" onPress={() => undefined} />} />
+      <ActionRow name="old-archive" status="Skipped" tone="quiet" detail="The folder is gone." />
+    </ul>} /></ul>;
+}

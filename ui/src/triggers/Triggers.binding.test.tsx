@@ -6,7 +6,7 @@ import type { Trigger, TriggerFire } from "@shared/triggers";
 import { TriggersScreen } from "./Triggers.binding";
 import { useTriggerList } from "./useTriggerList";
 import type { TriggerPlace } from "./triggersModel";
-import { audit, digest, docs, HOST_ZONE, manyList, NOW, nightly, notes, triage } from "./fixtures/triggers";
+import { audit, CALIPER, digest, docs, everywhere, FORGERIE, HOST_ZONE, manyList, NOW, nightly, notes, PI_MONO, spreadNotes, triage } from "./fixtures/triggers";
 import { memoryApi, memoryDirectory, serverRunId, type MemoryStore } from "./fixtures/memoryApi";
 import { TriggerRefusal, type TriggersApi } from "./triggersApi";
 import { createTriggerMemory, type TriggerMemory } from "./triggerMemory";
@@ -53,6 +53,21 @@ const press = async (name: string | RegExp) => {
 /** The field named `label`: an input by its accessible name, or a text box by its label. */
 const field = (label: string) => document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)
   ?? [...document.querySelectorAll("label")].find((node) => node.textContent === label)?.control as HTMLInputElement | HTMLTextAreaElement | null | undefined;
+/** A checkbox in the project picker, by the project's name. */
+const checkbox = (name: string) => [...document.querySelectorAll("label")].find((node) => node.querySelector(".choice-list-label")?.textContent === name)
+  ?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+const check = async (name: string) => {
+  const box = checkbox(name);
+  if (!box) throw new Error(`No checkbox ${name} in: ${text().slice(0, 400)}`);
+  await act(async () => { box.click(); });
+  await flush();
+};
+/** Opens the project picker, checks each project named, and closes it with Done. */
+const chooseProjects = async (...names: string[]) => {
+  await press(/^Target projects:/);
+  for (const name of names) await check(name);
+  await press("Done");
+};
 const type = async (label: string, value: string) => {
   const input = field(label);
   if (!input) throw new Error(`No field ${label}`);
@@ -110,9 +125,9 @@ describe("the list", () => {
     expect(text()).toContain("“Release notes” is starting. Its session shows under Runs once it opens.");
     expect(text()).toContain("Starting…");
     // An entry whose ID the browser could have built from its own request is not this run: the mark stays.
-    const manual = (requestId: string, outcome: TriggerFire["outcome"]): TriggerFire =>
-      ({ occurrence: NOW, requestId, cause: "manual", recordedAt: NOW, skippedBefore: 0, outcome });
-    store.set([{ ...notes, history: [manual("trigger-release-notes-run-req1", { kind: "started", sessionId: "s0", cwd: notes.action.cwd, runId: "r0" })] }]);
+    const manual = (requestId: string, outcome: TriggerFire["outcome"]): TriggerFire => ({ occurrence: NOW, requestId, cause: "manual", recordedAt: NOW, skippedBefore: 0, outcome,
+      projects: [{ cwd: FORGERIE, outcome: outcome.kind === "started" ? { kind: "started", sessionId: outcome.sessionId, runId: outcome.runId } : { kind: "running", startedAt: NOW } }] });
+    store.set([{ ...notes, history: [manual("trigger-release-notes-run-req1", { kind: "started", sessionId: "s0", cwd: FORGERIE, runId: "r0" })] }]);
     await press("Trigger commands");
     await press("Read triggers again");
     expect(document.querySelector(".record-row-outcome")?.textContent).toBe("Starting…");
@@ -122,7 +137,7 @@ describe("the list", () => {
     await press("Read triggers again");
     expect(document.querySelector(".record-row-outcome")?.textContent).toBe("Starting…");
     expect(document.querySelectorAll('.mark-strip-mark[data-tone="live"]')).toHaveLength(1);
-    store.set([{ ...notes, history: [manual(serverRunId("release-notes", "req1"), { kind: "started", sessionId: "s1", cwd: notes.action.cwd, runId: "r1" })] }]);
+    store.set([{ ...notes, history: [manual(serverRunId("release-notes", "req1"), { kind: "started", sessionId: "s1", cwd: FORGERIE, runId: "r1" })] }]);
     await press("Trigger commands");
     await press("Read triggers again");
     expect(text()).toContain("Started Oct 12, 6:00 PM by Run now");
@@ -196,7 +211,7 @@ describe("a trigger's page", () => {
     expect(text()).toContain("Next run Tue, Oct 13 at 3:00 AM, in 9 hours.");
     expect(text()).toContain("Also covers 2 earlier runs that passed while Forgerie was off.");
     await press("Open session");
-    expect(opened[0]?.cwd).toBe(nightly.action.cwd);
+    expect(opened[0]?.cwd).toBe(FORGERIE);
   });
 
   it("saves only the changed field against the revision it read", async () => {
@@ -325,15 +340,15 @@ describe("a trigger's page", () => {
   it("closes the project picker when a save starts", async () => {
     await render({ view: "trigger", id: "weekday-triage" });
     await type("Trigger name", "Mine");
-    await press("pi-mono");
-    expect(button(/^forgerie/)).toBeDefined();
+    await press("Target projects: Runs in pi-mono");
+    expect(checkbox("forgerie")).toBeDefined();
     const held = store.hold("update");
     await saveKey();
-    expect(button(/^forgerie/)).toBeUndefined();
+    expect(checkbox("forgerie")).toBeUndefined();
     await act(async () => held.release());
     await flush();
     expect(store.calls.filter((call) => call[0] === "update")).toEqual([["update", "weekday-triage", { baseRevision: 12, name: "Mine" }]]);
-    expect(store.triggers().find((trigger) => trigger.id === "weekday-triage")?.action.cwd).toBe(triage.action.cwd);
+    expect(store.triggers().find((trigger) => trigger.id === "weekday-triage")?.action.targets).toEqual(triage.action.targets);
   });
 
   it("says when no trigger has the ID", async () => {
@@ -346,7 +361,7 @@ describe("a trigger's page", () => {
     expect(text()).toContain("An agent made this trigger in “Lockfile review”.");
     expect(text()).not.toContain("without your confirmation");
     await press("Open the agent's session");
-    expect(opened.at(-1)).toEqual({ id: audit.createdBy.kind === "agent" ? audit.createdBy.sessionId : "", cwd: nightly.action.cwd });
+    expect(opened.at(-1)).toEqual({ id: audit.createdBy.kind === "agent" ? audit.createdBy.sessionId : "", cwd: FORGERIE });
     expect(document.querySelector(".alert-card-title")?.textContent).toBe("Missed Oct 12, 2:30 AM");
   });
 
@@ -374,8 +389,7 @@ describe("the create page", () => {
   it("moves focus to an input with a problem, and links the problem to it", async () => {
     await render({ view: "create" }, []);
     await type("Trigger name", "Nightly docs");
-    await press("Choose a project");
-    await press(/^forgerie/);
+    await chooseProjects("forgerie");
     await press(/^Workflow:/);
     await press(/^refine-backlog/);
     await press("Create");
@@ -388,8 +402,7 @@ describe("the create page", () => {
   it("sends one create for repeated saves, and locks the form while it is in flight", async () => {
     await render({ view: "create" }, []);
     await type("Trigger name", "Nightly docs");
-    await press("Choose a project");
-    await press(/^forgerie/);
+    await chooseProjects("forgerie");
     await press(/^Workflow:/);
     await press(/^triage-issues/);
     await type("Task", "Triage the new issues.");
@@ -413,8 +426,7 @@ describe("the create page", () => {
     await render({ view: "create" }, []);
     store.failNext("create", new TriggerRefusal("database is locked", 503));
     await type("Trigger name", "Nightly docs");
-    await press("Choose a project");
-    await press(/^forgerie/);
+    await chooseProjects("forgerie");
     await press(/^Workflow:/);
     await press(/^docs-sweep/);
     await press("Create");
@@ -431,17 +443,184 @@ describe("the create page", () => {
     await press("Create");
     expect(store.calls.some((call) => call[0] === "create")).toBe(false);
     expect(text()).toContain("Give the trigger a name.");
-    expect(text()).toContain("Choose a project.");
+    expect(text()).toContain("Choose at least one project, or All projects.");
     await type("Trigger name", "Nightly docs");
-    await press("Choose a project");
-    await press(/^forgerie/);
+    await chooseProjects("forgerie");
     await press(/^Workflow:/);
     await press(/^docs-sweep/);
     await press("Create");
     const create = store.calls.find((call) => call[0] === "create")?.[1];
     expect(create).toEqual({ name: "Nightly docs", schedule: { kind: "daily", at: "03:00", timezone: HOST_ZONE },
-      action: { kind: "workflow", cwd: nightly.action.cwd, workflow: "docs-sweep", inputs: {} }, missedGraceMinutes: 360 });
+      action: { kind: "workflow", targets: { kind: "projects", cwds: [FORGERIE] }, workflow: "docs-sweep", inputs: {} }, missedGraceMinutes: 360 });
     expect(moves.at(-1)).toEqual({ view: "trigger", id: "nightly-docs" });
     expect(text()).toContain("Created “Nightly docs”. Next run Tue, Oct 13 at 3:00 AM.");
+  });
+});
+
+/** The problem under a field's row, by the field's label. */
+const problemOf = (label: string) => [...document.querySelectorAll(".agent-field")]
+  .find((row) => row.querySelector(".agent-field-label")?.textContent === label)?.querySelector(".agent-field-problem")?.textContent;
+const hintOf = (label: string) => [...document.querySelectorAll(".agent-field")]
+  .find((row) => row.querySelector(".agent-field-label")?.textContent === label)?.querySelector(".agent-field-hint")?.textContent;
+
+describe("target projects", () => {
+  it("picks several projects or All projects, lists only the workflows they share, and creates with them", async () => {
+    await render({ view: "create" }, []);
+    await type("Trigger name", "Weekly notes everywhere");
+    await chooseProjects("forgerie", "pi-mono");
+    expect(button(/^Target projects:/)?.getAttribute("aria-label")).toBe("Target projects: Runs in 2 projects");
+    expect(hintOf("Project")).toBe("Each run starts a new session in each of these projects, at once.");
+    // One read per selection, whatever order the projects were checked in.
+    expect(store.calls).toContainEqual(["commonWorkflows", { kind: "projects", cwds: [PI_MONO, FORGERIE] }]);
+    expect(hintOf("Workflow")).toBe("Only workflows every target project can run are listed. Global workflows run in every project.");
+    await press(/^Workflow:/);
+    // refine-backlog is forgerie's own: it is listed only to say why it cannot be chosen.
+    expect(button(/^refine-backlog/)?.textContent).toContain("Missing in pi-mono");
+    expect(button(/^release-notes/)).toBeDefined();
+    await press(/^release-notes/);
+    // All projects: every row shows checked and cannot change one by one; projects added later are included.
+    await press(/^Target projects:/);
+    await check("All projects");
+    expect(checkbox("caliper")?.checked).toBe(true);
+    expect(checkbox("caliper")?.disabled).toBe(true);
+    await press("Done");
+    expect(button(/^Target projects:/)?.getAttribute("aria-label")).toBe("Target projects: Runs in all projects");
+    expect(hintOf("Project")).toContain("Projects added later are included.");
+    await press("Create");
+    expect(store.calls.find((call) => call[0] === "create")?.[1]).toMatchObject({ action: { targets: { kind: "all" }, workflow: "release-notes" } });
+  });
+
+  it("gives back the fixed list when All projects is turned off, and asks for at least one project", async () => {
+    await render({ view: "trigger", id: spreadNotes.id }, [spreadNotes]);
+    await press(/^Target projects:/);
+    await check("All projects");
+    await check("All projects");
+    expect(["forgerie", "pi-mono", "caliper"].map((name) => checkbox(name)?.checked)).toEqual([true, true, true]);
+    await check("forgerie"); await check("pi-mono"); await check("caliper");
+    await press("Done");
+    expect(button(/^Target projects:/)?.getAttribute("aria-label")).toBe("Target projects: Runs in Choose projects");
+    await press("Save");
+    expect(store.calls.some((call) => call[0] === "update")).toBe(false);
+    expect(problemOf("Project")).toBe("Choose at least one project, or All projects.");
+  });
+
+  it("keeps a workflow the new selection does not share, says why at once, and will not save it", async () => {
+    await render({ view: "trigger", id: nightly.id });
+    await chooseProjects("pi-mono");
+    expect(button(/^Workflow:/)?.getAttribute("aria-label")).toBe("Workflow: refine-backlog");
+    expect(problemOf("Workflow")).toBe("“refine-backlog” cannot run in every target project. It is missing in pi-mono. Choose another workflow, or change the projects.");
+    await press("Save");
+    expect(store.calls.some((call) => call[0] === "update")).toBe(false);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Workflow: refine-backlog");
+    // caliper has the same refine-backlog: swap pi-mono for it and the workflow is common again.
+    await chooseProjects("pi-mono", "caliper");
+    expect(problemOf("Workflow")).toBeUndefined();
+    await press("Save");
+    expect(store.calls.find((call) => call[0] === "update")?.[2]).toMatchObject({ action: { targets: { kind: "projects", cwds: [FORGERIE, CALIPER] }, workflow: "refine-backlog" } });
+  });
+
+  it("names a workflow whose inputs differ in another project", async () => {
+    await render({ view: "trigger", id: triage.id });
+    await chooseProjects("forgerie");
+    expect(problemOf("Workflow")).toContain("It asks for different inputs in forgerie.");
+  });
+});
+
+describe("a fire in several projects", () => {
+  it("counts the projects on the last-run line and lists each one, failures first, unavailable ones quiet", async () => {
+    await render({ view: "trigger", id: everywhere.id }, [everywhere]);
+    expect(text()).toContain("Last run Oct 12 at 4:00 AM: 2 of 4 started, 1 failed, 1 unavailable.");
+    const status = document.querySelector('[aria-label="Outcome in each project"]')!;
+    const rows = [...status.querySelectorAll(":scope > .action-row")];
+    expect(rows.map((row) => [row.querySelector(".action-row-name")?.textContent, row.querySelector(".action-row-status")?.textContent]))
+      .toEqual([["pi-mono", "Failed"], ["forgerie", "Started"], ["caliper", "Started"], ["old-site", "Unavailable"]]);
+    expect(rows.map((row) => row.getAttribute("data-tone"))).toEqual([null, null, null, "quiet"]);
+    expect(rows[3]?.textContent).toContain("ENOENT: no such file or directory");
+    // Each project that has a session opens it: the failed one too, since its session exists.
+    expect(rows.map((row) => row.querySelector("button")?.textContent ?? null)).toEqual(["Open session", "Open session", "Open session", null]);
+    await act(async () => rows[2]?.querySelector("button")?.click());
+    expect(opened.at(-1)).toEqual({ id: expect.stringContaining("nightly-docs") as string, cwd: CALIPER });
+    expect(text()).toContain("Failed in pi-mono: 2 of 4 started, 1 failed, 1 unavailable.");
+  });
+
+  it("counts each run in the history and opens its projects on request", async () => {
+    await render({ view: "trigger", id: everywhere.id }, [everywhere]);
+    const runs = () => [...document.querySelectorAll(".list-section .list-section-rows > .action-row")];
+    expect(runs().map((row) => row.querySelector(".action-row-status")?.textContent)).toEqual(["2 of 4 started", "3 of 4 started", "4 of 4 started"]);
+    expect(runs()[1]?.querySelector(".action-row-detail")?.textContent).toBe("Scheduled. 1 unavailable.");
+    expect(runs()[1]?.querySelector(".action-row-status")?.getAttribute("data-tone")).toBeNull();
+    const toggle = runs()[1]?.querySelector<HTMLButtonElement>("button");
+    expect(toggle?.textContent).toBe("Projects");
+    await act(async () => toggle?.click());
+    await flush();
+    expect(toggle?.getAttribute("aria-pressed")).toBe("true");
+    expect([...runs()[1]!.querySelectorAll(".action-row-below .action-row-name")].map((node) => node.textContent)).toEqual(["forgerie", "pi-mono", "caliper", "old-site"]);
+  });
+
+  it("words the list row by count and names the target projects", async () => {
+    await render({ view: "list" }, [everywhere, spreadNotes]);
+    expect(text()).toContain("Oct 12, 4:00 AM: 2 of 4 started, 1 failed, 1 unavailable");
+    expect(text()).toContain("All projects");
+    expect(text()).toContain("3 projects");
+    expect(button(/^Weekly release notes\./)?.getAttribute("aria-label")).toContain("Runs in 3 projects.");
+  });
+});
+
+describe("Run now with several projects", () => {
+  it("runs in every target project by default, sending no cwd", async () => {
+    await render({ view: "trigger", id: spreadNotes.id }, [spreadNotes]);
+    await press("Run now…");
+    expect(text()).toContain("It starts release-notes in a new session of each of 3 projects, at once: forgerie, pi-mono, and caliper.");
+    expect(button("All target projects")?.getAttribute("aria-pressed")).toBe("true");
+    await press("Run now");
+    expect(store.calls.filter((call) => call[0] === "run")).toEqual([["run", spreadNotes.id, "req1"]]);
+    expect(text()).toContain("“Weekly release notes” is starting in each target project.");
+  });
+
+  it("runs in one project when the reader picks it, and keeps that choice for a retry", async () => {
+    await render({ view: "trigger", id: spreadNotes.id }, [spreadNotes]);
+    await press("Run now…");
+    await press("One project");
+    // No project picked yet: Run now waits for one.
+    expect(button("Run now")?.disabled).toBe(true);
+    expect(text()).toContain("Choose the project to run in.");
+    await press("pi-mono");
+    expect(text()).toContain("It starts release-notes in a new session of pi-mono only. The trigger keeps its target projects.");
+    store.failNext("run", new TypeError("Failed to fetch"));
+    await press("Run now");
+    // The retry reuses the request ID, so the server keeps its first choice: the choice is locked to match.
+    expect(button("All target projects")?.disabled).toBe(true);
+    expect(button("caliper")?.disabled).toBe(true);
+    await press("Run now");
+    expect(store.calls.filter((call) => call[0] === "run")).toEqual([["run", spreadNotes.id, "req1", PI_MONO]]);
+    expect(text()).toContain("“Weekly release notes” is starting in pi-mono.");
+  });
+
+  it("leaves the choice open after a refusal, which admitted nothing", async () => {
+    await render({ view: "trigger", id: spreadNotes.id }, [spreadNotes]);
+    await press("Run now…");
+    await press("One project");
+    await press("pi-mono");
+    store.failNext("run", new TriggerRefusal("Choose a workspace of a registered project", 400, "cwd"));
+    await press("Run now");
+    expect(text()).toContain("Could not run “Weekly release notes”: Choose a workspace of a registered project");
+    expect(button("caliper")?.disabled).toBe(false);
+    await press("caliper");
+    await press("Run now");
+    expect(store.calls.filter((call) => call[0] === "run")).toEqual([["run", spreadNotes.id, "req1", CALIPER]]);
+  });
+
+  it("offers every registered project for a trigger on All projects", async () => {
+    await render({ view: "trigger", id: everywhere.id }, [everywhere]);
+    await press("Run now…");
+    expect(button("All projects")?.getAttribute("aria-pressed")).toBe("true");
+    await press("One project");
+    expect(["forgerie", "pi-mono", "caliper"].map((name) => button(name) !== undefined)).toEqual([true, true, true]);
+  });
+
+  it("keeps one project's question as it was", async () => {
+    await render({ view: "trigger", id: notes.id }, [notes]);
+    await press("Run now…");
+    expect(button("One project")).toBeUndefined();
   });
 });

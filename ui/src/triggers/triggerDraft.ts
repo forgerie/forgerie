@@ -1,13 +1,15 @@
 // The trigger form as data: a draft, its problems, and the request it becomes.
 // Pure. The page holds a draft; nothing reaches the server until Save or Create.
-import { DEFAULT_MISSED_GRACE_MINUTES, type Trigger, type TriggerAction, type TriggerCreate, type TriggerUpdate, type TriggerWorkflow } from "@shared/triggers";
+import { DEFAULT_MISSED_GRACE_MINUTES, type Trigger, type TriggerAction, type TriggerCreate, type TriggerTargets, type TriggerUpdate, type TriggerWorkflow } from "@shared/triggers";
 import { launchInputs, proposalInputs, type WorkflowInput } from "../workflows/workflowsModel";
 import { scheduleDays, scheduleOf } from "./triggerWords";
 import { thinkingLevelOf, WEEK, type ThinkingLevel, type Weekday } from "./triggerValues";
+import { hasTargets, targetsKey } from "./triggerTargets";
 
 export interface TriggerDraft {
   name: string;
-  cwd: string;
+  /** The target projects. A fixed list may be empty while the reader picks; it must not be saved so. */
+  targets: TriggerTargets;
   workflow: string;
   repeat: "daily" | "days";
   days: Weekday[];
@@ -24,14 +26,14 @@ export interface TriggerDraft {
 }
 
 /** A new trigger: every night at 3:00 AM in the host's zone, run late up to 6 hours. */
-export function emptyDraft(timezone: string, cwd = ""): TriggerDraft {
-  return { name: "", cwd, workflow: "", repeat: "daily", days: [...WEEK], at: "03:00", timezone, zoneChosen: false, grace: DEFAULT_MISSED_GRACE_MINUTES, inputs: {} };
+export function emptyDraft(timezone: string, cwds: readonly string[] = []): TriggerDraft {
+  return { name: "", targets: { kind: "projects", cwds: [...cwds] }, workflow: "", repeat: "daily", days: [...WEEK], at: "03:00", timezone, zoneChosen: false, grace: DEFAULT_MISSED_GRACE_MINUTES, inputs: {} };
 }
 
 export function draftOf(trigger: Trigger): TriggerDraft {
   const days = scheduleDays(trigger.schedule);
   return {
-    name: trigger.name, cwd: trigger.action.cwd, workflow: trigger.action.workflow,
+    name: trigger.name, targets: trigger.action.targets, workflow: trigger.action.workflow,
     repeat: trigger.schedule.kind === "daily" ? "daily" : "days", days, at: trigger.schedule.at, timezone: trigger.schedule.timezone, zoneChosen: true,
     model: trigger.action.model, thinkingLevel: thinkingLevelOf(trigger.action.thinkingLevel), grace: trigger.missedGraceMinutes,
     inputs: Object.fromEntries(Object.entries(trigger.action.inputs).map(([name, value]) => [name, String(value)])),
@@ -52,14 +54,16 @@ export const FIELD_ORDER: readonly DraftField[] = ["name", "project", "workflow"
 
 /**
  * What stops the draft from saving, checked in the browser before any request.
- * `workflow` is the chosen workflow as the project lists it; undefined while the list is not read.
+ * `workflow` is the chosen workflow as the target projects share it; undefined while the list is not read.
+ * `workflowGap` says why the chosen workflow is not common to the target projects, when it is not.
  */
-export function draftProblems(draft: TriggerDraft, workflow: TriggerWorkflow | undefined): DraftProblems {
+export function draftProblems(draft: TriggerDraft, workflow: TriggerWorkflow | undefined, workflowGap?: string): DraftProblems {
   const problems: DraftProblems = {};
   if (!draft.name.trim()) problems.name = "Give the trigger a name.";
-  if (!draft.cwd) problems.project = "Choose a project.";
+  if (!hasTargets(draft.targets)) problems.project = "Choose at least one project, or All projects.";
   if (!draft.workflow) problems.workflow = "Choose a workflow.";
   else if (workflow?.kind === "script") problems.workflow = "Scripts cannot run on a schedule. Choose a prose workflow.";
+  else if (workflowGap) problems.workflow = workflowGap;
   if (draft.repeat === "days" && draft.days.length === 0) problems.days = "Choose at least one day.";
   if (workflow) {
     const typed = launchInputs({ definition: { inputs: workflow.inputs } }, inputFields(workflow, draft).values);
@@ -80,7 +84,7 @@ export function fieldOf(path: string | undefined): DraftField | undefined {
   if (path.startsWith("schedule.on")) return "days";
   if (path.startsWith("schedule.timezone")) return "timezone";
   if (path.startsWith("schedule")) return "time";
-  if (path.startsWith("action.cwd")) return "project";
+  if (path.startsWith("action.targets") || path.startsWith("action.cwd")) return "project";
   if (path.startsWith("action.workflow")) return "workflow";
   if (path.startsWith("action.inputs")) return "inputs";
   if (path.startsWith("action.model") || path.startsWith("action.thinkingLevel")) return "model";
@@ -93,7 +97,7 @@ function actionOf(draft: TriggerDraft, workflow: TriggerWorkflow | undefined): T
   const typed = workflow ? launchInputs({ definition: { inputs: workflow.inputs } }, draft.inputs) : undefined;
   // Without the workflow's declaration, keep what was typed as text: the server checks it against the workflow.
   const inputs = typed && "inputs" in typed ? typed.inputs : Object.fromEntries(Object.entries(draft.inputs).filter(([, value]) => value.trim() !== ""));
-  return { kind: "workflow", cwd: draft.cwd, workflow: draft.workflow, inputs,
+  return { kind: "workflow", targets: draft.targets, workflow: draft.workflow, inputs,
     ...(draft.model ? { model: draft.model } : {}), ...(draft.thinkingLevel ? { thinkingLevel: draft.thinkingLevel } : {}) };
 }
 const scheduleOfDraft = (draft: TriggerDraft) => scheduleOf(draft.repeat === "daily" ? WEEK : draft.days, draft.at, draft.timezone);
@@ -105,9 +109,9 @@ export function createOf(draft: TriggerDraft, workflow: TriggerWorkflow | undefi
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 const sortedInputs = (inputs: Readonly<Record<string, string>>) =>
   Object.fromEntries(Object.entries(inputs).filter(([, value]) => value !== "").sort(([a], [b]) => a.localeCompare(b)));
-/** The reader changed what a run does: the project, the workflow, an input, the model, or the thinking level. */
+/** The reader changed what a run does: the projects, the workflow, an input, the model, or the thinking level. */
 function actionEdited(draft: TriggerDraft, saved: TriggerDraft): boolean {
-  const action = (value: TriggerDraft) => ({ cwd: value.cwd, workflow: value.workflow, model: value.model ?? null, thinkingLevel: value.thinkingLevel ?? null,
+  const action = (value: TriggerDraft) => ({ targets: targetsKey(value.targets), workflow: value.workflow, model: value.model ?? null, thinkingLevel: value.thinkingLevel ?? null,
     inputs: sortedInputs(value.inputs) });
   return !same(action(draft), action(saved));
 }
@@ -128,7 +132,8 @@ export function updateOf(trigger: Trigger, draft: TriggerDraft, workflow: Trigge
 
 /** The draft differs from what it started from. A zone that only followed the host is not a change. */
 export function isDirty(draft: TriggerDraft, start: TriggerDraft): boolean {
-  const comparable = (value: TriggerDraft) => ({ ...value, zoneChosen: false, days: value.repeat === "daily" ? [] : value.days,
+  // The order projects were checked in is not a change.
+  const comparable = (value: TriggerDraft) => ({ ...value, targets: targetsKey(value.targets), zoneChosen: false, days: value.repeat === "daily" ? [] : value.days,
     inputs: Object.fromEntries(Object.entries(value.inputs).sort(([a], [b]) => a.localeCompare(b))) });
   return !same(comparable(draft), comparable(start));
 }

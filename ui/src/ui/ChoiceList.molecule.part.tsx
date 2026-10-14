@@ -37,3 +37,14 @@ export function Missing() {
 export function Disabled() {
   return <ChoiceList legend="Folders" choices={few} chosen={["c"]} missing="Missing folder" search="Find a folder" disabled onChange={() => undefined} />;
 }
+export function EveryRow() {
+  const [chosen, setChosen] = useState(["b"]);
+  const [all, setAll] = useState(false);
+  return <ChoiceList legend="Folders" choices={few} chosen={chosen} missing="Missing folder" search="Find a folder" onChange={setChosen}
+    every={{ label: "All folders", detail: "Includes folders added later.", on: all, onChange: setAll }} />;
+}
+export function EveryRowOn() {
+  const [all, setAll] = useState(true);
+  return <ChoiceList legend="Folders" choices={few} chosen={[]} missing="Missing folder" search="Find a folder" onChange={() => undefined}
+    every={{ label: "All folders", detail: "Includes folders added later.", on: all, onChange: setAll }} />;
+}

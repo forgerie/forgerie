@@ -5,6 +5,7 @@ import { MarkStrip } from "../ui/MarkStrip";
 import { MenuButton, type MenuCommand } from "../ui/MenuButton";
 import { attentionTone, type TriggersPlan } from "./triggersModel";
 import { outcomeWords, relativeShort, rowLabel, scheduleWords, stripMarks, type WordClock } from "./triggerWords";
+import { targetChip, targetNames, targetSummary, type ProjectName } from "./triggerTargets";
 
 export interface TriggerRowActions {
   onOpen: (trigger: Trigger) => void;
@@ -20,13 +21,15 @@ export interface TriggerRowActions {
 
 /**
  * Shape: one trigger in the list. A press opens its page. The marks show its
- * last runs; the line beside them says how the last one went. Its state action
- * (Mark as seen, Resume) is inline while the row is wide and first in ⋯ when not.
+ * last runs; the line beside them says how the last one went. Its meta names
+ * the target projects: one by name, several by count, or All projects. Its
+ * state action (Mark as seen, Resume) is inline while the row is wide and first
+ * in ⋯ when not.
  */
-export function TriggerRow({ trigger, clock, project, plan, starting, actions }: {
+export function TriggerRow({ trigger, clock, projectName, plan, starting, actions }: {
   trigger: Trigger; clock: WordClock;
-  /** The project's name, as the session list names it. */
-  project: string;
+  /** A project's name, as the session list names it. */
+  projectName: ProjectName;
   plan: TriggersPlan["row"];
   /** A Run now from this browser that the history does not show yet. */
   starting: boolean;
@@ -50,11 +53,11 @@ export function TriggerRow({ trigger, clock, project, plan, starting, actions }:
   ];
   const schedule = scheduleWords(trigger.schedule, clock.hostZone, clock.locale);
   return <RecordRow layout={plan.tier} dimmed={paused} mark={attentionTone(trigger)}
-    label={`${rowLabel(trigger, clock)}${showStarting ? " A run is starting." : ""}${byAgent ? " Made by an agent." : ""}`}
+    label={`${rowLabel(trigger, clock)} Runs in ${targetChip(trigger.action.targets, projectName) ?? "no project"}.${showStarting ? " A run is starting." : ""}${byAgent ? " Made by an agent." : ""}`}
     title={trigger.name} time={trigger.state.kind === "active" ? relativeShort(trigger.state.nextFireAt, clock.now) : "Paused"}
     meta={[
       { key: "schedule", text: schedule },
-      { key: "project", text: project, title: trigger.action.cwd },
+      { key: "project", text: targetSummary(trigger.action.targets, projectName), title: targetNames(trigger.action.targets, projectName) },
       { key: "workflow", text: trigger.action.workflow },
       ...byAgent ? [{ key: "agent", text: "Made by an agent" }] : [],
     ]}

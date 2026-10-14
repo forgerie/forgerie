@@ -1,7 +1,7 @@
 // The triggers screen in the app's shell, on fixture data: the real binding and views, with an in-memory trigger
 // store in the HTTP client's place. No request leaves the page and nothing is intercepted.
 //   ?state=list|calm|empty|off|failed-read|loading|many|failed|missed|paused|starting|create|unknown|conflict|edited|long
-//          |days-problem|input-problem|create-in-project
+//          |days-problem|input-problem|create-in-project|several|everywhere|not-shared
 //   &sheet=open shows the session list and its footer. &view=session shows a session in the thread's place instead of
 //   the triggers, with the list closed: the opener's dot is then the only sign of a trigger problem.
 import { useMemo, useState } from "react";
@@ -15,7 +15,9 @@ import { useTriggerList } from "../src/triggers/useTriggerList";
 import { triggerEntry, type TriggerPlace } from "../src/triggers/triggersModel";
 import { memoryApi, memoryDirectory } from "../src/triggers/fixtures/memoryApi";
 import { createTriggerMemory } from "../src/triggers/triggerMemory";
-import { audit, calmList, digest, docs, emptyList, FORGERIE, HOST_ZONE, manyList, mixedList, NOW, nightly, projects, triage } from "../src/triggers/fixtures/triggers";
+import {
+  audit, calmList, digest, docs, emptyList, everywhere, FORGERIE, HOST_ZONE, manyList, mixedList, NOW, nightly, PI_MONO, projects, spreadNotes, triage,
+} from "../src/triggers/fixtures/triggers";
 import { draftOf, emptyDraft, type TriggerDraft } from "../src/triggers/triggerDraft";
 import type { Trigger } from "@shared/triggers";
 import { SessionFrame } from "../src/ui/SessionFrame";
@@ -37,6 +39,7 @@ const PAGES: Record<string, TriggerPlace> = {
   starting: { view: "trigger", id: digest.id }, create: { view: "create" }, unknown: { view: "trigger", id: "gone" },
   conflict: { view: "trigger", id: triage.id }, edited: { view: "trigger", id: triage.id }, long: { view: "trigger", id: nightly.id },
   "days-problem": { view: "create" }, "input-problem": { view: "create" }, "create-in-project": { view: "create" },
+  several: { view: "trigger", id: spreadNotes.id }, everywhere: { view: "trigger", id: everywhere.id }, "not-shared": { view: "trigger", id: nightly.id },
 };
 const store = memoryApi((lists[state] ?? mixedList).triggers, { now: NOW, off: state === "off" ? "Could not open the trigger store: database is locked" : undefined });
 if (state === "failed-read") store.failNext("list", new Error("Request failed: HTTP 500"));
@@ -49,9 +52,10 @@ const seed = (key: string, draft: TriggerDraft, start: TriggerDraft, revision = 
 const fresh = { ...emptyDraft(HOST_ZONE), zoneChosen: true };
 if (state === "conflict") seed(`trigger:${triage.id}`, { ...draftOf(triage), name: "Weekday issue triage" }, { ...draftOf(triage), at: "08:00" }, 11);
 if (state === "edited") seed(`trigger:${triage.id}`, { ...draftOf(triage), name: "Weekday issue triage", at: "08:30" }, draftOf(triage));
-if (state === "days-problem") seed("create", { ...fresh, name: "Nightly docs", cwd: FORGERIE, workflow: "docs-sweep", repeat: "days", days: [], at: "02:30" }, fresh);
-if (state === "input-problem") seed("create", { ...fresh, name: "Nightly refinement 2", cwd: FORGERIE, workflow: "refine-backlog" }, fresh);
-if (state === "create-in-project") seed("create", { ...fresh, cwd: FORGERIE }, fresh);
+if (state === "days-problem") seed("create", { ...fresh, name: "Nightly docs", targets: { kind: "projects", cwds: [FORGERIE] }, workflow: "docs-sweep", repeat: "days", days: [], at: "02:30" }, fresh);
+if (state === "input-problem") seed("create", { ...fresh, name: "Nightly refinement 2", targets: { kind: "projects", cwds: [FORGERIE] }, workflow: "refine-backlog" }, fresh);
+if (state === "create-in-project") seed("create", { ...fresh, targets: { kind: "projects", cwds: [FORGERIE] } }, fresh);
+if (state === "not-shared") seed(`trigger:${nightly.id}`, { ...draftOf(nightly), targets: { kind: "projects", cwds: [FORGERIE, PI_MONO] } }, draftOf(nightly));
 const sessions = [
   { id: "s1", cwd: projects[0]!.path, name: "Nightly refinement · Oct 10", modified: new Date(NOW - 15 * 3_600_000).toISOString() },
   { id: "s2", cwd: projects[1]!.path, name: "Weekday triage · Oct 12", modified: new Date(NOW - 9 * 3_600_000).toISOString() },

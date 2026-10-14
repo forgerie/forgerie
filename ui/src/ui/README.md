@@ -12,9 +12,11 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays, and a refusal may offer one follow-up (such as Create) to confirm in place.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place; inside a list it opens at window level, above the button when the room below is short.
-- `ChoiceList` (molecule): pick any number of rows; the legend counts the choice, a long list gets a search field, and a chosen id with no row stays visible.
+- `ChoiceList` (molecule): pick any number of rows; the legend counts the choice, a long list gets a search field, a chosen id with no row stays visible, and an optional every row on top chooses every row, including rows added later.
+- `ChoicePicker` (molecule): any number of choices as one chip, with words before it, that opens a `ChoiceList` at window level; the panel stays open while rows are checked and closes with Done, Escape, or a press outside.
+- `NestedRows` (molecule): a short list of `<li>` rows under the line or row they belong to, indented on a hairline.
 - `ListSection` (molecule): a titled list of `<li>` rows on a settings-style page, with an optional readout beside the title, an empty text, a control under the rows, and a note on where the items live. `placement="document"` lines it up under a document page's fields.
-- `ActionRow` (molecule): a list item that is not a link: name and status on one line, a detail under them, its commands at the end. `layout="head"` lines the commands up with the status; `"stacked"` puts the status under the name for a narrow row.
+- `ActionRow` (molecule): a list item that is not a link: name and status on one line, a detail under them, its commands at the end. `layout="head"` lines the commands up with the status; `"stacked"` puts the status under the name for a narrow row; `tone="quiet"` mutes a row that needs nothing; `below` takes the full width under it.
 - `TitleField` (atom): a document title typed in place, in the title face, with its standfirst under it.
 - `Lede` (atom): the one quiet paragraph that opens a page.
 - `FilterChip` (atom): a filter that is on, above the list it narrows, with a clear button; not drawn when no filter is on.

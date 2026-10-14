@@ -35,7 +35,7 @@ describe("the session list's entry", () => {
     expect(triggerEntry({ type: "ready", value: { ...mixedList, triggers: [triage], attentionCount: 0 } })).toEqual({ title: "Triggers", attention: false });
   });
   it("counts in the bad tone when the latest problem of one trigger failed", () => {
-    expect(triggerEntry({ type: "ready", value: mixedList })).toEqual({ chip: { text: "2", tone: "bad" }, title: "Triggers: 2 need a look", attention: true });
+    expect(triggerEntry({ type: "ready", value: mixedList })).toEqual({ chip: { text: "3", tone: "bad" }, title: "Triggers: 3 need a look", attention: true });
   });
   it("counts in the warn tone when every problem was missed", () => {
     expect(triggerEntry({ type: "ready", value: { ...mixedList, triggers: [audit, triage], attentionCount: 1 } }))
@@ -45,7 +45,7 @@ describe("the session list's entry", () => {
     expect(triggerEntry({ type: "off", message: "database is locked" })).toEqual({ chip: { text: "Off", tone: "bad" }, title: "Triggers are off", attention: true });
   });
   it("keeps the last count after a failed read", () => {
-    expect(triggerEntry({ type: "failed", message: "HTTP 500", last: mixedList }).chip).toEqual({ text: "2", tone: "bad" });
+    expect(triggerEntry({ type: "failed", message: "HTTP 500", last: mixedList }).chip).toEqual({ text: "3", tone: "bad" });
   });
 });
 
@@ -53,8 +53,8 @@ describe("groups and order", () => {
   it("puts problems first, newest first, then active by next run, then paused by name", () => {
     const groups = groupTriggers(mixedList.triggers);
     expect(groups.map((group) => [group.label, group.triggers.map((trigger) => trigger.id)])).toEqual([
-      ["Needs a look", ["dependency-audit", "nightly-refinement"]],
-      ["Active", ["inbox-digest", "weekday-triage", "release-notes"]],
+      ["Needs a look", ["nightly-docs-sweep", "dependency-audit", "nightly-refinement"]],
+      ["Active", ["inbox-digest", "weekday-triage", "release-notes", "weekly-release-notes"]],
       ["Paused", ["docs-sweep"]],
     ]);
   });

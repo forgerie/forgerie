@@ -1,32 +1,44 @@
 import { describe, expect, it } from "vitest";
 import type { Trigger } from "@shared/triggers";
 import { createOf, draftOf, draftProblems, emptyDraft, fieldOf, isDirty, problemList, updateOf } from "./triggerDraft";
-import { docs, FORGERIE, HOST_ZONE, nightly, triage, workflows } from "./fixtures/triggers";
+import { CALIPER, docs, FORGERIE, HOST_ZONE, nightly, PI_MONO, triage, workflows } from "./fixtures/triggers";
 
 const workflow = (name: string) => workflows.find((item) => item.name === name);
 
 describe("the draft's problems", () => {
   it("names each missing choice in the page's order", () => {
     const problems = draftProblems({ ...emptyDraft(HOST_ZONE), repeat: "days", days: [] }, undefined);
-    expect(problemList(problems)).toEqual(["Give the trigger a name.", "Choose a project.", "Choose a workflow.", "Choose at least one day."]);
+    expect(problemList(problems)).toEqual(["Give the trigger a name.", "Choose at least one project, or All projects.", "Choose a workflow.", "Choose at least one day."]);
   });
   it("refuses a script workflow and an input the workflow needs", () => {
     expect(draftProblems({ ...draftOf(nightly), workflow: "nightly-report" }, workflow("nightly-report")).workflow).toMatch(/^Scripts cannot run on a schedule/);
     expect(draftProblems({ ...draftOf(nightly), inputs: { task: " " } }, workflow("refine-backlog")).inputs).toBe("Fill in task.");
     expect(draftProblems(draftOf(nightly), workflow("refine-backlog"))).toEqual({});
   });
+  it("refuses a workflow that is not common to the target projects, with the reason it is given", () => {
+    const draft = { ...draftOf(nightly), targets: { kind: "projects" as const, cwds: [FORGERIE, PI_MONO] } };
+    expect(draftProblems(draft, undefined, "“refine-backlog” cannot run in every target project.").workflow).toBe("“refine-backlog” cannot run in every target project.");
+    expect(draftProblems({ ...draft, targets: { kind: "all" } }, workflow("refine-backlog")).project).toBeUndefined();
+  });
   it("maps a server field to the field it is about", () => {
-    expect(["name", "schedule.at", "schedule.on", "schedule.timezone", "action.cwd", "action.workflow", "action.inputs.task", "action.model", "missedGraceMinutes", "other"].map(fieldOf))
+    expect(["name", "schedule.at", "schedule.on", "schedule.timezone", "action.targets.cwds", "action.workflow", "action.inputs.task", "action.model", "missedGraceMinutes", "other"].map(fieldOf))
       .toEqual(["name", "time", "days", "timezone", "project", "workflow", "inputs", "model", "late", undefined]);
   });
 });
 
 describe("the request a draft becomes", () => {
   it("creates without an ID: the server picks it", () => {
-    const create = createOf({ ...emptyDraft(HOST_ZONE), name: " Nightly refinement ", cwd: FORGERIE, workflow: "refine-backlog", inputs: { task: "Refine." } }, workflow("refine-backlog"));
+    const create = createOf({ ...emptyDraft(HOST_ZONE), name: " Nightly refinement ", targets: { kind: "projects", cwds: [FORGERIE] }, workflow: "refine-backlog", inputs: { task: "Refine." } }, workflow("refine-backlog"));
     expect(create).toEqual({ name: "Nightly refinement", schedule: { kind: "daily", at: "03:00", timezone: HOST_ZONE },
-      action: { kind: "workflow", cwd: FORGERIE, workflow: "refine-backlog", inputs: { task: "Refine." } }, missedGraceMinutes: 360 });
+      action: { kind: "workflow", targets: { kind: "projects", cwds: [FORGERIE] }, workflow: "refine-backlog", inputs: { task: "Refine." } }, missedGraceMinutes: 360 });
     expect("id" in create).toBe(false);
+    expect(createOf({ ...draftOf(nightly), name: "Everywhere", targets: { kind: "all" } }, workflow("refine-backlog")).action.targets).toEqual({ kind: "all" });
+  });
+  it("sends the action when the target projects change, but not when only their order does", () => {
+    const several = { ...nightly, action: { ...nightly.action, targets: { kind: "projects" as const, cwds: [FORGERIE, CALIPER] } } };
+    expect(updateOf(several, { ...draftOf(several), targets: { kind: "projects", cwds: [CALIPER, FORGERIE] } }, workflow("refine-backlog"), 12)).toEqual({ baseRevision: 12 });
+    expect(isDirty({ ...draftOf(several), targets: { kind: "projects", cwds: [CALIPER, FORGERIE] } }, draftOf(several))).toBe(false);
+    expect(updateOf(several, { ...draftOf(several), targets: { kind: "all" } }, workflow("refine-backlog"), 12).action?.targets).toEqual({ kind: "all" });
   });
   it("sends only what changed, with the revision it started from", () => {
     expect(updateOf(nightly, draftOf(nightly), workflow("refine-backlog"), 12)).toEqual({ baseRevision: 12 });
@@ -48,7 +60,7 @@ describe("the request a draft becomes", () => {
   it("keeps a thinking level with no model set", () => {
     const thinking: Trigger = { ...nightly, action: { ...nightly.action, thinkingLevel: "high" } };
     expect(updateOf(thinking, { ...draftOf(thinking), workflow: "docs-sweep", inputs: {} }, workflow("docs-sweep"), 12).action)
-      .toEqual({ kind: "workflow", cwd: FORGERIE, workflow: "docs-sweep", inputs: {}, thinkingLevel: "high" });
+      .toEqual({ kind: "workflow", targets: { kind: "projects", cwds: [FORGERIE] }, workflow: "docs-sweep", inputs: {}, thinkingLevel: "high" });
     expect(createOf({ ...draftOf(thinking), name: "x" }, workflow("refine-backlog")).action.thinkingLevel).toBe("high");
   });
   it("is dirty only when a field differs from where it started", () => {

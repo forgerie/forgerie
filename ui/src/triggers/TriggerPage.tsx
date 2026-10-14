@@ -9,15 +9,15 @@ import { MenuButton, type MenuCommand } from "../ui/MenuButton";
 import { TitleField } from "../ui/TitleField";
 import { Lede } from "../ui/Lede";
 import { LoadingLines } from "../ui/LoadingLines";
-import type { Project, Workspace } from "../newSession";
 import type { SessionModel } from "../contracts";
 import { TriggerAttention } from "./TriggerAttention";
 import { TriggerStatus } from "./TriggerStatus";
-import { TriggerForm, type WorkflowsLoad } from "./TriggerForm";
+import { TriggerForm, type ProjectsLoad, type WorkflowsLoad } from "./TriggerForm";
 import { TriggerRuns } from "./TriggerRuns";
 import { triggersPlan, UNMEASURED } from "./triggersModel";
 import { fieldDomId, firstProblem, problemList, type DraftField, type DraftProblems, type TriggerDraft } from "./triggerDraft";
 import { storeOffWords, type WordClock } from "./triggerWords";
+import type { ProjectName } from "./triggerTargets";
 
 /** Where the page is: reading the trigger, unknown, unreadable, or ready to edit. A new trigger is always ready. */
 export type TriggerPageLoad =
@@ -51,7 +51,7 @@ export interface TriggerPageActions {
  * while it does, and Create for a new trigger.
  */
 export function TriggerPage({ load, draft, dirty, problems, save, conflict, failure, clock, starting, creatorName, focusName, checked = false,
-  projectLabel, projects, workflows, listModels, timezones, actions }: {
+  projectName, projects, workflows, listModels, timezones, actions }: {
   load: TriggerPageLoad; draft: TriggerDraft; dirty: boolean;
   /** Problems found in the browser and the field a server refusal names. Shown after the first save attempt. */
   problems: DraftProblems;
@@ -66,8 +66,8 @@ export function TriggerPage({ load, draft, dirty, problems, save, conflict, fail
   focusName?: boolean | undefined;
   /** Show the draft's problems before the reader tries to save, such as for a draft that a save already refused. */
   checked?: boolean | undefined;
-  projectLabel: string;
-  projects: { list: (signal: AbortSignal) => Promise<Project[]>; workspaces: (projectId: string, signal: AbortSignal) => Promise<Workspace[]> };
+  projectName: ProjectName;
+  projects: ProjectsLoad;
   workflows: WorkflowsLoad;
   listModels: (signal: AbortSignal) => Promise<SessionModel[]>;
   timezones: readonly string[];
@@ -151,16 +151,16 @@ export function TriggerPage({ load, draft, dirty, problems, save, conflict, fail
     </>} error={error} recovery={recovery} notice={notice}>
     {load.type === "loading" ? <LoadingLines label="Reading the trigger…" /> : null}
     {load.type === "ready" ? <div>
-      {fresh ? <Lede>A trigger starts a saved workflow at a set time, in a new session of the project. You review each run in its session.</Lede> : null}
-      {trigger ? <TriggerAttention trigger={trigger} clock={clock} errorLines={plan.errorLines} onAcknowledge={actions.onAcknowledge}
+      {fresh ? <Lede>A trigger starts a saved workflow at a set time, in a new session of each target project. You review each run in its session.</Lede> : null}
+      {trigger ? <TriggerAttention trigger={trigger} clock={clock} errorLines={plan.errorLines} projectName={projectName} onAcknowledge={actions.onAcknowledge}
         onRunNow={actions.onRunNow} onOpenSession={actions.onOpenSession} /> : null}
       <TitleField label="Trigger name" placeholder="Name the trigger" value={draft.name} maxLength={120} disabled={saving} autoFocus={focusName}
         problem={showing ? problems.name : undefined} fieldId={fieldDomId("name")} onChange={(name) => actions.onDraft({ ...draft, name })} />
-      {trigger ? <TriggerStatus trigger={trigger} clock={clock} starting={starting} creatorName={creatorName}
+      {trigger ? <TriggerStatus trigger={trigger} clock={clock} starting={starting} creatorName={creatorName} projectName={projectName} narrow={plan.row.tier === "narrow"}
         onPause={actions.onPause} onResume={actions.onResume} onOpenSession={actions.onOpenSession} /> : null}
       <TriggerForm draft={draft} onDraft={actions.onDraft} problems={showing ? problems : {}} disabled={saving} hostZone={clock.hostZone}
-        timezones={timezones} projectLabel={projectLabel} projects={projects} workflows={workflows} listModels={listModels} locale={clock.locale} />
-      {trigger ? <TriggerRuns trigger={trigger} clock={clock} starting={starting} narrow={plan.row.tier === "narrow"} onOpenSession={actions.onOpenSession} /> : null}
+        timezones={timezones} projectName={projectName} projects={projects} workflows={workflows} listModels={listModels} locale={clock.locale} />
+      {trigger ? <TriggerRuns trigger={trigger} clock={clock} starting={starting} projectName={projectName} narrow={plan.row.tier === "narrow"} onOpenSession={actions.onOpenSession} /> : null}
     </div> : null}
   </SettingsFrame>;
 }

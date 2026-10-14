@@ -2,7 +2,7 @@
 // page hand it to the binding in the client's place: no request leaves the page, and nothing is intercepted.
 import type { Trigger, TriggerCreate } from "@shared/triggers";
 import { TriggerRefusal, type TriggersApi } from "../triggersApi";
-import { HOST_ZONE, serverRunId, workflows as savedWorkflows } from "./triggers";
+import { commonWorkflows, HOST_ZONE, serverRunId } from "./triggers";
 export { serverRunId };
 import type { TriggerDirectory } from "../Triggers.binding";
 import { models, projects } from "./triggers";
@@ -47,7 +47,7 @@ export function memoryApi(initial: readonly Trigger[], options: { now: number; o
         attentionCount: triggers.filter((trigger) => trigger.attention !== null).length, timezone: HOST_ZONE, timezones: ZONES };
     },
     get: async (id) => { check("get"); calls.push(["get", id]); return find(id); },
-    workflows: async (cwd) => { check("workflows"); calls.push(["workflows", cwd]); return { workflows: savedWorkflows, diagnostics: [] }; },
+    commonWorkflows: async (targets) => { check("commonWorkflows"); calls.push(["commonWorkflows", targets]); return commonWorkflows(targets); },
     create: async (body: TriggerCreate) => {
       check("create"); calls.push(["create", body]);
       const id = body.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -66,7 +66,9 @@ export function memoryApi(initial: readonly Trigger[], options: { now: number; o
     pause: async (id) => { check("pause"); calls.push(["pause", id]); return change(id, (trigger) => ({ ...trigger, state: { kind: "paused", pausedAt: options.now } })); },
     resume: async (id) => { check("resume"); calls.push(["resume", id]); return change(id, (trigger) => ({ ...trigger, state: { kind: "active", nextFireAt: options.now + 9 * 3_600_000 } })); },
     acknowledge: async (id) => { check("acknowledge"); calls.push(["acknowledge", id]); return change(id, (trigger) => ({ ...trigger, attention: null })); },
-    run: async (id, requestId) => { check("run"); calls.push(["run", id, requestId]); find(id); return { requestId: serverRunId(id, requestId) }; },
+    run: async (id, requestId, cwd) => {
+      check("run"); calls.push(cwd ? ["run", id, requestId, cwd] : ["run", id, requestId]); find(id); return { requestId: serverRunId(id, requestId) };
+    },
     remove: async (id) => { check("remove"); calls.push(["remove", id]); find(id); triggers = triggers.filter((trigger) => trigger.id !== id); return { ok: true as const }; },
   };
   const holds = new Map<string, Promise<void>>();
@@ -87,10 +89,8 @@ export function memoryApi(initial: readonly Trigger[], options: { now: number; o
   };
 }
 
-/** Folders and models from fixtures. */
+/** Projects and models from fixtures. */
 export const memoryDirectory: TriggerDirectory = {
   projects: async () => projects,
-  workspaces: async (projectId) => projects.filter((project) => project.id === projectId)
-    .map((project) => ({ id: `${project.id}-main`, path: project.path, label: project.name, isMain: true })),
   models: async () => ({ models }),
 };

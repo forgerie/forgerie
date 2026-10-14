@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Trigger } from "@shared/triggers";
 import { TriggerRow } from "./TriggerRow";
 import { triggersPlan } from "./triggersModel";
-import { audit, digest, docs, nightly, notes, triage } from "./fixtures/triggers";
+import { audit, digest, docs, everywhere, nightly, notes, spreadNotes, triage } from "./fixtures/triggers";
 import { clock, projectLabel, rowActions } from "./fixtures/scenario";
 
 export const name = "Trigger row";
@@ -18,7 +18,7 @@ const NARROW = triggersPlan(320, 352, 735).row;
 /** Mark as seen is a real handler: the mark and the inline action go once it is pressed. */
 function Row({ trigger, plan = WIDE, starting = false }: { trigger: Trigger; plan?: typeof WIDE; starting?: boolean }) {
   const [shown, setShown] = useState(trigger);
-  return <ul><TriggerRow trigger={shown} clock={clock} project={projectLabel(shown.action.cwd)} plan={plan} starting={starting}
+  return <ul><TriggerRow trigger={shown} clock={clock} projectName={projectLabel} plan={plan} starting={starting}
     actions={{ ...rowActions, onAcknowledge: () => setShown({ ...shown, attention: null }), onResume: () => setShown({ ...shown, state: { kind: "active", nextFireAt: clock.now + 9 * 3_600_000 } }) }} /></ul>;
 }
 
@@ -30,3 +30,6 @@ export function Paused() { return <Row trigger={docs} />; }
 export function Starting() { return <Row trigger={digest} />; }
 export function StartingLocally() { return <Row trigger={notes} starting />; }
 export function NarrowFailed() { return <Row trigger={nightly} plan={NARROW} />; }
+export function SeveralProjects() { return <Row trigger={spreadNotes} />; }
+export function AllProjectsPartlyFailed() { return <Row trigger={everywhere} />; }
+export function NarrowAllProjects() { return <Row trigger={everywhere} plan={NARROW} />; }

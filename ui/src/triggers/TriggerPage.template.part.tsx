@@ -1,9 +1,9 @@
 import { useState } from "react";
 import type { Trigger } from "@shared/triggers";
 import { TriggerPage, type TriggerPageLoad, type TriggerSave } from "./TriggerPage";
-import { draftOf, draftProblems, emptyDraft, isDirty, type TriggerDraft } from "./triggerDraft";
-import { audit, digest, docs, HOST_ZONE, mixedList, nightly, workflows } from "./fixtures/triggers";
-import { clock, folders, listModels, pageActions, projectLabel, ready } from "./fixtures/scenario";
+import { draftOf, emptyDraft, isDirty, type TriggerDraft } from "./triggerDraft";
+import { audit, digest, docs, everywhere, FORGERIE, HOST_ZONE, mixedList, nightly, PI_MONO, spreadNotes } from "./fixtures/triggers";
+import { clock, draftScenario, folders, listModels, pageActions, projectLabel } from "./fixtures/scenario";
 
 export const name = "Trigger page";
 export const note = "One trigger as a document, or a new one: attention, status, settings, inputs, and runs";
@@ -21,10 +21,10 @@ function Page({ trigger, load, start, save = { type: "idle" }, conflict = false,
   const base = trigger ? draftOf(trigger) : emptyDraft(HOST_ZONE);
   const [draft, setDraft] = useState(start ?? base);
   const [saved, setSaved] = useState(save);
-  const workflow = workflows.find((item) => item.name === draft.workflow);
-  return <TriggerPage load={load ?? { type: "ready", trigger }} draft={draft} dirty={isDirty(draft, base)} problems={draftProblems(draft, workflow)} save={saved}
-    conflict={conflict} failure={failure} clock={clock} starting={false} checked={checked} projectLabel={draft.cwd ? projectLabel(draft.cwd) : "Choose a project"}
-    projects={folders} workflows={ready} listModels={listModels} timezones={mixedList.timezones}
+  const { workflows, problems } = draftScenario(draft);
+  return <TriggerPage load={load ?? { type: "ready", trigger }} draft={draft} dirty={isDirty(draft, base)} problems={problems} save={saved}
+    conflict={conflict} failure={failure} clock={clock} starting={false} checked={checked} projectName={projectLabel}
+    projects={folders} workflows={workflows} listModels={listModels} timezones={mixedList.timezones}
     actions={{ ...pageActions, onDraft: setDraft, onSave: () => setSaved({ type: "saved" }) }} />;
 }
 export default function Failed() { return <Page trigger={nightly} />; }
@@ -33,7 +33,13 @@ export function Paused() { return <Page trigger={docs} />; }
 export function Starting() { return <Page trigger={digest} />; }
 export function Edited() { return <Page trigger={nightly} start={{ ...draftOf(nightly), at: "04:15" }} />; }
 export function Create() { return <Page />; }
-export function CreateWithProblems() { return <Page checked start={{ ...emptyDraft(HOST_ZONE), cwd: nightly.action.cwd, repeat: "days", days: [] }} />; }
+export function CreateWithProblems() { return <Page checked start={{ ...emptyDraft(HOST_ZONE, [FORGERIE]), repeat: "days", days: [] }} />; }
+/** Three fixed projects; every one started on the last run. */
+export function SeveralProjects() { return <Page trigger={spreadNotes} />; }
+/** All projects: the last run failed in one project and skipped one whose folder was gone. */
+export function AllProjectsPartlyFailed() { return <Page trigger={everywhere} />; }
+/** pi-mono added to a forgerie trigger: its workflow is not in pi-mono, and the page says so before Save. */
+export function WorkflowNotShared() { return <Page trigger={nightly} start={{ ...draftOf(nightly), targets: { kind: "projects", cwds: [FORGERIE, PI_MONO] } }} />; }
 export function Refused() {
   return <Page start={{ ...draftOf(nightly), name: "Nightly refinement copy" }} save={{ type: "refused", message: "Unknown time zone \"Mars/Olympus\"." }} />;
 }

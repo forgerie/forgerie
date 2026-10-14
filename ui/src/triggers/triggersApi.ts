@@ -2,7 +2,7 @@
 // wire types). Everything else in this client reads the types below. The app's
 // main chunk imports this module, so it imports shared types only.
 import type {
-  Trigger, TriggerCreate, TriggerListResponse, TriggerRunResponse, TriggerUpdate, TriggerWorkflowsResponse,
+  Trigger, TriggerCreate, TriggerListResponse, TriggerRunRequest, TriggerRunResponse, TriggerTargets, TriggerUpdate, TriggerWorkflowsResponse,
 } from "@shared/triggers";
 import type { Fetch } from "../newSession";
 
@@ -17,12 +17,16 @@ export class TriggerRefusal extends Error {
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+function looksLikeTargets(value: unknown): value is TriggerTargets {
+  if (!isRecord(value)) return false;
+  return value["kind"] === "all" || (value["kind"] === "projects" && Array.isArray(value["cwds"]) && value["cwds"].every((cwd) => typeof cwd === "string"));
+}
 /** Enough of a trigger for every part of the screen to read it. A malformed one drops out, not the list. */
 function looksLikeTrigger(value: unknown): value is Trigger {
   if (!isRecord(value) || typeof value["id"] !== "string" || typeof value["name"] !== "string" || !Array.isArray(value["history"])) return false;
   const { schedule, action, state } = value;
   return isRecord(schedule) && typeof schedule["at"] === "string" && typeof schedule["timezone"] === "string"
-    && isRecord(action) && typeof action["cwd"] === "string" && typeof action["workflow"] === "string"
+    && isRecord(action) && looksLikeTargets(action["targets"]) && typeof action["workflow"] === "string"
     && isRecord(state) && (state["kind"] === "active" || state["kind"] === "paused") && typeof value["revision"] === "number";
 }
 function readList(value: unknown): TriggerListResponse {
@@ -51,7 +55,7 @@ function readWorkflows(value: unknown): TriggerWorkflowsResponse {
   const workflows = value["workflows"].filter((item): item is TriggerWorkflowsResponse["workflows"][number] => isRecord(item)
     && typeof item["name"] === "string" && (item["kind"] === "prose" || item["kind"] === "script") && isRecord(item["inputs"]));
   const diagnostics = Array.isArray(value["diagnostics"]) ? value["diagnostics"].filter((item): item is TriggerWorkflowsResponse["diagnostics"][number] =>
-    isRecord(item) && typeof item["name"] === "string" && typeof item["error"] === "string") : [];
+    isRecord(item) && typeof item["name"] === "string" && typeof item["path"] === "string" && typeof item["error"] === "string") : [];
   return { workflows, diagnostics };
 }
 
@@ -73,8 +77,11 @@ export function createTriggersApi(fetchFn: Fetch) {
   return {
     list: (signal?: AbortSignal) => call("/api/triggers", readList, signal ? { signal } : {}),
     get: (id: string, signal?: AbortSignal) => call(at(id), readTrigger, signal ? { signal } : {}),
-    /** A project's saved workflows, without opening a session there. */
-    workflows: (cwd: string, signal?: AbortSignal) => call(`/api/triggers/workflows?${new URLSearchParams({ cwd }).toString()}`, readWorkflows, signal ? { signal } : {}),
+    /**
+     * The prose workflows every target project can run with the same inputs, without opening a session. The
+     * diagnostics say why each other name was left out. All projects reads the projects registered now.
+     */
+    commonWorkflows: (targets: TriggerTargets, signal?: AbortSignal) => call("/api/triggers/workflows/common", readWorkflows, send("POST", targets, signal)),
     /** The server picks the ID from the name. */
     create: (body: TriggerCreate) => call("/api/triggers", readTrigger, send("POST", body)),
     /** Refused with 409 when `baseRevision` is no longer the stored revision. */
@@ -83,10 +90,11 @@ export function createTriggersApi(fetchFn: Fetch) {
     resume: (id: string) => call(`${at(id)}/resume`, readTrigger, send("POST", {})),
     acknowledge: (id: string) => call(`${at(id)}/acknowledge`, readTrigger, send("POST", {})),
     /**
-     * Start one run now. The same `requestId` starts nothing new, so a request
-     * whose answer was lost can be sent again with it.
+     * Start one fire now, in every target project, or only in `cwd`. The same `requestId` starts nothing new, so a
+     * request whose answer was lost can be sent again with it; the first accepted request keeps its `cwd`.
      */
-    run: (id: string, requestId: string) => call(`${at(id)}/run`, readRun, send("POST", { requestId })),
+    run: (id: string, requestId: string, cwd?: string) => call(`${at(id)}/run`, readRun,
+      send("POST", { requestId, ...(cwd ? { cwd } : {}) } satisfies TriggerRunRequest)),
     remove: (id: string) => call(at(id), () => ({ ok: true as const }), { method: "DELETE" }),
   };
 }

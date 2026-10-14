@@ -4,6 +4,7 @@
 import type { Trigger, TriggerFire } from "@shared/triggers";
 import { nextOccurrence, type TriggerSchedule } from "@shared/triggerSchedules";
 import { WEEK, type Weekday } from "./triggerValues";
+import { fireCountWords, isSpreadFire, listWords } from "./triggerTargets";
 
 /** What every time word needs: the instant now, the browser's locale and zone, and the host's zone. */
 export interface WordClock {
@@ -67,7 +68,6 @@ export function scheduleOf(days: readonly string[], at: string, timezone: string
   return { kind: "weekly", at, timezone, on };
 }
 
-const listWords = (items: readonly string[]) => items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")}, and ${items.at(-1) ?? ""}`;
 const isNight = (at: string) => at >= "21:00" || at < "05:00";
 
 /** "Every night at 3:00 AM", "Weekdays at 9:00 AM", "Sundays at 4:00 AM New York time". */
@@ -152,14 +152,16 @@ export function firstLine(text: string): string {
   return text.split("\n").map((line) => line.trim()).find(Boolean) ?? text.trim();
 }
 
-/** The row's last outcome line. */
+/** The row's last outcome line. A fire in several projects counts them: "Oct 12, 4:00 AM: 2 of 4 started, 1 failed". */
 export function outcomeWords(fire: TriggerFire | undefined, zone: string, clock: WordClock): string {
   if (!fire) return "No runs yet";
   const outcome = fire.outcome;
   if (outcome.kind === "running") return "Starting…";
+  if (outcome.kind === "missed") return `Missed ${whenShort(fire.occurrence, zone, clock)}`;
+  if (isSpreadFire(fire)) return `${whenShort(fire.occurrence, zone, clock)}${fire.cause === "manual" ? " by Run now" : ""}: ${fireCountWords(fire)}`;
   if (outcome.kind === "started") return `Started ${whenShort(fire.occurrence, zone, clock)}${fire.cause === "manual" ? " by Run now" : ""}`;
   if (outcome.kind === "failed") return `Failed ${dateOnly(fire.occurrence, zone, clock)}: ${firstLine(outcome.error)}`;
-  return `Missed ${whenShort(fire.occurrence, zone, clock)}`;
+  return `Unavailable ${dateOnly(fire.occurrence, zone, clock)}: ${firstLine(outcome.reason)}`;
 }
 
 /** "6 hours", "1 day", "90 min". */
@@ -184,9 +186,10 @@ export function clockChangeHint(at: string): string | undefined {
 }
 
 export type MarkTone = "plain" | "bad" | "warn" | "live";
+/** A project skipped as unavailable needs no look, so a fire that only skipped projects is a plain mark. */
 export function fireTone(fire: TriggerFire): MarkTone {
   switch (fire.outcome.kind) {
-    case "started": return "plain";
+    case "started": case "unavailable": return "plain";
     case "failed": return "bad";
     case "missed": return "warn";
     case "running": return "live";
@@ -203,7 +206,7 @@ export function stripMarks(history: readonly TriggerFire[], starting: boolean): 
 export function stripWords(history: readonly TriggerFire[]): string {
   if (history.length === 0) return "No runs yet.";
   const count = (kind: TriggerFire["outcome"]["kind"]) => history.filter((fire) => fire.outcome.kind === kind).length;
-  const parts = ([["started", "started"], ["failed", "failed"], ["missed", "missed"], ["running", "starting"]] as const)
+  const parts = ([["started", "started"], ["failed", "failed"], ["missed", "missed"], ["unavailable", "unavailable"], ["running", "starting"]] as const)
     .map(([kind, word]) => [count(kind), word] as const).filter(([value]) => value > 0).map(([value, word]) => `${String(value)} ${word}`);
   return `Last ${history.length === 1 ? "run" : `${String(history.length)} runs`}: ${parts.join(", ")}.`;
 }
@@ -240,11 +243,13 @@ export function skippedWords(count: number): string | undefined {
 export function lastRunWords(fire: TriggerFire | undefined, zone: string, clock: WordClock): string {
   if (!fire) return "No runs yet.";
   const when = `Last run ${whenAt(fire.occurrence, zone, clock)}`;
+  if (isSpreadFire(fire) && fire.outcome.kind !== "missed") return `${when}: ${fireCountWords(fire)}.`;
   switch (fire.outcome.kind) {
     case "running": return `${when} is starting.`;
     case "started": return `${when} started a session.`;
     case "failed": return `${when} failed.`;
     case "missed": return `${when} was missed.`;
+    case "unavailable": return `${when} did not start: the project was unavailable.`;
   }
 }
 

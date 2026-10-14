@@ -1,0 +1,23 @@
+/* Words, then a quiet chip that opens a checklist. The chip is set like a single-choice chip; the words before it are muted. */
+.choice-picker { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; color: var(--muted-foreground); font-size: var(--small-text); }
+.choice-picker > svg { flex: none; }
+.choice-picker-lead { flex: none; }
+.choice-picker-trigger { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); min-inline-size: 0; block-size: 2rem;
+  padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--foreground);
+  font-size: var(--small-text); font-weight: 500; }
+/* The drawn chip is 2rem tall; this keeps a control-sized target for a finger. */
+.choice-picker-trigger::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
+.choice-picker-trigger:not(:disabled):hover, .choice-picker-trigger[aria-expanded="true"] { background: var(--hover-surface); }
+.choice-picker-trigger:focus-visible { outline: calc(2 * var(--hairline)) solid var(--line-focus); outline-offset: var(--hairline); }
+.choice-picker-trigger[data-empty] { color: var(--muted-foreground); }
+.choice-picker-trigger svg { flex: none; color: var(--muted-foreground); }
+.choice-picker-value { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The checklist scrolls inside the panel; Done stays at its foot, so closing is always one press away. */
+.choice-picker-body { flex: 1 1 auto; min-block-size: 0; overflow-y: auto; padding: var(--space-3) var(--space-2) var(--space-2); }
+.choice-picker-foot { flex: none; display: flex; justify-content: flex-end; padding: var(--space-1) var(--space-2); border-block-start: var(--hairline) solid var(--line); }
+.choice-picker-done { position: relative; min-block-size: 2rem; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 600; }
+.choice-picker-done::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
+.choice-picker-done:hover { background: var(--hover-surface); }
+.choice-picker-done:focus-visible { outline: calc(2 * var(--hairline)) solid var(--line-focus); outline-offset: var(--hairline); }

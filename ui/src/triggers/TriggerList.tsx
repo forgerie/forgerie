@@ -14,8 +14,9 @@ import {
   FILTER_FROM, groupTriggers, listOf, matchesFilter, totalWords, triggersPlan, UNMEASURED, type TriggerGroupKey, type TriggerListLoad,
 } from "./triggersModel";
 import { storeOffWords, type WordClock } from "./triggerWords";
+import { targetNames, targetSummary } from "./triggerTargets";
 
-const EMPTY_TEXT = "A trigger starts a saved workflow at a set time, in a new session of a project. In the morning, you review the work in that session.";
+const EMPTY_TEXT = "A trigger starts a saved workflow at a set time, in a new session of each target project. In the morning, you review the work in those sessions.";
 
 /**
  * Shape: every trigger, grouped so a problem comes first: Needs a look, then
@@ -42,7 +43,7 @@ export function TriggerList({ load, clock, projectLabel, starting, failure, onDi
   const list = load.type === "off" ? undefined : listOf(load);
   const triggers = list?.triggers ?? [];
   const filtering = triggers.length >= FILTER_FROM;
-  const shown = filtering ? triggers.filter((trigger) => matchesFilter(trigger, query, projectLabel(trigger.action.cwd))) : triggers;
+  const shown = filtering ? triggers.filter((trigger) => matchesFilter(trigger, query, `${targetSummary(trigger.action.targets, projectLabel)} ${targetNames(trigger.action.targets, projectLabel)}`)) : triggers;
   const groups = groupTriggers(shown);
   const readError = load.type === "off"
     ? storeOffWords(load.message)
@@ -74,7 +75,7 @@ export function TriggerList({ load, clock, projectLabel, starting, failure, onDi
     {filtering && query.trim() && shown.length === 0 ? <p>No triggers match “{query.trim()}”.</p> : null}
     {groups.map((group) => <RecordGroup key={group.key} label={group.label} count={group.triggers.length} emphasis={group.key === "attention"} compact={plan.density === "compact"}
       open={!closed.has(group.key)} onToggle={() => toggle(group.key)}>
-      {group.triggers.map((trigger) => <TriggerRow key={trigger.id} trigger={trigger} clock={clock} project={projectLabel(trigger.action.cwd)}
+      {group.triggers.map((trigger) => <TriggerRow key={trigger.id} trigger={trigger} clock={clock} projectName={projectLabel}
         plan={plan.row} starting={starting.has(trigger.id)} actions={actions} />)}
     </RecordGroup>)}
   </SettingsFrame>;

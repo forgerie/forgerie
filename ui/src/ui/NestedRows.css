@@ -1,0 +1,3 @@
+/* Rows under their owner: a hairline at the start and a small indent, no card. The rows bring their own padding. */
+.nested-rows { display: flex; flex-direction: column; min-inline-size: 0; margin: 0; padding: 0 0 0 var(--space-2); list-style: none;
+  border-inline-start: var(--hairline) solid var(--line); }

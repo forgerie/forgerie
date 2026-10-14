@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Trigger, TriggerWorkflow } from "@shared/triggers";
+import type { Trigger, TriggerTargets, TriggerWorkflow } from "@shared/triggers";
 import { writeClipboardText } from "../clipboard";
-import { destinationLabel, type Project, type Workspace } from "../newSession";
+import { destinationLabel, type Project } from "../newSession";
 import type { SessionModel } from "../contracts";
 import { TriggerRefusal, type TriggersApi } from "./triggersApi";
 import { listOf, type TriggerPlace, type TriggersScreenArgs } from "./triggersModel";
@@ -10,14 +10,14 @@ import { createOf, draftOf, draftProblems, emptyDraft, fieldOf, isDirty, updateO
 import { runRecorded, whenLong, type WordClock } from "./triggerWords";
 import { draftKey, type TriggerMemory } from "./triggerMemory";
 import { TriggersView, type TriggerNote, type TriggerScreen } from "./TriggersView";
-import type { TriggerQuestion } from "./TriggerDialog";
+import type { RunScope, TriggerQuestion } from "./TriggerDialog";
 import type { TriggerPageLoad, TriggerSave } from "./TriggerPage";
-import type { WorkflowsLoad } from "./TriggerForm";
+import type { ProjectsLoad, WorkflowsLoad } from "./TriggerForm";
+import { fixedCwds, hasTargets, isSpread, targetsKey, workflowGap } from "./triggerTargets";
 
-/** Folders, workspaces, and models, as the new-session dialog reads them. */
+/** Registered projects and models, as the new-session dialog reads them. */
 export interface TriggerDirectory {
   projects: (signal?: AbortSignal) => Promise<Project[]>;
-  workspaces: (projectId: string, signal?: AbortSignal) => Promise<Workspace[]>;
   models: (cwd: string, signal?: AbortSignal) => Promise<{ models: SessionModel[] }>;
 }
 
@@ -29,8 +29,9 @@ const newRequestId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((
 /**
  * Binding: the triggers screen. The list comes from the app's binding, which
  * holds it so the session list's entry stays true. This reads one trigger in
- * full, the project's workflows, and the models; it keeps drafts and the one
- * question the screen asks, and it sends every write.
+ * full, the registered projects, the workflows the target projects share, and
+ * the models; it keeps drafts and the one question the screen asks, and it
+ * sends every write.
  */
 export function TriggersScreen({ args, list, api, directory, memory, now: clockNow = Date.now, zone = browserZone(), locale, requestId = newRequestId }: {
   args: TriggersScreenArgs;
@@ -59,12 +60,14 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
   const clock: WordClock = { now, locale, browserZone: zone, hostZone: value?.timezone ?? zone };
   const refresh = list.refresh;
 
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoad, setProjectsLoad] = useState<ProjectsLoad>({ type: "loading" });
   useEffect(() => {
     const controller = new AbortController();
-    directory.projects(controller.signal).then(setProjects, () => undefined);
+    directory.projects(controller.signal).then((projects) => { if (!controller.signal.aborted) setProjectsLoad({ type: "ready", projects }); },
+      (error: unknown) => { if (!controller.signal.aborted) setProjectsLoad({ type: "failed", message: messageOf(error) }); });
     return () => controller.abort();
   }, [directory]);
+  const projects: readonly Project[] = projectsLoad.type === "ready" ? projectsLoad.projects : [];
   const projectLabel = useCallback((cwd: string) => destinationLabel(cwd, projects), [projects]);
 
   // One trigger in full: up to 50 runs. The list's copy shows at once and the full read replaces it.
@@ -131,23 +134,27 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
   };
   const dropDraft = (id = key) => { drafts.delete(id); touch(); };
 
-  // The chosen project's workflows.
+  // The workflows every target project shares, read again for each new selection. One read per selection, kept, so
+  // checking a project and unchecking it again does not wait. All projects reads the projects registered now.
   const [workflowLoads, setWorkflowLoads] = useState<Record<string, WorkflowsLoad>>({});
-  const cwd = place.view === "list" ? "" : draft.cwd;
+  const targeted = place.view !== "list" && hasTargets(draft.targets);
+  const selection = targeted ? targetsKey(draft.targets) : "";
   useEffect(() => {
-    if (!cwd) return;
+    if (!selection) return;
+    const targets: TriggerTargets = selection === "all" ? { kind: "all" } : { kind: "projects", cwds: selection.split("\n") };
     const controller = new AbortController();
-    setWorkflowLoads((current) => current[cwd]?.type === "ready" ? current : { ...current, [cwd]: { type: "loading" } });
-    api.workflows(cwd, controller.signal).then((result) => setWorkflowLoads((current) => ({ ...current, [cwd]: { type: "ready", workflows: result.workflows } })),
-      (error: unknown) => { if (!controller.signal.aborted) setWorkflowLoads((current) => ({ ...current, [cwd]: { type: "failed", message: messageOf(error) } })); });
+    setWorkflowLoads((current) => current[selection]?.type === "ready" ? current : { ...current, [selection]: { type: "loading" } });
+    api.commonWorkflows(targets, controller.signal).then((result) => setWorkflowLoads((current) => ({ ...current, [selection]: { type: "ready", ...result } })),
+      (error: unknown) => { if (!controller.signal.aborted) setWorkflowLoads((current) => ({ ...current, [selection]: { type: "failed", message: messageOf(error) } })); });
     return () => controller.abort();
-  }, [api, cwd]);
-  const workflows: WorkflowsLoad = cwd ? workflowLoads[cwd] ?? { type: "loading" } : { type: "ready", workflows: [] };
+  }, [api, selection]);
+  const workflows: WorkflowsLoad = selection ? workflowLoads[selection] ?? { type: "loading" } : { type: "ready", workflows: [], diagnostics: [] };
   const workflow: TriggerWorkflow | undefined = workflows.type === "ready" ? workflows.workflows.find((item) => item.name === draft.workflow) : undefined;
+  const gap = workflows.type === "ready" && targeted ? workflowGap(draft.workflow, workflows, projectLabel) : undefined;
 
   const [save, setSave] = useState<{ key: string; state: TriggerSave }>({ key, state: { type: "idle" } });
   const saveState = save.key === key ? save.state : { type: "idle" as const };
-  const problems: DraftProblems = { ...draftProblems(draft, workflow) };
+  const problems: DraftProblems = { ...draftProblems(draft, workflow, gap) };
   const refusedField = save.key === key && save.state.type === "refused" ? save.state.field : undefined;
   if (refusedField && save.state.type === "refused") problems[refusedField] ??= save.state.message;
 
@@ -184,7 +191,12 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
     onAcknowledge: (target: Trigger) => void command(target, "mark as seen", api.acknowledge),
     onPause: (target: Trigger) => void command(target, "pause", api.pause),
     onResume: (target: Trigger) => void command(target, "resume", api.resume),
-    onRunNow: (target: Trigger) => { runRequest.current = requestId(); setQuestion({ kind: "run", trigger: target, busy: false }); },
+    onRunNow: (target: Trigger) => {
+      runRequest.current = requestId();
+      // One run can be limited to a fixed target, or under All projects to any registered project.
+      const choices = target.action.targets.kind === "all" ? projects.map((project) => project.path) : fixedCwds(target.action.targets);
+      setQuestion({ kind: "run", trigger: target, busy: false, scope: { kind: "all" }, choices });
+    },
     onDelete: (target: Trigger) => setQuestion({ kind: "delete", trigger: target, busy: false }),
   };
 
@@ -196,18 +208,25 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
     if (question.kind === "run") {
       const id = runRequest.current ?? requestId();
       runRequest.current = id;
+      // `cwd` goes only when the reader limited this run to one project of several.
+      const only = isSpread(target.action.targets) && question.scope.kind === "one" ? question.scope.cwd : undefined;
+      setQuestion({ ...question, busy: true, error: undefined, sent: true });
       try {
         // The history entry carries the ID the answer returns, not one built from `id`.
-        const answer = await api.run(target.id, id);
+        const answer = await api.run(target.id, id, only);
         pendingRuns.set(target.id, { triggerId: target.id, recordedId: answer.requestId });
         runRequest.current = undefined;
         setQuestion(undefined);
-        setNote({ text: `“${target.name}” is starting. Its session shows under Runs once it opens.` });
+        setNote({ text: only ? `“${target.name}” is starting in ${projectLabel(only)}. Its session shows under Runs once it opens.`
+          : isSpread(target.action.targets) ? `“${target.name}” is starting in each target project. Its sessions show under Runs once they open.`
+          : `“${target.name}” is starting. Its session shows under Runs once it opens.` });
         refresh();
         if (target.id === triggerId) readDetail(target.id);
       } catch (error) {
-        // The same request ID goes with the next press, so a lost answer never starts a second run.
-        setQuestion({ ...question, busy: false, error: error instanceof TriggerRefusal ? error.message
+        // The same request ID goes with the next press, so a lost answer never starts a second run. The server keeps the
+        // first accepted request's projects, so after a lost answer the choice is locked to match. A refusal admitted
+        // nothing, so the reader can still change it.
+        setQuestion({ ...question, busy: false, sent: !(error instanceof TriggerRefusal), error: error instanceof TriggerRefusal ? error.message
           : `${messageOf(error)}. Press Run now to send the same request again; it starts at most one run.` });
       }
       return;
@@ -274,10 +293,13 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
       load: pageLoad, draft, dirty, problems, save: saveState, conflict, failure, clock, focusName,
       starting: trigger ? starting.has(trigger.id) : false,
       creatorName: trigger?.createdBy.kind === "agent" ? sessionName(trigger.createdBy.sessionId) : undefined,
-      projectLabel: draft.cwd ? projectLabel(draft.cwd) : "Choose a project",
-      projects: { list: (signal) => directory.projects(signal), workspaces: (id, signal) => directory.workspaces(id, signal) },
+      projectName: projectLabel, projects: projectsLoad,
       workflows, timezones: value?.timezones ?? [clock.hostZone],
-      listModels: async (signal) => draft.cwd ? (await directory.models(draft.cwd, signal)).models : [],
+      // The model list is read from one project: the first fixed target, or the first registered project under All projects.
+      listModels: async (signal) => {
+        const cwd = fixedCwds(draft.targets)[0] ?? (draft.targets.kind === "all" ? projects[0]?.path : undefined);
+        return cwd ? (await directory.models(cwd, signal)).models : [];
+      },
       actions: {
         onDraft: setDraft, onSave: () => void submit(),
         onDiscard: () => { dropDraft(); if (!trigger) go({ view: "list" }); },
@@ -298,5 +320,6 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
     } };
   return <TriggersView screen={screen} question={question} note={note} clock={clock} projectLabel={projectLabel}
     onConfirm={() => void confirm()} onCancel={() => { leave.current = undefined; runRequest.current = undefined; setQuestion(undefined); }}
+    onScope={(scope: RunScope) => setQuestion((current) => current?.kind === "run" && !current.sent && !current.busy ? { ...current, scope } : current)}
     onDismissNote={() => setNote(undefined)} />;
 }

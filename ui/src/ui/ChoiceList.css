@@ -20,6 +20,11 @@
 .choice-list-detail { grid-area: detail; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); }
 .choice-list-row[data-missing] .choice-list-label { color: var(--destructive); }
+/* The every row is set apart from the rows it chooses by a rule; its second line wraps, since it is a sentence. */
+.choice-list-row[data-every] { margin-block-end: var(--space-2); border-block-end: var(--hairline) solid var(--line); border-end-start-radius: 0; border-end-end-radius: 0; }
+.choice-list-wrap { grid-area: detail; min-inline-size: 0; color: var(--muted-foreground); font-size: var(--meta-text); line-height: 1.4; }
+.choice-list-row[data-held] { cursor: default; }
+.choice-list-row[data-held] .choice-list-label { color: var(--muted-foreground); }
 .choice-list:disabled .choice-list-row { cursor: default; opacity: 0.6; }
 .choice-list-none { margin: var(--space-3) 0 0; padding-inline: var(--space-3); color: var(--muted-foreground); font-size: var(--small-text); }
 @media (prefers-reduced-motion: reduce) { .choice-list-row, .choice-list-search { transition: none; } }
