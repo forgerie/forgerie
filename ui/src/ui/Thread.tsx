@@ -128,19 +128,10 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
 /** How long a reveal waits for its message to draw, and keeps it in view against the thread's own scroll to the end. */
 const REVEAL_WAIT_MS = 4000;
 const REVEAL_HOLD_MS = 1200;
-/** Frames the viewport must hold still before a step's glide counts as finished. */
-const GLIDE_STILL_FRAMES = 3;
-/** The reader's own scrolling, which ends a step's hold: after a step, the reader's scroll is theirs. */
-const READER_SCROLL = ["wheel", "touchstart", "pointerdown"] as const;
 /**
  * Brings the marked message to a quarter of the way down the thread, so a
  * long reply shows its start above the input bar. The thread's own viewport
  * scrolls, never the page. Returns the cleanup.
- *
- * Finished messages far from view are not drawn (content-visibility), so they
- * hold an estimated height until they come near. A message the browser draws
- * on arrival can then grow and carry the target out of view, so both the first
- * reveal and a step hold the target in view for a moment after they land.
  */
 function revealMessage(column: HTMLDivElement | null, messageId: string, step: boolean): (() => void) | undefined {
   const viewport = column?.parentElement;
@@ -150,10 +141,6 @@ function revealMessage(column: HTMLDivElement | null, messageId: string, step: b
   let frame = 0;
   const started = performance.now();
   let shownAt: number | undefined;
-  let glide: { top: number; still: number } | undefined;
-  let released = false;
-  const release = () => { released = true; };
-  if (step) for (const gesture of READER_SCROLL) viewport.addEventListener(gesture, release, { passive: true });
   const smooth = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches !== true;
   const place = (target: Element, behavior: ScrollBehavior) => {
     const offset = target.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
@@ -163,26 +150,20 @@ function revealMessage(column: HTMLDivElement | null, messageId: string, step: b
     const target = column.querySelector(selector);
     const now = performance.now();
     if (!target) { if (now - started < REVEAL_WAIT_MS) frame = requestAnimationFrame(tick); return; }
-    if (shownAt === undefined && glide === undefined) {
-      // A step glides; the first reveal jumps. Both then hold the message in view: the first
-      // reveal against the opening thread settling at its end, a step against late heights.
-      if (step && smooth) glide = { top: viewport.scrollTop, still: 0 };
-      else shownAt = now;
-      place(target, glide ? "smooth" : "auto");
-    } else if (shownAt === undefined && glide) {
-      glide = viewport.scrollTop === glide.top ? { ...glide, still: glide.still + 1 } : { top: viewport.scrollTop, still: 0 };
-      if (glide.still >= GLIDE_STILL_FRAMES) shownAt = now;
+    if (shownAt === undefined) {
+      // A step glides, and then the reader's own scroll is theirs. The first reveal jumps, and holds
+      // the message in view while the opening thread settles at its end.
+      if (step && smooth) { place(target, "smooth"); return; }
+      place(target, "auto");
+      if (step) return;
+      shownAt = now;
     } else {
       const box = target.getBoundingClientRect();
       const room = viewport.getBoundingClientRect();
       if (box.bottom < room.top || box.top > room.bottom) place(target, "auto");
     }
-    if (released) return;
-    if (shownAt === undefined ? now - started < REVEAL_WAIT_MS : now - shownAt < REVEAL_HOLD_MS) frame = requestAnimationFrame(tick);
+    if (now - shownAt < REVEAL_HOLD_MS) frame = requestAnimationFrame(tick);
   };
   frame = requestAnimationFrame(tick);
-  return () => {
-    cancelAnimationFrame(frame);
-    for (const gesture of READER_SCROLL) viewport.removeEventListener(gesture, release);
-  };
+  return () => cancelAnimationFrame(frame);
 }
