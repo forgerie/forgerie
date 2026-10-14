@@ -31,6 +31,15 @@ export function createTaskActivityStore(request: Request, ref: () => SessionRef 
   let disposed = false;
   /** Only the newest read may land: an older one that returns late would put back a list the server already replaced. */
   let latest = 0;
+  /**
+   * The connection, as the binding reports it. Each drop starts a new epoch. A
+   * reply can clear `stale` only if its read started while connected in the
+   * current epoch: a read sent before a drop, or while the connection was down,
+   * may miss changes whose events never arrived, even when it returns after the
+   * reconnect.
+   */
+  let connected = true;
+  let epoch = 0;
   const update = (next: Partial<TaskActivityState>) => {
     if (disposed) return;
     state = { ...state, ...next };
@@ -41,6 +50,7 @@ export function createTaskActivityStore(request: Request, ref: () => SessionRef 
     const session = ref();
     if (!session || disposed) return;
     const version = ++latest;
+    const startedIn = connected ? epoch : -1;
     update({ reading: true });
     try {
       const response = await request(`/api/sessions/${encodeURIComponent(session.id)}/tasks?${new URLSearchParams({ cwd: session.cwd })}`,
@@ -54,7 +64,7 @@ export function createTaskActivityStore(request: Request, ref: () => SessionRef 
       // A reply this page cannot read most likely comes from a newer or older server than the page.
       if (!parsed.success) throw new Error("The server sent task data this page cannot read. Reload the page.");
       const activity = parsed.data;
-      if (version === latest) update({ activity, reading: false, error: undefined, stale: false });
+      if (version === latest) update({ activity, reading: false, error: undefined, stale: !connected || startedIn !== epoch });
     } catch (error) {
       // The last good list stays, marked stale, so a failed read never empties the panel.
       if (version === latest) update({ reading: false, error: error instanceof Error ? error.message : String(error), stale: state.activity !== undefined });
@@ -72,8 +82,18 @@ export function createTaskActivityStore(request: Request, ref: () => SessionRef 
     refresh,
     /** Try again now, for the reader's own press. */
     retry() { clearTimeout(timer); void read(); },
-    /** The connection dropped: keep the list, but say it may be out of date until the next read returns. */
-    markStale() { if (state.activity !== undefined && !state.stale) update({ stale: true }); },
+    /**
+     * The connection's state. A drop keeps the list but says it may be out of
+     * date, until a read sent after the reconnect returns. The binding reads
+     * again on reconnect.
+     */
+    setConnected(next: boolean) {
+      if (next === connected) return;
+      connected = next;
+      if (next) return;
+      epoch += 1;
+      if (state.activity !== undefined && !state.stale) update({ stale: true });
+    },
     dispose() { disposed = true; clearTimeout(timer); listeners.clear(); },
   };
 }

@@ -76,14 +76,69 @@ describe("the task activity store", () => {
   it("marks the list stale while the connection is down, and a read after reconnect replaces it", async () => {
     const replies = [respond(200, WORKING), respond(200, BUSY)];
     const store = createTaskActivityStore(() => replies.shift()!, session);
-    store.markStale();
+    store.setConnected(false);
     expect(store.getSnapshot().stale).toBe(false);
+    store.setConnected(true);
     store.retry();
     await vi.waitFor(() => expect(store.getSnapshot().activity).toEqual(WORKING));
-    store.markStale();
+    store.setConnected(false);
     expect(store.getSnapshot()).toMatchObject({ activity: WORKING, stale: true });
+    store.setConnected(true);
+    expect(store.getSnapshot().stale).toBe(true);
     store.retry();
     await vi.waitFor(() => expect(store.getSnapshot()).toMatchObject({ activity: BUSY, stale: false }));
+    store.dispose();
+  });
+
+  /** A store with one good list, and a read in flight that the test answers. */
+  async function withLateRead(refreshDelayMs = 10) {
+    const pending: ((response: Response) => void)[] = [];
+    const replies: Promise<Response>[] = [respond(200, WORKING)];
+    const store = createTaskActivityStore(() => replies.shift() ?? new Promise((resolve) => { pending.push(resolve); }), session, { refreshDelayMs });
+    store.retry();
+    await vi.waitFor(() => expect(store.getSnapshot().activity).toEqual(WORKING));
+    store.retry();
+    expect(store.getSnapshot().reading).toBe(true);
+    const answer = (body: unknown) => pending.shift()!(new Response(JSON.stringify(body), { status: 200 }));
+    return { store, answer, pending };
+  }
+
+  it("keeps the list stale when a read sent before a drop returns while still disconnected", async () => {
+    const { store, answer } = await withLateRead();
+    store.setConnected(false);
+    answer(BUSY);
+    await vi.waitFor(() => expect(store.getSnapshot().reading).toBe(false));
+    expect(store.getSnapshot()).toMatchObject({ activity: BUSY, stale: true });
+    store.dispose();
+  });
+
+  it("keeps the list stale when a read sent before a drop returns during the reconnect's debounce", async () => {
+    // The debounce is long enough that the late reply lands inside it.
+    const { store, answer, pending } = await withLateRead(300);
+    store.setConnected(false);
+    store.setConnected(true);
+    store.refresh();
+    answer(BUSY);
+    await vi.waitFor(() => expect(store.getSnapshot().activity).toEqual(BUSY));
+    expect(store.getSnapshot().stale).toBe(true);
+    expect(pending).toHaveLength(0);
+    // The reconnect's own read clears it.
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    answer(WORKING);
+    await vi.waitFor(() => expect(store.getSnapshot()).toMatchObject({ activity: WORKING, stale: false }));
+    store.dispose();
+  });
+
+  it("keeps the list stale when a read sent while disconnected returns after the reconnect", async () => {
+    const { store, answer } = await withLateRead();
+    answer(WORKING);
+    await vi.waitFor(() => expect(store.getSnapshot().reading).toBe(false));
+    store.setConnected(false);
+    store.retry();
+    store.setConnected(true);
+    answer(BUSY);
+    await vi.waitFor(() => expect(store.getSnapshot().activity).toEqual(BUSY));
+    expect(store.getSnapshot().stale).toBe(true);
     store.dispose();
   });
 

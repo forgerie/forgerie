@@ -167,8 +167,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   // Read the children on every join: a reconnect may have missed their change events.
   useEffect(() => { if (connected && sessionId) { childAgents.refresh(); workflows.refresh(); decisions.refresh(); gated.refresh(); processes.refresh(); taskActivity.refresh(); } },
     [childAgents, workflows, decisions, gated, processes, taskActivity, connected, sessionId]);
-  // While the connection is down, the task list may miss changes: keep it, marked stale, until the next read.
-  useEffect(() => { if (!connected) taskActivity.markStale(); }, [taskActivity, connected]);
+  // While the connection is down, the task list may miss changes: keep it, marked stale, until a read after the reconnect.
+  useEffect(() => { taskActivity.setConnected(connected); }, [taskActivity, connected]);
   useEffect(() => () => { childAgents.dispose(); workflows.dispose(); decisions.dispose(); gated.dispose(); processes.dispose(); taskActivity.dispose(); },
     [childAgents, workflows, decisions, gated, processes, taskActivity]);
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
