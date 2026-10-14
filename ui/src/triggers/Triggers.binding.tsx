@@ -3,7 +3,7 @@ import type { Trigger, TriggerTargets, TriggerWorkflow } from "@shared/triggers"
 import { writeClipboardText } from "../clipboard";
 import { destinationLabel, type Project } from "../newSession";
 import type { SessionModel } from "../contracts";
-import { TriggerRefusal, type TriggersApi } from "./triggersApi";
+import { runRefusedBeforeAdmission, TriggerRefusal, type TriggersApi } from "./triggersApi";
 import { listOf, type TriggerPlace, type TriggersScreenArgs } from "./triggersModel";
 import type { TriggerList as TriggerListState } from "./useTriggerList";
 import { createOf, draftOf, draftProblems, emptyDraft, fieldOf, isDirty, updateOf, type DraftProblems, type TriggerDraft } from "./triggerDraft";
@@ -225,10 +225,10 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
       } catch (error) {
         // The same request ID goes with the next press, so a lost answer never starts a second run. The server keeps the
         // first accepted request's projects, so once a request may have reached it the choice is locked to match, and
-        // stays locked: a later refusal for the same ID proves nothing about the earlier one. Only a refusal of the
-        // first send, which admitted nothing, leaves the choice open.
+        // stays locked: a later refusal for the same ID proves nothing about the earlier one. Only a known
+        // pre-admission refusal, with no earlier ambiguous attempt, leaves the choice open.
         const reachedBefore = question.sent === true;
-        setQuestion({ ...question, busy: false, sent: reachedBefore || !(error instanceof TriggerRefusal), error: error instanceof TriggerRefusal ? error.message
+        setQuestion({ ...question, busy: false, sent: reachedBefore || !runRefusedBeforeAdmission(error), error: error instanceof TriggerRefusal ? error.message
           : `${messageOf(error)}. Press Run now to send the same request again; it starts at most one run.` });
       }
       return;

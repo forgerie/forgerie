@@ -8,7 +8,7 @@ import { useTriggerList } from "./useTriggerList";
 import type { TriggerPlace } from "./triggersModel";
 import { audit, CALIPER, digest, docs, everywhere, FORGERIE, HOST_ZONE, manyList, NOW, nightly, notes, PI_MONO, spreadNotes, triage } from "./fixtures/triggers";
 import { memoryApi, memoryDirectory, serverRunId, type MemoryStore } from "./fixtures/memoryApi";
-import { TriggerRefusal, type TriggersApi } from "./triggersApi";
+import { createTriggersApi, TriggerRefusal, type TriggersApi } from "./triggersApi";
 import { createTriggerMemory, type TriggerMemory } from "./triggerMemory";
 
 let root: Root;
@@ -687,21 +687,50 @@ describe("Run now with several projects", () => {
     expect(text()).toContain("“Weekly release notes” is starting in pi-mono.");
   });
 
-  it("leaves the choice open after a refusal, which admitted nothing", async () => {
+  it.each([500, 502, 503, 504, 409, 599])("keeps scope locked after a first-send HTTP %i and retries the original cwd", async (status) => {
+    await render({ view: "trigger", id: spreadNotes.id }, [spreadNotes]);
+    const requests: { path: string; body: unknown }[] = [];
+    const http = createTriggersApi(async (path, init) => {
+      requests.push({ path, body: JSON.parse(String(init?.body)) as unknown });
+      return requests.length === 1 ? new Response(JSON.stringify({ error: "Run answer unavailable" }), { status })
+        : new Response(JSON.stringify({ requestId: serverRunId(spreadNotes.id, "req1") }), { status: 202 });
+    });
+    api = { ...store.api, run: http.run };
+    await rerender();
+    await press("Run now…");
+    await press("One project");
+    await press("pi-mono");
+    await press("Run now");
+    expect(text()).toContain("Could not run “Weekly release notes”: Run answer unavailable");
+    expect(button("All target projects")?.disabled).toBe(true);
+    expect(button("caliper")?.disabled).toBe(true);
+    await press("caliper");
+    await press("All target projects");
+    expect(text()).toContain("It starts release-notes in a new session of pi-mono only.");
+    await press("Run now");
+    const original = { path: `/api/triggers/${spreadNotes.id}/run`, body: { requestId: "req1", cwd: PI_MONO } };
+    expect(requests).toEqual([original, original]);
+    expect(text()).toContain("“Weekly release notes” is starting in pi-mono.");
+    expect(text()).not.toContain("“Weekly release notes” is starting in caliper.");
+  });
+
+  it.each([400, 404])("leaves the choice open after a first-send HTTP %i refusal", async (status) => {
     await render({ view: "trigger", id: spreadNotes.id }, [spreadNotes]);
     await press("Run now…");
     await press("One project");
     await press("pi-mono");
-    store.failNext("run", new TriggerRefusal("Choose a workspace of a registered project", 400, "cwd"));
+    const message = status === 400 ? "Choose a workspace of a registered project" : "Trigger does not exist";
+    store.failNext("run", new TriggerRefusal(message, status));
     await press("Run now");
-    expect(text()).toContain("Could not run “Weekly release notes”: Choose a workspace of a registered project");
+    expect(text()).toContain(`Could not run “Weekly release notes”: ${message}`);
+    expect(button("All target projects")?.disabled).toBe(false);
     expect(button("caliper")?.disabled).toBe(false);
     await press("caliper");
     await press("Run now");
     expect(store.calls.filter((call) => call[0] === "run")).toEqual([["run", spreadNotes.id, "req1", CALIPER]]);
   });
 
-  it("keeps the choice locked after a lost answer, even when a later retry is refused", async () => {
+  it.each([400, 404, 503])("keeps the choice locked after a lost answer, even when a later retry returns HTTP %i", async (status) => {
     await render({ view: "trigger", id: spreadNotes.id }, [spreadNotes]);
     await press("Run now…");
     await press("One project");
@@ -710,10 +739,10 @@ describe("Run now with several projects", () => {
     await press("Run now");
     // The first request may have reached the server, which keeps its projects: the choice locks.
     expect(button("All target projects")?.disabled).toBe(true);
-    store.failNext("run", new TriggerRefusal("database is locked", 503));
+    store.failNext("run", new TriggerRefusal("Retry refused", status));
     await press("Run now");
-    expect(text()).toContain("Could not run “Weekly release notes”: database is locked");
-    // The 503 says nothing about the lost request, so the choice stays locked and still reads pi-mono.
+    expect(text()).toContain("Could not run “Weekly release notes”: Retry refused");
+    // Even a definite refusal of the retry says nothing about admission of the first attempt.
     expect(button("All target projects")?.disabled).toBe(true);
     expect(button("caliper")?.disabled).toBe(true);
     await press("All target projects");

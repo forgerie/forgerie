@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createTriggersApi, TriggerRefusal } from "./triggersApi";
+import { createTriggersApi, runRefusedBeforeAdmission, TriggerRefusal } from "./triggersApi";
 import { mixedList, nightly } from "./fixtures/triggers";
 
 /** The client takes its fetch as an argument: the test hands it one that records each request. */
@@ -46,6 +46,16 @@ describe("the trigger routes", () => {
     const remove = served(200, { ok: true });
     expect(await remove.api.remove("nightly-refinement")).toEqual({ ok: true });
     expect(remove.calls).toEqual([{ path: "/api/triggers/nightly-refinement", method: "DELETE" }]);
+  });
+  it.each([400, 404, 409, 500, 502, 503, 504, 599])("classifies only known pre-admission run refusals: HTTP %i", async (status) => {
+    const error = await served(status, { error: "Request failed" }).api.run("nightly-refinement", "abc123").catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(TriggerRefusal);
+    expect(runRefusedBeforeAdmission(error)).toBe(status === 400 || status === 404);
+  });
+  it("does not treat network, unreadable answers, or unknown errors as proof of non-admission", () => {
+    for (const error of [new TypeError("Failed to fetch"), new Error("Unreadable answer"), { status: 400 }, undefined]) {
+      expect(runRefusedBeforeAdmission(error)).toBe(false);
+    }
   });
   it("refuses a run answer without the server's request ID instead of guessing it", async () => {
     await expect(served(202, {}).api.run("nightly-refinement", "abc123")).rejects.toThrow("Forgerie sent a run answer this app cannot read.");

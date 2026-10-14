@@ -7,13 +7,22 @@ import type {
 import type { Fetch } from "../newSession";
 
 /**
- * The server refused a trigger request. `status` is the HTTP status: 400 a bad
- * request, 404 an unknown trigger, 409 a conflict (another change came first),
- * 503 the trigger store is off. `field` names the request field at fault, as a
+ * A non-success answer from a trigger route or its proxy. This alone does not
+ * prove the request was refused: a proxy can lose the answer after admission.
+ * `status` is the HTTP status. `field` names the request field at fault, as a
  * dotted path such as `schedule.at`, when the server knows it.
  */
 export class TriggerRefusal extends Error {
   constructor(message: string, readonly status: number, readonly field?: string) { super(message); }
+}
+
+/**
+ * Run now rejects validation (400) and unknown triggers (404) before durableTriggers.run writes its receipt and
+ * creates the task. The run path has no 409 refusal. Every other status, including proxy and store failures, is
+ * ambiguous. This classifies this attempt only: it says nothing about admission by an earlier attempt.
+ */
+export function runRefusedBeforeAdmission(error: unknown): boolean {
+  return error instanceof TriggerRefusal && (error.status === 400 || error.status === 404);
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
