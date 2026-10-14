@@ -1,6 +1,6 @@
 # Managed processes run as transient systemd user units
 
-Status: proposed, 2026-10-14
+Status: accepted, 2026-10-14
 
 Durable sessions resume after Forgerie restarts, but the bundled `@aliou/pi-processes` kills every process on `session_shutdown`. Its processes also live in `forgerie-sessiond.service`'s cgroup, so systemd kills them when sessiond stops. Upstream plans persistence across reloads only, not across a restart of the host process.
 
