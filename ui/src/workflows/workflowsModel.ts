@@ -7,7 +7,14 @@ import type { StageStripSegment } from "../ui/StageStrip";
 import type { ChildRetry } from "../childAgents/childAgentsModel";
 
 const valueSchema = z.union([z.string(), z.boolean(), z.number()]);
-const workerSchema = z.object({ name: z.string(), agent: z.string().optional(), model: z.string().optional() });
+/** A declared worker. Without a model it runs on the session's. */
+interface DeclaredWorker { name: string; agent?: string | undefined; model?: string }
+/**
+ * The server writes `model: null` for a worker the reader put on the session's model, at start or during a run. The
+ * browser has one form for that: no model.
+ */
+const workerSchema = z.object({ name: z.string(), agent: z.string().optional(), model: z.string().nullable().optional() })
+  .transform(({ model, ...worker }): DeclaredWorker => model === null || model === undefined ? worker : { ...worker, model });
 const stageSchema = z.object({
   id: z.string(), name: z.string(), does: z.string().optional(),
   stop: z.enum(["approve", "land"]).optional(), workers: z.array(workerSchema).optional(),

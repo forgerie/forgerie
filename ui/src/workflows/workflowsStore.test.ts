@@ -167,6 +167,23 @@ describe("workers' models", () => {
     expect(calls.at(-1)?.body).toEqual({ cwd: "/srv/app", model: null });
   });
 
+  it("reads a worker the server put on the session's model, written as null, as a worker with no model", async () => {
+    // As the server stores it: `null` for the session's model, in the run list and in the model route's answer.
+    const wire = (run: typeof BUILDING) => JSON.parse(JSON.stringify(run, (key, value: unknown) => key === "workers"
+      ? (value as { name: string }[]).map((worker) => worker.name === "design" ? { ...worker, model: null } : worker) : value)) as unknown;
+    const onSession = (run: typeof BUILDING) => ({ ...run, stages: run.stages?.map((stage) => ({ ...stage, ...stage.workers === undefined ? {}
+      : { workers: stage.workers.map((worker) => worker.name === "design" ? { name: worker.name, agent: worker.agent } : worker) } })) });
+    const { store } = routes((path) => path.endsWith("/model") ? json(200, wire(BUILDING)) : json(200, [wire(BUILDING)]));
+    store.refresh();
+    await settle();
+    expect(store.getSnapshot().runs).toEqual([onSession(BUILDING)]);
+    const design = store.getSnapshot().runs[0]?.stages?.[1]?.workers?.[0];
+    expect(design).toEqual({ name: "design", agent: "design-engineer" });
+    expect(design).not.toHaveProperty("model");
+    expect(await store.setWorkerModel(BUILDING.id, "design", null)).toBe(true);
+    expect(store.getSnapshot()).toMatchObject({ error: undefined, runs: [onSession(BUILDING)] });
+  });
+
   it("says why a model change was refused, and reads the runs again", async () => {
     const { calls, store } = routes((path) => path.endsWith("/model") ? json(409, { error: "Workflow run is not running" }) : json(200, [BUILDING]));
     expect(await store.setWorkerModel(BUILDING.id, "build", "openai/gpt-5")).toBe(false);
