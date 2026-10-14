@@ -26,8 +26,10 @@ import { SessionFrame } from "./ui/SessionFrame";
 import { StatusChip } from "./ui/StatusChip";
 import { Consequence } from "./ui/Consequence";
 import { CircleAlertIcon } from "lucide-react";
-import { problemsLabel, sessionStatus } from "./session/sessionStatus";
+import { sessionStatus } from "./session/sessionStatus";
 import { StatusDetail, type ConnectionTrouble } from "./session/StatusDetail";
+import { TaskActivity } from "./session/TaskActivity";
+import { createTaskActivityStore } from "./session/taskActivityStore";
 import type { AskBinding } from "./ui/useAskMode";
 import type { CommandResult } from "./commands";
 import { createMentionSource } from "./mentionSource";
@@ -127,6 +129,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const sessionRef = useRef<{ id: string; cwd: string } | undefined>(undefined);
   const [childAgents] = useState(() => createChildAgentsStore(browserTransport.request, () => sessionRef.current));
   const [processes] = useState(() => createProcessesStore(browserTransport.request, () => sessionRef.current));
+  // Live Durable tasks for the status panel: read again on the same change event as the children, on reconnect, and on panel open.
+  const [taskActivity] = useState(() => createTaskActivityStore(browserTransport.request, () => sessionRef.current));
+  const tasks = useSyncExternalStore(taskActivity.subscribe, taskActivity.getSnapshot);
   const processState = useSyncExternalStore(processes.subscribe, processes.getSnapshot);
   const [processesOpen, setProcessesOpen] = useState(false);
   // Workflows: the saved ones this session can start, and its runs. Refreshed on the same kind of change events.
@@ -144,7 +149,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const [store] = useState(() => createSessionStore(id, browserTransport, {}, known, createReadTracker(browserTransport, { subscribe: onUnread, isVisible: () => document.visibilityState === "visible", afterRender: afterTranscriptPaint }),
     (eventType) => {
       if (eventType === "processes.update" || eventType === "processes.output") processes.refresh();
-      if (eventType === CHILDREN_CHANGED_EVENT) { childAgents.refresh(); workflows.refresh(); }
+      if (eventType === CHILDREN_CHANGED_EVENT) { childAgents.refresh(); workflows.refresh(); taskActivity.refresh(); }
       if (eventType === WORKFLOW_RUNS_CHANGED_EVENT) { workflows.refresh(); decisions.refresh(); gated.refresh(); }
     }));
   const children = useSyncExternalStore(childAgents.subscribe, childAgents.getSnapshot);
@@ -160,9 +165,12 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   sessionRef.current = sessionId && cwd ? { id: sessionId, cwd } : undefined;
   const connected = state.connection.type === "ready";
   // Read the children on every join: a reconnect may have missed their change events.
-  useEffect(() => { if (connected && sessionId) { childAgents.refresh(); workflows.refresh(); decisions.refresh(); gated.refresh(); processes.refresh(); } },
-    [childAgents, workflows, decisions, gated, processes, connected, sessionId]);
-  useEffect(() => () => { childAgents.dispose(); workflows.dispose(); decisions.dispose(); gated.dispose(); processes.dispose(); }, [childAgents, workflows, decisions, gated, processes]);
+  useEffect(() => { if (connected && sessionId) { childAgents.refresh(); workflows.refresh(); decisions.refresh(); gated.refresh(); processes.refresh(); taskActivity.refresh(); } },
+    [childAgents, workflows, decisions, gated, processes, taskActivity, connected, sessionId]);
+  // While the connection is down, the task list may miss changes: keep it, marked stale, until the next read.
+  useEffect(() => { if (!connected) taskActivity.markStale(); }, [taskActivity, connected]);
+  useEffect(() => () => { childAgents.dispose(); workflows.dispose(); decisions.dispose(); gated.dispose(); processes.dispose(); taskActivity.dispose(); },
+    [childAgents, workflows, decisions, gated, processes, taskActivity]);
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
     [sessionId, cwd]);
   const [attachments] = useState(() => createAttachmentAdapter(store.saveAttachment));
@@ -433,17 +441,24 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     connection: connection.type, dialogOpen: dialogs.length > 0, askOpen: state.ask.type === "open", sending: state.sending,
     compaction: state.compaction.type === "running" ? "running" : state.compaction.type === "queued" ? "queued" : "idle",
     running: state.transcript.isRunning, shellRunning: isBashRunning(state), problems: problems.length,
+    tasks: tasks.activity?.kind === "unsupported" ? "unsupported"
+      : tasks.activity && { live: tasks.activity.tasks.length, backgroundAgents: tasks.activity.backgroundAgents },
   });
+  const clipboard = typeof navigator.clipboard?.writeText === "function" ? (text: string) => navigator.clipboard.writeText(text) : undefined;
   const trouble: ConnectionTrouble | undefined = connection.type === "reconnecting"
     ? { type: "reconnecting", reason: connection.message, attempt: connection.attempt, retryAt: connection.retryAt, lastReadyAt: state.lastReadyAt }
     : connection.type === "failed" ? { type: "failed", reason: connection.message } : undefined;
-  const statusChip = <StatusChip label={status.label} tone={status.tone} count={status.count} countLabel={status.countLabel}
-    ring={problems[0]?.id} panel={status.hasDetail ? {
-      title: trouble ? status.label : problemsLabel(problems.length),
+  const statusChip = <StatusChip label={status.label} tone={status.tone} aside={status.aside} asideLabel={status.asideLabel}
+    count={status.count} countLabel={status.countLabel} ring={problems[0]?.id} panel={status.hasDetail ? {
+      title: status.label,
       actions: problems.length > 1 ? [{ label: "Dismiss all", onPress: store.dismissProblems }] : [],
-      children: <StatusDetail connection={trouble} problems={problems} draftSaved={saved !== undefined}
-        onTryNow={store.retryNow} onReload={() => window.location.reload()} onDismiss={store.dismissProblem}
-        onCopy={typeof navigator.clipboard?.writeText === "function" ? (text) => { void navigator.clipboard.writeText(text).catch(() => undefined); } : undefined} />,
+      onOpen: taskActivity.refresh,
+      children: <>
+        <StatusDetail connection={trouble} problems={problems} draftSaved={saved !== undefined}
+          onTryNow={store.retryNow} onReload={() => window.location.reload()} onDismiss={store.dismissProblem}
+          onCopy={clipboard && ((text) => { void clipboard(text).catch(() => undefined); })} />
+        {!readOnly && <TaskActivity view={tasks} running={state.transcript.isRunning} onRetry={taskActivity.retry} onCopy={clipboard} />}
+      </>,
     } : undefined} />;
   const oldestDialog = dialogs[0];
   const dialog: DialogBinding | undefined = oldestDialog && {
