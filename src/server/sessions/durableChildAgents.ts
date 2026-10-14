@@ -17,6 +17,8 @@ import {
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Check } from "typebox/value";
+import { WorkflowModelSchema } from "../../shared/workflowRuns.js";
+import { isKnownThinkingLevel, type ThinkingLevel } from "../../shared/thinkingLevels.js";
 import { ChildRetrySchema, type ChildRetry } from "../../shared/childRetry.js";
 import type { DurableSdkTools } from "./durableSdkTools.js";
 import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
@@ -526,14 +528,12 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
   return extensions;
 }
 
-type Thinking = NonNullable<ChildAgentProfile["thinkingLevel"]>;
-const THINKING: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh"] satisfies Thinking[];
-const isThinking = (value: string): value is Thinking => THINKING.includes(value);
 /** provider/model-id with an optional :thinking-level, as agent files write it. Null when it cannot be read. */
-export function modelChoice(spec: string): { model: { provider: string; modelId: string }; thinkingLevel?: Thinking } | null {
+export function modelChoice(spec: string): { model: { provider: string; modelId: string }; thinkingLevel?: ThinkingLevel } | null {
+  if (!Check(WorkflowModelSchema, spec)) return null;
   const colon = spec.lastIndexOf(":");
   const suffix = colon > 0 ? spec.slice(colon + 1) : "";
-  const level = isThinking(suffix) ? suffix : undefined;
+  const level = isKnownThinkingLevel(suffix) ? suffix : undefined;
   const id = level === undefined ? spec : spec.slice(0, colon);
   const slash = id.indexOf("/");
   if (slash <= 0 || slash === id.length - 1) return null;

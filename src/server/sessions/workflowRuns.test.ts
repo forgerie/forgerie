@@ -197,7 +197,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
         url = `/sessions/${ref.id}/workflow-proposals/${proposal.id}/start`;
       }
       const payload = { cwd: root, ...(source === "saved" ? { name: "staged" } : {}), inputs: {}, requestId: "models-start", models: { alpha: model } };
-      for (const models of [{ missing: null }, { alpha: "bad" }, { alpha: "/id" }, { alpha: "provider/" }, { alpha: "provider/id:" }, { alpha: "provider/id has spaces" }, { alpha: 1 }]) {
+      for (const models of [{ missing: null }, { alpha: "bad" }, { alpha: "/id" }, { alpha: "provider/" }, { alpha: "provider/id:" }, { alpha: "provider/id:bogus" }, { alpha: "provider/id:HIGH" }, { alpha: "provider/id has spaces" }, { alpha: 1 }]) {
         expect((await server.inject({ method: "POST", url, payload: { ...payload, models } })).statusCode).toBe(400);
       }
       const response = await server.inject({ method: "POST", url, payload });
@@ -212,7 +212,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       const messages = (await service.messages(ref)).messages;
       expect(messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content).includes(`model ${model ?? "session default"}`))).toBe(true);
       const modelUrl = `/sessions/${ref.id}/workflow-runs/${run.id}/workers/alpha/model`;
-      for (const model of ["bad", "provider/", "provider/id:", 1, {}]) {
+      for (const model of ["bad", "provider/", "provider/id:", "provider/id:bogus", "provider/id:HIGH", 1, {}]) {
         expect((await server.inject({ method: "POST", url: modelUrl, payload: { cwd: root, model } })).statusCode).toBe(400);
       }
       expect((await server.inject({ method: "POST", url: modelUrl, payload: { cwd: root } })).statusCode).toBe(400);
