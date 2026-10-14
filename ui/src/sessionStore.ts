@@ -2,7 +2,7 @@ import type { EarlierHistory } from "./historyPaging";
 import type { ReadReceipt } from "./readReceipt";
 import type { ReadTracker } from "./readReceipt";
 import { z } from "zod";
-import { sessionOpenSchema, sessionHistoryPageSchema, type SessionOpen, type UiEvent, abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, dialogCloseResponseSchema, errorSchema, isAskEvent, isOperationEvent, modelsResponseSchema, parseEvent, statusSchema, thinkingLevelsResponseSchema, type AskAnswer, type OperationEvent, type Session, type SessionStatus } from "./contracts";
+import { sessionOpenSchema, sessionHistoryPageSchema, type SessionOpen, type UiEvent, type AskEvent, abortResultSchema, acceptedSchema, askCloseResponseSchema, catalogSchema, dialogCloseResponseSchema, errorSchema, isAskEvent, isOperationEvent, modelsResponseSchema, parseEvent, statusSchema, thinkingLevelsResponseSchema, type AskAnswer, type OperationEvent, type Session, type SessionStatus } from "./contracts";
 import { deliverPrompt, promptDelivery } from "./promptDelivery";
 import { noAsk, reduceAskEvent, resyncAsk, whileOpen, type AskAction, type AskState } from "./ask";
 import { carryUnsavedShellRows, fromHistory, hasRunningShell, reconcileTranscriptIdentity, reduceEvent, seedTranscript, type Transcript } from "./transcript";
@@ -263,8 +263,30 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   }
   function applyOpen(previous: SessionState, open: SessionOpen, buffered: readonly UiEvent[]): SessionState {
     const running = open.status.isStreaming || open.status.isCompacting;
+    if (open.cut === "sequential") {
+      const transcriptEvents = buffered.filter((event): event is Exclude<UiEvent, AskEvent | OperationEvent> => !isAskEvent(event) && !isOperationEvent(event));
+      // The legacy facade can publish completed messages/tools between its history and partial reads.
+      // Preserve the original seedTranscript reconciliation for this explicitly non-atomic cohort.
+      const seeded = seedTranscript(open.page.messages, open.snapshot.partial, open.seq, running,
+        transcriptEvents.filter(event => !event.type.startsWith("shell.") || (event.seq ?? Infinity) > open.seq), open.status.isBashRunning);
+      let next = withStatus({ ...previous, session: open.session,
+        transcript: { ...seeded, messages: seeded.messages.map(message => message.position === undefined ? message : { ...message, position: message.position + open.page.start }) },
+        ask: resyncAsk(previous.ask, open.status.pendingAsk), earlier: { type: open.page.start === 0 ? "complete" : "available" } }, open.status);
+      for (const event of open.snapshot.transientEvents) next = applyEvent(next, event);
+      for (const event of buffered) {
+        if (isAskEvent(event) && (event.seq ?? Infinity) > open.seq) next = applyEvent(next, event);
+        if (isOperationEvent(event) && (event.seq ?? Infinity) > (open.statusSeq ?? open.seq)) next = applyEvent(next, event);
+      }
+      page = { start: open.page.start, total: open.page.total, historyId: open.historyId, epoch: open.epoch };
+      if (open.receipt !== null) pendingReceipt = { ...open.receipt, session: open.session };
+      return { ...next, transcript: reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)) };
+    }
     // Absolute IDs/positions are assigned before any transient or live events are replayed.
-    const initial = fromHistory(open.page.messages, running, open.page.start);
+    const raw = fromHistory(open.page.messages, running, open.page.start);
+    const initial = open.readPath !== "native" ? raw : { ...raw, messages: raw.messages.map(message => {
+      const source = message.position === undefined ? undefined : open.page.messages[message.position - open.page.start];
+      return source?.id === undefined ? message : { ...message, key: source.id };
+    }) };
     const seededPartial = seedTranscript([], open.snapshot.partial, open.seq, running, [], open.status.isBashRunning);
     let transcript: Transcript = { ...initial, nextId: initial.nextId + seededPartial.nextId,
       messages: [...initial.messages, ...seededPartial.messages.map(message => ({ ...message, id: `partial-${String(open.seq)}-${message.id}` }))],

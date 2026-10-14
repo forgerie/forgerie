@@ -747,3 +747,40 @@ describe("SDK-compatible Durable execution", () => {
     expect((await session.journal.conversation.agent((await import("@earendil-works/chord/context")).BACKGROUND_CONTEXT)).tools.find((tool) => tool.name === "read")?.replay).toBe("unsafe");
   });
 });
+
+import Fastify from "fastify";
+import websocket from "@fastify/websocket";
+import { PiSessionService } from "./piSessionService.js";
+import { SessionEventHub } from "../realtime/sessionEventHub.js";
+import { registerSessionRoutes } from "./sessionRoutes.js";
+import { emptyArchiveStore, sessionGateway } from "./piSessionService.testSupport.js";
+
+it("opens the production Durable facade without a native reader and labels its existing sequential cut", async () => {
+  const { session, provider, manager, services, directory } = await fixture();
+  const hub = new SessionEventHub();
+  const service = new PiSessionService(hub, { agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime,
+    sessionManager: { ...sessionGateway([]), create: () => manager }, archiveStore: emptyArchiveStore(),
+    createAgentRuntime: () => Promise.resolve({ session, cwd: directory, setRebindSession: () => { /* This fixture never replaces its facade. */ }, fork: () => Promise.reject(new Error("Not exercised")), dispose: () => Promise.resolve() }), heartbeatIntervalMs: 60_000 });
+  const app = Fastify(); await app.register(websocket); registerSessionRoutes(app, service, hub);
+  try {
+    await service.start(directory);
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    provider.setResponses([async () => { await held; return fauxAssistantMessage("finished during the open"); }]);
+    const prompting = session.prompt("production facade input");
+    await vi.waitFor(() => { expect(session.isStreaming).toBe(true); });
+    const original = service.streamSnapshot.bind(service);
+    vi.spyOn(service, "streamSnapshot").mockImplementationOnce(async ref => {
+      const snapshot = await original(ref);
+      release(); await prompting;
+      await vi.waitFor(() => { expect(session.isStreaming).toBe(false); });
+      return snapshot;
+    });
+    const response = await app.inject({ url: `/sessions/${session.sessionId}/open?${new URLSearchParams({ cwd: directory, limit: "50" })}` });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ readPath: "classic", cut: "sequential", session: { id: session.sessionId, cwd: directory }, status: { isStreaming: false } });
+    const result = response.json<{ seq: number; snapshot: { seq: number }; statusSeq: number }>();
+    expect(result.snapshot.seq).toBe(result.seq);
+    expect(result.statusSeq).toBeGreaterThanOrEqual(result.seq);
+  } finally { await app.close(); await service.dispose(); }
+});

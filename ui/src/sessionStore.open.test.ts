@@ -58,3 +58,20 @@ describe("one-read chat open", () => {
     expect(server.requests.some(url => url.pathname.endsWith("/unread"))).toBe(false);
   });
 });
+
+it("keeps today's buffered completion reconciliation for an explicitly sequential facade envelope", async () => {
+  const gate = held();
+  const server = await createOpenServer(async url => {
+    if (!url.pathname.endsWith("/open")) return [];
+    await gate.promise;
+    return { ...openFixture({ page: { messages: [{ id: "u", role: "user", content: "input", timestamp: 1 }], start: 0, total: 1 }, snapshot: { seq: 4, partial: { role: "assistant", content: "next partial" } }, status: { isStreaming: true, isCompacting: false, isBashRunning: false } }), cut: "sequential", statusSeq: 4 };
+  }); cleanup.push(server.close);
+  const store = createSessionStore("known", server.transport, {}, session); cleanup.push(store.dispose);
+  const starting = store.start();
+  await vi.waitFor(() => expect(server.requests.some(url => url.pathname.endsWith("/open"))).toBe(true));
+  server.emit({ type: "message.end", message: { role: "assistant", content: "finished between history and partial", timestamp: 2 }, seq: 3 });
+  server.emit({ type: "assistant.delta", text: "next partial", seq: 4 });
+  server.emit({ type: "assistant.delta", text: " grows", seq: 9 });
+  await new Promise(resolve => setTimeout(resolve, 10)); gate.release(); await starting;
+  expect(store.getSnapshot().transcript.messages.map(messageText)).toEqual(["input", "finished between history and partial", "next partial grows"]);
+});

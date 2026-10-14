@@ -68,3 +68,10 @@ describe("open request boundary", () => {
     expect(sessionOpenRequestSchema.parse({ cwd: "/workspace", around: 0 }).around).toBe(0);
   });
 });
+
+it("labels compatibility facade cuts and requires their status boundary", () => {
+  const schema = createSessionOpenSchema(z.object({ role: z.string() }), z.object({}));
+  const value = { session: { id: "s", cwd: "/work" }, readPath: "classic", epoch: "e", seq: 1, historyId: "h", page: { messages: [], start: 0, total: 0 }, snapshot: { seq: 1, partial: null, tools: [], transientEvents: [] }, status: {}, receipt: null, cut: "sequential" };
+  expect(schema.safeParse(value).success).toBe(false);
+  expect(schema.safeParse({ ...value, statusSeq: 2 }).success).toBe(true);
+});

@@ -26,7 +26,7 @@ export class SessionEventHub {
   private readonly globalSockets = new Set<RealtimeSocket>();
   private readonly seqBySession = new Map<string, number>();
   readonly epoch = randomUUID();
-  private readonly hostBySession = new Map<string, { shells: { events: SessionOpenTransientEvent[]; after?: string | undefined }[]; command?: Extract<SessionOpenTransientEvent, { type: "command.output" }> }>();
+  private readonly hostBySession = new Map<string, { shells: { events: SessionOpenTransientEvent[]; after?: string | undefined }[]; consumed: Set<string>; command?: Extract<SessionOpenTransientEvent, { type: "command.output" }> }>();
   private readonly shellAnchor = new Map<string, string | undefined>();
 
   prepareHostShell(sessionId: string, after: string | undefined): void { this.shellAnchor.set(sessionId, after); }
@@ -71,18 +71,18 @@ export class SessionEventHub {
       const start = row.events[0], end = row.events.at(-1);
       if (start?.type !== "shell.start" || end?.type !== "shell.end" || end.isError === true) return true;
       const anchor = row.after === undefined ? -1 : messages.findIndex(message => message.id === row.after);
-      const index = messages.findIndex((message, index) => index > anchor && !consumed.has(index) && message.role === "bashExecution"
+      const index = messages.findIndex((message, index) => index > anchor && !consumed.has(index) && !host.consumed.has(message.id ?? String(index)) && message.role === "bashExecution"
         && message.command === start.command && message.output === end.output && (message.exitCode ?? undefined) === (end.exitCode ?? undefined)
         && (message.cancelled === true) === (end.cancelled === true));
       if (index < 0) return true;
-      consumed.add(index); return false;
+      consumed.add(index); host.consumed.add(messages[index]?.id ?? String(index)); return false;
     });
   }
 
   private rememberHostOutput(sessionId: string, event: SessionUiEvent): void {
     if (!event.type.startsWith("shell.") && event.type !== "command.output") return;
     let host = this.hostBySession.get(sessionId);
-    if (host === undefined) { host = { shells: [] }; this.hostBySession.set(sessionId, host); }
+    if (host === undefined) { host = { shells: [], consumed: new Set() }; this.hostBySession.set(sessionId, host); }
     if (event.type === "shell.start") {
       host.shells.push({ events: [event], after: this.shellAnchor.get(sessionId) }); this.shellAnchor.delete(sessionId);
     } else if (event.type === "shell.chunk") {

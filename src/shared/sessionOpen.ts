@@ -45,6 +45,9 @@ export function createSessionOpenSchema<MessageSchema extends z.ZodType, StatusS
   return z.object({
     session: z.object({ id: identity, cwd: identity, name: z.string().optional() }),
     readPath: z.enum(["classic", "native"]),
+    /** Compatibility facade reads retain the previous three-read reconciliation until native cutover. */
+    cut: z.literal("sequential").optional(),
+    statusSeq: safePosition.optional(),
     epoch: identity,
     seq: safePosition,
     historyId: identity,
@@ -58,6 +61,7 @@ export function createSessionOpenSchema<MessageSchema extends z.ZodType, StatusS
     status,
     receipt: sessionOpenReceiptSchema.nullable(),
   }).superRefine((value, context) => {
+    if (value.cut === "sequential" && value.statusSeq === undefined) context.addIssue({ code: "custom", path: ["statusSeq"], message: "Sequential facade reads require a status boundary" });
     if (value.seq !== value.snapshot.seq) context.addIssue({ code: "custom", path: ["snapshot", "seq"], message: "Open and snapshot watermarks must match" });
   });
 }

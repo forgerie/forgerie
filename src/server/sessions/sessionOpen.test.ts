@@ -141,4 +141,6 @@ it("retains several unsaved shells and does not mistake an old identical record 
   expect(hub.transientEvents("s").filter(event => event.type === "shell.start")).toHaveLength(2);
   hub.savedHostOutput("s", [...saved, { ...saved[0], id: "new", role: "bashExecution", command: "date", output: "same", exitCode: 0 }]);
   expect(hub.transientEvents("s").filter(event => event.type === "shell.start")).toHaveLength(1);
+  hub.savedHostOutput("s", [...saved, { id: "new", role: "bashExecution", command: "date", output: "same", exitCode: 0 }]);
+  expect(hub.transientEvents("s").filter(event => event.type === "shell.start")).toHaveLength(1);
 });

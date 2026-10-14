@@ -2847,7 +2847,21 @@ export class PiSessionService implements SessionRouteService {
       throw new SessionOpenError("Saved history changed during open", 503, "OPEN_UNAVAILABLE");
     }
     const session = await this.getOrOpen(ref);
-    if (session instanceof DurableAgentSession) throw new SessionOpenError("Native consistent reads are unavailable", 503, "OPEN_UNAVAILABLE");
+    if (session instanceof DurableAgentSession) {
+      // This cohort still exports SDK callback state. It has no event-line drain seam, and
+      // project() can advance its branch before applyEvent updates the partial and emits.
+      // Preserve today's acquisition order and label it explicitly; never claim this is atomic.
+      await session.flushDurableMutations();
+      const messages = this.openMessages(session.sessionManager);
+      const snapshot = await this.streamSnapshot(ref);
+      const transientEvents = this.events.transientEvents(session.sessionId);
+      const statusSeq = this.events.currentSeq(session.sessionId);
+      const status = await this.status(ref);
+      const partial = snapshot.partial === null ? null : openMessageSchema.parse(snapshot.partial);
+      const result = this.classicOpenCut(session.sessionId, session.sessionManager.getCwd(), messages, partial, status, page,
+        receiptFor(session.sessionId, session.sessionManager.getCwd()));
+      return { ...result, cut: "sequential", statusSeq, seq: snapshot.seq, snapshot: { ...result.snapshot, seq: snapshot.seq, transientEvents } };
+    }
     // Worktree/file/unread preparation is complete. All values below share one synchronous tick.
     const messages = this.openMessages(session.sessionManager);
     const streaming = session.state.streamingMessage;

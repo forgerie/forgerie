@@ -77,7 +77,7 @@ export interface Transcript {
 type ToolPart = Extract<TranscriptPart, { type: "tool" }>;
 
 function keyOf(message: PiMessage): string | undefined {
-  return message.id ?? (message.timestamp === undefined ? undefined : `${message.role}:${message.timestamp}`);
+  return message.timestamp === undefined ? undefined : `${message.role}:${message.timestamp}`;
 }
 /** Renderable images in tool output, as data URLs. Unsupported or empty parts are skipped. */
 export function imagesOf(content: unknown): readonly string[] {
@@ -374,7 +374,7 @@ export function reconcileTranscriptIdentity(previous: Transcript, refreshed: Tra
   let nextId = Math.max(previous.nextId, refreshed.nextId);
   let liveId = refreshed.liveId;
   const messages = refreshed.messages.map((message) => {
-    const retained = message.key ? ids.get(message.key) : undefined;
+    const retained = previousById.has(message.id) && message.id.startsWith("history-") === false ? message.id : message.key ? ids.get(message.key) : undefined;
     const id = retained ?? (reserved.has(message.id) ? `resync-${nextId++}` : message.id);
     if (message.id === refreshed.liveId) liveId = id;
     const candidate = { ...message, id };
