@@ -10,20 +10,19 @@
 //   1. Scrolls to the top, picks the first message that starts in view, and
 //      records its y relative to the transcript. Clicks "load earlier
 //      messages". Samples that y on every animation frame while the page
-//      arrives, while the browser first draws the prepended (content-visibility)
-//      messages, and while their Mermaid diagrams draw late.
+//      arrives and while its Mermaid diagrams draw late.
 //   2. Sends a message so a reply streams, scrolls up, and loads the next page
 //      with the keyboard (Enter on the focused button). Samples again while the
 //      reply streams below.
 //   Each sample must stay within 1 CSS px of the first.
-//   3. Steps a search through messages, one of them in a page that was
-//      loaded above and never drawn, and checks each lands in view.
-//   4. Checks that text in a finished message the browser skipped
-//      (content-visibility) is still found by window.find, and whether it is in
-//      the accessibility tree. The desktop pass turns accessibility on before
-//      the page loads, as a running screen reader does; the unfolded-portrait
-//      pass turns it on only afterwards. Only the first must expose the text;
-//      the second is recorded as a finding.
+//   3. Steps a search through messages, one of them in a page loaded above
+//      and never scrolled to, and checks each lands in view.
+//   4. Checks that every loaded reply is in the accessibility tree and that
+//      window.find reaches text far from view. Desktop and unfolded-landscape
+//      turn accessibility on before the page loads, as a running screen reader
+//      does; the other postures turn it on only afterwards, as a screen reader
+//      started later does. Both must expose every reply. No message may skip
+//      its rendering (content-visibility), which hid replies from a late tree.
 //
 //   5. (states) Captures each load-earlier state of the part, light and dark,
 //      at every viewport, plus the available state with keyboard focus, and
@@ -47,7 +46,7 @@ const SAMPLE_MS = 4500;
 const viewports = [
   ...FOLD8_POSTURES.map((posture) => ({ ...posture, dpr: FOLD8_DPR, mobile: true })),
   { name: "desktop", width: 1440, height: 900, dpr: 1, mobile: false, accessibilityAtLoad: true },
-];
+].map((viewport) => viewport.name === "unfolded-landscape" ? { ...viewport, accessibilityAtLoad: true } : viewport);
 const frameUrl = new URL("/__caliper/frame?part=src/ui/Thread.organism.part.tsx&state=Paging", base).href;
 
 // In-page helpers: the transcript viewport, its messages, and a frame sampler.
@@ -72,7 +71,7 @@ const HELPERS = String.raw`(() => {
         const diagrams = () => document.querySelectorAll('.diagram[data-drawing="drawn"]').length;
         const tick = () => {
           const element = viewport();
-          const streaming = document.querySelector(".message-assistant:not([data-finished])");
+          const streaming = document.querySelector('[data-message-id^="stream-reply"]');
           samples.push({ t: Math.round(performance.now() - start), y: this.relativeY(id), scrollTop: element.scrollTop,
             scrollHeight: element.scrollHeight, count: messages().length, drawn: diagrams(), streamingLength: streaming?.textContent.length ?? 0 });
           if (performance.now() - start < ms) requestAnimationFrame(tick); else resolve(samples);
@@ -180,7 +179,7 @@ try {
       await evaluate(cdp, `document.querySelector("[data-composer-input]").focus()`);
       await cdp.send("Input.insertText", { text: "Stream a reply while the history stays still." });
       await evaluate(cdp, `document.querySelector('[aria-label="Send message"]').click()`);
-      await until(`!!document.querySelector(".message-assistant:not([data-finished])")`);
+      await until(`!!document.querySelector('[data-message-id^="stream-reply"]')`);
       const streaming = await measure("keyboard-while-streaming", async () => {
         await evaluate(cdp, `document.querySelector(".load-earlier-action").focus()`);
         for (const type of ["keyDown", "keyUp"]) await cdp.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, ...(type === "keyDown" ? { text: "\r" } : {}) });
@@ -189,50 +188,43 @@ try {
       const focused = await evaluate(cdp, `document.activeElement?.className ?? ""`);
       result.focusAfterKeyboardLoad = focused;
 
-      // 3. Search steps land on messages the browser has not drawn yet. Turn 1484 sits in a page
-      //    loaded above and never drawn, so its neighbours still have estimated heights.
-      await until(`!!document.querySelector(".message-assistant[data-message-id^='stream-reply'][data-finished]")`);
+      // 3. Search steps, one of them to turn 1484, in a page loaded above and never scrolled to.
+      //    The streamed reply has settled once it shows its copy action.
+      await until(`!!document.querySelector('[data-message-id^="stream-reply"] [aria-label="Copy response"]')`);
       await evaluate(cdp, `__le.viewport().scrollTo({ top: __le.viewport().scrollHeight, behavior: "instant" })`);
       await sleep(800);
       result.reveal = [];
       for (const id of ["user-1499", "user-1484", "user-1490"]) {
-        const skipped = await evaluate(cdp, `!document.querySelector('[data-message-id="${id}"] .user-bubble').checkVisibility({ contentVisibilityAuto: true })`);
         await evaluate(cdp, `document.querySelector('.session-header .header-button').click()`);
         await sleep(2500);
         const landed = await evaluate(cdp, `(() => { const r = document.querySelector('[data-message-id="${id}"]').getBoundingClientRect(); const v = __le.viewport().getBoundingClientRect();
           return { top: Math.round(r.top - v.top), inView: r.top >= v.top && r.bottom <= v.bottom }; })()`);
-        result.reveal.push({ id, skippedBefore: skipped, ...landed });
-        console.log(`${viewport.name} reveal ${id} (skipped before: ${skipped}): top ${landed.top} px, in view ${landed.inView} ${landed.inView ? "PASS" : "FAIL"}`);
+        result.reveal.push({ id, ...landed });
+        console.log(`${viewport.name} reveal ${id}: top ${landed.top} px, in view ${landed.inView} ${landed.inView ? "PASS" : "FAIL"}`);
         if (!landed.inView) failures++;
       }
 
-      // 4. A skipped finished message is still findable and in the accessibility tree.
-      if (viewport.name === "desktop" || viewport.name === "unfolded-portrait") {
-        const text = await evaluate(cdp, `(() => {
-          const top = __le.viewport().getBoundingClientRect().bottom;
-          const skipped = [...document.querySelectorAll(".message-assistant[data-finished]")]
-            .find((element) => element.getBoundingClientRect().top > top + 2000 && !element.querySelector(".markdown").checkVisibility({ contentVisibilityAuto: true }));
-          return skipped?.textContent.match(/Readable last turn \\d+\\./)?.[0];
-        })()`);
-        if (!text) console.log(JSON.stringify(await evaluate(cdp, `(() => { const v = __le.viewport(); return { scrollTop: v.scrollTop, bottom: v.getBoundingClientRect().bottom,
-          rows: [...document.querySelectorAll(".message-assistant[data-finished]")].map((e) => [e.dataset.messageId, Math.round(e.getBoundingClientRect().top), e.querySelector(".markdown")?.checkVisibility({ contentVisibilityAuto: true })].join(" ")) }; })()`)));
-        assert.ok(text, "A finished message far below the viewport is skipped by content-visibility");
-        const ax = await cdp.send("Accessibility.getFullAXTree", {});
-        const inTree = ax.nodes.some((node) => node.name?.value?.includes(text) && !node.ignored);
-        const found = await evaluate(cdp, `(() => {
-          getSelection().removeAllRanges();
-          const found = window.find(${JSON.stringify(text)}, true, false, true);
-          const node = getSelection().anchorNode?.parentElement?.closest("[data-message-id]");
-          return { found, rendered: node ? node.querySelector(".markdown").checkVisibility({ contentVisibilityAuto: true }) : false, selected: String(getSelection()) };
-        })()`);
-        // window.find selects without scrolling, with or without content-visibility; the browser's find bar is not driven here.
-        result.skippedText = { text, accessibilityAtLoad: viewport.accessibilityAtLoad === true, accessibilityTree: inTree, windowFind: found.found, selected: found.selected, renderedAfterFind: found.rendered };
-        const required = viewport.accessibilityAtLoad === true;
-        const ok = found.found && found.rendered && (!required || inTree);
-        console.log(`${viewport.name} skipped text "${text}" (accessibility ${required ? "on before load" : "turned on after load"}): ` +
-          `accessibility tree ${inTree}, window.find ${found.found}, rendered after find ${found.rendered} ${ok ? "PASS" : "FAIL"}${required ? "" : " (tree exposure recorded, not required)"}`);
-        if (!ok) failures++;
-      }
+      // 4. Every loaded reply is in the accessibility tree, however late accessibility starts.
+      const loaded = await evaluate(cdp, `(() => {
+        const box = __le.viewport().getBoundingClientRect();
+        const replies = [...document.querySelectorAll(".message-assistant")].flatMap((element) => {
+          const marker = element.textContent.match(/Readable last turn \\d+\\./)?.[0];
+          return marker ? [{ marker, distance: Math.abs(element.getBoundingClientRect().top - box.top) }] : [];
+        });
+        const skipping = __le.messages().filter((element) => getComputedStyle(element).contentVisibility !== "visible").length;
+        return { markers: replies.map((reply) => reply.marker), farthest: replies.sort((a, b) => b.distance - a.distance)[0]?.marker, skipping };
+      })()`);
+      if (!viewport.accessibilityAtLoad) await cdp.send("Accessibility.enable");
+      const ax = await cdp.send("Accessibility.getFullAXTree", {});
+      const exposed = new Set(ax.nodes.filter((node) => !node.ignored && node.role?.value === "StaticText").map((node) => node.name?.value));
+      const missing = loaded.markers.filter((marker) => !exposed.has(marker));
+      const found = await evaluate(cdp, `(() => { getSelection().removeAllRanges(); return window.find(${JSON.stringify(loaded.farthest)}, true, false, true) && String(getSelection()) === ${JSON.stringify(loaded.farthest)}; })()`);
+      result.accessibility = { accessibilityAtLoad: viewport.accessibilityAtLoad === true, replies: loaded.markers.length, missing, skippingMessages: loaded.skipping, windowFind: found, farthest: loaded.farthest };
+      const ok = loaded.markers.length > 0 && missing.length === 0 && loaded.skipping === 0 && found;
+      console.log(`${viewport.name} accessibility ${viewport.accessibilityAtLoad ? "on before load" : "turned on after load"}: ` +
+        `${loaded.markers.length - missing.length}/${loaded.markers.length} replies in the tree, ${loaded.skipping} messages skip rendering, ` +
+        `window.find "${loaded.farthest}" ${found} ${ok ? "PASS" : "FAIL"}`);
+      if (!ok) failures++;
       if (errors.length) { failures++; console.log(`${viewport.name} errors: ${errors.join(" | ")}`); }
     } finally {
       cdp.close();

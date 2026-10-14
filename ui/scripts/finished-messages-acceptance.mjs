@@ -16,10 +16,8 @@
 //
 // Open mode records the opening view, frame by frame, in the built app: the
 // screencast's painted frames and, on every animation frame, where the last
-// turn's marker sits and how far the transcript is from its bottom. With
-// --no-content-visibility it overrides the finished-message rule, so the same
-// command gives the comparison without it.
-//   open     node ... open http://127.0.0.1:18671/ <out-dir> [fixture] [--no-content-visibility]
+// turn's marker sits and how far the transcript is from its bottom.
+//   open     node ... open http://127.0.0.1:18671/ <out-dir> [fixture]
 //
 // Usage:
 //   node ui/scripts/finished-messages-acceptance.mjs app http://127.0.0.1:18671/ [out.json]
@@ -32,12 +30,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CDP, evaluate, findChrome, getFreePort, launchChrome, sleep, waitForDebugger } from "../../scripts/lib/cdp.mjs";
 
-const flags = process.argv.slice(2).filter((arg) => arg.startsWith("--"));
-const [mode = "app", base = mode === "harness" ? "http://127.0.0.1:18670/" : "http://127.0.0.1:18671/", outPath, extra] = process.argv.slice(2).filter((arg) => !arg.startsWith("--"));
+const [mode = "app", base = mode === "harness" ? "http://127.0.0.1:18670/" : "http://127.0.0.1:18671/", outPath, extra] = process.argv.slice(2);
 assert.ok(mode === "app" || mode === "harness" || mode === "open", `Unknown mode ${mode}`);
 const earlierPages = Number(mode === "harness" ? extra ?? 20 : 0);
 const openFixture = mode === "open" ? extra ?? "huge" : undefined;
-const contentVisibility = !flags.includes("--no-content-visibility");
 
 // Open mode: every animation frame from the click, the last turn's marker and the transcript's distance from its bottom.
 const OPEN_TRACE = String.raw`(() => {
@@ -57,11 +53,6 @@ const OPEN_TRACE = String.raw`(() => {
   };
   requestAnimationFrame(tick);
 })()`;
-const NO_CONTENT_VISIBILITY = String.raw`document.addEventListener("DOMContentLoaded", () => {
-  const style = document.createElement("style");
-  style.textContent = ".message[data-finished] { content-visibility: visible !important; }";
-  document.head.append(style);
-})`;
 
 // Installed before React loads. React calls onCommitFiberRoot after each commit.
 const HOOK = String.raw`(() => {
@@ -119,7 +110,6 @@ try {
   await cdp.send("Runtime.enable");
   await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: mode === "open" ? OPEN_TRACE : HOOK });
-  if (!contentVisibility) await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: NO_CONTENT_VISIBILITY });
   const until = async (expression, timeoutMs = 60_000) => {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) { if (await evaluate(cdp, expression)) return; await sleep(50); }
@@ -131,7 +121,7 @@ try {
   let windowMs;
   if (mode === "open") {
     assert.ok(outPath, "open mode needs an output folder");
-    const folder = join(outPath, `${openFixture}-${contentVisibility ? "content-visibility" : "no-content-visibility"}`);
+    const folder = join(outPath, openFixture);
     await rm(folder, { recursive: true, force: true });
     await mkdir(folder, { recursive: true });
     await cdp.send("Page.navigate", { url: base });
@@ -162,7 +152,7 @@ try {
       ? [{ t: Math.round(frame.t), from: after[index].markerY, to: frame.markerY, drawnBefore: after[index].drawn, drawn: frame.drawn }] : []);
     // A move in the same frame as a Mermaid diagram finishing is that diagram growing; any other move is unexplained.
     const unexplained = markerMoves.filter((move) => move.drawn === move.drawnBefore);
-    const summary = { mode, fixture: openFixture, contentVisibility, base, chromium: (await cdp.send("Browser.getVersion")).product,
+    const summary = { mode, fixture: openFixture, base, chromium: (await cdp.send("Browser.getVersion")).product,
       firstMarkerVisibleMs: firstVisible < 0 ? null : Math.round(frames[firstVisible].t), frames: frames.length, paintedFrames: files.length,
       firstVisible: frames[firstVisible], settled, markerMovesAfterFirstVisible: markerMoves,
       settledGapToBottom: settled.gapToBottom, unexplainedMoves: unexplained, errors };
@@ -213,7 +203,7 @@ try {
       await evaluate(cdp, `window.__renders.phase = "deltas"`);
       await until(`${reply}?.textContent.includes("Streamed paragraph 59.")`);
       await evaluate(cdp, `window.__renders.phase = "end"`);
-      await until(`${reply}?.dataset.finished === "true"`);
+      await until(`!!${reply}?.querySelector('[aria-label="Copy response"]')`);
       await sleep(500);
       windowMs = Date.now() - started;
       await evaluate(cdp, `window.__renders.phase = undefined`);

@@ -4,7 +4,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { AssistantRuntimeProvider, useExternalStoreRuntime } from "@assistant-ui/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolState, TranscriptMessage } from "../transcript";
-import type { ShellRun } from "../shellRun";
 import { useThreadMessages } from "../useThreadMessages";
 import { Thread } from "./Thread";
 import { SessionFrame } from "./SessionFrame";
@@ -19,7 +18,6 @@ vi.mock("./highlightCode", async (original) => {
 let root: Root;
 const say = (id: string, role: "user" | "assistant", text: string): TranscriptMessage => ({ id, role, parts: [{ type: "text", text }] });
 const tool = (id: string, state: ToolState): TranscriptMessage["parts"][number] => ({ type: "tool", id, name: "bash", args: { command: `echo ${id}` }, state });
-const shell = (id: string, run: ShellRun): TranscriptMessage => ({ id, role: "shell", parts: [{ type: "shell", run }] });
 
 function Fixture({ messages, running }: { messages: readonly TranscriptMessage[]; running: boolean }) {
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages(messages, running), isRunning: running, onNew: async () => {} });
@@ -50,23 +48,6 @@ const followUp = say("q2", "user", "And now?");
 const streaming = (text: string) => say("a2", "assistant", text);
 
 describe("Finished messages", () => {
-  it("marks settled replies and user messages finished, and leaves the streaming reply live", async () => {
-    await render([question, finishedReply, followUp, streaming("Working")], true);
-    expect(row("q1").dataset.finished).toBe("true");
-    expect(row("a1").dataset.finished).toBe("true");
-    expect(row("q2").dataset.finished).toBe("true");
-    expect(row("a2").dataset.finished).toBeUndefined();
-    await render([question, finishedReply, followUp, streaming("Done.")]);
-    expect(row("a2").dataset.finished).toBe("true");
-  });
-
-  it("marks a shell row finished only once its command ends", async () => {
-    await render([shell("s1", { command: "ls", result: { type: "running", output: "a" } })], true);
-    expect(row("s1").dataset.finished).toBeUndefined();
-    await render([shell("s1", { command: "ls", result: { type: "done", output: "a", cancelled: false, truncated: false, exitCode: 0 } })]);
-    expect(row("s1").dataset.finished).toBe("true");
-  });
-
   it("keeps a finished reply's copy action while another reply streams", async () => {
     await render([question, finishedReply, followUp, streaming("Working")], true);
     const copies = () => [...document.querySelectorAll('button[aria-label="Copy response"]')].map((button) => button.closest("[data-message-id]")?.getAttribute("data-message-id"));
