@@ -38,7 +38,8 @@
   "bundleDependencies": [
     "pi-web-access",
     "@earendil-works/pi-coding-agent",
-    "@router-for-me/pi-cliproxyapi-provider"
+    "@router-for-me/pi-cliproxyapi-provider",
+    "typebox"
   ],
   "scripts": {
     "dev": "bash -c 'trap \"kill 0\" EXIT; npm run dev:sessiond & npm run dev:web & npm run dev:client & wait'",
