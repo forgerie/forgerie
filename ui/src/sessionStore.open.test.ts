@@ -76,15 +76,59 @@ it("keeps today's buffered completion reconciliation for an explicitly sequentia
   expect(store.getSnapshot().transcript.messages.map(messageText)).toEqual(["input", "finished between history and partial", "next partial grows"]);
 });
 
-it("acknowledges the exact hidden completion receipt only after that entry becomes visibly selected", async () => {
+it("acknowledges a hidden completion only after adopting and painting the transcript that contains it", async () => {
   let observer: ((id: string, receipt?: { catalogId: string; throughCompletionOrder: number }) => void) | undefined;
   let documentVisible = false;
-  const server = await createOpenServer(url => url.pathname.endsWith("/open") ? openFixture() : { catalogId: "epoch", sessions: [] }); cleanup.push(server.close);
-  const reads = createReadTracker(server.transport, { isVisible: () => documentVisible, subscribe: listener => { observer = listener; return () => { observer = undefined; }; }, afterRender: async () => {} });
+  const paints: { text: string[]; release: () => void }[] = [];
+  const replacement = held();
+  let opens = 0;
+  const server = await createOpenServer(async url => {
+    if (!url.pathname.endsWith("/open")) return { catalogId: "epoch", sessions: [] };
+    if (++opens === 1) return openFixture({ page: { messages: [{ role: "assistant", content: "OLD answer" }], start: 0, total: 1 } });
+    await replacement.promise;
+    return openFixture({ page: { messages: [{ role: "assistant", content: "Completion 7: NEW answer" }], start: 0, total: 1 }, receipt: { catalogId: "epoch", throughCompletionOrder: 7 } });
+  }); cleanup.push(server.close);
+  const acknowledged: { order: unknown; painted: string[]; adopted: string[] }[] = [];
+  const request = server.transport.request;
+  server.transport.request = async (path, init) => {
+    if (path.endsWith("/unread/acknowledge")) acknowledged.push({ order: JSON.parse(String(init.body)).throughCompletionOrder,
+      painted: paints.at(-1)?.text ?? [], adopted: store.getSnapshot().transcript.messages.map(messageText) });
+    return request(path, init);
+  };
+  const reads = createReadTracker(server.transport, { isVisible: () => documentVisible,
+    subscribe: listener => { observer = listener; return () => { observer = undefined; }; },
+    afterRender: () => { const paint = held(); paints.push({ text: store.getSnapshot().transcript.messages.map(messageText), release: paint.release }); return paint.promise; } });
   const store = createSessionStore("known", server.transport, {}, session, reads); cleanup.push(store.dispose);
-  await store.start(); observer?.("known", { catalogId: "epoch", throughCompletionOrder: 7 });
-  store.setVisible(true); await new Promise(resolve => setTimeout(resolve, 10));
-  expect(server.requests.some(url => url.pathname.endsWith("/unread/acknowledge"))).toBe(false);
+  cleanup.push(() => { replacement.release(); for (const paint of paints) paint.release(); });
+  await store.start();
+  for (const order of [5, 6, 7]) observer?.("known", { catalogId: "epoch", throughCompletionOrder: order });
+  store.setVisible(true);
+  expect(paints).toEqual([]); expect(acknowledged).toEqual([]); expect(opens).toBe(1);
   documentVisible = true; store.setVisible(false); store.setVisible(true);
-  await vi.waitFor(() => expect(server.requests.filter(url => url.pathname.endsWith("/unread/acknowledge"))).toHaveLength(1));
+  await vi.waitFor(() => expect(paints).toHaveLength(1));
+  expect(paints[0]?.text).toEqual(["OLD answer"]); expect(opens).toBe(1); expect(acknowledged).toEqual([]);
+  paints[0]?.release();
+  await vi.waitFor(() => expect(opens).toBe(2));
+  expect(store.getSnapshot().transcript.messages.map(messageText)).toEqual(["OLD answer"]); expect(acknowledged).toEqual([]);
+  replacement.release();
+  await vi.waitFor(() => expect(paints).toHaveLength(2));
+  expect(paints[1]?.text).toEqual(["Completion 7: NEW answer"]); expect(acknowledged).toEqual([]);
+  paints[1]?.release();
+  await vi.waitFor(() => expect(acknowledged).toEqual([{ order: 7, painted: ["Completion 7: NEW answer"], adopted: ["Completion 7: NEW answer"] }]));
+  expect(server.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(2);
+  expect(server.requests.some(url => url.pathname.endsWith("/unread"))).toBe(false);
+});
+
+it("never acknowledges a catalog-only boundary while the replacement still contains OLD answer", async () => {
+  let observer: ((id: string, receipt?: { catalogId: string; throughCompletionOrder: number }) => void) | undefined;
+  const old = openFixture({ page: { messages: [{ role: "assistant", content: "OLD answer" }], start: 0, total: 1 } });
+  const server = await createOpenServer(url => url.pathname.endsWith("/open") ? old : { catalogId: "epoch", sessions: [] }); cleanup.push(server.close);
+  const reads = createReadTracker(server.transport, { isVisible: () => true,
+    subscribe: listener => { observer = listener; return () => { observer = undefined; }; }, afterRender: async () => {} });
+  const store = createSessionStore("known", server.transport, {}, session, reads); cleanup.push(store.dispose);
+  await store.start(); observer?.("known", { catalogId: "epoch", throughCompletionOrder: 7 }); store.setVisible(true);
+  await vi.waitFor(() => expect(server.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(2));
+  await vi.waitFor(() => expect(store.getSnapshot().connection.type).toBe("ready"));
+  expect(store.getSnapshot().transcript.messages.map(messageText)).toEqual(["OLD answer"]);
+  expect(server.requests.some(url => url.pathname.endsWith("/unread/acknowledge"))).toBe(false);
 });

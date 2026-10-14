@@ -12,6 +12,7 @@ export interface ReadReceipt { session: Session; catalogId: string; throughCompl
 export interface ReadTracker {
   capture(session: Session, signal: AbortSignal): Promise<ReadReceipt | undefined>;
   acknowledge(receipt: ReadReceipt, signal: AbortSignal): Promise<void>;
+  afterPaint(signal: AbortSignal): Promise<void>;
   observe(listener: (sessionId: string, receipt?: SessionOpenReceipt) => void): () => void;
   isVisible(): boolean;
 }
@@ -22,7 +23,9 @@ export function createReadTracker(transport: Pick<SessionTransport, "request">, 
   subscribe?: ((listener: (sessionId: string, receipt?: SessionOpenReceipt) => void) => () => void) | undefined;
   afterRender?: ((signal: AbortSignal) => Promise<void>) | undefined;
 }): ReadTracker {
+  const afterPaint = (signal: AbortSignal) => options.afterRender?.(signal) ?? Promise.resolve();
   return {
+    afterPaint,
     isVisible: options.isVisible,
     observe: (listener) => options.subscribe?.(listener) ?? (() => {}),
     async capture(session, signal) {
@@ -35,7 +38,7 @@ export function createReadTracker(transport: Pick<SessionTransport, "request">, 
     },
     async acknowledge(receipt, signal) {
       if (!options.isVisible() || signal.aborted) return;
-      await options.afterRender?.(signal);
+      await afterPaint(signal);
       if (!options.isVisible() || signal.aborted) return;
       const response = await transport.request(`/api/sessions/${encodeURIComponent(receipt.session.id)}/unread/acknowledge`, {
         method: "POST", signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]), headers: { "content-type": "application/json" },

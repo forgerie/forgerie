@@ -152,18 +152,38 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   let unwatch: (() => void) | undefined;
   let unwatchUnread: (() => void) | undefined;
   let readRefreshRequested = false;
+  let catalogVersion = 0;
+  let refreshPaint: AbortSignal | undefined;
   let page: { start: number; total: number; historyId: string; epoch: string } | undefined;
   let earlierRead: Promise<void> | undefined;
   let pendingReceipt: ReadReceipt | undefined;
   let activation = new AbortController();
   let selectedVisible = reads === undefined;
   function acknowledge() {
-    if (!reads || !pendingReceipt || !selectedVisible || !reads.isVisible()) return;
+    if (!reads || !pendingReceipt || readRefreshRequested || !selectedVisible || !reads.isVisible()) return;
     const receipt = pendingReceipt;
     const signal = AbortSignal.any([activation.signal, lifetime.signal]);
     void reads.acknowledge(receipt, signal).then(() => {
       if (!signal.aborted && pendingReceipt === receipt) pendingReceipt = undefined;
     }).catch((error: unknown) => { if (!signal.aborted) update(withProblem(state, "Could not mark the visible session read", messageOf(error))); });
+  }
+  // Catalog receipts describe unseen work, not transcript coverage. Refresh only after
+  // cached content has painted; only an adopted open receipt can become eligible to acknowledge.
+  function scheduleReadRefresh() {
+    if (!reads || !readRefreshRequested || !selectedVisible || !reads.isVisible()
+      || state.connection.type !== "ready" || join?.seeding !== false) return;
+    const generation = activation.signal;
+    if (refreshPaint === generation) return;
+    refreshPaint = generation;
+    const signal = AbortSignal.any([generation, lifetime.signal]);
+    void reads.afterPaint(signal).then(() => {
+      if (signal.aborted || !selectedVisible || !reads.isVisible() || !readRefreshRequested
+        || state.connection.type !== "ready" || join?.seeding !== false) return;
+      readRefreshRequested = false;
+      reload();
+    }).catch((error: unknown) => {
+      if (!signal.aborted) update(withProblem(state, "Could not refresh unseen completion", messageOf(error)));
+    }).finally(() => { if (refreshPaint === generation) refreshPaint = undefined; });
   }
   let started = false;
   const update = (next: SessionState) => {
@@ -350,7 +370,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
             attempt.checkpoint = open;
             if (!attempt.seeding && open.seq >= attempt.seq) {
               attempt.seq = open.seq;
-              update(applyOpen(state, open, [])); acknowledge();
+              update(applyOpen(state, open, [])); acknowledge(); scheduleReadRefresh();
             }
             return;
           }
@@ -368,6 +388,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
             if (parsed.seq !== undefined) attempt.seq = parsed.seq;
             if (parsed.type === "status.update") statusVersion++;
             update(applyEvent(state, parsed));
+            scheduleReadRefresh();
           }
         } catch (error) {
           if (error instanceof CheckpointUncertain) retry(attempt, error);
@@ -388,6 +409,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         attempt.controller.signal.addEventListener("abort", onAbort, { once: true });
         socket.addEventListener("open", onOpen, { once: true });
       });
+      const capturedCatalogVersion = catalogVersion;
       const response = await read(`${readPath("open", session)}&limit=50`, sessionOpenSchema);
       if (!current(attempt)) return;
       if (attempt.epoch !== undefined && response.epoch !== attempt.epoch) throw new Error("Open checkpoint belongs to another daemon epoch.");
@@ -400,10 +422,11 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       attempt.checkpoint = open;
       attempt.seeding = false; attempt.buffered.length = 0;
       statusVersion++; retryDelay = initialDelay; attempts = 0;
+      if (capturedCatalogVersion === catalogVersion) readRefreshRequested = false;
       update({ ...joined, connection: { type: "ready" }, lastReadyAt: now() });
       acknowledge();
       void loadCommands();
-      if (readRefreshRequested && selectedVisible && reads?.isVisible()) { readRefreshRequested = false; reload(); }
+      scheduleReadRefresh();
     } catch (error) {
       if (!current(attempt)) return;
       if (error instanceof ReadFailure && error.status === 409) retry(attempt, error);
@@ -429,12 +452,11 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     if (started || lifetime.signal.aborted) return;
     started = true;
     unwatch = transport.watchRecovery?.(() => recover());
-    unwatchUnread = reads?.observe((sessionId, receipt) => {
+    unwatchUnread = reads?.observe((sessionId) => {
       if (sessionId !== id) return;
-      if (receipt !== undefined && state.session !== undefined) pendingReceipt = { ...receipt, session: state.session };
-      if (!selectedVisible || !reads?.isVisible()) { readRefreshRequested = true; return; }
-      if (state.connection.type === "ready") reload();
-      else readRefreshRequested = true;
+      catalogVersion++;
+      readRefreshRequested = true;
+      scheduleReadRefresh();
     });
     await connect();
   }
@@ -724,7 +746,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     },
     setVisible: (visible: boolean) => {
       activation.abort(); activation = new AbortController(); selectedVisible = visible;
-      if (visible) acknowledge();
+      if (visible) { acknowledge(); scheduleReadRefresh(); }
     },
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
