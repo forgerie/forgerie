@@ -42,3 +42,26 @@ _Avoid_: Audit log, history
 
 **Auto-land**:
 A setting, global or per workflow, under which a workflow's land stop passes without the user and the run lands its branches itself.
+
+## Processes
+
+**Managed process**:
+A command that an agent or the user starts in the background from a session. The session owns it. It keeps running when Forgerie restarts, and it ends only when someone stops it, when it exits, or at session close.
+_Avoid_: Background job, background task, service
+
+**Workspace service**:
+A long-running service declared in a worktree's services file. The worktree owns it, so it outlives any one session. It is not a managed process.
+_Avoid_: Dev server, process
+
+**Session close**:
+The moment a session is archived or deleted, or its worktree is removed. It ends every managed process the session owns.
+
+**Missed event**:
+An exit or a watch match of a managed process that happened while Forgerie was down. The session receives it on resume with the attention level the watch asked for.
+
+**Lost process**:
+A managed process whose supervisor disappeared, for example after a reboot. Forgerie reports it as ended and never runs it again by itself.
+
+**Attached process**:
+A managed process on a host where Forgerie cannot detach it. It ends when Forgerie restarts, and Forgerie labels it that way wherever it appears.
+_Avoid_: Fallback process
