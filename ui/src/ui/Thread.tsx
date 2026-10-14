@@ -1,5 +1,5 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AuiIf, ThreadPrimitive } from "@assistant-ui/react";
 import { ArrowDownIcon } from "lucide-react";
 import { createLatest } from "./latest";
@@ -25,8 +25,12 @@ import type { EarlierHistory } from "../historyPaging";
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode. `working` says what a draft can
 // do while the session works; `queue` is what already waits.
-export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact, fileLinks, linkBase, linkError, onOpenFile, reveal }: {
-  /** Type-only parallel-builder seam. Presentation is supplied by the front-end builder. */
+export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact, fileLinks, linkBase, linkError, onOpenFile, reveal, earlier }: {
+  /**
+   * Whether older messages exist above the first loaded one. The runtime's
+   * `hasEarlier` and `onLoadEarlier` load them; this only describes the state.
+   * Absent: the thread has no paging, and shows no paging seam.
+   */
   earlier?: EarlierHistory | undefined;
   /**
    * Scrolls one message into view each time `key` changes, waiting for it to
@@ -61,6 +65,7 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
     SystemMessage: hasArtifact ? () => <SystemMessage artifact={artifactView} /> : SystemMessage }), [hasArtifact, artifactView, fileLinks]);
   const linkScope = useMemo(() => linkBase === undefined ? undefined : { base: linkBase, error: linkError, openFile: onOpenFile }, [linkBase, linkError, onOpenFile]);
   const column = useRef<HTMLDivElement>(null);
+  const earlierError = useId();
   // The first reveal lands as the thread opens; a later key is a step from one marked message to the next.
   const revealed = useRef<string | undefined>(undefined);
   const revealKey = reveal?.key;
@@ -80,6 +85,24 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
           </div>
         </AuiIf>
         {head}
+        {earlier && <AuiIf condition={(s) => earlier.type !== "complete" || s.thread.messages.length > 0}>
+          {/* A seam above the oldest loaded message, in the history summary's grammar. One button
+              carries load, progress and retry, so keyboard focus stays on it while a page loads,
+              and it is a polite live region for its own label. The end of history is a status. */}
+          <div className="load-earlier" data-state={earlier.type}>
+            {earlier.type === "failed" && <p id={earlierError} className="load-earlier-error" role="alert">could not load earlier messages: {earlier.message}</p>}
+            {earlier.type !== "complete" && <ThreadPrimitive.LoadEarlier className="load-earlier-action" aria-live="polite"
+              aria-describedby={earlier.type === "failed" ? earlierError : undefined}>
+              <AuiIf condition={(s) => earlier.type === "loading" || s.thread.isLoadingEarlier}>
+                <span className="load-earlier-label" data-live>loading earlier messages</span>
+              </AuiIf>
+              <AuiIf condition={(s) => earlier.type !== "loading" && !s.thread.isLoadingEarlier}>
+                <span className="load-earlier-label">{earlier.type === "failed" ? "retry" : "load earlier messages"}</span>
+              </AuiIf>
+            </ThreadPrimitive.LoadEarlier>}
+            <p className="load-earlier-end" role="status">{earlier.type === "complete" ? "start of chat" : ""}</p>
+          </div>
+        </AuiIf>}
         <AuiIf condition={(s) => !s.thread.isLoading && !s.thread.isDisabled && s.thread.messages.length === 0}>
           <div className="thread-welcome"><h2>How can I help you today?</h2></div>
         </AuiIf>

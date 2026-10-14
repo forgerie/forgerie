@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolState, TranscriptMessage } from "../transcript";
+import type { EarlierHistory } from "../historyPaging";
 import { useThreadMessages } from "../useThreadMessages";
 import { Thread } from "./Thread";
 import { SessionFrame } from "./SessionFrame";
@@ -26,8 +27,10 @@ const answer = (text: string, id = "reply"): TranscriptMessage => ({ id, role: "
 const reply = answer("Hello");
 const tool = (id: string, state: ToolState, name = "bash", args: unknown = { command: `echo ${id}` }) =>
   ({ type: "tool" as const, id, name, args, state });
-function Fixture({ messages = [], running = false, loading = false, disabled = false, onNew = async () => {}, onCancel = async () => {}, fileLinks, linkBase }: {
+function Fixture({ messages = [], running = false, loading = false, disabled = false, onNew = async () => {}, onCancel = async () => {}, fileLinks, linkBase, earlier, onLoadEarlier }: {
   messages?: TranscriptMessage[];
+  earlier?: EarlierHistory;
+  onLoadEarlier?: () => Promise<void>;
   fileLinks?: FileLinks;
   linkBase?: string | null;
   running?: boolean;
@@ -37,10 +40,12 @@ function Fixture({ messages = [], running = false, loading = false, disabled = f
   onCancel?: () => Promise<void>;
 }) {
   const threadMessages = useThreadMessages(messages, running);
+  // As ForgerieSession wires it: the runtime pages, the prop describes the state.
   const runtime = useExternalStoreRuntime({ messages: threadMessages, onNew, onCancel,
-    isRunning: running, isLoading: loading, isDisabled: disabled });
+    isRunning: running, isLoading: loading, isDisabled: disabled,
+    hasEarlier: earlier !== undefined && earlier.type !== "complete", onLoadEarlier });
   return <AssistantRuntimeProvider runtime={runtime}>
-    <SessionFrame name="A long session title" status={<StatusChip label={running ? "Running" : "Connected"} tone={running ? "live" : "quiet"} />}><Thread fileLinks={fileLinks} linkBase={linkBase} onOpenFile={fileLinks ? (path) => { fileLinks.open(path); return true; } : undefined} /></SessionFrame>
+    <SessionFrame name="A long session title" status={<StatusChip label={running ? "Running" : "Connected"} tone={running ? "live" : "quiet"} />}><Thread fileLinks={fileLinks} linkBase={linkBase} onOpenFile={fileLinks ? (path) => { fileLinks.open(path); return true; } : undefined} earlier={earlier} /></SessionFrame>
   </AssistantRuntimeProvider>;
 }
 async function render(props: Parameters<typeof Fixture>[0] = {}) {
@@ -851,5 +856,69 @@ describe("Rich blocks, round four", () => {
     await render({ messages: [answer("> [!NOTE]\n> Read the guide.\n> — AGENTS.md")] });
     expect(document.querySelector('.callout')?.getAttribute('data-callout')).toBe("note");
     expect(document.querySelector('.quote-figure')).toBeNull();
+  });
+});
+
+describe("Earlier history", () => {
+  const history = [{ id: "q", role: "user" as const, parts: [{ type: "text" as const, text: "Where were we?" }] }, answer("Here.")];
+  const seam = () => document.querySelector<HTMLElement>(".load-earlier");
+  const action = () => document.querySelector<HTMLButtonElement>(".load-earlier-action");
+
+  it("shows no paging seam when the thread has no paging", async () => {
+    await render({ messages: history });
+    expect(seam()).toBeNull();
+  });
+
+  it("offers older messages above the first one, and loads them through the runtime", async () => {
+    const onLoadEarlier = vi.fn(async () => {});
+    await render({ messages: history, earlier: { type: "available" }, onLoadEarlier });
+    expect(seam()?.nextElementSibling?.classList.contains("message-group")).toBe(true);
+    // A native button: Enter and Space activate it, and it is in the tab order.
+    expect(action()?.type).toBe("button");
+    expect(action()?.disabled).toBe(false);
+    expect(action()?.textContent).toBe("load earlier messages");
+    expect(action()?.getAttribute("aria-live")).toBe("polite");
+    await act(async () => action()!.click());
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the same focused button while a page loads, and says so", async () => {
+    let finish = () => {};
+    const onLoadEarlier = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    await render({ messages: history, earlier: { type: "available" }, onLoadEarlier });
+    const button = action()!;
+    button.focus();
+    // The runtime knows at once; the store's state follows.
+    await act(async () => button.click());
+    expect(action()).toBe(button);
+    expect(document.activeElement).toBe(button);
+    expect(button.textContent).toBe("loading earlier messages");
+    await render({ messages: history, earlier: { type: "loading" }, onLoadEarlier });
+    expect(action()).toBe(button);
+    expect(button.textContent).toBe("loading earlier messages");
+    expect(button.disabled).toBe(false);
+    await act(async () => finish());
+    await render({ messages: [answer("Older.", "older"), ...history], earlier: { type: "available" }, onLoadEarlier });
+    expect(action()).toBe(button);
+    expect(button.textContent).toBe("load earlier messages");
+  });
+
+  it("says why a page failed, and retries through the same runtime action", async () => {
+    const onLoadEarlier = vi.fn(async () => {});
+    await render({ messages: history, earlier: { type: "failed", message: "the server did not answer." }, onLoadEarlier });
+    const alert = document.querySelector('.load-earlier [role="alert"]');
+    expect(alert?.textContent).toBe("could not load earlier messages: the server did not answer.");
+    expect(action()?.textContent).toBe("retry");
+    expect(action()?.getAttribute("aria-describedby")).toBe(alert?.id);
+    await act(async () => action()!.click());
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks the start of the chat once every page is loaded, and nothing in an empty thread", async () => {
+    await render({ messages: history, earlier: { type: "complete" } });
+    expect(action()).toBeNull();
+    expect(document.querySelector('.load-earlier [role="status"]')?.textContent).toBe("start of chat");
+    await render({ messages: [], earlier: { type: "complete" } });
+    expect(seam()).toBeNull();
   });
 });

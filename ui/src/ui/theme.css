@@ -288,6 +288,21 @@ button:disabled { cursor: default; opacity: 0.4; }
 .history-summary-text .markdown :is(h3, h4) { font-size: var(--small-text); }
 .history-summary-text .markdown :is(h1, h2, h3, h4, p, ul, ol):first-child { margin-block-start: 0; }
 .history-summary-text:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }
+/* Loading earlier history is a seam too: the same rule and quiet monospace
+   label as a summary, at the top of the loaded messages. The seam keeps one
+   height through available, loading and end, so pressing it does not move the
+   messages under the reader. A failure says what failed above the retry. */
+.load-earlier { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0 var(--space-2); min-block-size: var(--control-size); margin-block-end: var(--space-2); font-family: var(--code-font); font-size: 0.75rem; font-variant-ligatures: none; color: var(--muted-foreground); }
+.load-earlier::before, .load-earlier::after { content: ""; flex: 1 1 var(--space-4); min-inline-size: var(--space-4); border-block-start: var(--hairline) solid var(--line); }
+.load-earlier-action { display: inline-flex; align-items: center; min-block-size: var(--control-size); padding-inline: var(--space-2); border: 0; border-radius: var(--radius-document); background: transparent; color: inherit; font: inherit; }
+.load-earlier-action:not(:disabled):hover { color: var(--foreground); }
+.load-earlier[data-state="failed"] .load-earlier-action { color: var(--foreground); }
+.load-earlier-action:focus-visible { outline: 2px solid var(--line-focus); outline-offset: -2px; }
+.load-earlier-label[data-live] { background: linear-gradient(90deg, var(--muted-foreground) 40%, var(--foreground) 50%, var(--muted-foreground) 60%) 0 0 / 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: trace-shimmer 2s linear infinite; }
+.load-earlier-end { margin: 0; }
+.load-earlier-end:empty { display: none; }
+.load-earlier-error { order: -1; flex: 1 0 100%; margin: 0; padding-block: var(--space-1); color: var(--destructive); text-align: center; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .load-earlier-label[data-live] { animation: none; background: none; color: var(--foreground); } }
 /* Action bar from messages.tsx and action-bar.tsx: mt-2, gap-1.5, and
    actionButtonClass (p-1 around a 16px icon, muted-foreground/70). */
 .message-actions { display: flex; align-items: center; gap: 0.375rem; margin-block-start: var(--space-2); }
