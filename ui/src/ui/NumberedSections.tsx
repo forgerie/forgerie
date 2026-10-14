@@ -56,9 +56,10 @@ export function NumberedSections({ overview, sections, target, onInView }: {
     {sections.map((section, index) => <section key={section.key} className="numbered-sections-section" data-section={section.key}
       data-mark={section.mark} data-change={section.change} aria-labelledby={`${id}-${String(index)}`}>
       <h2 className="numbered-sections-heading" id={`${id}-${String(index)}`}>
-        {section.number !== undefined && section.change !== "removed" && <span className="numbered-sections-number" aria-label={`Step ${String(section.number)}${
-          section.mark === "done" ? ", done" : section.mark === "current" ? ", at work" : ""}`}>
-          {section.mark === "done" ? <CheckIcon aria-hidden /> : section.number}</span>}
+        {section.number !== undefined && section.change !== "removed" && <>
+          <span className="numbered-sections-number" aria-hidden>{section.mark === "done" ? <CheckIcon /> : section.number}</span>
+          <span className="numbered-sections-said">{`Step ${String(section.number)}${section.mark === "done" ? ", done" : section.mark === "current" ? ", at work" : ""}: `}</span>
+        </>}
         <span className="numbered-sections-title">{section.title}</span>
       </h2>
       {section.flag !== undefined && section.flag !== null && <p className="numbered-sections-flag">{section.flag}</p>}

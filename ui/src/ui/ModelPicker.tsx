@@ -107,9 +107,11 @@ function useFavoriteCycle(binding: ModelBinding, panelOpen: boolean, change: Cha
  * opens at window level so the transcript cannot clip it. Nothing changes in
  * the browser until Pi answers, and a change is never retried.
  */
-export function ModelPicker({ binding, anchor, open, onOpenChange }: {
+export function ModelPicker({ binding, anchor, open, onOpenChange, minWidthRem }: {
   binding: ModelBinding; anchor: RefObject<HTMLElement | null>;
   open: PickerOpen | undefined; onOpenChange: (open: PickerOpen | undefined) => void;
+  /** The panel's least width, for an anchor narrower than a usable panel, such as a trigger alone in a row. */
+  minWidthRem?: number | undefined;
 }) {
   const layer = usePortalTarget();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -136,13 +138,13 @@ export function ModelPicker({ binding, anchor, open, onOpenChange }: {
       {level && <span className="model-trigger-level">{thinkingLabel(level)}</span>}
       <ChevronDownIcon aria-hidden size={14} />
     </button>
-    {open && createPortal(<ModelPanel id={panelId} binding={binding} anchor={anchor} trigger={trigger}
+    {open && createPortal(<ModelPanel id={panelId} binding={binding} anchor={anchor} trigger={trigger} minWidthRem={minWidthRem}
       initialQuery={open.query} onClose={close} change={change} setChange={setChange} />, layer)}
   </>;
 }
 
-function ModelPanel({ id, binding, anchor, trigger, initialQuery, onClose, change, setChange }: {
-  id: string; binding: ModelBinding; anchor: RefObject<HTMLElement | null>; trigger: RefObject<HTMLButtonElement | null>;
+function ModelPanel({ id, binding, anchor, trigger, minWidthRem, initialQuery, onClose, change, setChange }: {
+  id: string; binding: ModelBinding; anchor: RefObject<HTMLElement | null>; trigger: RefObject<HTMLButtonElement | null>; minWidthRem: number | undefined;
   initialQuery: string; onClose: (returnFocus: boolean) => void;
   change: Change; setChange: (change: Change) => void;
 }) {
@@ -162,7 +164,7 @@ function ModelPanel({ id, binding, anchor, trigger, initialQuery, onClose, chang
   const changingRef = useRef(false);
   changingRef.current = change.type === "changing";
 
-  usePanelPlacement(panel, anchor, PANEL_CAP);
+  usePanelPlacement(panel, anchor, PANEL_CAP, minWidthRem);
 
   // A tap outside closes the panel. The trigger toggles it itself.
   useEffect(() => {

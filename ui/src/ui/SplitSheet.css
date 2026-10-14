@@ -57,8 +57,8 @@
 .split-sheet-main { display: contents; }
 .split-sheet-lead { order: -2; max-inline-size: calc(var(--split-sheet-measure) + 2 * var(--split-sheet-pad)); padding: var(--space-4) var(--split-sheet-pad) 0; }
 .split-sheet-document { order: 0; min-inline-size: 0; max-inline-size: calc(var(--split-sheet-measure) + 2 * var(--split-sheet-pad)); padding: var(--space-6) var(--split-sheet-pad); }
-.split-sheet-rail { order: 1; display: grid; gap: var(--space-6); align-content: start; min-inline-size: 0; padding: var(--space-6) var(--split-sheet-pad);
-  border-block-start: var(--hairline) solid var(--line); background: var(--tint-surface); }
+.split-sheet-rail { order: 1; display: grid; align-content: start; min-inline-size: 0; padding: var(--space-6) var(--split-sheet-pad);
+  border-block-start: var(--hairline) solid var(--line); }
 .split-sheet-grid[data-rail-first] .split-sheet-rail { order: -1; padding-block: var(--space-4); border-block: 0 var(--hairline) solid var(--line); }
 .split-sheet-grid[data-rail-first] .split-sheet-lead { padding-block-end: var(--space-4); }
 .split-sheet-foot { grid-area: foot; container-type: inline-size; min-inline-size: 0; padding: var(--space-3) var(--split-sheet-pad); border-block-start: var(--hairline) solid var(--line);
@@ -86,7 +86,7 @@
   .split-sheet-rail { grid-area: rail; overflow-y: auto; overscroll-behavior: contain; border-block-start: 0; border-inline-start: var(--hairline) solid var(--line); }
   .split-sheet-grid[data-rail-first] .split-sheet-rail { padding-block: var(--space-6); border-block: 0; }
   .split-sheet-grid[data-rail-first] .split-sheet-lead { padding-block-end: 0; }
-  .split-sheet-foot { border-inline-start: var(--hairline) solid var(--line); background: var(--tint-surface); }
+  .split-sheet-foot { border-inline-start: var(--hairline) solid var(--line); }
   .split-sheet-grid[data-detail] .split-sheet-main { display: flex; flex-direction: column; overflow: hidden; }
   .split-sheet-grid[data-detail] .split-sheet-document { max-inline-size: none; padding: 0; }
   .split-sheet-grid[data-detail] .split-sheet-rail { display: grid; }
@@ -95,5 +95,5 @@
 /* Wide but short: the foot spans both panes, so the rail keeps its height and the actions fit one row. */
 @container split-sheet (min-width: 50rem) and (max-height: 36rem) {
   .split-sheet-grid { grid-template: "head head" auto "main rail" minmax(0, 1fr) "foot foot" auto / minmax(0, 1fr) var(--split-sheet-rail); }
-  .split-sheet-foot { padding-block: var(--space-2); border-inline-start: 0; background: var(--modal-surface); }
+  .split-sheet-foot { padding-block: var(--space-2); border-inline-start: 0; }
 }

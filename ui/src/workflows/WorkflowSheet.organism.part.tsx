@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { StateChecks } from "@simonwjackson/caliper/checks";
 import { WorkflowSheet } from "./WorkflowSheet";
 import type { WorkerRecord } from "./WorkflowWorkerPane";
 import { addStage, addWorker, removeWorker, setWorkerModel } from "./workflowRoute";
@@ -12,6 +13,36 @@ import { SAVED } from "./fixtures/runs";
 
 export const name = "Workflow sheet";
 export const note = "One sheet for a workflow: a saved one before it starts, a proposal, and a run. The plan is the page; the route, inputs and actions are the rail";
+export const checks = {
+  ProposalReview: {
+    "a worker's model picker opens inside the modal, and a model-only change keeps Start": async ({ canvas, input, expect, waitFor }) => {
+      await input.click(canvas.getByRole("button", { name: /^Claude Sonnet 5.*change model/ }));
+      await waitFor(() => { expect(canvas.getByRole("dialog", { name: "Model and thinking level" })).toBeVisible(); });
+      // By keyboard, so it works at every size: search, step into the list, choose.
+      await input.type(canvas.getByRole("searchbox", { name: "Search models" }), "Opus");
+      await input.press(canvas.getByRole("searchbox", { name: "Search models" }), "ArrowDown");
+      await input.press(canvas.getByRole("button", { name: /Claude Opus 4\.5/ }), "Enter");
+      await waitFor(() => { expect(canvas.getByText("1 model changed. The run uses it; the plan stays as it is.")).toBeVisible(); });
+      expect(canvas.getByRole("button", { name: "Start workflow" })).toBeEnabled();
+    },
+    "Edit stages, then removing a worker, turns Start into Update the plan": async ({ canvas, input, expect, waitFor }) => {
+      await input.click(canvas.getByRole("button", { name: "Edit stages" }));
+      await input.click(canvas.getByRole("button", { name: "Remove worker page" }));
+      await waitFor(() => { expect(canvas.getByRole("button", { name: "Update the plan" })).toBeVisible(); });
+      expect(canvas.getByRole("button", { name: "Start workflow" })).toBeDisabled();
+      expect(canvas.getByRole("region", { name: "The plan does not match your route yet" })).toBeVisible();
+    },
+  },
+  RunWorking: {
+    "a worker opens its record beside the route, and Plan goes back": async ({ canvas, input, expect, waitFor }) => {
+      await input.click(canvas.getByRole("button", { name: /api full-stack-engineer/ }));
+      await waitFor(() => { expect(canvas.getByRole("button", { name: "Stop" })).toBeVisible(); });
+      expect(canvas.getByText("From its next turn. The turn in progress finishes on its current model.")).toBeVisible();
+      await input.click(canvas.getByRole("button", { name: "Plan" }));
+      await waitFor(() => { expect(canvas.getByRole("article", { name: "Plan" })).toBeVisible(); });
+    },
+  },
+} satisfies StateChecks;
 
 /** Real handlers on local state: each action decides at once, and the sheet shows the closed proposal. */
 function Proposal({ proposal: initial, entry = RICH_ENTRY, readError, blocked, pending, error, route, editing, changing }: {

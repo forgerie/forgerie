@@ -30,7 +30,9 @@ const text = () => sheet().textContent ?? "";
 const note = () => sheet().querySelector(".action-footer-note")?.textContent ?? "";
 const problem = () => sheet().querySelector(".action-footer-problem")?.textContent ?? "";
 const pane = (label: string) => sheet().querySelector(`[aria-label="${label}"]`);
-const headings = () => [...sheet().querySelectorAll(".numbered-sections-heading")].map((heading) => heading.textContent);
+/** Each section's number as drawn, then its title. */
+const headings = () => [...sheet().querySelectorAll(".numbered-sections-heading")]
+  .map((heading) => `${heading.querySelector(".numbered-sections-number")?.textContent ?? ""}${heading.querySelector(".numbered-sections-title")?.textContent ?? ""}`);
 const type = async (field: HTMLTextAreaElement | null | undefined, value: string) => {
   if (!field) throw new Error("Expected the field");
   await act(async () => {
@@ -226,6 +228,7 @@ describe("a run's sheet", () => {
     await act(async () => root.render(running().element));
     expect(sheet().querySelector(".split-sheet-subtitle")?.textContent).toBe("settings-store-portPort the API and the page, 1 working");
     expect([...sheet().querySelectorAll(".numbered-sections-section")].map((node) => node.getAttribute("data-mark"))).toEqual(["done", "current", null, null]);
+    expect([...sheet().querySelectorAll(".numbered-sections-said")].map((node) => node.textContent)).toEqual(["Step 1, done: ", "Step 2, at work: ", "Step 3: ", "Step 4: "]);
     expect(worker("api")?.textContent).toBe("apifull-stack-engineerWorkingClaude Sonnet 5");
     expect(worker("page")?.textContent).toBe("pagedesign-engineerDoneSession's model");
     expect(sheet().querySelector(".route-list-meta")?.textContent).toBe("1 of 4 done");

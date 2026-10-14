@@ -39,7 +39,7 @@ export function WorkerModelPicker({ worker, model, reset, models, disabled = fal
   const edited = reset !== undefined && model !== reset.to;
   return <>
     <span ref={anchor} aria-label={`${worker}'s model`} role="group">
-      <ModelPicker binding={binding} anchor={anchor} open={open} onOpenChange={setOpen} />
+      <ModelPicker binding={binding} anchor={anchor} open={open} onOpenChange={setOpen} minWidthRem={18} />
     </span>
     {edited && !disabled && <TextButton label={reset.label} title={`Back to ${modelName(reset.to, models.known)}`}
       onPress={() => { void Promise.resolve(onChange(reset.to)).catch(() => undefined); }} />}
