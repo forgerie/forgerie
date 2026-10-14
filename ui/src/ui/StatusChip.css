@@ -26,8 +26,12 @@ button.status-chip-face:hover, button.status-chip-face[aria-expanded="true"] { b
 .status-chip[data-tone="warn"] .status-chip-dot { border: calc(var(--hairline) * 1.5) solid var(--tone-warn); animation: status-chip-pulse 1.6s ease-in-out infinite; }
 .status-chip[data-tone="bad"] .status-chip-dot { background: var(--destructive); }
 .status-chip[data-tone="quiet"] .status-chip-dot { background: var(--muted-foreground); }
-/* What else goes on rides after the word as a quiet readout, in the chip's own ink, never the failure tone. */
-.status-chip-aside { padding-inline-start: 0.375rem; border-inline-start: var(--hairline) solid currentColor; font-variant-numeric: tabular-nums; opacity: 0.8; }
+/* What else goes on rides after the word as a quiet readout. It takes the quiet
+   ink on every tone, so it never reads as the failure, the warning, or the live word. */
+.status-chip-aside { padding-inline-start: 0.375rem; border-inline-start: var(--hairline) solid currentColor; color: var(--quiet-foreground);
+  font-variant-numeric: tabular-nums; }
+/* On a quiet or neutral chip the word already has the quiet ink; the aside matches it rather than outranking it. */
+.status-chip[data-tone="quiet"] .status-chip-aside, .status-chip[data-tone="neutral"] .status-chip-aside { color: inherit; }
 /* A narrow header gives the title the room: the aside is a readout the panel
    repeats, and the live region still says it. */
 @container (max-width: 26rem) { .status-chip-aside { display: none; } }

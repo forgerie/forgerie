@@ -30,6 +30,14 @@ export function WithAside() {
 export function QuietWithAside() {
   return <StatusChip label="Connected" tone="quiet" aside="1 agent" asideLabel="1 background agent" />;
 }
+export function BadWithAside() {
+  return <StatusChip label="2 problems" tone="bad" aside="2 agents" asideLabel="2 background agents" panel={{ title: "2 problems", children:
+    <AlertCard label="Problem" title="Command failed" time="14:05">Unknown command: /bad</AlertCard> }} />;
+}
+export function WarnWithAside() {
+  return <StatusChip label="Reconnecting" tone="warn" aside="1 agent" asideLabel="1 background agent" panel={{ title: "Reconnecting", children:
+    <AlertCard label="Connection lost" tone="warn" title="The live connection dropped">Live connection timed out.</AlertCard> }} />;
+}
 export function Counted() {
   const [count, setCount] = useState(2);
   return <StatusChip label="Running" tone="live" count={count} countLabel={`${String(count)} problems`} ring={count}
