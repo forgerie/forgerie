@@ -87,6 +87,25 @@ function transientChildError(detail: string): boolean {
   return !PERMANENT_CHILD_ERROR.test(detail) && TRANSIENT_CHILD_ERROR.test(detail);
 }
 
+/** Apply a declared model only between turns. The caller may wait, or keep a user steer in the current turn. */
+async function applyWorkflowWorkerModel(tx: Tx, parentId: ConversationId, childId: ConversationId, name: string, catalog?: ChildAgentCatalog): Promise<TaskId | undefined> {
+  const declared = await workflowWorkerModel(tx, parentId, name);
+  if (declared === undefined) return undefined;
+  const record = (await tx.doc(Children, parentId)).agents[name];
+  const profile = declared === null || record?.agent == null ? undefined : await catalog?.find(record.agent);
+  const choice = declared === null ? undefined : modelChoice(declared);
+  if (choice === null) throw new WorkflowError(400, `Invalid workflow model for ${name}: ${declared ?? "default"}`);
+  const parent = await tx.doc(AgentDoc, parentId);
+  const model = declared === null ? parent.model : choice?.model ?? profile?.model ?? parent.model;
+  const thinkingLevel = declared === null ? parent.thinkingLevel ?? "off" : choice?.thinkingLevel ?? profile?.thinkingLevel ?? parent.thinkingLevel ?? "off";
+  const configured = await tx.doc(AgentDoc, childId);
+  if (configured.model?.provider === model?.provider && configured.model?.modelId === model?.modelId && (configured.thinkingLevel ?? "off") === thinkingLevel) return undefined;
+  const busy = (await tx.doc(LiveDoc, childId)).run?.taskId;
+  if (busy !== undefined) return busy;
+  await configure(tx, childId, { model: model ?? null, thinkingLevel });
+  return undefined;
+}
+
 const REPORTER_KIND = "forgerie.child-reporter";
 function childReporter(resolve: (conversationId: ConversationId, context: Context) => Promise<DurableChildExtensionOptions>) {
   return defineTask<ReporterInput, ReporterState, null>({
@@ -106,20 +125,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           let busy: TaskId | undefined;
           await runtime.commit(async (tx) => {
             if (await tx.submissionByRequest(conversationId, `child:${String(reporter.id)}`) !== undefined) return;
-            const declared = await workflowWorkerModel(tx, runtime.conversationId, name);
-            if (declared === undefined) return;
-            const record = (await tx.doc(Children, runtime.conversationId)).agents[name];
-            const profile = record?.agent == null ? undefined : await selected.catalog?.find(record.agent);
-            const choice = declared === null ? undefined : modelChoice(declared);
-            if (choice === null) throw new WorkflowError(400, `Invalid workflow model for ${name}: ${declared ?? "default"}`);
-            const parent = await tx.doc(AgentDoc, runtime.conversationId);
-            const model = declared === null ? parent.model : choice?.model ?? profile?.model ?? parent.model;
-            const thinkingLevel = declared === null ? parent.thinkingLevel ?? "off" : choice?.thinkingLevel ?? profile?.thinkingLevel ?? parent.thinkingLevel ?? "off";
-            const configured = await tx.doc(AgentDoc, conversationId);
-            if (configured.model?.provider === model?.provider && configured.model?.modelId === model?.modelId && (configured.thinkingLevel ?? "off") === thinkingLevel) return;
-            busy = (await tx.doc(LiveDoc, conversationId)).run?.taskId;
-            if (busy !== undefined) return;
-            await configure(tx, conversationId, { model: model ?? null, thinkingLevel });
+            busy = await applyWorkflowWorkerModel(tx, runtime.conversationId, conversationId, name, selected.catalog);
           }, context);
           if (busy === undefined) break;
           await runtime.waitForTask(busy, context);
@@ -634,10 +640,15 @@ async function noteInParent(parent: Conversation, text: string, data: Record<str
 }
 
 /** The user typing into an opened child: a steer while it works, a new input when it is idle. */
-export async function messageChild(harness: Harness, parent: Conversation, conversationId: number, text: string, context: Context, worktrees?: DurableChildWorktrees): Promise<void> {
+export async function messageChild(harness: Harness, parent: Conversation, conversationId: number, text: string, context: Context, worktrees?: DurableChildWorktrees, extensions?: DurableChildExtensions): Promise<void> {
   await withChildAdmission(worktrees, async () => {
     const { name, child, worktreeId } = await ownedChild(harness, parent.id, conversationId, context);
     if (worktreeId !== undefined) await requireWorktrees(worktrees).assertWritable(worktreeId);
+    const options = extensions === undefined ? undefined : extensionOptions.get(extensions);
+    const selected = await options?.resolveOptions?.(parent.id, context) ?? options;
+    // A user steer joins the busy turn immediately and keeps that turn's model. An idle send applies the
+    // current declaration first; it does not inherit the previous turn's model or thinking level.
+    await parent.commit((tx) => applyWorkflowWorkerModel(tx, parent.id, child.id, name, selected?.catalog), context);
     await child.submit({ type: "input", content: text, whenBusy: "steer" }, context);
     await noteInParent(parent, `[the user told child ${name} directly] ${text}`, { child: conversationId, childName: name, action: "message" }, context);
   });

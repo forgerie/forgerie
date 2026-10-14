@@ -15,6 +15,7 @@ import { CapturingSessionEventHub, emptyArchiveStore } from "./piSessionService.
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import { createDurableChildHost, LiveChildSessionIndex } from "./durableChildHost.js";
 import { ChildRunStore } from "./childRunStore.js";
+import { registerDurableChildRoutes } from "./durableChildRoutes.js";
 import { registerWorkflowRoutes } from "./workflowRoutes.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
@@ -80,6 +81,7 @@ const app = () => {
   const server = Fastify();
   registerPromptLibraryRoutes(server, new AgentDirPromptLibrary(agentDir));
   registerWorkflowRoutes(server, service);
+  registerDurableChildRoutes(server, service);
   return server;
 };
 const textOf = (value: unknown): string => typeof value === "string" ? value : Array.isArray(value) ? value.map((part: { text?: string }) => part.text ?? "").join("") : "";
@@ -98,7 +100,7 @@ const route: FauxResponseFactory = (context, options, _state, model) => {
   if (modelTask !== undefined) {
     modelThinking.push(options?.reasoning ?? "off");
     modelRequests.push({ name: textOf(modelTask.content).slice("MODEL-TURN-".length), model: model.id, phase: last?.role ?? "unknown" });
-    return last?.role === "user" ? call("work", {}) : answer("MODEL-DONE");
+    return last?.role === "user" && said !== "MODEL-STEER" ? call("work", {}) : answer("MODEL-DONE");
   }
   const modelAction = /^MODEL-(SPAWN|SEND)-(alpha|beta|gamma)$/u.exec(said);
   if (last?.role === "user" && modelAction !== null) return call("child_agent", {
@@ -308,6 +310,66 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
         await settled(5);
       }
       await service.finishWorkflow(ref, run.id, "completed", "Models applied at turn boundaries");
+    } finally { releaseWork?.(); await server.close(); }
+  }, 20000);
+
+  it.each([false, true])("applies workflow models through direct HTTP messages without changing a busy steer's model (agent file: %s)", async (agentFile) => {
+    if (agentFile) {
+      await mkdir(join(agentDir, "agents"));
+      await writeFile(join(agentDir, "agents/model-agent.md"), "---\nname: model-agent\ndescription: Model test\ntools: work\nmodel: faux/faux-declared\nthinking: high\n---\nDo the task.");
+      modelAgent = "model-agent";
+    }
+    const server = app();
+    let releaseWork: (() => void) | undefined;
+    modelWork = () => new Promise<void>((resolve) => { releaseWork = resolve; });
+    try {
+      const ref = { id: (await service.start(root)).id, cwd: root };
+      await service.setThinkingLevel(ref, "low");
+      await new AgentDirPromptLibrary(agentDir).save({ name: "direct-models", body: "---\nworkflow:\n  version: 1\n  stages:\n    - { id: build, name: Build, workers: [{ name: alpha }] }\n---\nWait for instructions.\n" });
+      const run = await service.runWorkflow(ref, "direct-models", {}, "direct-models", { alpha: "faux/faux-declared:high" });
+      await until(async () => (await service.messages(ref)).messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content).startsWith(`Workflow run ${run.id}`)) && !(await service.status(ref)).isStreaming);
+      await service.prompt(ref, "MODEL-SPAWN-alpha");
+      await until(() => Promise.resolve(started === 1));
+      const child = (await service.durableChildren(ref))[0];
+      if (child === undefined) throw new Error("Expected alpha");
+      const idle = () => until(async () => !(await service.durableChildMessages(ref, child.conversationId)).busy);
+      const message = async (text: string) => {
+        const response = await server.inject({ method: "POST", url: `/sessions/${ref.id}/children/${String(child.conversationId)}/message`, payload: { cwd: root, text } });
+        expect(response.statusCode).toBe(200);
+      };
+      const change = async (model: string | null) => {
+        const response = await server.inject({ method: "POST", url: `/sessions/${ref.id}/workflow-runs/${run.id}/workers/alpha/model`, payload: { cwd: root, model } });
+        expect(response.statusCode).toBe(200);
+      };
+      releaseWork?.(); await idle();
+      await change("faux/faux-1:low");
+      await message("MODEL-TURN-alpha");
+      await until(() => Promise.resolve(started === 2));
+      expect(modelRequests.at(-1)?.model).toBe("faux-1");
+      expect(modelThinking.at(-1)).toBe("low");
+      releaseWork?.(); await idle();
+      await change("faux/faux-declared:high");
+      const busyTurnStart = modelRequests.length;
+      await message("MODEL-TURN-alpha");
+      await until(() => Promise.resolve(started === 3));
+      await change("faux/faux-1:low");
+      // Direct messages must still steer now, not wait for this tool to finish.
+      await message("MODEL-STEER");
+      expect(started).toBe(3);
+      releaseWork?.(); await idle();
+      expect(modelRequests.slice(busyTurnStart).map((request) => request.model)).toEqual(["faux-declared", "faux-declared"]);
+      expect(modelThinking.slice(busyTurnStart)).toEqual(["high", "high"]);
+      await message("MODEL-TURN-alpha");
+      await until(() => Promise.resolve(started === 4));
+      expect(modelRequests.at(-1)?.model).toBe("faux-1");
+      expect(modelThinking.at(-1)).toBe("low");
+      releaseWork?.(); await idle();
+      await change(null);
+      await message("MODEL-TURN-alpha");
+      await until(() => Promise.resolve(started === 5));
+      expect(modelRequests.at(-1)?.model).toBe("faux-1");
+      expect(modelThinking.at(-1)).toBe("low");
+      releaseWork?.(); await idle();
     } finally { releaseWork?.(); await server.close(); }
   }, 20000);
 

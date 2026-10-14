@@ -393,7 +393,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   discardDurableChildWorktree(conversationId: number, confirmationToken: string) { return childWorktreeAction(this.journal.harness, this.journal.conversation.id, conversationId, context, this.childWorktrees, "discard", confirmationToken); }
   durableChildMessages(conversationId: number) { return childMessages(this.journal.harness, this.journal.conversation.id, conversationId, context); }
   async messageDurableChild(conversationId: number, text: string) {
-    await messageChild(this.journal.harness, this.journal.conversation, conversationId, text, context, this.childWorktrees);
+    await messageChild(this.journal.harness, this.journal.conversation, conversationId, text, context, this.childWorktrees, this.childExtensions);
     await this.childRunRecords?.flush();
   }
   stopDurableChild(conversationId: number) { return stopChild(this.journal.harness, this.journal.conversation, conversationId, context, this.childWorktrees); }
