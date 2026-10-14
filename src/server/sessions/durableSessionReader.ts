@@ -1,7 +1,7 @@
 import { readTaskActivity } from "./durableTaskActivity.js";
 import type { TaskActivity } from "../../shared/durableTaskActivity.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
-import type { SessionOpenResult } from "./sessionOpen.js";
+import type { SessionOpenPageRequest, SessionOpenResult } from "./sessionOpen.js";
 import type { SessionStatus } from "../../shared/apiTypes.js";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { SessionRef, SessionTreeSnapshot } from "../../shared/apiTypes.js";
@@ -38,7 +38,7 @@ export class DurableSessionReader {
     return await this.read(ref, handle => readTaskActivity(handle.harness, handle.conversation.id, context)) ?? { kind: "unsupported" };
   }
 
-  open(ref: SessionRef, page: MessagePageRequest, hub: SessionEventHub, hostStatus?: () => Partial<SessionStatus>): Promise<SessionOpenResult | undefined> {
+  open(ref: SessionRef, page: SessionOpenPageRequest, hub: SessionEventHub, hostStatus?: () => Partial<SessionStatus>): Promise<SessionOpenResult | undefined> {
     return this.read(ref, handle => this.options.readModel(handle).open(ref.cwd, page, hub, context, hostStatus));
   }
 

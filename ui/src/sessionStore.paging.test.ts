@@ -62,3 +62,31 @@ it("resolves an old joined-assistant search target and reads its full-tree entry
   expect(threadMessageIdAt(store.getSnapshot().transcript.messages, 2)).toBe("plan0");
   expect(server.requests.filter(url => url.pathname.endsWith("/messages"))).toHaveLength(1);
 });
+
+it("replaces the authoritative window after a 409 for before=150 when a 200-message branch shrinks to one", async () => {
+  const long = Array.from({ length: 200 }, (_, index) => ({ id: `m${String(index)}`, role: index % 2 === 0 ? "user" : "assistant", content: `message ${String(index)}` }));
+  let opens = 0;
+  let release!: () => void;
+  const replacement = new Promise<void>(resolve => { release = resolve; });
+  const server = await createOpenServer(async url => {
+    if (url.pathname.endsWith("/open")) {
+      if (++opens === 1) return openFixture({ historyId: "before-shrink", page: { messages: long.slice(150), start: 150, total: 200 } });
+      await replacement;
+      return openFixture({ historyId: "after-shrink", page: { messages: [{ id: "replacement", role: "user", content: "new branch" }], start: 0, total: 1 } });
+    }
+    if (url.pathname.endsWith("/messages")) return Response.json({ error: "Session history changed", code: "HISTORY_CHANGED" }, { status: 409 });
+    return [];
+  }); cleanup.push(server.close); cleanup.push(() => { release(); });
+  const store = createSessionStore("known", server.transport, {}, { id: "known", cwd: "/workspace" }); cleanup.push(store.dispose);
+  await store.start(); const previous = store.getSnapshot().transcript.messages;
+  await expect(store.loadEarlier()).rejects.toThrow("Session history changed");
+  await vi.waitFor(() => expect(opens).toBe(2));
+  expect(server.requests.find(url => url.pathname.endsWith("/messages"))?.searchParams.toString()).toBe("cwd=%2Fworkspace&before=150&limit=50&historyId=before-shrink");
+  expect(store.getSnapshot().transcript.messages).toBe(previous);
+  release();
+  await vi.waitFor(() => expect(store.getSnapshot().transcript.messages.map(message => message.id)).toEqual(["replacement"]));
+  expect(store.getSnapshot().transcript.messages[0]?.position).toBe(0);
+  expect(store.getSnapshot().earlier.type).toBe("complete");
+  await store.loadEarlier();
+  expect(server.requests.filter(url => url.pathname.endsWith("/messages"))).toHaveLength(1);
+});

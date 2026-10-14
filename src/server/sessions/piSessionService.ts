@@ -1,8 +1,7 @@
 import type { TaskActivity } from "../../shared/durableTaskActivity.js";
 import { durableBrowserMessageSchema } from "../../shared/durableBrowserSnapshot.js";
 import { z } from "zod";
-import type { SessionOpenRequest } from "../../shared/sessionOpen.js";
-import { PresentationHistoryIdentity, SessionOpenError, type SessionOpenResult, type SessionOpenMessage, type SessionOpenHistoryPage } from "./sessionOpen.js";
+import { assertHistoryIdentity, PresentationHistoryIdentity, SessionOpenError, type SessionOpenPageRequest, type SessionOpenResult, type SessionOpenMessage, type SessionOpenHistoryPage } from "./sessionOpen.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { ManagedProcessRegistry, type ManagedProcessRegistryOptions } from "../processes/managedProcessRegistry.js";
 import type { ManagedProcesses } from "../processes/managedProcesses.js";
@@ -2810,7 +2809,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   /** Preparation may await. The active classic cut below must not. */
-  async open(ref: PiSessionRef, page: Pick<SessionOpenRequest, "limit" | "around"> & { before?: number }): Promise<SessionOpenResult> {
+  async open(ref: PiSessionRef, page: SessionOpenPageRequest): Promise<SessionOpenResult> {
     const active = this.activeForRef(ref)?.runtime.session;
     if (active instanceof DurableAgentSession) await active.flushDurableMutations();
     const catalog = await this.unreadCatalog(); // Capture before any transcript acquisition.
@@ -2881,18 +2880,18 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private classicOpenCut(id: string, cwd: string, messages: SessionOpenMessage[], partial: SessionOpenMessage | null, status: ClientSessionStatus,
-    page: Pick<SessionOpenRequest, "limit" | "around"> & { before?: number }, receipt: SessionOpenResult["receipt"]): SessionOpenResult {
+    page: SessionOpenPageRequest, receipt: SessionOpenResult["receipt"]): SessionOpenResult {
+    const historyId = this.presentationHistory.identify(JSON.stringify([cwd, id]), messages);
+    assertHistoryIdentity(historyId, page.historyId);
     const seq = this.events.currentSeq(id);
     this.events.savedHostOutput(id, messages);
-    return structuredClone({ session: { id, cwd }, readPath: "classic", epoch: this.events.epoch, seq,
-      historyId: this.presentationHistory.identify(JSON.stringify([cwd, id]), messages),
+    return structuredClone({ session: { id, cwd }, readPath: "classic", epoch: this.events.epoch, seq, historyId,
       page: pageMessagesAtSafeBoundary(messages, { ...page, completeTurns: true }),
       snapshot: { seq, partial, tools: [], transientEvents: this.events.transientEvents(id) }, status, receipt });
   }
 
   async earlier(ref: PiSessionRef, page: { before: number; limit: number; historyId: string }): Promise<SessionOpenHistoryPage> {
-    const opened = await this.open(ref, { limit: page.limit, before: page.before });
-    if (opened.historyId !== page.historyId) throw new SessionOpenError("Session history changed", 409, "HISTORY_CHANGED");
+    const opened = await this.open(ref, page);
     return { ...opened.page, historyId: opened.historyId, epoch: opened.epoch, seq: opened.seq };
   }
 

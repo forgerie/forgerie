@@ -1,16 +1,24 @@
 import { randomUUID, createHash } from "node:crypto";
 import type { SessionRef, SessionStatus } from "../../shared/apiTypes.js";
 import type { DurableBrowserMessage } from "../../shared/durableBrowserSnapshot.js";
-import type { SessionHistoryPage, SessionOpenRequest, SessionOpenResponse } from "../../shared/sessionOpen.js";
+import type { SessionHistoryPage, SessionOpenResponse } from "../../shared/sessionOpen.js";
+import type { MessagePageRequest } from "./messagePaging.js";
 
 /** Classic saved shell rows can disclose their full output; native rows use the same allowlist. */
 export type SessionOpenMessage = DurableBrowserMessage & { fullOutputPath?: string | undefined };
 export type SessionOpenResult = SessionOpenResponse<SessionOpenMessage, SessionStatus>;
 export type SessionOpenHistoryPage = SessionHistoryPage<SessionOpenMessage>;
 
+/** Internal cursor guard. Identity must match the acquired cut before paging it. */
+export interface SessionOpenPageRequest extends MessagePageRequest { historyId?: string }
+
+export function assertHistoryIdentity(historyId: string, expected?: string): void {
+  if (expected !== undefined && historyId !== expected) throw new SessionOpenError("Session history changed", 409, "HISTORY_CHANGED");
+}
+
 /** Implementations return one detached consistent cut. */
 export interface SessionOpenReader {
-  open(ref: SessionRef, page: Pick<SessionOpenRequest, "limit" | "around">): Promise<SessionOpenResult>;
+  open(ref: SessionRef, page: SessionOpenPageRequest): Promise<SessionOpenResult>;
 }
 
 /** Only fingerprints are retained. Transcript data keeps its existing storage owner. */

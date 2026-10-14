@@ -14,6 +14,9 @@ describe("server open type boundary", () => {
   });
 });
 
+import Fastify from "fastify";
+import fastifyWebsocket from "@fastify/websocket";
+import { registerSessionRoutes } from "./sessionRoutes.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,6 +61,32 @@ describe("consistent open acquisition", () => {
       expect(result.page.messages[0]?.content).toBe("prompt");
       expect(new SessionEventHub().epoch).not.toBe(hub.epoch);
     } finally { await service.dispose(); }
+  });
+
+  it("returns HTTP 409 before applying before=150 when a 200-message branch shrinks to one", async () => {
+    const { service, hub, branch } = classic();
+    const app = Fastify({ logger: false });
+    await app.register(fastifyWebsocket); registerSessionRoutes(app, service, hub);
+    branch.splice(0, branch.length, ...Array.from({ length: 200 }, (_, index) => ({ type: "message", id: `m${String(index)}`,
+      message: { role: index % 2 === 0 ? "user" : "assistant", content: `text ${String(index)}` } })));
+    try {
+      await service.start("/workspace");
+      const initial = await app.inject({ url: "/sessions/classic/open?cwd=%2Fworkspace&limit=50" });
+      expect(initial.statusCode).toBe(200);
+      const opened = initial.json<SessionOpenResult>(); expect(opened.page).toMatchObject({ start: 150, total: 200 });
+      const earlier = await app.inject({ url: `/sessions/classic/messages?${new URLSearchParams({ cwd: "/workspace", limit: "50", before: "150", historyId: opened.historyId })}` });
+      expect(earlier.statusCode).toBe(200);
+      expect(earlier.json<SessionOpenHistoryPage>()).toMatchObject({ historyId: opened.historyId, start: 100, total: 200 });
+      expect(earlier.json<SessionOpenHistoryPage>().messages.map(message => message.id)).toEqual(Array.from({ length: 50 }, (_, index) => `m${String(100 + index)}`));
+      branch.splice(0, branch.length, { type: "message", id: "replacement", message: { role: "user", content: "new branch" } });
+      const stale = await app.inject({ url: `/sessions/classic/messages?${new URLSearchParams({ cwd: "/workspace", limit: "50", before: "150", historyId: opened.historyId })}` });
+      expect(stale.statusCode).toBe(409); expect(stale.json()).toMatchObject({ code: "HISTORY_CHANGED" });
+      const replacement = await service.open({ id: "classic", cwd: "/workspace" }, { limit: 50 });
+      expect(replacement.historyId).not.toBe(opened.historyId);
+      expect(replacement.page).toMatchObject({ start: 0, total: 1, messages: [{ id: "replacement", content: "new branch" }] });
+      const invalid = await app.inject({ url: `/sessions/classic/messages?${new URLSearchParams({ cwd: "/workspace", limit: "50", before: "150", historyId: replacement.historyId })}` });
+      expect(invalid.statusCode).toBe(400);
+    } finally { await service.dispose(); await app.close(); }
   });
 
   it("seeds shell output emitted before subscription and replaces a persisted shell exactly once", () => {
@@ -107,6 +136,8 @@ describe("consistent open acquisition", () => {
       const commits = vi.fn();
       const stop = harness.subscribeCommits(commits);
       const result = await reader.open("/workspace", { limit: 50 }, new SessionEventHub(), context);
+      await expect(reader.open("/workspace", { limit: 50, before: 150, historyId: `${result.historyId}-old` }, new SessionEventHub(), context))
+        .rejects.toMatchObject({ status: 409, code: "HISTORY_CHANGED" });
       stop();
       expect(result.page.messages.map(message => message.content)).toEqual(["before reset", "after reset"]);
       expect(result.status.pendingAsk?.askId).toBe("ask");

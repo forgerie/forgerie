@@ -8,7 +8,7 @@ import type { Context } from "@earendil-works/chord";
 import type { ContextView, ConversationView, Cursor, EntryRecord, UsageState, WatchEnd, WatchHandle } from "@earendil-works/pi-durable";
 import { AgentDoc, InboxDoc, LiveDoc, UsageDoc } from "@earendil-works/pi-durable";
 import { ParentAsks, ParentAsksSchema, ParentResponse, ParentResponseSchema, Presentation, PresentationSchema, SessionName, SessionNameSchema } from "./durableParentDocuments.js";
-import { SessionOpenError, type SessionOpenResult } from "./sessionOpen.js";
+import { assertHistoryIdentity, SessionOpenError, type SessionOpenPageRequest, type SessionOpenResult } from "./sessionOpen.js";
 import { SessionBindings } from "./durableSessionBindings.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE } from "../../shared/apiTypes.js";
@@ -60,7 +60,7 @@ export class DurableParentReadModel {
    * Preload document membership, then use only Tx reads on the serialized line.
    * Membership is guarded by adoption: Tx.doc creates absent documents, which an open must never do.
    */
-  async open(cwd: string, request: MessagePageRequest, hub: SessionEventHub, context: Context,
+  async open(cwd: string, request: SessionOpenPageRequest, hub: SessionEventHub, context: Context,
     hostStatus: () => Partial<SessionStatus> = () => ({})): Promise<SessionOpenResult> {
     const { handle } = this.options;
     const id = handle.conversation.id;
@@ -146,8 +146,10 @@ export class DurableParentReadModel {
             response: asks.pending !== undefined ? { kind: "needs-response", reason: "questions" }
               : response.intent === "nothing" ? { kind: "none" } : { kind: "needs-response", reason: response.intent === "questions" ? "reply" : response.intent } };
           if (before !== hub.currentSeq(handle.address.sessionId)) return undefined;
+          const historyId = `native:${handle.address.journalId}:${String(id)}`;
+          assertHistoryIdentity(historyId, request.historyId);
           return structuredClone({ session: { id: handle.address.sessionId, cwd, ...(name.name === undefined ? {} : { name: name.name }) }, readPath: "native" as const,
-            epoch: hub.epoch, seq, historyId: `native:${handle.address.journalId}:${String(id)}`, page: this.page(messages, { ...request, completeTurns: true }),
+            epoch: hub.epoch, seq, historyId, page: this.page(messages, { ...request, completeTurns: true }),
             snapshot: { seq, partial: partial === undefined ? null : durableBrowserMessageSchema.parse(projectBrowserMessage(partial)), tools, transientEvents: hub.transientEvents(handle.address.sessionId) }, status, receipt: null });
         }, context);
         if (cut !== undefined) return cut;
