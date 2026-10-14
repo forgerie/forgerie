@@ -23,6 +23,13 @@ export function WithDetail() {
       Live connection timed out. Try <strong>4</strong> starts in 3 s.
     </AlertCard> }} />;
 }
+export function WithAside() {
+  return <StatusChip label="Running" tone="live" aside="2 agents" asideLabel="2 background agents" count={1} countLabel="1 problem"
+    panel={{ title: "Running", children: <AlertCard label="Problem" title="Pi reported an error" time="14:06">529 overloaded_error: Overloaded</AlertCard> }} />;
+}
+export function QuietWithAside() {
+  return <StatusChip label="Connected" tone="quiet" aside="1 agent" asideLabel="1 background agent" />;
+}
 export function Counted() {
   const [count, setCount] = useState(2);
   return <StatusChip label="Running" tone="live" count={count} countLabel={`${String(count)} problems`} ring={count}

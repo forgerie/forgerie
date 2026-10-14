@@ -76,4 +76,26 @@ describe("status chip", () => {
     act(() => root.render(<StatusChip label="Problem" tone="bad" ring={2} panel={detail()} />));
     expect(document.querySelector(".status-chip-ring")).not.toBe(first);
   });
+  it("draws a quiet aside after the word, and reads it in words before the count", () => {
+    act(() => root.render(<StatusChip label="Running" tone="live" aside="2 agents" asideLabel="2 background agents" count={1} countLabel="1 problem" panel={detail()} />));
+    expect(live()).toBe("Running, 2 background agents, 1 problem");
+    expect(document.querySelector(".status-chip-aside")?.textContent).toBe("2 agents");
+    expect(face()?.getAttribute("aria-label")).toBe("Running, 2 background agents, 1 problem. Show details");
+  });
+
+  it("draws a quiet status that has an aside", () => {
+    act(() => root.render(<StatusChip label="Connected" tone="quiet" aside="1 agent" asideLabel="1 background agent" />));
+    expect(face()?.textContent).toBe("Connected1 agent");
+    expect(live()).toBe("Connected, 1 background agent");
+  });
+
+  it("tells its owner each time the panel opens, not when it closes", () => {
+    const onOpen = vi.fn();
+    act(() => root.render(<StatusChip label="Running" tone="live" panel={{ ...detail(), onOpen }} />));
+    act(() => face()?.click());
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    act(() => face()?.click());
+    act(() => face()?.click());
+    expect(onOpen).toHaveBeenCalledTimes(2);
+  });
 });

@@ -15,6 +15,8 @@ export interface StatusChipPanel {
   title: string;
   /** Quiet text actions in the panel's head, before close. */
   actions?: readonly StatusChipAction[];
+  /** Called each time the reader opens the panel, such as to read its content again. */
+  onOpen?: (() => void) | undefined;
   children: ReactNode;
 }
 
@@ -22,12 +24,17 @@ export interface StatusChipPanel {
  * Molecule: a header's one status word, as a chip. With a panel, the chip is
  * a button with a chevron, and the panel opens under the header at the
  * window's end: the long story lives there, never above the page's content.
- * A count rides along for things that wait in the panel. A new `ring` value
- * rings the chip twice, the one motion that asks for a look.
+ * A count rides along for things that wait in the panel. A quiet aside after
+ * the word says what else goes on, never in the failure tone. A new `ring`
+ * value rings the chip twice, the one motion that asks for a look.
  */
-export function StatusChip({ label, tone, count = 0, countLabel, ring, panel }: {
+export function StatusChip({ label, tone, aside, asideLabel, count = 0, countLabel, ring, panel }: {
   label: string;
   tone: StatusTone;
+  /** A short readout after the word, such as "2 agents". It draws the chip even while the tone is quiet. */
+  aside?: string | undefined;
+  /** The aside in words, such as "2 background agents". Read with the label. */
+  asideLabel?: string | undefined;
   count?: number;
   /** The count in words, such as "2 problems". Read with the label. */
   countLabel?: string | undefined;
@@ -51,11 +58,12 @@ export function StatusChip({ label, tone, count = 0, countLabel, ring, panel }: 
     const focused = document.activeElement;
     if (!focused || focused === document.body || anchor.current?.contains(focused)) face.current?.focus({ preventScroll: true });
   }, [open, anchor]);
-  const spoken = count > 0 && countLabel ? `${label}, ${countLabel}` : label;
-  const drawn = tone !== "quiet" || hasPanel;
+  const spoken = [label, aside ? asideLabel ?? aside : undefined, count > 0 ? countLabel : undefined].filter(Boolean).join(", ");
+  const drawn = tone !== "quiet" || hasPanel || Boolean(aside);
   const inner = <>
     <span className="status-chip-dot" />
     <span className="status-chip-label">{label}</span>
+    {aside ? <span className="status-chip-aside">{aside}</span> : null}
     {count > 0 && <span className="status-chip-count">{count}</span>}
     {ring ? <span key={ring} className="status-chip-ring" /> : null}
   </>;
@@ -64,7 +72,7 @@ export function StatusChip({ label, tone, count = 0, countLabel, ring, panel }: 
     <span className="status-chip-live" role="status">{spoken}</span>
     {drawn && (hasPanel
       ? <button ref={face} type="button" className="status-chip-face" aria-haspopup="dialog" aria-expanded={open}
-        aria-label={`${spoken}. Show details`} onClick={() => setOpen(!open)}>
+        aria-label={`${spoken}. Show details`} onClick={() => { if (!open) panel?.onOpen?.(); setOpen(!open); }}>
         {inner}<ChevronDownIcon className="status-chip-chevron" aria-hidden size={12} />
       </button>
       : <span className="status-chip-face" aria-hidden="true">{inner}</span>)}
