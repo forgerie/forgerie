@@ -46,7 +46,7 @@ A setting, global or per workflow, under which a workflow's land stop passes wit
 ## Processes
 
 **Managed process**:
-A command that an agent starts in the background from a session. The session owns it. It keeps running when Forgerie restarts, and it ends only when someone stops it, when it exits, or at session close.
+A command that an agent starts in the background from a session. The session owns it. It keeps running when Forgerie restarts, and it ends only when someone stops it, when it exits, or at session close. Its owner never changes: a handoff or a fork leaves it with the session that started it.
 _Avoid_: Background job, background task, service
 
 **Workspace service**:
@@ -55,6 +55,9 @@ _Avoid_: Dev server, process
 
 **Session close**:
 The moment a session is archived or deleted, or its worktree is removed. It ends every managed process the session owns.
+
+**Child process**:
+A managed process that a child agent starts. It ends when the child finishes, unless the child hands it to its parent in its report.
 
 **Missed event**:
 An exit or a watch match of a managed process that happened while Forgerie was down. The session receives it on resume with the attention level the watch asked for.
