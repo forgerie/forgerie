@@ -278,7 +278,6 @@
   "ui/ShellRun.tsx",
   "ui/SkillInvocation.tsx",
   "ui/SlashCommands.tsx",
-  "ui/Thread.tsx",
   "ui/Trace.tsx",
   "ui/WorktreeActions.tsx",
   "ui/WorktreeChip.tsx",
@@ -341,6 +340,10 @@
  ],
  "owned selector with a universal child": [
   "ui/theme.css: *"
+ ],
+ "part reads state": [
+  "ui/Thread.organism.part.tsx: useExternalStoreRuntime",
+  "ui/Thread.organism.part.tsx: useThreadMessages"
  ],
  "raw value in a stylesheet": [
   "ui/backlog/backlog.css: 1.5px",
@@ -451,6 +454,7 @@
   "ui/SessionTreeNavigator.tsx -> ../sessionTreeModel",
   "ui/SkillInvocation.tsx -> ../toolSummary",
   "ui/SlashCommands.tsx -> ../commands",
+  "ui/Thread.organism.part.tsx -> ../useThreadMessages",
   "ui/Trace.tsx -> ../skills",
   "ui/Trace.tsx -> ../toolSummary",
   "ui/WorktreeActions.tsx -> ../worktrees/worktreeModel",
