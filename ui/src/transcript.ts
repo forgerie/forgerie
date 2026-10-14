@@ -1,3 +1,5 @@
+import { RISK_LABEL_ENTRY_KIND, type RiskLabel } from "@shared/riskLabels";
+import { riskLabelEntryOf } from "./riskLabelsModel";
 import type { CompleteAttachment, ThreadMessageLike } from "@assistant-ui/react";
 import { outputOf, partsOf, textOf, type PiMessage, type SessionEvent } from "./contracts";
 import { imageSource } from "./images";
@@ -28,7 +30,7 @@ export type TranscriptPart =
   | { type: "thinking"; text: string }
   /** An image the assistant itself produced. User images are attachments. */
   | { type: "image"; src: string }
-  | { type: "tool"; id: string; name: string; args: unknown; state: ToolState }
+  | { type: "tool"; id: string; name: string; args: unknown; state: ToolState; riskLabel?: RiskLabel }
   /** A `!` command the user ran. It is the only part of a `shell` message. */
   | { type: "shell"; run: ShellRun };
 /** The skill a user message invoked. Its typed argument stays in the message's text. */
@@ -213,7 +215,7 @@ function reconcileTools(message: TranscriptMessage, messages: readonly Transcrip
     if (part.type !== "tool") return [part];
     if (elsewhere.has(part.id)) return [];
     const existing = current.get(part.id);
-    return [existing ? { ...part, state: existing.state } : part];
+    return [existing ? { ...part, state: existing.state, ...(existing.riskLabel ? {riskLabel: existing.riskLabel} : {}) } : part];
   });
   return { ...message, parts };
 }
@@ -284,8 +286,19 @@ function foldOldIssueOutcome(state: Transcript, raw: PiMessage): Transcript | un
     && message.oldIssueProposal.outcome === undefined ? { ...message, oldIssueProposal: { ...message.oldIssueProposal, outcome: decision.outcome } } : message) };
 }
 
+/** Opinions fold into the existing row, never into execution state or an extra model message. */
+function foldRiskLabel(state: Transcript, raw: PiMessage): Transcript | undefined {
+  if (raw.role !== "custom" || raw.customType !== RISK_LABEL_ENTRY_KIND) return undefined;
+  const entry = riskLabelEntryOf(raw);
+  if (entry === undefined) return state;
+  const messages = entry.target === "tool" ? mapTool(state.messages, entry.id, part => ({...part, riskLabel: entry.label}))
+    : state.messages.map(message => message.gatedAction?.id === entry.id
+      ? {...message, gatedAction: {...message.gatedAction, riskLabel: entry.label}} : message);
+  return messages === undefined ? state : {...state, messages};
+}
+
 function applyMessage(state: Transcript, raw: PiMessage, provisional: boolean): Transcript {
-  const folded = foldOldIssueOutcome(state, raw);
+  const folded = foldRiskLabel(state, raw) ?? foldOldIssueOutcome(state, raw);
   if (folded) return folded;
   const proposalId = oldIssueProposalOf(raw)?.proposalId;
   // History and buffered custom-message events can overlap without a shared timestamp.
@@ -319,7 +332,7 @@ export function messageText(message: TranscriptMessage): string {
 export function fromHistory(history: readonly PiMessage[], isRunning = false, start = 0): Transcript {
   let state: Transcript = { messages: [], nextId: 0, isRunning };
   history.forEach((raw, index) => {
-    const folded = foldOldIssueOutcome(state, raw);
+    const folded = foldRiskLabel(state, raw) ?? foldOldIssueOutcome(state, raw);
     if (folded) { state = folded; return; }
     const parsed = raw.role === "toolResult" ? undefined : asMessage(raw, raw.id ?? `history-${start + index}`);
     state = raw.role === "toolResult" ? finishResult(state, raw)
@@ -492,7 +505,7 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
 }
 
 /** UI-only state of a tool call, carried as the part's artifact. */
-export type ToolArtifact = { state: ToolState["type"]; images?: readonly string[]; door?: HandoffDoor; issue?: IssueOutcome };
+export type ToolArtifact = { state: ToolState["type"]; riskLabel?: RiskLabel; images?: readonly string[]; door?: HandoffDoor; issue?: IssueOutcome };
 /** The session a converted tool call created, read back from its artifact. */
 export function artifactDoor(artifact: unknown): HandoffDoor | undefined {
   if (typeof artifact !== "object" || artifact === null || !("door" in artifact)) return undefined;
@@ -591,7 +604,7 @@ function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
         case "tool": return [{
           type: "tool-call", toolCallId: part.id, toolName: part.name,
           args: isArgs(part.args) ? part.args : {},
-          artifact: toolArtifact(part.state),
+          artifact: { ...toolArtifact(part.state), ...(part.riskLabel ? {riskLabel: part.riskLabel} : {}) },
           ...toolResult(part.state),
           ...parent,
         }];

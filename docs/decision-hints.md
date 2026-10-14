@@ -59,6 +59,50 @@ The plugin form has no secret field. The existing status endpoint
 `components.sessiond.decisionHints.keyPresent`. This reports presence, not whether
 the gateway accepts the key. The interface stage can display this status.
 
+## Risk labels
+
+With the master switch and `risk_labels` on and an address configured, Forgerie
+starts one background ask after each new gate admission and for each SDK or
+native child `bash` invocation. A replayed gate does not send another ask.
+Approval can cause a second ask when the saved bash call actually executes.
+The gateway receives the tool name, JSON arguments limited to 8000 characters,
+and execution cwd. Gate asks also include category and description (limited to
+4000 characters). Arguments are not secret-redacted. Do not enable this feature
+for commands whose arguments must not leave the machine.
+
+The questions ask whether the call deletes or overwrites data, acts outside its
+cwd, or acts under the user's name outside this machine. These three `noul`
+answers are numbers from 0 to 1. The risk score runs from 0 to 2 for `low`,
+`check`, and `danger`; the nearest score selects the label. The original score
+and the answering model are retained. A low label is not "safe to approve".
+Sensitivity does not alter risk labels.
+
+Gate responses add optional `riskLabel` to the gate record. The shape is
+`{model, deletes_data, outside_worktree, acts_as_user, risk, risk_score}`.
+A separate journal transaction updates only this field, even if approval,
+refusal, or execution has finished. It also appends a display-only
+`forgerie.risk-label` entry `{target:"gate", id, label}`. Label-only commits
+refresh the gate read without recounting Needs your response.
+
+Bash responses append the same display-only entry with `target:"tool"` and the
+tool call ID. The existing message stream delivers it live. The transcript
+folds it into that call's `riskLabel`, carried in the UI tool-call artifact.
+Native child transcripts project and poll the same durable entries. Entries
+and gate labels survive restart; ordinary bash cards recover their label on
+reload. Nested SDK bash labels are live when their nested call row exists;
+those nested call rows are not themselves persisted by the SDK adapter, so a
+reload can retain the annotation without showing a nested row.
+
+The initial UI adds only `data-risk-label` JSON attributes on existing gate,
+bash, and child call markup. Visual labels remain a later design stage. No
+new row, scroll, choice, or approval recommendation is added.
+
+No call awaits a gateway response. A disabled feature, empty address, invalid
+answer, timeout, or gateway failure adds nothing. Turning either switch off
+before an answer arrives discards that late answer. Already stored annotations
+remain history. Storage errors are reported through the session's extension
+error channel; they never alter gate state or tool results.
+
 ## Maintainer contract
 
 Inject `DecisionHints` through `PiSessionServiceDependencies.decisionHints`.

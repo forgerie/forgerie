@@ -26,7 +26,7 @@ export function exchangeLines(name: string, transcript: ChildTranscript): Exchan
       return;
     }
     if (line.kind === "result" && line.name === QUESTION_TOOL) return;
-    if (line.kind === "tool") { out.push({ kind: "call", key: line.key, name: line.name, summary: line.summary }); return; }
+    if (line.kind === "tool") { out.push({ kind: "call", key: line.key, name: line.name, summary: line.summary, ...(line.riskLabel === undefined ? {} : {riskLabel: line.riskLabel}) }); return; }
     out.push({ kind: "output", key: line.key, name: line.name, text: line.text, isError: line.isError });
   });
   return out;

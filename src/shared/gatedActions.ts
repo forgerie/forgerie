@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import { RiskLabelSchema } from "./riskLabels.js";
 import { GatedCategorySchema } from "./autonomyPolicy.js";
 
 export const GatedActionStateSchema = Type.Union([
@@ -11,6 +12,7 @@ export const GatedActionStateSchema = Type.Union([
 export const GatedActionSchema = Type.Object({
   id: Type.String(), conversationId: Type.Integer({ minimum: 1 }), by: Type.String(), tool: Type.String(),
   args: Type.Record(Type.String(), Type.Unknown()), category: GatedCategorySchema, description: Type.String(),
+  riskLabel: Type.Optional(RiskLabelSchema),
   requestedAt: Type.Number(), state: GatedActionStateSchema,
 }, { additionalProperties: false });
 export type GatedAction = Omit<Static<typeof GatedActionSchema>, "state"> & {state: GatedActionState};
@@ -19,6 +21,6 @@ export const GatedActionRequestSchema = Type.Object({ cwd: Type.String({ minLeng
 export const GATED_ACTION_ENTRY_KIND = "forgerie.gated-action";
 export const GatedActionEntrySchema = Type.Object({
   id: Type.String(), by: Type.String(), tool: Type.String(), category: GatedCategorySchema,
-  description: Type.String(), command: Type.String(),
+  description: Type.String(), command: Type.String(), riskLabel: Type.Optional(RiskLabelSchema),
 }, { additionalProperties: false });
 export type GatedActionEntry = Static<typeof GatedActionEntrySchema>;

@@ -32,6 +32,8 @@ export function GatedActionCard({ entry, record, read, deciding, problem, onAppr
   onApprove?: (() => void) | undefined;
   onRefuse?: (() => void) | undefined;
 }) {
+  const riskLabel = record?.riskLabel ?? entry.riskLabel;
+  const meta = <span data-risk-label={riskLabel === undefined ? undefined : JSON.stringify(riskLabel)}>{gatedMeta(entry)}</span>;
   const waiting = gatedIsWaiting(record, read);
   const open = waiting && onApprove !== undefined && onRefuse !== undefined;
   const call = shownCall(entry, record);
@@ -44,7 +46,7 @@ export function GatedActionCard({ entry, record, read, deciding, problem, onAppr
   const output = printed.trim() !== "" ? <CommandBlock code={printed} label="Result" copyLabel="Copy result" lines={3} moreLabel="Show full result" />
     : unknown !== undefined && unknown.rest !== "" ? <p>{unknown.rest}</p>
     : saysMore(error) ? <CommandBlock code={error} label="Error" copyLabel="Copy error" lines={3} moreLabel="Show full error" /> : undefined;
-  return <DecisionCard title={entry.description.trim() === "" ? entry.tool : entry.description} meta={gatedMeta(entry)}
+  return <DecisionCard title={entry.description.trim() === "" ? entry.tool : entry.description} meta={meta}
     open={open} pinChoices problem={problem}
     closed={waiting ? "Waiting for a decision." : gatedOutcome(record)} closedTone={state?.kind === "failed" ? "bad" : undefined} closedDetail={output}
     footer={open && <ActionFooter note={deciding === "approve" ? "Approving…" : deciding === "refuse" ? "Refusing…" : undefined} actions={[

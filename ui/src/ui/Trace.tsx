@@ -1,3 +1,4 @@
+import type { RiskLabel } from "@shared/riskLabels";
 // Trace grammar adapted from assistant-ui's homepage demo (trace.tsx,
 // trace-line.tsx). See THIRD_PARTY_NOTICES.md. Native <details> replaces the
 // site's Collapsible so disclosures need no extra dependency.
@@ -32,12 +33,12 @@ export function WorkingLine() {
 }
 
 /** A trace entry that opens. The body renders only while open. */
-function Disclosure({ live, label, detail, tone, className, children }: {
+function Disclosure({ live, label, detail, tone, className, children, riskLabel }: {
   live: boolean; label: string; detail?: string; tone?: "error";
-  className?: string; children: (open: boolean) => ReactNode;
+  riskLabel?: RiskLabel; className?: string; children: (open: boolean) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  return <details className={`trace${className ? ` ${className}` : ""}`} data-tone={tone}
+  return <details className={`trace${className ? ` ${className}` : ""}`} data-tone={tone} data-risk-label={riskLabel === undefined ? undefined : JSON.stringify(riskLabel)}
     onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary className="trace-line">
       <span className="trace-marker" aria-hidden>{">"}</span>
@@ -69,7 +70,7 @@ export function ToolCall({ toolCallId, toolName, args, result, isError, artifact
   const view = toolView({ artifact, result, isError });
   const summary = summarizeToolArgs(args);
   return <Disclosure live={isLive(view)} label={toolLabels[view]} detail={summary ? `${toolName} ${summary}` : toolName}
-    className="tool-call" {...(view === "failed" ? { tone: "error" as const } : {})}>
+    className="tool-call" {...(isToolArtifact(artifact) && artifact.riskLabel ? {riskLabel: artifact.riskLabel} : {})} {...(view === "failed" ? { tone: "error" as const } : {})}>
     {(open) => open ? <ToolBody view={view} input={formatToolArgs(args)} output={outputText(result)}>
       <ToolImages toolCallId={toolCallId} />
     </ToolBody> : null}

@@ -1,3 +1,5 @@
+import { RISK_LABEL_ENTRY_KIND, RiskLabelEntrySchema, type RiskLabelEntry } from "../../shared/riskLabels.js";
+import { launchRiskLabel } from "../decisions/riskLabels.js";
 /**
  * Durable-native child agents inside a Forgerie session.
  *
@@ -9,9 +11,9 @@
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Context } from "@earendil-works/chord";
-import { Type, type AssistantMessage } from "@earendil-works/pi-ai";
+import { Type, type AssistantMessage, type Message } from "@earendil-works/pi-ai";
 import {
-  AgentDoc, AssistantEntry, CompactionTask, GenerationTask, LiveDoc, configure, defineDoc, defineExtension, defineTask, defineTool, hook, section,
+  AgentDoc, AssistantEntry, CompactionTask, GenerationTask, LiveDoc, configure, defineDoc, defineExtension, defineTask, defineTool, hook, section, wrapTool,
   type Conversation, type ConversationId, type EntryId, type Extension, type Harness, type TaskGraph, type TaskId,
   type ToolRegistration, type Tx,
 } from "@earendil-works/pi-durable";
@@ -19,7 +21,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Check } from "typebox/value";
 import { parseModelReference, type ThinkingLevel } from "../../shared/thinkingLevels.js";
 import { ChildRetrySchema, type ChildRetry } from "../../shared/childRetry.js";
-import type { DurableSdkTools } from "./durableSdkTools.js";
+import type { DurableSdkTools, DurableSdkToolsOptions } from "./durableSdkTools.js";
 import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
 import type { DurableChildSummary } from "../../shared/childAgents.js";
 import type { WorktreeActionResult, WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
@@ -312,6 +314,7 @@ const askHumanTool = defineTool({
 
 const codingTools: readonly ToolRegistration[] = CodingTools.tools ?? [];
 const readTool = codingTools.find((tool) => tool.name === "read");
+const bashTool = codingTools.find(tool => tool.name === "bash");
 
 /** The tools a child gets: every child tool, or the ones its agent file names as `planChildRuntime` translates them. */
 function childToolsFor(plan: ChildRuntimePlan, extra: readonly ToolRegistration[], shared: readonly ToolRegistration[]): ToolRegistration[] {
@@ -341,6 +344,7 @@ export interface DurableChildExtensionOptions {
   extraTools?: readonly ToolRegistration[];
   /** A getter because reload replaces the parent's tool registry. */
   sessionTools?: () => DurableSdkTools;
+  riskLabels?: DurableSdkToolsOptions["riskLabels"];
   childToolsDeny?: readonly string[];
   worktrees?: DurableChildWorktrees;
   flushRunRecords?: () => Promise<void>;
@@ -402,7 +406,20 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       hook(CompactionTask, { beforeCompact: async (_request, api, ctx) => { await (await resolve(api.conversationId, ctx)).flushRunRecords?.(); return undefined; } }),
     ],
     tools: [askHumanTool, ...codingTools, watchdogDiffTool, ...extraTools, ...sharedTools],
-    ...(readTool === undefined ? {} : { wraps: [readsImages(readTool)] }),
+    wraps: [...(readTool === undefined ? [] : [readsImages(readTool)]),
+      ...(bashTool === undefined || options.riskLabels === undefined ? [] : [wrapTool(bashTool, tool => ({...tool,
+        execute: (args, api, context) => {
+          // Owner resolution and the ask are detached too. Preserve the native tool's result,
+          // errors, abort signal and replay declaration without inserting an awaited hook.
+          void Promise.resolve().then(async () => {
+            const labels = (await resolve(api.conversationId, context)).riskLabels;
+            if (labels === undefined) return;
+            launchRiskLabel(labels.hints, {tool: "bash", args, cwd: api.env?.cwd ?? "."},
+              label => labels.record(api.conversationId, api.callId, label), labels.onError);
+          }).catch((error: unknown) => { options.riskLabels?.onError(error); });
+          return tool.execute(args, api, context);
+        },
+      }))])],
     sections: [section("environment", (input) => input.env === undefined ? undefined : `Working directory: ${input.env.cwd}`)],
   });
   const agentList = (options.agents ?? []).map((agent) => `- ${agent.name}: ${agent.description}`).join("\n");
@@ -645,7 +662,10 @@ export async function childMessages(harness: Harness, parent: ConversationId, co
   const live = await harness.snapshot(LiveDoc, child.id, context);
   const partial = live?.generation?.message;
   return {
-    messages: view.entries.flatMap((entry) => entry.model ?? []).filter((message) => message.role !== "system"),
+    messages: view.entries.flatMap<Message | {role: "custom"; customType: string; content: string; details: RiskLabelEntry}>(entry =>
+      entry.kind === RISK_LABEL_ENTRY_KIND && Check(RiskLabelEntrySchema, entry.data)
+        ? [{role: "custom", customType: RISK_LABEL_ENTRY_KIND, content: "Risk opinion (not approval)", details: entry.data}]
+        : entry.model ?? []).filter(message => message.role !== "system"),
     busy: live?.run !== undefined,
     ...(partial === undefined ? {} : { partial }),
   };

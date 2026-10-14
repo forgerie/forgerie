@@ -1,10 +1,13 @@
 import { readTaskActivity, watchTaskActivity } from "./durableTaskActivity.js";
+import { durableJson } from "./durableJson.js";
+import { RISK_LABEL_ENTRY_KIND, type RiskLabel } from "../../shared/riskLabels.js";
+import type { DecisionHints } from "../decisions/decisionHints.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { acceptProcessEvents, processEventsExtension } from "./durableProcessEvents.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
-import { gatedActionsExtension, gateToolCall, type GatedActionsExtensionOptions, gatedActions, decideGatedAction, waitingGatedActions, gatedActionsChanged } from "./durableGatedActions.js";
+import { gatedActionsExtension, gateToolCall, type GatedActionsExtensionOptions, gatedActions, decideGatedAction, waitingGatedActions, gatedActionsChanged, gateRiskLabelsChanged } from "./durableGatedActions.js";
 import type { GatedActionReads } from "./gatedActions.js";
 import type { AutonomyPolicySource } from "../../shared/autonomyPolicy.js";
 import { readFile } from "node:fs/promises";
@@ -48,6 +51,7 @@ export interface DurableAgentSessionOptions {
   processTools?: ManagedProcessTools;
   gatedIssueLabels?: GatedActionReads["issueLabels"];
   autonomyPolicy?: AutonomyPolicySource;
+  decisionHints?: DecisionHints;
   handle?: DurableSessionHandle;
   services: AgentSessionServices;
   sessionManager: SessionManager;
@@ -177,6 +181,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       return { ...caller, child };
     })]];
     this.tools = new DurableSdkTools({ cwd: services.cwd, settings: this.settingsManager, runner: this.extensionRunner, customTools: this.customTools,
+      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error); },
+        record: (conversation: ConversationId, id: string, label: RiskLabel) => this.recordToolRiskLabel(conversation, id, label)}}),
       beforeCall: () => this.journal.project(), gateNested: (call, api, index, ctx) => {
         if (this.gateOptions === undefined) throw new Error("Nested gated actions are not bound");
         return gateToolCall(this.gateOptions, call, api, ctx, {index, cwd: this.options.services.cwd, extension: `forgerie.sdk-tools:${this.sessionId}:nested`});
@@ -449,11 +455,20 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     return extensions;
   }
 
+  private async recordToolRiskLabel(conversation: ConversationId, id: string, label: RiskLabel): Promise<void> {
+    // A gateway can answer after the source task ended. Use the session journal, not the task's expired execution API.
+    await this.journal.harness.commit(async tx => {
+      if (await tx.conversation(conversation) === undefined) return;
+      await tx.appendEntry(conversation, {kind: RISK_LABEL_ENTRY_KIND, data: durableJson({target: "tool", id, label})});
+    }, context);
+  }
+
   private async startGatedActions(): Promise<void> {
     this.gateUnsubscribe?.();
     const parent = this.journal.conversation.id;
     this.gateOptions = {name: `forgerie.gated-actions:${String(parent)}`, parent,
       harness: () => this.journal.harness,
+      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error); }}}),
       ...(this.options.autonomyPolicy === undefined ? {} : {policy: this.options.autonomyPolicy}),
       reads: {git: async (cwd, args) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8", maxBuffer: 4 * 1024 * 1024})).stdout,
         issueLabels: this.options.gatedIssueLabels ?? (() => Promise.reject(new Error("GitHub labels unavailable")))},
@@ -472,6 +487,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     await recount();
     let pending = Promise.resolve();
     this.gateUnsubscribe = this.journal.harness.subscribeCommits(publication => {
+      if (gateRiskLabelsChanged(publication, parent)) { this.emit({type: "workflow_runs_changed"}); return; }
       if (!gatedActionsChanged(publication, parent) && !decisionsChanged(publication, parent)) return;
       this.emit({type: "workflow_runs_changed"});
       pending = pending.then(recount).catch((error: unknown) => { this.report(error); });
@@ -503,6 +519,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       .map((skill) => ({ name: skill.name, description: skill.description, path: skill.filePath }));
     const source = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext, sessionSkills, sessionTools: () => this.tools,
       commit: (change, ctx) => this.journal.harness.commit(change, ctx),
+      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error); },
+        record: (conversation: ConversationId, id: string, label: RiskLabel) => this.recordToolRiskLabel(conversation, id, label)}}),
       ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
       ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
     const workflow = workflowExtension({ library: new WorkflowLibrary(this.options.services.agentDir), cwd: this.options.services.cwd });
@@ -923,6 +941,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (this.errorListener !== undefined) runner.onError(this.errorListener);
     this.runner = runner;
     this.tools = new DurableSdkTools({ cwd: this.options.services.cwd, settings: this.settingsManager, runner, customTools: this.customTools,
+      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error); },
+        record: (conversation: ConversationId, id: string, label: RiskLabel) => this.recordToolRiskLabel(conversation, id, label)}}),
       beforeCall: () => this.journal.project(), gateNested: (call, api, index, ctx) => {
         if (this.gateOptions === undefined) throw new Error("Nested gated actions are not bound");
         return gateToolCall(this.gateOptions, call, api, ctx, {index, cwd: this.options.services.cwd, extension: `forgerie.sdk-tools:${this.sessionId}:nested`});

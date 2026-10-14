@@ -1,3 +1,8 @@
+import { RISK_LABEL_ENTRY_KIND } from "../../shared/riskLabels.js";
+import type { RiskLabelOptions } from "../decisions/riskLabels.js";
+import { readDecisionHintsSettings } from "../decisions/decisionHintsSettings.js";
+import type { DecisionAnswers } from "../decisions/decisionClient.js";
+import { assertDecisionHintOffEquivalence } from "../decisions/decisionHintsOffEquivalence.testSupport.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
@@ -18,14 +23,14 @@ import { defaultAutonomyPolicy } from "../../shared/autonomyPolicy.js";
 import { durableChildExtensions, listChildren } from "./durableChildAgents.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { decisions, decisionExtension } from "./durableDecisions.js";
-import { gatedActions, gatedActionsExtension, decideGatedAction, waitingGatedActions, GATED_ACTIONS_DOC_KIND } from "./durableGatedActions.js";
+import { gatedActions, gatedActionsExtension, decideGatedAction, waitingGatedActions, GATED_ACTIONS_DOC_KIND, gatedActionsChanged, gateRiskLabelsChanged } from "./durableGatedActions.js";
 
 const roots: string[] = []; const journals: DurableSessionJournal[] = [];
 afterEach(async () => { for (const journal of journals) await journal.close(); for (const root of roots) await rm(root, {recursive: true, force: true}); journals.length = 0; roots.length = 0; });
-async function fixture() {
+async function fixture(riskLabels?: RiskLabelOptions) {
   const root = await mkdtemp(join(tmpdir(), "forgerie-gates-")); roots.push(root);
   const manager = SessionManager.create(root, join(root, "sessions"));
-  const state = {runs: 0, delay: false, fail: false, childHold: false, childEntered: false, paid: false, gated: true};
+  const state = {runs: 0, hold: false, delay: false, fail: false, childHold: false, childEntered: false, paid: false, gated: true};
   const models = createModels(); const provider = fauxProvider({tokensPerSecond: 100000}); models.setProvider(provider.provider);
   provider.setResponses(Array.from({length: 100}, () => request => {
     const last = request.messages.at(-1);
@@ -35,6 +40,7 @@ async function fixture() {
   const registry = createRegistry();
   const tool = defineTool({name: "mcp_ebay_seller_update", description: "Update", parameters: Type.Object({value: Type.String()}), replay: "unsafe", execute: async (args, _api, ctx) => {
     state.runs++; await writeFile(join(root, "effect"), args.value);
+    while (state.hold) await sleep(5, undefined, {signal: ctx.abortSignal});
     if (state.delay) await sleep(60000, undefined, {signal: ctx.abortSignal});
     if (state.fail) throw new Error("Configured failure");
     return {content: [{type: "text" as const, text: "EXACT RESULT " + args.value}], ...(state.paid ? {usage: {input: 1, output: 2, totalTokens: 3, cacheRead: 0, cacheWrite: 0, cost: {input: 1, output: 2, cacheRead: 0, cacheWrite: 0, total: 3}}} : {})};
@@ -48,7 +54,7 @@ async function fixture() {
   for (const extension of [...children.parent, ...children.childOnly, tools, decision]) registry.install(extension);
   const options = {manager, models, registry, env: ({cwd}: {cwd?: string}) => new NodeExecutionEnv({cwd: cwd ?? root}), agent: {cwd: root, model: {provider: "faux", modelId: "faux-1"}, extensions: [...children.parent, tools, decision]}};
   let journal = await DurableSessionJournal.open(options); journals.push(journal);
-  const gate = gatedActionsExtension({parent: journal.conversation.id, harness: () => journal.harness, policy: {read: () => Promise.resolve({...structuredClone(defaultAutonomyPolicy), gated: {...defaultAutonomyPolicy.gated, messages: state.gated}})}, reads: {git: () => Promise.resolve(""), issueLabels: () => Promise.resolve([])}});
+  const gate = gatedActionsExtension({...(riskLabels === undefined ? {} : {riskLabels}), parent: journal.conversation.id, harness: () => journal.harness, policy: {read: () => Promise.resolve({...structuredClone(defaultAutonomyPolicy), gated: {...defaultAutonomyPolicy.gated, messages: state.gated}})}, reads: {git: () => Promise.resolve(""), issueLabels: () => Promise.resolve([])}});
   registry.install(gate); await journal.conversation.configure({extensions: {add: [gate]}}, context);
   const reopen = async () => { await journal.close(); journal = await DurableSessionJournal.open(options); journals.push(journal); return journal; };
   return {root, state, get journal() {return journal;}, reopen};
@@ -216,4 +222,96 @@ it("redacts obvious secrets only in the card preview, preserving exact saved arg
   await decideGatedAction(f.journal.harness, f.journal.conversation, gate.id, "approved", context);
   await vi.waitFor(async () => { expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.state.kind).toBe("ran"); });
   expect(await readFile(join(f.root, "effect"), "utf8")).toBe(value);
+});
+
+const labelSettings = { ...readDecisionHintsSettings({}), enabled: true, baseUrl: "http://gateway.invalid" };
+const labelAnswers: DecisionAnswers = { model: "risk-model", answers: {
+  deletes_data: {type: "noul", noul: 0.9}, outside_worktree: {type: "noul", noul: 0.8}, acts_as_user: {type: "noul", noul: 1},
+  risk: {type: "score", score: 2, probabilities: {"0": 0, "1": 0, "2": 1}, confidence: 1},
+} };
+it.each(["approved", "refused"] as const)("a late label cannot change %s, its decision, execution or response count", async choice => {
+  let answer: ((value: DecisionAnswers) => void) | undefined;
+  const errors: unknown[] = []; let asks = 0;
+  const f = await fixture({hints: {client: {ask: () => { asks++; return new Promise(resolve => {answer = resolve;}); }}, readSettings: () => labelSettings}, onError: error => {errors.push(error);} });
+  const id = await blocked(f);
+  const changed: boolean[] = []; const labels: boolean[] = [];
+  const unsubscribe = f.journal.harness.subscribeCommits(publication => {
+    if (!publication.changes.some(change => change.type === "entry" && change.value.kind === RISK_LABEL_ENTRY_KIND)) return;
+    changed.push(gatedActionsChanged(publication, f.journal.conversation.id));
+    labels.push(gateRiskLabelsChanged(publication, f.journal.conversation.id));
+  });
+  try {
+    await decideGatedAction(f.journal.harness, f.journal.conversation, id, choice, context);
+    await vi.waitFor(async () => { expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.state.kind).toBe(choice === "approved" ? "ran" : "refused"); });
+    const before = (await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0];
+    const beforeDecisions = await decisions(f.journal.harness, f.journal.conversation.id, context);
+    expect(answer).toBeDefined(); answer?.(labelAnswers);
+    await vi.waitFor(async () => { expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.riskLabel?.model).toBe("risk-model"); });
+    const after = (await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0];
+    const {riskLabel, ...unchanged} = after ?? {};
+    expect(unchanged).toStrictEqual(before); expect(riskLabel?.risk).toBe("danger");
+    expect(await decisions(f.journal.harness, f.journal.conversation.id, context)).toStrictEqual(beforeDecisions);
+    expect(await waitingGatedActions(f.journal.harness, f.journal.conversation.id, context)).toBe(0);
+    expect(f.state.runs).toBe(choice === "approved" ? 1 : 0); expect(asks).toBe(1);
+    expect(changed).toEqual([false]); expect(labels).toEqual([true]); expect(errors).toEqual([]);
+    await f.reopen();
+    expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.riskLabel).toEqual(riskLabel);
+  } finally {unsubscribe();}
+});
+
+it.each(["approved", "refused"] as const)("gate %s has off-equivalence, including an unreachable and hanging gateway", async choice => {
+  await assertDecisionHintOffEquivalence(async ({client, settings}) => {
+    const f = await fixture(client === undefined ? undefined : {hints: {client, readSettings: () => settings}, onError: error => {throw error;} });
+    const phases: string[] = [];
+    const unsubscribe = f.journal.harness.subscribeCommits(publication => {
+      for (const change of publication.changes) {
+        if (change.type !== "task" || change.value.kind !== "forgerie.gated-action-run") continue;
+        phases.push(JSON.stringify(change.value.state));
+      }
+    });
+    const id = await blocked(f);
+    const waiting = await waitingGatedActions(f.journal.harness, f.journal.conversation.id, context);
+    const admitted = await decideGatedAction(f.journal.harness, f.journal.conversation, id, choice, context);
+    await vi.waitFor(async () => { expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.state.kind).toBe(choice === "approved" ? "ran" : "refused"); });
+    return {dispose: unsubscribe, observe: async () => ({waiting, admitted: admitted.state.kind, runs: f.state.runs, phases,
+      state: (await gatedActions(f.journal.harness, f.journal.conversation.id, context)).map(gate => ({tool: gate.tool, args: gate.args, category: gate.category, state: gate.state.kind, label: gate.riskLabel})),
+      decisions: (await decisions(f.journal.harness, f.journal.conversation.id, context)).map(decision => ({kind: decision.kind, by: decision.by, choice: decision.choice})),
+      waitingAfter: await waitingGatedActions(f.journal.harness, f.journal.conversation.id, context),
+    })};
+  }, {timeoutMs: 3000});
+});
+
+it.each(["approved", "refused"] as const)("an early label is information only when the user chooses %s", async choice => {
+  const f = await fixture({hints: {client: {ask: () => Promise.resolve(labelAnswers)}, readSettings: () => labelSettings}, onError: error => {throw error;} });
+  const id = await blocked(f);
+  await vi.waitFor(async () => { expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.riskLabel?.risk).toBe("danger"); });
+  expect(await waitingGatedActions(f.journal.harness, f.journal.conversation.id, context)).toBe(1);
+  expect(await decisions(f.journal.harness, f.journal.conversation.id, context)).toEqual([]); expect(f.state.runs).toBe(0);
+  await decideGatedAction(f.journal.harness, f.journal.conversation, id, choice, context);
+  await vi.waitFor(async () => { expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.state.kind).toBe(choice === "approved" ? "ran" : "refused"); });
+  expect(f.state.runs).toBe(choice === "approved" ? 1 : 0);
+});
+
+it("a label between execution intent and result cannot change the approved run or repeat its effect", async () => {
+  let answer: ((value: DecisionAnswers) => void) | undefined;
+  const f = await fixture({hints: {client: {ask: () => new Promise(resolve => {answer = resolve;})}, readSettings: () => labelSettings}, onError: error => {throw error;} });
+  f.state.hold = true;
+  const id = await blocked(f);
+  let intent = false;
+  const unsubscribe = f.journal.harness.subscribeCommits(publication => {
+    for (const change of publication.changes) {
+      if (change.type === "task" && change.value.kind === "forgerie.gated-action-run" && change.value.state.status === "running"
+        && JSON.stringify(change.value.state.checkpoint) === '{"phase":"unknown"}') intent = true;
+    }
+  });
+  try {
+    await decideGatedAction(f.journal.harness, f.journal.conversation, id, "approved", context);
+    await vi.waitFor(() => {expect(f.state.runs).toBe(1);}); expect(intent).toBe(true);
+    answer?.(labelAnswers);
+    await vi.waitFor(async () => {expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]).toMatchObject({state: {kind: "approved"}, riskLabel: {risk: "danger"}});});
+    expect(await decisions(f.journal.harness, f.journal.conversation.id, context)).toMatchObject([{kind: "gated", by: "user", choice: "approved"}]);
+    f.state.hold = false;
+    await vi.waitFor(async () => {expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.state.kind).toBe("ran");});
+    expect(f.state.runs).toBe(1); expect(await readFile(join(f.root, "effect"), "utf8")).toBe("original");
+  } finally {f.state.hold = false; unsubscribe();}
 });

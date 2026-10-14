@@ -1,3 +1,5 @@
+import type { RiskLabel } from "@shared/riskLabels";
+import { riskLabelEntryOf } from "../riskLabelsModel";
 // Child agents a session runs in its own Durable storage. The server side is
 // src/server/sessions/durableChildAgents.ts; the routes are durableChildRoutes.ts.
 import { z } from "zod";
@@ -102,7 +104,7 @@ export function reportOf(text: string): ChildEntry | undefined {
 /** One line of a child's transcript for the child view. */
 export type ChildLine =
   | { kind: "said"; who: "message" | "child"; text: string; key: string; streaming?: boolean }
-  | { kind: "tool"; name: string; summary: string; key: string }
+  | { kind: "tool"; name: string; summary: string; key: string; riskLabel?: RiskLabel }
   | { kind: "result"; name: string; text: string; isError: boolean; key: string };
 
 function summarize(args: unknown): string {
@@ -115,6 +117,10 @@ function summarize(args: unknown): string {
 /** Model messages, oldest first, as lines a person can read. */
 export function childLines(transcript: ChildTranscript): ChildLine[] {
   const lines: ChildLine[] = [];
+  const labels = new Map(transcript.messages.flatMap(message => {
+    const entry = riskLabelEntryOf(message);
+    return entry?.target === "tool" ? [[entry.id, entry.label] as const] : [];
+  }));
   const add = (message: PiMessage, index: number, streaming = false) => {
     const key = `${String(index)}`;
     if (message.role === "user") { lines.push({ kind: "said", who: "message", text: textOf(message), key }); return; }
@@ -125,7 +131,11 @@ export function childLines(transcript: ChildTranscript): ChildLine[] {
     if (message.role !== "assistant") return;
     partsOf(message).forEach((part, partIndex) => {
       if (part.type === "text" && part.text.trim() !== "") lines.push({ kind: "said", who: "child", text: part.text, key: `${key}.${String(partIndex)}`, ...(streaming ? { streaming } : {}) });
-      if (part.type === "toolCall") lines.push({ kind: "tool", name: part.name, summary: summarize(part.arguments), key: `${key}.${String(partIndex)}` });
+      if (part.type === "toolCall") {
+        const riskLabel = labels.get(part.id);
+        lines.push({ kind: "tool", name: part.name, summary: summarize(part.arguments), key: `${key}.${String(partIndex)}`,
+          ...(riskLabel === undefined ? {} : {riskLabel}) });
+      }
     });
   };
   transcript.messages.forEach((message, index) => add(message, index));

@@ -1,3 +1,4 @@
+import { riskLabelSchema } from "../riskLabelsModel";
 // Gated actions: tool calls Forgerie holds until the reader approves them (docs/adr/0003).
 // The server side is the Durable `beforeTool` hook and the doc `forgerie.gated-actions` per conversation; the routes are
 // GET /api/sessions/:id/gated-actions?cwd= and POST …/gated-actions/:gid/approve|refuse { cwd }.
@@ -48,6 +49,7 @@ export const gatedActionSchema = z.strictObject({
   description: z.string(),
   requestedAt: z.number(),
   state: gatedActionStateSchema,
+  riskLabel: riskLabelSchema.optional(),
 });
 export const gatedActionsSchema = z.array(gatedActionSchema);
 /** Spelled as the server spells it, so the two types compare equal. */
@@ -62,6 +64,7 @@ export const gatedActionEntrySchema = z.strictObject({
   description: z.string(),
   /** The shell command, or the tool and its arguments as JSON; at most 4000 characters. The record's `args` are whole. */
   command: z.string(),
+  riskLabel: riskLabelSchema.optional(),
 });
 export type GatedActionEntry = z.infer<typeof gatedActionEntrySchema>;
 /**

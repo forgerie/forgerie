@@ -878,6 +878,7 @@ function createDefaultRuntimeFactory(
   triggers?: () => TriggerService,
   azurePr?: AzurePrToolDeps,
   processTools?: (ref: PiSessionRef, sessionDir: string) => Promise<ManagedProcessTools | undefined>,
+  decisionHints?: DecisionHints,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
@@ -921,6 +922,7 @@ function createDefaultRuntimeFactory(
     if (azurePr !== undefined) customTools.push(...await createAzurePrTools(cwd, azurePr));
     const managedTools = await processTools?.({ id: sessionManager.getSessionId(), cwd }, sessionManager.getSessionDir());
     const session = await DurableAgentSession.open({
+      ...(decisionHints === undefined ? {} : {decisionHints}),
       ...(managedTools === undefined ? {} : { processTools: managedTools }),
       ...(handle === undefined ? {} : { handle }),
       ...(beforeResume === undefined ? {} : { beforeResume }),
@@ -1267,6 +1269,7 @@ export class PiSessionService implements SessionRouteService {
         if (this.managedProcesses === undefined) throw new Error("Managed processes are not configured");
         return this.managedProcesses.tools(ref.id, { cwd: ref.cwd, stateFile: join(sessionDir, `${ref.id}.process-watches.json`) });
       },
+      deps.decisionHints,
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;

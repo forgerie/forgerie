@@ -1,3 +1,4 @@
+import type { RiskLabel } from "@shared/riskLabels";
 import { useEffect, useRef, type ReactNode } from "react";
 import { MarkdownFragment } from "./MarkdownFragment";
 import { RailSection } from "./RailSection";
@@ -9,7 +10,7 @@ export type ExchangeLine =
   /** Words from the worker, drawn as prose. */
   | { kind: "out"; key: string; text: string; streaming?: boolean | undefined }
   /** An action the worker took, in one line. */
-  | { kind: "call"; key: string; name: string; summary: string }
+  | { kind: "call"; key: string; name: string; summary: string; riskLabel?: RiskLabel }
   /** What an action returned, folded by default. */
   | { kind: "output"; key: string; name: string; text: string; isError: boolean }
   /** Something the owner draws in the flow, such as a card. */
@@ -30,7 +31,7 @@ function blocks(lines: readonly ExchangeLine[]): Block[] {
 }
 
 function work(line: ExchangeLine): ReactNode {
-  if (line.kind === "call") return <div key={line.key} className="exchange-log-call">
+  if (line.kind === "call") return <div key={line.key} className="exchange-log-call" data-risk-label={line.riskLabel === undefined ? undefined : JSON.stringify(line.riskLabel)}>
     <span className="exchange-log-name">{line.name}</span>
     <span className="exchange-log-summary">{line.summary}</span>
   </div>;

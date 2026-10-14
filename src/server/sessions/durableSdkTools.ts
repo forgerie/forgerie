@@ -1,3 +1,5 @@
+import type { RiskLabel } from "../../shared/riskLabels.js";
+import { launchRiskLabel, type RiskLabelOptions } from "../decisions/riskLabels.js";
 import type { Context } from "@earendil-works/chord";
 import { randomUUID } from "node:crypto";
 import type { AgentTool, AgentToolCallOutcome, AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -18,6 +20,7 @@ function shareWithChild(tool: ToolDefinition, deny: readonly string[]): boolean 
 
 export interface DurableSdkToolsOptions {
   cwd: string;
+  riskLabels?: RiskLabelOptions & { record(conversationId: ConversationId, callId: string, label: RiskLabel): Promise<void> };
   settings: SettingsManager;
   runner: ExtensionRunner;
   customTools: readonly ToolDefinition[];
@@ -222,6 +225,10 @@ export class DurableSdkTools {
     }
     await this.options.beforeCall();
     const eventBase = { toolCallId: callId, toolName: name, args, input, ...(parentToolCallId === undefined ? {} : { parentToolCallId }) };
+    if (name === "bash" && this.options.riskLabels !== undefined) {
+      const api = this.invocations.get(callId)?.api;
+      if (api !== undefined) launchRiskLabel(this.options.riskLabels.hints, {tool: name, args: input, cwd: this.options.cwd}, label => this.options.riskLabels?.record(api.conversationId, callId, label), this.options.riskLabels.onError);
+    }
     const blocked = await this.options.runner.emitToolCall({ type: "tool_call", ...eventBase });
     if (blocked?.block === true) return error(blocked.reason ?? `Tool ${name} was blocked`);
     if (parentToolCallId !== undefined) this.options.emit({ type: "tool_execution_start", ...eventBase });

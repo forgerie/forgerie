@@ -2,6 +2,8 @@
 
 Forgerie blocks recognised irreversible and external tool calls through shared Durable gate admission. Direct calls enter through `ToolTask.beforeTool`; nested `ctx.executeTool` calls, including codemode and shared child tools, enter through the Durable SDK adapter. The parent and every newly spawned, refreshed or continued Durable child select the hook. The agent receives a blocked result at once and can keep working on other parts. A waiting gate counts toward **Needs your response** and the dock wait. Prompt guidance also covers actions hidden inside scripts.
 
+Optional [risk labels](decision-hints.md#risk-labels) add gateway opinions only after admission. The gateway is never awaited by a gate or tool. A separate transaction can add `riskLabel` after approval, refusal, or execution, but it never writes gate state, decisions, execution intent, or tasks. Label-only updates refresh the reader without changing Needs your response. A label, including `low`, is not approval or permission to run. Disabled, unconfigured, timed-out, and failed hints leave gate behavior unchanged.
+
 ## Default categories
 
 All six categories are gated. `src/shared/autonomyPolicy.ts` owns their schema, labels and defaults. The injectable `AutonomyPolicySource.read(cwd)` returns defaults in this slice. Version 1 already includes `autoPassStops: false`; configurable policy storage comes in slice 4.

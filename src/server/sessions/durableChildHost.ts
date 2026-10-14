@@ -14,7 +14,7 @@ export interface DurableChildSessionRef { id: string; cwd: string }
 
 /** What a Durable session needs from the daemon to host child agents. */
 export interface DurableChildHost {
-  extensions(input: { cwd: string; agentDir: string; projectContext: string; sessionSkills?: readonly ChildSkill[]; sessionTools?: () => DurableSdkTools; worktrees?: DurableChildWorktrees; flushRunRecords?: () => Promise<void>; commit?: DurableChildExtensionOptions["commit"] }): Promise<DurableChildExtensions>;
+  extensions(input: { cwd: string; agentDir: string; projectContext: string; sessionSkills?: readonly ChildSkill[]; sessionTools?: () => DurableSdkTools; worktrees?: DurableChildWorktrees; flushRunRecords?: () => Promise<void>; riskLabels?: DurableChildExtensionOptions["riskLabels"]; commit?: DurableChildExtensionOptions["commit"] }): Promise<DurableChildExtensions>;
   worktrees?: SessionWorktrees;
   runRecords?: ChildRunStore;
   runFinished?: (run: ChildRun) => Promise<void>;
@@ -95,12 +95,12 @@ export function createDurableChildHost(options: DurableChildHostOptions = {}): D
     ...(options.runRecords === undefined ? {} : { runRecords: options.runRecords }),
     ...(options.onRunRecordError === undefined ? {} : { runRecordError: options.onRunRecordError }),
     ...(options.worktrees === undefined ? {} : { worktrees: options.worktrees }),
-    async extensions({ cwd, agentDir, projectContext, sessionSkills, sessionTools, worktrees, flushRunRecords, commit }) {
+    async extensions({ cwd, agentDir, projectContext, sessionSkills, sessionTools, worktrees, flushRunRecords, commit, riskLabels }) {
       const catalog = ChildAgentCatalog.forSession(cwd, agentDir, {
         ...(options.homeAgentsDir === undefined ? {} : { home: options.homeAgentsDir }),
         ...(options.builtinAgentsDirs === undefined ? {} : { builtin: options.builtinAgentsDirs }) });
       const agents = await catalog.list();
-      return durableChildExtensions({ catalog, agents, projectContext, ...(commit === undefined ? {} : { commit }),
+      return durableChildExtensions({ ...(riskLabels === undefined ? {} : {riskLabels}), catalog, agents, projectContext, ...(commit === undefined ? {} : { commit }),
         ...(sessionTools === undefined ? {} : { sessionTools }), childToolsDeny: options.childToolsDeny ?? [], ...(sessionSkills === undefined ? {} : { sessionSkills }), ...(flushRunRecords === undefined ? {} : { flushRunRecords }), ...(worktrees === undefined ? {} : { worktrees }), ...(options.extraTools === undefined ? {} : { extraTools: options.extraTools }) });
     },
     liveChanged(ref, live) {
