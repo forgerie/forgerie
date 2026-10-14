@@ -871,6 +871,7 @@ function createDefaultRuntimeFactory(
   triggers?: () => TriggerService,
   azurePr?: AzurePrToolDeps,
   getManagedProcesses?: (sessionId: string) => Promise<ManagedProcesses>,
+  processToolsAllowed?: (ref: PiSessionRef) => Promise<boolean>,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
     const processBridgeSlot = createProcessBridgeSlot();
@@ -915,8 +916,9 @@ function createDefaultRuntimeFactory(
       },
     }, projectTools, workspaceServices, triggers);
     if (azurePr !== undefined) customTools.push(...await createAzurePrTools(cwd, azurePr));
+    const allowProcesses = await processToolsAllowed?.({ id: sessionManager.getSessionId(), cwd }) ?? true;
     const session = await DurableAgentSession.open({
-      ...(getManagedProcesses === undefined ? {} : { getManagedProcesses }),
+      ...(getManagedProcesses === undefined || !allowProcesses ? {} : { getManagedProcesses }),
       ...(handle === undefined ? {} : { handle }),
       ...(beforeResume === undefined ? {} : { beforeResume }),
       services,
@@ -1238,6 +1240,7 @@ export class PiSessionService implements SessionRouteService {
       deps.triggers,
       deps.azurePr,
       this.managedProcesses === undefined ? undefined : (sessionId) => this.getManagedProcesses(sessionId),
+      async (ref) => !await this.archiveStore.isArchived(ref.id) && await this.sessionWorktrees?.store.readOnly(ref) === undefined,
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;
