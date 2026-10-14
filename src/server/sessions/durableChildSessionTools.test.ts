@@ -62,6 +62,7 @@ async function fixture(named: string[], definitions: Pick<ToolDefinition, "name"
   const offered: string[][] = [];
   const instructions: string[] = [];
   let query = "valid";
+  let forceNamedCall = false;
   provider.setResponses(Array.from({ length: 100 }, () => (context) => {
     const prompt = getCurrentSystemPrompt(context.messages);
     if (prompt.includes("CHILD-PROBE")) {
@@ -69,7 +70,7 @@ async function fixture(named: string[], definitions: Pick<ToolDefinition, "name"
       instructions.push(prompt);
       const last = context.messages.at(-1);
       if (last?.role === "toolResult") return fauxAssistantMessage("CHILD-DONE");
-      return named[0] !== undefined && getCurrentTools(context.messages).some((tool) => tool.name === named[0])
+      return named[0] !== undefined && (forceNamedCall || getCurrentTools(context.messages).some((tool) => tool.name === named[0]))
         ? fauxAssistantMessage([fauxToolCall(named[0], { query }, { id: "same-id" })], { stopReason: "toolUse" })
         : fauxAssistantMessage("CHILD-DONE");
     }
@@ -98,7 +99,7 @@ async function fixture(named: string[], definitions: Pick<ToolDefinition, "name"
   }, registerTool: (name: string) => {
     if (registerTool === undefined) throw new Error("Extension did not load");
     registerTool({ name });
-  }, setVersion: (value: number) => { version = value; }, setBlocked: () => { blocked = true; }, setQuery: (value: string) => { query = value; } };
+  }, setVersion: (value: number) => { version = value; }, setBlocked: () => { blocked = true; }, setQuery: (value: string) => { query = value; }, forceNamedCall: () => { forceNamedCall = true; } };
 }
 
 it("executes a named registered (inactive) session tool through validation and extension hooks, with a child call id", async () => {
@@ -142,13 +143,26 @@ it.each(["deferred", "codemode"] as const)("offers named %s session tools direct
   expect(probe.calls).toHaveLength(1);
 });
 
-it.each(["child_agent", "ask_user", "end_turn", "spawn_session", "handoff_session", "workflow_finish", "workflow_stop", "propose_workflow", "propose_issue", "propose_future", "subagent", "bg_wait", "web_enable"])("never offers parent-only %s even if registered and named", async (name) => {
+it.each(["child_agent", "ask_user", "end_turn", "spawn_session", "handoff_session", "workflow_finish", "workflow_stop", "propose_workflow", "file_issue", "propose_future", "subagent", "bg_wait", "web_enable"])("never offers parent-only %s even if registered and named", async (name) => {
   const probe = await fixture([name], [{ name }]);
   await probe.spawn();
   expect(probe.offered[0]).toEqual(["ask_human"]);
   expect(probe.calls).toEqual([]);
   expect(probe.instructions[0]).toContain(`Not available here: ${name}`);
+  expect(probe.instructions[0]).toContain("Do not file issues. Suggest issues in your report; the parent files them.");
   expect(JSON.stringify(probe.session.messages)).toContain(`Not available to it here: tools ${name}`);
+});
+
+it("refuses a child's attempted file_issue call, even when the parent registers a direct implementation", async () => {
+  const probe = await fixture(["file_issue"], [{ name: "file_issue" }]);
+  probe.forceNamedCall();
+  await probe.spawn();
+  expect(probe.calls).toEqual([]);
+  const child = (await probe.session.durableChildren())[0];
+  if (child === undefined) throw new Error("Missing child");
+  const transcript = JSON.stringify(await probe.session.durableChildMessages(child.conversationId));
+  expect(transcript).toContain('"toolName":"file_issue"');
+  expect(transcript).toContain('"isError":true');
 });
 
 it.each(["grep", "find", "ls"])("excludes the parent's %s tool from shared declarations and translates it to child-native bash", async (name) => {

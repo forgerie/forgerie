@@ -125,8 +125,7 @@ import { countOutOfListingChildren, locateOutOfListingParents, type SessionHeade
 import { siblingWorkspaceCwds, type ProjectWorkspaceCwds } from "../workspaces/projectWorkspaceCwds.js";
 import type { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 import { createAskUserToolDefinition, type AskUserInvocation, type AskUserToolDeps } from "./askUserTool.js";
-import { IssueProposals, type IssueProposalSession } from "./issueProposals.js";
-import type { IssueProposalInput } from "../../shared/issueProposals.js";
+import { logDecision } from "./durableDecisions.js";
 import { createGitHubToolDefinitions, type GitHubToolDeps } from "./githubTools.js";
 import { createProjectTools, type ProjectToolDeps } from "./projectTools.js";
 import type { WorkspaceServices } from "../workspaces/workspaceServices.js";
@@ -1004,7 +1003,7 @@ export interface PiSessionServiceDependencies {
    */
   askUserEnabled?: boolean;
   /**
-   * When provided, every session gets `github_read`, `github_write`, and `propose_issue` for its
+   * When provided, every session gets `github_read`, `github_write`, and `file_issue` for its
    * project's GitHub repo, acting as Forgerie's GitHub App.
    */
   github?: GitHubToolDeps;
@@ -1161,13 +1160,8 @@ export class PiSessionService implements SessionRouteService {
   private unreadPublicationRetryDelayMs: number;
   private unreadPublicationStopped = false;
 
-  private readonly issueProposals: IssueProposals | undefined;
-
   constructor(private readonly events: SessionEventHub, deps: PiSessionServiceDependencies) {
     this.durableReader = deps.durableReader;
-    const prepare = deps.github?.prepareIssue;
-    const create = deps.github?.createIssue;
-    this.issueProposals = prepare === undefined || create === undefined ? undefined : new IssueProposals({ prepare, create });
     this.archiveStore = deps.archiveStore ?? new SessionArchiveStore();
     this.pinStore = deps.pinStore ?? new SessionPinStore();
     this.tabsStore = deps.tabsStore ?? new SessionTabsStore();
@@ -1207,7 +1201,25 @@ export class PiSessionService implements SessionRouteService {
       this.spawnTargets === undefined ? undefined : (input) => this.spawnSession(input),
       deps.askUserEnabled === true ? { open: (input) => this.openAsk(input) } : undefined,
       this.spawnTargets === undefined ? undefined : (input) => this.handoffSession(input),
-      deps.github === undefined ? undefined : { ...deps.github, propose: (ref, targetCwd, input) => this.proposeIssue(ref, targetCwd, input) },
+      deps.github === undefined ? undefined : { ...deps.github, fileIssue: async (targetCwd, id, input) => {
+        const file = deps.github?.fileIssue;
+        if (file === undefined) throw new Error("Issue filing is unavailable.");
+        const session = await this.getOrOpen(this.activeSessionRef(id));
+        if (!(session instanceof DurableAgentSession)) throw new Error("Issue filing requires a Durable parent session.");
+        const result = await file(targetCwd, id, input);
+        if (result.state === "created") {
+          try {
+            await session.journal.conversation.commit(tx => logDecision(tx, session.journal.conversation.id, {
+              id: `issue:${result.repo.toLowerCase()}:${String(result.number)}`, kind: "issue", by: "parent",
+              question: input.title, choice: `#${String(result.number)} ${result.url}`,
+              reason: `Searches run: ${input.duplicates.join("; ")}`, flagged: false,
+            }), durableContext);
+          } catch (error) {
+            throw new Error(`Filed #${String(result.number)} ${result.url}, but decision logging failed: ${error instanceof Error ? error.message : String(error)}. Do not file it again.`, { cause: error });
+          }
+        }
+        return result;
+      } },
       deps.projectTools,
       deps.durableChildAgents,
       deps.workspaceServices,
@@ -2584,33 +2596,6 @@ export class PiSessionService implements SessionRouteService {
   async messageDurableChild(ref: PiSessionRef, conversationId: number, text: string) { await (await this.durableSession(ref)).messageDurableChild(conversationId, text); }
   async stopDurableChild(ref: PiSessionRef, conversationId: number) { await (await this.durableSession(ref)).stopDurableChild(conversationId); }
   async answerDurableChildQuestion(ref: PiSessionRef, questionId: string, answer: string) { await (await this.durableSession(ref)).answerDurableChildQuestion(questionId, answer); }
-  async proposeIssue(ref: PiSessionRef, targetCwd: string, input: IssueProposalInput) {
-    const proposals = this.issueProposals;
-    if (proposals === undefined) throw new Error("Issue proposals are unavailable.");
-    await this.assertWritable(ref);
-    const session = await this.getOrOpen(ref);
-    this.assertHandoffDestinationAcceptsInput(session);
-    return this.runSessionEntryMutation(session, "propose an issue", () => proposals.propose(this.issueProposalSession(session), targetCwd, input));
-  }
-
-  async decideIssueProposal(ref: PiSessionRef, proposalId: string, decision: "create" | "dismiss") {
-    const proposals = this.issueProposals;
-    if (proposals === undefined) throw new Error("Issue proposals are unavailable.");
-    await this.assertWritable(ref);
-    const session = await this.getOrOpen(ref);
-    this.assertHandoffDestinationAcceptsInput(session);
-    // Hold the navigation guard through both the GitHub request and the durable append.
-    return this.runSessionEntryMutation(session, "decide an issue proposal", () => proposals.decide(this.issueProposalSession(session), proposalId, decision));
-  }
-
-  private issueProposalSession(session: PiAgentSession): IssueProposalSession {
-    return { id: session.sessionId, branch: () => session.sessionManager.getBranch(), append: async (message) => {
-      await session.sendCustomMessage({ ...message, display: true }, { triggerTurn: false });
-      this.sessionManager.invalidateSessionFile(session.sessionFile ?? "");
-      this.publishStatus(session);
-    } };
-  }
-
   async gatedActions(ref: PiSessionRef) {
     const session = await this.getOrOpen(ref);
     return session instanceof DurableAgentSession ? session.gatedActions() : [];

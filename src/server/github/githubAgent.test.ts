@@ -100,23 +100,6 @@ describe("GitHub agent: reading", () => {
 });
 
 describe("GitHub agent: writing", () => {
-  it("refuses a label that does not exist, and writes nothing", async () => {
-    const f = fixture();
-    f.github.on(`GET ${REPO}/labels`, json([{ name: "bug", description: null }, { name: "priority: high", description: "Soon" }]));
-    await expect(f.agent.prepareIssue("/repo", { title: "New", body: "", labels: ["bug", "wontfix"] }))
-      .rejects.toThrow("These labels do not exist on the repo: wontfix.");
-    expect(f.github.requests.every((request) => request.method === "GET")).toBe(true);
-  });
-
-  it("creates an issue with existing labels and marks the body with the session", async () => {
-    const f = fixture();
-    f.github.on(`GET ${REPO}/labels`, json([{ name: "bug", description: null }]));
-    f.github.on(`POST ${REPO}/issues`, json(withIssue(71, { title: "New" }), { status: 201 }));
-    const result = await f.agent.createIssue("korri-os/korri", "s1", { title: "New", body: "Details", labels: ["Bug"] });
-    expect(result).toEqual({ state: "created", number: 71, title: "New", url: "https://github.com/korri-os/korri/issues/71" });
-    expect(f.bodyOf(`POST ${REPO}/issues`)).toEqual({ title: "New", body: "Details\n\n<!-- forgerie-session: s1 -->", labels: ["Bug"] });
-  });
-
   it("posts the closing comment before it closes the issue", async () => {
     const f = fixture();
     f.github.on(`POST ${REPO}/issues/56/comments`, json({}, { status: 201 }));

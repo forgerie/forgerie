@@ -1,4 +1,4 @@
-import { IssueProposalInputSchema, type IssueProposalInput, type IssueProposalOutcome } from "../../shared/issueProposals.js";
+import { FileIssueInputSchema, closeIssueTitle, issueTitleSearchTerms, type FileIssueInput, type FileIssueResult } from "../../shared/fileIssues.js";
 import { Type, type Static, type TSchema } from "typebox";
 import { Check } from "typebox/value";
 import { canonicalBacklogRoot } from "../backlog/backlogScanner.js";
@@ -63,7 +63,7 @@ const StatusSchema = Type.Object({ state: Type.String(), statuses: Type.Array(Ty
 const ReviewSchema = Type.Object({ user, state: Type.String() });
 const RepoSchema = Type.Object({ default_branch: Type.String() });
 const MergeSchema = Type.Object({ sha: Type.String(), merged: Type.Boolean() });
-const SearchSchema = Type.Object({ total_count: Type.Integer(), items: Type.Array(Type.Unknown()) });
+const SearchSchema = Type.Object({ total_count: Type.Integer(), incomplete_results: Type.Optional(Type.Boolean()), items: Type.Array(Type.Unknown()) });
 type Issue = Static<typeof IssueSchema>;
 
 /** Check conclusions that let a merge go ahead. */
@@ -75,7 +75,7 @@ const MAX_COMMENTS = 100;
 /**
  * GitHub work for agents in Forgerie sessions, done as Forgerie's GitHub App on the session's own repo.
  * Every text an author wrote passes the same trust rule as the backlog, so an outside contributor's words
- * reach the agent only when the project lists everyone. Writes cannot create labels, and a merge waits for
+ * reach the agent only when the project lists everyone. Only file_issue creates the agent-filed label; a merge waits for
  * CI to pass on the exact commit it merges.
  */
 export class GitHubAgent {
@@ -126,23 +126,67 @@ export class GitHubAgent {
     }
   }
 
-  /** Resolve the proposal once. Creation uses this pinned repo, not a later remote or config. */
-  async prepareIssue(cwd: string, input: IssueProposalInput): Promise<string> {
-    if (!Check(IssueProposalInputSchema, input) || input.title.trim() === "") throw new GitHubToolError("Invalid issue proposal title, body, or labels.");
+  /** Search and creation share a pinned repo. Search results contain titles, never bodies. */
+  async fileIssue(cwd: string, sessionId: string, input: FileIssueInput): Promise<FileIssueResult> {
+    if (!Check(FileIssueInputSchema, input)) throw new GitHubToolError("Invalid file_issue title, body, labels, duplicate searches, or overrides.");
     const repo = await this.resolveRepo(cwd);
     const call = this.caller(repo.slug);
-    await call.get("", RepoSchema, "Metadata: read");
-    await this.requireLabels(call, input.labels ?? []);
-    return repo.slug;
+    const words = issueTitleSearchTerms(input.title);
+    if (words.length === 0) throw new GitHubToolError("The issue title needs a word or number to search.");
+    const candidates = new Map<number, Issue>();
+    // Title-word searches avoid AND search missing titles with an omitted word.
+    // GitHub caps search at 1000 results. Fail closed rather than pretend a partial search is complete.
+    for (const word of words) {
+      for (let page = 1; ; page++) {
+        const q = `repo:${repo.slug} is:issue in:title ${word}`;
+        const found = await call.get(`/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=${String(page)}`, SearchSchema, "Issues: read", { absolute: true });
+        if (found.total_count > 1000 || found.incomplete_results === true) throw new GitHubToolError("Duplicate search is incomplete. Use a more specific title and search again; no issue was filed.");
+        for (const item of found.items) {
+          if (!Check(IssueSchema, item)) throw new GitHubToolError("GitHub sent an invalid duplicate search result; no issue was filed.");
+          if (item.pull_request === undefined && closeIssueTitle(input.title, item.title)) candidates.set(item.number, item);
+        }
+        if (page * 100 >= found.total_count) break;
+        if (found.items.length === 0) throw new GitHubToolError("Duplicate search ended early; no issue was filed.");
+      }
+    }
+    const issues = [...candidates.values()];
+    const trusted = await this.judge(repo, call, issues.map(authorOf));
+    const matches = issues.map<Extract<FileIssueResult, { state: "duplicate" }>["matches"][number]>(issue => {
+      if (issue.state !== "open" && issue.state !== "closed") throw new GitHubToolError("GitHub sent an invalid issue state; no issue was filed.");
+      return { number: issue.number, title: titleOf(issue, trusted), state: issue.state, url: issue.html_url };
+    }).sort((a, b) => a.number - b.number);
+    if (matches.some(issue => input.notDuplicateOf?.includes(issue.number) !== true)) return { state: "duplicate", repo: repo.slug, matches };
+    const requested = [...new Set((input.labels ?? []).filter(label => label.toLowerCase() !== "agent-filed"))];
+    await this.requireLabels(call, requested);
+    const labelWarning = await this.ensureAgentFiled(repo.slug, call);
+    const labels = labelWarning === undefined ? [...requested, "agent-filed"] : requested;
+    const issue = await call.send("POST", "/issues", { title: input.title.trim(), body: `${input.body}\n\n<!-- forgerie-session: ${sessionId} -->`, labels }, IssueSchema, "Issues: write");
+    const agentFiled = labelsOf(issue).some(label => label.toLowerCase() === "agent-filed");
+    const warning = agentFiled ? undefined : labelWarning ?? "Issue filed without agent-filed: GitHub did not attach the requested label.";
+    return { state: "created", repo: repo.slug, number: issue.number, title: issue.title, url: issue.html_url, agentFiled, ...(warning === undefined ? {} : { labelWarning: warning }) };
   }
 
-  /** Browser-confirmed creation only. Not an action of github_write. */
-  async createIssue(repo: string, sessionId: string, input: IssueProposalInput): Promise<Extract<IssueProposalOutcome, { state: "created" }>> {
-    if (!Check(IssueProposalInputSchema, input) || input.title.trim() === "") throw new GitHubToolError("Invalid issue proposal title, body, or labels.");
-    const call = this.caller(repo);
-    await this.requireLabels(call, input.labels ?? []);
-    const issue = await call.send("POST", "/issues", { title: input.title, body: `${input.body}\n\n<!-- forgerie-session: ${sessionId} -->`, labels: input.labels ?? [] }, IssueSchema, "Issues: write");
-    return { state: "created", number: issue.number, title: issue.title, url: issue.html_url };
+  private readonly agentFiledLabelChecks = new Map<string, Promise<string | undefined>>();
+  private async ensureAgentFiled(repo: string, call: Caller): Promise<string | undefined> {
+    const key = repo.toLowerCase();
+    const existing = this.agentFiledLabelChecks.get(key);
+    if (existing !== undefined) return existing;
+    const pending = (async () => {
+      const labels = await this.existingLabels(call);
+      if (labels.some(label => label.name.toLowerCase() === "agent-filed")) return undefined;
+      try { await call.send("POST", "/labels", { name: "agent-filed", color: "ededed", description: "Filed by a Forgerie parent agent" }, LabelSchema, "Issues: write"); }
+      catch (error) {
+        if (!(error instanceof GitHubToolError)) throw error;
+        // Another process can create the same label between the GET and POST.
+        const current = await this.existingLabels(call).catch(() => []);
+        if (current.some(label => label.name.toLowerCase() === "agent-filed")) return undefined;
+        return `Issue filed without agent-filed: label creation failed: ${error.message}`;
+      }
+      return undefined;
+    })();
+    this.agentFiledLabelChecks.set(key, pending);
+    try { return await pending; }
+    finally { if (this.agentFiledLabelChecks.get(key) === pending) this.agentFiledLabelChecks.delete(key); }
   }
 
   async write(cwd: string, sessionId: string, request: WriteRequest): Promise<WriteResult> {
@@ -150,7 +194,7 @@ export class GitHubAgent {
     const call = this.caller(repo.slug);
     const signed = (body: string) => `${body}\n\n<!-- forgerie-session: ${sessionId} -->`;
     const number = () => required(request.number, "number", request.action);
-    if (!WRITE_ACTIONS.includes(request.action)) throw new GitHubToolError("Unknown github_write action. Use propose_issue for new issues; the user decides.");
+    if (!WRITE_ACTIONS.includes(request.action)) throw new GitHubToolError("Unknown github_write action. Use file_issue for new issues after searching for duplicates.");
     switch (request.action) {
       case "comment": {
         const comment = await call.send("POST", `/issues/${String(number())}/comments`, { body: signed(required(request.body, "body", "comment")) }, Type.Object({ html_url: Type.String() }), "Issues: write");
@@ -285,12 +329,21 @@ export class GitHubAgent {
     return { text: `Merged PR #${String(number)} into ${pull.base.ref} by ${method}; ${pull.base.ref} is now at ${merged.sha.slice(0, 12)}. CI: ${checks.summary}.`, url: pull.html_url };
   }
 
-  /** Labels must already exist: agents use the repo's label set and never grow it. */
+  private async existingLabels(call: Caller): Promise<Static<typeof LabelSchema>[]> {
+    const labels: Static<typeof LabelSchema>[] = [];
+    for (let page = 1; ; page++) {
+      const found = await call.get(`/labels?per_page=100&page=${String(page)}`, Type.Array(LabelSchema), "Issues: read");
+      labels.push(...found);
+      if (found.length < 100) return labels;
+    }
+  }
+
+  /** Caller-supplied labels must exist. Only file_issue can create agent-filed. */
   private async requireLabels(call: Caller, names: readonly string[]): Promise<void> {
     if (names.length === 0) return;
-    const known = new Set((await call.get("/labels?per_page=100", Type.Array(LabelSchema), "Issues: read")).map((label) => label.name.toLowerCase()));
+    const known = new Set((await this.existingLabels(call)).map((label) => label.name.toLowerCase()));
     const missing = names.filter((name) => !known.has(name.toLowerCase()));
-    if (missing.length > 0) throw new GitHubToolError(`These labels do not exist on the repo: ${missing.join(", ")}. Use only existing labels (action "labels" lists them); agents do not create labels.`);
+    if (missing.length > 0) throw new GitHubToolError(`These labels do not exist on the repo: ${missing.join(", ")}. Use only existing labels (action "labels" lists them); only file_issue creates agent-filed.`);
   }
 
   private async judge(repo: SessionRepo, call: Caller, authors: GitHubAuthor[]): Promise<(author: GitHubAuthor) => boolean> {

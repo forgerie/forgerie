@@ -210,10 +210,10 @@ describe("issue proposal browser projection", () => {
     const failedEvent = { type: "tool.end" as const, toolName: "propose_issue", toolCallId: "t1", text: "Unknown labels", isError: true };
     expect(projectBrowserSessionEvent(failedEvent)).toBe(failedEvent);
   });
-  it("waits for full history rather than presenting a truncated proposal as actionable", () => {
+  it("retains historical details with bounded preview text and unchanged full history", () => {
     const message = { role: "custom", customType: "forgerie.issue-proposal", content: "Proposed issue", details: { proposal: { proposalId: "p1", repo: "o/r", title: "Fix", body: "x".repeat(65000), labels: [] } } };
     const preview = projectBrowserMessagePreviewResponse({ messages: [message], start: 0, total: 1 });
-    expect(preview.messages[0]).not.toHaveProperty("details");
+    expect(preview.messages[0]).toHaveProperty("details.proposal.title", "Fix");
     expect(projectBrowserMessageResponse({ messages: [message], start: 0, total: 1 }).messages[0]).toBe(message);
   });
   it("shows the branch-owned proposal instead of a second tool card in history and the stream", () => {

@@ -1,4 +1,4 @@
-import type { IssueProposal, IssueProposalInput } from "../../shared/issueProposals.js";
+import { FileIssueInputSchema, type FileIssueResult } from "../../shared/fileIssues.js";
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { READ_ACTIONS, WRITE_ACTIONS, type GitHubAgent } from "../github/githubAgent.js";
@@ -6,9 +6,7 @@ import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
 
 export type GitHubToolDeps = Pick<GitHubAgent, "read" | "write"> & {
   gateIssueLabels?: GitHubAgent["gateIssueLabels"];
-  prepareIssue?: GitHubAgent["prepareIssue"];
-  createIssue?: GitHubAgent["createIssue"];
-  propose?: (ref: { id: string; cwd: string }, targetCwd: string, input: IssueProposalInput) => Promise<IssueProposal>;
+  fileIssue?: GitHubAgent["fileIssue"];
   watch?: (cwd: string, id: string, action: "start" | "stop", number?: number) => Promise<unknown>;
   target?: (ref: { id: string; cwd: string }, worktreeId: string) => Promise<string>;
 };
@@ -49,7 +47,7 @@ const WriteParams = Type.Object({
 });
 
 /**
- * GitHub reads, writes, and issue proposals: work on the session's own repo, done as Forgerie's GitHub App.
+ * GitHub reads, writes, and issue filing: work on the session's own repo, done as Forgerie's GitHub App.
  * Only Forgerie-hosted sessions get them. Writes are model-only, so each one shows in the transcript as
  * its own card instead of disappearing inside a script.
  */
@@ -65,7 +63,7 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
     description: "Read issues, labels, and pull requests (with CI checks) of this session's GitHub repo. Text by outside contributors is hidden unless the project lists everyone.",
     promptSnippet: "github_read: list/read issues, labels, and pull requests with CI status on this project's GitHub repo",
     promptGuidelines: [
-      "The project's backlog is its GitHub issues. Use github_read to find and read them, propose_issue to propose new issues for the user to create, and github_write to comment, close, label, open pull requests, and merge. They default to this session's own repo. For a secondary repo, supply its owned worktreeId from project_worktree.",
+      "The project's backlog is its GitHub issues. Use github_read to find and read them, file_issue to file new issues after searching open and closed issues for duplicates, and github_write to comment, close, label, open pull requests, and merge. They default to this session's own repo. For a secondary repo, supply its owned worktreeId from project_worktree.",
     ],
     parameters: ReadParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -90,25 +88,24 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
       return { content: [{ type: "text", text: result.url === undefined ? result.text : `${result.text}\n${result.url}` }], details: { action: params.action, ...(result.url === undefined ? {} : { url: result.url }) } };
     },
   });
-  const proposalParams = Type.Object({
-    title: Type.String({ minLength: 1, maxLength: 256 }), body: Type.String({ maxLength: BODY_MAX, description: "Markdown." }),
-    labels: labelList("Must already exist on the repo. Use github_read action labels to list them."), worktreeId: targetWorktree,
-  });
-  const propose = defineTool<typeof proposalParams, { proposalId: string }>({
-    name: "propose_issue", label: "Propose issue", exposure: MODEL_ONLY_EXPOSURE,
-    description: "Propose a new GitHub issue for the user to create or dismiss in chat. Checks the repository and existing labels. Does not create the issue or end your turn.",
-    promptSnippet: "propose_issue: propose a GitHub issue; the user decides whether to create it",
-    promptGuidelines: ["Every new issue must go through propose_issue. Never create it yourself with another tool, shell, or API. Keep going after proposing; the outcome arrives as text on your next turn and does not wake you."],
-    parameters: proposalParams,
+  const fileParams = Type.Object({ ...FileIssueInputSchema.properties, worktreeId: targetWorktree }, { additionalProperties: false });
+  const file = defineTool<typeof fileParams, FileIssueResult>({
+    name: "file_issue", label: "File issue", exposure: MODEL_ONLY_EXPOSURE, executionMode: "sequential",
+    description: "Parent only: file a GitHub issue after searching open and closed issues. Supply the search queries in duplicates (at least one). Also searches the title itself and refuses close matches unless all their numbers are in notDuplicateOf. Adds agent-filed, creating that label if missing. If label creation is refused, files without it and reports why. Logs an issue decision.",
+    promptSnippet: "file_issue: file a GitHub issue after checking duplicates, with agent-filed and a decision",
+    promptGuidelines: ["Search open and closed issues with github_read before file_issue. Put the queries you ran in duplicates. Only override a matching issue with notDuplicateOf after checking that it is different work. Children suggest issues in reports; only the parent files them. Keep working after filing."],
+    parameters: fileParams,
     async execute(_id, params, _signal, _update, ctx) {
-      if (deps.propose === undefined) throw new Error("Issue proposals are unavailable.");
+      if (deps.fileIssue === undefined) throw new Error("Issue filing is unavailable.");
       const { worktreeId, ...input } = params;
-      const id = ctx.sessionManager.getSessionId();
-      const proposal = await deps.propose({ id, cwd }, await target(id, worktreeId), input);
-      return { content: [{ type: "text", text: `Issue proposal ${proposal.proposalId} is in the chat. The user decides whether to create it. Do not create this issue yourself. Continue your work.` }], details: { proposalId: proposal.proposalId } };
+      const result = await deps.fileIssue(await target(ctx.sessionManager.getSessionId(), worktreeId), ctx.sessionManager.getSessionId(), input);
+      const text = result.state === "duplicate"
+        ? `No issue filed: close title matches. Read these issues; stop or use notDuplicateOf only for different work.\n${result.matches.map(issue => `#${String(issue.number)} ${issue.title} [${issue.state}] ${issue.url}`).join("\n")}`
+        : `Filed #${String(result.number)} ${result.url}${result.labelWarning === undefined ? " with agent-filed." : `\n${result.labelWarning}`}`;
+      return { content: [{ type: "text", text }], details: result, ...(result.state === "duplicate" ? { isError: true } : {}) };
     },
   });
-  if (deps.watch === undefined) return [read, write, propose] as const;
+  if (deps.watch === undefined) return [read, write, file] as const;
   const watchParams = Type.Object({ worktreeId: targetWorktree, action: Type.Union([Type.Literal("start"), Type.Literal("stop")]), number: Type.Optional(Type.Integer({ minimum: 1 })) });
   const watch = defineTool<typeof watchParams, { action: string }>({
     name: "github_watch", label: "Watch pull request", exposure: MODEL_ONLY_EXPOSURE,
@@ -120,5 +117,5 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
       return { content: [{ type: "text", text: JSON.stringify(result ?? null) }], details: { action: params.action } };
     },
   });
-  return [read, write, propose, watch] as const;
+  return [read, write, file, watch] as const;
 }

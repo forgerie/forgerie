@@ -1,10 +1,10 @@
+import { readLegacyIssueEntry } from "../shared/legacyIssueProposals.js";
 import type { MessagePage, SessionUiEvent } from "../shared/apiTypes.js";
-import { ISSUE_PROPOSAL_TYPE } from "../shared/issueProposals.js";
 import { END_TURN_TOOL_NAME } from "./sessions/endTurnTool.js";
 
 /**
  * Tools represented by branch-owned custom records rather than tool cards.
- * Turn declarations use the response protocol; proposals use an issue card.
+ * Turn declarations use the response protocol. Old proposal calls remain hidden; their custom messages stay.
  * Failed results remain visible. Paging keeps raw positions: `start` still counts hidden calls.
  */
 const HIDDEN_TRANSCRIPT_TOOLS: ReadonlySet<string> = new Set([END_TURN_TOOL_NAME, "propose_issue"]);
@@ -25,6 +25,8 @@ function isHiddenToolResult(message: unknown): boolean {
  */
 export function projectBrowserMessage(message: unknown): unknown {
   if (!isRecord(message)) return message;
+  // Historical proposal records are plain custom messages; never reinterpret their details as live actions.
+  if (message["role"] === "custom" && readLegacyIssueEntry(message["customType"], message["details"]) !== undefined) return message;
   const originalContent = message["content"];
   if (!isUnknownArray(originalContent)) return message;
 
@@ -178,9 +180,7 @@ function previewMessageEnvelope(message: Record<string, unknown>, content: unkno
     if (typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) projected[field] = value;
   }
   if (Object.hasOwn(message, "output")) projected["output"] = projectToolArguments(message["output"], 0, budget);
-  // A preview must not turn truncated proposal Markdown into an actionable issue draft.
-  // The complete history payload supplies the card; the preview supplies no artifact.
-  if (Object.hasOwn(message, "details") && message["customType"] !== ISSUE_PROPOSAL_TYPE) projected["details"] = projectToolArguments(message["details"], 0, budget);
+  if (Object.hasOwn(message, "details")) projected["details"] = projectToolArguments(message["details"], 0, budget);
   return projected;
 }
 

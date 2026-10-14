@@ -29,7 +29,7 @@ The audit checked the installed source, not descriptions alone.
 | `workspace_services` | unsafe | Starts, stops, and restarts Process Compose services. Status/log actions share the registration. |
 | `github_read` | unsafe | `githubTools.ts` → `GitHubAgent.read`: reads can mint an installation token via POST; PR reads can POST GraphQL queries. |
 | `github_write` | unsafe | Posts, patches, closes, labels, and merges GitHub objects. |
-| `propose_issue` | unsafe | Persists a user-visible issue proposal. |
+| `file_issue` | unsafe | Creates a GitHub issue after duplicate search, then logs an issue decision. A crash requires checking GitHub before retrying. |
 | `github_watch` | unsafe | Changes watches and can wake the parent. |
 | `ask_user` | unsafe | Persists/publishes a question form and terminates the run. |
 | `end_turn` | unsafe | Records a response declaration and terminates the run. |

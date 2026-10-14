@@ -1,11 +1,4 @@
-import { execFileSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { Check } from "typebox/value";
-import { GitHubAgent } from "../github/githubAgent.js";
-import { FakeGitHub, json } from "../github/fakeGitHub.testSupport.js";
-import { IssueProposals } from "./issueProposals.js";
 import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
@@ -32,8 +25,8 @@ describe("GitHub tools", () => {
   it("adds github_read and github_write to every hosted session, delegated or not, only when GitHub is wired", () => {
     const github: GitHubToolDeps = { read: () => Promise.resolve(""), write: () => Promise.resolve({ text: "" }) };
     const names = (delegation: boolean) => createPiWebCustomToolDefinitions("/workspace", delegation, undefined, undefined, undefined, github).map((tool) => tool.name);
-    expect(names(true)).toEqual(["edit", "github_read", "github_write", "propose_issue"]);
-    expect(names(false)).toEqual(["edit", "github_read", "github_write", "propose_issue"]);
+    expect(names(true)).toEqual(["edit", "github_read", "github_write", "file_issue"]);
+    expect(names(false)).toEqual(["edit", "github_read", "github_write", "file_issue"]);
     expect(createPiWebCustomToolDefinitions("/workspace", true).map((tool) => tool.name)).toEqual(["edit"]);
   });
 
@@ -73,54 +66,29 @@ describe("GitHub tools", () => {
   });
 });
 
-// The app boundary is scripted; proposal persistence and tool errors use the production paths.
-describe("propose_issue", () => {
-  it("is model-only, returns the proposal id, and targets an owned worktree", async () => {
+describe("file_issue", () => {
+  it("routes through an owned worktree, preserves refusal details, and remains model-only", async () => {
     const calls: unknown[] = [];
+    const result = { state: "duplicate" as const, repo: "o/r", matches: [{ number: 8, title: "Fix portal", state: "closed" as const, url: "https://github.com/o/r/issues/8" }] };
     const tools = createGitHubToolDefinitions("/repo-a", { read: () => Promise.resolve(""), write: () => Promise.resolve({ text: "" }),
-      target: (ref, id) => { calls.push([ref, id]); return id === "owned" ? Promise.resolve("/repo-b") : Promise.reject(new Error("Unknown worktree")); },
-      propose: (ref, cwd, input) => { calls.push([ref, cwd, input]); return Promise.resolve({ proposalId: "p1", repo: "o/r", title: input.title, body: input.body, labels: input.labels ?? [] }); },
+      target: (ref, id) => { calls.push([ref, id]); if (id !== "owned") return Promise.reject(new Error("Not owned")); return Promise.resolve("/repo-b"); },
+      fileIssue: (cwd, id, input) => { calls.push([cwd, id, input]); return Promise.resolve(result); },
     });
-    const propose = tools[2];
-    expect(propose.name).toBe("propose_issue");
-    expect(propose.exposure).toBe(MODEL_ONLY_EXPOSURE);
-    const result = await propose.execute("t1", { title: "Fix", body: "Details", worktreeId: "owned" }, undefined, undefined, ctxFor("s1"));
-    expect(result.details).toEqual({ proposalId: "p1" });
-    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("The user decides"));
-    expect(calls).toEqual([[{ id: "s1", cwd: "/repo-a" }, "owned"], [{ id: "s1", cwd: "/repo-a" }, "/repo-b", { title: "Fix", body: "Details" }]]);
-    await expect(propose.execute("t2", { title: "Fix", body: "", worktreeId: "foreign" }, undefined, undefined, ctxFor("s1"))).rejects.toThrow("Unknown worktree");
+    const file = tools[2];
+    expect(file.name).toBe("file_issue"); expect(file.exposure).toBe(MODEL_ONLY_EXPOSURE);
+    const input = { title: "Fix portal", body: "Details", duplicates: ["portal state:all"] };
+    const refused = await file.execute("t1", { ...input, worktreeId: "owned" }, undefined, undefined, ctxFor("s1"));
+    expect(refused).toMatchObject({ details: result, isError: true });
+    expect(calls).toEqual([[{ id: "s1", cwd: "/repo-a" }, "owned"], ["/repo-b", "s1", input]]);
+    await expect(file.execute("t2", { ...input, worktreeId: "foreign" }, undefined, undefined, ctxFor("s1"))).rejects.toThrow("Not owned");
   });
-  it("does not offer create_issue in github_write", () => {
-    const tools = createGitHubToolDefinitions("/repo", { read: () => Promise.resolve(""), write: () => Promise.resolve({ text: "" }) });
-    expect(Check(tools[1].parameters, { action: "create_issue", title: "Fix" })).toBe(false);
-    expect(JSON.stringify(tools[1].parameters)).not.toContain("create_issue");
-  });
-  it("reports unknown labels and a missing GitHub repo as tool errors without recording proposals", async () => {
-    const github = new FakeGitHub();
-    github.always("GET https://api.github.com/repos/o/r", json({ default_branch: "main" }));
-    github.always("GET https://api.github.com/repos/o/r/labels", json([{ name: "bug", description: null }]));
-    github.always("GET https://api.github.com/repos/o/missing", json({ message: "Not Found" }, { status: 404 }));
-    const agent = new GitHubAgent({ fetch: github.fetch, app: { tokenFor: () => Promise.resolve({ ok: true, token: "test" }), dropToken() { /* Test tokens do not expire. */ }, status: () => ({ state: "not-configured" }) },
-      trust: { judge: () => Promise.resolve(() => true) }, resolveRepo: (cwd) => Promise.resolve({ slug: cwd === "/missing" ? "o/missing" : "o/r", everyone: true }) });
-    let recorded = 0;
-    const proposals = new IssueProposals({ prepare: (cwd, input) => agent.prepareIssue(cwd, input), create: (repo, id, input) => agent.createIssue(repo, id, input) });
-    const tools = (cwd: string) => createGitHubToolDefinitions(cwd, { read: (cwd, input) => agent.read(cwd, input), write: (cwd, id, input) => agent.write(cwd, id, input),
-      propose: (ref, target, input) => proposals.propose({ id: ref.id, branch: () => [], append: () => { recorded++; return Promise.resolve(); } }, target, input) });
-    await expect(tools("/repo")[2].execute("labels", { title: "Fix", body: "", labels: ["unknown"] }, undefined, undefined, ctxFor("s1"))).rejects.toThrow("These labels do not exist");
-    await expect(tools("/missing")[2].execute("repo", { title: "Fix", body: "" }, undefined, undefined, ctxFor("s1"))).rejects.toThrow("HTTP 404");
-    expect(recorded).toBe(0);
-    expect(github.requests.every((request) => request.method === "GET")).toBe(true);
-  });
-  it("reports a non-GitHub origin as a tool error", async () => {
-    const root = await mkdtemp(join(tmpdir(), "forgerie-propose-non-github-"));
-    try {
-      execFileSync("git", ["init", "-q", root]);
-      execFileSync("git", ["-C", root, "remote", "add", "origin", "https://example.com/owner/repo.git"]);
-      const agent = new GitHubAgent({ fetch: () => Promise.reject(new Error("Network must not be reached")), app: { tokenFor: () => Promise.reject(new Error("App must not be reached")), dropToken() { /* No tokens are minted. */ }, status: () => ({ state: "not-configured" }) }, trust: { judge: () => Promise.resolve(() => true) } });
-      const proposals = new IssueProposals({ prepare: (cwd, input) => agent.prepareIssue(cwd, input), create: (repo, id, input) => agent.createIssue(repo, id, input) });
-      const tools = createGitHubToolDefinitions(root, { read: (cwd, input) => agent.read(cwd, input), write: (cwd, id, input) => agent.write(cwd, id, input),
-        propose: (ref, target, input) => proposals.propose({ id: ref.id, branch: () => [], append: () => Promise.reject(new Error("Must not record")) }, target, input) });
-      await expect(tools[2].execute("repo", { title: "Fix", body: "" }, undefined, undefined, ctxFor("s1"))).rejects.toThrow("has no GitHub repo");
-    } finally { await rm(root, { recursive: true, force: true }); }
+  it("reports label warnings in text and rejects missing duplicate searches at the schema boundary", async () => {
+    const file = createGitHubToolDefinitions("/repo", { read: () => Promise.resolve(""), write: () => Promise.resolve({ text: "" }),
+      fileIssue: () => Promise.resolve({ state: "created", repo: "o/r", number: 9, title: "New", url: "https://github.com/o/r/issues/9", agentFiled: false, labelWarning: "Issue filed without agent-filed: permission refused" }),
+    })[2];
+    expect(Check(file.parameters, { title: "New", body: "", duplicates: [] })).toBe(false);
+    expect(Check(file.parameters, { title: "New", body: "" })).toBe(false);
+    const result = await file.execute("t1", { title: "New", body: "", duplicates: ["New"] }, undefined, undefined, ctxFor("s1"));
+    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("without agent-filed"));
   });
 });

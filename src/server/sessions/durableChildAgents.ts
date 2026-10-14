@@ -512,7 +512,7 @@ export function modelChoice(spec: string): { model: { provider: string; modelId:
 function childInstructions(name: string, profile: ChildAgentProfile | undefined, plan: ChildRuntimePlan, projectContext: string | undefined): string {
   const project = profile?.inheritProjectContext !== false && projectContext !== undefined && projectContext !== ""
     ? `\n\n<project_context>\n${projectContext}\n</project_context>` : "";
-  return `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked; it asks your parent, not the user.${plan.section === "" ? "" : `\n\n${plan.section}`}${project}`;
+  return `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked; it asks your parent, not the user.\nDo not file issues. Suggest issues in your report; the parent files them.${plan.section === "" ? "" : `\n\n${plan.section}`}${project}`;
 }
 
 function withChildAdmission<T>(worktrees: DurableChildWorktrees | undefined, operation: () => Promise<T>): Promise<T> {
