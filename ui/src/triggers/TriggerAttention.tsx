@@ -1,6 +1,6 @@
 import type { Trigger } from "@shared/triggers";
 import { AlertCard, type AlertAction } from "../ui/AlertCard";
-import { problemsSince } from "./triggersModel";
+import { failingWhileRunning, problemsSince } from "./triggersModel";
 import { dateOnly, missedWords, skippedWords, whenShort, type WordClock } from "./triggerWords";
 import { fireCountWords, isSpreadFire, listWords, type ProjectName } from "./triggerTargets";
 
@@ -23,7 +23,11 @@ export function TriggerAttention({ trigger, clock, errorLines, projectName, onAc
   const latest = problems[0];
   if (trigger.attention === null || !latest) return null;
   const zone = trigger.schedule.timezone;
-  const failed = latest.outcome.kind === "failed" ? latest.outcome : undefined;
+  // The fire's own failure, or, while other projects still start, its first failed project's.
+  const running = failingWhileRunning(latest);
+  const firstFailed = latest.projects.find((item) => item.outcome.kind === "failed");
+  const failed = latest.outcome.kind === "failed" ? latest.outcome
+    : running && firstFailed?.outcome.kind === "failed" ? { error: firstFailed.outcome.error, sessionId: firstFailed.outcome.sessionId, cwd: firstFailed.cwd } : undefined;
   const when = whenShort(latest.occurrence, zone, clock);
   const skipped = skippedWords(latest.skippedBefore);
   const actions: AlertAction[] = [
@@ -33,13 +37,17 @@ export function TriggerAttention({ trigger, clock, errorLines, projectName, onAc
   ];
   const spread = isSpreadFire(latest);
   const failedIn = latest.projects.filter((item) => item.outcome.kind === "failed").map((item) => projectName(item.cwd));
+  const stillStarting = latest.projects.filter((item) => item.outcome.kind === "running").length;
   const where = spread && failed && failedIn.length > 0
     ? `Failed in ${listWords(failedIn)}: ${fireCountWords(latest)}.${failedIn.length > 1 ? ` The error below is from ${failedIn[0] ?? ""}.` : ""}` : undefined;
+  const next = running
+    ? `${stillStarting === 1 ? "1 project is" : `${String(stillStarting)} projects are`} still starting. Fix the cause, then run it now in the failed project or wait for the next run.`
+    : "Fix the cause, then run it now or wait for the next run.";
   return <AlertCard tone={failed ? "bad" : "warn"} label={failed ? "Run failed" : "Run missed"} subject={failed ? "Failed" : "Missed"}
     title={when}
     code={failed?.error} codeLabel="Error" codeLines={errorLines} actions={actions}>
     {where ? <p>{where}</p> : null}
-    <p>{failed ? "Fix the cause, then run it now or wait for the next run." : missedWords(latest, zone, trigger.missedGraceMinutes, clock)}</p>
+    <p>{failed ? next : missedWords(latest, zone, trigger.missedGraceMinutes, clock)}</p>
     {problems.length > 1 ? <p>{problems.length} runs had problems since {dateOnly(trigger.attention.since, zone, clock)}.</p> : null}
     {skipped ? <p>{skipped}</p> : null}
   </AlertCard>;

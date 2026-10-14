@@ -6,8 +6,9 @@ import { MarkStrip } from "../ui/MarkStrip";
 import { TextButton } from "../ui/TextButton";
 import { triggerFireSummary } from "@shared/triggers";
 import { firstLine, runsZone, runWhen, skippedWords, stripMarks, whenLong, type WordClock } from "./triggerWords";
-import { isSpread, isSpreadFire, PROJECT_STATUS, type ProjectName } from "./triggerTargets";
+import { fireCountWords, isSpread, isSpreadFire, PROJECT_STATUS, type ProjectName } from "./triggerTargets";
 import { FireProjects } from "./FireProjects";
+import { failingWhileRunning } from "./triggersModel";
 
 const FIRST = 10;
 /** "Scheduled", or "Scheduled. <error's first line>" and the earlier runs it covers: one sentence per fact. */
@@ -18,7 +19,8 @@ const detailWords = (cause: string, outcome: TriggerFire["outcome"], skipped: st
 /** A run in several projects: "3 of 4 started" as its status, and what else happened in its detail. */
 function spreadWords(fire: TriggerFire, cause: string, skipped: string | undefined) {
   const summary = triggerFireSummary(fire);
-  if (fire.outcome.kind === "running") return { status: "Starting…", detail: cause };
+  // Still starting in some projects: what has settled so far goes in the detail, so a failure shows at once.
+  if (fire.outcome.kind === "running") return { status: "Starting…", detail: summary.running < summary.total ? `${cause}. ${fireCountWords(fire)}.` : cause };
   if (fire.outcome.kind === "missed") return { status: "Missed", detail: [cause, skipped].filter(Boolean).join(". ") };
   const rest = ([["failed", summary.failed], ["unavailable", summary.unavailable], ["missed", summary.missed]] as const)
     .filter(([, count]) => count > 0).map(([word, count]) => `${String(count)} ${word}`);
@@ -68,7 +70,7 @@ export function TriggerRuns({ trigger, clock, starting, projectName, narrow = fa
         const words = spreadWords(fire, cause, skipped);
         const shown = open.has(fire.requestId);
         return <ActionRow key={fire.requestId} layout={narrow ? "stacked" : "head"} name={name} status={words.status}
-          tone={outcome.kind === "failed" ? "danger" : undefined} detail={words.detail}
+          tone={outcome.kind === "failed" || failingWhileRunning(fire) ? "danger" : undefined} detail={words.detail}
           actions={<TextButton label="Projects" title={`Each project's outcome on ${name}`} pressed={shown} onPress={() => toggle(fire.requestId)} />}
           below={shown ? <FireProjects fire={fire} projectName={projectName} narrow={narrow} onOpenSession={onOpenSession} /> : undefined} />;
       }

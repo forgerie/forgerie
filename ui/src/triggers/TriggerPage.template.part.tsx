@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Trigger } from "@shared/triggers";
 import { TriggerPage, type TriggerPageLoad, type TriggerSave } from "./TriggerPage";
 import { draftOf, emptyDraft, isDirty, type TriggerDraft } from "./triggerDraft";
-import { audit, digest, docs, everywhere, FORGERIE, HOST_ZONE, mixedList, nightly, PI_MONO, spreadNotes } from "./fixtures/triggers";
+import { audit, digest, docs, everywhere, FORGERIE, HOST_ZONE, mixedList, nightly, PI_MONO, spreadNotes, stillStarting } from "./fixtures/triggers";
 import { clock, draftScenario, folders, listModels, pageActions, projectLabel } from "./fixtures/scenario";
 
 export const name = "Trigger page";
@@ -38,6 +38,8 @@ export function CreateWithProblems() { return <Page checked start={{ ...emptyDra
 export function SeveralProjects() { return <Page trigger={spreadNotes} />; }
 /** All projects: the last run failed in one project and skipped one whose folder was gone. */
 export function AllProjectsPartlyFailed() { return <Page trigger={everywhere} />; }
+/** A Run now failed in pi-mono while caliper still starts: the card leads, and the rest is still under way. */
+export function FailedWhileOthersStart() { return <Page trigger={stillStarting} />; }
 /** pi-mono added to a forgerie trigger: its workflow is not in pi-mono, and the page says so before Save. */
 export function WorkflowNotShared() { return <Page trigger={nightly} start={{ ...draftOf(nightly), targets: { kind: "projects", cwds: [FORGERIE, PI_MONO] } }} />; }
 export function Refused() {

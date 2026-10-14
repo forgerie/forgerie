@@ -34,10 +34,25 @@ describe("a workflow the target projects do not share", () => {
     const common = commonWorkflows(fixed(FORGERIE, PI_MONO));
     expect(workflowGap("refine-backlog", common, projectLabel)).toBe(
       "“refine-backlog” cannot run in every target project. It is missing in pi-mono. Choose another workflow, or change the projects.");
-    expect(workflowGap("triage-issues", common, projectLabel)).toContain("It asks for different inputs in pi-mono.");
+    expect(workflowGap("triage-issues", common, projectLabel)).toBe(
+      "“triage-issues” cannot run in every target project. Its inputs differ between forgerie and pi-mono. Choose another workflow, or change the projects.");
+    expect(gapShort("triage-issues", common.diagnostics, projectLabel)).toBe("Inputs differ between forgerie and pi-mono");
     expect(workflowGap("nightly-report", common, projectLabel)).toContain("It is a script in forgerie, and scripts cannot run on a schedule.");
     expect(workflowGap("docs-sweep", common, projectLabel)).toBeUndefined();
     expect(gapShort("refine-backlog", common.diagnostics, projectLabel)).toBe("Missing in pi-mono");
+  });
+  it("reads the server's inputs text, which names the two projects it compared", () => {
+    // The server compares with the first target that has the workflow, so a missing first target adds no inputs line.
+    const diagnostics = [
+      { name: "nightly", path: `${PI_MONO}/.pi/prompts/nightly.md`, error: `Workflow is unavailable in ${FORGERIE}` },
+      { name: "nightly", path: `${CALIPER}/.pi/prompts/nightly.md`, error: `Workflow input declarations differ between ${PI_MONO} and ${CALIPER}` },
+    ];
+    expect(gapShort("nightly", diagnostics, projectLabel)).toBe("Missing in forgerie. Inputs differ between pi-mono and caliper");
+    expect(workflowGap("nightly", { workflows: [], diagnostics }, projectLabel)).toBe("“nightly” cannot run in every target project. It is missing in forgerie. "
+      + "Its inputs differ between pi-mono and caliper. Choose another workflow, or change the projects.");
+    // Several pairs share the first project: each project shows once.
+    const pairs = [`${PI_MONO} and ${CALIPER}`, `${PI_MONO} and ${FORGERIE}`].map((pair) => ({ name: "n", path: "/x", error: `Workflow input declarations differ between ${pair}` }));
+    expect(gapShort("n", pairs, projectLabel)).toBe("Inputs differ between pi-mono, caliper, and forgerie");
   });
   it("says when a project could not be read at all", () => {
     expect(workflowGap("docs-sweep", commonWorkflows(fixed(FORGERIE, OLD_SITE)), projectLabel)).toContain("It is missing in old-site.");
@@ -51,6 +66,8 @@ describe("a fire in several projects", () => {
   it("counts the projects: started of all, then what else happened", () => {
     expect(fireCountWords(partly)).toBe("2 of 4 started, 1 failed, 1 unavailable");
     expect(fireCountWords(spreadNotes.history[0]!)).toBe("3 of 3 started");
+    expect(fireCountWords({ projects: [{ cwd: FORGERIE, outcome: { kind: "running", startedAt: 0 } }, { cwd: PI_MONO, outcome: { kind: "failed", error: "x" } },
+      { cwd: CALIPER, outcome: { kind: "started", sessionId: "s", runId: "r" } }] })).toBe("1 of 3 started, 1 failed, 1 still starting");
   });
   it("lists failures first and unavailable projects last", () => {
     expect(projectsInOrder(partly.projects).map((item) => item.cwd)).toEqual([PI_MONO, FORGERIE, CALIPER, OLD_SITE]);

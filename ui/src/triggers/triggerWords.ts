@@ -156,7 +156,8 @@ export function firstLine(text: string): string {
 export function outcomeWords(fire: TriggerFire | undefined, zone: string, clock: WordClock): string {
   if (!fire) return "No runs yet";
   const outcome = fire.outcome;
-  if (outcome.kind === "running") return "Starting…";
+  // A fire still starting in some projects that already failed in one says so: the row carries the trouble mark.
+  if (outcome.kind === "running") return isSpreadFire(fire) && fire.projects.some((item) => item.outcome.kind === "failed") ? `Starting… ${fireCountWords(fire)}` : "Starting…";
   if (outcome.kind === "missed") return `Missed ${whenShort(fire.occurrence, zone, clock)}`;
   if (isSpreadFire(fire)) return `${whenShort(fire.occurrence, zone, clock)}${fire.cause === "manual" ? " by Run now" : ""}: ${fireCountWords(fire)}`;
   if (outcome.kind === "started") return `Started ${whenShort(fire.occurrence, zone, clock)}${fire.cause === "manual" ? " by Run now" : ""}`;

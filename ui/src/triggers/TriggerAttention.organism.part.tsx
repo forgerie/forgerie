@@ -1,5 +1,5 @@
 import { TriggerAttention } from "./TriggerAttention";
-import { audit, everywhere, nightly } from "./fixtures/triggers";
+import { audit, everywhere, nightly, stillStarting } from "./fixtures/triggers";
 import { clock, projectLabel } from "./fixtures/scenario";
 
 export const name = "Trigger attention";
@@ -17,4 +17,7 @@ export function Missed() {
 }
 export function FailedInOneProject() {
   return <TriggerAttention trigger={everywhere} clock={clock} projectName={projectLabel} errorLines={4} onAcknowledge={() => undefined} onRunNow={() => undefined} onOpenSession={() => undefined} />;
+}
+export function FailedWhileOthersStart() {
+  return <TriggerAttention trigger={stillStarting} clock={clock} projectName={projectLabel} errorLines={4} onAcknowledge={() => undefined} onRunNow={() => undefined} onOpenSession={() => undefined} />;
 }

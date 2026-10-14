@@ -224,9 +224,11 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
         if (target.id === triggerId) readDetail(target.id);
       } catch (error) {
         // The same request ID goes with the next press, so a lost answer never starts a second run. The server keeps the
-        // first accepted request's projects, so after a lost answer the choice is locked to match. A refusal admitted
-        // nothing, so the reader can still change it.
-        setQuestion({ ...question, busy: false, sent: !(error instanceof TriggerRefusal), error: error instanceof TriggerRefusal ? error.message
+        // first accepted request's projects, so once a request may have reached it the choice is locked to match, and
+        // stays locked: a later refusal for the same ID proves nothing about the earlier one. Only a refusal of the
+        // first send, which admitted nothing, leaves the choice open.
+        const reachedBefore = question.sent === true;
+        setQuestion({ ...question, busy: false, sent: reachedBefore || !(error instanceof TriggerRefusal), error: error instanceof TriggerRefusal ? error.message
           : `${messageOf(error)}. Press Run now to send the same request again; it starts at most one run.` });
       }
       return;

@@ -51,12 +51,14 @@ export function commonWorkflows(targets: TriggerTargets): TriggerWorkflowsRespon
   const names = [...new Set(listed.flatMap((item) => item.workflows.map((workflow) => workflow.name)))].sort();
   const common: TriggerWorkflow[] = [];
   for (const name of names) {
-    const first = listed[0]?.workflows.find((workflow) => workflow.name === name);
+    // Inputs are compared with the first target that has the workflow, as the server does.
+    const reference = listed.map((item) => ({ cwd: item.cwd, workflow: item.workflows.find((workflow) => workflow.name === name) })).find((item) => item.workflow);
+    const first = reference?.workflow;
     let ok = first !== undefined;
     for (const { cwd, workflows: own } of listed) {
       const workflow = own.find((item) => item.name === name);
       const error = !workflow ? `Workflow is unavailable in ${cwd}` : workflow.kind === "script" ? `Workflow must resolve to prose in ${cwd}`
-        : JSON.stringify(workflow.inputs) !== JSON.stringify(first?.inputs) ? `Workflow input declarations differ in ${cwd}` : undefined;
+        : JSON.stringify(workflow.inputs) !== JSON.stringify(first?.inputs) ? `Workflow input declarations differ between ${reference?.cwd ?? ""} and ${cwd}` : undefined;
       if (error) { diagnostics.push({ name, path: cwd, error }); ok = false; }
     }
     if (ok && first) common.push(first);
@@ -230,6 +232,22 @@ export const everywhere: Trigger = {
     spread("nightly-docs-sweep", night(10, 4), [ran("nightly-docs-sweep", 44, FORGERIE), ran("nightly-docs-sweep", 45, PI_MONO),
       ran("nightly-docs-sweep", 46, CALIPER), ran("nightly-docs-sweep", 47, OLD_SITE)]),
   ],
+};
+
+/**
+ * Run now under way in three projects: pi-mono already failed, forgerie started, caliper is still starting. The
+ * server set attention at the failure, after it recorded the running fire.
+ */
+export const stillStarting: Trigger = {
+  ...spreadNotes,
+  attention: { since: NOW - 4 * 60_000 },
+  history: [{
+    occurrence: NOW - 5 * 60_000, requestId: serverRunId("weekly-release-notes", "c3d4"), cause: "manual", recordedAt: NOW - 5 * 60_000, skippedBefore: 0,
+    outcome: { kind: "running", startedAt: NOW - 5 * 60_000 },
+    projects: [ran("weekly-release-notes", 71, FORGERIE),
+      { cwd: PI_MONO, outcome: { kind: "failed", error: PUSH_FAILED, sessionId: sessionOf("weekly-release-notes", 72) } },
+      { cwd: CALIPER, outcome: { kind: "running", startedAt: NOW - 5 * 60_000 } }],
+  }, ...spreadNotes.history],
 };
 
 const ZONES = ["America/Denver", "America/New_York", "America/Los_Angeles", "Europe/Berlin", "Europe/London", "Asia/Tokyo", "UTC"];

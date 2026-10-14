@@ -50,13 +50,22 @@ export interface TriggerEntry {
   attention: boolean;
 }
 
+/**
+ * A fire still running in some projects that already failed in another. The server sets attention at that failure,
+ * while the fire's summary stays `running` and its `recordedAt` stays the admission time, before `attention.since`.
+ */
+export const failingWhileRunning = (fire: TriggerFire) =>
+  fire.outcome.kind === "running" && fire.projects.some((project) => project.outcome.kind === "failed");
 const isProblem = (fire: TriggerFire) => fire.outcome.kind === "failed" || fire.outcome.kind === "missed";
 
-/** Failed and missed runs recorded since the trigger's attention was set, newest first. */
+/**
+ * Failed and missed runs recorded since the trigger's attention was set, newest first. A running fire with a failed
+ * project counts whatever its admission time: its failures settled after it was recorded.
+ */
 export function problemsSince(trigger: Trigger): TriggerFire[] {
   const since = trigger.attention?.since;
   if (since === undefined) return [];
-  return trigger.history.filter((fire) => isProblem(fire) && fire.recordedAt >= since);
+  return trigger.history.filter((fire) => failingWhileRunning(fire) || (isProblem(fire) && fire.recordedAt >= since));
 }
 
 /** Bad when the newest problem failed, warn when it was missed. A trigger without attention has no tone. */

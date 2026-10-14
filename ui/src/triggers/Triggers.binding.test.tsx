@@ -522,7 +522,7 @@ describe("target projects", () => {
   it("names a workflow whose inputs differ in another project", async () => {
     await render({ view: "trigger", id: triage.id });
     await chooseProjects("forgerie");
-    expect(problemOf("Workflow")).toContain("It asks for different inputs in forgerie.");
+    expect(problemOf("Workflow")).toContain("Its inputs differ between pi-mono and forgerie.");
   });
 });
 
@@ -563,6 +563,39 @@ describe("a fire in several projects", () => {
     expect(text()).toContain("All projects");
     expect(text()).toContain("3 projects");
     expect(button(/^Weekly release notes\./)?.getAttribute("aria-label")).toContain("Runs in 3 projects.");
+  });
+});
+
+describe("a fire that failed in one project while others still start", () => {
+  // pi-mono failed, forgerie started, caliper is still starting. The server set attention at the failure, after it
+  // recorded the running fire, and the fire's summary still says running.
+  const admitted = NOW - 5 * 60_000;
+  const held: Trigger = { ...spreadNotes, attention: { since: admitted + 60_000 }, history: [{
+    occurrence: admitted, requestId: "trigger-weekly-release-notes-held", cause: "schedule", recordedAt: admitted, skippedBefore: 0,
+    outcome: { kind: "running", startedAt: admitted },
+    projects: [
+      { cwd: FORGERIE, outcome: { kind: "started", sessionId: "s-forgerie", runId: "r1" } },
+      { cwd: PI_MONO, outcome: { kind: "failed", error: "Session could not start: the workspace is locked.", sessionId: "s-pi" } },
+      { cwd: CALIPER, outcome: { kind: "running", startedAt: admitted } },
+    ] }, ...spreadNotes.history] };
+
+  it("shows the attention card with the failed project, says the rest still start, and marks it as seen", async () => {
+    await render({ view: "trigger", id: held.id }, [held]);
+    expect(document.querySelector(".alert-card-title")?.textContent).toBe("Failed Oct 12, 5:55 PM");
+    expect(text()).toContain("Failed in pi-mono: 1 of 3 started, 1 failed, 1 still starting.");
+    expect(text()).toContain("1 project is still starting.");
+    expect(text()).toContain("Session could not start: the workspace is locked.");
+    await press("Open session");
+    expect(opened.at(-1)).toEqual({ id: "s-pi", cwd: PI_MONO });
+    await press("Mark as seen");
+    expect(store.calls).toContainEqual(["acknowledge", held.id]);
+    expect(document.querySelector(".alert-card")).toBeNull();
+  });
+
+  it("puts the trigger under Needs a look, in the bad tone, with what settled so far", async () => {
+    await render({ view: "list" }, [held]);
+    expect([...document.querySelectorAll(".record-group-label")].map((node) => node.textContent)).toEqual(["Needs a look"]);
+    expect(document.querySelector(".record-row-outcome")?.textContent).toBe("Starting… 1 of 3 started, 1 failed, 1 still starting");
   });
 });
 
@@ -608,6 +641,27 @@ describe("Run now with several projects", () => {
     await press("caliper");
     await press("Run now");
     expect(store.calls.filter((call) => call[0] === "run")).toEqual([["run", spreadNotes.id, "req1", CALIPER]]);
+  });
+
+  it("keeps the choice locked after a lost answer, even when a later retry is refused", async () => {
+    await render({ view: "trigger", id: spreadNotes.id }, [spreadNotes]);
+    await press("Run now…");
+    await press("One project");
+    await press("pi-mono");
+    store.failNext("run", new TypeError("Failed to fetch"));
+    await press("Run now");
+    // The first request may have reached the server, which keeps its projects: the choice locks.
+    expect(button("All target projects")?.disabled).toBe(true);
+    store.failNext("run", new TriggerRefusal("database is locked", 503));
+    await press("Run now");
+    expect(text()).toContain("Could not run “Weekly release notes”: database is locked");
+    // The 503 says nothing about the lost request, so the choice stays locked and still reads pi-mono.
+    expect(button("All target projects")?.disabled).toBe(true);
+    expect(button("caliper")?.disabled).toBe(true);
+    await press("All target projects");
+    expect(text()).toContain("It starts release-notes in a new session of pi-mono only.");
+    await press("Run now");
+    expect(store.calls.filter((call) => call[0] === "run")).toEqual([["run", spreadNotes.id, "req1", PI_MONO]]);
   });
 
   it("offers every registered project for a trigger on All projects", async () => {

@@ -46,34 +46,34 @@ export function targetHint(targets: TriggerTargets): string {
   return "Each run starts a new session in this folder.";
 }
 
-/** One diagnostic, sorted into what the reader can act on. The server says which project at the end: "… in <cwd>". */
-type Gap = { kind: "missing" | "script" | "inputs"; cwd: string } | { kind: "other"; cwd: string; error: string };
+/**
+ * One diagnostic, sorted into what the reader can act on. The server names the project at the end: "… in <cwd>", or,
+ * for inputs, the two projects it compared: "… differ between <cwdA> and <cwdB>". Every cwd is absolute, so the
+ * second one starts at the first " and /".
+ */
+type Gap = { kind: "missing" | "script"; cwd: string } | { kind: "inputs"; cwds: [string, string] } | { kind: "other"; cwd: string; error: string };
 function gapOf(diagnostic: TriggerWorkflowsResponse["diagnostics"][number]): Gap {
-  const found = /^Workflow (is unavailable|must resolve to prose|input declarations differ) in (.+)$/u.exec(diagnostic.error);
+  const between = /^Workflow input declarations differ between (\/.*?) and (\/.*)$/u.exec(diagnostic.error);
+  if (between) return { kind: "inputs", cwds: [between[1] ?? "", between[2] ?? ""] };
+  const found = /^Workflow (is unavailable|must resolve to prose) in (.+)$/u.exec(diagnostic.error);
   if (!found) return { kind: "other", cwd: diagnostic.path, error: diagnostic.error };
-  const kind = found[1] === "is unavailable" ? "missing" : found[1] === "must resolve to prose" ? "script" : "inputs";
-  return { kind, cwd: found[2] ?? diagnostic.path };
+  return { kind: found[1] === "is unavailable" ? "missing" : "script", cwd: found[2] ?? diagnostic.path };
 }
 const firstLine = (text: string) => text.split("\n").map((line) => line.trim()).find(Boolean) ?? text.trim();
-
-/**
- * The gaps for one workflow. The server compares inputs against the first target's copy, so when some target lacks
- * the workflow, its "inputs differ" lines may only compare against nothing: they are dropped, and the missing
- * projects are what the reader fixes first.
- */
-function gapsFor(workflow: string, diagnostics: Diagnostics): Gap[] {
-  const gaps = diagnostics.filter((item) => item.name === workflow).map(gapOf);
-  return gaps.some((gap) => gap.kind === "missing") ? gaps.filter((gap) => gap.kind !== "inputs") : gaps;
+const gapsFor = (workflow: string, diagnostics: Diagnostics): Gap[] => diagnostics.filter((item) => item.name === workflow).map(gapOf);
+/** The projects a kind of gap names: for inputs, every project in a pair that differs, the shared one first. */
+function gapProjects(gaps: readonly Gap[], kind: Gap["kind"], name: ProjectName): string[] {
+  return [...new Set(gaps.flatMap((gap) => gap.kind !== kind ? [] : gap.kind === "inputs" ? gap.cwds : [gap.cwd]).map(name))];
 }
 
-/** Why a workflow is not offered, in a few words: "Missing in pi-mono", "Inputs differ in caliper". */
+/** Why a workflow is not offered, in a few words: "Missing in pi-mono", "Inputs differ between forgerie and caliper". */
 export function gapShort(workflow: string, diagnostics: Diagnostics, name: ProjectName): string | undefined {
   const gaps = gapsFor(workflow, diagnostics);
   if (gaps.length === 0) return undefined;
-  const where = (kind: Gap["kind"]) => shortList([...new Set(gaps.filter((gap) => gap.kind === kind).map((gap) => name(gap.cwd)))], 2);
+  const where = (kind: Gap["kind"]) => shortList(gapProjects(gaps, kind, name), 2);
   const parts = [
     gaps.some((gap) => gap.kind === "missing") ? `Missing in ${where("missing")}` : undefined,
-    gaps.some((gap) => gap.kind === "inputs") ? `Inputs differ in ${where("inputs")}` : undefined,
+    gaps.some((gap) => gap.kind === "inputs") ? `Inputs differ between ${where("inputs")}` : undefined,
     gaps.some((gap) => gap.kind === "script") ? `A script in ${where("script")}` : undefined,
     gaps.some((gap) => gap.kind === "other") ? `Cannot be read in ${where("other")}` : undefined,
   ].filter(Boolean);
@@ -88,10 +88,10 @@ export function workflowGap(workflow: string, common: Common, name: ProjectName)
   if (!workflow || common.workflows.some((item) => item.name === workflow)) return undefined;
   const gaps = gapsFor(workflow, common.diagnostics);
   const unread = common.diagnostics.filter((item) => item.name === "").map((item) => name(item.path));
-  const where = (kind: Gap["kind"]) => listWords([...new Set(gaps.filter((gap) => gap.kind === kind).map((gap) => name(gap.cwd)))]);
+  const where = (kind: Gap["kind"]) => listWords(gapProjects(gaps, kind, name));
   const reasons = [
     gaps.some((gap) => gap.kind === "missing") ? `It is missing in ${where("missing")}.` : undefined,
-    gaps.some((gap) => gap.kind === "inputs") ? `It asks for different inputs in ${where("inputs")}.` : undefined,
+    gaps.some((gap) => gap.kind === "inputs") ? `Its inputs differ between ${where("inputs")}.` : undefined,
     gaps.some((gap) => gap.kind === "script") ? `It is a script in ${where("script")}, and scripts cannot run on a schedule.` : undefined,
     ...gaps.flatMap((gap) => gap.kind === "other" ? [`${name(gap.cwd)}: ${firstLine(gap.error)}`] : []),
     gaps.length === 0 && unread.length > 0 ? `Forgerie could not read ${listWords([...new Set(unread)])}.` : undefined,
@@ -116,7 +116,11 @@ export const isSpreadFire = (fire: Pick<TriggerFire, "projects">) => fire.projec
 /** "4 of 5 started, 1 failed, 1 unavailable": a spread fire in numbers. */
 export function fireCountWords(fire: Pick<TriggerFire, "projects">): string {
   const summary = triggerFireSummary(fire);
-  if (summary.running > 0) return `${String(summary.total - summary.running)} of ${String(summary.total)} settled, starting…`;
+  if (summary.running > 0) {
+    const settled = ([["failed", summary.failed], ["unavailable", summary.unavailable]] as const).filter(([, count]) => count > 0)
+      .map(([word, count]) => `${String(count)} ${word}`);
+    return [`${String(summary.started)} of ${String(summary.total)} started`, ...settled, `${String(summary.running)} still starting`].join(", ");
+  }
   if (summary.missed === summary.total) return "missed";
   const rest = ([["failed", summary.failed], ["unavailable", summary.unavailable], ["missed", summary.missed]] as const)
     .filter(([, count]) => count > 0).map(([word, count]) => `${String(count)} ${word}`);

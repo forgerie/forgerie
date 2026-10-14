@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Trigger } from "@shared/triggers";
 import {
-  attentionTone, groupTriggers, HEADER_TIGHT, matchesFilter, readTriggersPlace, ROW_NARROW, ROW_WIDE, SHORT_BODY, totalWords, triggerEntry,
+  attentionTone, groupTriggers, HEADER_TIGHT, matchesFilter, problemsSince, readTriggersPlace, ROW_NARROW, ROW_WIDE, SHORT_BODY, totalWords, triggerEntry,
   triggersPlan, writeTriggersPlace,
 } from "./triggersModel";
 import { audit, docs, manyList, mixedList, nightly, notes, triage } from "./fixtures/triggers";
@@ -46,6 +46,18 @@ describe("the session list's entry", () => {
   });
   it("keeps the last count after a failed read", () => {
     expect(triggerEntry({ type: "failed", message: "HTTP 500", last: mixedList }).chip).toEqual({ text: "3", tone: "bad" });
+  });
+});
+
+describe("problems since attention", () => {
+  it("counts a running fire with a failed project, though it was recorded before attention was set", () => {
+    const running: Trigger = { ...nightly, attention: { since: 2_000 }, history: [{ occurrence: 1_000, requestId: "r", cause: "schedule", recordedAt: 1_000, skippedBefore: 0,
+      outcome: { kind: "running", startedAt: 1_000 }, projects: [{ cwd: "/a", outcome: { kind: "failed", error: "x" } }, { cwd: "/b", outcome: { kind: "running", startedAt: 1_000 } }] }] };
+    expect(problemsSince(running).map((fire) => fire.requestId)).toEqual(["r"]);
+    expect(attentionTone(running)).toBe("bad");
+    // Still running everywhere: nothing has failed yet.
+    const quiet: Trigger = { ...running, history: running.history.map((fire) => ({ ...fire, projects: [{ cwd: "/b", outcome: { kind: "running", startedAt: 1_000 } }] })) };
+    expect(problemsSince(quiet)).toEqual([]);
   });
 });
 
