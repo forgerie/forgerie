@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { textOf, type PiMessage } from "../contracts";
-import { issueLinkOf } from "./filedIssue";
+import { issueLinkOf } from "./fileIssueResult";
 
 /**
  * Old issue proposals. Before ADR 0002 an agent proposed an issue and the
@@ -22,6 +22,21 @@ export interface OldIssueProposal {
   title?: string;
   outcome?: OldIssueOutcome;
 }
+
+// Strict mirrors of src/shared/legacyIssueProposals.ts, for the parity test. The reader below is looser on purpose:
+// it reads each field on its own, so an entry the server's schema refuses still shows as a line.
+const legacyOutcomeSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("created"), number: z.number().int().min(1), title: z.string(), url: z.string() }),
+  z.object({ state: z.literal("dismissed") }),
+]);
+export const legacyIssueProposalRecordSchema = z.object({
+  proposal: z.object({
+    proposalId: z.string().min(1), repo: z.string().min(1), title: z.string().min(1).max(256), body: z.string().max(65_000),
+    labels: z.array(z.string().min(1).max(50)).max(20), outcome: legacyOutcomeSchema.optional(),
+  }),
+  targetCwd: z.string().min(1),
+});
+export const legacyIssueProposalDecisionSchema = z.object({ proposalId: z.string().min(1), outcome: legacyOutcomeSchema });
 
 const createdSchema = z.object({ state: z.literal("created"), number: z.number().int().positive(), url: z.unknown() });
 const dismissedSchema = z.object({ state: z.literal("dismissed") });

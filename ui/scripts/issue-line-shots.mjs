@@ -1,8 +1,8 @@
 #!/usr/bin/env -S nix shell nixpkgs#nodejs_24 nixpkgs#chromium -c node
 // Capture the issue lines at the four Fold 8 postures, in the dark and light schemes: the old issue proposal's line and
-// the event sentence it and the filed issue use (their Caliper parts, /__caliper/frame), and the `issues` preview, where
-// both sit in a real thread beside their neighbours. Each capture reports whether the page spills sideways, which none
-// may, and every line's height in lines of text, so a cut-off sentence shows as a number.
+// the event sentence it and the file_issue line use (their Caliper parts, /__caliper/frame), and the `issues` preview,
+// where both sit in a real thread beside their neighbours: `issues` at the filing, `issues-old` at the old lines. Each
+// capture reports whether the page spills sideways, which none may, and every line's height in lines of text.
 // Run from ui/ with the Caliper dev server up (scripts/caliper-dev.mjs):
 //   APP_URL=http://localhost:5173/ scripts/issue-line-shots.mjs
 // PARTS ("file#State file#State ..."), SCHEMES and POSTURES narrow the run. One image pixel is one CSS pixel.
@@ -23,7 +23,7 @@ const sentence = "src/ui/EventSentence.molecule.part.tsx";
 const parts = (process.env.PARTS ?? [
   ...["default", "Dismissed", "Undecided", "Untitled", "Unlinked", "LongTitle"].map((state) => `${line}#${state}`),
   ...["default", "Plain", "Hollow", "LongWords"].map((state) => `${sentence}#${state}`),
-  "preview#issues",
+  "preview#issues", "preview#issues-old",
 ].join(" ")).split(" ");
 const schemes = (process.env.SCHEMES ?? "dark,light").split(",");
 const postures = (process.env.POSTURES ?? FOLD8_POSTURES.map((posture) => posture.name).join(",")).split(",");
@@ -32,8 +32,8 @@ const port = await getFreePort();
 const chrome = launchChrome(process.env.CHROME_BIN || spawnSync("which", ["chromium"], { encoding: "utf8" }).stdout.trim(), port, profile);
 const measure = `(() => ({ spills: document.documentElement.scrollWidth > document.documentElement.clientWidth,
   lines: [...document.querySelectorAll('.event-sentence-text')].map((node) => Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight))) }))()`;
-// The preview opens at its end; the issue rows sit in the middle of the thread, so the first old line scrolls into view.
-const showIssues = `(() => { document.querySelector('.event-sentence')?.scrollIntoView({ block: 'start' }); return true; })()`;
+// The preview opens at its end, where the parent files its issue; `issues-old` scrolls the old lines into view.
+const showOld = `(() => { document.querySelector('.event-sentence')?.scrollIntoView({ block: 'start' }); return true; })()`;
 try {
   await waitForDebugger(port);
   for (const scheme of schemes) {
@@ -54,7 +54,7 @@ try {
           await sleep(100);
         }
         await evaluate(cdp, `document.fonts.ready.then(() => true)`);
-        if (preview) await evaluate(cdp, showIssues);
+        if (preview && state === "issues-old") await evaluate(cdp, showOld);
         await sleep(600);
         const { data } = await cdp.send("Page.captureScreenshot", { format: "png" });
         const file = join(out, `${preview ? "preview" : part.split("/").pop().split(".")[0]}-${state}-${name}-${scheme}.png`);

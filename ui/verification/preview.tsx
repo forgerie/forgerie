@@ -42,7 +42,7 @@ import { PinnedDock } from "../src/ui/PinnedDock";
 import { EventLine } from "../src/ui/EventLine";
 import { CHILDREN, STREAMING, TRANSCRIPT } from "../src/childAgents/fixtures/children";
 import { OldIssueProposalLine } from "../src/issues/OldIssueProposalLine";
-import { FILED } from "../src/issues/fixtures/issues";
+import { DUPLICATE, FILED, LABEL_WARNING } from "../src/issues/fixtures/issues";
 import type { ComposerInputElement } from "../src/ui/ComposerEditor";
 import { WorkflowEntryView } from "../src/workflows/WorkflowEntryView";
 import { WorkflowProposalSheet } from "../src/workflows/WorkflowProposalSheet";
@@ -468,8 +468,8 @@ const childMessages = (): TranscriptMessage[] => [...foldChildEntries(fromHistor
   { role: "custom", customType: CHILD_QUESTION_TYPE, content: "", details: { questionId: "q:40", child: 21, childName: "ui", question: "Should the empty state show the last run, or stay blank?" } },
   ...longer,
 ]).messages)];
-// Issues: the parent files one itself (its tool line, then the issue under it), between old proposals whose cards are
-// gone. The rows come from raw entries through the transcript, as a real session's history does. No network.
+// Issues: old proposals whose cards are gone, then the parent filing one itself: the duplicate check refuses the
+// first try, and the second files it without the agent-filed label, which GitHub refused to create. The rows come from raw entries through the transcript, as a real session's history does. No network.
 const issuePreview = scenario.startsWith("issue");
 const oldProposal = (proposalId: string, title: string) => ({ role: "custom", customType: "forgerie.issue-proposal",
   content: `Proposed issue ${proposalId} on forgerie/forgerie: ${title}. The user decides whether to create it.`,
@@ -485,10 +485,14 @@ const issueMessages = (): TranscriptMessage[] => [...fromHistory([
   oldOutcome("ip-3f1c", { state: "created", number: 142, title: "Retry after a failed send loses the composer draft", url: "https://github.com/forgerie/forgerie/issues/142" }),
   oldOutcome("ip-77a0", { state: "dismissed" }),
   { role: "user", content: "The retry bug came back. File it again, it is a different cause." },
-  { role: "assistant", content: [{ type: "text", text: "I searched open and closed issues first; only the old one matches, and it was a different cause." },
-    { type: "toolCall", id: "file-1", name: "file_issue", arguments: { title: FILED.title, body: "Steps to reproduce…", duplicates: ["retry draft", "composer draft lost"], notDuplicateOf: [142] } }] },
-  { role: "toolResult", toolCallId: "file-1", toolName: "file_issue", content: [{ type: "text", text: `Filed #${String(FILED.number)} ${FILED.url} with agent-filed.` }], details: FILED, isError: false },
-  { role: "assistant", content: [{ type: "text", text: "Filed it with the agent-filed label. I will keep working on the fix." }] },
+  { role: "assistant", content: [{ type: "text", text: "I searched open and closed issues first." },
+    { type: "toolCall", id: "file-0", name: "file_issue", arguments: { title: FILED.title, body: "Steps to reproduce…", duplicates: ["retry draft", "composer draft lost"] } }] },
+  { role: "toolResult", toolCallId: "file-0", toolName: "file_issue", content: [{ type: "text", text: "No issue filed: close title matches." }], details: DUPLICATE, isError: true },
+  { role: "assistant", content: [{ type: "text", text: "Both matches are the old cause; this one is different." },
+    { type: "toolCall", id: "file-1", name: "file_issue", arguments: { title: FILED.title, body: "Steps to reproduce…", duplicates: ["retry draft", "composer draft lost"], notDuplicateOf: [142, 98] } }] },
+  { role: "toolResult", toolCallId: "file-1", toolName: "file_issue", content: [{ type: "text", text: `Filed #${String(FILED.number)} ${FILED.url}\n${LABEL_WARNING}` }],
+    details: { ...FILED, agentFiled: false, labelWarning: LABEL_WARNING }, isError: false },
+  { role: "assistant", content: [{ type: "text", text: "Filed it. GitHub would not create the agent-filed label, so add it by hand. I will keep working on the fix." }] },
 ]).messages];
 // Workflow proposals: an earlier proposal the reader asked to change, and the agent's new one, pinned above the
 // composer while it waits. `workflow-proposal-sheet` opens its sheet; Start shows the run strip. No network.

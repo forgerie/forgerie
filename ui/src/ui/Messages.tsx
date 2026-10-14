@@ -1,10 +1,11 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
 import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui, useAuiState, type GroupByContext, type PartState } from "@assistant-ui/react";
-import { useMemo, useState, type ReactNode } from "react";
-import { artifactDoor, artifactFiled, type HistorySummaryKind, type PullNoticeArtifact, type ShellArtifact, type SummaryArtifact } from "../transcript";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { artifactDoor, artifactIssue, type HistorySummaryKind, type PullNoticeArtifact, type ShellArtifact, type SummaryArtifact } from "../transcript";
 import { PullNoticeRow } from "./PullNoticeRow";
 import { SessionDoorCall } from "./SessionDoor";
 import { EventSentence } from "./EventSentence";
+import type { IssueOutcome, IssueRef } from "../issues/fileIssueResult";
 import { ShellRun } from "./ShellRun";
 import { MarkdownText } from "./MarkdownText";
 import type { FileLinks } from "./FileTree";
@@ -48,7 +49,7 @@ const WORK: readonly GroupKey[] = ["group-work"];
 const isStepKey = (key: string): key is StepKey => key.startsWith(STEP_GROUP);
 function activityPath(part: PartState, context: GroupByContext): readonly GroupKey[] {
   if (part.type !== "tool-call") return groupActivity(part, context);
-  if (artifactDoor(part.artifact) || artifactFiled(part.artifact)) return [];
+  if (artifactDoor(part.artifact) || artifactIssue(part.artifact)) return [];
   return skillLoadOf(part.toolName, part.args) ? skillGroup : groupActivity(part, context);
 }
 function groupAssistantParts(rowOf: ReadonlyMap<string, string>) {
@@ -80,6 +81,25 @@ function stepRow(step: ToolStepView, { text: stepText, thought: stepThought }: S
       body: parts(section.tools, stepTools) }))}>
     {step.narration.length > 0 ? parts(step.narration, stepText) : undefined}
   </TallyRow>;
+}
+
+/** An issue as a sentence names it: the number and the title, linked to the issue when its address is a web address. */
+function issueName({ number, title, href }: IssueRef) {
+  const name = <>#{number}{title !== "" && <> <strong>{title}</strong></>}</>;
+  return href === undefined ? name : <a href={href} target="_blank" rel="noreferrer">{name}</a>;
+}
+/**
+ * What a file_issue call did: the issue it filed, with why it lacks the
+ * agent-filed label if it does, or the issues it would have duplicated. A
+ * refusal is the duplicate check doing its job, so its dot stays neutral.
+ */
+function issueSentence(outcome: IssueOutcome) {
+  if (outcome.state === "duplicate") return <EventSentence tone="neutral">
+    Refused: duplicate of {outcome.matches.map((match, index) => <Fragment key={match.number}>{index > 0 && ", "}{issueName(match)}</Fragment>)}
+  </EventSentence>;
+  return <EventSentence tone="positive">
+    Filed {issueName(outcome.issue)}{outcome.labelWarning !== undefined && <><br />{outcome.labelWarning}</>}
+  </EventSentence>;
 }
 
 // The invocation renders apart from the bubble, which keeps only the typed argument.
@@ -131,11 +151,10 @@ export function AssistantMessage({ fileLinks }: { fileLinks?: FileLinks | undefi
             case "reasoning": return <div className="reasoning-text"><MarkdownText fileLinks={fileLinks} /></div>;
             case "tool-call": {
               const door = artifactDoor(part.artifact);
-              const filed = artifactFiled(part.artifact);
-              // A filed issue keeps the ordinary tool line, so its input and output stay one tap away, and adds the issue under it.
+              const issue = artifactIssue(part.artifact);
+              // A file_issue call keeps the ordinary tool line, so its input and output stay one tap away, and says under it what it did.
               return door ? <SessionDoorCall {...part} door={door} />
-                : filed ? <><ToolCall {...part} /><EventSentence tone="positive">Filed {filed.href === undefined ? <>#{filed.number} <strong>{filed.title}</strong></>
-                  : <a href={filed.href} target="_blank" rel="noreferrer">#{filed.number} <strong>{filed.title}</strong></a>}</EventSentence></>
+                : issue ? <><ToolCall {...part} />{issueSentence(issue)}</>
                 : skillLoadOf(part.toolName, part.args) ? <SkillLoad {...part} /> : <ToolCall {...part} />;
             }
             // Images gather in the reply gallery below the text.
