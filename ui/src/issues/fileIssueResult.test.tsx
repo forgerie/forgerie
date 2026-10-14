@@ -110,9 +110,19 @@ describe("a file_issue call in the thread", () => {
     expect(sentences()[0]?.getAttribute("data-tone")).toBe("neutral");
   });
 
-  it("names a match by its number alone when its title is hidden", async () => {
-    await render(reply(tool(filed({ state: "duplicate", matches: [{ number: 142, title: "" }] }))));
-    expect(sentences().map((node) => node.textContent)).toEqual(["Refused: duplicate of #142"]);
+  it("names a match by its number alone when the server hides its outside contributor's title", async () => {
+    const hidden = (title: string) => ({ ...DUPLICATE, matches: [{ ...DUPLICATE.matches[0]!, title }, DUPLICATE.matches[1]!] });
+    for (const title of ["(title hidden: outside contributor @drive-by)", "(title hidden: outside contributor a deleted user)"]) {
+      const outcome = of(hidden(title), true)!;
+      expect(outcome).toEqual({ state: "duplicate", matches: [{ number: 142, title: "", href: DUPLICATE.matches[0]!.url },
+        { number: 98, title: DUPLICATE.matches[1]!.title, href: DUPLICATE.matches[1]!.url }] });
+      await render(reply(tool(filed(outcome))));
+      expect(sentences().map((node) => node.textContent)).toEqual(["Refused: duplicate of #142, #98 Composer draft lost after a failed retry"]);
+      expect(linksOf(sentences()[0])[0]).toEqual(["#142", DUPLICATE.matches[0]!.url]);
+    }
+    // Only the exact masked form is hidden: a real title that mentions it stays.
+    const quoted = "Explain (title hidden: outside contributor @x) in the docs";
+    expect(of(hidden(quoted), true)).toMatchObject({ matches: [{ title: quoted }, {}] });
   });
 
   it("keeps the call's input and output one tap away", async () => {

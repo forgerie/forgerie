@@ -16,8 +16,12 @@ const webAddress = z.url({ protocol: /^https?$/u });
 /** An issue's address when it is a web address, so a link never runs anything else. */
 export const issueLinkOf = (url: unknown): string | undefined => webAddress.safeParse(url).data;
 
-/** One issue as the thread names it: its number and title, and its link when the address is a web address. */
+/** One issue as the thread names it: its number and title, and its link when the address is a web address. An empty title is hidden. */
 export interface IssueRef { number: number; title: string; href?: string }
+
+// The server hides an outside contributor's title behind this sentence (titleOf in src/server/github/githubAgent.ts).
+// It is words for the agent, not a title, so the thread names that issue by its number alone.
+const HIDDEN_TITLE = /^\(title hidden: outside contributor (?:@\S+|a deleted user)\)$/u;
 /**
  * What the thread shows of a `file_issue` result: the issue it filed, with the
  * reason it lacks the agent-filed label if it does, or the issues it refused
@@ -29,7 +33,7 @@ export type IssueOutcome =
 
 const refOf = ({ number, title, url }: { number: number; title: string; url?: unknown }): IssueRef => {
   const href = issueLinkOf(url);
-  return { number, title, ...(href ? { href } : {}) };
+  return { number, title: HIDDEN_TITLE.test(title) ? "" : title, ...(href ? { href } : {}) };
 };
 
 /**
