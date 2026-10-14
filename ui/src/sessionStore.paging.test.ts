@@ -42,3 +42,23 @@ describe("absolute complete-turn history windows", () => {
     failed = false; await store.loadEarlier(); expect(store.getSnapshot().transcript.messages).toHaveLength(8);
   });
 });
+
+it("resolves an old joined-assistant search target and reads its full-tree entry outside the tail page", async () => {
+  const history = Array.from({ length: 3 }, (_, turn) => [
+    { id: `u${String(turn)}`, role: "user", content: `input ${String(turn)}` },
+    { id: `plan${String(turn)}`, role: "assistant", content: [{ type: "thinking", thinking: "plan" }] },
+    { id: `answer${String(turn)}`, role: "assistant", content: `answer ${String(turn)}` },
+  ]).flat();
+  const server = await createOpenServer(url => {
+    if (url.pathname.endsWith("/open")) return openFixture({ page: { messages: history.slice(6), start: 6, total: 9 } });
+    if (url.pathname.endsWith("/messages")) return { messages: history.slice(0, 6), start: 0, total: 9, historyId: "test-history", epoch: "test-daemon", seq: 0 };
+    if (url.pathname.endsWith("/tree")) return { tree: { nodes: [{ id: "u0", parentId: null, kind: "user", summary: "old input" }, { id: "answer0", parentId: "u0", kind: "assistant", summary: "old answer" }], activeLeafId: "answer0", activePathIds: ["u0", "answer0"] } };
+    return [];
+  }); cleanup.push(server.close);
+  const store = createSessionStore("known", server.transport, {}, { id: "known", cwd: "/workspace" }); cleanup.push(store.dispose);
+  await store.start(); expect(store.getSnapshot().transcript.messages.some(message => message.position === 2)).toBe(false);
+  await store.viewTree(); expect(store.getSnapshot().tree).toMatchObject({ type: "open", tree: { nodes: [expect.anything(), { id: "answer0" }] } });
+  await store.ensurePosition(2);
+  expect(threadMessageIdAt(store.getSnapshot().transcript.messages, 2)).toBe("plan0");
+  expect(server.requests.filter(url => url.pathname.endsWith("/messages"))).toHaveLength(1);
+});
