@@ -1,5 +1,5 @@
 import { processWatchStateSchema } from "../processes/processWatchState.js";
-import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, readdir, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -119,3 +119,66 @@ it.each(["offline", "after-startup"] as const)("restores idle-session watches fo
   expect(wakes).toBe(1);
   expect(f.errors.filter(error => typeof error === "object" && error !== null && "text" in error && error.text === "managed process maintenance failed")).toEqual([]);
 }, 15000);
+
+
+it("starts the daemon after an unused session created an empty process owner", async () => {
+  const f = await fixture(); const first = f.open();
+  const ref = { id: (await first.start(f.root)).id, cwd: f.root };
+  expect(await f.catalog()).toEqual([]);
+  await first.dispose();
+  const directory = join(f.root, "managed-processes", ref.id);
+  expect(await readdir(directory)).toEqual([]);
+  const second = f.open();
+  await expect(second.initializeManagedProcesses()).resolves.toBeUndefined();
+  expect(await readdir(directory)).toEqual([]);
+  expect(f.control.started).toHaveLength(0);
+});
+
+it("isolates an unresolved owner and keeps its records and event evidence while restoring healthy owners", async () => {
+  const f = await fixture(); const first = f.open();
+  const orphan = { id: (await first.start(f.root)).id, cwd: f.root };
+  const core = await first.getManagedProcesses(orphan.id);
+  const record = await core.start({ command: "cat", cwd: f.root });
+  await writeFile(join(record.directory, "output.log"), "retained evidence\n");
+  const healthy = { id: (await first.start(f.root)).id, cwd: f.root };
+  await first.prompt(healthy, "Persist this session");
+  await vi.waitFor(async () => { expect(f.provider.state.callCount).toBeGreaterThan(0); expect((await first.status(healthy)).isStreaming).toBe(false); });
+  const entry = (await f.catalog()).find(item => item.id === healthy.id);
+  if (entry === undefined) throw new Error("Missing healthy session");
+  const watchFile = join(dirname(entry.path), `${orphan.id}.process-watches.json`);
+  await first.dispose();
+  const evidence = JSON.stringify({ version: 1, processes: {}, pending: { summary: { id: "saved", missed: true, events: [
+    { processId: record.id, name: "orphan", watchId: "watch", attention: "context", kind: "match", line: 1, count: 1, samples: [{ number: 1, text: "retained evidence" }] },
+  ] }, cursors: {} } });
+  await writeFile(watchFile, evidence);
+  const command = await readFile(join(record.directory, "command.json"), "utf8");
+  const second = f.open();
+  await expect(second.initializeManagedProcesses()).resolves.toBeUndefined();
+  expect(await (await second.getManagedProcesses(healthy.id)).list()).toEqual([]);
+  expect(await readFile(join(record.directory, "command.json"), "utf8")).toBe(command);
+  expect(await readFile(join(record.directory, "output.log"), "utf8")).toBe("retained evidence\n");
+  expect(await readFile(watchFile, "utf8")).toBe(evidence);
+  expect(JSON.stringify(f.errors)).toContain(orphan.id);
+  expect(f.control.started).toHaveLength(1);
+});
+
+it("retries a failed archive through the production runtime with a usable dispatcher", async () => {
+  const f = await fixture(); const service = f.open();
+  const ref = { id: (await service.start(f.root)).id, cwd: f.root };
+  await service.prompt(ref, "Persist before archive");
+  await vi.waitFor(async () => { expect(f.provider.state.callCount).toBeGreaterThan(0); expect((await service.status(ref)).isStreaming).toBe(false); });
+  const record = await (await service.getManagedProcesses(ref.id)).start({ command: "cat", cwd: f.root });
+  const stop = f.control.launcher.stopSession.bind(f.control.launcher);
+  let attempts = 0;
+  f.control.launcher.stopSession = async id => {
+    if (++attempts === 1) throw new Error("Injected stop failure");
+    await stop(id);
+  };
+  await expect(service.archive(ref)).rejects.toThrow("Injected stop failure");
+  expect(await f.archive.isArchived(ref.id)).toBe(false);
+  await access(join(record.directory, "command.json"));
+  await expect(service.archive(ref)).resolves.toBeUndefined();
+  expect(await f.archive.isArchived(ref.id)).toBe(true);
+  expect(attempts).toBe(2);
+  await expect(access(record.directory)).rejects.toMatchObject({ code: "ENOENT" });
+});

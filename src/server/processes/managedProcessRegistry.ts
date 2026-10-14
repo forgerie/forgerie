@@ -41,8 +41,14 @@ export class ManagedProcessRegistry {
     for (const entry of entries) {
       // proper-lockfile keeps sibling <session>.lock directories, including after a crash.
       if (!entry.isDirectory() || entry.name.endsWith(".lock")) continue;
-      await this.get(entry.name);
-      await onRecovered?.(entry.name);
+      try {
+        await this.get(entry.name);
+        await onRecovered?.(entry.name);
+      } catch (error) {
+        // A lazy, unused session may have no catalog entry. Orphans with evidence must
+        // remain untouched too. Report this owner, not a fatal failure of sessiond.
+        this.options.onError(error, entry.name);
+      }
     }
     this.start();
   }
@@ -72,8 +78,8 @@ export class ManagedProcessRegistry {
     const owner = this.get(sessionId);
     const closing = (async () => {
       const processes = await owner;
-      await this.dispatchers.get(sessionId)?.dispose();
       await processes.closeSession();
+      await this.dispatchers.get(sessionId)?.dispose();
       await processes.dispose();
       this.owners.delete(sessionId);
       this.dispatchers.delete(sessionId);
@@ -108,6 +114,8 @@ export class ManagedProcessRegistry {
   }
 
   private async open(sessionId: string, session?: ManagedProcessSession): Promise<ManagedProcesses> {
+    // Resolve before acquiring/classifying an orphan: even its liveness evidence stays unchanged.
+    const resolved = session ?? await this.options.resolveSession?.(sessionId);
     const launcher = await (this.options.prepareLauncher?.() ?? prepareManagedProcessLauncher(this.options.environment));
     const owner = new ManagedProcesses({ stateDirectory: this.options.stateDirectory, sessionId, launcher,
       ...(this.options.environment === undefined ? {} : { environment: this.options.environment }),
@@ -119,7 +127,6 @@ export class ManagedProcessRegistry {
       catch (error) { if (!hasCode(error, "ELOCKED") || Date.now() >= deadline) throw error; await sleep(250); }
     }
     try {
-      const resolved = session ?? await this.options.resolveSession?.(sessionId);
       if (resolved !== undefined) {
         const dispatcher = new ManagedProcessTools({ sessionId, ...resolved, getManagedProcesses: () => Promise.resolve(owner) });
         await dispatcher.initialize();
