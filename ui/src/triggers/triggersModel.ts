@@ -3,7 +3,7 @@
 // The app's main chunk imports this module, so it imports shared types only:
 // a runtime import of @shared/triggers would bring its schema library along.
 import type { ReactNode } from "react";
-import type { Trigger, TriggerFire, TriggerListResponse } from "@shared/triggers";
+import type { Trigger, TriggerFire, TriggerListResponse, TriggerProjectFire } from "@shared/triggers";
 
 /** `?triggers` is the list, `?triggers&create` the create page, `?triggers=<id>` one trigger. */
 export type TriggerPlace = { view: "list" } | { view: "create" } | { view: "trigger"; id: string };
@@ -56,23 +56,34 @@ export interface TriggerEntry {
  */
 export const failingWhileRunning = (fire: TriggerFire) =>
   fire.outcome.kind === "running" && fire.projects.some((project) => project.outcome.kind === "failed");
-const isProblem = (fire: TriggerFire) => fire.outcome.kind === "failed" || fire.outcome.kind === "missed";
+/** A project's problem time. Old history uses the fire's recorded time. */
+const projectProblemAt = (fire: TriggerFire, project: TriggerProjectFire): number => {
+  const outcome = project.outcome;
+  if (outcome.kind === "failed") return outcome.failedAt ?? fire.recordedAt;
+  if (outcome.kind === "missed") return outcome.missedAt ?? fire.recordedAt;
+  return Number.NEGATIVE_INFINITY;
+};
 
-/**
- * Failed and missed runs recorded since the trigger's attention was set, newest first. A running fire with a failed
- * project counts whatever its admission time: its failures settled after it was recorded.
- */
+/** Only unseen failed or missed projects, newest problem first, not target order. */
+export function projectProblemsSince(fire: TriggerFire, since: number): TriggerProjectFire[] {
+  return fire.projects.filter((project) => projectProblemAt(fire, project) >= since)
+    .sort((a, b) => projectProblemAt(fire, b) - projectProblemAt(fire, a));
+}
+
+/** Fires with unseen project problems, ordered by the newest problem, not fire admission. */
 export function problemsSince(trigger: Trigger): TriggerFire[] {
   const since = trigger.attention?.since;
   if (since === undefined) return [];
-  return trigger.history.filter((fire) => failingWhileRunning(fire) || (isProblem(fire) && fire.recordedAt >= since));
+  return trigger.history.map((fire) => ({ fire, at: Math.max(...fire.projects.map((project) => projectProblemAt(fire, project))) }))
+    .filter(({ at }) => at >= since).sort((a, b) => b.at - a.at).map(({ fire }) => fire);
 }
 
 /** Bad when the newest problem failed, warn when it was missed. A trigger without attention has no tone. */
 export function attentionTone(trigger: Trigger): "bad" | "warn" | undefined {
   if (trigger.attention === null) return undefined;
   const latest = problemsSince(trigger)[0];
-  return latest?.outcome.kind === "missed" ? "warn" : "bad";
+  const project = latest && projectProblemsSince(latest, trigger.attention.since)[0];
+  return project?.outcome.kind === "missed" ? "warn" : "bad";
 }
 
 export function triggerEntry(load: TriggerListLoad): TriggerEntry {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Trigger } from "@shared/triggers";
+import type { Trigger, TriggerFire } from "@shared/triggers";
 import {
   attentionTone, groupTriggers, HEADER_TIGHT, matchesFilter, problemsSince, readTriggersPlace, ROW_NARROW, ROW_WIDE, SHORT_BODY, totalWords, triggerEntry,
   triggersPlan, writeTriggersPlace,
@@ -50,9 +50,41 @@ describe("the session list's entry", () => {
 });
 
 describe("problems since attention", () => {
+  it.each(["failed", "missed"] as const)("filters %s projects by their own timestamp, with recordedAt for old history", (kind) => {
+    const at = 2_000;
+    const fire = (id: string, recordedAt: number, problemAt?: number): TriggerFire => ({
+      occurrence: 1_000, requestId: id, cause: "schedule", recordedAt, skippedBefore: 0,
+      outcome: { kind: "running", startedAt: 1_000 },
+      projects: [{ cwd: "/a", outcome: kind === "failed" ? { kind, error: id, failedAt: problemAt } : { kind, missedAt: problemAt } }],
+    });
+    const trigger: Trigger = { ...nightly, attention: { since: at }, history: [
+      fire("acknowledged", 3_000, at - 1), fire("old-acknowledged", at - 1),
+      fire("boundary", 1_000, at), fire("newest", 1_000, at + 1), fire("old-boundary", at),
+    ] };
+    expect(problemsSince(trigger).map((item) => item.requestId)).toEqual(["newest", "boundary", "old-boundary"]);
+    expect(attentionTone(trigger)).toBe(kind === "failed" ? "bad" : "warn");
+  });
+
+  it("does not revive an acknowledged running fire when an older overlapping fire fails", () => {
+    const running = (id: string, admitted: number, failedAt: number): TriggerFire => ({
+      occurrence: admitted, requestId: id, cause: "schedule", recordedAt: admitted, skippedBefore: 0,
+      outcome: { kind: "running", startedAt: admitted }, projects: [
+        { cwd: "/a", outcome: { kind: "failed", error: id, failedAt } },
+        { cwd: "/b", outcome: { kind: "running", startedAt: admitted } },
+      ],
+    });
+    // B starts, then A. A fails and is seen; B fails later while A's sibling still runs.
+    const a = running("A", 2_000, 3_000);
+    const b = running("B", 1_000, 5_000);
+    const trigger: Trigger = { ...nightly, attention: { since: 5_000 }, history: [a, b] };
+    expect(problemsSince(trigger).map((fire) => fire.requestId)).toEqual(["B"]);
+    expect(problemsSince({ ...trigger, attention: { since: 3_000 } }).map((fire) => fire.requestId)).toEqual(["B", "A"]);
+    expect(problemsSince({ ...trigger, attention: null })).toEqual([]);
+    expect(attentionTone({ ...trigger, attention: null })).toBeUndefined();
+  });
   it("counts a running fire with a failed project, though it was recorded before attention was set", () => {
     const running: Trigger = { ...nightly, attention: { since: 2_000 }, history: [{ occurrence: 1_000, requestId: "r", cause: "schedule", recordedAt: 1_000, skippedBefore: 0,
-      outcome: { kind: "running", startedAt: 1_000 }, projects: [{ cwd: "/a", outcome: { kind: "failed", error: "x" } }, { cwd: "/b", outcome: { kind: "running", startedAt: 1_000 } }] }] };
+      outcome: { kind: "running", startedAt: 1_000 }, projects: [{ cwd: "/a", outcome: { kind: "failed", error: "x", failedAt: 2_000 } }, { cwd: "/b", outcome: { kind: "running", startedAt: 1_000 } }] }] };
     expect(problemsSince(running).map((fire) => fire.requestId)).toEqual(["r"]);
     expect(attentionTone(running)).toBe("bad");
     // Still running everywhere: nothing has failed yet.

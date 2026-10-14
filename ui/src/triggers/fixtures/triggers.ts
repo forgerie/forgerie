@@ -245,7 +245,7 @@ export const stillStarting: Trigger = {
     occurrence: NOW - 5 * 60_000, requestId: serverRunId("weekly-release-notes", "c3d4"), cause: "manual", recordedAt: NOW - 5 * 60_000, skippedBefore: 0,
     outcome: { kind: "running", startedAt: NOW - 5 * 60_000 },
     projects: [ran("weekly-release-notes", 71, FORGERIE),
-      { cwd: PI_MONO, outcome: { kind: "failed", error: PUSH_FAILED, sessionId: sessionOf("weekly-release-notes", 72) } },
+      { cwd: PI_MONO, outcome: { kind: "failed", error: PUSH_FAILED, sessionId: sessionOf("weekly-release-notes", 72), failedAt: NOW - 4 * 60_000 } },
       { cwd: CALIPER, outcome: { kind: "running", startedAt: NOW - 5 * 60_000 } }],
   }, ...spreadNotes.history],
 };

@@ -1,6 +1,6 @@
 import type { Trigger } from "@shared/triggers";
 import { AlertCard, type AlertAction } from "../ui/AlertCard";
-import { failingWhileRunning, problemsSince } from "./triggersModel";
+import { problemsSince, projectProblemsSince } from "./triggersModel";
 import { dateOnly, missedWords, skippedWords, whenShort, type WordClock } from "./triggerWords";
 import { fireCountWords, isSpreadFire, listWords, type ProjectName } from "./triggerTargets";
 
@@ -9,7 +9,7 @@ import { fireCountWords, isSpreadFire, listWords, type ProjectName } from "./tri
  * and the two ways forward. It stays until the reader marks it as seen:
  * opening the page, editing, or running now does not clear it. A run in
  * several projects names the projects that failed; the error shown is the
- * first one's.
+ * newest unseen one's.
  */
 export function TriggerAttention({ trigger, clock, errorLines, projectName, onAcknowledge, onRunNow, onOpenSession }: {
   trigger: Trigger; clock: WordClock;
@@ -23,11 +23,11 @@ export function TriggerAttention({ trigger, clock, errorLines, projectName, onAc
   const latest = problems[0];
   if (trigger.attention === null || !latest) return null;
   const zone = trigger.schedule.timezone;
-  // The fire's own failure, or, while other projects still start, its first failed project's.
-  const running = failingWhileRunning(latest);
-  const firstFailed = latest.projects.find((item) => item.outcome.kind === "failed");
-  const failed = latest.outcome.kind === "failed" ? latest.outcome
-    : running && firstFailed?.outcome.kind === "failed" ? { error: firstFailed.outcome.error, sessionId: firstFailed.outcome.sessionId, cwd: firstFailed.cwd } : undefined;
+  // A fire's summary can still name an acknowledged failure. Use its newest unseen project instead.
+  const unseen = projectProblemsSince(latest, trigger.attention.since);
+  const newest = unseen[0];
+  const running = latest.outcome.kind === "running";
+  const failed = newest?.outcome.kind === "failed" ? { ...newest.outcome, cwd: newest.cwd } : undefined;
   const when = whenShort(latest.occurrence, zone, clock);
   const skipped = skippedWords(latest.skippedBefore);
   const actions: AlertAction[] = [
@@ -36,7 +36,7 @@ export function TriggerAttention({ trigger, clock, errorLines, projectName, onAc
     ...failed?.sessionId && failed.cwd ? [{ label: "Open session", onPress: () => onOpenSession({ id: failed.sessionId ?? "", cwd: failed.cwd ?? "" }) }] : [],
   ];
   const spread = isSpreadFire(latest);
-  const failedIn = latest.projects.filter((item) => item.outcome.kind === "failed").map((item) => projectName(item.cwd));
+  const failedIn = unseen.filter((item) => item.outcome.kind === "failed").map((item) => projectName(item.cwd));
   const stillStarting = latest.projects.filter((item) => item.outcome.kind === "running").length;
   const where = spread && failed && failedIn.length > 0
     ? `Failed in ${listWords(failedIn)}: ${fireCountWords(latest)}.${failedIn.length > 1 ? ` The error below is from ${failedIn[0] ?? ""}.` : ""}` : undefined;

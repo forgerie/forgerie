@@ -575,9 +575,67 @@ describe("a fire that failed in one project while others still start", () => {
     outcome: { kind: "running", startedAt: admitted },
     projects: [
       { cwd: FORGERIE, outcome: { kind: "started", sessionId: "s-forgerie", runId: "r1" } },
-      { cwd: PI_MONO, outcome: { kind: "failed", error: "Session could not start: the workspace is locked.", sessionId: "s-pi" } },
+      { cwd: PI_MONO, outcome: { kind: "failed", error: "Session could not start: the workspace is locked.", sessionId: "s-pi", failedAt: admitted + 60_000 } },
       { cwd: CALIPER, outcome: { kind: "running", startedAt: admitted } },
     ] }, ...spreadNotes.history] };
+
+  it("keeps A's acknowledged error hidden when overlapping fire B fails later", async () => {
+    const starting = (id: string, at: number): TriggerFire => ({
+      occurrence: at, requestId: id, cause: "manual", recordedAt: at, skippedBefore: 0,
+      outcome: { kind: "running", startedAt: at }, projects: [FORGERIE, PI_MONO].map((cwd) => ({ cwd, outcome: { kind: "running", startedAt: at } })),
+    });
+    const publish = async (history: TriggerFire[], attention: Trigger["attention"]) => {
+      const current = store.triggers()[0]!;
+      store.set([{ ...current, revision: current.revision + 1, history, attention }]);
+      await triggersChanged();
+      await flush();
+    };
+    const b = starting("B", NOW - 6 * 60_000);
+    await render({ view: "trigger", id: held.id }, [{ ...held, attention: null, history: [b] }]);
+    const a = starting("A", NOW - 5 * 60_000);
+    await publish([a, b], null);
+    const failedA: TriggerFire = { ...a, projects: [
+      { cwd: FORGERIE, outcome: { kind: "failed", failedAt: NOW - 4 * 60_000, error: "Already-seen A error", sessionId: "s-A" } }, a.projects[1]!,
+    ] };
+    await publish([failedA, b], { since: NOW - 4 * 60_000 });
+    expect(document.querySelector(".alert-card")?.textContent).toContain("Already-seen A error");
+    await press("Mark as seen");
+    expect(document.querySelector(".alert-card")).toBeNull();
+    const failedB: TriggerFire = { ...b, projects: [
+      { cwd: FORGERIE, outcome: { kind: "failed", failedAt: NOW - 2 * 60_000, error: "New unseen B error", sessionId: "s-B" } }, b.projects[1]!,
+    ] };
+    await publish([failedA, failedB], { since: NOW - 2 * 60_000 });
+    const card = document.querySelector(".alert-card")?.textContent;
+    expect(card).toContain("New unseen B error");
+    expect(card).not.toContain("Already-seen A error");
+    expect(card).not.toContain("2 runs had problems");
+    await press("Open session");
+    expect(opened.at(-1)).toEqual({ id: "s-B", cwd: FORGERIE });
+  });
+
+  it("shows no attention card for an acknowledged failure while a sibling still starts", async () => {
+    await render({ view: "trigger", id: held.id }, [{ ...held, attention: null }]);
+    expect(document.querySelector(".alert-card")).toBeNull();
+    expect(button("Mark as seen")).toBeUndefined();
+  });
+
+  it("shows the newest unseen project error rather than a fire's first failed project", async () => {
+    const fire = held.history[0]!;
+    const history: TriggerFire[] = [{ ...fire, outcome: { kind: "failed", error: "Already-seen project error", cwd: FORGERIE, sessionId: "seen" }, projects: [
+      { cwd: FORGERIE, outcome: { kind: "failed", failedAt: admitted, error: "Already-seen project error", sessionId: "seen" } },
+      { cwd: PI_MONO, outcome: { kind: "failed", failedAt: admitted + 60_000, error: "Earlier unseen error", sessionId: "earlier" } },
+      { cwd: CALIPER, outcome: { kind: "failed", failedAt: admitted + 120_000, error: "Newest unseen error", sessionId: "newest" } },
+    ] }];
+    await render({ view: "trigger", id: held.id }, [{ ...held, history }]);
+    const card = document.querySelector(".alert-card")?.textContent;
+    expect(card).toContain("Newest unseen error");
+    expect(card).toContain("Failed in caliper and pi-mono:");
+    expect(card).toContain("The error below is from caliper.");
+    expect(card).not.toContain("Already-seen project error");
+    expect(card).not.toContain("Earlier unseen error");
+    await press("Open session");
+    expect(opened.at(-1)).toEqual({ id: "newest", cwd: CALIPER });
+  });
 
   it("shows the attention card with the failed project, says the rest still start, and marks it as seen", async () => {
     await render({ view: "trigger", id: held.id }, [held]);
