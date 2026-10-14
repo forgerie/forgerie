@@ -46,24 +46,30 @@ export function targetHint(targets: TriggerTargets): string {
   return "Each run starts a new session in this folder.";
 }
 
-/**
- * One diagnostic, sorted into what the reader can act on. The server names the project at the end: "… in <cwd>", or,
- * for inputs, the two projects it compared: "… differ between <cwdA> and <cwdB>". Every cwd is absolute, so the
- * second one starts at the first " and /".
- */
-type Gap = { kind: "missing" | "script"; cwd: string } | { kind: "inputs"; cwds: [string, string] } | { kind: "other"; cwd: string; error: string };
+/** Structured common-workflow diagnostics name projects without parsing paths out of prose. */
+type Gap = { kind: "missing" | "script" | "inputs"; cwds: readonly string[] } | { kind: "other"; cwds: readonly string[]; error: string };
 function gapOf(diagnostic: TriggerWorkflowsResponse["diagnostics"][number]): Gap {
+  if (diagnostic.reason) {
+    const cwds = diagnostic.cwds ?? [diagnostic.path];
+    switch (diagnostic.reason) {
+      case "missing": return { kind: "missing", cwds };
+      case "script": return { kind: "script", cwds };
+      case "inputs-differ": return { kind: "inputs", cwds };
+      case "unreadable": return { kind: "other", cwds, error: diagnostic.error };
+    }
+  }
+  // Legacy per-cwd diagnostics have no reason or cwds.
   const between = /^Workflow input declarations differ between (\/.*?) and (\/.*)$/u.exec(diagnostic.error);
   if (between) return { kind: "inputs", cwds: [between[1] ?? "", between[2] ?? ""] };
   const found = /^Workflow (is unavailable|must resolve to prose) in (.+)$/u.exec(diagnostic.error);
-  if (!found) return { kind: "other", cwd: diagnostic.path, error: diagnostic.error };
-  return { kind: found[1] === "is unavailable" ? "missing" : "script", cwd: found[2] ?? diagnostic.path };
+  if (!found) return { kind: "other", cwds: [diagnostic.path], error: diagnostic.error };
+  return { kind: found[1] === "is unavailable" ? "missing" : "script", cwds: [found[2] ?? diagnostic.path] };
 }
 const firstLine = (text: string) => text.split("\n").map((line) => line.trim()).find(Boolean) ?? text.trim();
 const gapsFor = (workflow: string, diagnostics: Diagnostics): Gap[] => diagnostics.filter((item) => item.name === workflow).map(gapOf);
 /** The projects a kind of gap names: for inputs, every project in a pair that differs, the shared one first. */
 function gapProjects(gaps: readonly Gap[], kind: Gap["kind"], name: ProjectName): string[] {
-  return [...new Set(gaps.flatMap((gap) => gap.kind !== kind ? [] : gap.kind === "inputs" ? gap.cwds : [gap.cwd]).map(name))];
+  return [...new Set(gaps.flatMap((gap) => gap.kind !== kind ? [] : gap.cwds).map(name))];
 }
 
 /** Why a workflow is not offered, in a few words: "Missing in pi-mono", "Inputs differ between forgerie and caliper". */
@@ -87,13 +93,13 @@ export function gapShort(workflow: string, diagnostics: Diagnostics, name: Proje
 export function workflowGap(workflow: string, common: Common, name: ProjectName): string | undefined {
   if (!workflow || common.workflows.some((item) => item.name === workflow)) return undefined;
   const gaps = gapsFor(workflow, common.diagnostics);
-  const unread = common.diagnostics.filter((item) => item.name === "").map((item) => name(item.path));
+  const unread = common.diagnostics.filter((item) => item.name === "").flatMap((item) => gapOf(item).cwds.map(name));
   const where = (kind: Gap["kind"]) => listWords(gapProjects(gaps, kind, name));
   const reasons = [
     gaps.some((gap) => gap.kind === "missing") ? `It is missing in ${where("missing")}.` : undefined,
     gaps.some((gap) => gap.kind === "inputs") ? `Its inputs differ between ${where("inputs")}.` : undefined,
     gaps.some((gap) => gap.kind === "script") ? `It is a script in ${where("script")}, and scripts cannot run on a schedule.` : undefined,
-    ...gaps.flatMap((gap) => gap.kind === "other" ? [`${name(gap.cwd)}: ${firstLine(gap.error)}`] : []),
+    ...gaps.flatMap((gap) => gap.kind === "other" ? [`${listWords(gap.cwds.map(name))}: ${firstLine(gap.error)}`] : []),
     gaps.length === 0 && unread.length > 0 ? `Forgerie could not read ${listWords([...new Set(unread)])}.` : undefined,
   ].filter(Boolean);
   return [`“${workflow}” cannot run in every target project.`, ...reasons.length ? reasons : ["No target project has it."],

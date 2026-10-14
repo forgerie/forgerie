@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { TriggerWorkflowsResponse } from "@shared/triggers";
 import {
   fireCountWords, gapShort, projectsInOrder, targetChip, targetHint, targetNames, targetsKey, targetSummary, workflowGap,
 } from "./triggerTargets";
@@ -30,6 +31,37 @@ describe("target projects in words", () => {
 });
 
 describe("a workflow the target projects do not share", () => {
+  it("uses structured project paths even when a path contains ' and /'", () => {
+    const first = "/projects/one and /nested";
+    const second = "/projects/two";
+    const name = (cwd: string) => cwd === first ? "First project" : cwd === second ? "Second project" : cwd;
+    const diagnostics: TriggerWorkflowsResponse["diagnostics"] = [{
+      name: "nightly", path: `${second}/.pi/prompts/nightly.md`,
+      error: `Workflow input declarations differ between ${first} and ${second}`,
+      reason: "inputs-differ", cwds: [first, second],
+    }];
+    expect(gapShort("nightly", diagnostics, name)).toBe("Inputs differ between First project and Second project");
+    expect(workflowGap("nightly", { workflows: [], diagnostics }, name)).toBe(
+      "“nightly” cannot run in every target project. Its inputs differ between First project and Second project. Choose another workflow, or change the projects.");
+  });
+
+  it.each([
+    ["missing", "Missing in pi-mono", "It is missing in pi-mono."],
+    ["script", "A script in pi-mono", "It is a script in pi-mono, and scripts cannot run on a schedule."],
+    ["unreadable", "Cannot be read in pi-mono", "pi-mono: Could not load workflow"],
+    ["inputs-differ", "Inputs differ between forgerie and pi-mono", "Its inputs differ between forgerie and pi-mono."],
+  ] as const)("uses the %s reason and cwds regardless of the error text or workflow file path", (reason, short, detail) => {
+    const diagnostics = [{ name: "nightly", path: `${CALIPER}/.pi/prompts/nightly.md`, error: "Could not load workflow", reason,
+      cwds: reason === "inputs-differ" ? [FORGERIE, PI_MONO] : [PI_MONO] }];
+    expect(gapShort("nightly", diagnostics, projectLabel)).toBe(short);
+    expect(workflowGap("nightly", { workflows: [], diagnostics }, projectLabel)).toContain(detail);
+  });
+
+  it("names unreadable projects from cwds rather than the diagnostic file path", () => {
+    expect(workflowGap("nightly", { workflows: [], diagnostics: [{
+      name: "", path: `${PI_MONO}/.pi/prompts`, error: "ENOENT", reason: "unreadable", cwds: [PI_MONO],
+    }] }, projectLabel)).toContain("Forgerie could not read pi-mono.");
+  });
   it("says which project lacks it and which declares other inputs", () => {
     const common = commonWorkflows(fixed(FORGERIE, PI_MONO));
     expect(workflowGap("refine-backlog", common, projectLabel)).toBe(
