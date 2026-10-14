@@ -21,6 +21,7 @@ describe("six-entry session lifetime", () => {
     await vi.waitFor(() => expect(api.registry.getSnapshot().every(record => record.state === "seeded")).toBe(true));
     expect(api.sockets.clients.size).toBe(6);
     expect(api.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(6);
+    await vi.waitFor(() => expect(api.requests).toHaveLength(48)); // All initial panel refresh timers have finished.
     expect(api.registry.select(session("s1"))).toBe(prefetched);
     const requests = api.requests.length;
     await new Promise(resolve => setTimeout(resolve, 20)); expect(api.requests).toHaveLength(requests);
@@ -50,4 +51,23 @@ describe("six-entry session lifetime", () => {
     await vi.waitFor(() => expect(registry.getSnapshot().every(record => record.state === "seeded")).toBe(true));
     expect(server.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(2);
   });
+});
+
+it("keeps a deeply paged selected reader intact, then demotes it only when hidden", async () => {
+  const messages = Array.from({ length: 300 }, (_, index) => ({ id: `m${String(index)}`, role: index % 2 === 0 ? "user" : "assistant", content: `text ${String(index)}` }));
+  const server = await createOpenServer(url => {
+    if (url.pathname.endsWith("/open")) return openFixture({ session: session(url.pathname.split("/").at(-2) ?? "known"), page: { messages: messages.slice(250), start: 250, total: 300 } });
+    if (url.pathname.endsWith("/messages")) { const before = Number(url.searchParams.get("before")); return { messages: messages.slice(before - 50, before), start: before - 50, total: 300, historyId: "test-history", epoch: "test-daemon", seq: 0 }; }
+    return [];
+  }); cleanup.push(server.close);
+  const registry = createSessionRegistry(server.transport, { isVisible: () => true, afterPaint: async () => {} }); cleanup.push(registry.dispose);
+  const entry = registry.select(session("deep")); if (!entry) throw new Error("Missing selected entry");
+  await vi.waitFor(() => expect(entry.store.getSnapshot().connection.type).toBe("ready"));
+  for (let index = 0; index < 5; index++) await entry.store.loadEarlier();
+  expect(entry.store.getSnapshot().transcript.messages).toHaveLength(300);
+  expect(registry.getSnapshot().some(record => record.entry === entry)).toBe(true);
+  const disposed = vi.fn(); entry.onDispose(disposed);
+  registry.select(session("next"));
+  expect(disposed).toHaveBeenCalledTimes(1);
+  expect(registry.getSnapshot().some(record => record.entry === entry)).toBe(false);
 });

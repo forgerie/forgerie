@@ -1,3 +1,4 @@
+import { afterTranscriptPaint } from "../readPaint";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorktreeApi, WorktreeInfo } from "./worktreeApi";
 
@@ -23,7 +24,7 @@ export function combineWorktree(sources: { catalog?: WorktreeInfo | undefined; s
  * the session opens and each time a run ends, because that is when commits
  * and edits change; nothing polls.
  */
-export function useSessionWorktree(api: Pick<WorktreeApi, "get"> | undefined, sources: { catalog?: WorktreeInfo | undefined; status?: WorktreeInfo | undefined }, running: boolean) {
+export function useSessionWorktree(api: Pick<WorktreeApi, "get"> | undefined, sources: { catalog?: WorktreeInfo | undefined; status?: WorktreeInfo | undefined }, running: boolean, visibility?: { visible: boolean; revision: number; afterPaint?: (signal: AbortSignal) => Promise<void> }) {
   const [fetched, setFetched] = useState<WorktreeInfo>();
   const id = sources.catalog?.id ?? sources.status?.id;
   const active = (sources.catalog ?? sources.status)?.state.kind === "active";
@@ -36,14 +37,23 @@ export function useSessionWorktree(api: Pick<WorktreeApi, "get"> | undefined, so
       if (attempt === latest.current) setFetched(result.info);
     } catch { /* The counts stay as last read; the status read still describes the worktree. */ }
   }, [api, id]);
-  const observed = useRef<string | undefined>(undefined);
-  // Each observed run's end, and the first open, read Git again; not an unchanged Activity reveal.
+  const observed = useRef<{ id: string | undefined; event: string } | undefined>(undefined);
+  const visible = visibility?.visible ?? true;
+  const revision = visibility?.revision;
+  const afterPaint = visibility?.afterPaint ?? afterTranscriptPaint;
   useEffect(() => {
-    const key = JSON.stringify([id, running, active]);
-    if (observed.current === key) return;
-    observed.current = key;
-    if (!running && active) void refresh();
-  }, [id, running, active, refresh]);
+    if (!visible) return;
+    const event = JSON.stringify([running, active, revision]);
+    const previous = observed.current;
+    if (previous?.id === id && previous?.event === event) return;
+    observed.current = { id, event };
+    if (running || !active) return;
+    if (previous === undefined || previous.id !== id || visibility === undefined) { void refresh(); return; }
+    const controller = new AbortController();
+    let refreshed = false;
+    void afterPaint(controller.signal).then(() => { if (!controller.signal.aborted) { refreshed = true; void refresh(); } });
+    return () => { controller.abort(); if (!refreshed) observed.current = previous; };
+  }, [id, running, active, refresh, visible, revision, afterPaint, visibility === undefined]);
   const info = combineWorktree({ ...sources, fetched: fetched?.id === id ? fetched : undefined });
   return { info, refresh };
 }

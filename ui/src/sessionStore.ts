@@ -24,6 +24,7 @@ const MAX_PROBLEMS = 20;
 export interface SessionState {
   connection: Connection;
   earlier: EarlierHistory;
+  completedRuns: number;
   /** When the live connection last finished a join. */
   lastReadyAt?: number;
   /** Newest first. */
@@ -128,7 +129,7 @@ export function shellAvailabilityOf(state: SessionState): ShellAvailability {
 export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session, reads?: ReadTracker,
   /** Server events the transcript does not use, by Pi event type, such as a child agent's change. */
   onPiEvent?: (eventType: string) => void) {
-  let state: SessionState = { connection: { type: "loading" }, earlier: { type: "complete" }, problems: [], ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree, dialogPhase: noDialogPhase };
+  let state: SessionState = { connection: { type: "loading" }, earlier: { type: "complete" }, completedRuns: 0, problems: [], ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree, dialogPhase: noDialogPhase };
   const now = timing.now ?? Date.now;
   let problemId = 0;
   /** The same words twice add nothing: a reconnect can replay the event that reported them. */
@@ -168,6 +169,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   const update = (next: SessionState) => {
     if (lifetime.signal.aborted) return;
     // Pi reports a failed run on the transcript. Each new report becomes a problem.
+    const busy = (value: SessionState) => value.transcript.isRunning || isBashRunning(value) || value.status?.isCompacting === true;
+    next = { ...next, completedRuns: state.completedRuns + (busy(state) && !busy(next) ? 1 : 0) };
     const error = next.transcript.error;
     state = error !== undefined && error !== state.transcript.error ? withProblem(next, "Pi reported an error", error) : next;
     for (const listener of listeners) listener();
@@ -403,7 +406,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (readRefreshRequested && selectedVisible && reads?.isVisible()) { readRefreshRequested = false; reload(); }
     } catch (error) {
       if (!current(attempt)) return;
-      if (permanent(error)) stop(error);
+      if (error instanceof ReadFailure && error.status === 409) retry(attempt, error);
+      else if (permanent(error)) stop(error);
       else retry(attempt, error);
     }
   }

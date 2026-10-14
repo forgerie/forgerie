@@ -1,3 +1,4 @@
+import { afterTranscriptPaint } from "../readPaint";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { sameLink, type MergeMethod, type PullItem, type PullLink, type PullRequestApi, type PullSessionRef } from "./pullRequestApi";
 
@@ -37,7 +38,7 @@ const upsert = (items: readonly PullItem[], next: PullItem) =>
  * request it names: each read costs several GitHub requests, and the server's
  * watcher, not this client, is the poller.
  */
-export function useSessionPulls(api: PullRequestApi, ref: PullSessionRef | undefined, catalogLinks: readonly PullLink[], lifetime?: AbortSignal): SessionPulls {
+export function useSessionPulls(api: PullRequestApi, ref: PullSessionRef | undefined, catalogLinks: readonly PullLink[], lifetime?: AbortSignal, visibility?: { visible: boolean; revision: number; afterPaint?: (signal: AbortSignal) => Promise<void> }): SessionPulls {
   const [load, setLoad] = useState<PullsLoad>({ type: "loading" });
   const [reading, setReading] = useState<ReadonlySet<number>>(new Set());
   const [notice, setNotice] = useState<SessionPulls["notice"]>();
@@ -52,29 +53,53 @@ export function useSessionPulls(api: PullRequestApi, ref: PullSessionRef | undef
   const latestCatalog = useRef(catalogLinks);
   const fullRead = useRef<{ key: string; controller: AbortController } | undefined>(undefined);
   latestCatalog.current = catalogLinks;
+  const visible = visibility?.visible ?? true;
+  const revision = visibility?.revision ?? 0;
+  const afterPaint = visibility?.afterPaint ?? afterTranscriptPaint;
+  const catalogKey = catalogLinks.map(linkKey).join("|");
+  const fullCatalogKey = visibility === undefined ? "" : catalogKey;
+  const suspended = useRef(false);
+  const completedVersion = useRef(revision);
+  const readingFull = useRef(false);
+  useEffect(() => () => { suspended.current = true; }, []);
   useEffect(() => {
-    if (!id || !cwd) return;
-    const key = JSON.stringify([id, cwd, generation]);
-    if (lifetime && fullRead.current?.key === key) return;
-    fullRead.current?.controller.abort();
+    if (!id || !cwd || !visible) return;
+    const key = JSON.stringify([id, cwd, generation, revision]);
+    const changedCatalog = catalogLinks.some(link => seen.current.get(`${link.repo.toLowerCase()}#${String(link.number)}`) !== linkKey(link))
+      || seen.current.size !== catalogLinks.length;
+    const hiddenEvent = suspended.current && changedCatalog;
+    const versionChanged = completedVersion.current !== revision;
+    const previous = fullRead.current;
+    suspended.current = false;
+    if (lifetime && previous?.key === key && !previous.controller.signal.aborted && !hiddenEvent) return;
+    previous?.controller.abort();
     const controller = new AbortController();
     fullRead.current = { key, controller };
     const signal = lifetime ? AbortSignal.any([lifetime, controller.signal]) : controller.signal;
-    setLoad((current) => current.type === "ready" ? current : { type: "loading" });
-    api.list({ id, cwd }, signal).then((items) => {
+    readingFull.current = true;
+    let admitted = false;
+    const read = async () => {
       if (signal.aborted) return;
-      seen.current = new Map(latestCatalog.current.map((link) => [`${link.repo.toLowerCase()}#${String(link.number)}`, linkKey(link)]));
-      setLoad({ type: "ready", items });
-    }, (error: unknown) => {
-      if (!signal.aborted) setLoad({ type: "failed", message: messageOf(error) });
-    });
-    return lifetime ? undefined : () => controller.abort();
-  }, [api, id, cwd, generation, lifetime]);
+      admitted = true; completedVersion.current = revision;
+      setLoad(current => current.type === "ready" ? current : { type: "loading" });
+      try {
+        const items = await api.list({ id, cwd }, signal);
+        if (signal.aborted) return;
+        seen.current = new Map(latestCatalog.current.map(link => [`${link.repo.toLowerCase()}#${String(link.number)}`, linkKey(link)]));
+        setLoad({ type: "ready", items });
+      } catch (error) { if (!signal.aborted) setLoad({ type: "failed", message: messageOf(error) }); }
+      finally { readingFull.current = false; }
+    };
+    const defer = previous !== undefined && (hiddenEvent || versionChanged || previous.controller.signal.aborted && previous.key === key);
+    if (defer) void afterPaint(signal).then(read); else void read();
+    return () => {
+      if (!lifetime || !admitted) { controller.abort(); readingFull.current = false; }
+    };
+  }, [api, id, cwd, generation, lifetime, visible, revision, afterPaint, fullCatalogKey]);
 
   // Partial reads: a catalog link that appeared or changed is read again; a link that went away leaves.
-  const catalogKey = catalogLinks.map(linkKey).join("|");
   useEffect(() => {
-    if (!id || !cwd || !loaded) return;
+    if (!id || !cwd || !loaded || !visible || readingFull.current) return;
     const links = latestCatalog.current;
     const now = new Map(links.map((link) => [`${link.repo.toLowerCase()}#${String(link.number)}`, linkKey(link)]));
     const changed = links.filter((link) => seen.current.get(`${link.repo.toLowerCase()}#${String(link.number)}`) !== linkKey(link));
@@ -97,7 +122,7 @@ export function useSessionPulls(api: PullRequestApi, ref: PullSessionRef | undef
       ).finally(() => setReading((current) => { const next = new Set(current); next.delete(link.number); return next; }));
     }
     return lifetime ? undefined : () => controller.abort();
-  }, [api, id, cwd, loaded, catalogKey, lifetime]);
+  }, [api, id, cwd, loaded, catalogKey, lifetime, visible]);
 
   const refresh = useCallback(() => { setLoad({ type: "loading" }); setGeneration((value) => value + 1); }, []);
   const write = useCallback(async (run: (target: PullSessionRef) => Promise<void>): Promise<boolean> => {

@@ -1,3 +1,4 @@
+import { afterTranscriptPaint } from "../readPaint";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ChangesReview } from "../ui/ChangesReview";
 import { markdownView } from "../ui/markdownView";
@@ -24,9 +25,10 @@ const message = (cause: unknown) => cause instanceof Error ? cause.message : Str
  * them again after each run, so a new one appears when the run that made it
  * ends. Nothing is added to the input bar.
  */
-export function RelatedWorkspaces({ api, request, source, busy, visible = true, links, onAsk, own, commands }: {
+export function RelatedWorkspaces({ api, request, source, busy, visible = true, afterPaint = afterTranscriptPaint, links, onAsk, own, commands }: {
   visible?: boolean | undefined;
-  api: ProjectGroupApi; request: Fetch; source: { id: string; cwd: string }; busy: boolean; links: readonly PullLink[]; onAsk: (text: string) => void;
+  afterPaint?: ((signal: AbortSignal) => Promise<void>) | undefined;
+  api: ProjectGroupApi; request: Fetch; source: { id: string; cwd: string; completionRevision?: number | undefined }; busy: boolean; links: readonly PullLink[]; onAsk: (text: string) => void;
   own?: OwnWorktree | undefined;
   commands?: SessionMenuSection["commands"] | undefined;
 }) {
@@ -50,13 +52,24 @@ export function RelatedWorkspaces({ api, request, source, busy, visible = true, 
     // A failed read keeps the chips already drawn; the next run's end reads again.
     try { setRelated((await api.context(ref)).related); } catch { /* Keep the last known chips. */ }
   }, [api, ref]);
-  const observed = useRef<string | undefined>(undefined);
+  const observed = useRef<{ identity: string; event: string } | undefined>(undefined);
   useEffect(() => {
-    const key = JSON.stringify([source.id, source.cwd, busy]);
-    if (observed.current === key) return;
-    observed.current = key;
-    if (!busy) void refresh();
-  }, [source.id, source.cwd, busy, refresh]);
+    if (!visible) return;
+    const identity = JSON.stringify([source.id, source.cwd]);
+    const event = JSON.stringify([busy, source.completionRevision]);
+    const previous = observed.current;
+    if (previous?.identity === identity && previous.event === event) return;
+    observed.current = { identity, event };
+    if (busy) return;
+    if (previous?.identity !== identity) { void refresh(); return; }
+    const controller = new AbortController();
+    let refreshed = false;
+    void afterPaint(controller.signal).then(() => {
+      if (controller.signal.aborted) return;
+      refreshed = true; void refresh();
+    });
+    return () => { controller.abort(); if (!refreshed) observed.current = previous; };
+  }, [source.id, source.cwd, source.completionRevision, busy, visible, afterPaint, refresh]);
 
   // Review notes wait per worktree, saved with this chat's drafts, until they go into a message.
   const [drafts] = useState(() => createDraftStore(browserStorage()));

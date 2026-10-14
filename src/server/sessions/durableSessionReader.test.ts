@@ -7,12 +7,13 @@ import { WebSocket } from "ws";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxToolCall, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
-import { Harness, GenerationTask, LiveDoc, UserEntry, createRegistry, defineExtension, defineTool, type EntryRecord } from "@earendil-works/pi-durable";
+import { Harness, GenerationTask, InboxDoc, LiveDoc, UsageDoc, UserEntry, createRegistry, defineExtension, defineTool, type EntryRecord } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { durableBrowserSnapshotSchema, type DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import { SessionEventHub, type RealtimeSocket } from "../realtime/sessionEventHub.js";
+import { initializeParentDocuments } from "./durableParentDocuments.js";
 import { DurableParentReadModel } from "./durableParentReadModel.js";
 import { DurableSessionReader } from "./durableSessionReader.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
@@ -299,4 +300,25 @@ describe("native read-model HTTP and WebSocket paths", () => {
       await expect(sent).rejects.toThrow(kind === "stalled" ? "stalled" : "byte limit");
     } finally { socket.terminate(); await app.close(); }
   });
+});
+
+it("serves a configured native open as one read-only cut and releases its lease on failure", async () => {
+  const f = await fixture();
+  await f.conversation().commit(async tx => {
+    await initializeParentDocuments(tx, { id: f.conversation().id });
+    await tx.doc(LiveDoc, f.conversation().id); await tx.doc(InboxDoc, f.conversation().id); await tx.doc(UsageDoc, f.conversation().id);
+  }, context);
+  await f.user("native open without any JSONL");
+  const base = await f.start();
+  const path = `${base}/sessions/logical/open?${new URLSearchParams({ cwd: f.directory, limit: "50" })}`;
+  const response = await fetch(path);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ readPath: "native", epoch: f.hub.epoch, session: { id: "logical" }, page: { start: 0, total: 1, messages: [{ content: "native open without any JSONL" }] } });
+  expect(f.leased()).toBe(0);
+  expect(await f.scheduling()).toBe("paused");
+  f.failAcquire(new Error("native read unavailable"));
+  const failed = await fetch(path);
+  expect(failed.status).toBe(503);
+  expect(await failed.json()).toMatchObject({ error: "native read unavailable" });
+  expect(f.leased()).toBe(0);
 });

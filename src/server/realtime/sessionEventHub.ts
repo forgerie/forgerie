@@ -156,7 +156,7 @@ export class SessionEventHub {
     const seq = (this.seqBySession.get(sessionId) ?? 0) + 1;
     this.seqBySession.set(sessionId, seq);
     const payload = JSON.stringify({ ...projectBrowserSessionEvent(event), seq });
-    this.sendToSockets(this.socketsBySession.get(sessionId), payload, event.type.startsWith("shell.") || event.type === "command.output" || event.type.startsWith("dialog.") || event.type === "session.error");
+    this.sendToSockets(this.socketsBySession.get(sessionId), payload, event.type.startsWith("shell.") || event.type === "command.output" || event.type.startsWith("dialog.") || event.type === "session.error" || event.type === "pi.event" || event.type === "processes.update" || event.type === "processes.output");
   }
 
   /**

@@ -87,5 +87,21 @@ it("retains its context on reveal and excludes hidden body-level review portals"
   expect(context).toHaveBeenCalledTimes(2);
   await act(async () => render(true, "other", true));
   await act(async () => render(true, "other", false));
+  await until(() => context.mock.calls.length === 3);
   expect(context).toHaveBeenCalledTimes(3);
+});
+
+it("coalesces hidden run completions into one context refresh after the paint signal", async () => {
+  const context = vi.fn(async () => related);
+  let painted!: () => void;
+  const paint = new Promise<void>(resolve => { painted = resolve; });
+  const afterPaint = () => paint;
+  const bound = { ...api, context };
+  const render = (visible: boolean, revision: number) => root.render(<RelatedWorkspaces api={bound} request={request}
+    source={{ id: "chat", cwd: "/code/korri", completionRevision: revision }} visible={visible} afterPaint={afterPaint} busy={false} links={[]} onAsk={() => undefined} />);
+  await act(async () => render(true, 0)); expect(context).toHaveBeenCalledTimes(1);
+  await act(async () => render(false, 1)); await act(async () => render(false, 2)); expect(context).toHaveBeenCalledTimes(1);
+  await act(async () => render(true, 2)); expect(context).toHaveBeenCalledTimes(1);
+  await act(async () => painted()); expect(context).toHaveBeenCalledTimes(2);
+  await act(async () => render(false, 2)); await act(async () => render(true, 2)); expect(context).toHaveBeenCalledTimes(2);
 });

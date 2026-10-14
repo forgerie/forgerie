@@ -206,7 +206,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
   }, [cwd]);
   const pullRef = useMemo(() => sessionId && cwd ? { id: sessionId, cwd } : undefined, [sessionId, cwd]);
   const ownPulls = useMemo(() => catalogPulls?.filter((link) => link.session.cwd === cwd) ?? NO_LINKS, [catalogPulls, cwd]);
-  const pull = useSessionPulls(pullRequests, pullRef, ownPulls, entry.signal);
+  const pull = useSessionPulls(pullRequests, pullRef, ownPulls, entry.signal, { visible, revision: state.completedRuns });
   const [pullOpen, setPullOpen] = useState(false);
   const [pullSelected, setPullSelected] = useState<number>();
   const pullItems = pull.load.type === "ready" ? pull.load.items : [];
@@ -244,7 +244,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     } catch { /* The store exposes the command error. */ }
   }, [store, chatDraft]);
   const busy = state.transcript.isRunning || isBashRunning(state) || state.status?.isCompacting === true;
-  const { info: worktree, refresh: refreshWorktree } = useSessionWorktree(worktrees, { catalog: catalogWorktree, status: state.status?.worktree }, busy);
+  const { info: worktree, refresh: refreshWorktree } = useSessionWorktree(worktrees, { catalog: catalogWorktree, status: state.status?.worktree }, busy, { visible, revision: state.completedRuns });
   // Landed or discarded: the transcript is saved, the folder is gone, Pi does not run here again.
   const readOnly = state.status?.readOnly === true || (worktree !== undefined && worktree.state.kind !== "active");
   const treeAvailable = state.connection.type === "ready" && !state.sending && !busy && !readOnly;
@@ -500,7 +500,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
           // The catalog's status can lag the live one; the server refuses an archive during any run.
           availability={isBashRunning(state) || state.status?.isStreaming === true || state.status?.isCompacting === true
             ? { type: "blocked", reason: "Stop the run first" } : archive.availability} />}
-        {sessionId && cwd && relatedWork ? relatedWork({ visible, ref: { id: sessionId, cwd }, busy, links: catalogPulls ?? NO_LINKS, onAsk: appendToDraft, commands: sessionCommands,
+        {sessionId && cwd && relatedWork ? relatedWork({ visible, ref: { id: sessionId, cwd, completionRevision: state.completedRuns }, busy, links: catalogPulls ?? NO_LINKS, onAsk: appendToDraft, commands: sessionCommands,
           own: worktree && worktrees && worktree.state.kind === "active" ? { info: worktree, onCommand: setWorktreeCommand } : undefined })
           : visible ? <SessionMenu info={worktree && worktrees && worktree.state.kind === "active" ? worktree : undefined} busy={busy} onCommand={setWorktreeCommand} commands={sessionCommands} /> : null}
       </>}>

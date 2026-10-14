@@ -75,3 +75,16 @@ it("keeps today's buffered completion reconciliation for an explicitly sequentia
   await new Promise(resolve => setTimeout(resolve, 10)); gate.release(); await starting;
   expect(store.getSnapshot().transcript.messages.map(messageText)).toEqual(["input", "finished between history and partial", "next partial grows"]);
 });
+
+it("acknowledges the exact hidden completion receipt only after that entry becomes visibly selected", async () => {
+  let observer: ((id: string, receipt?: { catalogId: string; throughCompletionOrder: number }) => void) | undefined;
+  let documentVisible = false;
+  const server = await createOpenServer(url => url.pathname.endsWith("/open") ? openFixture() : { catalogId: "epoch", sessions: [] }); cleanup.push(server.close);
+  const reads = createReadTracker(server.transport, { isVisible: () => documentVisible, subscribe: listener => { observer = listener; return () => { observer = undefined; }; }, afterRender: async () => {} });
+  const store = createSessionStore("known", server.transport, {}, session, reads); cleanup.push(store.dispose);
+  await store.start(); observer?.("known", { catalogId: "epoch", throughCompletionOrder: 7 });
+  store.setVisible(true); await new Promise(resolve => setTimeout(resolve, 10));
+  expect(server.requests.some(url => url.pathname.endsWith("/unread/acknowledge"))).toBe(false);
+  documentVisible = true; store.setVisible(false); store.setVisible(true);
+  await vi.waitFor(() => expect(server.requests.filter(url => url.pathname.endsWith("/unread/acknowledge"))).toHaveLength(1));
+});

@@ -8,7 +8,8 @@ import type { Context } from "@earendil-works/chord";
 import type { ContextView, ConversationView, Cursor, EntryRecord, UsageState, WatchEnd, WatchHandle } from "@earendil-works/pi-durable";
 import { AgentDoc, InboxDoc, LiveDoc, UsageDoc } from "@earendil-works/pi-durable";
 import { ParentAsks, ParentAsksSchema, ParentResponse, ParentResponseSchema, Presentation, PresentationSchema, SessionName, SessionNameSchema } from "./durableParentDocuments.js";
-import type { SessionOpenResult } from "./sessionOpen.js";
+import { SessionOpenError, type SessionOpenResult } from "./sessionOpen.js";
+import { SessionBindings } from "./durableSessionBindings.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE } from "../../shared/apiTypes.js";
 import { ParentAskOutcomeSchema } from "./sessionResponse.js";
@@ -68,6 +69,7 @@ export class DurableParentReadModel {
     const membership = new Map<string, number>();
     const stop = handle.harness.subscribeCommits(publication => {
       for (const change of publication.changes) {
+        if (change.type === "document" && change.value === null && change.record.kind === SessionBindings.definition.kind) retiredRequired++;
         if (change.type === "document" && change.conversationId === id) {
           if (change.value === null) retiredRequired++;
           if (change.record.kind === Presentation.definition.kind && change.record.key !== undefined) {
@@ -89,6 +91,7 @@ export class DurableParentReadModel {
           handle.harness.snapshot(SessionName, id, context),
         ]);
         if (required.some(value => value === undefined)) throw new Error("Native open requires initialized parent documents");
+        const bound = await handle.harness.snapshot(SessionBindings, context);
         let cursor: Cursor | undefined;
         do {
           const page = await handle.conversation.entries({ order: "ascending" }, SCAN_SIZE, cursor, context);
@@ -110,6 +113,9 @@ export class DurableParentReadModel {
             entries.push(...page.items); cursor = page.next;
           } while (cursor !== undefined);
           // No table reads may follow document acquisition (which can stage initialization).
+          if (bound !== undefined && (await tx.doc(SessionBindings)).sessions[handle.address.sessionId]?.conversationId !== id) {
+            throw new SessionOpenError("Session history changed during native open", 409, "HISTORY_CHANGED");
+          }
           const live = await tx.doc(LiveDoc, id), inbox = await tx.doc(InboxDoc, id);
           const agent = await tx.doc(AgentDoc, id), usage = await tx.doc(UsageDoc, id);
           const asks = copyJson(await tx.doc(ParentAsks, id)), response = await tx.doc(ParentResponse, id), name = await tx.doc(SessionName, id);

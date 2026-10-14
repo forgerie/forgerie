@@ -144,3 +144,32 @@ it("retains several unsaved shells and does not mistake an old identical record 
   hub.savedHostOutput("s", [...saved, { id: "new", role: "bashExecution", command: "date", output: "same", exitCode: 0 }]);
   expect(hub.transientEvents("s").filter(event => event.type === "shell.start")).toHaveLength(1);
 });
+
+import { rename, writeFile } from "node:fs/promises";
+import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
+
+it("retries a real saved JSONL replacement without mixing readonly messages and positions", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "fast-open-readonly-"));
+  const path = join(directory, "history.jsonl");
+  const contents = (text: string) => [
+    { type: "session", version: 3, id: "readonly", cwd: "/workspace", timestamp: "2026-01-01T00:00:00Z" },
+    { type: "message", id: "u", parentId: null, timestamp: "2026-01-01T00:01:00Z", message: { role: "user", content: text, timestamp: 1 } },
+  ].map(value => JSON.stringify(value)).join("\n") + "\n";
+  await writeFile(path, contents("old history"));
+  const gateway = createPiSessionManagerGateway({ agentDir: directory, env: {}, sessionDirEnvKeys: [] });
+  const readonly = gateway.openReadOnly?.bind(gateway); if (readonly === undefined) throw new Error("Readonly gateway is required");
+  let replaced = false;
+  const runtime = vi.fn(() => Promise.reject(new Error("Saved opens must not start a runtime")));
+  const service = new PiSessionService(new SessionEventHub(), { agentDir: directory, modelRuntime: testModelRuntime, createAgentRuntime: runtime,
+    archiveStore: { ...emptyArchiveStore(), get: () => Promise.resolve({ sessionId: "readonly", cwd: "/workspace", archivePath: path, archivedAt: "2026-01-01" }) },
+    sessionManager: { ...gateway, openReadOnly: async file => {
+      const manager = await readonly(file);
+      if (!replaced) { replaced = true; await writeFile(path + ".replacement", contents("new history")); await rename(path + ".replacement", path); }
+      return manager;
+    } }, heartbeatIntervalMs: 60_000 });
+  try {
+    const result = await service.open({ id: "readonly", cwd: "/workspace" }, { limit: 50 });
+    expect(result.page).toMatchObject({ start: 0, total: 1, messages: [{ content: "new history" }] });
+    expect(result.status.readOnly).toBe(true); expect(result.snapshot.partial).toBeNull(); expect(runtime).not.toHaveBeenCalled();
+  } finally { await service.dispose(); await rm(directory, { recursive: true, force: true }); }
+});
