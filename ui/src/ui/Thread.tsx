@@ -1,6 +1,6 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AuiIf, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
+import { AuiIf, ThreadPrimitive } from "@assistant-ui/react";
 import { ArrowDownIcon } from "lucide-react";
 import { createLatest } from "./latest";
 import { Composer, type ShellBinding } from "./Composer";
@@ -25,7 +25,7 @@ import type { EarlierHistory } from "../historyPaging";
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode. `working` says what a draft can
 // do while the session works; `queue` is what already waits.
-export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact, fileLinks, linkBase, linkError, onOpenFile, reveal, earlier }: {
+export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact, fileLinks, linkBase, linkError, onOpenFile, reveal, earlier, followTail }: {
   /**
    * Whether older messages exist above the first loaded one. The runtime's
    * `hasEarlier` and `onLoadEarlier` load them; this only describes the state.
@@ -38,6 +38,13 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
    * of its first message.
    */
   reveal?: { messageId: string; key: string } | undefined;
+  /**
+   * Follow the tail while the reader is at the bottom: pass true once the thread is loaded and idle. Late growth (a
+   * diagram finishing its draw) then keeps the last turn in view. Leave it false while the thread loads or a turn
+   * runs: the turn stays anchored at the top, and opening a running chat jumps to its tail instead of
+   * smooth-scrolling down from the start (measured: about 1.1 s instead of 0.18 s to a readable last turn).
+   */
+  followTail?: boolean | undefined;
   /** Base URL for relative Markdown links. Null keeps file links inactive until the binding resolves their folder. */
   linkBase?: string | null | undefined;
   linkError?: string | undefined;
@@ -57,8 +64,6 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
   // The artifact view changes whenever the binding's data does. System rows read the current one, so they keep
   // their identity and their local state (a decision in flight, its error) across those changes.
   const [artifactView] = useState(() => createLatest(systemArtifact));
-  // Follow the tail only once a loaded thread is idle; see the viewport below.
-  const follow = useAuiState((s) => !s.thread.isRunning && !s.thread.isLoading);
   useLayoutEffect(() => { artifactView.set(systemArtifact); }, [artifactView, systemArtifact]);
   const hasArtifact = systemArtifact !== undefined;
   // One component identity per view function, so messages do not remount on each render.
@@ -78,12 +83,8 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
     return revealId === undefined ? undefined : revealMessage(column.current, revealId, step);
   }, [revealKey, revealId]);
   return <MarkdownLinkContext.Provider value={linkScope}><ImageViewerProvider><ThreadPrimitive.Root className="thread">
-    {/* While idle, follow the tail when the reader is at the bottom, so late growth (a diagram finishing its draw)
-        keeps the last turn in view. assistant-ui defaults autoScroll to false with turnAnchor="top", which let late
-        growth push an idle transcript off its bottom. While the thread loads or a turn runs, keep that default: the
-        turn stays anchored at the top, and opening a running chat jumps to its tail instead of smooth-scrolling
-        down from the start (measured: about 1.1 s instead of 0.18 s to a readable last turn). */}
-    <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top" autoScroll={follow}>
+    {/* assistant-ui defaults autoScroll to false with turnAnchor="top"; followTail turns it on for an idle thread. */}
+    <ThreadPrimitive.Viewport className="transcript" aria-label="Conversation" turnAnchor="top" autoScroll={followTail === true}>
       <div ref={column} className="thread-column">
         <AuiIf condition={(s) => s.thread.isLoading && s.thread.messages.length === 0}>
           <div className="history-loading" role="status" aria-label="Loading conversation">

@@ -505,7 +505,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
           : visible ? <SessionMenu info={worktree && worktrees && worktree.state.kind === "active" ? worktree : undefined} busy={busy} onCommand={setWorktreeCommand} commands={sessionCommands} /> : null}
       </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
-      <Thread earlier={state.earlier} ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
+      <Thread earlier={state.earlier} followTail={!state.transcript.isRunning && state.connection.type !== "loading"} ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
         reveal={reveal}
         beforeComposer={<>
           {found && matchBar && <MatchBar view={matchBar} onClose={found.onClose} onRetry={retryFound ?? (() => undefined)}
