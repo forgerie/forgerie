@@ -55,16 +55,11 @@ function subject(name: string, args: unknown): string | null {
 }
 
 interface ShellWord { start: number; end: number; value: string }
-/** Short options whose value is masked, as a separate word (`-u root`) or attached (`-uroot`). */
-const SECRET_SHORT = /^-[puH]$/;
-/** An option whose value is masked: the contract's list, plus long options that name a credential, user, or header. */
-const isSecretOption = (name: string) => SECRET_SHORT.test(name) || /^--[A-Za-z0-9-]*(?:token|passw|secret|key|auth|credential|header|user)[A-Za-z0-9-]*$/i.test(name);
 /**
- * A word shown as written must hold only these characters once the outer shell decodes it. Anything else
- * (spaces, quotes, backslashes, shell operators) means the word can be a script for a nested shell, `eval`,
- * or another parser that we do not run, so it can hide an option or a secret from this masker.
+ * A bash row shows its program name only, never an argument. No masking rule can know which arguments a
+ * program, `env -S`, `eval`, or a nested shell treats as a secret; three review rounds found new leaks in each.
  */
-const PLAIN_WORD = /^[A-Za-z0-9_./:@%+,=-]*$/;
+const PROGRAM_NAME = /^[A-Za-z0-9_.+][A-Za-z0-9_.+-]*$/;
 
 /** Only simple shell words are supported. Never display syntax whose word boundaries can change at execution. */
 function shellWords(command: string): ShellWord[] | null {
@@ -112,35 +107,12 @@ function shellWords(command: string): ShellWord[] | null {
 function bashSubject(command: string): string | null {
   const words = shellWords(command);
   if (words === null) return null;
-  let masked = "";
-  let cursor = 0;
-  let maskNext = false;
-  for (const word of words) {
-    const gap = command.slice(cursor, word.start);
-    if (maskNext && gap.includes("\n")) return null;
-    let replacement = command.slice(word.start, word.end);
-    const equals = word.value.indexOf("=");
-    const option = equals >= 0 ? word.value.slice(0, equals) : word.value;
-    // Whole-word masks come first: they hide everything after the name, whatever it holds.
-    if (maskNext) replacement = "…";
-    else if (equals >= 0 && isSecretOption(option)) replacement = `${option}=…`;
-    else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word.value)) replacement = `${word.value.slice(0, equals)}=…`;
-    else if (isSecretOption(word.value)) replacement = word.value;
-    else if (SECRET_SHORT.test(word.value.slice(0, 2)) && word.value.length > 2) replacement = `${word.value.slice(0, 2)}…`;
-    // A URL that carries `user:password@` keeps only its scheme.
-    else if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/]*@/.test(word.value)) replacement = `${word.value.slice(0, word.value.indexOf("://") + 3)}…`;
-    // Any other `name=value` keeps its name only: the value can be a script for `env -S` or a credential.
-    else if (equals > 0 && PLAIN_WORD.test(option)) replacement = `${option}=…`;
-    // Fail closed: a word that is not plain can be a nested script (`bash -c`, `eval`, `sh -c`) whose own
-    // quoting turns `--"token"` into an option. Never infer safety from a missing match; omit the subject.
-    else if (!PLAIN_WORD.test(word.value)) return null;
-    maskNext = isSecretOption(word.value);
-    masked += gap + replacement;
-    cursor = word.end;
-  }
-  if (maskNext) return null;
-  // Validate the complete command and mask whole words before taking the public first-line prefix.
-  return (masked + command.slice(cursor)).split("\n")[0]?.slice(0, 120) ?? "";
+  // Leading `NAME=value` words only set the environment. Their values are private, so skip them.
+  const first = words.find(word => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word.value));
+  if (first === undefined) return null;
+  // The path can name private folders: keep the basename.
+  const program = first.value.slice(first.value.lastIndexOf("/") + 1);
+  return PROGRAM_NAME.test(program) ? program.slice(0, 120) : null;
 }
 async function toolCall(tx: Tx, input: unknown) {
   const fields = object(input);

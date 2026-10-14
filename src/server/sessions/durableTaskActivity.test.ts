@@ -181,7 +181,7 @@ it("uses the assistant's matching tool call, allowlists subjects, and requires b
   const row = (id: TaskId) => result.tasks.find(task => task.id === id);
   expect(row(safe)).toMatchObject({ label: "Read", subject: "src/private.ts", tool: { name: "read", replay: "safe" }, restart: "resumes", startedAt: null });
   expect(row(savedUnsafe)).toMatchObject({ tool: { name: "read", replay: "unsafe" }, restart: "stops" });
-  expect(row(command)).toMatchObject({ label: "Run", subject: "KEY=… run --token … --password=… --secret … --key=… -p …" });
+  expect(row(command)).toMatchObject({ label: "Run", subject: "run" });
   expect(row(quoted)).toMatchObject({ subject: null });
   expect(row(longPath)?.subject).toBe("x".repeat(120));
   expect(row(custom)).toMatchObject({ label: "Use `custom`", subject: null, restart: "stops" });
@@ -283,54 +283,40 @@ it("does not publish a family read that finishes after watch disposal", async ()
 });
 
 it.each([
-  { command: String.raw`run --token "abc\" SECRET_TAIL"`, expected: "run --token …" },
-  { command: 'env "KEY=first SECRET_TAIL" run', expected: "env KEY=… run" },
-  { command: "env 'KEY=first SECRET_TAIL' run", expected: "env KEY=… run" },
-  { command: String.raw`env K"E"Y=first\ SECRET_TAIL run`, expected: "env KEY=… run" },
-  { command: `run '--password=first SECRET_TAIL'`, expected: "run --password=…" },
-  { command: `run "--secret" 'first SECRET_TAIL'`, expected: "run --secret …" },
-  { command: String.raw`run --key="first\" SECRET_TAIL"`, expected: "run --key=…" },
-  { command: String.raw`run --token 'first'" SECRET_TAIL"`, expected: "run --token …" },
-  { command: String.raw`run --token "first\\\" SECRET_TAIL"`, expected: "run --token …" },
-  { command: `run -p 'first SECRET_TAIL'`, expected: "run -p …" },
-  { command: "run -pSECRET_TAIL", expected: "run -p…" },
+  // Every leak found in review rounds 1 to 3. Only the program name may appear.
+  { command: String.raw`run --token "abc\" SECRET_TAIL"`, expected: "run" },
+  { command: 'env "KEY=first SECRET_TAIL" run', expected: "env" },
+  { command: String.raw`env K"E"Y=first\ SECRET_TAIL run`, expected: "env" },
+  { command: `bash -c 'run --"token" SECRET_TAIL'`, expected: "bash" },
+  { command: String.raw`bash -c 'run --to\ken SECRET_TAIL'`, expected: "bash" },
+  { command: `eval 'run --"password" SECRET_TAIL'`, expected: "eval" },
+  { command: `sh -c 'run --to"ken" SECRET_TAIL'`, expected: "sh" },
+  { command: "env --split-string='run --token' SECRET_TAIL", expected: "env" },
+  { command: "env -S'KEY=x run --token' SECRET_TAIL", expected: "env" },
+  { command: "xargs env --split-string='run --token' SECRET_TAIL", expected: "xargs" },
+  { command: "run --token_value SECRET_TAIL", expected: "run" },
+  { command: "eval run --token '' SECRET_TAIL", expected: "eval" },
+  { command: "curl -sHAuthorization:SECRET_TAIL https://example.com", expected: "curl" },
+  { command: "curl -su user:SECRET_TAIL https://example.com", expected: "curl" },
+  { command: "git clone https://user:SECRET_TAIL@example.com/repo.git", expected: "git" },
+  { command: "tool SECRET_TAIL", expected: "tool" },
+  // Leading assignments are skipped; a path keeps its basename.
+  { command: "KEY=SECRET_TAIL TOKEN='SECRET_TAIL x' npm test -- durableTriggers", expected: "npm" },
+  { command: "/home/SECRET_TAIL/bin/deploy --now", expected: "deploy" },
+  { command: "./node_modules/.bin/vitest run", expected: "vitest" },
+  // Nothing to show, or syntax the parser refuses.
+  { command: "KEY=SECRET_TAIL", expected: null },
+  { command: "'SECRET_TAIL program' --flag", expected: null },
+  { command: "--SECRET_TAIL", expected: null },
   { command: 'run --token "first SECRET_TAIL', expected: null },
   { command: "run --token SECRET_TAIL\\", expected: null },
   { command: 'run --token "$(printf SECRET_TAIL)"', expected: null },
-  { command: "run --token '$(printf SECRET_TAIL)'", expected: null },
   { command: 'run --token "`printf SECRET_TAIL`"', expected: null },
   { command: "run <<EOF\nSECRET_TAIL\nEOF", expected: null },
   { command: "run --token SECRET_TAIL | cat", expected: null },
   { command: "run --token SECRET_TAIL; echo done", expected: null },
-  { command: "bash -c 'run --token SECRET_TAIL'", expected: null },
-  { command: "bash -c 'KEY=SECRET_TAIL run'", expected: "bash -c KEY=…" },
-  { command: `env --split-string='run --token=SECRET_TAIL'`, expected: "env --split-string=…" },
-  { command: `env --split-string='KEY=SECRET_TAIL'`, expected: "env --split-string=…" },
   { command: "run --token 'first\nSECRET_TAIL'", expected: null },
-  { command: "run --token SECRET_TAIL\necho $(unsupported)", expected: null },
-  // Review round 2: a nested shell decodes quotes and escapes the outer masker never sees.
-  { command: `bash -c 'run --"token" SECRET_TAIL'`, expected: null },
-  { command: String.raw`bash -c 'run --to\ken SECRET_TAIL'`, expected: null },
-  { command: `eval 'run --"password" SECRET_TAIL'`, expected: null },
-  { command: `sh -c 'run --to"ken" SECRET_TAIL'`, expected: null },
-  { command: `sh -c "run --'secret' SECRET_TAIL"`, expected: null },
-  { command: String.raw`bash -c run\ --token\ SECRET_TAIL`, expected: null },
-  { command: `eval "KEY=x;run --token SECRET_TAIL"`, expected: "eval KEY=…" },
-  { command: String.raw`run --to\ken SECRET_TAIL`, expected: "run --token …" },
-  { command: `run --"token" SECRET_TAIL`, expected: "run --token …" },
-  { command: "run --password=SECRET_TAIL --verbose", expected: "run --password=… --verbose" },
-  { command: "env -SKEY=SECRET_TAIL run", expected: "env -SKEY=… run" },
-  { command: "env --split-string=KEY=SECRET_TAIL run", expected: "env --split-string=… run" },
-  { command: "run --api-token SECRET_TAIL", expected: "run --api-token …" },
-  { command: "run --AUTH=SECRET_TAIL", expected: "run --AUTH=…" },
-  { command: "curl -H Authorization:SECRET_TAIL https://example.com", expected: "curl -H … https://example.com" },
-  { command: "curl -uuser:SECRET_TAIL https://example.com", expected: "curl -u… https://example.com" },
-  { command: "run --header=Authorization:SECRET_TAIL", expected: "run --header=…" },
-  { command: "run --reporter=SECRET_TAIL", expected: "run --reporter=…" },
-  { command: "npm test -- durableTriggers", expected: "npm test -- durableTriggers" },
-  { command: "git clone https://user:SECRET_TAIL@example.com/repo.git", expected: "git clone https://…" },
-  { command: "curl https://example.com/path", expected: "curl https://example.com/path" },
-])("masks shell words or omits unsupported bash syntax: $command", async ({ command, expected }) => {
+])("shows only a bash command's program name: $command", async ({ command, expected }) => {
   const storage = new MemoryStorage();
   const parent = await seedConversation(storage);
   const assistant = await storage.mintId<EntryId>();
