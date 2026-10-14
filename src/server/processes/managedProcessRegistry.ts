@@ -28,14 +28,15 @@ export class ManagedProcessRegistry {
     if (!Number.isFinite(interval) || interval <= 0) throw new Error("Managed process maintenance interval must be positive");
   }
 
-  async initialize(isClosed?: (sessionId: string) => Promise<boolean>): Promise<void> {
+  async initialize(onRecovered?: (sessionId: string) => Promise<void>): Promise<void> {
     let entries: Dirent[];
     try { entries = await readdir(join(this.options.stateDirectory, "managed-processes"), { withFileTypes: true }); }
     catch (error) { if (!hasCode(error, "ENOENT")) throw error; entries = []; }
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
+      // proper-lockfile keeps sibling <session>.lock directories, including after a crash.
+      if (!entry.isDirectory() || entry.name.endsWith(".lock")) continue;
       await this.get(entry.name);
-      if (await isClosed?.(entry.name) === true) await this.closeSession(entry.name);
+      await onRecovered?.(entry.name);
     }
     this.start();
   }
@@ -78,9 +79,12 @@ export class ManagedProcessRegistry {
     this.stopped = true;
     clearInterval(this.timer); this.timer = undefined;
     await this.maintenance;
-    await Promise.all(this.closing.values());
-    await Promise.all([...this.owners.values()].map(async (owner) => (await owner).dispose()));
+    const closing = await Promise.allSettled(this.closing.values());
+    const disposed = await Promise.allSettled([...this.owners.values()].map(async (owner) => (await owner).dispose()));
     this.owners.clear();
+    const failures: unknown[] = [];
+    for (const result of [...closing, ...disposed]) if (result.status === "rejected") failures.push(result.reason);
+    if (failures.length > 0) throw new AggregateError(failures, "Managed process owners could not all be disposed");
   }
 
   private async open(sessionId: string): Promise<ManagedProcesses> {

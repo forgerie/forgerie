@@ -207,7 +207,8 @@ and logs under the owner lease. A stop or inspection failure keeps the evidence
 and fails the close. Land, Discard, archive cleanup, and scheduled/manual
 worktree cleanup share the same pre-removal hook. Workspace services keep their
 separate shutdown hook. The registry then disposes the owner and removes its
-empty directory.
+empty directory. Session close also deletes the originating session directory's
+`<sessionId>.process-watches.json`; daemon/runtime disposal leaves it intact.
 
 Version 1 records now optionally contain `child: { name, runId }` and
 `keepAfterChild`. Old records without these fields remain session-owned.

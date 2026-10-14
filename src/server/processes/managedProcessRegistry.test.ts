@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile, access } from "node:fs/promises";
+import { AttachedManagedProcessLauncher } from "./managedProcessLauncher.js";
+import { mkdtemp, mkdir, readFile, rm, writeFile, access, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -31,6 +32,11 @@ it("shares concurrent ownership, resumes all saved sessions, and maintains unrea
   await first.dispose();
   expect(f.stoppedSessions).toEqual([]);
   await writeFile(join(record.directory, "output.log"), "first\nsecond\nthird\n");
+  // An abruptly killed owner can leave this sibling directory behind.
+  const staleLease = join(f.root, "managed-processes/idle.lock");
+  await mkdir(staleLease);
+  const stale = new Date(Date.now() - 20_000);
+  await utimes(staleLease, stale, stale);
   const second = f.registry(); await second.initialize();
   await vi.waitFor(async () => {
     const position = await readFile(join(record.directory, "read-position.json"), "utf8");
@@ -79,4 +85,17 @@ it("stops only the finishing child run, retaining kept, session-owned, and secon
   expect(f.stopped).toEqual(["parent/first", "parent/second"]);
   expect((await owner.status("kept")).state.kind).toBe("running");
   expect((await owner.status("session")).state.kind).toBe("running");
+});
+
+it("closes a real attached command before removing its files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "managed-attached-close-")); roots.push(root);
+  const registry = new ManagedProcessRegistry({ stateDirectory: root, prepareLauncher: () => Promise.resolve(new AttachedManagedProcessLauncher()),
+    onError: (error) => { throw error; } });
+  registries.push(registry);
+  const owner = await registry.get("attached");
+  const record = await owner.start({ id: "one", command: "printf ready; exec /bin/cat", cwd: root });
+  expect(record.supervision.kind).toBe("attached");
+  await vi.waitFor(async () => { expect(await readFile(join(record.directory, "output.log"), "utf8")).toContain("ready"); });
+  await registry.closeSession("attached");
+  await expect(access(record.directory)).rejects.toMatchObject({ code: "ENOENT" });
 });

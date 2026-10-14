@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { readSessionFileStats, type SessionFileStats } from "./sessionFileStats.js";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { clampThinkingLevel, type ImageContent } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
@@ -1436,14 +1436,15 @@ export class PiSessionService implements SessionRouteService {
     this.sessionHeaderCache.clear();
     this.pendingSessionHeaderReads.clear();
     this.notificationStore.clearAll("service-dispose");
-    await Promise.all(activeSessions.map(async (active) => {
-      active.unsubscribe();
-      active.runtime.setRebindSession(undefined);
-      this.workspaceActivity?.removeSession(active.runtime.session.sessionId, active.runtime.session.sessionManager.getCwd());
-      // Daemon shutdown closes journals and leaves unfinished work resumable. Stop remains an explicit abort operation.
-      await active.runtime.dispose();
-    }));
-    await this.managedProcesses?.dispose();
+    try {
+      await Promise.all(activeSessions.map(async (active) => {
+        active.unsubscribe();
+        active.runtime.setRebindSession(undefined);
+        this.workspaceActivity?.removeSession(active.runtime.session.sessionId, active.runtime.session.sessionManager.getCwd());
+        // Daemon shutdown closes journals and leaves unfinished work resumable. Stop remains an explicit abort operation.
+        await active.runtime.dispose();
+      }));
+    } finally { await this.managedProcesses?.dispose(); }
     await this.sessionManager.flushSessionNames?.();
     await this.publishUnreadMutations([]);
   }
@@ -1551,7 +1552,21 @@ export class PiSessionService implements SessionRouteService {
     return withSessionTabs(withPinnedFlags(ownedSessions, pinnedSessionIdSet(pinnedRecords)), tabsBySessionId(tabsRecords));
   }
 
-  async initializeManagedProcesses(): Promise<void> { await this.managedProcesses?.initialize((id) => this.archiveStore.isArchived(id)); }
+  async initializeManagedProcesses(): Promise<void> {
+    await this.managedProcesses?.initialize(async (id) => {
+      if (await this.archiveStore.isArchived(id)) await this.closeSessionManagedProcesses(id);
+    });
+  }
+
+  private async closeSessionManagedProcesses(sessionId: string, transcriptPath?: string): Promise<void> {
+    if (this.managedProcesses === undefined) return;
+    // The gateway opens transcripts with dirname(path) as getSessionDir(). Capture
+    // the original path before archive/delete, never the relocated archive copy.
+    const path = transcriptPath ?? (await this.archiveStore.get(sessionId))?.originalPath
+      ?? (await (this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll())).find((session) => session.id === sessionId)?.path;
+    await this.managedProcesses.closeSession(sessionId);
+    if (path !== undefined) await rm(join(dirname(path), `${sessionId}.process-watches.json`), { force: true });
+  }
 
   async getManagedProcesses(sessionId: string): Promise<ManagedProcesses> {
     if (this.managedProcesses === undefined) throw new Error("Managed processes are not configured");
@@ -1569,7 +1584,11 @@ export class PiSessionService implements SessionRouteService {
     const sessions = await this.worktreeSessionInventory(record.path);
     const ids = new Set([...sessions.map((session) => session.id), ...record.transcripts.map((session) => session.id),
       ...(record.sessionId === undefined ? [] : [record.sessionId])]);
-    for (const id of ids) await this.managedProcesses?.closeSession(id);
+    for (const id of ids) {
+      const path = sessions.find((session) => session.id === id)?.path ?? record.transcripts.find((session) => session.id === id)?.session.path
+        ?? (record.sessionId === id ? record.ownerSession?.path : undefined);
+      await this.closeSessionManagedProcesses(id, path);
+    }
   }
 
   /** Cleanup keeps even idle, unarchived sessions. Hidden delegated sessions are part of the catalog. */
@@ -3361,7 +3380,7 @@ export class PiSessionService implements SessionRouteService {
     if (readonly !== undefined) {
       if (await this.isPinned(readonly.session.id)) throw new Error("Unpin session before archiving");
       if (await this.getArchived(ref) !== undefined) return;
-      await this.managedProcesses?.closeSession(readonly.session.id);
+      await this.closeSessionManagedProcesses(readonly.session.id, readonly.session.path);
       await this.archiveStore.archive({
         sessionId: readonly.session.id, ...readonly.session,
         path: sessionFileExists(readonly.session.path) ? readonly.session.path : readonly.transcriptPath,
@@ -3379,7 +3398,7 @@ export class PiSessionService implements SessionRouteService {
       async () => {
         const archiveInput = await this.archiveInputForSession(session);
         await this.closeActive(session.sessionId, { kind: "clear", reason: "archive" });
-        await this.managedProcesses?.closeSession(archiveInput.sessionId);
+        await this.closeSessionManagedProcesses(archiveInput.sessionId, archiveInput.path);
         await this.archiveStore.archive(archiveInput);
         this.scheduleSearchScan();
         await this.forgetUnreadSessions([archiveInput]);
@@ -3980,7 +3999,7 @@ export class PiSessionService implements SessionRouteService {
 
   private async archiveStoreArchiveMany(inputs: readonly ArchiveSessionInput[]): Promise<ArchivedSessionRecord[]> {
     if (inputs.length === 0) return [];
-    for (const input of inputs) await this.managedProcesses?.closeSession(input.sessionId);
+    for (const input of inputs) await this.closeSessionManagedProcesses(input.sessionId, input.path);
     if (this.archiveStore.archiveMany !== undefined) {
       const records = await this.archiveStore.archiveMany(inputs);
       this.scheduleSearchScan();
@@ -3995,7 +4014,7 @@ export class PiSessionService implements SessionRouteService {
   private async archiveStoreDeleteArchivedMany(sessionIds: readonly string[]): Promise<string[]> {
     // Never remove .durable/<name>/ because <name>.jsonl is gone; forks share that journal.
     if (sessionIds.length === 0) return [];
-    for (const sessionId of sessionIds) await this.managedProcesses?.closeSession(sessionId);
+    for (const sessionId of sessionIds) await this.closeSessionManagedProcesses(sessionId);
     if (this.archiveStore.deleteArchivedMany !== undefined) {
       const deleted = await this.archiveStore.deleteArchivedMany(sessionIds);
       this.scheduleSearchScan();

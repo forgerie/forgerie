@@ -55,8 +55,10 @@ async function fixture(worktree = false) {
   });
   services.push(service);
   const owner = await service.getManagedProcesses(session.id);
+  const watchFile = join(root, `${session.id}.process-watches.json`);
+  await writeFile(watchFile, "{\"version\":1}");
   const process = await owner.start({ id: "one", command: "cat", cwd });
-  return { root, cwd, session, service, owner, process, archives, control, worktrees, worktreeId };
+  return { root, cwd, session, service, owner, process, watchFile, archives, control, worktrees, worktreeId };
 }
 
 it.each(["archive", "archiveMany", "archiveTree", "delete"] as const)("%s stops the slice and removes its records and logs", async (action) => {
@@ -71,6 +73,7 @@ it.each(["archive", "archiveMany", "archiveTree", "delete"] as const)("%s stops 
   expect(f.control.stoppedSessions).toEqual([f.session.id]);
   expect(f.control.live.size).toBe(0);
   await expect(access(f.process.directory)).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(access(f.watchFile)).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 it.each(["land", "discard", "cleanup-route"] as const)("%s removes the worktree only after stopping managed processes", async (action) => {
@@ -96,6 +99,7 @@ it.each(["land", "discard", "cleanup-route"] as const)("%s removes the worktree 
   expect(f.control.stoppedSessions).toEqual([f.session.id]);
   await expect(access(f.cwd)).rejects.toMatchObject({ code: "ENOENT" });
   await expect(access(f.process.directory)).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(access(f.watchFile)).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 it("daemon disposal leaves durable managed processes and their records running", async () => {
@@ -103,4 +107,24 @@ it("daemon disposal leaves durable managed processes and their records running",
   expect(f.control.stoppedSessions).toEqual([]);
   expect(f.control.live.has("owner/one")).toBe(true);
   await access(join(f.process.directory, "command.json"));
+  await access(f.watchFile);
+});
+
+it("reconciles an archived owner at startup, including its saved watches", async () => {
+  const f = await fixture();
+  f.archives.push({ sessionId: f.session.id, cwd: f.cwd, originalPath: f.session.path, archivedAt: new Date().toISOString() });
+  await f.service.initializeManagedProcesses();
+  expect(f.control.stoppedSessions).toEqual([f.session.id]);
+  await expect(access(f.process.directory)).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(access(f.watchFile)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("fails archive without deleting managed process evidence or watches when slice stop fails", async () => {
+  const f = await fixture();
+  f.control.launcher.stopSession = () => Promise.reject(new Error("manager unavailable"));
+  await expect(f.service.archive(f.session)).rejects.toThrow("manager unavailable");
+  expect(f.archives).toEqual([]);
+  expect(f.control.live.has("owner/one")).toBe(true);
+  await access(join(f.process.directory, "command.json"));
+  await access(f.watchFile);
 });
