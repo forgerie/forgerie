@@ -142,3 +142,103 @@ Failure/test: finished rows do not re-highlight on unrelated deltas, streaming r
 Builders add their focused tests, then root `npm test`, `npm run verify:static`, UI `npm run verify`. Run browser acceptance for cold/kept opens, all targets, streaming/asks/shell, scrolling, hidden read receipts and 6→7 eviction. Reuse this fixture harness and add native real-storage route/service tests. First-page fixture measurements alone cannot prove native consistency or a one-request production open. Count all network initiated by kept selection through first paint. Capture request waterfall for uncached transcript seed and keep acknowledgement/commands separate. No deployment or shared-service start during this workflow.
 
 Stop if a consistent native/classic cut or complete-turn paging would require changing ask/shell/read-receipt policy. Do not replace a failed native read with legacy data. Proposed follow-up, medium importance: strengthen readable-last-turn measurement to exact-marker glyph geometry and gather real-storage/device baselines before advertising the 500 ms target.
+
+## Parallel file ownership (fixed before builders start)
+
+These lists are exclusive write ownership, not a request to edit every file. Builders may read each other's files. Architect commits the schemas and Thread's optional typed seam before either starts. Thereafter full-stack owns schema changes, but the frozen seam must not change during parallel work. A file not listed here needs a parent ownership decision before editing; do not both solve a build failure in the other's file.
+
+### full-stack
+
+Server source:
+
+- `src/shared/sessionOpen.ts` (architect seeds envelope/schema factory)
+- `src/server/sessions/sessionOpen.ts` (architect seeds server types; implement acquisition here)
+- `src/server/sessions/sessionRoutes.ts`
+- `src/server/sessions/sessionService.ts`
+- `src/server/sessions/piSessionService.ts`
+- `src/server/sessions/messagePaging.ts`
+- `src/server/sessions/durableParentReadModel.ts`
+- `src/server/sessions/durableSessionReader.ts`
+- `src/server/sessions/durableParentContracts.ts`
+- `src/server/sessions/durableNativeHistory.ts`
+- `src/server/sessions/durableParentState.ts`
+- `src/server/sessions/durableSessionRuntime.ts`
+- `src/server/realtime/sessionEventHub.ts`
+- `src/server/sessiond/sessionProxyRoutes.ts`
+
+Server checks (existing or new):
+
+- `src/shared/sessionOpen.test.ts`
+- `src/server/sessions/sessionOpen.test.ts`
+- `src/server/sessions/sessionRoutes.test.ts`
+- `src/server/sessions/piSessionService.messages.test.ts`
+- `src/server/sessions/piSessionService.unread.test.ts`
+- `src/server/sessions/piSessionService.durable.test.ts`
+- `src/server/sessions/piSessionService.processEvents.test.ts`
+- `src/server/sessions/messagePaging.test.ts`
+- `src/server/sessions/durableParentReadModel.test.ts`
+- `src/server/sessions/durableSessionReader.test.ts`
+- `src/server/sessions/durableNativeHistory.test.ts`
+- `src/server/realtime/sessionEventHub.test.ts`
+- `src/server/sessiond/sessionProxyRoutes.test.ts`
+
+Browser data/composition:
+
+- `ui/src/contracts.ts`
+- `ui/src/historyPaging.ts` (architect seeds EarlierHistory type)
+- `ui/src/sessionRegistry.ts` (new)
+- `ui/src/sessionPrefetch.ts` (new)
+- `ui/src/sessionStore.ts`
+- `ui/src/transcript.ts`
+- `ui/src/useThreadMessages.ts`
+- `ui/src/readReceipt.ts`
+- `ui/src/ForgerieSession.tsx`
+- `ui/src/App.tsx`
+- `ui/src/ui/Picker.tsx` (prefetch events only; no styling changes)
+
+Browser checks/harness:
+
+- `ui/src/sessionRegistry.test.ts` (new)
+- `ui/src/sessionPrefetch.test.ts` (new)
+- `ui/src/sessionStore.open.test.ts` (new)
+- `ui/src/sessionStore.paging.test.ts` (new)
+- `ui/src/sessionStore.test.ts`
+- `ui/src/sessionStore.reconnect.test.ts`
+- `ui/src/sessionStore.nativeReadModel.test.ts`
+- `ui/src/sessionStore.read.test.ts`
+- `ui/src/sessionStore.shell.test.ts`
+- `ui/src/readReceipt.test.ts`
+- `ui/src/transcript.test.ts`
+- `ui/src/transcript.search.test.ts`
+- `ui/src/transcript.shell.test.ts`
+- `ui/src/ForgerieSession.search.test.tsx`
+- `ui/src/ForgerieSession.drafts.test.tsx`
+- `ui/src/App.search.test.tsx`
+- `ui/src/App.archiveNext.test.tsx`
+- `ui/src/App.keptSessions.test.tsx` (new)
+- `ui/src/ui/Picker.prefetch.test.tsx` (new)
+- `scripts/fast-chat-open-server.mjs`
+- `ui/scripts/fast-chat-open-baseline.mjs`
+- `ui/scripts/fast-chat-open-acceptance.mjs` (new)
+- `ui/scripts/fixtures/fast-chat-open.mjs`
+- `ui/scripts/fixtures/fast-chat-open.test.mjs`
+
+### front-end
+
+- `ui/src/ui/Thread.tsx`
+- `ui/src/ui/Thread.test.tsx`
+- `ui/src/ui/Thread.organism.part.tsx` (new Caliper fixture for states)
+- `ui/src/ui/Messages.tsx`
+- `ui/src/ui/Messages.test.tsx` (new)
+- `ui/src/ui/MarkdownText.tsx`
+- `ui/src/ui/MarkdownText.test.tsx` (new)
+- `ui/src/ui/Trace.tsx`
+- `ui/src/ui/theme.css`
+- `ui/scripts/load-earlier-acceptance.mjs` (new: prepend geometry and UI states)
+- `ui/scripts/finished-messages-acceptance.mjs` (new: render identity/streaming)
+
+### Integration rules
+
+The shared seam is the `EarlierHistory` union, store methods, native runtime options and optional Thread prop defined in section 6. Full-stack must not edit Thread, Messages, MarkdownText, Trace or theme.css. Front-end must not edit ForgerieSession, App, sessionStore, contracts or registry. The architect adds Thread's **type-only** optional `earlier` property before builders start so both branches typecheck independently. Front-end then implements its presentation. Full-stack can pass the prop without waiting for presentation code. No runtime semantics are implemented by the architect's seam.
+
+Neither builder edits package manifests/lockfiles; the architect owns the assistant-ui upgrade. Neither builder edits this brief or ADR during parallel work. Parent handles design changes and integration acceptance. No new dependency, custom viewport, or virtualization without the parent revising this contract.
