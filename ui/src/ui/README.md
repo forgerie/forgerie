@@ -64,6 +64,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `BadgeButton` (atom): an icon button drawn small with a control-sized hit area, a live-colour count of what waits on the reader (or a quiet count of what can wait), and a working dot.
 - `IconCount` (atom): a quiet count beside a small icon, as a readout in a row; muted, never a signal.
 - `SheetDialog` (organism): a modal sheet that is a card while the window has room and meets each edge as the room runs out, with back, title, text or icon actions, close, a scrolling body, and a footer.
+- `WorkRow` (molecule): one unit of live work in an owner tree, as a disclosure: a state mark (pending, running, waiting, finishing, blocked), a label with a subject in the code face, a detail line, an optional warning line, and an elapsed time; it opens to a body under its words, the rows it owns hang off a spine from its mark, and a folded row names what it holds in one press; a narrow row moves its time under the label.
 - `StatusRow` (molecule): one pressable row for a running thing: a tone dot, a name, a detail, and a status that wraps under the name when the row is narrow.
 - `ExchangeLog` (molecule): one worker's record, oldest first: words with the speaker in a margin, one line per action, and folded output.
 - `ReplyBox` (molecule): a short text field with send and an optional second action; Enter sends and the text stays until the send succeeds.

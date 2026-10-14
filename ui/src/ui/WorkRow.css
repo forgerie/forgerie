@@ -1,0 +1,77 @@
+/* One unit of live work. The row is a disclosure as tall as a control; the
+   mark keeps its small size in a lead column, and the rows a row owns hang off
+   a spine that drops from the centre of that column. Each row is its own
+   container, so a deep or narrow row moves its time under the label instead
+   of starving the label. */
+.work-row { /** @label Lead column @min 0.75 @max 1.5 @step 0.125 */ --work-row-lead: 1rem;
+  --work-row-inset: var(--space-3); --work-row-spine: calc(var(--hairline) * 1.5);
+  container-type: inline-size; min-inline-size: 0; list-style: none; }
+.work-row-main { display: grid; grid-template-columns: var(--work-row-lead) minmax(0, 1fr) auto; column-gap: var(--space-2); align-items: start;
+  inline-size: 100%; min-block-size: var(--control-size); margin: 0; padding: var(--space-2) var(--space-2) var(--space-2) var(--work-row-inset);
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--foreground);
+  font: inherit; font-size: var(--small-text); line-height: 1.4; text-align: start; cursor: pointer; }
+.work-row-main:hover { background: var(--hover-surface); }
+.work-row-main:active { background: var(--active-surface); }
+.work-row-main:focus-visible { outline: calc(var(--hairline) * 2) solid var(--foreground); outline-offset: calc(var(--hairline) * -2); }
+
+/* The mark sits centred on the label's first line. */
+.work-row-mark { justify-self: center; box-sizing: border-box; inline-size: 0.5625rem; block-size: 0.5625rem; margin-block-start: calc((1lh - 0.5625rem) / 2);
+  border: var(--work-row-spine) solid var(--muted-foreground); border-radius: 50%; }
+.work-row[data-state="running"] > .work-row-main .work-row-mark { border-color: var(--live); background: var(--live); animation: work-row-pulse 1.6s ease-in-out infinite; }
+.work-row[data-state="waiting"] > .work-row-main .work-row-mark { border-color: var(--live); }
+.work-row[data-state="finishing"] > .work-row-main .work-row-mark { border-color: var(--live); background: linear-gradient(90deg, var(--live) 50%, transparent 50%); }
+.work-row[data-state="pending"] > .work-row-main .work-row-mark { border-style: dashed; }
+.work-row[data-state="blocked"] > .work-row-main .work-row-mark { border: 0; border-radius: calc(var(--hairline) * 1.5); background: var(--tone-warn); }
+@keyframes work-row-pulse { 50% { opacity: 0.35; } }
+
+.work-row-text { display: flex; flex-direction: column; gap: 0.125rem; min-inline-size: 0; }
+.work-row-label { font-weight: 550; overflow-wrap: anywhere; }
+.work-row-subject { font-family: var(--code-font); font-size: var(--code-size); font-weight: 450; color: var(--quiet-foreground); }
+.work-row-detail { color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.45; }
+.work-row[data-state="blocked"] > .work-row-main .work-row-detail { color: var(--ink-warn); font-weight: 500; }
+.work-row-warning { display: flex; align-items: flex-start; gap: 0.3125rem; color: var(--ink-warn); font-size: var(--label-text); line-height: 1.45; }
+.work-row-warning-icon { flex: none; inline-size: 0.8125rem; block-size: 0.8125rem; margin-block-start: calc((1lh - 0.8125rem) / 2); }
+.work-row-time { display: inline-flex; align-items: center; gap: var(--space-1); block-size: 1lh;
+  color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.work-row-chevron { flex: none; inline-size: 0.75rem; block-size: 0.75rem; opacity: 0.7; transition: rotate 160ms ease; }
+.work-row-main[aria-expanded="true"] .work-row-chevron { rotate: 180deg; }
+
+/* What the row opens to, under its words. */
+.work-row-body { min-inline-size: 0; margin: 0 0 var(--space-2) calc(var(--work-row-inset) + var(--work-row-lead) + var(--space-2));
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-document); background: var(--code-surface); font-size: var(--label-text); }
+
+/* Text buttons pad their words; pull them back so the words line up with the body's. */
+.work-row-actions { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: var(--space-1) 0 0 calc(var(--space-2) * -1); }
+
+/* Drawn as quiet words under the label, pressed through a control-sized area. */
+.work-row-fold { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); block-size: var(--icon-size);
+  margin: calc(var(--space-2) * -1) 0 var(--space-1) calc(var(--work-row-inset) + var(--work-row-lead) + var(--space-1));
+  padding-inline: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-document); background: transparent;
+  color: var(--muted-foreground); font: inherit; font-size: var(--label-text); font-weight: 500; cursor: pointer; }
+.work-row-fold::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: var(--control-size); translate: -50% -50%; }
+.work-row-fold:hover { background: var(--hover-surface); color: var(--foreground); }
+.work-row-fold:focus-visible { outline: calc(var(--hairline) * 2) solid var(--foreground); outline-offset: 0; }
+.work-row-fold-icon { flex: none; inline-size: 0.75rem; block-size: 0.75rem; }
+
+/* The owner spine: centred under the mark, with the owned rows one small step in.
+   Each owned row draws its own piece of the spine, and the last piece stops at
+   that row's mark, so the spine ends where the owner's rows end. */
+.work-row-children { display: flex; flex-direction: column; margin: 0 0 0 calc(var(--work-row-inset) + (var(--work-row-lead) - var(--work-row-spine)) / 2);
+  padding: 0 0 0 var(--space-1); list-style: none; }
+.work-row-children > .work-row { position: relative; }
+.work-row-children > .work-row::before { content: ""; position: absolute; inset-block: 0; inset-inline-start: calc(var(--space-1) * -1);
+  inline-size: var(--work-row-spine); background: var(--line); }
+.work-row-children > .work-row:last-child::before { inset-block-end: auto; block-size: calc(var(--space-2) + var(--small-text) * 0.7); }
+/* An owned row needs no inset of its own: the spine already sets it in. */
+.work-row-children > .work-row { --work-row-inset: var(--space-1); }
+
+/* A narrow or deeply nested row: the time moves under the words, so the label keeps the width. */
+@container (max-width: 16rem) {
+  .work-row-main { grid-template-columns: var(--work-row-lead) minmax(0, 1fr); }
+  .work-row-time { grid-column: 2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .work-row[data-state="running"] > .work-row-main .work-row-mark { animation: none; }
+  .work-row-chevron { transition: none; }
+}
