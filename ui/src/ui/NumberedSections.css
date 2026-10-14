@@ -1,0 +1,21 @@
+/* A document in sections. A numbered heading carries its number in a ring, as the list beside it does. */
+.numbered-sections { min-inline-size: 0; }
+.numbered-sections-overview { margin-block-end: var(--space-2); }
+.numbered-sections-section { scroll-margin-block-start: var(--space-4); }
+.numbered-sections-heading { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); margin: 2.25rem 0 0.625rem;
+  font-family: var(--display-font); font-size: 1.125rem; font-weight: 550; line-height: 1.35; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.numbered-sections-section:first-child .numbered-sections-heading { margin-block-start: 0; }
+.numbered-sections-number { flex: none; display: grid; place-items: center; inline-size: 1.5rem; block-size: 1.5rem;
+  border: var(--hairline) solid var(--line-focus); border-radius: var(--radius-pill);
+  font-family: var(--code-font); font-size: var(--label-text); font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: 0; color: var(--muted-foreground); }
+.numbered-sections-number svg { inline-size: 0.875rem; block-size: 0.875rem; }
+.numbered-sections-title { min-inline-size: 0; }
+/* Where the process stands: the step at work fills live, a finished one fills with ink. */
+.numbered-sections-section[data-mark="current"] .numbered-sections-number { border-color: transparent; background: var(--live); color: var(--background); }
+.numbered-sections-section[data-mark="done"] .numbered-sections-number { border-color: transparent; background: var(--meter-ink); color: var(--background); }
+/* A change the text has not caught up with, in the diff's inks. */
+.numbered-sections-section[data-change="added"] .numbered-sections-title { color: var(--ink-good); }
+.numbered-sections-section[data-change="added"] .numbered-sections-body { color: var(--muted-foreground); font-style: italic; }
+.numbered-sections-section[data-change="removed"] .numbered-sections-title { color: var(--muted-foreground); text-decoration: line-through; text-decoration-color: var(--ink-bad); }
+.numbered-sections-section[data-change="removed"] .numbered-sections-body { opacity: 0.45; }
+.numbered-sections-flag { margin: calc(-1 * var(--space-1)) 0 var(--space-3); color: var(--muted-foreground); font-size: var(--small-text); }

@@ -1,6 +1,7 @@
 // The browser's view of one session's workflows: the saved ones it can start, the ones the agent proposed, and its runs.
 // Routes: src/server/sessions/workflowRoutes.ts.
 import { z } from "zod";
+import type { ModelChoices } from "./workflowRoute";
 import {
   workflowInventorySchema, workflowProposalSchema, workflowProposalsSchema, workflowRunSchema, workflowRunsSchema,
   type ProposalAction, type SavedWorkflow, type StopDecision, type WorkflowInputs, type WorkflowProposal, type WorkflowRun,
@@ -24,6 +25,8 @@ export interface WorkflowsState {
   proposalsError?: string;
   /** The proposal with a decision on its way, and which one. */
   proposing?: { id: string; action: ProposalAction };
+  /** The worker whose model change is on its way, as runId/worker. */
+  modelling?: string;
   /** The last action that failed, in words for the reader. */
   error?: string;
 }
@@ -116,8 +119,12 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
     },
     /** Reads the proposals again at once, such as after a failed read. */
     retryProposals: () => readProposals(),
-    /** Starts a proposal with the reader's inputs. Resolves true once the server accepted it; the run strip follows the runs. */
-    startProposal: (id: string, inputs: WorkflowInputs) => decideProposal(id, "start", { inputs, requestId: newRequestId() }, workflowRunSchema, (run) => ({
+    /**
+     * Starts a proposal with the reader's inputs, and the workers' models the reader changed. Resolves true once the
+     * server accepted it; the run strip follows the runs.
+     */
+    startProposal: (id: string, inputs: WorkflowInputs, models?: ModelChoices) => decideProposal(id, "start",
+      { inputs, ...(models === undefined ? {} : { models }), requestId: newRequestId() }, workflowRunSchema, (run) => ({
       runs: [run, ...state.runs.filter((candidate) => candidate.id !== run.id)],
       proposals: state.proposals?.map((proposal) => proposal.id === id ? { ...proposal, state: { kind: "started", runId: run.id, decidedAt: run.startedAt } } : proposal),
     })),
@@ -132,13 +139,14 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
         update({ ...state, saved: inventory.workflows, broken: inventory.diagnostics.map(({ name, error }) => ({ name, error })) });
       } catch (error) { update({ ...state, saved: [], error: message(error) }); }
     },
-    /** Starts a saved workflow. Resolves true once the server accepted the launch. */
-    async launch(name: string, inputs: WorkflowInputs): Promise<boolean> {
+    /** Starts a saved workflow, with the workers' models the reader changed. Resolves true once the server accepted the launch. */
+    async launch(name: string, inputs: WorkflowInputs, models?: ModelChoices): Promise<boolean> {
       const session = ref();
       if (!session || state.launching === true) return false;
       update({ ...state, launching: true, error: undefined });
       try {
-        const run = await call(url(session, "workflow-runs"), workflowRunSchema, { cwd: session.cwd, name, inputs, requestId: newRequestId() });
+        const run = await call(url(session, "workflow-runs"), workflowRunSchema,
+          { cwd: session.cwd, name, inputs, ...(models === undefined ? {} : { models }), requestId: newRequestId() });
         retireReads({ runs: true, proposals: false });
         update({ ...state, launching: false, runs: [run, ...state.runs.filter((candidate) => candidate.id !== run.id)] });
         return true;
@@ -156,6 +164,26 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
         return true;
       } catch (error) {
         update({ ...state, deciding: undefined, error: message(error) });
+        void readRuns();
+        return false;
+      }
+    },
+    /**
+     * Moves one worker of a running workflow to another model, or to the session's with null. It applies from the
+     * worker's next spawn or next message, never to a turn in progress. Resolves true once the server stored it.
+     */
+    async setWorkerModel(runId: string, worker: string, model: string | null): Promise<boolean> {
+      const session = ref();
+      if (!session || state.modelling !== undefined) return false;
+      update({ ...state, modelling: `${runId}/${worker}`, error: undefined });
+      try {
+        const run = await call(url(session, `workflow-runs/${encodeURIComponent(runId)}/workers/${encodeURIComponent(worker)}/model`), workflowRunSchema,
+          { cwd: session.cwd, model });
+        retireReads({ runs: true, proposals: false });
+        update({ ...state, modelling: undefined, runs: state.runs.map((candidate) => candidate.id === run.id ? run : candidate) });
+        return true;
+      } catch (error) {
+        update({ ...state, modelling: undefined, error: message(error) });
         void readRuns();
         return false;
       }

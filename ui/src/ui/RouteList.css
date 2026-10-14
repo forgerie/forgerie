@@ -1,0 +1,76 @@
+/* A process as a flat list: no boxes and no rules between steps. Each state has one treatment, and the
+   blocks carry it. Only a row the reader points at, or has open, takes a wash. */
+.route-list {
+  --route-list-number: 1.125rem;
+  --route-list-blocks: calc(3 * 0.4375rem + 2 * 0.1875rem);
+  display: grid; gap: var(--space-1); min-inline-size: 0;
+}
+.route-list-head { display: flex; align-items: center; gap: var(--space-2); min-block-size: 2rem; }
+.route-list-label { flex: 1; min-inline-size: 0; margin: 0; color: var(--muted-foreground); font-family: var(--body-font); font-size: var(--label-text); font-weight: 600; }
+.route-list-meta { color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
+.route-list-steps, .route-list-items { list-style: none; margin: 0; padding: 0; display: grid; }
+.route-list-steps { gap: var(--space-1); }
+.route-list-step, .route-list-item { display: grid; min-inline-size: 0; }
+.route-list-row { display: flex; align-items: flex-start; min-inline-size: 0; }
+
+/* A step: its number, its name and one line, then its marks. */
+.route-list-stage { flex: 1; min-inline-size: 0; display: flex; align-items: flex-start; gap: var(--space-2); min-block-size: var(--control-size);
+  padding: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--foreground);
+  font: inherit; font-size: var(--small-text); text-align: start; }
+button.route-list-stage { cursor: pointer; }
+button.route-list-stage:hover { background: var(--hover-surface); }
+.route-list-stage:focus-visible, .route-list-worker:focus-visible { outline: 0.125rem solid var(--line-focus); outline-offset: -0.125rem; }
+.route-list-number { flex: none; inline-size: var(--route-list-number); padding-block-start: 0.0625rem; color: var(--muted-foreground);
+  font-family: var(--code-font); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
+.route-list-number svg { inline-size: 0.875rem; block-size: 0.875rem; }
+.route-list-text { flex: 1; min-inline-size: 0; display: grid; gap: 0.125rem; }
+.route-list-name { font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
+.route-list-name[data-added] { color: var(--ink-good); }
+/* One line, two at most. */
+.route-list-detail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--muted-foreground);
+  font-size: var(--label-text); line-height: 1.45; }
+.route-list-detail[data-tone="live"] { color: var(--ink-live); }
+.route-list-detail code { font-family: var(--code-font); font-size: var(--label-text); }
+.route-list-marks { flex: none; display: inline-flex; align-items: center; gap: var(--space-2); padding-block-start: 0.3125rem; }
+/* The document shows this step: its name and number in full ink. */
+.route-list-step[data-here] .route-list-name { font-weight: 600; }
+.route-list-step[data-here] .route-list-number { color: var(--foreground); }
+/* Where the process stands. Next steps recede; the step at work and one that waits are set heavier, the number in live ink. */
+.route-list-step[data-state="next"] .route-list-name { color: var(--muted-foreground); font-weight: 400; }
+.route-list-step:is([data-state="current"], [data-state="waiting"]) .route-list-name { font-weight: 600; }
+.route-list-step:is([data-state="current"], [data-state="waiting"]) .route-list-number { color: var(--ink-live); font-weight: 600; }
+
+/* Items: blocks right-aligned in a margin column three marks wide, as the tally wraps, so names line up. */
+.route-list-items { margin-block-start: calc(-1 * var(--space-1)); padding: 0 0 var(--space-1) calc(var(--space-2) + var(--route-list-number)); gap: 0.125rem; }
+.route-list-worker { flex: 1; min-inline-size: 0; display: grid; grid-template-columns: var(--route-list-blocks) minmax(0, 1fr); align-items: start; column-gap: var(--space-2);
+  padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--foreground); font: inherit; text-align: start; }
+button.route-list-worker { min-block-size: var(--control-size); padding-block: var(--space-2); cursor: pointer; }
+button.route-list-worker:hover { background: var(--hover-surface); }
+/* Open elsewhere: the active wash, and nothing else. */
+.route-list-worker[aria-current] { background: var(--active-surface); }
+.route-list-worker[aria-current] .route-list-who-line code { font-weight: 600; }
+.route-list-blocks { justify-self: end; padding-block-start: 0.4375rem; line-height: 0; }
+.route-list-who { display: grid; min-inline-size: 0; color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.45; }
+.route-list-who-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); min-inline-size: 0; font-size: var(--small-text); }
+.route-list-who-line code { font-family: var(--code-font); font-size: var(--small-text); color: var(--foreground); overflow-wrap: anywhere; }
+.route-list-who-line[data-added] code { color: var(--ink-good); }
+.route-list-line { overflow-wrap: anywhere; }
+.route-list-line[data-tone="warn"] { color: var(--ink-warn); }
+.route-list-line[data-tone="bad"] { color: var(--ink-bad); }
+.route-list-line[data-tone="live"] { color: var(--ink-live); }
+/* A control under the item, lined up with its words. The control's own padding sits in the gutter. */
+.route-list-control { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-1); min-inline-size: 0;
+  margin: 0 0 var(--space-1) calc(var(--space-2) + var(--route-list-blocks)); }
+.route-list-control[data-edited] [aria-haspopup] { color: var(--ink-warn); }
+
+/* Editing */
+.route-list-remove { position: relative; flex: none; display: grid; place-items: center; inline-size: 1.75rem; block-size: 1.75rem;
+  margin: var(--space-2) var(--space-1) 0 0; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
+.route-list-remove:hover { color: var(--foreground); background: var(--hover-surface); }
+.route-list-remove:focus-visible { outline: 0.125rem solid var(--line-focus); outline-offset: 0.0625rem; }
+.route-list-remove svg { inline-size: 0.875rem; block-size: 0.875rem; }
+/* Drawn small, pressed large. */
+.route-list-remove::after { content: ""; position: absolute; inset: -0.5rem; }
+.route-list-after { margin: 0 0 var(--space-2) calc(2 * var(--space-2) + var(--route-list-number)); min-inline-size: 0; }
+.route-list-gap { display: grid; min-inline-size: 0; padding-inline-start: calc(var(--space-2) + var(--route-list-number)); }

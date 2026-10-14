@@ -45,7 +45,7 @@ import { OldIssueProposalLine } from "../src/issues/OldIssueProposalLine";
 import { DUPLICATE, FILED, LABEL_WARNING } from "../src/issues/fixtures/issues";
 import type { ComposerInputElement } from "../src/ui/ComposerEditor";
 import { WorkflowEntryView } from "../src/workflows/WorkflowEntryView";
-import { WorkflowProposalSheet } from "../src/workflows/WorkflowProposalSheet";
+import { WorkflowSheet } from "../src/workflows/WorkflowSheet";
 import { WorkflowRunStrip } from "../src/workflows/WorkflowRunStrip";
 import type { WorkflowEntry, WorkflowProposal, WorkflowRun } from "../src/workflows/workflowsModel";
 import { CHANGES_PROPOSAL, PROPOSAL, PROPOSAL_ENTRY, PROPOSAL_RUN } from "../src/workflows/fixtures/proposals";
@@ -781,7 +781,8 @@ function Preview() {
       <SessionDoorsProvider cwd={previewCwd} open={openPreviewDoor}>
       {proposalPreview && flowSheet !== undefined && (() => {
         const proposal = flowProposals.find((candidate) => candidate.id === flowSheet);
-        return proposal && <WorkflowProposalSheet entry={{ ...PROPOSAL_ENTRY, proposalId: proposal.id }} proposal={proposal} onRetry={() => {}} onClose={() => setFlowSheet(undefined)}
+        return proposal && <WorkflowSheet mode="start" source={{ kind: "proposal", entry: { ...PROPOSAL_ENTRY, proposalId: proposal.id }, proposal }}
+          models={{ known: previewModels, list: async () => previewModels }} onRetry={() => {}} onClose={() => setFlowSheet(undefined)}
           onStart={() => { setFlowRun(PROPOSAL_RUN); decideProposal(proposal.id, { kind: "started", runId: PROPOSAL_RUN.id, decidedAt: PROPOSAL_RUN.startedAt }); }}
           onChanges={async (note) => { decideProposal(proposal.id, { kind: "changes", note, decidedAt: PROPOSAL.createdAt }); return true; }}
           onDismiss={() => decideProposal(proposal.id, { kind: "dismissed", decidedAt: PROPOSAL.createdAt })} />;

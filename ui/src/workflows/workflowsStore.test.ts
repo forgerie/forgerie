@@ -138,3 +138,40 @@ describe("a session's workflow proposals", () => {
     expect(store.getSnapshot()).toMatchObject({ proposals: [PROPOSAL], proposalsError: undefined });
   });
 });
+
+describe("workers' models", () => {
+  it("sends the models the reader changed with a proposal's start and a saved workflow's launch, and nothing when none changed", async () => {
+    const { calls, store } = routes((path) => path.endsWith("/start") || path.endsWith("/workflow-runs") ? json(200, PROPOSAL_RUN) : json(200, []));
+    await store.startProposal(PROPOSAL.id, { task: "Port it." }, { api: "anthropic/claude-opus-4-5:high", page: null });
+    await store.launch("design-build-review", { task: "Export" }, { design: "openai/gpt-5" });
+    await store.launch("design-build-review", { task: "Export" });
+    expect(calls.filter((call) => call.method === "POST").map((call) => call.body)).toEqual([
+      { cwd: "/srv/app", inputs: { task: "Port it." }, models: { api: "anthropic/claude-opus-4-5:high", page: null }, requestId: "req-1" },
+      { cwd: "/srv/app", name: "design-build-review", inputs: { task: "Export" }, models: { design: "openai/gpt-5" }, requestId: "req-1" },
+      { cwd: "/srv/app", name: "design-build-review", inputs: { task: "Export" }, requestId: "req-1" },
+    ]);
+  });
+
+  it("moves a running worker to another model and keeps the run the server answers", async () => {
+    const moved = { ...BUILDING, stages: BUILDING.stages?.map((stage) => stage.id === "build"
+      ? { ...stage, workers: stage.workers?.map((worker) => worker.name === "build" ? { ...worker, model: "openai/gpt-5" } : worker) } : stage) };
+    const { calls, store } = routes((path) => path.endsWith("/model") ? json(200, moved) : json(200, [BUILDING]));
+    store.refresh();
+    await settle();
+    const pending = store.setWorkerModel(BUILDING.id, "build", "openai/gpt-5");
+    expect(store.getSnapshot().modelling).toBe(`${BUILDING.id}/build`);
+    expect(await pending).toBe(true);
+    expect(calls.at(-1)).toEqual({ path: `${BASE}/workflow-runs/${BUILDING.id}/workers/build/model`, method: "POST", body: { cwd: "/srv/app", model: "openai/gpt-5" } });
+    expect(store.getSnapshot()).toMatchObject({ modelling: undefined, runs: [moved] });
+    await store.setWorkerModel(BUILDING.id, "build", null);
+    expect(calls.at(-1)?.body).toEqual({ cwd: "/srv/app", model: null });
+  });
+
+  it("says why a model change was refused, and reads the runs again", async () => {
+    const { calls, store } = routes((path) => path.endsWith("/model") ? json(409, { error: "Workflow run is not running" }) : json(200, [BUILDING]));
+    expect(await store.setWorkerModel(BUILDING.id, "build", "openai/gpt-5")).toBe(false);
+    await settle();
+    expect(store.getSnapshot()).toMatchObject({ modelling: undefined, error: "Workflow run is not running" });
+    expect(calls.at(-1)?.path).toBe(`${BASE}/workflow-runs?cwd=%2Fsrv%2Fapp`);
+  });
+});

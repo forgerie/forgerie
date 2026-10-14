@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { activeRun, launchInputs, routeSteps, runStatus, stopIsOpen, stopOutcome, stripSegments, waitingStops, workflowEntryOf, type WorkflowRun } from "./workflowsModel";
-import { BUILDING, CHILD_LOOKS, CONTRACT_STOP, CONTRACT_WAITING, FAILED, LAND_STOP, LAND_WAITING, LANDED, SAVED, STAGES } from "./fixtures/runs";
+import { activeRun, launchInputs, runStatus, stopIsOpen, stopOutcome, stripSegments, waitingStops, workflowEntryOf, type WorkflowRun } from "./workflowsModel";
+import { BUILDING, CONTRACT_STOP, CONTRACT_WAITING, FAILED, LAND_STOP, LAND_WAITING, LANDED, SAVED, STAGES } from "./fixtures/runs";
 
 const RUN_ID = "a".repeat(64);
 describe("workflow transcript entries", () => {
@@ -99,21 +99,6 @@ describe("a run at a glance", () => {
       { key: "contract", lanes: ["waiting"] }, { key: "build", lanes: ["next", "next"] }, { key: "review", lanes: ["next"] }, { key: "land", lanes: ["next"] }]);
     expect(stripSegments({ ...BUILDING, children: [] })[1]?.lanes).toEqual(["next", "next"]);
     expect(stripSegments({ ...LANDED, children: [] }).flatMap((segment) => segment.lanes)).toEqual(["done", "done", "done", "done", "done"]);
-  });
-
-  it("puts declared workers on the route before they start, and opens only started ones", () => {
-    const planned = routeSteps(STAGES, undefined);
-    expect(planned.map((step) => [step.key, step.state, step.mine === true])).toEqual([
-      ["contract", "next", true], ["build", "next", false], ["review", "next", false], ["land", "next", true]]);
-    expect(planned[1]?.tracks?.map((track) => [track.name, track.lines])).toEqual([
-      ["design", ["design-engineer", "anthropic/claude-opus-5.5"]], ["build", ["full-stack-engineer"]]]);
-    const opened: string[] = [];
-    const live = routeSteps(STAGES, BUILDING, CHILD_LOOKS, (name) => opened.push(name));
-    expect(live[0]).toMatchObject({ state: "done", word: "Approved by you" });
-    expect(live[1]?.tracks?.map((track) => [track.state, track.lines?.at(-1)])).toEqual([["working", "design/run-export"], ["working", "feat/run-export-api"]]);
-    live[1]?.tracks?.[0]?.onPress?.();
-    expect(opened).toEqual(["design"]);
-    expect(live[2]?.tracks?.[0]?.onPress).toBeUndefined();
   });
 });
 

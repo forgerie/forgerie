@@ -1,0 +1,99 @@
+/* A sheet with a document and a rail. Layout is a function of the sheet's own size (container "split-sheet"):
+   - TWO PANES  inline-size >= 50rem: the document at a reading measure, the rail beside it, the foot under the rail.
+   - ONE COLUMN below that: one scroller (lead, then document and rail in the host's order), the foot pinned below.
+   - SHORT      block-size < 30rem: the header takes one line.
+   Both thresholds are guesses until measured. The foot is in view at every size. */
+
+/* The dialog is the page frame while open, so it sizes from the viewport. Each axis gives up its margin before the content shrinks. */
+.split-sheet {
+  --split-sheet-width: 72rem; --split-sheet-height: 52rem;
+  --split-sheet-room-inline: clamp(0rem, (100dvw - var(--split-sheet-width)) / 2, 1.5rem);
+  --split-sheet-room-block: clamp(0rem, (100dvh - var(--split-sheet-height)) / 2, 1.5rem);
+  position: fixed; inset: 0; margin: auto; padding: 0;
+  inline-size: min(var(--split-sheet-width), 100dvw - 2 * var(--split-sheet-room-inline));
+  block-size: min(var(--split-sheet-height), 100dvh - 2 * var(--split-sheet-room-block));
+  max-inline-size: none; max-block-size: none; overflow: hidden;
+  border: var(--hairline) solid var(--line);
+  border-radius: min(var(--radius-thread), var(--split-sheet-room-inline), var(--split-sheet-room-block));
+  background: var(--modal-surface); color: var(--foreground); box-shadow: var(--modal-shadow); animation: modal-in var(--modal-enter);
+}
+.split-sheet::backdrop { background: var(--scrim); backdrop-filter: var(--modal-backdrop); animation: modal-scrim-in var(--modal-enter); }
+@media (prefers-reduced-motion: reduce) { .split-sheet, .split-sheet::backdrop { animation: none; } }
+/* The frame, not the dialog, is the size container, so pickers mounted in the dialog are not trapped by it. */
+.split-sheet-frame { block-size: 100%; container: split-sheet / size;
+  padding: max(0rem, var(--safe-top) - var(--split-sheet-room-block)) max(0rem, var(--safe-right) - var(--split-sheet-room-inline))
+    max(0rem, var(--safe-bottom) - var(--split-sheet-room-block)) max(0rem, var(--safe-left) - var(--split-sheet-room-inline)); }
+.split-sheet-frame:focus { outline: none; }
+.split-sheet-grid {
+  --split-sheet-pad: clamp(0.75rem, 2.4cqi, 1.5rem);
+  --split-sheet-measure: 40rem;
+  block-size: 100%; min-inline-size: 0;
+  display: grid; grid-template: "head" auto "body" minmax(0, 1fr) "foot" auto / minmax(0, 1fr);
+}
+
+/* ---------- Header: the title outweighs everything in the body ---------- */
+.split-sheet-head { grid-area: head; display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--header-size);
+  padding: var(--space-2) var(--space-1) var(--space-2) var(--split-sheet-pad); border-block-end: var(--hairline) solid var(--line); }
+.split-sheet-head:has(> .split-sheet-control:first-child) { padding-inline-start: var(--space-1); }
+.split-sheet-titles { flex: 1; min-inline-size: 0; display: grid; gap: 0.125rem; }
+.split-sheet-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--display-font); font-size: 1.125rem; font-weight: 600; line-height: 1.3; letter-spacing: -0.005em; }
+.split-sheet-subtitle { margin: 0; display: flex; flex-wrap: wrap; gap: 0 var(--space-3); min-inline-size: 0; color: var(--muted-foreground); font-size: var(--label-text); }
+.split-sheet-subtitle code { font-family: var(--code-font); font-size: var(--label-text); color: var(--foreground); overflow-wrap: anywhere; }
+.split-sheet-control { flex: none; display: grid; place-items: center; inline-size: var(--control-size); block-size: var(--control-size); padding: 0; border: 0;
+  border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
+.split-sheet-control:hover { color: var(--foreground); background: var(--hover-surface); }
+.split-sheet-control:focus-visible { outline: 0.125rem solid var(--line-focus); outline-offset: -0.125rem; }
+.split-sheet-control svg { inline-size: 1.125rem; block-size: 1.125rem; }
+@container split-sheet (max-height: 30rem) {
+  .split-sheet-head { padding-block: 0; }
+  .split-sheet-titles { display: flex; align-items: baseline; gap: var(--space-3); }
+  .split-sheet-title { flex: 0 1 auto; font-size: 1rem; }
+  .split-sheet-subtitle { flex: 1 1 0; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
+}
+
+/* ---------- One column: one scroller ---------- */
+.split-sheet-body { grid-area: body; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
+.split-sheet-main { display: contents; }
+.split-sheet-lead { order: -2; max-inline-size: calc(var(--split-sheet-measure) + 2 * var(--split-sheet-pad)); padding: var(--space-4) var(--split-sheet-pad) 0; }
+.split-sheet-document { order: 0; min-inline-size: 0; max-inline-size: calc(var(--split-sheet-measure) + 2 * var(--split-sheet-pad)); padding: var(--space-6) var(--split-sheet-pad); }
+.split-sheet-rail { order: 1; display: grid; gap: var(--space-6); align-content: start; min-inline-size: 0; padding: var(--space-6) var(--split-sheet-pad);
+  border-block-start: var(--hairline) solid var(--line); background: var(--tint-surface); }
+.split-sheet-grid[data-rail-first] .split-sheet-rail { order: -1; padding-block: var(--space-4); border-block: 0 var(--hairline) solid var(--line); }
+.split-sheet-grid[data-rail-first] .split-sheet-lead { padding-block-end: var(--space-4); }
+.split-sheet-foot { grid-area: foot; container-type: inline-size; min-inline-size: 0; padding: var(--space-3) var(--split-sheet-pad); border-block-start: var(--hairline) solid var(--line);
+  background: var(--modal-surface); }
+/* A detail, such as a record, takes the column and scrolls inside itself; the rail waits behind its back control. */
+.split-sheet-grid[data-detail] .split-sheet-body { overflow: hidden; }
+.split-sheet-grid[data-detail] .split-sheet-rail, .split-sheet-grid[data-detail] .split-sheet-lead { display: none; }
+.split-sheet-grid[data-detail] .split-sheet-document { flex: 1; min-block-size: 0; max-inline-size: none; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); padding: 0; }
+@container split-sheet (max-height: 30rem) {
+  .split-sheet-foot { padding-block: var(--space-2); }
+  .split-sheet-document { padding-block: var(--space-4); }
+}
+
+/* ---------- Two panes ---------- */
+@container split-sheet (min-width: 50rem) {
+  .split-sheet-grid {
+    --split-sheet-rail: clamp(17rem, 30cqi, 21rem);
+    --split-sheet-doc-pad: clamp(1.5rem, 5cqi, 4rem);
+    grid-template: "head head" auto "main rail" minmax(0, 1fr) "main foot" auto / minmax(0, 1fr) var(--split-sheet-rail);
+  }
+  .split-sheet-body { display: contents; }
+  .split-sheet-main { grid-area: main; display: block; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .split-sheet-lead { max-inline-size: calc(var(--split-sheet-measure) + 2 * var(--split-sheet-doc-pad)); padding: var(--space-6) var(--split-sheet-doc-pad) 0; }
+  .split-sheet-document { max-inline-size: calc(var(--split-sheet-measure) + 2 * var(--split-sheet-doc-pad)); padding: var(--space-6) var(--split-sheet-doc-pad) var(--space-8); }
+  .split-sheet-rail { grid-area: rail; overflow-y: auto; overscroll-behavior: contain; border-block-start: 0; border-inline-start: var(--hairline) solid var(--line); }
+  .split-sheet-grid[data-rail-first] .split-sheet-rail { padding-block: var(--space-6); border-block: 0; }
+  .split-sheet-grid[data-rail-first] .split-sheet-lead { padding-block-end: 0; }
+  .split-sheet-foot { border-inline-start: var(--hairline) solid var(--line); background: var(--tint-surface); }
+  .split-sheet-grid[data-detail] .split-sheet-main { display: flex; flex-direction: column; overflow: hidden; }
+  .split-sheet-grid[data-detail] .split-sheet-document { max-inline-size: none; padding: 0; }
+  .split-sheet-grid[data-detail] .split-sheet-rail { display: grid; }
+}
+
+/* Wide but short: the foot spans both panes, so the rail keeps its height and the actions fit one row. */
+@container split-sheet (min-width: 50rem) and (max-height: 36rem) {
+  .split-sheet-grid { grid-template: "head head" auto "main rail" minmax(0, 1fr) "foot foot" auto / minmax(0, 1fr) var(--split-sheet-rail); }
+  .split-sheet-foot { padding-block: var(--space-2); border-inline-start: 0; background: var(--modal-surface); }
+}

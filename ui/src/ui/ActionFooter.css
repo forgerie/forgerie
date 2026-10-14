@@ -11,3 +11,9 @@
 .action-footer-button[data-tone="primary"] { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
 .action-footer-button[data-tone="danger"] { color: var(--destructive); border-color: var(--destructive-line); }
 .action-footer-button:disabled { color: var(--foreground); background: var(--muted); border-color: var(--line); cursor: not-allowed; }
+/* Stacked in a narrow container: the primary action first and full width, the others sharing the row under it. */
+@container (max-width: 26rem) {
+  .action-footer-controls[data-stack] { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr)); }
+  .action-footer-controls[data-stack] .action-footer-button { padding-inline: var(--space-2); }
+  .action-footer-controls[data-stack] .action-footer-button[data-tone="primary"] { grid-column: 1 / -1; order: -1; }
+}

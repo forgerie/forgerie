@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DecisionsSheet } from "./DecisionsSheet";
 import { DecisionsOpener } from "./DecisionsOpener";
-import { WorkflowRunSheet } from "../workflows/WorkflowRunSheet";
+import { WorkflowSheet } from "../workflows/WorkflowSheet";
 import { BUILDING, CHILD_LOOKS } from "../workflows/fixtures/runs";
 import type { DecisionLogActions, DecisionLogView } from "./decisionsModel";
 import { ANSWER, GUESS, LOG_NOW, OVERTURNED, RUN_DECISIONS, SESSION_ANSWER, SESSION_DECISIONS } from "./fixtures/decisions";
@@ -22,8 +22,12 @@ const button = (name: string) => [...sheet().querySelectorAll<HTMLButtonElement>
 const records = () => [...sheet().querySelectorAll(".decision-record")];
 const record = (question: string) => records().find((node) => node.textContent?.includes(question));
 const footer = () => sheet().querySelector(".sheet-dialog-foot");
+/** The run mode of the workflow sheet, with the session's log or without one. */
+const runSheet = (decisions?: { log: DecisionLogView; actions: DecisionLogActions }) => <WorkflowSheet mode="run" run={BUILDING} looks={CHILD_LOOKS}
+  models={{ known: [], list: async () => [] }} now={() => LOG_NOW} decisions={decisions} onDecide={async () => true} onOpenWorker={() => {}} onRetryRecord={() => {}}
+  onSteer={async () => {}} onStopWorker={() => {}} onDismissRecordError={() => {}} onModel={async () => true} onClose={() => {}} />;
 async function type(text: string) {
-  const field = sheet().querySelector<HTMLTextAreaElement>(".sheet-dialog-foot textarea")!;
+  const field = sheet().querySelector<HTMLTextAreaElement>(".sheet-dialog-foot textarea, .split-sheet-foot textarea")!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, text);
     field.dispatchEvent(new Event("input", { bubbles: true }));
@@ -157,11 +161,10 @@ describe("the session's decisions sheet", () => {
 });
 
 describe("the run sheet's decisions", () => {
-  it("lists only the run's decisions, under its route, with Overturn", async () => {
+  it("lists only the run's decisions, under its route, with Overturn in the foot", async () => {
     const onOverturn = vi.fn(() => Promise.resolve(true));
-    await act(async () => root.render(<WorkflowRunSheet run={BUILDING} workers={CHILD_LOOKS} onOpenChild={() => {}} onClose={() => {}} now={() => LOG_NOW}
-      decisions={{ log: { decisions: SESSION_DECISIONS }, actions: { onRetry: () => {}, onDismissError: () => {}, onOverturn } }} />));
-    expect(sheet().querySelector(".route-map")).not.toBeNull();
+    await act(async () => root.render(runSheet({ log: { decisions: SESSION_DECISIONS }, actions: { onRetry: () => {}, onDismissError: () => {}, onOverturn } })));
+    expect(sheet().querySelector(".route-list")).not.toBeNull();
     expect(sheet().querySelector(".list-section-title")?.textContent).toBe("Decisions");
     expect(records().map((node) => node.querySelector(".decision-record-question")?.textContent)).toEqual(RUN_DECISIONS.map((decision) => decision.question));
     await act(async () => { record(GUESS.question)!.querySelector("button")!.click(); });
@@ -171,10 +174,9 @@ describe("the run sheet's decisions", () => {
   });
 
   it("says when the run has no decisions, and shows no list for a session without a log", async () => {
-    await act(async () => root.render(<WorkflowRunSheet run={BUILDING} workers={CHILD_LOOKS} onOpenChild={() => {}} onClose={() => {}}
-      decisions={{ log: { decisions: [SESSION_ANSWER] }, actions: { onRetry: () => {}, onDismissError: () => {} } }} />));
+    await act(async () => root.render(runSheet({ log: { decisions: [SESSION_ANSWER] }, actions: { onRetry: () => {}, onDismissError: () => {} } })));
     expect(sheet().querySelector(".list-section-empty")?.textContent).toBe("No decisions yet.");
-    await act(async () => root.render(<WorkflowRunSheet run={BUILDING} workers={CHILD_LOOKS} onOpenChild={() => {}} onClose={() => {}} />));
+    await act(async () => root.render(runSheet()));
     expect(sheet().querySelector(".list-section")).toBeNull();
   });
 });

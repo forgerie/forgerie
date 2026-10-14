@@ -7,7 +7,8 @@ import { contextUse } from "./contextUse";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
 import { browserTransport, createSessionStore, isBashRunning, NotSentError, shellAvailabilityOf } from "./sessionStore";
-import type { Session } from "./contracts";
+import type { Session, SessionModel } from "./contracts";
+import { agentsApi } from "./agents/agentsApi";
 import { useThreadMessages } from "./useThreadMessages";
 import { foldProcessEvents } from "./processes/processEvent";
 import { loadProcessOutput } from "./processes/processApi";
@@ -73,9 +74,9 @@ import { activeRun, waitingStops, WORKFLOW_RUNS_CHANGED_EVENT, type ProposalEntr
 import { WorkflowEntryView } from "./workflows/WorkflowEntryView";
 import { WorkflowOpener } from "./workflows/WorkflowOpener";
 import { WorkflowPicker } from "./workflows/WorkflowPicker";
-import { WorkflowPlanSheet } from "./workflows/WorkflowPlanSheet";
-import { WorkflowProposalSheet } from "./workflows/WorkflowProposalSheet";
-import { WorkflowRunSheet } from "./workflows/WorkflowRunSheet";
+import { WorkflowSheet } from "./workflows/WorkflowSheet";
+import type { ModelChoices } from "./workflows/workflowRoute";
+import type { WorkerModels } from "./workflows/WorkerModelPicker";
 import { createDecisionsStore } from "./decisions/decisionsStore";
 import { DecisionsOpener } from "./decisions/DecisionsOpener";
 import { DecisionsSheet } from "./decisions/DecisionsSheet";
@@ -131,7 +132,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   // Gated actions: calls Forgerie holds until the reader approves them. They change with the workflow records, on the same event.
   const [gated] = useState(() => createGatedActionsStore(browserTransport.request, () => sessionRef.current));
   const held = useSyncExternalStore(gated.subscribe, gated.getSnapshot);
-  const [workflowSheet, setWorkflowSheet] = useState<{ type: "picker" } | { type: "plan"; name: string; task?: string } | { type: "run" }
+  const [workflowSheet, setWorkflowSheet] = useState<{ type: "picker" } | { type: "plan"; name: string; task?: string } | { type: "run"; runId: string }
     | { type: "proposal"; entry: ProposalEntry }>();
   const [store] = useState(() => createSessionStore(id, browserTransport, {}, known, createReadTracker(browserTransport, { subscribe: onUnread, isVisible: () => document.visibilityState === "visible", afterRender: afterTranscriptPaint }),
     (eventType) => {
@@ -370,8 +371,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     // A landed or discarded session has no agent left to take a correction.
     onOverturn: readOnly ? undefined : decisions.overturn,
   };
-  const startWorkflow = async (name: string, inputs: WorkflowInputs, task: string | undefined) => {
-    if (!await workflows.launch(name, inputs)) return;
+  const startWorkflow = async (name: string, inputs: WorkflowInputs, task: string | undefined, models: ModelChoices | undefined) => {
+    if (!await workflows.launch(name, inputs, models)) return;
     setWorkflowSheet(undefined);
     // The task came from the composer: it now lives in the run, so the draft would only repeat it.
     const composer = runtimeRef.current?.thread.composer;
@@ -380,6 +381,21 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   const workflowBlock = running !== undefined ? "Finish the running workflow before you start another."
     : busy ? "Wait for the agent to finish its turn." : undefined;
   const proposalBlock = running !== undefined ? "Another workflow is running." : busy ? "Wait for the agent to finish its turn." : undefined;
+  // A workflow sheet's pickers offer the session's models, and the route names them; a new worker can run as any listed agent.
+  const sheetOpen = workflowSheet !== undefined && workflowSheet.type !== "picker";
+  const [sessionModels, setSessionModels] = useState<readonly SessionModel[]>([]);
+  const [agentNames, setAgentNames] = useState<readonly string[]>([]);
+  useEffect(() => {
+    if (!sheetOpen) return;
+    const controller = new AbortController();
+    store.listModels(controller.signal).then((models) => { if (!controller.signal.aborted) setSessionModels(models); }, () => undefined);
+    if (workflowSheet?.type === "proposal") agentsApi.list(controller.signal, browserTransport.request).then((list) => {
+      if (!controller.signal.aborted) setAgentNames([...new Set(list.agents.filter((agent) => agent.advertise && !agent.disabled && agent.broken === undefined).map((agent) => agent.name))].sort());
+    }, () => undefined);
+    return () => controller.abort();
+  }, [sheetOpen, workflowSheet?.type, store]);
+  const workerModels = useMemo<WorkerModels>(() => ({ known: sessionModels, list: store.listModels }), [sessionModels, store]);
+  const sheetRun = workflowSheet?.type === "run" ? runs.find((run) => run.id === workflowSheet.runId) : undefined;
   /** Closes the proposal's sheet once its decision went through, unless the reader already moved on. */
   const closeProposal = (id: string) => setWorkflowSheet((current) => current?.type === "proposal" && current.entry.proposalId === id ? undefined : current);
   const runtime = useExternalStoreRuntime({
@@ -482,7 +498,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
             {held.readError !== undefined && waiting.some((item) => item.kind === "gated")
               && <GatedActionsReadProblem error={held.readError} onRetry={() => { void gated.retry(); }} />}
           </PinnedDock>}
-          {running !== undefined && <WorkflowRunStrip run={running} onOpen={() => setWorkflowSheet({ type: "run" })} />}
+          {running !== undefined && <WorkflowRunStrip run={running} onOpen={() => setWorkflowSheet({ type: "run", runId: running.id })} />}
         </>}
         head={setup && <WorktreeSetupCard setup={setup} hookSeen={setup.log !== ""} branch={worktree?.branch} />}
         inputContext={worktree && worktree.state.kind === "active" ? <WorktreeChip info={worktree} /> : null}
@@ -544,25 +560,37 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         }} />}
       {workflowSheet?.type === "plan" && (() => {
         const workflow = flows.saved?.find((candidate) => candidate.name === workflowSheet.name);
-        return workflow && <WorkflowPlanSheet workflow={workflow} blocked={workflowBlock} starting={flows.launching === true} error={flows.error}
-          initialTask={workflowSheet.task} onStart={(inputs) => { void startWorkflow(workflow.name, inputs, workflowSheet.task); }}
+        return workflow && <WorkflowSheet mode="start" source={{ kind: "saved", workflow, initialTask: workflowSheet.task }} blocked={workflowBlock}
+          pending={flows.launching === true ? "start" : undefined} error={flows.error} models={workerModels}
+          onStart={(inputs, models) => { void startWorkflow(workflow.name, inputs, workflowSheet.task, models); }}
           onBack={() => { workflows.dismissError(); setWorkflowSheet({ type: "picker" }); }}
           onClose={() => { workflows.dismissError(); setWorkflowSheet(undefined); }} />;
       })()}
       {workflowSheet?.type === "proposal" && (() => {
         const id = workflowSheet.entry.proposalId;
-        return <WorkflowProposalSheet key={id} entry={workflowSheet.entry} proposal={proposals?.find((candidate) => candidate.id === id)}
-          readError={flows.proposalsError} blocked={proposalBlock} pending={flows.proposing?.id === id ? flows.proposing.action : undefined} error={flows.error}
+        return <WorkflowSheet mode="start" key={id} source={{ kind: "proposal", entry: workflowSheet.entry, proposal: proposals?.find((candidate) => candidate.id === id),
+          readError: flows.proposalsError }} blocked={proposalBlock} pending={flows.proposing?.id === id ? flows.proposing.action : undefined} error={flows.error}
+          models={workerModels} agents={agentNames}
           onRetry={() => { void workflows.retryProposals(); }}
-          onStart={(inputs) => { void workflows.startProposal(id, inputs).then((done) => { if (done) closeProposal(id); }); }}
+          onStart={(inputs, models) => { void workflows.startProposal(id, inputs, models).then((done) => { if (done) closeProposal(id); }); }}
           onChanges={async (note) => { const done = await workflows.askProposalChanges(id, note); if (done) closeProposal(id); return done; }}
           onDismiss={() => { void workflows.dismissProposal(id).then((done) => { if (done) closeProposal(id); }); }}
           onClose={() => { workflows.dismissError(); setWorkflowSheet(undefined); }} />;
       })()}
-      {workflowSheet?.type === "run" && running !== undefined && <WorkflowRunSheet run={running}
-        workers={children.children.map((child) => ({ name: child.name, agent: child.agent, branch: child.worktree?.branch, asking: child.questions.length > 0, retry: child.retry }))}
-        decisions={{ log, actions: logActions }}
-        onOpenChild={(name) => { setWorkflowSheet(undefined); openChildByName(name); }} onClose={() => { decisions.dismissError(); setWorkflowSheet(undefined); }} />}
+      {sheetRun !== undefined && <WorkflowSheet mode="run" key={sheetRun.id} run={sheetRun}
+        looks={children.children.map((child) => ({ name: child.name, agent: child.agent, branch: child.worktree?.branch, asking: child.questions.length > 0,
+          busy: child.busy, retry: child.retry }))}
+        record={children.open === undefined ? undefined : { transcript: children.open.transcript, readError: children.open.error, error: children.error }}
+        models={workerModels} deciding={flows.deciding?.startsWith(`${sheetRun.id}/`) === true} error={flows.error} decisions={{ log, actions: logActions }}
+        onDecide={(stage, decision, note) => workflows.decide(sheetRun.id, stage, decision, note)}
+        onReview={childrenAvailable ? () => { childAgents.close(); setWorkflowSheet(undefined); childAgents.refresh(); setChildrenOpen(true); } : undefined}
+        onOpenWorker={(conversationId) => { if (conversationId === undefined) childAgents.close(); else childAgents.open(conversationId); }}
+        onRetryRecord={(conversationId) => { childAgents.close(); childAgents.open(conversationId); }}
+        onSteer={(conversationId, text) => childAgents.send(conversationId, text)}
+        onStopWorker={(conversationId) => { void childAgents.stop(conversationId).catch(() => { /* The pane shows the error. */ }); }}
+        onDismissRecordError={childAgents.dismissError}
+        onModel={(worker, model) => workflows.setWorkerModel(sheetRun.id, worker, model)}
+        onClose={() => { decisions.dismissError(); workflows.dismissError(); childAgents.close(); setWorkflowSheet(undefined); }} />}
       {decisionsOpen && <DecisionsSheet log={log} actions={logActions} onClose={() => { decisions.dismissError(); setDecisionsOpen(false); }} />}
       {pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
         notice={pull.notice} writing={pull.writing} now={Date.now()}

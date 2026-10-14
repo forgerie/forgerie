@@ -3,12 +3,8 @@
 import { z } from "zod";
 import { stageViews, type StageView } from "@shared/workflowStops";
 import { textOf, type PiMessage } from "../contracts";
-import type { RouteState, RouteStep, RouteTrack } from "../ui/RouteMap";
 import type { StageStripSegment } from "../ui/StageStrip";
-import { retryLine, retryWait, type ChildRetry } from "../childAgents/childAgentsModel";
-
-/** A track is a card in a column: the provider's error is cut there, and read whole in the child's own view. */
-const ROUTE_ERROR_LENGTH = 120;
+import type { ChildRetry } from "../childAgents/childAgentsModel";
 
 const valueSchema = z.union([z.string(), z.boolean(), z.number()]);
 const workerSchema = z.object({ name: z.string(), agent: z.string().optional(), model: z.string().optional() });
@@ -50,7 +46,9 @@ export const workflowRunSchema = z.object({
 export const workflowRunsSchema = z.array(workflowRunSchema);
 const definitionSchema = z.object({ version: z.literal(1), inputs: z.record(z.string(), inputSchema).optional(), stages: z.array(stageSchema).optional() });
 export const workflowInventorySchema = z.object({
-  workflows: z.array(z.object({ name: z.string(), path: z.string(), sha256: z.string(), description: z.string().optional(), definition: definitionSchema })),
+  workflows: z.array(z.object({ name: z.string(), path: z.string(), sha256: z.string(), description: z.string().optional(), definition: definitionSchema,
+    /** The whole file, and its prose without the frontmatter. */
+    text: z.string().optional(), body: z.string().optional() })),
   diagnostics: z.array(z.object({ name: z.string(), path: z.string(), error: z.string() })),
 });
 /** A workflow the agent wrote for the current task. It lives in the session's records, never in the repository. */
@@ -200,8 +198,11 @@ export function launchInputs(workflow: DeclaresInputs, typed: Readonly<Record<st
   return { inputs };
 }
 
-/** What a run's children look like to the route: their branch, whether they wait on the reader, and a retry Forgerie waits to make. */
-export interface ChildLook { name: string; agent: string | null; branch?: string | undefined; asking: boolean; retry?: ChildRetry | undefined }
+/**
+ * What a run's children look like to the route: their branch, whether they wait on the reader, whether a turn is in
+ * progress, and a retry Forgerie waits to make.
+ */
+export interface ChildLook { name: string; agent: string | null; branch?: string | undefined; asking: boolean; busy?: boolean | undefined; retry?: ChildRetry | undefined }
 
 type Settled = Extract<WorkflowRun["children"][number]["state"], { kind: "settled" }>;
 /**
@@ -221,41 +222,6 @@ export function deliveryNote(state: Pick<Settled, "delivered" | "deliveryError">
 export function deliveryProblem(state: Pick<Settled, "delivered" | "deliveryError">): string | undefined {
   return state.delivered === true || state.deliveryError === undefined || state.deliveryError === LEGACY_SUPPRESSED ? undefined
     : `Report not delivered: ${state.deliveryError}`;
-}
-
-/**
- * The route as RouteMap steps. Declared workers are tracks even before they start; children the agent added are
- * tracks of the stage they joined. `open` makes a started worker's track open that child. A working child that
- * waits to retry a model error says so in a notice; `now` adds the time to the next try.
- */
-export function routeSteps(stages: readonly WorkflowStage[], run: WorkflowRun | undefined, children: readonly ChildLook[] = [],
-  open?: (name: string) => void, now?: number): RouteStep[] {
-  const views = run === undefined ? undefined : viewsOf(run);
-  return stages.map((stage) => {
-    const state: RouteState = views?.[stage.id] ?? "next";
-    const stop = run?.stops?.[stage.id];
-    const word = stage.stop === undefined || stop?.state !== "approved" ? undefined
-      : stage.stop === "land" ? `Landed ${String(stop.landed?.length ?? 0)} ${stop.landed?.length === 1 ? "branch" : "branches"}` : "Approved by you";
-    const records = run?.children.filter((child) => child.stage === stage.id) ?? [];
-    const names = [...(stage.workers ?? []).map((worker) => worker.name), ...records.map((child) => child.name)].filter((name, index, all) => all.indexOf(name) === index);
-    const tracks: RouteTrack[] = names.map((name) => {
-      const declared = stage.workers?.find((worker) => worker.name === name);
-      const mine = records.filter((child) => child.name === name);
-      const look = children.find((child) => child.name === name);
-      const trackState: RouteState = look?.asking === true ? "waiting" : mine.some((child) => child.state.kind === "working") ? "working"
-        : mine.length > 0 ? "done" : "next";
-      const last = mine.at(-1)?.state;
-      const retry = trackState === "working" ? look?.retry : undefined;
-      const lines = [declared?.agent ?? look?.agent ?? (mine.length > 0 ? "general helper" : undefined), declared?.model, look?.branch,
-        last?.kind === "settled" ? deliveryNote(last) : undefined].filter((line) => line !== undefined);
-      const notice = retry && [retryLine(retry, ROUTE_ERROR_LENGTH), ...(now === undefined ? [] : [retryWait(retry, now)])];
-      const problem = last?.kind === "settled" ? deliveryProblem(last) : undefined;
-      return { key: name, name, state: trackState, lines, ...(notice ? { notice } : {}), ...(problem === undefined ? {} : { problem }),
-        ...(mine.length > 0 && open !== undefined ? { label: `Open ${name}`, onPress: () => open(name) } : {}) };
-    });
-    return { key: stage.id, name: stage.name, state, ...(stage.stop === undefined ? {} : { mine: true }), ...(word === undefined ? {} : { word }),
-      ...(stage.does === undefined ? {} : { does: stage.does }), ...(tracks.length === 0 ? {} : { tracks }) };
-  });
 }
 
 /** The route as StageStrip segments: one bar per stage, one lane per worker of a stage with several. */

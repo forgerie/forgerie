@@ -5,13 +5,13 @@ import { landBlocker, resultText, totalCost, type ChildDetail, type Runs } from 
 import type { WorktreeActionResult } from "../worktrees/worktreeApi";
 import { SheetDialog } from "../ui/SheetDialog";
 import { StatusRow } from "../ui/StatusRow";
-import { ExchangeLog, type ExchangeLine } from "../ui/ExchangeLog";
+import { ExchangeLog } from "../ui/ExchangeLog";
 import { ReplyBox } from "../ui/ReplyBox";
-import { QuestionCard } from "../ui/QuestionCard";
 import { NoticeBar } from "../ui/NoticeBar";
 import { AlertCard } from "../ui/AlertCard";
 import { useNow } from "../ui/useNow";
-import { QUESTION_TOOL, childLines, childStatus, nextRetry, orderChildren, retryCount, retryLine, retryWait, type ChildSummary, type ChildTranscript } from "./childAgentsModel";
+import { exchangeLines } from "./childExchange";
+import { childStatus, nextRetry, orderChildren, retryCount, retryLine, retryWait, type ChildSummary, type ChildTranscript } from "./childAgentsModel";
 
 export interface ChildAgentsActions {
   onOpenChild: (conversationId: number) => void;
@@ -33,34 +33,8 @@ export interface ChildAgentsActions {
   onRetryDetail: () => void;
 }
 
-const ANSWERED = /^The user answered: ([\s\S]*)$/u;
 /** A row is one glance: the provider's error is cut there, and read whole in the child's own view. */
 const ROW_ERROR_LENGTH = 160;
-
-/**
- * The record as lines. A question the child asked is a card where it asked,
- * answered or open, instead of a tool call and its result.
- */
-function exchange(child: ChildSummary, transcript: ChildTranscript): ExchangeLine[] {
-  let inputs = 0;
-  const lines = childLines(transcript);
-  const out: ExchangeLine[] = [];
-  lines.forEach((line, index) => {
-    if (line.kind === "said" && line.who === "message") { out.push({ kind: "in", key: line.key, label: inputs++ === 0 ? "Task" : "Message", text: line.text }); return; }
-    if (line.kind === "said") { out.push({ kind: "out", key: line.key, text: line.text, streaming: line.streaming }); return; }
-    if (line.kind === "tool" && line.name === QUESTION_TOOL) {
-      const next = lines[index + 1];
-      const answer = next?.kind === "result" && next.name === QUESTION_TOOL ? ANSWERED.exec(next.text)?.[1] : undefined;
-      out.push({ kind: "block", key: line.key, content: <QuestionCard asker={`${child.name} asks`} question={line.summary}
-        answer={answer} closedReason={next?.kind === "result" && next.isError ? "Question ended without an answer." : undefined} /> });
-      return;
-    }
-    if (line.kind === "result" && line.name === QUESTION_TOOL) return;
-    if (line.kind === "tool") { out.push({ kind: "call", key: line.key, name: line.name, summary: line.summary }); return; }
-    out.push({ kind: "output", key: line.key, name: line.name, text: line.text, isError: line.isError });
-  });
-  return out;
-}
 
 /**
  * Shape: a session's child agents in one sheet. The list puts questions for
@@ -155,7 +129,7 @@ export function ChildAgentsPanel({ children, openId, transcript, error, actions,
     actions={[history, ...(busy || question !== undefined ? [{ label: "Stop", onPress: () => actions.onStop(child.conversationId) }]
       : writingId === child.conversationId && !closed ? [{ label: "Branch actions", onPress: () => setWritingId(undefined) }] : [])]} footer={footer}>
     {alert}
-    <ExchangeLog lines={[...(transcript === undefined ? [] : exchange(child, transcript)),
+    <ExchangeLog lines={[...(transcript === undefined ? [] : exchangeLines(child.name, transcript)),
       ...(child.retry ? [{ kind: "block" as const, key: "retry", content: <AlertCard label={`${child.name} is retrying`} tone="warn" title={retryCount(child.retry)}
         code={child.retry.error} codeLabel="Error" codeLines={6}>
         The model call failed. Forgerie tries again on its own, up to {child.retry.max} times. <strong>{retryWait(child.retry, now)}.</strong>

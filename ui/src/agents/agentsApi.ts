@@ -38,8 +38,9 @@ export function replacedBy(agent: AgentSummary, agents: readonly AgentSummary[])
 export class AgentConflict extends Error {}
 
 const path = (scope: AgentScope, file: string) => `/aui/agents/${scope}/${file.split("/").map(encodeURIComponent).join("/")}`;
-async function call<T>(url: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+type Fetch = (url: string, init: RequestInit) => Promise<Response>;
+async function call<T>(url: string, schema: z.ZodType<T>, init: RequestInit = {}, request: Fetch = fetch): Promise<T> {
+  const response = await request(url, init);
   const value: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = typeof value === "object" && value && "error" in value && typeof value.error === "string" ? value.error : `The agents server answered ${String(response.status)}.`;
@@ -49,7 +50,8 @@ async function call<T>(url: string, schema: z.ZodType<T>, init?: RequestInit): P
 }
 
 export const agentsApi = {
-  list: (signal?: AbortSignal) => call("/aui/agents", listSchema, signal ? { signal } : {}),
+  /** `request` is the transport, such as a session's, when the caller has one. */
+  list: (signal?: AbortSignal, request?: Fetch) => call("/aui/agents", listSchema, signal ? { signal } : {}, request),
   read: (scope: AgentScope, file: string, signal?: AbortSignal) => call(path(scope, file), fileSchema, signal ? { signal } : {}),
   /** `baseMtimeMs: null` creates the file and fails if it exists. */
   write: (scope: WritableAgentScope, file: string, text: string, baseMtimeMs: number | null) => call(path(scope, file), fileSchema, {

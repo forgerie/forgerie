@@ -1,8 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { Check } from "typebox/value";
 import { WorkflowChildDeliverySchema, WorkflowRunSchema, type WorkflowChildDelivery, type WorkflowRun as SharedWorkflowRun } from "@shared/workflowRuns";
-import { deliveredSchema, deliveryNote, deliveryProblem, routeSteps, workflowRunSchema, type WorkflowRun } from "./workflowsModel";
-import { BUILDING, LAND_WAITING, RETRY_LOOKS, RUN_NOW, STAGES, UNSENT } from "./fixtures/runs";
+import { deliveredSchema, deliveryNote, deliveryProblem, workflowRunSchema, type WorkflowRun } from "./workflowsModel";
+import { BUILDING, LAND_WAITING, UNSENT } from "./fixtures/runs";
 
 type Settled = Extract<WorkflowRun["children"][number]["state"], { kind: "settled" }>;
 type SharedSettled = Extract<SharedWorkflowRun["children"][number]["state"], { kind: "settled" }>;
@@ -60,29 +60,5 @@ describe("what a settled child's delivery says", () => {
     const old = { delivered: false, deliveryError: "Completion report suppressed; no parent message was submitted." } as const;
     expect(deliveryNote(old)).toBe("Report not sent");
     expect(deliveryProblem(old)).toBeUndefined();
-  });
-});
-
-describe("the route of a run with unsent reports and a retry", () => {
-  const steps = routeSteps(STAGES, UNSENT, RETRY_LOOKS, () => {}, RUN_NOW);
-  const track = (stage: number, name: string) => steps[stage]?.tracks?.find((candidate) => candidate.name === name);
-
-  it("puts the retry on the working track, with the time to the next try", () => {
-    expect(track(1, "design")).toMatchObject({ state: "working", lines: ["design-engineer", "anthropic/claude-opus-5.5", "design/run-export"],
-      notice: [expect.stringMatching(/^Retrying 2 of 3: 529 \{"type":"error"/u), "Next try in 1 min 40 s"] });
-    // Without a clock, the route still names the retry.
-    expect(routeSteps(STAGES, UNSENT, RETRY_LOOKS)[1]?.tracks?.[0]?.notice).toHaveLength(1);
-    // A retry that no longer waits on a working child is not drawn.
-    expect(routeSteps(STAGES, LAND_WAITING, RETRY_LOOKS)[1]?.tracks?.[0]).not.toHaveProperty("notice");
-  });
-
-  it("says a duplicate and a stop in plain lines, and a failed report as a problem", () => {
-    expect(track(1, "build")).toMatchObject({ state: "done", lines: ["full-stack-engineer", "feat/run-export-api", "Duplicate report, not sent again"] });
-    expect(track(1, "docs")).toMatchObject({ state: "done", lines: ["general helper", "Stopped before reporting"] });
-    for (const name of ["build", "docs"]) {
-      expect(track(1, name)).not.toHaveProperty("notice");
-      expect(track(1, name)).not.toHaveProperty("problem");
-    }
-    expect(track(1, "tests")).toMatchObject({ state: "done", lines: ["general helper"], problem: "Report not delivered: Completion reporter faulted: Disk full" });
   });
 });
