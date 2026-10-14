@@ -23,6 +23,22 @@ The package-install smoke test also passes the real tarball's manifest to npm's 
 
 Use focused tests while editing. Run `npm run verify` before merging cross-cutting changes. Build and install only in an isolated worktree when active agents use the deployed checkout. Do not restart live services to run tests.
 
+## Managed process core acceptance
+
+The core API and its limits are in [managed-processes-core.md](managed-processes-core.md).
+On Linux with a systemd user manager, Node 24, Python 3, and util-linux:
+
+```sh
+npm test -- src/server/processes
+npx tsc -p tsconfig.build.json
+node scripts/verify-managed-processes-restart.mjs
+```
+
+The proof uses temporary units, not deployed Forgerie units. It checks restart
+survival, stdin/EOF, exit results, slice stop, output interleaving, and attached
+parent-death cleanup. It cleans its units even on failure and retains failed
+proof files for inspection.
+
 ## Workspace services acceptance
 
 The normal suite uses a real Unix-socket contract server. Enable the external-runtime tests to check Process Compose itself:

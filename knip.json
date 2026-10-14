@@ -13,7 +13,8 @@
   "ignoreBinaries": [
     "findmnt",
     "flock",
-    "nix"
+    "nix",
+    "setsid"
   ],
   "ignoreExportsUsedInFile": true
 }
