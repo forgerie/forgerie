@@ -1,4 +1,4 @@
-import { ArchiveIcon, CalendarClockIcon, FlagIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, HashIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon,
+import { ArchiveIcon, ArrowLeftIcon, CalendarClockIcon, FlagIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, HashIcon, PinIcon, PinOffIcon, SearchIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -68,6 +68,28 @@ export interface PickerFilter {
   onChoose: (value: string) => void;
   /** Opens the page where groups are made and changed. */
   onManage: () => void;
+}
+
+/**
+ * Search in the list's header. Closed, a Search button sits beside New session.
+ * Open, the field takes the header's place, so the list loses no row to it. The
+ * binding owns the query and whether the reader asked for the field.
+ */
+export interface PickerSearch {
+  /** The search box, drawn in the header while search is open. */
+  field: ReactNode;
+  /** The typed query. While it holds text, search stays open, wherever focus goes. */
+  query: string;
+  /** The reader asked for the field: the Search button, Ctrl+K, or `/`. */
+  open: boolean;
+  /** Opens the field and puts the caret in it. */
+  onOpen: () => void;
+  /** Closes the field and clears its query. */
+  onClose: () => void;
+  /** The keys that reach the field from anywhere, for the Search button's `aria-keyshortcuts`. */
+  keys?: string | undefined;
+  /** A line about the query, drawn under the header. Its id describes the field. */
+  hint?: { id: string; text: string } | undefined;
 }
 
 const PIN = <PinIcon className="picker-pin" aria-hidden />;
@@ -220,15 +242,16 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
   shelves?: ReactNode;
   /** Which projects the list shows. Without it, the list shows every project and the menu offers no filter. */
   filter?: PickerFilter | undefined;
-  /** A search box, drawn first under the header. */
-  search?: ReactNode;
+  /** Search in the header. Without it, the header offers no search. */
+  search?: PickerSearch | undefined;
   /** Drawn in the list's place while set, such as what a search found. The list's own keys rest meanwhile. */
   results?: ReactNode;
   /** The sections hold only some sessions, such as those whose title matches, so the list makes no claim about the rest. */
   narrowed?: boolean;
   /**
    * Escape anywhere in the list asks this first, from the search box too, unless a control already used the key.
-   * It returns true when it used the key, such as to clear a search; only then does Escape not close the list.
+   * It returns true when it used the key, such as to clear a search. If it did not, Escape closes an open search
+   * field, and only then the list.
    */
   onEscape?: (() => boolean) | undefined;
 }) {
@@ -239,6 +262,17 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
   const plan = footerPlan(useInnerWidth(footer));
   const fullScreenInMenu = actions.onFullscreen !== undefined && plan.fullScreen === "menu";
   const change = onPrefs;
+  // A typed query keeps the field open even after focus leaves it, so the list it narrows never hides its cause.
+  const searchOpen = search !== undefined && (search.open || search.query !== "");
+  const searchButton = useRef<HTMLButtonElement>(null);
+  // Closed by the reader (Escape, the back arrow): focus goes back to the Search button. A blur closes it quietly.
+  const searchFocusBack = useRef(false);
+  const closeSearch = () => { searchFocusBack.current = true; search?.onClose(); };
+  useLayoutEffect(() => {
+    if (searchOpen || !searchFocusBack.current) return;
+    searchFocusBack.current = false;
+    searchButton.current?.focus({ preventScroll: true });
+  }, [searchOpen]);
 
   // The selected row's group opens, so the current session is never hidden.
   const selectedKey = useMemo(() => view.sections.find((section) => section.rows.some((row) => row.session.id === view.selectedId))?.key, [view.sections, view.selectedId]);
@@ -261,7 +295,10 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
     if (event.key === "Escape") {
       if (event.defaultPrevented) return;
       event.preventDefault();
-      if (menu) setMenu(undefined); else if (!onEscape?.()) actions.onClose?.();
+      if (menu) setMenu(undefined);
+      else if (onEscape?.()) return;
+      else if (searchOpen) closeSearch();
+      else actions.onClose?.();
       return;
     }
     if (event.target instanceof HTMLElement && event.target.closest("input, textarea, [contenteditable]")) return;
@@ -311,9 +348,23 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
   const rowWithMenu = rowMenu ? order.find((row) => row.session.id === rowMenu.id) : undefined;
   const filterChosen = filter?.value ? filter.options.find((option) => option.value === filter.value) : undefined;
   return <section className="picker" aria-label="Sessions" onKeyDown={onKeyDown}>
-    <header className="picker-header">
-      {/* The homepage sidebar header: product mark and name. */}
-      <h2 className="picker-brand"><LogoMark />Forgerie<span className="sr-only"> sessions</span></h2>
+    {/* The homepage sidebar header: product mark and name, then the list's commands. Search opens in its place. */}
+    <header className="picker-header" data-search={searchOpen ? "open" : undefined}
+      onBlur={searchOpen ? (event) => {
+        // Focus left an empty field: it closes. A query keeps it open; so does a window that lost focus, not the field.
+        const next = event.relatedTarget;
+        if (search?.query !== "" || next instanceof Node && event.currentTarget.contains(next) || !document.hasFocus()) return;
+        search.onClose();
+      } : undefined}>
+      {searchOpen ? <>
+        <button className="picker-icon" aria-label="Close search" title="Close search (Esc)" onClick={closeSearch}><ArrowLeftIcon aria-hidden size={16} /></button>
+        <div className="picker-search">{search?.field}</div>
+      </> : <>
+      <h2 className="picker-brand"><LogoMark /><span className="picker-brand-name">Forgerie</span><span className="sr-only"> sessions</span></h2>
+      {search ? <button ref={searchButton} className="picker-icon" aria-label="Search sessions" aria-keyshortcuts={search.keys}
+        title="Search sessions (Ctrl+K or /)" onClick={() => { setMenu(undefined); search.onOpen(); }}><SearchIcon aria-hidden size={16} /></button> : null}
+      {actions.onNew ? <button className="picker-icon" aria-label="New session" aria-keyshortcuts="N" title="New session (N)"
+        onClick={actions.onNew}><SquarePenIcon aria-hidden size={16} /></button> : null}
       <button className="picker-icon" aria-label="More session commands" aria-haspopup="menu" aria-expanded={menu === "board"}
         title="Arrange the list"
         onClick={() => { setRowMenu(undefined); setMenu(menu === "board" ? undefined : "board"); }}><EllipsisIcon aria-hidden size={16} /></button>
@@ -342,13 +393,11 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
             <CheckIcon aria-hidden />Full screen</button>
         </> : null}
       </div> : null}
+      </>}
     </header>
-    {search ? <div className="picker-search">{search}</div> : null}
+    {searchOpen && search?.hint ? <p id={search.hint.id} className="picker-search-hint">{search.hint.text}</p> : null}
     {filterChosen ? <FilterChip icon={<FolderTreeIcon aria-hidden />} label={filterChosen.label} detail={filterChosen.detail}
       clear="Show all projects" onClear={() => filter?.onChoose("")} /> : null}
-    {/* The homepage thread list opens with "New Thread"; here it starts a session. */}
-    {actions.onNew ? <button className="picker-new" onClick={actions.onNew} aria-keyshortcuts="N" title="New session (N)">
-      <SquarePenIcon aria-hidden size={16} />New session</button> : null}
     {connection.type === "reconnecting" ? <p className="picker-notice" role="status"><span aria-hidden="true">&gt;</span> Reconnecting…</p> : null}
     {connection.type === "failed" && !empty ? <p className="picker-notice" data-tone="error" role="alert">{connection.message}<button onClick={actions.onRetry}>Retry now</button></p> : null}
     {/* The room the list shares with plugin shelves. A shelf measures it to decide how much of it to take. */}
@@ -357,7 +406,8 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
       {[38, 90, 70, 38, 90, 70].map((width, index) => <span key={index} className="picker-skeleton" style={{ "--picker-skeleton-width": `${String(width)}%` }} />)}
     </div> : connection.type === "failed" && empty ? <div className="picker-state" role="alert">
       <strong>Could not load sessions</strong><span>{connection.message}</span><button onClick={actions.onRetry}>Retry now</button>
-    </div> : empty ? <div className="picker-state"><strong>No sessions yet</strong><span>Start one with New session, and it appears here.</span></div>
+    </div> : empty ? <div className="picker-state"><strong>No sessions yet</strong>
+      {actions.onNew ? <button onClick={actions.onNew}>New session</button> : null}</div>
     : <div className="picker-list" role="listbox" aria-label="Sessions" tabIndex={0} ref={listRef}
         aria-activedescendant={view.selectedId ? `picker-row-${view.selectedId}` : undefined}>
       {!narrowed && view.sections.every((section) => section.kind === "band" || section.kind === "archived" || section.kind === "project")

@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { RelatedWorkRenderer } from "./projectGroups/relatedWork";
 import type { ResourceLensRenderer } from "./resources/resourceLens";
 import type { SettingsPageRenderer } from "./ui/settings/SettingsView";
@@ -8,7 +8,7 @@ import type { Row } from "./picker/board";
 import type { Session } from "./contracts";
 import { AppShell } from "./ui/AppShell";
 import { useFullscreen } from "./ui/useFullscreen";
-import { Picker, PickerToast, type PickerFilter } from "./ui/Picker";
+import { Picker, PickerToast, type PickerFilter, type PickerSearch } from "./ui/Picker";
 import { SessionFrame } from "./ui/SessionFrame";
 import { StatusChip } from "./ui/StatusChip";
 import { browserStorage, createDraftStore } from "./draftStore";
@@ -22,7 +22,7 @@ import type { SessionSearch } from "./search/useSessionSearch";
 import type { SearchHit } from "./search/searchApi";
 import { queryMode, resultsView } from "./search/searchModel";
 import { foundBinding } from "./search/found";
-import { SearchBox } from "./search/SearchBox";
+import { SEARCH_KEYS, SearchBox, searchHint } from "./search/SearchBox";
 import { SearchResults } from "./search/SearchResults";
 import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
 import { createBacklogApi, type BacklogItem } from "./backlog/backlogApi";
@@ -302,10 +302,13 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     openSearch?.(hit);
     switchSession({ id: hit.sessionId, cwd: hit.cwd, ...(hit.title ? { name: hit.title } : {}) });
   }, [openSearch, switchSession]);
-  // Ctrl+K reaches the search box from anywhere, and `/` from anywhere but a text field. The list opens first.
+  // Ctrl+K reaches the search box from anywhere, and `/` from anywhere but a text field. The list opens first,
+  // then the box opens in the list's header. Held here, so an open box survives the switch between layouts.
   const searchInput = useRef<HTMLInputElement>(null);
   const resultsList = useRef<HTMLDivElement>(null);
   const [searchFocus, setSearchFocus] = useState(0);
+  const [searchAsked, setSearchAsked] = useState(false);
+  const searchHintId = useId();
   const searching = search !== undefined;
   useEffect(() => {
     if (!searching) return;
@@ -315,6 +318,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       event.preventDefault();
       event.stopPropagation();
       setOpen(true);
+      setSearchAsked(true);
       setSearchFocus((count) => count + 1);
     };
     window.addEventListener("keydown", onKey, true);
@@ -413,7 +417,9 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const toast = picker.view.toast
     ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} /> : orphanNotice;
   const searchBox = search ? <SearchBox query={query} busy={mode === "messages" && search.state.results.loading}
-    onQuery={search.actions.setQuery} onClear={search.actions.clear} inputRef={searchInput}
+    onQuery={search.actions.setQuery} inputRef={searchInput} variant="bare" hintId={searchHintId}
+    // The ✕ leaves the caret in the box, so the box stays where the reader is typing.
+    onClear={() => { search.actions.clear(); searchInput.current?.focus({ preventScroll: true }); }}
     onKeyDown={(event) => {
       // Down from the box goes to the first hit.
       if (event.key !== "ArrowDown" || mode !== "messages") return;
@@ -427,13 +433,20 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       ? <SearchResults view={{ type: "titles-none", query: query.trim() }} now={Date.now()} where={picker.where}
         onOpen={openHit} onRetry={search.actions.retry} onMore={search.actions.more} /> : undefined;
   // Escape on the search box or its hits clears a typed query first, and puts the caret back in the box.
-  // Only Escape on an empty query closes the list.
+  // Escape on an empty query closes the box, and only the next one closes the list (see Picker).
   const clearSearch = () => {
     if (!search || query === "") return false;
     search.actions.clear();
     searchInput.current?.focus({ preventScroll: true });
     return true;
   };
+  const hint = searchHint(query);
+  const pickerSearch: PickerSearch | undefined = search && searchBox ? {
+    field: searchBox, query, open: searchAsked, keys: SEARCH_KEYS,
+    onOpen: () => { setSearchAsked(true); setSearchFocus((count) => count + 1); },
+    onClose: () => { if (query !== "") search.actions.clear(); setSearchAsked(false); },
+    hint: hint ? { id: searchHintId, text: hint } : undefined,
+  } : undefined;
   const sessionFound = search && found && found.hit.sessionId === selectedId ? foundBinding(found, search.actions) : undefined;
   const dialog = composing === undefined ? null : composing || composeItem
     ? <NewSession key={composeKey} cwd={composing} initialPlacement={readPlace()} initialMode={composeMode} api={newSessionApi} worktrees={worktreeApi}
@@ -473,7 +486,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   return <><AppShell open={open} onOpenChange={setOpen} attention={picker.attention ?? (triggers?.entry.attention ? "blocked" : undefined)}
     picker={(layout) => <Picker view={pickerView} prefs={picker.prefs} onPrefs={picker.setPrefs}
       shelves={shelves} filter={projectFilter ? { ...projectFilter, onManage: () => placeSettings({ section: "projects" }) } : undefined}
-      search={searchBox} results={searchResults} narrowed={mode === "title"} onEscape={clearSearch}
+      search={pickerSearch} results={searchResults} narrowed={mode === "title"} onEscape={clearSearch}
       actions={{ ...picker.actions, onSelect: select, onNew: () => { void startNew(); },
         onSettings: () => placeSettings(settings ?? { section: "root" }), settingsOpen: settings !== undefined,
         onBacklog: () => placeBacklog(backlog ?? {}), backlogOpen: backlog !== undefined,

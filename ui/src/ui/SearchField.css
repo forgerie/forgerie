@@ -19,6 +19,9 @@
 .search-field-spinner { color: var(--live); animation: search-field-spin 900ms linear infinite; }
 @keyframes search-field-spin { to { rotate: 1turn; } }
 .search-field-status { position: absolute; inline-size: var(--hairline); block-size: var(--hairline); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Bare: no box and no ring. The row the field sits in draws the edge and marks focus, so the field does not box itself twice. */
+.search-field[data-variant="bare"] .search-field-box { padding-inline: var(--space-1) 0; border-color: transparent; }
+.search-field[data-variant="bare"] .search-field-box:has(.search-field-input:focus-visible) { outline: none; }
 .search-field-hint { margin: 0; padding-inline: var(--space-1); color: var(--muted-foreground); font-size: var(--meta-text); line-height: 1rem; }
 @media (prefers-reduced-motion: reduce) {
   .search-field-box, .search-field-clear { transition: none; }

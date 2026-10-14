@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
-import { act, useState } from "react";
+import { act, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLocationResolver, DEFAULT_COLLAPSED, rows, sections, type PickerSession, type PickerStatus, type Row } from "../picker/board";
 import type { CatalogConnection } from "../picker/catalogStore";
-import { Picker, PickerToast, type PickerView } from "./Picker";
+import { Picker, PickerToast, type PickerSearch, type PickerView } from "./Picker";
+import { SearchField } from "./SearchField";
 import { readPrefs, writePrefs, PREFS_KEY, type PickerPrefs } from "../picker/prefs";
 import { shellLayout, DOCK_MIN_WIDTH } from "./AppShell";
 
@@ -230,20 +231,137 @@ describe("project filter", () => {
 });
 
 describe("new session", () => {
-  it("starts a new session from the button at the top of the list, or with N", () => {
+  it("starts a new session from the header's icon, or with N", () => {
     const onNew = vi.fn();
     act(() => root.render(<Picker view={view([S("a")])} prefs={defaults} onPrefs={() => {}} actions={{ onSelect: () => {}, onRetry: () => {}, onNew }} />));
-    const button = host.querySelector<HTMLButtonElement>(".picker-new")!;
-    expect(button.textContent).toBe("New session");
+    const button = host.querySelector<HTMLButtonElement>('.picker-header button[aria-label="New session"]')!;
     expect(button.getAttribute("aria-keyshortcuts")).toBe("N");
+    expect(button.title).toBe("New session (N)");
+    // An icon in the header, not a row of its own above the list.
+    expect(host.querySelector(".picker-header + .picker-new, .picker-room ~ .picker-new")).toBeNull();
     act(() => button.click());
     press("n");
     expect(onNew).toHaveBeenCalledTimes(2);
   });
 
-  it("offers it on an empty list too", () => {
-    act(() => root.render(<Picker view={view([])} prefs={defaults} onPrefs={() => {}} actions={{ onSelect: () => {}, onRetry: () => {}, onNew: () => {} }} />));
-    expect(host.querySelector(".picker-new")).not.toBeNull();
+  it("offers it on an empty list too, in the header and in the empty state", () => {
+    const onNew = vi.fn();
+    act(() => root.render(<Picker view={view([])} prefs={defaults} onPrefs={() => {}} actions={{ onSelect: () => {}, onRetry: () => {}, onNew }} />));
+    expect(host.querySelector('.picker-header button[aria-label="New session"]')).not.toBeNull();
+    const start = [...host.querySelectorAll<HTMLButtonElement>(".picker-state button")].find((button) => button.textContent === "New session");
+    act(() => start?.click());
+    expect(onNew).toHaveBeenCalledOnce();
+  });
+});
+
+describe("search in the header", () => {
+  /** Owns the query and the open flag the way App does, with a plain search field for the box. */
+  function SearchHarness({ onClose, initialQuery = "" }: { onClose: () => void; initialQuery?: string }) {
+    const [query, setQuery] = useState(initialQuery);
+    const [open, setOpen] = useState(false);
+    const [focus, setFocus] = useState(0);
+    const input = useRef<HTMLInputElement>(null);
+    useEffect(() => { if (focus) input.current?.focus(); }, [focus]);
+    const search: PickerSearch = {
+      field: <SearchField label="Search sessions" value={query} onChange={setQuery} variant="bare" inputRef={input}
+        clear={{ label: "Clear search", onClear: () => setQuery("") }} />,
+      query, open, keys: "Control+K Meta+K /",
+      onOpen: () => { setOpen(true); setFocus((count) => count + 1); },
+      onClose: () => { setQuery(""); setOpen(false); },
+      hint: query.length > 0 && query.length < 3 ? { id: "hint", text: "Type 3 or more characters to search messages" } : undefined,
+    };
+    return <><button id="outside">Outside</button>
+      <Picker view={view([S("a")])} prefs={defaults} onPrefs={() => {}} search={search}
+        onEscape={() => { if (query === "") return false; setQuery(""); return true; }}
+        actions={{ onSelect: () => {}, onRetry: () => {}, onNew: () => {}, onClose }} /></>;
+  }
+  const field = () => host.querySelector<HTMLInputElement>('.picker-header input[aria-label="Search sessions"]');
+  const searchButton = () => host.querySelector<HTMLButtonElement>('.picker-header button[aria-label="Search sessions"]');
+  const headerLabels = () => [...host.querySelectorAll(".picker-header > button")].map((button) => button.getAttribute("aria-label"));
+  const typeQuery = (text: string) => act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field(), text);
+    field()!.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const escape = (target: Element) => act(() => { target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+  function renderSearch(initialQuery = "") {
+    const onClose = vi.fn();
+    act(() => root.render(<SearchHarness onClose={onClose} initialQuery={initialQuery} />));
+    return { onClose };
+  }
+
+  it("draws Search, New session, ⋯ and × in the header row, and no search field or New session row", () => {
+    renderSearch();
+    expect(headerLabels()).toEqual(["Search sessions", "New session", "More session commands", "Close sessions"]);
+    expect(searchButton()?.getAttribute("aria-keyshortcuts")).toBe("Control+K Meta+K /");
+    expect(searchButton()?.title).toBe("Search sessions (Ctrl+K or /)");
+    expect(field()).toBeNull();
+    expect(host.querySelector(".picker-new")).toBeNull();
+    expect(host.querySelector(".picker-brand")?.textContent).toBe("Forgerie sessions");
+  });
+
+  it("opens the field in the header's place and focuses it", () => {
+    renderSearch();
+    act(() => searchButton()!.click());
+    expect(document.activeElement).toBe(field());
+    expect(headerLabels()).toEqual(["Close search"]);
+    expect(host.querySelector(".picker-brand")).toBeNull();
+    expect(host.querySelector(".picker-header")?.getAttribute("data-search")).toBe("open");
+  });
+
+  it("draws the hint under the header and describes the field with it", () => {
+    renderSearch();
+    act(() => searchButton()!.click());
+    typeQuery("de");
+    expect(host.querySelector("#hint")?.textContent).toBe("Type 3 or more characters to search messages");
+    expect(host.querySelector(".picker-header #hint")).toBeNull();
+  });
+
+  it("Escape clears a query, then closes the field and returns focus to Search, then closes the list", () => {
+    const { onClose } = renderSearch();
+    act(() => searchButton()!.click());
+    typeQuery("deploy");
+    escape(field()!);
+    expect(field()?.value).toBe("");
+    expect(onClose).not.toHaveBeenCalled();
+    escape(field()!);
+    expect(field()).toBeNull();
+    expect(document.activeElement).toBe(searchButton());
+    expect(onClose).not.toHaveBeenCalled();
+    escape(searchButton()!);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("Close search clears the query and closes the field", () => {
+    renderSearch();
+    act(() => searchButton()!.click());
+    typeQuery("deploy");
+    act(() => host.querySelector<HTMLButtonElement>('button[aria-label="Close search"]')!.click());
+    expect(field()).toBeNull();
+    expect(document.activeElement).toBe(searchButton());
+    act(() => searchButton()!.click());
+    expect(field()?.value).toBe("");
+  });
+
+  it("closes an empty field when focus leaves it", () => {
+    renderSearch();
+    act(() => searchButton()!.click());
+    act(() => host.querySelector<HTMLButtonElement>("#outside")!.focus());
+    expect(field()).toBeNull();
+    expect(searchButton()).not.toBeNull();
+  });
+
+  it("keeps the field open while it holds a query, wherever focus goes", () => {
+    renderSearch();
+    act(() => searchButton()!.click());
+    typeQuery("de");
+    act(() => host.querySelector<HTMLButtonElement>("#outside")!.focus());
+    expect(field()?.value).toBe("de");
+    expect(searchButton()).toBeNull();
+  });
+
+  it("opens with a query already typed, such as one kept from the last look", () => {
+    renderSearch("deploy");
+    expect(field()?.value).toBe("deploy");
   });
 });
 

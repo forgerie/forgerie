@@ -50,6 +50,12 @@ const until = async (condition: () => boolean) => {
 };
 const openId = () => new URLSearchParams(window.location.search).get("session");
 const box = () => document.querySelector<HTMLInputElement>('input[aria-label="Search sessions"]')!;
+const searchButton = () => document.querySelector<HTMLButtonElement>('.picker-header button[aria-label="Search sessions"]');
+/** The list's Search icon opens the box in the header. A closed sheet is inert, so the sheet opens first, as a reader's tap does. */
+const openSearch = async () => {
+  if (sheet() === "closed") await act(async () => { document.querySelector<HTMLButtonElement>(".app-opener")!.click(); });
+  await act(async () => { searchButton()!.click(); });
+};
 const sheet = () => document.querySelector(".app-shell")?.getAttribute("data-sheet");
 const titles = () => [...document.querySelectorAll(".picker-row .picker-title")].map((node) => node.textContent);
 const hitTitles = () => [...document.querySelectorAll(".hit-row-title")].map((node) => node.textContent);
@@ -129,8 +135,18 @@ afterEach(async () => {
 });
 
 describe("reaching the search box", () => {
-  it("Ctrl+K opens the closed list and focuses the box, even from the message box", async () => {
+  it("keeps the box closed until asked: the header holds Search and New session as icons", async () => {
+    expect(document.querySelector('input[aria-label="Search sessions"]')).toBeNull();
+    const labels = [...document.querySelectorAll(".picker-header > button")].map((button) => button.getAttribute("aria-label"));
+    expect(labels.slice(0, 2)).toEqual(["Search sessions", "New session"]);
+    await openSearch();
+    await until(() => document.activeElement === box());
+    expect(searchButton()).toBeNull();
+  });
+
+  it("Ctrl+K opens the closed list, opens the box in the header and focuses it, even from the message box", async () => {
     expect(sheet()).toBe("closed");
+    expect(document.querySelector('input[aria-label="Search sessions"]')).toBeNull();
     const composer = await (async () => { await until(() => document.querySelector("[data-composer-input]") !== null); return document.querySelector<HTMLElement>("[data-composer-input]")!; })();
     composer.focus();
     await key(composer, { key: "k", ctrlKey: true });
@@ -154,9 +170,11 @@ describe("reaching the search box", () => {
 
 describe("searching the list", () => {
   it("filters by title under three characters, archived sessions included, and says how to search messages", async () => {
+    await openSearch();
     await type("al");
     expect(titles()).toEqual(["Alpha", "Alder, put away"]);
     expect(document.body.textContent).toContain("Type 3 or more characters to search messages");
+    expect(document.getElementById(box().getAttribute("aria-describedby")!)?.textContent).toBe("Type 3 or more characters to search messages");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(searches).toEqual([]);
     await type("zq");
@@ -164,6 +182,7 @@ describe("searching the list", () => {
   });
 
   it("replaces the list with hits from three characters, and Escape clears both", async () => {
+    await openSearch();
     await type("deploy");
     await until(() => hitTitles().length === 2);
     expect(searches).toHaveLength(1);
@@ -179,7 +198,19 @@ describe("searching the list", () => {
     expect(titles()).toContain("Alpha");
   });
 
-  it("clears the query on Escape from the hits, and closes the list only on a second Escape", async () => {
+  it("closes an empty box when focus leaves it, and keeps a box with a query open", async () => {
+    await openSearch();
+    await until(() => document.activeElement === box());
+    await act(async () => { document.querySelector<HTMLElement>('[role="listbox"]')!.focus(); });
+    expect(document.querySelector('input[aria-label="Search sessions"]')).toBeNull();
+    await openSearch();
+    await type("al");
+    await act(async () => { document.querySelector<HTMLElement>('[role="listbox"]')!.focus(); });
+    expect(box().value).toBe("al");
+    expect(titles()).toEqual(["Alpha", "Alder, put away"]);
+  });
+
+  it("clears the query on Escape from the hits, closes the box on the next Escape, and closes the list only on a third", async () => {
     await key(document.body, { key: "k", ctrlKey: true });
     await until(() => document.activeElement === box());
     await type("deploy");
@@ -193,10 +224,15 @@ describe("searching the list", () => {
     expect(sheet()).toBe("open");
     expect(document.activeElement).toBe(box());
     await key(box(), { key: "Escape" });
+    expect(document.querySelector('input[aria-label="Search sessions"]')).toBeNull();
+    expect(document.activeElement).toBe(searchButton());
+    expect(sheet()).toBe("open");
+    await key(searchButton()!, { key: "Escape" });
     expect(sheet()).toBe("closed");
   });
 
   it("keeps the query and its hits across the switch to a docked list and back", async () => {
+    await openSearch();
     await type("deploy");
     await until(() => hitTitles().length === 2);
     await resize(1200);
@@ -213,6 +249,7 @@ describe("searching the list", () => {
 
 describe("opening a hit", () => {
   it("opens an on-branch hit at its match, and the hits wait for the next look", async () => {
+    await openSearch();
     await type("deploy");
     await until(() => hitTitles().length === 2);
     await act(async () => { document.querySelector<HTMLButtonElement>(".hit-row")!.click(); });
@@ -228,6 +265,7 @@ describe("opening a hit", () => {
   });
 
   it("opens an off-branch hit in the history tree, on its entry", async () => {
+    await openSearch();
     await type("deploy");
     await until(() => hitTitles().length === 2);
     await act(async () => { document.querySelectorAll<HTMLButtonElement>(".hit-row")[1]!.click(); });
