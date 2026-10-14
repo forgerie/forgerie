@@ -51,8 +51,12 @@ describe("managed processes", () => {
       await manager.maintain();
       expect((await manager.list()).map((item) => item.id)).toEqual([...Array.from({ length: 50 }, (_, n) => `ended-${String(n + 2).padStart(2, "0")}`), "running"]);
       await expect(readFile(join(root, "managed-processes/retention/ended-00/command.json"))).rejects.toMatchObject({ code: "ENOENT" });
-      live.delete("ended-51");
-      expect(await manager.clearFinished()).toHaveLength(50);
+      await manager.start({ id: "lost", command: "cat", cwd: root });
+      live.delete("lost");
+      const cleared = await manager.clearFinished();
+      expect(cleared).toHaveLength(51);
+      expect(cleared).toContain("lost");
+      await expect(readFile(join(root, "managed-processes/retention/lost/command.json"))).rejects.toMatchObject({ code: "ENOENT" });
       expect((await manager.list()).map((item) => item.id)).toEqual(["running"]);
     } finally { await manager.dispose(); }
   });
