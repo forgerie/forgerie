@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Task activity in the status panel</title>
+<!--
+  Mockup: the status chip's panel shows the session's live Durable tasks as a
+  tree, in plain words. Pick a scene with ?scene=<name>; SCENES lists them.
+  Tokens and fonts match ui/src/ui/theme.css. The shell, chip, and panel are
+  the shipped status-chip grammar (prototypes/status-chip).
+-->
+<style>
+@font-face { font-family: "Public Sans Variable"; font-weight: 100 900; font-display: block;
+  src: url(fonts/public-sans-latin-wght-normal.woff2) format("woff2"); }
+@font-face { font-family: "JetBrains Mono Variable"; font-weight: 100 800; font-display: block;
+  src: url(fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2"); }
+
+:root {
+  color-scheme: light dark;
+  --tint: 106;
+  --background: oklch(0.992 0.002 var(--tint));
+  --foreground: oklch(0.145 0.006 var(--tint));
+  --muted: oklch(0.97 0.004 var(--tint));
+  --muted-foreground: oklch(0.556 0.007 var(--tint));
+  --destructive: oklch(0.577 0.245 27.325);
+  --line: color-mix(in oklab, var(--foreground) 10%, transparent);
+  --line-focus: color-mix(in oklab, var(--foreground) 25%, transparent);
+  --code-surface: color-mix(in oklab, var(--foreground) 4%, var(--background));
+  --tint-surface: color-mix(in oklab, var(--foreground) 2.5%, var(--background));
+  --popover: var(--background);
+  --hover-surface: color-mix(in oklab, var(--foreground) 4%, transparent);
+  --quiet-foreground: color-mix(in oklab, var(--foreground) 70%, transparent);
+  --body-font: "Public Sans Variable", sans-serif;
+  --code-font: "JetBrains Mono Variable", monospace;
+  --text-size: 0.9375rem;
+  --small-text: 0.8125rem;
+  --label-text: 0.75rem;
+  --meta-text: 0.6875rem;
+  --code-size: 0.78125rem;
+  --line-height: 1.625;
+  --thread-max-width: 42rem;
+  --radius-control: 0.5rem;
+  --radius-document: 0.375rem;
+  --radius-surface: 0.625rem;
+  --gutter: clamp(1rem, 2.6cqi, 1.5rem);
+  --control-size: 2.75rem;
+  --icon-size: 1.75rem;
+  --header-size: 3rem;
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-6: 1.5rem;
+  --hairline: 1px;
+  --live: oklch(0.623 0.214 259.815);
+  --live-wash: color-mix(in oklab, var(--live) 16%, transparent);
+  --live-edge: color-mix(in oklab, var(--live) 45%, transparent);
+  --scrim-shadow: oklch(0 0 0 / 0.16);
+  --diff-add: oklch(0.6 0.15 150);
+  --diff-modify: oklch(0.6 0.13 70);
+  --tone-warn: var(--diff-modify);
+  --ink-good: color-mix(in oklab, var(--diff-add) 78%, var(--foreground));
+  --ink-warn: color-mix(in oklab, var(--diff-modify) 70%, var(--foreground));
+  --ink-live: color-mix(in oklab, var(--live) 75%, var(--foreground));
+  --warn-wash: color-mix(in oklab, var(--diff-modify) 8%, transparent);
+  --meter-rest: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.17 0.003 var(--tint));
+    --foreground: oklch(0.985 0.002 var(--tint));
+    --muted: oklch(0.275 0.004 var(--tint));
+    --muted-foreground: oklch(0.708 0.004 var(--tint));
+    --destructive: oklch(0.704 0.191 22.216);
+    --popover: oklch(0.215 0.003 var(--tint));
+    --tint-surface: color-mix(in oklab, var(--foreground) 4%, var(--background));
+    --scrim-shadow: oklch(0 0 0 / 0.4);
+    --diff-modify: oklch(0.76 0.13 80);
+    --diff-add: oklch(0.72 0.15 150);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { block-size: 100%; margin: 0; }
+body { background: var(--background); color: var(--foreground); font-family: var(--body-font); font-size: var(--text-size);
+  -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; }
+svg { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+code { font-family: var(--code-font); font-size: var(--code-size); }
+:focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
+
+/* ---------- The session shell, as shipped ---------- */
+.session-shell { container-type: size; position: relative; block-size: 100dvh; display: flex; flex-direction: column; min-inline-size: 0; }
+.session-header { flex: none; block-size: var(--header-size); display: flex; align-items: center; gap: var(--space-2);
+  padding-inline: clamp(1rem, 2.6cqi, 1.25rem); border-block-end: 1px solid var(--line); }
+.session-title { flex: 1; min-inline-size: 0; margin: 0; font-size: var(--small-text); font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon-button { position: relative; display: grid; place-items: center; flex: none; inline-size: var(--icon-size); block-size: var(--icon-size);
+  padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
+.icon-button svg { inline-size: 1.125rem; block-size: 1.125rem; }
+.icon-button::before, .status-chip::after { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
+.icon-button + .icon-button { margin-inline-start: var(--space-2); }
+
+/* ---------- The chip, as shipped ---------- */
+.status-chip { --chip-ink: var(--muted-foreground); --chip-wash: color-mix(in oklab, var(--foreground) 6%, transparent);
+  position: relative; flex: none; display: inline-flex; align-items: center; gap: 0.375rem; block-size: 1.5rem;
+  margin-inline-end: var(--space-2); padding-inline: 0.625rem 0.4375rem; border: 0; border-radius: 999px;
+  background: var(--chip-wash); color: var(--chip-ink); font-size: var(--label-text); font-weight: 500; line-height: 1; white-space: nowrap; }
+.status-chip:hover, .status-chip[aria-expanded="true"] { background: color-mix(in oklab, var(--chip-wash), var(--foreground) 8%); }
+.status-chip[data-tone="live"] { --chip-ink: var(--ink-live); --chip-wash: var(--live-wash); }
+.status-chip[data-tone="warn"] { --chip-ink: var(--ink-warn); --chip-wash: var(--warn-wash); }
+.chip-dot { flex: none; inline-size: 6px; block-size: 6px; border-radius: 50%; border: 1.5px solid currentColor; }
+[data-tone="live"] > .chip-dot { border-color: var(--live); animation: pulse 1.6s ease-in-out infinite; }
+[data-tone="warn"] > .chip-dot { border: 0; border-radius: 1px; background: var(--tone-warn); }
+/* New: background work rides along as a quiet count, never in the failure tone. */
+.chip-aside { padding-inline-start: 0.375rem; margin-inline-start: 0.125rem; border-inline-start: var(--hairline) solid currentColor;
+  font-variant-numeric: tabular-nums; opacity: 0.8; }
+.chip-chevron { inline-size: 0.75rem; block-size: 0.75rem; stroke-width: 2.5; opacity: 0.75; }
+[aria-expanded="true"] > .chip-chevron { rotate: 180deg; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+/* ---------- The panel, as shipped, a little wider ---------- */
+.status-panel { position: absolute; z-index: 10;
+  inset-block-start: calc(var(--header-size) + var(--space-1));
+  inset-inline-end: clamp(0.5rem, 2cqi, 1rem);
+  inline-size: min(27rem, 100cqi - 1rem);
+  max-block-size: calc(100cqb - var(--header-size) - var(--space-4));
+  display: flex; flex-direction: column; overflow: hidden;
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-surface); background: var(--popover);
+  box-shadow: 0 var(--space-2) var(--space-6) var(--scrim-shadow); font-size: var(--small-text); }
+.status-scrim { position: absolute; z-index: 9; inset: var(--header-size) 0 0; background: color-mix(in oklab, var(--background) 62%, transparent); }
+.panel-scroll { overflow-y: auto; overscroll-behavior: contain;
+  /* A cut edge shows that more exists below. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.25rem), transparent); padding-block-end: var(--space-2); }
+.panel-close { position: absolute; z-index: 1; inset-block-start: var(--space-1); inset-inline-end: var(--space-1);
+  display: grid; place-items: center; inline-size: 2.25rem; block-size: 2.25rem; padding: 0; border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--muted-foreground); }
+.panel-close svg { inline-size: 1rem; block-size: 1rem; }
+
+.state { --tone: var(--muted-foreground); --wash: transparent;
+  padding: var(--space-3) 2.75rem var(--space-3) calc(var(--space-4) - var(--hairline) * 3);
+  border-inline-start: calc(var(--hairline) * 3) solid var(--tone); background: var(--wash); }
+.state[data-tone="warn"] { --tone: var(--tone-warn); --wash: var(--warn-wash); }
+.state[data-tone="live"] { --tone: var(--live); --wash: color-mix(in oklab, var(--live) 7%, transparent); }
+.state-title { margin: 0; min-block-size: 1.75rem; display: flex; align-items: center; font-size: var(--text-size); font-weight: 600; }
+.state-lede { margin: var(--space-1) 0 0; color: var(--quiet-foreground); line-height: 1.55; text-wrap: pretty; }
+.state-lede strong { color: var(--foreground); font-weight: 600; }
+.state-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-block-start: var(--space-3); }
+.button { min-block-size: 2rem; padding-inline: var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
+  background: transparent; font-size: var(--small-text); font-weight: 500; }
+.button[data-primary] { border-color: transparent; background: var(--foreground); color: var(--background); }
+.consequence { margin: var(--space-2) 0 0; color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.5; }
+
+/* A short pane: the lede repeats what the lists below already say, so it goes
+   first (intrinsic rule 7). The title, the lists, and every action stay. */
+@container (max-height: 26rem) { .state-lede { display: none; } }
+
+/* ---------- New: the work list ---------- */
+.work { padding: var(--space-2) var(--space-4) var(--space-1); }
+.work + .work, .state + .work { border-block-start: var(--hairline) solid var(--line); }
+.work-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); min-block-size: 2rem; padding-block-start: var(--space-1); }
+/* With no state on top, the first list's head makes room for the close button. */
+.panel-scroll > .work:first-child .work-head { padding-inline-end: 2.25rem; }
+.work-head h2 { margin: 0; font-size: var(--small-text); font-weight: 600; }
+.work-head span { color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
+.work-empty { margin: 0 0 var(--space-2); color: var(--muted-foreground); }
+.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+/* The owner spine: a child hangs off the line that drops from its owner's mark. */
+.tree ul { margin-inline-start: calc(0.5rem - 0.75px); padding-inline-start: calc(0.75rem + 0.75px); border-inline-start: 1.5px solid var(--line); }
+.tree ul > li:last-child { position: relative; }
+.tree ul > li:last-child::before { content: ""; position: absolute; inset-inline-start: calc(-0.75rem - 2.25px); inset-block: 1.1rem 0; inline-size: 3px; background: var(--popover); }
+
+/* A row is a disclosure button. Its hit area spans the panel; the mark keeps its own size. */
+.task { display: grid; grid-template-columns: 1rem minmax(0, 1fr) auto; column-gap: var(--space-2); align-items: start;
+  inline-size: 100%; min-block-size: var(--control-size); padding: var(--space-2) var(--space-1) var(--space-2) 0;
+  border: 0; border-radius: var(--radius-control); background: transparent; text-align: start; }
+.task:hover { background: var(--hover-surface); }
+.mark { margin-block-start: 0.3rem; justify-self: center; inline-size: 0.5625rem; block-size: 0.5625rem; border-radius: 50%; border: 1.5px solid var(--muted-foreground); }
+.mark[data-s="running"] { border-color: var(--live); background: var(--live); animation: pulse 1.6s ease-in-out infinite; }
+.mark[data-s="waiting"] { border-color: var(--live); }
+.mark[data-s="completing"] { border-color: var(--live); background: linear-gradient(90deg, var(--live) 50%, transparent 50%); }
+.mark[data-s="pending"] { border-style: dashed; }
+.mark[data-s="blocked"] { border: 0; border-radius: 1.5px; background: var(--tone-warn); }
+.task-body { min-inline-size: 0; }
+.task-label { display: block; font-weight: 550; line-height: 1.4; overflow-wrap: anywhere; }
+.task-label code { font-weight: 450; color: var(--quiet-foreground); }
+.task-detail { display: block; margin-block-start: 0.125rem; color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.45; }
+.task-detail[data-tone="warn"] { color: var(--ink-warn); }
+/* The one thing only Durable knows: what happens to this task if Forgerie restarts now. */
+.restart { display: flex; align-items: center; gap: 0.3125rem; margin-block-start: 0.1875rem; color: var(--ink-warn); font-size: var(--label-text); }
+.restart svg { flex: none; inline-size: 0.8125rem; block-size: 0.8125rem; }
+.task-time { padding-block-start: 0.0625rem; color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.task-time svg { display: inline-block; vertical-align: -0.125rem; inline-size: 0.75rem; block-size: 0.75rem; margin-inline-start: 0.25rem; opacity: 0.7; }
+.task[aria-expanded="true"] .task-time svg { rotate: 180deg; }
+.folded { display: block; margin-block-start: 0.125rem; color: var(--muted-foreground); font-size: var(--label-text); }
+
+/* The record behind a row, for when the plain words are not enough. */
+.record { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.25rem var(--space-3); margin: 0 0 var(--space-2) calc(1rem + var(--space-2));
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-document); background: var(--code-surface); font-size: var(--label-text); }
+.record dt { color: var(--muted-foreground); }
+.record dd { margin: 0; min-inline-size: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.record dd code { font-size: var(--label-text); }
+.record-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin-block-start: var(--space-1); }
+.text-button { min-block-size: 2rem; padding-inline: var(--space-2); margin-inline-start: calc(-1 * var(--space-2)); border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+.text-button:hover { background: var(--hover-surface); color: var(--foreground); }
+
+/* The restart promise for the whole session, said once. */
+.restart-note { display: flex; gap: var(--space-2); margin: var(--space-1) var(--space-4) var(--space-3); padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-document); background: var(--tint-surface); color: var(--quiet-foreground); font-size: var(--label-text); line-height: 1.5; }
+.restart-note svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; margin-block-start: 0.125rem; color: var(--ink-good); }
+.restart-note strong { color: var(--foreground); font-weight: 600; }
+
+/* ---------- Thread and composer, as shipped ---------- */
+.thread { flex: 1; min-block-size: 0; overflow-y: auto; padding: clamp(1rem, 3cqb, 1.5rem) var(--gutter) var(--space-4); }
+.thread-inner { max-inline-size: var(--thread-max-width); margin-inline: auto; display: flex; flex-direction: column; gap: clamp(1rem, 3.2cqb, 1.5rem); }
+.bubble { align-self: flex-end; max-inline-size: min(85%, 32rem); padding: 0.625rem 1.125rem; border-radius: 1.25rem; background: var(--muted); line-height: var(--line-height); }
+.reply { line-height: var(--line-height); }
+.reply p { margin: 0 0 0.75rem; }
+.reply p code { padding: 0.0625rem 0.3125rem; border-radius: 0.25rem; background: var(--code-surface); }
+.tool { display: flex; align-items: center; gap: var(--space-2); margin-block: 0.25rem; color: var(--muted-foreground); font-size: var(--small-text); }
+.tool svg { inline-size: 0.875rem; block-size: 0.875rem; }
+.tool code { color: var(--quiet-foreground); }
+.composer { flex: none; margin: 0 var(--gutter) clamp(0.5rem, 2.5cqb, 1.25rem); max-inline-size: var(--thread-max-width); }
+@container (min-width: 46rem) { .composer { margin-inline: auto; inline-size: calc(100% - 2 * var(--gutter)); } }
+.composer-box { border: var(--hairline) solid var(--line); border-radius: 1rem; background: var(--tint-surface); padding: var(--space-3) var(--space-3) var(--space-2) var(--space-4); }
+.composer-text { min-block-size: 1.75rem; color: var(--muted-foreground); line-height: var(--line-height); }
+.composer-row { display: flex; align-items: center; gap: var(--space-3); margin-block-start: var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); }
+.composer-row svg { inline-size: 1.125rem; block-size: 1.125rem; }
+.send { margin-inline-start: auto; display: grid; place-items: center; inline-size: 2rem; block-size: 2rem; border-radius: var(--radius-control);
+  background: var(--foreground); color: var(--background); }
+
+@media (prefers-reduced-motion: reduce) { .chip-dot, .mark { animation: none !important; } }
+</style>
+</head>
+<body>
+<main class="session-shell" id="shell"></main>
+
+<script>
+const icon = {
+  panel: '<svg viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>',
+  tree: '<svg viewBox="0 0 24 24"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>',
+  archive: '<svg viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>',
+  chevron: '<svg class="chip-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+  down: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+  x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+  stop: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9h6v6H9z"/></svg>',
+  resume: '<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
+  file: '<svg viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>',
+  term: '<svg viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>',
+  plus: '<svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
+  mic: '<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
+  up: '<svg viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>',
+};
+
+/*
+ * One row per live task. The fields map one to one onto pi-durable:
+ *   status  TaskGraphNode.state.status, or "blocked" from harness.inspect()
+ *   owner   TaskGraphNode.owner, or the anchor whose conversations[] holds the child
+ *   kind, id, started  TaskRecord kind, id, startedAt
+ *   replay  the tool's replay policy: "unsafe" tools are not rerun after a restart
+ * Labels are Forgerie's words for each kind; the kind itself sits behind the row.
+ */
+function row(t) {
+  const restart = t.replay === "unsafe"
+    ? `<span class="restart">${icon.stop}Stops if Forgerie restarts, and is not run again</span>` : "";
+  const folded = t.folded ? `<span class="folded">${t.folded}</span>` : "";
+  const open = Boolean(t.record);
+  const record = open ? `<dl class="record">
+      <dt>Kind</dt><dd><code>${t.record.kind}</code></dd>
+      <dt>Task</dt><dd>${t.record.id}${t.record.owner ? `, owned by task ${t.record.owner}` : ", owned by the conversation"}</dd>
+      <dt>Started</dt><dd>${t.record.started}</dd>
+      <dt>Scheduler</dt><dd><code>${t.record.scheduler}</code></dd>
+      ${t.record.extra ?? ""}
+      ${t.record.actions ? `<div class="record-actions">${t.record.actions}</div>` : ""}
+    </dl>` : "";
+  const kids = t.children?.length ? `<ul>${t.children.map(row).join("")}</ul>` : "";
+  return `<li><button class="task" aria-expanded="${open}">
+      <span class="mark" data-s="${t.status}" aria-hidden="true"></span>
+      <span class="task-body"><span class="task-label">${t.label}</span>
+        <span class="task-detail"${t.tone ? ` data-tone="${t.tone}"` : ""}>${t.detail}</span>${restart}${folded}</span>
+      <span class="task-time">${t.time ?? ""}${icon.down}</span>
+    </button>${record}${kids}</li>`;
+}
+const work = (title, count, tasks, empty) => `<section class="work">
+    <div class="work-head"><h2>${title}</h2><span>${count}</span></div>
+    ${tasks.length ? `<ul class="tree">${tasks.map(row).join("")}</ul>` : `<p class="work-empty">${empty}</p>`}
+  </section>`;
+const restartNote = (html) => `<p class="restart-note">${icon.resume}<span>${html}</span></p>`;
+
+/* ---------- Fixtures ---------- */
+const testRun = (open) => ({ label: "Run <code>npm test -- durableTriggers</code>", status: "running", time: "41 s", detail: "Running", replay: "unsafe",
+  record: open ? { kind: "pi.tool", id: 1842, owner: 1840, started: "14:03:12", scheduler: "running",
+    extra: `<dt>Tool</dt><dd><code>bash</code>, replay <code>unsafe</code></dd>`,
+    actions: `<button class="text-button">Show in chat</button><button class="text-button">Copy record</button>` } : undefined });
+const thisTurn = (open) => [{ label: "Answering your message", status: "waiting", time: "1 m 12 s", detail: "Waiting for 2 tool calls",
+  children: [testRun(open),
+    { label: "Read <code>src/server/triggers/durableTriggers.ts</code>", status: "running", time: "1 s", detail: "Running" }] }];
+const uiAgent = { label: "Agent <code>ui</code>", status: "completing", time: "3 m 40 s", detail: "Working. Its answer comes back here.",
+  children: [
+    { label: "Answering", status: "waiting", time: "3 m 38 s", detail: "Waiting for 1 tool call",
+      children: [{ label: "Edit <code>ui/src/triggers/TriggerList.tsx</code>", status: "running", time: "1 s", detail: "Running", replay: "unsafe" }] },
+    { label: "Report back to this session", status: "waiting", time: "3 m 40 s", detail: "Waits for the agent to finish" }] };
+const reviewAgent = { label: "Agent <code>review</code>", status: "completing", time: "52 s", detail: "Working. Its answer comes back here.", folded: "2 tasks inside" };
+
+const SCENES = {
+  working: { chip: { label: "Working", tone: "live", aside: "2 agents" } },
+  "working-open": { chip: { label: "Working", tone: "live", aside: "2 agents", open: true },
+    panel: `<section class="state" data-tone="live"><h2 class="state-title">Working</h2>
+        <p class="state-lede">Pi is answering your message. <strong>2 agents</strong> work in the background and post their answers here.</p></section>
+      ${work("This turn", "3 tasks", thisTurn(false))}
+      ${work("In the background", "2 agents", [uiAgent, reviewAgent])}
+      ${restartNote("If Forgerie restarts now, everything here resumes on its own, <strong>except the test run and the edit</strong>. They stop, and Pi tells the agent that ran each one.")}` },
+  "working-details": { chip: { label: "Working", tone: "live", aside: "2 agents", open: true },
+    panel: `${work("This turn", "3 tasks", thisTurn(true))}
+      ${work("In the background", "2 agents", [uiAgent, reviewAgent])}` },
+  "idle-background-open": { chip: { label: "Your turn", tone: "idle", aside: "2 agents", open: true }, idle: true,
+    panel: `<section class="state"><h2 class="state-title">Your turn</h2>
+        <p class="state-lede">Pi finished its answer. <strong>2 agents</strong> still work. Each answer arrives as a new message, and Pi picks it up.</p></section>
+      ${work("This turn", "", [], "Nothing is running for this turn.")}
+      ${work("In the background", "2 agents", [{ ...uiAgent, children: uiAgent.children }, { ...reviewAgent, folded: undefined,
+        children: [{ label: "Answering", status: "running", time: "52 s", detail: "Writing" },
+          { label: "Report back to this session", status: "waiting", time: "52 s", detail: "Waits for the agent to finish" }] }])}
+      ${restartNote("If Forgerie restarts now, both agents resume on their own. <strong>1 running edit</strong> stops, and Pi tells the agent.")}` },
+  "stuck-open": { chip: { label: "Stuck", tone: "warn", open: true }, idle: true,
+    panel: `<section class="state" data-tone="warn"><h2 class="state-title">1 task cannot run</h2>
+        <p class="state-lede">This session looks busy, but nothing moves. A newer Forgerie saved the task below, and this build cannot run it. This happens after a rollback.</p>
+        <div class="state-actions"><button class="button" data-primary>Stop the task</button><button class="button">Copy details</button></div>
+        <p class="consequence">If you stop it, Pi does not learn that <code>git push</code> ran. Tell it in chat.</p></section>
+      ${work("This turn", "", [], "Nothing is running for this turn.")}
+      ${work("In the background", "1 task", [{ label: "Tell Pi the result of an approved action", status: "blocked", time: "2 h 14 m",
+        detail: "Saved by a newer version. Waiting for code that is not loaded.", tone: "warn",
+        record: { kind: "forgerie.gated-action-delivery", id: 2207, started: "11:52:40", scheduler: "blocked: task_too_old",
+          extra: `<dt>Saved as</dt><dd>version 2, this build has version 1</dd><dt>Action</dt><dd><code>git push origin main</code>, approved 11:52</dd>` } }])}` },
+};
+
+const name = new URLSearchParams(location.search).get("scene") ?? "working-open";
+const scene = SCENES[name] ?? SCENES["working-open"];
+document.title = `Task activity: ${name}`;
+
+function chip({ label, tone, aside, open = false }) {
+  return `<button class="status-chip" data-tone="${tone}" aria-haspopup="dialog" aria-expanded="${open}"><span class="chip-dot"></span>${label}${
+    aside ? `<span class="chip-aside">${aside}</span>` : ""}${icon.chevron}</button>`;
+}
+
+document.getElementById("shell").innerHTML = `
+  <header class="session-header">
+    <button class="icon-button" aria-label="Sessions">${icon.panel}</button>
+    <h1 class="session-title">Durable triggers miss a fire after restart</h1>
+    ${chip(scene.chip)}
+    <button class="icon-button" aria-label="Session tree">${icon.tree}</button>
+    <button class="icon-button" aria-label="Archive">${icon.archive}</button>
+  </header>
+  ${scene.panel ? `<div class="status-scrim"></div><div class="status-panel" role="dialog" aria-label="Session status">
+      <button class="panel-close" aria-label="Close">${icon.x}</button>
+      <div class="panel-scroll">${scene.panel}</div></div>` : ""}
+  <div class="thread"><div class="thread-inner">
+    <div class="bubble">A daily trigger did not fire after I restarted sessiond at 09:00. Find out why, and fix the trigger list so it shows the missed run.</div>
+    <div class="reply">
+      <div class="tool">${icon.file}Read <code>src/server/triggers/durableTriggers.ts</code></div>
+      <div class="tool">${icon.term}Ran <code>rg -n "firstOccurrence" src/server/triggers</code></div>
+      <p>The fire task takes its next time from <code>firstOccurrence</code>. A restart between two fires recomputes it from the current clock, so the 09:00 occurrence is skipped.</p>
+      <p>I gave the list change to the <code>ui</code> agent and asked <code>review</code> to check the fix. I am running the trigger tests now.</p>
+    </div>
+  </div></div>
+  <div class="composer"><div class="composer-box">
+    <div class="composer-text">Message Pi</div>
+    <div class="composer-row">${icon.plus}${icon.mic}<span class="send">${icon.up}</span></div>
+  </div></div>`;
+</script>
+</body>
+</html>
