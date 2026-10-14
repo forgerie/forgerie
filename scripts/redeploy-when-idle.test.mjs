@@ -10,11 +10,13 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "redeploy-check-"));
   await writeFile(join(root, "curl"), '#!/usr/bin/env bash\nif [[ "$*" == *build.json* ]]; then printf \'{"entry":"test.js"}\\n\'; else printf "%s" "$ACTIVITY"; exit "$CURL_EXIT"; fi\n', { mode: 0o755 });
   await writeFile(join(root, "systemctl"), '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$CALLS"\nexit "$SYSTEMCTL_EXIT"\n', { mode: 0o755 });
+  await writeFile(join(root, "git"), '#!/usr/bin/env bash\nprintf "%s\\n" "$GIT_REVISION"\n', { mode: 0o755 });
   return {
     root,
     run(index, item, paths = []) {
       return spawnSync("bash", [script, "/own", "0", ...paths], { encoding: "utf8", env: { ...process.env,
         FORGERIE_DEPLOY_SHELL: "1", PATH: `${root}:${process.env.PATH}`, FORGERIE_REDEPLOY_LOG: join(root, `log-${index}`),
+        FORGERIE_REDEPLOY_REVISION: item.revision ?? "", GIT_REVISION: item.gitRevision ?? "current",
         ACTIVITY: item.raw ?? JSON.stringify(item.activity), CURL_EXIT: String(item.curlExit ?? 0), SYSTEMCTL_EXIT: String(item.systemctlExit ?? 0), CALLS: join(root, `calls-${index}`) } });
     },
     calls: (index) => readFile(join(root, `calls-${index}`), "utf8").catch(() => ""),
@@ -58,13 +60,18 @@ it("publishes a prepared build while services are stopped and keeps the previous
     const refused = f.run("invalid", idle, [prepared, f.root]);
     assert.notEqual(refused.status, 0);
     assert.equal(await f.calls("invalid"), "");
-    const result = f.run("publish", idle, [prepared, deployed]);
+    const stale = f.run("stale", { ...idle, revision: "old" }, [prepared, deployed]);
+    assert.notEqual(stale.status, 0);
+    assert.equal(await f.calls("stale"), "");
+    assert.equal(await readFile(join(deployed, "server/index.js"), "utf8"), "old");
+    const result = f.run("publish", { ...idle, revision: "current" }, [prepared, deployed]);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.deepEqual((await f.calls("publish")).trim().split("\n").slice(0, 2), [
       "--user stop forgerie-sessiond.service forgerie-web.service", "--user start forgerie-sessiond.service forgerie-web.service",
     ]);
     assert.equal(await readFile(join(deployed, "server/index.js"), "utf8"), "new");
-    const [backup] = await readdir(join(f.root, ".forgerie"));
-    assert.equal(await readFile(join(f.root, ".forgerie", backup, "previous/server/index.js"), "utf8"), "old");
+    const backups = await readdir(join(f.root, ".forgerie"));
+    const kept = await Promise.all(backups.map((backup) => readFile(join(f.root, ".forgerie", backup, "previous/server/index.js"), "utf8").catch(() => undefined)));
+    assert.ok(kept.includes("old"));
   } finally { await f.close(); }
 });

@@ -4,7 +4,7 @@ PATH="${PATH:-/usr/bin:/bin}:/run/current-system/sw/bin:/etc/profiles/per-user/$
 export PATH
 if [ -z "${FORGERIE_DEPLOY_SHELL:-}" ]; then
   FORGERIE_DEPLOY_SHELL=1 exec nix --extra-experimental-features 'nix-command flakes' shell \
-    nixpkgs#bash nixpkgs#curl nixpkgs#jq nixpkgs#coreutils nixpkgs#systemd --command bash "$0" "$@"
+    nixpkgs#bash nixpkgs#curl nixpkgs#jq nixpkgs#coreutils nixpkgs#systemd nixpkgs#git --command bash "$0" "$@"
 fi
 unset FORGERIE_DEPLOY_SHELL
 # The body runs in Bash. A failed curl must never look like an idle server.
@@ -22,6 +22,10 @@ publish_build() {
   mkdir -p "$(dirname "$deployed")/.forgerie"
   stage=$(mktemp -d "$(dirname "$deployed")/.forgerie/deploy.XXXXXX")
   cp -a "$prepared" "$stage/next"
+  if [ -n "${FORGERIE_REDEPLOY_REVISION:-}" ] && [ "$(git -C "$(dirname "$deployed")" rev-parse HEAD)" != "$FORGERIE_REDEPLOY_REVISION" ]; then
+    say "refused: deployed checkout changed while waiting. Build its new revision before restarting."
+    return 1
+  fi
   # Copy before stopping. Swap only while both units are down, so the new UI never calls an old server.
   systemctl --user stop forgerie-sessiond.service forgerie-web.service
   if [ -e "$deployed" ]; then
@@ -36,7 +40,7 @@ publish_build() {
   systemctl --user start forgerie-sessiond.service forgerie-web.service
 }
 main() {
-  for tool in bash curl jq date sleep systemctl tee; do command -v "$tool" >/dev/null || { echo "missing: $tool" >&2; exit 1; }; done
+  for tool in bash curl jq date sleep systemctl tee git; do command -v "$tool" >/dev/null || { echo "missing: $tool" >&2; exit 1; }; done
   if [ "${1:-}" = "--check" ]; then echo "Redeploy dependencies ready"; return; fi
   own="${1:?usage: redeploy-when-idle.sh WORKSPACE [LIMIT_MINUTES] [BUILT_DIST DEPLOYED_DIST]}"
   local limit="${2:-60}"
