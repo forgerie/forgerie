@@ -358,7 +358,7 @@ export async function workflowChildRefusal(tx: Tx, parent: ConversationId, name:
   return admission.kind === "refused" ? admission.reason : undefined;
 }
 
-/** The active workflow's model choice. Spawns and sends enforce it; null restores the agent-file/session default. */
+/** The active workflow's model choice. Spawns and sends enforce it; null restores the session default. */
 export async function workflowWorkerModel(tx: Tx, parent: ConversationId, name: string): Promise<string | null | undefined> {
   const doc = await tx.doc(Runs, parent);
   const run = doc.active === null ? undefined : doc.records[doc.active];

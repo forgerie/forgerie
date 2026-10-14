@@ -111,8 +111,8 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
             const choice = declared === null ? undefined : modelChoice(declared);
             if (choice === null) throw new WorkflowError(400, `Invalid workflow model for ${name}: ${declared ?? "default"}`);
             const parent = await tx.doc(AgentDoc, runtime.conversationId);
-            const model = choice?.model ?? profile?.model ?? parent.model;
-            const thinkingLevel = choice?.thinkingLevel ?? profile?.thinkingLevel ?? parent.thinkingLevel ?? "off";
+            const model = declared === null ? parent.model : choice?.model ?? profile?.model ?? parent.model;
+            const thinkingLevel = declared === null ? parent.thinkingLevel ?? "off" : choice?.thinkingLevel ?? profile?.thinkingLevel ?? parent.thinkingLevel ?? "off";
             const configured = await tx.doc(AgentDoc, conversationId);
             if (configured.model?.provider === model?.provider && configured.model?.modelId === model?.modelId && (configured.thinkingLevel ?? "off") === thinkingLevel) return;
             busy = (await tx.doc(LiveDoc, conversationId)).run?.taskId;
@@ -480,8 +480,8 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
             const spec = current === null ? undefined : current ?? args.model;
             const choice = spec === undefined ? undefined : modelChoice(spec);
             if (choice === null) throw new WorkflowError(400, `Invalid workflow model for ${name}: ${spec ?? ""}`);
-            const chosenModel = choice?.model ?? profile?.model;
-            const chosenThinking = choice?.thinkingLevel ?? profile?.thinkingLevel;
+            const chosenModel = current === null ? undefined : choice?.model ?? profile?.model;
+            const chosenThinking = current === null ? undefined : choice?.thinkingLevel ?? profile?.thinkingLevel;
             const plan = runtime ?? planChildRuntime(profile, availableNames(selected), []);
             await configure(tx, child.id, {
               ...(checkout === undefined ? {} : { cwd: checkout.path }),
