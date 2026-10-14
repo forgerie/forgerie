@@ -7,7 +7,12 @@ import { mentionPlacement } from "../mentionSyntax";
  * narrower), and within the visual viewport (so a touch keyboard counts). The
  * panel scrolls inside the height it gets. A host that keeps the panel
  * unmounted while closed passes `open`, so placement starts when it appears.
+ * A panel with less than `SHORT_REM` of height gets `data-short`, so its content
+ * can take a cheaper layout for the room it has.
  */
+/** Under this height a panel is short. A guess until measured: about a search field and four rows. */
+const SHORT_REM = 22;
+
 export function usePanelPlacement(panel: RefObject<HTMLElement | null>, anchor: RefObject<HTMLElement | null>, cap: number, minWidthRem = 0, open = true) {
   useLayoutEffect(() => {
     if (!open) return;
@@ -24,6 +29,7 @@ export function usePanelPlacement(panel: RefObject<HTMLElement | null>, anchor: 
       // Measured window geometry, not theme decisions.
       Object.assign(element.style, { left: `${plan.left}px`, top: `${plan.top}px`, width: `${plan.width}px`,
         maxHeight: `${plan.maxHeight}px`, transform: plan.up ? "translateY(-100%)" : "none" });
+      element.toggleAttribute("data-short", plan.maxHeight < SHORT_REM * rem);
     };
     position();
     const observer = new ResizeObserver(position);

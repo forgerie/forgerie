@@ -436,6 +436,13 @@ button:disabled { cursor: default; opacity: 0.4; }
 .model-hint { margin: 0; padding: var(--space-2) var(--space-3); color: var(--muted-foreground); }
 /* Thinking: Pi's levels for this model, as one wrapping row of segments next
    to the trigger, so they stay in reach when the list scrolls. */
+/* The model list fills the panel above the levels. Its floor is its search and a row and a half, so the levels never
+   cover it; a panel shorter than both scrolls. A short panel sets the levels in one row that scrolls sideways. */
+.model-list { flex: 1 1 auto; display: flex; flex-direction: column; }
+[role="dialog"][data-short] .model-list { min-block-size: 7.5rem; }
+[role="dialog"][data-short] .model-thinking { flex-wrap: nowrap; padding-inline-end: 0; }
+[role="dialog"][data-short] .model-levels { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; }
+[role="dialog"][data-short] .model-levels button { flex: none; }
 .model-thinking { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3); border-block-start: 1px solid var(--line); }
 .model-thinking .model-hint { padding: var(--space-2) 0; }
 .model-thinking-label { flex: none; color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }

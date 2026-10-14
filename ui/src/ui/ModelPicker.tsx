@@ -220,7 +220,8 @@ function ModelPanel({ id, binding, anchor, trigger, minWidthRem, initialQuery, o
   const options = modelOptionGroups(groups, { activeKey, changing: change.type === "changing" ? change.target : undefined, blocked: busy });
   const levelChoices = levels.type === "ready" ? levels.value : [];
   return <FloatingPanel ref={panel} id={id} role="dialog" aria-label="Model and thinking level" tabIndex={-1} onKeyDown={onKeyDown}>
-    <OptionList ref={list} label="Models" groups={options} status={status}
+    {/* The list keeps its search and a row or more; when the levels need the rest of a short panel, the panel scrolls. */}
+    <div className="model-list"><OptionList ref={list} label="Models" groups={options} status={status}
       search={{ value: query, onChange: setQuery, label: "Search models", placeholder: "Search models" }}
       alert={change.type === "failed" ? change.message : undefined}
       action={models.type === "ready" && (menu.hidden > 0 || showHidden) ? { label: hiddenModelsLabel(menu.hidden, showHidden), pressed: showHidden,
@@ -228,7 +229,7 @@ function ModelPanel({ id, binding, anchor, trigger, minWidthRem, initialQuery, o
       input={{ type: "focus", onChoose: (key) => {
         const model = models.type === "ready" ? models.value.find((item) => modelKey(item) === key) : undefined;
         if (model?.provider && model.id) void pickModel(model.provider, model.id);
-      } }} />
+      } }} /></div>
     {binding.thinking !== false && <div className="model-thinking" role="group" aria-labelledby={`${id}-thinking`}>
       <span id={`${id}-thinking`} className="model-thinking-label">Thinking</span>
       {levels.type === "loading" && <span className="model-hint" role="status">Loading…</span>}

@@ -25,6 +25,16 @@ export const checks = {
       await waitFor(() => { expect(canvas.getByText("1 model changed. The run uses it; the plan stays as it is.")).toBeVisible(); });
       expect(canvas.getByRole("button", { name: "Start workflow" })).toBeEnabled();
     },
+    "a pointer picks a model and a thinking level in the worker's picker, at any height": async ({ canvas, input, expect, waitFor }) => {
+      await input.click(canvas.getByRole("button", { name: /^Claude Sonnet 5.*change model/ }));
+      await waitFor(() => { expect(canvas.getByRole("dialog", { name: "Model and thinking level" })).toBeVisible(); });
+      await input.click(canvas.getByRole("button", { name: /Claude Opus 4\.5/ }));
+      await waitFor(() => { expect(canvas.getByText("1 model changed. The run uses it; the plan stays as it is.")).toBeVisible(); });
+      await input.click(canvas.getByRole("button", { name: /^Claude Opus 4\.5.*change model/ }));
+      await waitFor(() => { expect(canvas.getByRole("button", { name: "High" })).toBeVisible(); });
+      await input.click(canvas.getByRole("button", { name: "High" }));
+      await waitFor(() => { expect(canvas.getByRole("button", { name: /^Claude Opus 4\.5 High, change model/ })).toBeVisible(); });
+    },
     "Edit stages, then removing a worker, turns Start into Update the plan": async ({ canvas, input, expect, waitFor }) => {
       await input.click(canvas.getByRole("button", { name: "Edit stages" }));
       await input.click(canvas.getByRole("button", { name: "Remove worker page" }));
