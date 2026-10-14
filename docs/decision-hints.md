@@ -68,8 +68,18 @@ native child `bash` invocation. A replayed gate does not send another ask.
 Approval can cause a second ask when the saved bash call actually executes.
 The gateway receives the tool name, JSON arguments limited to 8000 characters,
 and execution cwd. Gate asks also include category and description (limited to
-4000 characters). Arguments are not secret-redacted. Do not enable this feature
-for commands whose arguments must not leave the machine.
+4000 characters). Before applying these limits or sending the request, a pure
+redaction step replaces likely secrets with `[redacted]`. It covers authorization
+headers, secret-bearing flags and environment assignments, URL credentials,
+sensitive JSON fields, common OpenAI/GitHub/Slack/AWS key formats, and long opaque
+credential-like strings. It keeps command verbs, flag names and ordinary
+configuration readable. The same step covers gate descriptions and other state
+text, including cwd when repeated in a question.
+
+Redaction changes only the outbound payload. Saved gate arguments, transcript
+commands, tool execution and gate decisions stay exact. Detection is heuristic:
+it can miss secrets and can hide non-secret strings. Do not enable this feature
+for commands whose contents must not leave the machine, even after redaction.
 
 The questions ask whether the call deletes or overwrites data, acts outside its
 cwd, or acts under the user's name outside this machine. These three `noul`

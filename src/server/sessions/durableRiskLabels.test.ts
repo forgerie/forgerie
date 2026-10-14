@@ -39,8 +39,8 @@ async function fixture(hints?: DecisionHints) {
   const session = await DurableAgentSession.open({services, sessionManager: manager, initialModel: model, childAgents: createDurableChildHost({homeAgentsDir: join(root, "home-agents"), builtinAgentsDirs: []}), ...(hints === undefined ? {} : {decisionHints: hints})}); sessions.push(session);
   const events: unknown[] = []; const errors: string[] = [];
   session.subscribe(event => events.push(event)); await session.bindExtensions({onError: error => {errors.push(error.error);}});
-  const run = async (nested = false) => {
-    provider.setResponses([fauxAssistantMessage([fauxToolCall(nested ? "codemode" : "bash", nested ? {code: 'return await tools.bash({command: "printf RAN > effect"});'} : {command: "printf RAN > effect"}, {id: "bash-call"})], {stopReason: "toolUse"}), fauxAssistantMessage("Finished")]);
+  const run = async (nested = false, command = "printf RAN > effect") => {
+    provider.setResponses([fauxAssistantMessage([fauxToolCall(nested ? "codemode" : "bash", nested ? {code: `return await tools.bash(${JSON.stringify({command})});`} : {command}, {id: "bash-call"})], {stopReason: "toolUse"}), fauxAssistantMessage("Finished")]);
     await session.prompt("Run command");
   };
   const runChild = async () => {
@@ -92,7 +92,7 @@ it.each([false, true])("delivers a late bash label live and through persisted hi
   expect(JSON.stringify(reopened.messages)).toContain("actual-risk-model");
 });
 
-it("uses the real HTTP gateway path without delaying a real bash command", async () => {
+it("redacts the real HTTP gateway payload while a real bash command keeps its original arguments", async () => {
   const requests: unknown[] = []; const server = createServer((request, response) => {
     expect(request.url).toBe("/v1/systemone"); let body = ""; request.setEncoding("utf8"); request.on("data", (chunk: string) => {body += chunk;});
     request.on("end", () => {requests.push(JSON.parse(body)); response.end(JSON.stringify(opinion));});
@@ -102,10 +102,14 @@ it("uses the real HTTP gateway path without delaying a real bash command", async
   const live = {...settings, baseUrl: `http://127.0.0.1:${String(address.port)}`};
   const client = createDecisionClient({readConfig: () => live});
   const f = await fixture({client, readSettings: () => live, status: () => ({keyPresent: false})});
-  await f.run();
-  expect(await readFile(join(f.root, "effect"), "utf8")).toBe("RAN");
+  const command = `KEY='must-stay-local' bash -c 'printf %s "$KEY" > effect'`;
+  await f.run(false, command);
+  expect(await readFile(join(f.root, "effect"), "utf8")).toBe("must-stay-local");
   await vi.waitFor(() => { expect(JSON.stringify(f.events)).toContain("actual-risk-model"); });
   expect(requests).toHaveLength(1); expect(f.errors).toEqual([]);
+  expect(requests[0]).toMatchObject({state: {arguments: JSON.stringify({command: `KEY='[redacted]' bash -c 'printf %s "$KEY" > effect'`})}});
+  expect(JSON.stringify(requests)).not.toContain("must-stay-local");
+  expect(JSON.stringify(f.session.messages)).toContain("must-stay-local");
 });
 
 it("native child bash has off-equivalence and does not wait for the hanging gateway", async () => {

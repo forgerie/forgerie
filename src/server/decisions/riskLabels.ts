@@ -1,3 +1,4 @@
+import { redactRiskLabelArguments, redactRiskLabelText } from "./riskLabelRedaction.js";
 import { Check } from "typebox/value";
 import { RiskLabelSchema, type RiskLabel } from "../../shared/riskLabels.js";
 import type { GatedCategory } from "../../shared/autonomyPolicy.js";
@@ -33,12 +34,13 @@ export function launchRiskLabel(hints: RiskLabelHints | undefined, input: RiskLa
   void Promise.resolve().then(async () => {
     const settings = enabled(hints);
     if (settings === undefined) return;
+    const cwd = redactRiskLabelText(input.cwd);
     const request: DecisionRequest = { model: settings.model,
-      state: { tool: input.tool, arguments: JSON.stringify(input.args).slice(0, 8000), cwd: input.cwd,
-        ...(input.gate === undefined ? {} : { category: input.gate.category, description: input.gate.description.slice(0, 4000) }) },
+      state: { tool: redactRiskLabelText(input.tool), arguments: redactRiskLabelArguments(input.args).slice(0, 8000), cwd,
+        ...(input.gate === undefined ? {} : { category: input.gate.category, description: redactRiskLabelText(input.gate.description).slice(0, 4000) }) },
       questions: {
         deletes_data: { type: "noul", instructions: "Does this delete or overwrite data?" },
-        outside_worktree: { type: "noul", instructions: `Does this act outside the working directory ${input.cwd}?` },
+        outside_worktree: { type: "noul", instructions: `Does this act outside the working directory ${cwd}?` },
         acts_as_user: { type: "noul", instructions: "Does this publish, send or change something under the user's name outside this machine?" },
         risk: { type: "score", instructions: "Assess the risk of this action. This is information only, not approval.", criteria: ["low", "check", "danger"] },
       },

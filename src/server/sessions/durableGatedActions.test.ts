@@ -315,3 +315,22 @@ it("a label between execution intent and result cannot change the approved run o
     expect(f.state.runs).toBe(1); expect(await readFile(join(f.root, "effect"), "utf8")).toBe("original");
   } finally {f.state.hold = false; unsubscribe();}
 });
+
+it("redacts gate hint arguments without changing the saved call or its approved execution", async () => {
+  const requests: unknown[] = [];
+  const f = await fixture({hints: {client: {ask: request => {requests.push(request); return Promise.resolve(labelAnswers);}}, readSettings: () => labelSettings}, onError: error => {throw error;} });
+  const value = "Send --token=must-stay-local";
+  const task = await call(f.journal, "mcp_ebay_seller_update", {value});
+  f.journal.harness.resume(); await f.journal.harness.waitForTask(task, context);
+  const gate = (await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0];
+  if (gate === undefined) throw new Error("Missing gate");
+  expect(gate).toMatchObject({args: {value}, state: {kind: "waiting"}}); expect(f.state.runs).toBe(0);
+  await vi.waitFor(() => {expect(requests).toHaveLength(1);});
+  expect(requests[0]).toMatchObject({state: {arguments: JSON.stringify({value: "Send --token=[redacted]"})}});
+  expect(JSON.stringify(requests)).not.toContain("must-stay-local");
+  await decideGatedAction(f.journal.harness, f.journal.conversation, gate.id, "approved", context);
+  await vi.waitFor(async () => {expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.state.kind).toBe("ran");});
+  expect(await readFile(join(f.root, "effect"), "utf8")).toBe(value);
+  expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.args).toEqual({value});
+  expect(f.state.runs).toBe(1);
+});

@@ -41,3 +41,21 @@ describe("detached risk labels", () => {
     await new Promise(done => setTimeout(done, 0)); expect(ask).not.toHaveBeenCalled();
   });
 });
+
+it.each(["bash", "host_ebay_seller_message_reply"])("scrubs only outbound %s state, including gate descriptions, before capping it", async tool => {
+  const secret = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+  const args = Object.freeze({command: `KEY='short-secret' curl -H "Authorization: Bearer ${secret}" --token=${"x".repeat(9000)} https://user:pass@host.test/data`,
+    headers: Object.freeze({Authorization: "Bearer short-secret"}), password: "short-secret"});
+  const gate = Object.freeze({category: "messages" as const, description: `Send --token=${secret}`});
+  const input = Object.freeze({tool, args, cwd: `/work/${secret}`, gate});
+  const original = JSON.stringify(input);
+  const sent: DecisionRequest[] = [];
+  const publish = vi.fn(); const onError = vi.fn();
+  launchRiskLabel({client: {ask: request => {sent.push(request); return Promise.resolve(riskAnswers);}}, readSettings: () => settings}, input, publish, onError);
+  await vi.waitFor(() => {expect(publish).toHaveBeenCalledOnce();});
+  expect(sent[0]?.state).toEqual({tool, arguments: JSON.stringify({command: 'KEY=\'[redacted]\' curl -H "Authorization: Bearer [redacted]" --token=[redacted] https://[redacted]@host.test/data',
+    headers: {Authorization: "[redacted]"}, password: "[redacted]"}), cwd: "/work/[redacted]", category: "messages", description: "Send --token=[redacted]"});
+  expect(sent[0]?.questions["outside_worktree"]).toMatchObject({instructions: "Does this act outside the working directory /work/[redacted]?"});
+  expect(JSON.stringify(sent)).not.toContain(secret); expect(JSON.stringify(sent)).not.toContain("short-secret");
+  expect(JSON.stringify(input)).toBe(original); expect(onError).not.toHaveBeenCalled();
+});
