@@ -1,3 +1,4 @@
+import type { SessionOpenReceipt } from "@shared/sessionOpen";
 import { z } from "zod";
 import { requestsResponse } from "../sessionResponse";
 import { asksSchema, deleteArchivedSchema, listingSchema, parseCatalogEvent, projectsSchema, startupEventSchema, unreadSchema, type CatalogEvent, type StartupEvent, type WireStatus } from "./contracts";
@@ -158,7 +159,17 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
   let state: CatalogState = { connection: { type: "loading" }, sessions: [], statuses: {}, activities: {}, unread: new Set(), projects: [] };
   const listeners = new Set<() => void>();
   /** Startup progress is not catalog state: it goes straight to whoever started the session. */
-  const unreadListeners = new Set<(id: string) => void>();
+  const unreadListeners = new Set<(id: string, receipt?: SessionOpenReceipt) => void>();
+  let unreadEpoch: string | undefined;
+  const receipts = new Map<string, { cwd: string; receipt: SessionOpenReceipt }>();
+  function receiptEvent(event: CatalogEvent | LocalChange) {
+    if (event.type !== "sessions.unread") return;
+    if (event.unread === null) { receipts.delete(event.sessionId); return; }
+    if (event.catalogId === undefined || event.catalogId !== unreadEpoch || event.cwd === undefined || event.unread.completionOrder === undefined || event.unread.completionOrder === 0) {
+      receipts.delete(event.sessionId); return;
+    }
+    receipts.set(event.sessionId, { cwd: event.cwd, receipt: { catalogId: event.catalogId, throughCompletionOrder: event.unread.completionOrder } });
+  }
   const startupListeners = new Set<(event: StartupEvent) => void>();
   /** Worktree changes also go to whoever started a session, before the catalog lists it. */
   const worktreeListeners = new Set<(record: WorktreeRecord) => void>();
@@ -247,7 +258,8 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
         catch (error) { console.warn("Picker ignored a malformed machine event.", error); return; }
         if (!event) return;
         if (current.buffer) current.buffer.push(event); else updateLive(applyCatalogEvent(state, event));
-        if (event.type === "sessions.unread" && event.unread !== null) for (const listener of unreadListeners) listener(event.sessionId);
+        receiptEvent(event);
+        if (event.type === "sessions.unread" && event.unread !== null) for (const listener of unreadListeners) listener(event.sessionId, receipts.get(event.sessionId)?.receipt);
       });
       socket.addEventListener("close", () => retry(current));
       socket.addEventListener("error", () => retry(current));
@@ -276,6 +288,11 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
         if (!blocked) continue;
         statuses[entry.id] = { ...(statuses[entry.id] ?? { isStreaming: false, isCompacting: false, isBashRunning: false }), blocked: true };
       }
+      unreadEpoch = unread.catalogId; receipts.clear();
+      for (const item of unread.sessions) if (unreadEpoch !== undefined && item.cwd !== undefined && item.completionOrder !== undefined && item.completionOrder > 0) {
+        receipts.set(item.sessionId, { cwd: item.cwd, receipt: { catalogId: unreadEpoch, throughCompletionOrder: item.completionOrder } });
+      }
+      for (const event of current.buffer ?? []) receiptEvent(event);
       let next: CatalogState = {
         connection: { type: "ready" },
         sessions: withPulls(listing.sessions, pulls.links),
@@ -353,7 +370,8 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
   return {
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    onUnread: (listener: (id: string) => void) => { unreadListeners.add(listener); return () => { unreadListeners.delete(listener); }; },
+    receipt: (session: { id: string; cwd: string }) => { const stored = receipts.get(session.id); return stored?.cwd === session.cwd ? stored.receipt : undefined; },
+    onUnread: (listener: (id: string, receipt?: SessionOpenReceipt) => void) => { unreadListeners.add(listener); return () => { unreadListeners.delete(listener); }; },
     onStartup: (listener: (event: StartupEvent) => void) => { startupListeners.add(listener); return () => { startupListeners.delete(listener); }; },
     onWorktree: (listener: (record: WorktreeRecord) => void) => { worktreeListeners.add(listener); return () => { worktreeListeners.delete(listener); }; },
     onTriggersChanged: (listener: () => void) => { triggerListeners.add(listener); return () => { triggerListeners.delete(listener); }; },

@@ -213,7 +213,7 @@ describe("machine catalog", () => {
     await until(store, () => store.getSnapshot().statuses["a"]?.needsResponse === true);
     api.emit({ type: "sessions.unread", sessionId: "a", cwd: "/code/forgerie", catalogId: "c", catalogRevision: 2, unread: { completionOrder: 1 } });
     await until(store, () => store.getSnapshot().unread.has("a"));
-    expect(changed).toHaveBeenCalledExactlyOnceWith("a");
+    expect(changed).toHaveBeenCalledExactlyOnceWith("a", { catalogId: "c", throughCompletionOrder: 1 });
     api.emit({ type: "sessions.unread", sessionId: "a", cwd: "/code/forgerie", catalogId: "c", catalogRevision: 3, unread: null });
     await until(store, () => !store.getSnapshot().unread.has("a"));
     expect(changed).toHaveBeenCalledTimes(1);
@@ -370,5 +370,26 @@ describe("machine catalog", () => {
     await until(store, () => store.getSnapshot().connection.type === "failed");
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(api.reads()).toBe(1);
+  });
+});
+
+describe("cached guarded receipt lookup", () => {
+  it("passes exact completion boundaries, rejects an old epoch and never invents a partial receipt", async () => {
+    const api = await machine();
+    const store = createCatalogStore(api.transport); cleanup.push(store.dispose);
+    await store.start();
+    const seen: unknown[] = [];
+    store.onUnread((id, receipt) => seen.push({ id, receipt }));
+    api.emit({ type: "sessions.unread", sessionId: "a", cwd: "/code/forgerie", catalogId: "c", unread: { completionOrder: 7 } });
+    await until(store, () => seen.length === 1);
+    expect(seen[0]).toEqual({ id: "a", receipt: { catalogId: "c", throughCompletionOrder: 7 } });
+    expect(store.receipt({ id: "a", cwd: "/code/forgerie" })).toEqual({ catalogId: "c", throughCompletionOrder: 7 });
+    expect(store.receipt({ id: "a", cwd: "/different" })).toBeUndefined();
+    api.emit({ type: "sessions.unread", sessionId: "a", cwd: "/code/forgerie", catalogId: "old", unread: { completionOrder: 99 } });
+    await until(store, () => seen.length === 2);
+    expect(store.receipt({ id: "a", cwd: "/code/forgerie" })).toBeUndefined();
+    api.emit({ type: "sessions.unread", sessionId: "a", catalogId: "c", unread: { completionOrder: 8 } });
+    await until(store, () => seen.length === 3);
+    expect(seen[2]).toEqual({ id: "a", receipt: undefined });
   });
 });

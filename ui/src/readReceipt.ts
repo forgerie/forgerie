@@ -1,3 +1,4 @@
+import type { SessionOpenReceipt } from "@shared/sessionOpen";
 import { z } from "zod";
 import type { SessionTransport } from "./sessionStore";
 import type { Session } from "./contracts";
@@ -11,14 +12,14 @@ export interface ReadReceipt { session: Session; catalogId: string; throughCompl
 export interface ReadTracker {
   capture(session: Session, signal: AbortSignal): Promise<ReadReceipt | undefined>;
   acknowledge(receipt: ReadReceipt, signal: AbortSignal): Promise<void>;
-  observe(listener: (sessionId: string) => void): () => void;
+  observe(listener: (sessionId: string, receipt?: SessionOpenReceipt) => void): () => void;
   isVisible(): boolean;
 }
 
 /** No client read flag. The daemon applies a guarded, monotonic acknowledgement. */
 export function createReadTracker(transport: Pick<SessionTransport, "request">, options: {
   isVisible: () => boolean;
-  subscribe?: ((listener: (sessionId: string) => void) => () => void) | undefined;
+  subscribe?: ((listener: (sessionId: string, receipt?: SessionOpenReceipt) => void) => () => void) | undefined;
   afterRender?: ((signal: AbortSignal) => Promise<void>) | undefined;
 }): ReadTracker {
   return {

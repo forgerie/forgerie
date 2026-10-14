@@ -45,7 +45,10 @@ export const listingSchema = z.object({
   activities: z.array(wireActivitySchema),
 });
 export const asksSchema = z.object({ sessions: z.array(z.object({ id: z.string(), ...blockers })) });
-export const unreadSchema = z.object({ sessions: z.array(z.object({ sessionId: z.string() })) });
+const receiptFields = { catalogId: z.string().min(1).optional(), cwd: z.string().startsWith("/").optional(),
+  completionOrder: z.number().int().nonnegative().safe().optional() };
+export const unreadSchema = z.object({ catalogId: receiptFields.catalogId,
+  sessions: z.array(z.object({ sessionId: z.string(), cwd: receiptFields.cwd, completionOrder: receiptFields.completionOrder })) });
 export const deleteArchivedSchema = z.object({
   deletedSessionIds: z.array(z.string()),
   failures: z.array(z.object({ sessionId: z.string(), error: z.string() })),
@@ -58,7 +61,7 @@ const catalogEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.created"), session: pickerSessionSchema }),
   z.object({ type: z.literal("session.name"), sessionId: z.string(), name: z.string().optional() }),
   z.object({ type: z.literal("session.pinned"), sessionId: z.string(), pinned: z.boolean() }),
-  z.object({ type: z.literal("sessions.unread"), sessionId: z.string(), unread: z.object({}).passthrough().nullable() }),
+  z.object({ type: z.literal("sessions.unread"), sessionId: z.string(), catalogId: receiptFields.catalogId, cwd: receiptFields.cwd, unread: z.object({ completionOrder: receiptFields.completionOrder }).passthrough().nullable() }),
 ]);
 export type CatalogEvent = z.infer<typeof catalogEventSchema>;
 /**
