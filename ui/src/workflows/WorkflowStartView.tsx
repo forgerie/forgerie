@@ -129,6 +129,8 @@ export function WorkflowStartView({ source, blocked, pending, error, models, age
       onSend={async (sent) => { if (!await onChanges(sent)) throw new Error("Not sent"); }} /> : undefined} />;
 
   const readError = source.kind === "proposal" ? source.readError : undefined;
+  /** Only a proposal changes shape: a saved file is edited where it lives. A proposal with no stages can be given its first. */
+  const editable = source.kind === "proposal" && onChanges !== undefined;
   const document = plan !== undefined
     ? plan.overview === "" && plan.sections.length === 0 ? <Lede>{summary === "" ? "This workflow has no prose." : summary}</Lede>
       : <WorkflowPlan plan={plan} original={original} stages={stages} changes={changes} target={target} onInView={setHere} />
@@ -146,8 +148,8 @@ export function WorkflowStartView({ source, blocked, pending, error, models, age
     })}
     note="Update the plan to send these to the agent. It rewrites the plan to match, and you start the new one." /> : undefined;
   const rail = <>
-    {(original.length > 0 || stages.length > 0) && <WorkflowRouteEditor original={original} stages={stages} onChange={setRoute}
-      editable={source.kind === "proposal" && onChanges !== undefined} editing={editing} onEditing={setEditing}
+    {(original.length > 0 || stages.length > 0 || editable && ready && closed === undefined) && <WorkflowRouteEditor original={original} stages={stages}
+      onChange={setRoute} editable={editable} editing={editing} onEditing={setEditing}
       disabled={!ready || busy || closed !== undefined} here={here} onJump={plan === undefined ? undefined : jump} models={models}
       resetLabel={saved !== undefined ? "Use the file's" : "Use the agent's"} agents={agents} />}
     {(fields === undefined || fields.inputs.length > 0) && <PageSection title="Inputs">

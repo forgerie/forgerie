@@ -18,7 +18,7 @@ const stopWords = (stage: WorkflowStage) => stage.stop === "land" ? "You land th
  * Shape: a workflow's route before it starts. Each stage lists its workers by name and agent, each a hollow block
  * (planned) with its model in the composer's picker. A stop is the reader's own block. A stage opens its section of
  * the plan. With `editable`, Edit stages lets the reader add and remove stages and workers; a land stop stays last,
- * and a stop takes no workers.
+ * and a stop takes no workers. A route with no stages says so, and Edit stages can add the first.
  */
 export function WorkflowRouteEditor({ original, stages, onChange, editable, editing, onEditing, disabled, here, onJump, models, resetLabel, agents }: {
   /** The route as proposed. */
@@ -75,8 +75,9 @@ export function WorkflowRouteEditor({ original, stages, onChange, editable, edit
         onSubmit={async (name) => { onChange(addStage(stages, after, name)); setAdding(undefined); }} />
       <TextButton label="Cancel" onPress={() => setAdding(undefined)} />
     </>;
-    return <TextButton label="Add a stage here" icon={<PlusIcon aria-hidden />} onPress={() => setAdding({ after })} />;
+    return <TextButton label={stages.length === 0 ? "Add a stage" : "Add a stage here"} icon={<PlusIcon aria-hidden />} onPress={() => setAdding({ after })} />;
   };
   return <RouteList label="Route" steps={steps} gap={gap}
+    empty={edit ? "No stages yet. Add the first one." : "No stages. The agent follows the plan's prose. Edit stages to give it a route."}
     action={editable && !disabled ? { label: editing ? "Done" : "Edit stages", pressed: editing, onPress: () => { onEditing(!editing); setAdding(undefined); } } : undefined} />;
 }

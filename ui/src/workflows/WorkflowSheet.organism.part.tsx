@@ -107,6 +107,7 @@ export function Dismissed() { return <Proposal proposal={RICH_DISMISSED} />; }
 export function ChangesSent() { return <Proposal proposal={RICH_CHANGES} />; }
 export function Replaced() { return <Proposal proposal={{ ...REPLACED_PROPOSAL, text: RICH_PROPOSAL.text }} />; }
 export function ProseOnly() { return <Proposal proposal={PROSE} entry={{ kind: "proposal", proposalId: PROSE.id, name: PROSE.name, summary: PROSE.summary, stages: [] }} />; }
+export function ProseOnlyEditStages() { return <Proposal proposal={PROSE} editing entry={{ kind: "proposal", proposalId: PROSE.id, name: PROSE.name, summary: PROSE.summary, stages: [] }} />; }
 
 // Run mode
 export function RunAtStop() { return <Run run={RUN_AT_STOP} />; }

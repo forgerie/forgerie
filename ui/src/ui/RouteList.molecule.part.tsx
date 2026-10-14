@@ -52,3 +52,10 @@ export function Editing() {
       items: step.items?.map((item) => ({ ...item, remove: { label: `Remove worker ${item.name}`, onPress: () => setSteps((current) => current.map((s) => s.key === step.key
         ? { ...s, items: s.items?.filter((i) => i.key !== item.key) } : s)) } })) }))} />;
 }
+
+/** No steps yet: the list says so, and in editing the reader can add the first. */
+export function Empty() {
+  const [steps, setSteps] = useState<RouteListStep[]>([]);
+  return <RouteList label="Route" empty="No stages. The agent follows the plan's prose." steps={steps}
+    gap={(after) => after === undefined ? <TextButton label="Add a stage here" onPress={() => setSteps([{ key: "first", number: 1, name: "Recon", added: true }])} /> : null} />;
+}

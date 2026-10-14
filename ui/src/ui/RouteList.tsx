@@ -91,8 +91,9 @@ const remove = (action: { label: string; onPress: () => void }) =>
  * in it, each with its blocks in a margin column. No boxes and no rules between steps; space separates them, and only
  * a row the reader points at or has open takes a wash. A step or an item with `onPress` is a button. A step can fold
  * its items into their blocks at its end. Between steps, `gap` can place a control, such as one that inserts a step.
+ * With no steps, `empty` says so, and the gap before the first step can still add one.
  */
-export function RouteList({ label, meta, action, steps, gap }: {
+export function RouteList({ label, meta, action, steps, gap, empty }: {
   label: string;
   /** A readout beside the label, such as a count. */
   meta?: ReactNode;
@@ -101,6 +102,8 @@ export function RouteList({ label, meta, action, steps, gap }: {
   steps: readonly RouteListStep[];
   /** A control before the first step (`undefined`) or after the step with this key. */
   gap?: ((after: string | undefined) => ReactNode) | undefined;
+  /** Said when there are no steps, above any control that adds the first. */
+  empty?: string | undefined;
 }) {
   const slot = (after: string | undefined) => { const content = gap?.(after); return content === undefined || content === null || content === false
     ? null : <li className="route-list-gap">{content}</li>; };
@@ -110,6 +113,7 @@ export function RouteList({ label, meta, action, steps, gap }: {
       {meta !== undefined && <span className="route-list-meta">{meta}</span>}
       {action !== undefined && <TextButton label={action.label} pressed={action.pressed} onPress={action.onPress} />}
     </div>
+    {steps.length === 0 && empty !== undefined && <p className="route-list-empty">{empty}</p>}
     <ol className="route-list-steps" role="list">
       {slot(undefined)}
       {steps.map((step) => <Fragment key={step.key}>

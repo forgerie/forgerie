@@ -206,12 +206,39 @@ describe("a proposal's sheet", () => {
     expect(handlers.onStart).not.toHaveBeenCalled();
   });
 
-  it("shows a prose-only proposal as one page, with no route", async () => {
-    await act(async () => root.render(proposal({ source: { kind: "proposal", entry: { ...RICH_ENTRY, proposalId: PROSE.id, name: PROSE.name, stages: [] }, proposal: PROSE } }).element));
+  it("shows a prose-only proposal as one page, with an empty route that can take a first stage", async () => {
+    const prose = { kind: "proposal" as const, entry: { ...RICH_ENTRY, proposalId: PROSE.id, name: PROSE.name, stages: [] }, proposal: PROSE };
+    const { element, handlers } = proposal({ source: prose });
+    await act(async () => root.render(element));
     expect(headings()).toEqual([]);
     expect(pane("Plan")?.textContent).toContain("Split the suites between three researchers.");
-    expect(sheet().querySelector(".route-list")).toBeNull();
     expect(sheet().querySelector(".split-sheet-subtitle")?.textContent).toBe("Proposed workflow");
+    expect(sheet().querySelector(".route-list-empty")?.textContent).toBe("No stages. The agent follows the plan's prose. Edit stages to give it a route.");
+    expect(button("Start workflow")?.disabled).toBe(false);
+    await press("Edit stages");
+    expect(sheet().querySelector(".route-list-empty")?.textContent).toBe("No stages yet. Add the first one.");
+    await press("Add a stage");
+    const input = sheet().querySelector<HTMLInputElement>(".text-submit-input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "Split the suites");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { input.form?.requestSubmit(); });
+    expect([...sheet().querySelectorAll(".route-list-name")].map((node) => node.textContent)).toEqual(["Split the suites"]);
+    expect(sheet().querySelector(".numbered-sections-section[data-change='added']")?.textContent).toContain("The agent writes this section when it updates the plan.");
+    expect(button("Start workflow")?.disabled).toBe(true);
+    await press("Update the plan");
+    await press("Update the plan");
+    expect(handlers.onChanges).toHaveBeenCalledWith("Change the route:\n- New stage Split the suites, first.");
+  });
+
+  it("shows no route for a decided prose-only proposal or a saved prose-only file", async () => {
+    await act(async () => root.render(proposal({ source: { kind: "proposal", entry: { ...RICH_ENTRY, proposalId: PROSE.id, name: PROSE.name, stages: [] },
+      proposal: { ...PROSE, state: { kind: "dismissed", decidedAt: 1 } } } }).element));
+    expect(sheet().querySelector(".route-list")).toBeNull();
+    await act(async () => root.render(<WorkflowSheet mode="start" source={{ kind: "saved", workflow: { ...SAVED_RICH, definition: { version: 1 }, text: PROSE.text, body: PROSE.text } }}
+      models={WORKER_MODELS} onStart={() => {}} onClose={() => {}} />));
+    expect(sheet().querySelector(".route-list")).toBeNull();
   });
 });
 
