@@ -3,7 +3,7 @@ import { AssistantEntry, defineDoc, defineExtension, defineTask, defineTool, Inb
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { Check } from "typebox/value";
-import { WorkflowOutcomeSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowChildDelivery, type WorkflowInputs, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
+import { WorkflowOutcomeSchema, WorkflowModelSchema, WorkflowModelsSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowChildDelivery, type WorkflowInputs, type WorkflowModels, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
 import { WorkflowProposalSchema, WorkflowProposalToolSchema, type WorkflowProposal, type WorkflowProposalTool } from "../../shared/workflowProposals.js";
 import { admitChild, completionProblem, declaredWorker, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
 import { assertProseOnly, parseWorkflow, WorkflowError, workflowInputs, workflowPrompt, type ProseWorkflow, type WorkflowLibrary } from "../resources/workflowLibrary.js";
@@ -32,7 +32,7 @@ export function workflowEntryText(kind: string, data: unknown): string {
   if (kind === WORKFLOW_PROPOSAL_KIND) return `Proposed workflow ${field("name")}: ${field("summary")}`;
   return `${field("workflow")} waits for you at ${field("stageName")}: ${field("summary")}`;
 }
-const Runs = defineDoc<{ active: string | null; records: Record<string, WorkflowRun & { requestedInputs: WorkflowInputs }>; receipts?: Record<string, boolean>; stopReceipts?: Record<string, string> }>({
+const Runs = defineDoc<{ active: string | null; records: Record<string, WorkflowRun & { requestedInputs: WorkflowInputs; requestedModels?: WorkflowModels }>; receipts?: Record<string, boolean>; stopReceipts?: Record<string, string> }>({
   kind: WORKFLOW_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({ active: null, records: {} }),
 });
 
@@ -221,12 +221,12 @@ export async function decideWorkflowProposal(harness: Harness, parent: Conversat
 }
 
 export async function startWorkflowProposal(harness: Harness, parent: Conversation, cwd: string, sessionId: string, id: string,
-  supplied: WorkflowInputs, requestId: string, context: Context): Promise<WorkflowRun> {
+  supplied: WorkflowInputs, requestId: string, context: Context, models?: WorkflowModels): Promise<WorkflowRun> {
   const proposal = (await harness.snapshot(Proposals, parent.id, context))?.records[id];
   if (proposal === undefined) throw new WorkflowError(404, "Workflow proposal not found in this session");
   // This is a storage read, never a library or filesystem read. The original bytes are the run's source.
   const definition = parseWorkflow(proposal.name, `proposal:${id}`, proposal.text);
-  return launchResolvedWorkflow(harness, parent, definition, cwd, sessionId, supplied, requestId, context, id);
+  return launchResolvedWorkflow(harness, parent, definition, cwd, sessionId, supplied, requestId, context, models, id);
 }
 
 function requireOpenProposal(proposal: WorkflowProposal | undefined): WorkflowProposal {
@@ -242,52 +242,62 @@ function publicProposal(proposal: WorkflowProposal): WorkflowProposal {
 function launchId(sessionId: string, parent: ConversationId, requestId: string): string {
   return createHash("sha256").update(`${sessionId}/${String(parent)}/${requestId}`).digest("hex");
 }
-function sameLaunch(run: WorkflowRun & { requestedInputs: WorkflowInputs }, name: string, supplied: WorkflowInputs, path?: string): WorkflowRun {
-  if (run.definition.name !== name || (path !== undefined && run.definition.path !== path) || !sameInputs(run.requestedInputs, supplied)) {
+function sameLaunch(run: WorkflowRun & { requestedInputs: WorkflowInputs; requestedModels?: WorkflowModels }, name: string, supplied: WorkflowInputs, models: WorkflowModels | undefined, path?: string): WorkflowRun {
+  if (run.definition.name !== name || (path !== undefined && run.definition.path !== path) || !sameInputs(run.requestedInputs, supplied) || !sameInputs(run.requestedModels ?? {}, models ?? {})) {
     throw new WorkflowError(409, "This workflow request ID already names another launch");
   }
   return publicRun(run);
 }
 
 export async function launchWorkflow(harness: Harness, parent: Conversation, library: WorkflowLibrary, cwd: string, sessionId: string,
-  name: string, supplied: WorkflowInputs, requestId: string, context: Context): Promise<WorkflowRun> {
+  name: string, supplied: WorkflowInputs, requestId: string, context: Context, models?: WorkflowModels): Promise<WorkflowRun> {
   const id = launchId(sessionId, parent.id, requestId);
   const stored = await harness.snapshot(Runs, parent.id, context);
   const existing = stored?.records[id];
   // A retry uses the accepted bytes and defaults, even if the file changed or was removed afterward.
   if (existing !== undefined) {
     if (existing.definition.path.startsWith("proposal:")) throw new WorkflowError(409, "This workflow request ID already names another launch");
-    return sameLaunch(existing, name, supplied);
+    return sameLaunch(existing, name, supplied, models);
   }
   if (stored?.receipts?.[id] === true) throw new WorkflowError(409, "This workflow receipt expired; launch with a new requestId");
-  return launchResolvedWorkflow(harness, parent, await library.read(cwd, name), cwd, sessionId, supplied, requestId, context);
+  return launchResolvedWorkflow(harness, parent, await library.read(cwd, name), cwd, sessionId, supplied, requestId, context, models);
 }
 
 async function launchResolvedWorkflow(harness: Harness, parent: Conversation, definition: ProseWorkflow, cwd: string, sessionId: string,
-  supplied: WorkflowInputs, requestId: string, context: Context, proposalId?: string): Promise<WorkflowRun> {
+  supplied: WorkflowInputs, requestId: string, context: Context, models?: WorkflowModels, proposalId?: string): Promise<WorkflowRun> {
   const id = launchId(sessionId, parent.id, requestId);
   const run = await parent.commit(async (tx) => {
     const doc = await tx.doc(Runs, parent.id);
     const found = doc.records[id];
-    if (found !== undefined) return sameLaunch(found, definition.name, supplied, definition.path);
+    if (found !== undefined) return sameLaunch(found, definition.name, supplied, models, definition.path);
     if (doc.receipts?.[id] === true) throw new WorkflowError(409, "This workflow receipt expired; launch with a new requestId");
     const proposal = proposalId === undefined ? undefined : requireOpenProposal((await tx.doc(Proposals, parent.id)).records[proposalId]);
     assertProseOnly(definition);
     const inputs = workflowInputs(definition.definition, supplied);
+    if (models !== undefined && !Check(WorkflowModelsSchema, models)) throw new WorkflowError(400, "Invalid workflow worker models");
+    for (const name of Object.keys(models ?? {})) {
+      if (declaredWorker(definition.definition, name) === undefined) throw new WorkflowError(400, `Unknown workflow worker ${name}`);
+    }
     if (doc.active !== null) throw new WorkflowError(409, "Finish the active workflow before launching another in this session");
     await assertChildWorkSettled(tx, parent.id);
     const live = await tx.doc(LiveDoc, parent.id);
     const inbox = await tx.doc(InboxDoc, parent.id);
     if (live.run !== undefined || inbox.items.length > 0) throw new WorkflowError(409, "Wait for the parent to become idle before launching a workflow");
-    const stages = definition.definition.stages;
+    const stages = definition.definition.stages?.map((stage) => ({ ...stage, ...(stage.workers === undefined ? {} : {
+      workers: stage.workers.map((worker) => {
+        const model = models !== undefined && Object.hasOwn(models, worker.name) ? models[worker.name] : undefined;
+        return model === undefined ? { ...worker } : { ...worker, model };
+      }),
+    }) }));
     const run: WorkflowRun = { id, requestId, session: { id: sessionId, cwd }, startedAt: Date.now(),
       definition: { name: definition.name, path: definition.path, text: definition.text, sha256: definition.sha256 }, inputs, state: { kind: "running" }, children: [],
       ...(stages === undefined ? {} : { stages, stops: Object.fromEntries(stages.flatMap((stage) => stage.stop === undefined ? [] : [[stage.id, { state: "open" as const, round: 0 }]])) }) };
-    doc.records[id] = { ...run, requestedInputs: supplied };
+    // Retry identity uses the accepted request, not stages: the user can change worker models during the run.
+    doc.records[id] = { ...run, requestedInputs: supplied, ...(models === undefined ? {} : { requestedModels: models }) };
     doc.receipts = { ...doc.receipts, [id]: true };
     doc.active = id;
     if (proposal !== undefined) proposal.state = { kind: "started", runId: id, decidedAt: run.startedAt };
-    await tx.createTask(Launch, { runId: id, prompt: workflowPrompt(id, definition, inputs) }, { ownership: { kind: "conversation" }, background: true });
+    await tx.createTask(Launch, { runId: id, prompt: workflowPrompt(id, { ...definition, definition: { ...definition.definition, ...(stages === undefined ? {} : { stages }) } }, inputs) }, { ownership: { kind: "conversation" }, background: true });
     return run;
   }, context);
   harness.resume();
@@ -302,6 +312,18 @@ export async function workflowRuns(harness: Harness, parent: ConversationId, con
     doc.records = Object.fromEntries(Object.entries(doc.records).filter(([, run]) => run.state.kind !== "finished" || run.state.finishedAt > cutoff));
     return Object.values(doc.records).map(publicRun).sort((a, b) => b.startedAt - a.startedAt || a.id.localeCompare(b.id));
   }, context);
+}
+
+/** A route edit changes only the declaration. Children apply it at their next spawn or send. */
+export async function setWorkflowWorkerModel(tx: Tx, parent: ConversationId, runId: string, name: string, model: string | null): Promise<WorkflowRun> {
+  if (!Check(WorkflowModelSchema, model)) throw new WorkflowError(400, "Invalid workflow worker model");
+  const run = (await tx.doc(Runs, parent)).records[runId];
+  if (run === undefined) throw new WorkflowError(404, "Workflow run not found in this session");
+  const worker = declaredWorker(run, name);
+  if (worker === undefined) throw new WorkflowError(404, "Workflow worker not found in this run");
+  if (run.state.kind !== "running") throw new WorkflowError(409, "This workflow has finished");
+  worker.model = model;
+  return publicRun(run);
 }
 
 export async function finishWorkflow(tx: Tx, parent: ConversationId, runId: string, outcome: WorkflowOutcome, result: string): Promise<void> {
@@ -336,8 +358,8 @@ export async function workflowChildRefusal(tx: Tx, parent: ConversationId, name:
   return admission.kind === "refused" ? admission.reason : undefined;
 }
 
-/** The model the active workflow declares for a worker with this name. A spawn uses it whatever model the agent asked for. */
-export async function workflowWorkerModel(tx: Tx, parent: ConversationId, name: string): Promise<string | undefined> {
+/** The active workflow's model choice. Spawns and sends enforce it; null restores the agent-file/session default. */
+export async function workflowWorkerModel(tx: Tx, parent: ConversationId, name: string): Promise<string | null | undefined> {
   const doc = await tx.doc(Runs, parent);
   const run = doc.active === null ? undefined : doc.records[doc.active];
   return run === undefined ? undefined : declaredWorker(run, name)?.model;
@@ -437,13 +459,13 @@ async function assertChildWorkSettled(tx: Tx, parent: ConversationId): Promise<v
     } while (cursor !== undefined);
   }
 }
-function publicRun(run: WorkflowRun & { requestedInputs?: WorkflowInputs }): WorkflowRun {
-  const value = Object.fromEntries(Object.entries(run).filter(([key]) => key !== "requestedInputs"));
+function publicRun(run: WorkflowRun & { requestedInputs?: WorkflowInputs; requestedModels?: WorkflowModels }): WorkflowRun {
+  const value = Object.fromEntries(Object.entries(run).filter(([key]) => key !== "requestedInputs" && key !== "requestedModels"));
   // Doc drafts are transaction overlays. Materialize nested fields before the commit settles.
   const plain: unknown = JSON.parse(JSON.stringify(value));
   if (!Check(WorkflowRunSchema, plain)) throw new Error("Invalid workflow record");
   return plain;
 }
-function sameInputs(a: WorkflowInputs, b: WorkflowInputs): boolean {
+function sameInputs(a: Record<string, string | number | boolean | null>, b: Record<string, string | number | boolean | null>): boolean {
   return Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([name, value]) => Object.hasOwn(b, name) && b[name] === value);
 }

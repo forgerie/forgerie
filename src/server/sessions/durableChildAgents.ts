@@ -45,7 +45,7 @@ type QuestionRouting = { kind: "parent" } | { kind: "user"; escalation: "irrever
   | { kind: "answered"; by: "parent" | "user"; provisional: boolean };
 // No routing field means a user-facing question created before parent-first routing.
 type ChildQuestion = { child: ConversationId; childName: string; question: string; answer: string | null; askedAt: number; closed?: boolean; routing?: QuestionRouting; resolvedBy?: string };
-type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean; worktreeId?: string };
+type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean; worktreeId?: string; workflowSend?: boolean };
 type ReporterState = { phase: "deliver"; attempt?: number; error?: string } | { phase: "retry"; attempt: number; error: string; until: number; run?: string }
   | { phase: "observe"; run: string; owner: TaskId } | { phase: "report"; report?: string; suppressed?: "duplicate" | "aborted" };
 type ChildRetryOwner = { owner: TaskId; conversationId: ConversationId; requestId: string };
@@ -96,6 +96,33 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
       if (child === undefined) throw new Error(`Child conversation ${String(conversationId)} is missing`);
       const attempt = reporter.state.checkpoint.attempt ?? 0;
       const content = attempt === 0 ? message : `Continue where you stopped; the last request failed with: ${reporter.state.checkpoint.error ?? "model_error"}`;
+      if (reporter.input.workflowSend === true && attempt === 0) {
+        const selected = await resolve(runtime.conversationId, context);
+        // A model switch must not affect later tool rounds of an already running turn. Wait for that turn,
+        // then resolve the current declaration again: the user can edit it while delivery is waiting.
+        for (;;) {
+          let busy: TaskId | undefined;
+          await runtime.commit(async (tx) => {
+            if (await tx.submissionByRequest(conversationId, `child:${String(reporter.id)}`) !== undefined) return;
+            const declared = await workflowWorkerModel(tx, runtime.conversationId, name);
+            if (declared === undefined) return;
+            const record = (await tx.doc(Children, runtime.conversationId)).agents[name];
+            const profile = record?.agent == null ? undefined : await selected.catalog?.find(record.agent);
+            const choice = declared === null ? undefined : modelChoice(declared);
+            if (choice === null) throw new WorkflowError(400, `Invalid workflow model for ${name}: ${declared ?? "default"}`);
+            const parent = await tx.doc(AgentDoc, runtime.conversationId);
+            const model = choice?.model ?? profile?.model ?? parent.model;
+            const thinkingLevel = choice?.thinkingLevel ?? profile?.thinkingLevel ?? parent.thinkingLevel ?? "off";
+            const configured = await tx.doc(AgentDoc, conversationId);
+            if (configured.model?.provider === model?.provider && configured.model?.modelId === model?.modelId && (configured.thinkingLevel ?? "off") === thinkingLevel) return;
+            busy = (await tx.doc(LiveDoc, conversationId)).run?.taskId;
+            if (busy !== undefined) return;
+            await configure(tx, conversationId, { model: model ?? null, thinkingLevel });
+          }, context);
+          if (busy === undefined) break;
+          await runtime.waitForTask(busy, context);
+        }
+      }
       const submission = await child.submit({ type: "input", content, whenBusy: attempt > 0 || followUp ? "followUp" : "steer",
         requestId: attempt === 0 ? `child:${String(reporter.id)}` : `child:${String(reporter.id)}:retry:${String(attempt)}` }, context);
       const selected = await resolve(runtime.conversationId, context);
@@ -408,7 +435,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         if (held !== undefined) return { content: [{ type: "text" as const, text: held }], isError: true };
         // A model the workflow declares for this worker is the user's choice: it wins over the agent's argument.
         const declared = action === "spawn" ? await api.commit((tx) => workflowWorkerModel(tx, api.conversationId, name), context) : undefined;
-        const spec = declared ?? (action === "spawn" ? args.model : undefined);
+        const spec = declared === null ? undefined : declared ?? (action === "spawn" ? args.model : undefined);
         const model = spec === undefined ? undefined : modelChoice(spec);
         if (model === null) return { content: [{ type: "text" as const, text: `Write model as provider/model-id, optionally with :thinking-level. Got ${spec ?? ""}${declared === undefined ? "" : " from the workflow file"}.` }], isError: true };
         if (existing?.worktreeId !== undefined) await requireWorktrees(selected.worktrees).assertWritable(existing.worktreeId);
@@ -448,8 +475,13 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
             if (Object.hasOwn(state.agents, name)) return `${name} already exists; use send.`;
             const anchor = await tx.createTask(Anchor, null, background);
             const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
-            const chosenModel = model?.model ?? profile?.model;
-            const chosenThinking = model?.thinkingLevel ?? profile?.thinkingLevel;
+            // Re-read in the allocation commit, so a route edit during worktree preparation wins too.
+            const current = await workflowWorkerModel(tx, api.conversationId, name);
+            const spec = current === null ? undefined : current ?? args.model;
+            const choice = spec === undefined ? undefined : modelChoice(spec);
+            if (choice === null) throw new WorkflowError(400, `Invalid workflow model for ${name}: ${spec ?? ""}`);
+            const chosenModel = choice?.model ?? profile?.model;
+            const chosenThinking = choice?.thinkingLevel ?? profile?.thinkingLevel;
             const plan = runtime ?? planChildRuntime(profile, availableNames(selected), []);
             await configure(tx, child.id, {
               ...(checkout === undefined ? {} : { cwd: checkout.path }),
@@ -467,14 +499,14 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
           const agent = state.agents[name];
           if (agent === undefined) return `No child named ${name}.`;
           if (refresh && runtime !== undefined) {
-            // Tools, skills, and instructions follow the current runtime and agent file. The model stays as spawned:
-            // a workflow or the agent may have chosen it for this child.
+            // Tools, skills, and instructions follow the current runtime and agent file. The reporter applies
+            // workflow model changes before delivery, after any running turn has settled.
             await configure(tx, agent.conversationId, { extensions: [ChildTools], tools: childToolsFor(runtime, extraTools, sharedTools),
               instructions: childInstructions(name, sentProfile, runtime, selected.projectContext) });
             (await tx.doc(AgentDoc, agent.conversationId)).extensions = [ChildTools.name, ...gateNames];
             if (sentProfile !== undefined) agent.agentFile = sentProfile.source;
           }
-          const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
+          const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(action === "send" ? { workflowSend: true } : {}), ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
           state.reporters[String(api.taskId)] = reporter;
           await associateWorkflowChild(tx, api.conversationId, agent.conversationId, reporter, name);
           if (action === "send") return refresh ? `Sent to ${name}.` : `Sent to ${name}. Its agent file ${String(agent.agent)} is gone, so it keeps the tools it was started with.`;

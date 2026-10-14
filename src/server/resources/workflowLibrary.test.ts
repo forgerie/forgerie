@@ -77,6 +77,13 @@ describe("prose workflows in the prompt library", () => {
     expect(() => { assertProseOnly(scripted); }).toThrow("script runtime");
   });
 
+  it("names worker models in the launch route even without an agent file", () => {
+    const text = "---\nworkflow:\n  version: 1\n  stages:\n    - id: build\n      name: Build\n      workers: [{ name: build, model: anthropic/opus:high }, { name: review, model: null }]\n---\nBuild and review.\n";
+    const workflow = parseWorkflow("models", "models.md", text);
+    const prompt = workflowPrompt("run-1", workflow, {});
+    expect(prompt).toContain("Workers: build (model anthropic/opus:high), review (model agent-file/session default).");
+  });
+
   it("reads a declared route, rejects one it cannot enforce, and tells the agent how stops work", () => {
     const staged = definition.replace("workflow:\n", "workflow:\n  stages:\n    - { id: contract, name: Contract, stop: approve }\n    - { id: build, name: Build, workers: [{ name: ui, agent: design-engineer, model: anthropic/opus:high }] }\n    - { id: land, name: Land, stop: land }\n");
     const workflow = parseWorkflow("staged", "staged.md", staged);

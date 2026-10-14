@@ -55,11 +55,13 @@ describe("machine-scoped session proxy routes", () => {
     ]);
   });
   it("forwards workflow discovery, launches, history, and explicit completion through the session wildcard", async () => {
-    const launch = { cwd: "/repo", name: "experiment", inputs: { task: "baseline" }, requestId: "stable-request" };
+    const launch = { cwd: "/repo", name: "experiment", inputs: { task: "baseline" }, requestId: "stable-request", models: { build: "faux/faux-1" } };
     const finish = { cwd: "/repo", outcome: "completed", result: "Recorded" };
     const discovery = await app.inject({ method: "GET", url: "/api/machines/local/sessions/s1/workflows?cwd=%2Frepo" });
     const accepted = await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/workflow-runs", payload: launch });
     const history = await app.inject({ method: "GET", url: "/api/machines/local/sessions/s1/workflow-runs?cwd=%2Frepo" });
+    const model = { cwd: "/repo", model: null };
+    expect((await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/workflow-runs/r1/workers/build/model", payload: model })).statusCode).toBe(200);
     daemon.respondWith({ statusCode: 409, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Children still running" }) });
     const pending = await app.inject({ method: "POST", url: "/api/machines/local/sessions/s1/workflow-runs/r1/finish", payload: finish });
     expect([discovery.statusCode, accepted.statusCode, history.statusCode, pending.statusCode]).toEqual([200, 200, 200, 409]);
@@ -68,12 +70,13 @@ describe("machine-scoped session proxy routes", () => {
       { method: "GET", path: "/sessions/s1/workflows?cwd=%2Frepo", body: undefined },
       { method: "POST", path: "/sessions/s1/workflow-runs", body: launch },
       { method: "GET", path: "/sessions/s1/workflow-runs?cwd=%2Frepo", body: undefined },
+      { method: "POST", path: "/sessions/s1/workflow-runs/r1/workers/build/model", body: model },
       { method: "POST", path: "/sessions/s1/workflow-runs/r1/finish", body: finish },
     ]);
   });
 
   it("forwards workflow proposal history and all decisions, including conflict reasons", async () => {
-    const start = { cwd: "/repo", inputs: { task: "edited" }, requestId: "start-1" };
+    const start = { cwd: "/repo", inputs: { task: "edited" }, requestId: "start-1", models: { build: null } };
     const changes = { cwd: "/repo", note: "Add review." };
     const base = "/api/machines/local/sessions/s1/workflow-proposals";
     expect((await app.inject({ url: `${base}?cwd=%2Frepo` })).statusCode).toBe(200);

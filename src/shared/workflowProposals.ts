@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { WorkflowDefinitionSchema, WorkflowInputsSchema } from "./workflowRuns.js";
+import { WorkflowDefinitionSchema, WorkflowInputsSchema, WorkflowModelsSchema } from "./workflowRuns.js";
 
 export const WorkflowProposalStateSchema = Type.Union([
   Type.Object({ kind: Type.Literal("open") }, { additionalProperties: false }),
@@ -28,7 +28,7 @@ export const WorkflowProposalToolSchema = Type.Object({
 }, { additionalProperties: false });
 export type WorkflowProposalTool = Static<typeof WorkflowProposalToolSchema>;
 export const WorkflowProposalStartSchema = Type.Object({
-  cwd: Type.String({ minLength: 1 }), inputs: WorkflowInputsSchema,
+  cwd: Type.String({ minLength: 1 }), inputs: WorkflowInputsSchema, models: Type.Optional(WorkflowModelsSchema),
   requestId: Type.String({ pattern: "^[a-zA-Z0-9-]{1,128}$" }),
 }, { additionalProperties: false });
 export const WorkflowProposalChangesSchema = Type.Object({

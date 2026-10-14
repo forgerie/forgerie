@@ -35,10 +35,10 @@ import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { decisionExtension, decisions, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import { workflowExtension, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops, workflowProposals, startWorkflowProposal, decideWorkflowProposal, openWorkflowProposals } from "./durableWorkflowRuns.js";
+import { workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops, workflowProposals, startWorkflowProposal, decideWorkflowProposal, openWorkflowProposals } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
-import type { WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
+import type { WorkflowModels, WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 
 export interface DurableAgentSessionOptions {
   gatedIssueLabels?: GatedActionReads["issueLabels"];
@@ -343,13 +343,13 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   decideGatedAction(id: string, choice: "approved" | "refused") { return decideGatedAction(this.journal.harness, this.journal.conversation, id, choice, context); }
   decisions() { return decisions(this.journal.harness, this.journal.conversation.id, context); }
   overturnDecision(id: string, note: string) { return overturnDecision(this.journal.harness, this.journal.conversation, id, note, context); }
-  runWorkflow(name: string, inputs: WorkflowInputs, requestId: string) {
+  runWorkflow(name: string, inputs: WorkflowInputs, requestId: string, models?: WorkflowModels) {
     if (!this.hostsDurableChildren) throw new Error("Workflow launches require durableChildren");
-    return launchWorkflow(this.journal.harness, this.journal.conversation, new WorkflowLibrary(this.options.services.agentDir), this.options.services.cwd, this.sessionId, name, inputs, requestId, context);
+    return launchWorkflow(this.journal.harness, this.journal.conversation, new WorkflowLibrary(this.options.services.agentDir), this.options.services.cwd, this.sessionId, name, inputs, requestId, context, models);
   }
   workflowProposals() { return workflowProposals(this.journal.harness, this.journal.conversation.id, context); }
-  startWorkflowProposal(id: string, inputs: WorkflowInputs, requestId: string) {
-    return startWorkflowProposal(this.journal.harness, this.journal.conversation, this.options.services.cwd, this.sessionId, id, inputs, requestId, context);
+  startWorkflowProposal(id: string, inputs: WorkflowInputs, requestId: string, models?: WorkflowModels) {
+    return startWorkflowProposal(this.journal.harness, this.journal.conversation, this.options.services.cwd, this.sessionId, id, inputs, requestId, context, models);
   }
   changeWorkflowProposal(id: string, note: string) {
     return decideWorkflowProposal(this.journal.harness, this.journal.conversation, id, "changes", note, context);
@@ -360,6 +360,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   workflowRuns() { return workflowRuns(this.journal.harness, this.journal.conversation.id, context); }
   finishWorkflow(runId: string, outcome: WorkflowOutcome, result: string) {
     return this.journal.conversation.commit((tx) => finishWorkflow(tx, this.journal.conversation.id, runId, outcome, result), context);
+  }
+  setWorkflowWorkerModel(runId: string, worker: string, model: string | null) {
+    return this.journal.conversation.commit((tx) => setWorkflowWorkerModel(tx, this.journal.conversation.id, runId, worker, model), context);
   }
   decideWorkflowStop(runId: string, stage: string, decision: WorkflowStopDecision, note: string | undefined) {
     return decideWorkflowStop(this.journal.harness, this.journal.conversation, runId, stage, decision, note, (run) => this.landWorkflowBranches(run), context);

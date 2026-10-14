@@ -66,6 +66,9 @@ let started = 0;
 let sequence = 0;
 let proposalText = staged;
 let proposalChanges = 0;
+let modelAgent: string | undefined;
+let modelWork: (() => Promise<void>) | undefined;
+const modelRequests: { name: string; model: string; phase: string }[] = [];
 let proposalInputs: Record<string, string | boolean | number> = {};
 let proposalName = "task-plan";
 let proposalSummary = "Build and review this task.";
@@ -80,14 +83,25 @@ const app = () => {
 const textOf = (value: unknown): string => typeof value === "string" ? value : Array.isArray(value) ? value.map((part: { text?: string }) => part.text ?? "").join("") : "";
 const work = defineTool({ name: "work", description: "Do a bounded work step", parameters: Type.Object({}), replay: "safe", execute: async () => {
   started++;
-  await sleep(700);
+  if (modelWork === undefined) await sleep(700);
+  else await modelWork();
   return { content: [{ type: "text" as const, text: "WORK-DONE" }] };
 } });
-const route: FauxResponseFactory = (context) => {
+const route: FauxResponseFactory = (context, _options, _state, model) => {
   const last = [...context.messages].reverse().find((message) => message.role !== "system");
   const said = textOf(last?.content);
   const call = (name: string, args: JsonObject) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
   const answer = (text: string) => fauxAssistantMessage([fauxText(text)]);
+  const modelTask = context.messages.find((message) => message.role === "user" && textOf(message.content).startsWith("MODEL-TURN-"));
+  if (modelTask !== undefined) {
+    modelRequests.push({ name: textOf(modelTask.content).slice("MODEL-TURN-".length), model: model.id, phase: last?.role ?? "unknown" });
+    return last?.role === "user" ? call("work", {}) : answer("MODEL-DONE");
+  }
+  const modelAction = /^MODEL-(SPAWN|SEND)-(alpha|beta)$/u.exec(said);
+  if (last?.role === "user" && modelAction !== null) return call("child_agent", {
+    action: modelAction[1] === "SPAWN" ? "spawn" : "send", name: modelAction[2] ?? "alpha", message: `MODEL-TURN-${modelAction[2] ?? "alpha"}`,
+    isolation: "shared", model: "faux/faux-1", ...(modelAgent === undefined ? {} : { agent: modelAgent }),
+  });
   const workflow = [...context.messages].reverse().find((message) => message.role === "user" && textOf(message.content).startsWith("Workflow run "));
   const runId = /^Workflow run ([a-f0-9]+)/u.exec(textOf(workflow?.content))?.[1];
   const isStaged = textOf(workflow?.content).includes("WORKFLOW-STAGED");
@@ -96,8 +110,8 @@ const route: FauxResponseFactory = (context) => {
     return call("propose_workflow", { name: proposalName, summary: proposalSummary, text: proposalText, inputs: proposalInputs });
   }
   if (last?.role === "user" && said === "BUSY") return call("bash", { command: "sleep 1" });
-  if (last?.role === "toolResult" && last.isError && context.messages.some((message) => message.role === "user" && textOf(message.content) === "PROPOSE")) proposalErrors.push(said);
-  const commits = context.messages.some((message) => message.role === "user" && textOf(message.content).startsWith("CHILD-COMMIT"));
+  if (last?.role === "toolResult" && last.isError && context.messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content) === "PROPOSE")) proposalErrors.push(said);
+  const commits = context.messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content).startsWith("CHILD-COMMIT"));
   const spawnAlpha = () => call("child_agent", { action: "spawn", name: "alpha", message: "CHILD-COMMIT", isolation: "worktree" });
   if (isStaged && runId !== undefined) {
     if (last?.role === "toolResult" && said.includes("is held at the stop")) return call("workflow_stop", { runId, stage: "contract", summary: "CONTRACT-SUMMARY" });
@@ -146,6 +160,7 @@ function runBody(value: unknown): WorkflowRun {
 }
 beforeEach(async () => {
   proposalText = staged; proposalChanges = 0; proposalErrors.length = 0; proposalInputs = {}; proposalName = "task-plan"; proposalSummary = "Build and review this task.";
+  modelAgent = undefined; modelWork = undefined; modelRequests.length = 0;
   errors.length = 0; started = 0; sequence = 0; autoComplete = false; worktrees = undefined; isolate = false;
   root = await mkdtemp(join(tmpdir(), "forgerie-workflow-runs-"));
   agentDir = join(root, "agent");
@@ -161,6 +176,125 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await service.dispose(); await rm(root, { recursive: true, force: true }); expect(errors).toEqual([]); });
 
 describe("saved prose workflows through production Durable sessions and HTTP", () => {
+  it.each([
+    { source: "saved", model: "faux/faux-1:high" }, { source: "proposal", model: "faux/faux-1:high" },
+    { source: "saved", model: null }, { source: "proposal", model: null },
+  ] as const)("starts a $source workflow with model $model, validates it, and preserves retry identity", async ({ source, model }) => {
+    let server = app();
+    try {
+      const ref = { id: (await service.start(root)).id, cwd: root };
+      let url = `/sessions/${ref.id}/workflow-runs`;
+      if (source === "saved") await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+      else {
+        await service.prompt(ref, "PROPOSE");
+        const proposal = await until(async () => {
+          const proposal = (await service.workflowProposals(ref))[0];
+          return proposal !== undefined && !(await service.status(ref)).isStreaming ? proposal : false;
+        });
+        url = `/sessions/${ref.id}/workflow-proposals/${proposal.id}/start`;
+      }
+      const payload = { cwd: root, ...(source === "saved" ? { name: "staged" } : {}), inputs: {}, requestId: "models-start", models: { alpha: model } };
+      for (const models of [{ missing: null }, { alpha: "bad" }, { alpha: "/id" }, { alpha: "provider/" }, { alpha: "provider/id:" }, { alpha: "provider/id has spaces" }, { alpha: 1 }]) {
+        expect((await server.inject({ method: "POST", url, payload: { ...payload, models } })).statusCode).toBe(400);
+      }
+      const response = await server.inject({ method: "POST", url, payload });
+      expect(response.statusCode).toBe(200);
+      const run = runBody(response.json());
+      expect(run.stages?.[1]?.workers?.[0]?.model).toBe(model);
+      expect((await server.inject({ method: "POST", url, payload })).json()).toMatchObject({ id: run.id });
+      for (const models of [{ alpha: model === null ? "faux/faux-1:high" : null }, { alpha: "faux/faux-declared" }, {}]) {
+        expect((await server.inject({ method: "POST", url, payload: { ...payload, models } })).statusCode).toBe(409);
+      }
+      await until(async () => (await service.workflowRuns(ref))[0]?.stops?.["contract"]?.state === "waiting" && !(await service.status(ref)).isStreaming);
+      const messages = (await service.messages(ref)).messages;
+      expect(messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content).includes(`model ${model ?? "agent-file/session default"}`))).toBe(true);
+      const modelUrl = `/sessions/${ref.id}/workflow-runs/${run.id}/workers/alpha/model`;
+      for (const model of ["bad", "provider/", "provider/id:", 1, {}]) {
+        expect((await server.inject({ method: "POST", url: modelUrl, payload: { cwd: root, model } })).statusCode).toBe(400);
+      }
+      expect((await server.inject({ method: "POST", url: modelUrl, payload: { cwd: root } })).statusCode).toBe(400);
+      expect((await server.inject({ method: "POST", url: modelUrl.replace("/alpha/", "/missing/"), payload: { cwd: root, model: null } })).statusCode).toBe(404);
+      expect((await server.inject({ method: "POST", url: modelUrl.replace(run.id, "missing"), payload: { cwd: root, model: null } })).statusCode).toBe(404);
+      hub.sessionEvents.length = 0;
+      const runtimeModel = model === null ? "faux/faux-declared" : null;
+      const changed = await server.inject({ method: "POST", url: modelUrl, payload: { cwd: root, model: runtimeModel } });
+      expect(changed.statusCode).toBe(200);
+      expect(runBody(changed.json()).stages?.[1]?.workers?.[0]?.model).toBe(runtimeModel);
+      const history = await server.inject({ url: `/sessions/${ref.id}/workflow-runs?cwd=${encodeURIComponent(root)}` });
+      expect(history.json<WorkflowRun[]>()[0]?.stages?.[1]?.workers?.[0]?.model).toBe(runtimeModel);
+      await until(() => Promise.resolve(hub.sessionEvents.some(({ event }) => event.type === "pi.event" && event.eventType === "workflow_runs_changed")));
+      // Runtime edits survive reopening and do not change which launch request was accepted.
+      await server.close(); await service.dispose(); service = openService(); server = app();
+      expect((await service.workflowRuns(ref))[0]?.stages?.[1]?.workers?.[0]?.model).toBe(runtimeModel);
+      expect((await server.inject({ method: "POST", url, payload })).statusCode).toBe(200);
+      await service.finishWorkflow(ref, run.id, "stopped", "End model test");
+      expect((await server.inject({ method: "POST", url: modelUrl, payload: { cwd: root, model: null } })).statusCode).toBe(409);
+    } finally { await server.close(); }
+  });
+
+  it.each(["session", "agent file"] as const)("applies runtime models at the next spawn/send, preserves a busy turn, and resets to the %s default", async (fallback) => {
+    if (fallback === "agent file") {
+      await mkdir(join(agentDir, "agents"));
+      await writeFile(join(agentDir, "agents/model-agent.md"), "---\nname: model-agent\ndescription: Model test\ntools: work\nmodel: faux/faux-declared\n---\nDo the task.");
+      modelAgent = "model-agent";
+    }
+    const server = app();
+    let releaseWork: (() => void) | undefined;
+    modelWork = () => new Promise<void>((resolve) => { releaseWork = resolve; });
+    try {
+      const ref = { id: (await service.start(root)).id, cwd: root };
+      const body = "---\nworkflow:\n  version: 1\n  stages:\n    - id: build\n      name: Build\n      workers: [{ name: alpha }, { name: beta }]\n---\nWait for instructions.\n";
+      await new AgentDirPromptLibrary(agentDir).save({ name: "models", body });
+      const run = await service.runWorkflow(ref, "models", {}, "runtime-models");
+      await until(async () => (await service.messages(ref)).messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content).startsWith(`Workflow run ${run.id}`)) && !(await service.status(ref)).isStreaming);
+      const change = async (name: string, model: string | null) => {
+        const response = await server.inject({ method: "POST", url: `/sessions/${ref.id}/workflow-runs/${run.id}/workers/${name}/model`, payload: { cwd: root, model } });
+        expect(response.statusCode).toBe(200);
+        expect(runBody(response.json()).stages?.[0]?.workers?.find((worker) => worker.name === name)?.model).toBe(model);
+      };
+      const ask = async (message: string) => {
+        await until(async () => !(await service.status(ref)).isStreaming);
+        await service.prompt(ref, message);
+      };
+      const settled = async (count: number) => until(async () => {
+        const children = (await service.workflowRuns(ref))[0]?.children;
+        return children?.length === count && children.every((child) => child.state.kind === "settled" && child.state.delivered !== false);
+      });
+      await change("alpha", "faux/faux-declared");
+      await ask("MODEL-SPAWN-alpha");
+      await until(() => Promise.resolve(started === 1));
+      expect(modelRequests).toEqual([{ name: "alpha", model: "faux-declared", phase: "user" }]);
+      // An edit alone cannot affect the remaining generations of this turn.
+      await change("alpha", "faux/faux-1:high");
+      await ask("MODEL-SEND-alpha");
+      await until(async () => (await service.workflowRuns(ref))[0]?.children.length === 2 && !(await service.status(ref)).isStreaming);
+      expect(started).toBe(1);
+      releaseWork?.();
+      await until(() => Promise.resolve(started === 2));
+      expect(modelRequests.slice(0, 3)).toEqual([
+        { name: "alpha", model: "faux-declared", phase: "user" },
+        { name: "alpha", model: "faux-declared", phase: "toolResult" },
+        { name: "alpha", model: "faux-1", phase: "user" },
+      ]);
+      releaseWork?.();
+      await settled(2);
+      await change("alpha", null);
+      await ask("MODEL-SEND-alpha");
+      await until(() => Promise.resolve(started === 3));
+      expect(modelRequests.at(-1)).toMatchObject({ name: "alpha", model: fallback === "session" ? "faux-1" : "faux-declared", phase: "user" });
+      releaseWork?.();
+      await settled(3);
+      // Null at spawn ignores the coordinating agent's explicit model argument too.
+      await change("beta", null);
+      await ask("MODEL-SPAWN-beta");
+      await until(() => Promise.resolve(started === 4));
+      expect(modelRequests.at(-1)).toMatchObject({ name: "beta", model: fallback === "session" ? "faux-1" : "faux-declared" });
+      releaseWork?.();
+      await settled(4);
+      await service.finishWorkflow(ref, run.id, "completed", "Models applied at turn boundaries");
+    } finally { releaseWork?.(); await server.close(); }
+  }, 20000);
+
   it("saves, launches, snapshots, recovers, links children, explicitly finishes, and copies a variation", async () => {
     let server = app();
     try {

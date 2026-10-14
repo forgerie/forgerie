@@ -71,7 +71,7 @@ import { parsePromptAttachments } from "../../shared/promptAttachments.js";
 import { fingerprintPromptResourceDeliveryText, parseLeadingSlashCommand, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
 import { AgentDirPromptLibrary } from "../resources/promptLibrary.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import type { WorkflowInputs, WorkflowOutcome, WorkflowStopDecision } from "../../shared/workflowRuns.js";
+import type { WorkflowModels, WorkflowInputs, WorkflowOutcome, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
 import { assertBoundedPromptResourceContent, readBoundedPromptResourceFile } from "../resources/promptResourceContent.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, SESSION_TREE_CUSTOM_INSTRUCTIONS_MAX_LENGTH, SESSION_UNREAD_LIMIT } from "../../shared/apiTypes.js";
@@ -2623,11 +2623,11 @@ export class PiSessionService implements SessionRouteService {
     const session = await this.getOrOpen(ref);
     return session instanceof DurableAgentSession && session.hostsDurableChildren ? session.workflowProposals() : [];
   }
-  async startWorkflowProposal(ref: PiSessionRef, id: string, inputs: WorkflowInputs, requestId: string) {
+  async startWorkflowProposal(ref: PiSessionRef, id: string, inputs: WorkflowInputs, requestId: string, models?: WorkflowModels) {
     await this.assertWritable(ref);
     const session = await this.durableSession(ref);
     this.assertHandoffDestinationAcceptsInput(session);
-    return this.runSessionEntryMutation(session, "start a workflow proposal", () => session.startWorkflowProposal(id, inputs, requestId));
+    return this.runSessionEntryMutation(session, "start a workflow proposal", () => session.startWorkflowProposal(id, inputs, requestId, models));
   }
   async changeWorkflowProposal(ref: PiSessionRef, id: string, note: string) {
     await this.assertWritable(ref);
@@ -2641,16 +2641,21 @@ export class PiSessionService implements SessionRouteService {
     return this.runSessionEntryMutation(session, "dismiss a workflow proposal", () => session.dismissWorkflowProposal(id));
   }
   async workflowRuns(ref: PiSessionRef) { return (await this.durableSession(ref)).workflowRuns(); }
-  async runWorkflow(ref: PiSessionRef, name: string, inputs: WorkflowInputs, requestId: string) {
+  async runWorkflow(ref: PiSessionRef, name: string, inputs: WorkflowInputs, requestId: string, models?: WorkflowModels) {
     await this.assertWritable(ref);
     const session = await this.durableSession(ref);
     this.assertHandoffDestinationAcceptsInput(session);
-    return this.runSessionEntryMutation(session, "launch a workflow", () => session.runWorkflow(name, inputs, requestId));
+    return this.runSessionEntryMutation(session, "launch a workflow", () => session.runWorkflow(name, inputs, requestId, models));
   }
   async finishWorkflow(ref: PiSessionRef, runId: string, outcome: WorkflowOutcome, result: string) {
     await this.assertWritable(ref);
     const session = await this.durableSession(ref);
     return this.runSessionEntryMutation(session, "finish a workflow", () => session.finishWorkflow(runId, outcome, result));
+  }
+  async setWorkflowWorkerModel(ref: PiSessionRef, runId: string, worker: string, model: string | null) {
+    await this.assertWritable(ref);
+    const session = await this.durableSession(ref);
+    return this.runSessionEntryMutation(session, "change a workflow worker model", () => session.setWorkflowWorkerModel(runId, worker, model));
   }
   async decideWorkflowStop(ref: PiSessionRef, runId: string, stage: string, decision: WorkflowStopDecision, note: string | undefined) {
     await this.assertWritable(ref);
