@@ -1208,6 +1208,7 @@ export class PiSessionService implements SessionRouteService {
         if (!(session instanceof DurableAgentSession)) throw new Error("Issue filing requires a Durable parent session.");
         const result = await file(targetCwd, id, input);
         if (result.state === "created") {
+          // Record the known issue even when the tool will report a label attachment error.
           try {
             await session.journal.conversation.commit(tx => logDecision(tx, session.journal.conversation.id, {
               id: `issue:${result.repo.toLowerCase()}:${String(result.number)}`, kind: "issue", by: "parent",

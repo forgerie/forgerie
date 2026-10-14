@@ -78,18 +78,21 @@ issue. It explains why and tells the user to create the label or grant the
 GitHub App `Issues: write` permission. Unknown caller-supplied labels also
 refuse filing before any write. There is no unlabelled fallback.
 
-The issue POST always includes the established label. Successful results always
-set `agentFiled: true`. The existing result schema still accepts `agentFiled`
-as a boolean and optional `labelWarning` for older transcript results.
+The issue POST always includes the established label. Successful tool results
+set `agentFiled: true`.
 
 If GitHub accepts that issue POST but returns an issue without the label, the
-tool reports an error with the created number and URL and prohibits refiling.
+client retains the creation receipt so the service logs its `issue` decision
+before returning the tool error. Result details have `state: "created"`,
+`agentFiled: false`, the created number and URL, and a `labelWarning` that
+requires repair and prohibits refiling. The tool result sets `isError: true`.
 That response arrives after creation, so it cannot be checked before the POST.
 The user must repair the existing issue's label or grant permission. The client
 cannot make GitHub's issue creation and label attachment atomic against remote
 failures or concurrent label deletion.
 
-Success calls `logDecision` in the parent conversation. The record uses
+Every known creation calls `logDecision` in the parent conversation, including
+a creation whose label attachment failed. The record uses
 `id: "issue:<lowercase repo>:<number>"`, `kind: "issue"`, `by: "parent"`, the title
 as `question`, `"#<number> <url>"` as `choice`, the reported queries as `reason`,
 and `flagged: false`. The existing decision log attaches the active run.

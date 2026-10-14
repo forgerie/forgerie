@@ -101,8 +101,8 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
       const result = await deps.fileIssue(await target(ctx.sessionManager.getSessionId(), worktreeId), ctx.sessionManager.getSessionId(), input);
       const text = result.state === "duplicate"
         ? `No issue filed: close title matches. Read these issues; stop or use notDuplicateOf only for different work.\n${result.matches.map(issue => `#${String(issue.number)} ${issue.title} [${issue.state}] ${issue.url}`).join("\n")}`
-        : `Filed #${String(result.number)} ${result.url}${result.labelWarning === undefined ? " with agent-filed." : `\n${result.labelWarning}`}`;
-      return { content: [{ type: "text", text }], details: result, ...(result.state === "duplicate" ? { isError: true } : {}) };
+        : `Filed #${String(result.number)} ${result.url}${result.agentFiled ? " with agent-filed." : `\n${result.labelWarning ?? "GitHub did not attach the established agent-filed label. Do not file it again. The user must repair the label or grant the GitHub App Issues: write permission."}`}`;
+      return { content: [{ type: "text", text }], details: result, ...(result.state === "duplicate" || !result.agentFiled ? { isError: true } : {}) };
     },
   });
   if (deps.watch === undefined) return [read, write, file] as const;

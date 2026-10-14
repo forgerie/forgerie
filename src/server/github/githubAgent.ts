@@ -168,8 +168,10 @@ export class GitHubAgent {
     await this.ensureAgentFiled(repo.slug, call);
     const labels = [...requested, "agent-filed"];
     const issue = await call.send("POST", "/issues", { title: input.title.trim(), body: `${input.body}\n\n<!-- forgerie-session: ${sessionId} -->`, labels }, IssueSchema, "Issues: write");
-    if (!labelsOf(issue).some(label => label.toLowerCase() === "agent-filed")) throw new GitHubToolError(`GitHub created #${String(issue.number)} ${issue.html_url} but did not attach the established agent-filed label. Do not file it again. The user must repair the label or grant the GitHub App Issues: write permission.`);
-    return { state: "created", repo: repo.slug, number: issue.number, title: issue.title, url: issue.html_url, agentFiled: true };
+    const agentFiled = labelsOf(issue).some(label => label.toLowerCase() === "agent-filed");
+    // A known creation receipt must reach the decision log, even when label attachment failed.
+    return { state: "created", repo: repo.slug, number: issue.number, title: issue.title, url: issue.html_url, agentFiled,
+      ...(agentFiled ? {} : { labelWarning: "GitHub did not attach the established agent-filed label. Do not file it again. The user must repair the label or grant the GitHub App Issues: write permission." }) };
   }
 
   private readonly agentFiledLabelChecks = new Map<string, Promise<void>>();

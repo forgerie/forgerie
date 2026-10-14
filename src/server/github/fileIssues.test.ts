@@ -161,7 +161,11 @@ describe("file_issue labels", () => {
   });
   it("reports a missing label in the issue creation response instead of claiming it was attached", async () => {
     const f = fixture({ labels: ["agent-filed"], omitIssueLabel: true });
-    await expect(f.agent.fileIssue("/repo", "s1", input)).rejects.toThrow("Do not file it again");
+    const result = await f.agent.fileIssue("/repo", "s1", input);
+    expect(result).toMatchObject({ state: "created", number: 40, agentFiled: false });
+    expect(Check(FileIssueResultSchema, result)).toBe(true);
+    expect(result).toHaveProperty("labelWarning", expect.stringContaining("Do not file it again"));
+    expect(f.requests.filter(request => request.method === "POST").map(request => request.url)).toEqual([`${repo}/issues`]);
   });
   it("refuses unknown user labels before any write", async () => {
     const f = fixture();
