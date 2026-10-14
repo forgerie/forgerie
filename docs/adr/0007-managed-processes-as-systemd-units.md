@@ -20,7 +20,10 @@ Forgerie replaces `@aliou/pi-processes` with its own `process` tool. The tool ke
 ## Consequences
 
 - Hosts without a systemd user manager get attached processes. These end when Forgerie restarts, and Forgerie labels them that way in the tool result and the panel.
-- The unit does not get the caller's environment by default. Forgerie passes the agent-visible environment, including `PATH`, explicitly, and launches with `--expand-environment=no` so that `$` in a command reaches the shell unchanged.
-- A process that is not attached to a terminal block-buffers its output. Without line buffering, logs and watches stay silent until the process exits.
+- The unit does not get the caller's environment by default. Forgerie passes the same agent-visible environment that workspace services get, including `PATH`, and launches with `--expand-environment=no` so that `$` in a command reaches the shell unchanged. A variable that pi-processes passed and the filter hides is no longer passed.
+- A process that is not attached to a terminal block-buffers its output. Forgerie sets line-buffering variables such as `PYTHONUNBUFFERED=1`. Other programs can still hold back output until they exit; agents add `stdbuf -oL` for those.
+- A session keeps its finished records and logs until session close: at most 50 finished records, and 64 MB per log with the oldest part dropped.
+- No memory or CPU limit is set on the session slice. A runaway process can still exhaust the host, now outside sessiond's own limits.
+- No host-wide list of managed processes exists yet. A process in a session left open keeps running until someone opens that session and stops it.
 - If the supervisor is lost (reboot, OOM), Forgerie reports each affected process as a lost process and does not run it again.
 - The change replaces `@aliou/pi-processes` in one step. A copy of it installed in the Pi profile is dropped from hosted sessions with a warning.
