@@ -18,6 +18,7 @@
     "@fontsource-variable/public-sans"
   ],
   "ignoreBinaries": [
+    "agent-browser",
     "magick",
     "which"
   ]
