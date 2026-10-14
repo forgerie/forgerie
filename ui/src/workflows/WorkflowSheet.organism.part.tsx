@@ -39,7 +39,7 @@ export const checks = {
       await waitFor(() => { expect(canvas.getByRole("button", { name: "Stop" })).toBeVisible(); });
       expect(canvas.getByText("From its next turn. The turn in progress finishes on its current model.")).toBeVisible();
       await input.click(canvas.getByRole("button", { name: "Plan" }));
-      await waitFor(() => { expect(canvas.getByRole("article", { name: "Plan" })).toBeVisible(); });
+      await waitFor(() => { expect(canvas.getByRole("region", { name: "Plan" })).toBeVisible(); });
     },
   },
 } satisfies StateChecks;

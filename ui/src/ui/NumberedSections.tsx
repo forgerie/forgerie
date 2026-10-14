@@ -9,7 +9,7 @@ export interface NumberedSection {
   title: ReactNode;
   /** Where the process stands: a finished step's number is filled with ink, the one at work with live. */
   mark?: "done" | "current" | undefined;
-  /** A step the reader added or removed, before the text catches up: added is in the added ink; removed is struck and faded. */
+  /** A step the reader added or removed, before the text catches up: added is in the added ink; removed is struck, and its body folds away. */
   change?: "added" | "removed" | undefined;
   /** One quiet line under the heading, such as what changed. */
   flag?: ReactNode;

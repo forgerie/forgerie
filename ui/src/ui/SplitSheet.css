@@ -55,6 +55,7 @@
 /* ---------- One column: one scroller ---------- */
 .split-sheet-body { grid-area: body; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
 .split-sheet-main { display: contents; }
+.split-sheet-body:focus-visible, .split-sheet-main:focus-visible, .split-sheet-rail:focus-visible { outline: 0.125rem solid var(--line-focus); outline-offset: -0.125rem; }
 .split-sheet-lead { order: -2; max-inline-size: calc(var(--split-sheet-measure) + 2 * var(--split-sheet-pad)); padding: var(--space-4) var(--split-sheet-pad) 0; }
 .split-sheet-document { order: 0; min-inline-size: 0; max-inline-size: calc(var(--split-sheet-measure) + 2 * var(--split-sheet-pad)); padding: var(--space-6) var(--split-sheet-pad); }
 .split-sheet-rail { order: 1; display: grid; align-content: start; min-inline-size: 0; padding: var(--space-6) var(--split-sheet-pad);

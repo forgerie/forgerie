@@ -50,6 +50,8 @@ button.route-list-worker:hover { background: var(--hover-surface); }
 /* Open elsewhere: the active wash, and nothing else. */
 .route-list-worker[aria-current] { background: var(--active-surface); }
 .route-list-worker[aria-current] .route-list-who-line code { font-weight: 600; }
+/* On the wash, the quiet lines take full ink so they keep their contrast. */
+.route-list-worker[aria-current] .route-list-who { color: var(--foreground); }
 .route-list-blocks { justify-self: end; padding-block-start: 0.4375rem; line-height: 0; }
 .route-list-who { display: grid; min-inline-size: 0; color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.45; }
 .route-list-who-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); min-inline-size: 0; font-size: var(--small-text); }

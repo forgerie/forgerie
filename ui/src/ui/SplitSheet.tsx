@@ -61,12 +61,13 @@ export function SplitSheet({ title, subtitle, closeLabel, onClose, back, lead, d
             </div>
             <button type="button" className="split-sheet-control" aria-label={closeLabel} title={closeLabel} onClick={onClose}><XIcon aria-hidden /></button>
           </header>
-          <div className="split-sheet-body">
-            <div className="split-sheet-main">
+          {/* Each scroller takes focus, so the keyboard can scroll it: the body in one column, the document pane beside the rail. */}
+          <div className="split-sheet-body" tabIndex={0} role="region" aria-label={`${title} content`}>
+            <div className="split-sheet-main" tabIndex={0} role="region" aria-label={documentLabel} aria-busy={busy || undefined}>
               {hasLead && <div className="split-sheet-lead">{lead}</div>}
-              <article className="split-sheet-document" aria-label={documentLabel} aria-busy={busy || undefined}>{document}</article>
+              <article className="split-sheet-document">{document}</article>
             </div>
-            <aside className="split-sheet-rail" aria-label={railLabel}>{rail}</aside>
+            <aside className="split-sheet-rail" tabIndex={0} aria-label={railLabel}>{rail}</aside>
           </div>
           <footer className="split-sheet-foot">{foot}</footer>
         </div>
