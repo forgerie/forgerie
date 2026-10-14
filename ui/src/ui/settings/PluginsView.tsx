@@ -116,8 +116,8 @@ export function PluginsView({ selected, onOpen, onBack, onClose, onCatalog, api 
     onClick={() => { if (selected) onOpen(undefined); else onBack(); }}><ChevronLeftIcon aria-hidden size={16} />{selected ? "Plugins" : "Settings"}</button>;
   const primary = adding ? <button type="submit" form="plugin-install" className="settings-primary" disabled={busy || !catalog || !source.trim()}>Install</button>
     : !selected ? <button type="button" className="settings-primary" disabled={busy || !catalog} onClick={() => onOpen("new")}><PlusIcon aria-hidden size={14} />Install package</button>
-    : fields?.some((def) => def.type === "url") ? <button type="submit" form="app-plugin-settings" className="settings-primary"
-      disabled={busy || !typedDirty || Object.values(typed).some((text) => !text.trim())}>Save</button>
+    : fields?.some((def) => def.type !== "boolean") ? <button type="submit" form="app-plugin-settings" className="settings-primary"
+      disabled={busy || !typedDirty || fields?.some((def) => def.type !== "boolean" && !(def.type === "url" && def.optional) && !(typed[def.id] ?? String(appValues?.[def.id] ?? def.default)).trim())}>Save</button>
     : null;
   const removable = plugin?.kind === "package";
   // Rare commands wait one tap away, as on Agents and Backlog. Remove asks twice, in place.
@@ -216,7 +216,7 @@ function PluginDetail({ plugin, home, busy, onToggle, children }: {
   const standfirst = plugin.description || (plugin.kind === "extension" ? "A Pi extension file." : "A Pi package.");
   const load = plugin.kind === "app" ? "Turned on" : "Load in sessions";
   const hint = plugin.kind === "builtin" ? "Part of Forgerie. You cannot turn it off here."
-    : plugin.kind === "app" ? (plugin.enabled ? "This app shows it. Changes apply at once." : "This app hides it. Its settings are kept.")
+    : plugin.kind === "app" ? (plugin.enabled ? "Enabled. Changes apply at once." : "Disabled. Its settings are kept.")
     : plugin.kind === "extension" ? (plugin.enabled ? "Sessions load this file." : "Sessions skip this file. The file stays where it is.")
     : plugin.enabled ? "Sessions load this package's tools, skills, and prompts." : "Kept in the list, but not loaded. Turn it on to load it again.";
   return <article className="agent-editor plugin-detail">
@@ -246,6 +246,6 @@ function fieldOf(def: AppSettingDef, values: AppSettings, typed: Readonly<Record
   onSwitch: (id: string, value: boolean) => void, onType: (id: string, text: string) => void) {
   return <SettingsField key={def.id} label={def.label} hint={def.description}>
     {def.type === "boolean" ? <SettingsToggle label={def.label} checked={values[def.id] === true} disabled={busy} onChange={(value) => onSwitch(def.id, value)} />
-      : <SettingsInput type="url" label={def.label} value={typed[def.id] ?? String(values[def.id] ?? def.default)} disabled={busy} required placeholder={def.default} onChange={(value) => onType(def.id, value)} />}
+      : <SettingsInput type={def.type === "url" ? "url" : "text"} choices={def.type === "choice" ? def.choices : undefined} label={def.label} value={typed[def.id] ?? String(values[def.id] ?? def.default)} disabled={busy} required={!(def.type === "url" && def.optional)} placeholder={def.default} onChange={(value) => onType(def.id, value)} />}
   </SettingsField>;
 }

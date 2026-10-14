@@ -1,3 +1,4 @@
+import { decisionHintsStatusSchema } from "./decisionHints.js";
 import type { PiWebComponentStatus, PiWebRuntimeComponent, PiWebRuntimeResponse, PiWebVersionResponse } from "./apiTypes.js";
 import { parseActiveAgentProfileDescriptor } from "./activeAgentProfile.js";
 import { parseKnownPiWebCapabilities } from "./capabilities.js";
@@ -34,6 +35,8 @@ export function parsePiWebRuntimeComponent(value: unknown): PiWebRuntimeComponen
   const runtimeVersion = value["runtimeVersion"];
   const available = value["available"];
   const capabilities = parseKnownPiWebCapabilities(value["capabilities"]);
+  const hints = value["decisionHints"] === undefined ? undefined : decisionHintsStatusSchema.safeParse(value["decisionHints"]);
+  if (hints !== undefined && (!hints.success || component !== "sessiond")) return undefined;
   const activeAgentProfileValue = value["activeAgentProfile"];
   const activeAgentProfile = activeAgentProfileValue === undefined ? undefined : parseActiveAgentProfileDescriptor(activeAgentProfileValue);
   const error = value["error"];
@@ -47,6 +50,7 @@ export function parsePiWebRuntimeComponent(value: unknown): PiWebRuntimeComponen
     available,
     capabilities,
     ...(activeAgentProfile === undefined ? {} : { activeAgentProfile }),
+    ...(hints?.success === true ? { decisionHints: hints.data } : {}),
     ...(typeof error === "string" ? { error } : {}),
   };
 }

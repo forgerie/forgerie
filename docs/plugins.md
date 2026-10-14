@@ -63,3 +63,9 @@ The current Settings API uses `/aui/plugins` and revision-checked mutations. The
 The original browser-plugin runtime, bundled plugin assets, public declaration package, discovery, and mutation APIs are retired. `/api/plugins` and `/pi-web-plugins/` assets return 404, including when the app serves browser navigation through its SPA fallback.
 
 Existing config entries remain data, but undiscovered original-client plugins no longer appear in Settings. Pi extensions, current app plugins, account meters, managed processes, and delegated agents remain supported. See [fork cleanup](fork-cleanup.md) for the full retired-feature list.
+
+## Decision hints
+
+Decision hints is an off-by-default gateway connection for optional attention and
+risk information. See [Decision hints](decision-hints.md) for configuration,
+privacy and server-only key setup. The annotations are a later integration stage.

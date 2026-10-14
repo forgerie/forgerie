@@ -2,6 +2,7 @@ import type { TaskActivity } from "../../shared/durableTaskActivity.js";
 import { durableBrowserMessageSchema } from "../../shared/durableBrowserSnapshot.js";
 import { z } from "zod";
 import { assertHistoryIdentity, PresentationHistoryIdentity, SessionOpenError, type SessionOpenPageRequest, type SessionOpenResult, type SessionOpenMessage, type SessionOpenHistoryPage } from "./sessionOpen.js";
+import type { DecisionHints } from "../decisions/decisionHints.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { ManagedProcessRegistry, type ManagedProcessRegistryOptions } from "../processes/managedProcessRegistry.js";
 import type { ManagedProcesses } from "../processes/managedProcesses.js";
@@ -971,6 +972,8 @@ function createPiWebEditToolDefinition(cwd: string) {
 }
 
 export interface PiSessionServiceDependencies {
+  /** Optional background-only hint client and live settings; never used for authorization. */
+  decisionHints?: DecisionHints;
   managedProcesses?: Omit<ManagedProcessRegistryOptions, "onError">;
   durableReader?: DurableSessionReader;
   agentDir: string;

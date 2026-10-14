@@ -6,7 +6,8 @@ import { z } from "zod";
  * A plugin declares who it is and what it can be set to here, as plain data,
  * so Forgerie's server can list it, validate its settings, and store them, and
  * Settings > Plugins can draw a form for it. Its interface lives in the browser
- * app (`ui/src/plugins/`), which registers it against the same id.
+ * app (`ui/src/plugins/`), which registers browser plugins against the same id.
+ * Server plugins use the settings contract without registering a picker shelf.
  *
  * Values are stored in Forgerie's config at `plugins[id]`, the same place the
  * original client's browser plugins used, so a plugin ported from that client
@@ -17,7 +18,9 @@ const defBase = { id: z.string(), label: z.string(), description: z.string() };
 export const appSettingDefSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("boolean"), ...defBase, default: z.boolean() }),
   /** An http or https address. */
-  z.object({ type: z.literal("url"), ...defBase, default: z.string() }),
+  z.object({ type: z.literal("url"), ...defBase, default: z.string(), optional: z.boolean().optional() }),
+  z.object({ type: z.literal("text"), ...defBase, default: z.string() }),
+  z.object({ type: z.literal("choice"), ...defBase, default: z.string(), choices: z.array(z.string()).min(1) }),
 ]);
 export type AppSettingDef = z.infer<typeof appSettingDefSchema>;
 export type AppSettingValue = boolean | string;
@@ -28,6 +31,10 @@ export interface AppPluginManifest {
   /** What the plugin does, in a sentence, for Settings > Plugins. */
   description: string;
   settings: readonly AppSettingDef[];
+  /** Existing plugins stay on by default; sensitive opt-in plugins can start off. */
+  defaultEnabled?: boolean;
+  /** Server plugins have settings here but no picker shelf. Existing plugins run in the browser. */
+  runtime?: "browser" | "server";
 }
 
 /** One plugin's state, as the browser app needs it to render: on or off, and every setting resolved. */
@@ -47,7 +54,11 @@ function isWebAddress(value: string): boolean {
   } catch { return false; }
 }
 function validValue(def: AppSettingDef, value: unknown): value is AppSettingValue {
-  return def.type === "boolean" ? typeof value === "boolean" : typeof value === "string" && isWebAddress(value);
+  if (def.type === "boolean") return typeof value === "boolean";
+  if (typeof value !== "string") return false;
+  if (def.type === "url") return (def.optional === true && value === "") || isWebAddress(value);
+  if (def.type === "choice") return def.choices.includes(value);
+  return value.trim() !== "" && value.length <= 2048;
 }
 
 /**
@@ -73,9 +84,15 @@ export function storedAppSettings(manifest: AppPluginManifest, input: Readonly<R
     const def = manifest.settings.find((candidate) => candidate.id === key);
     if (def === undefined) throw new AppSettingsError(`${manifest.name} has no setting "${key}".`);
     if (!validValue(def, value)) {
-      throw new AppSettingsError(def.type === "boolean" ? `${def.label} must be on or off.` : `${def.label} must be an http or https address.`);
+      const requirement = def.type === "boolean" ? "on or off" : def.type === "url" ? "an http or https address" : def.type === "choice" ? `one of: ${def.choices.join(", ")}` : "non-empty text (up to 2048 characters)";
+      throw new AppSettingsError(`${def.label} must be ${requirement}.`);
     }
     if (value !== def.default) stored[key] = value;
   }
   return stored;
+}
+
+/** The catalog and server consumers share the same master-switch default. */
+export function appPluginEnabled(manifest: AppPluginManifest, entry: { enabled?: boolean | undefined } | undefined): boolean {
+  return entry?.enabled ?? manifest.defaultEnabled ?? true;
 }

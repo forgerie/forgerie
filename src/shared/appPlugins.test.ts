@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AppSettingsError, resolveAppSettings, storedAppSettings, type AppPluginManifest } from "./appPlugins.js";
-import { APP_PLUGIN_MANIFESTS } from "./appPluginManifests.js";
+import { APP_PLUGIN_MANIFESTS, decisionHintsManifest } from "./appPluginManifests.js";
 
 const manifest: AppPluginManifest = {
   id: "meters", name: "Meters", description: "Draws meters.",
@@ -25,6 +25,13 @@ describe("app plugin settings", () => {
     expect(() => storedAppSettings(manifest, { five_hour: "false" })).toThrow("Five-hour window must be on or off.");
     expect(() => storedAppSettings(manifest, { endpoint: "javascript:alert(1)" })).toThrow("Address must be an http or https address.");
     expect(() => storedAppSettings(manifest, { endpoint: `https://x.example/${"a".repeat(2050)}` })).toThrow(AppSettingsError);
+  });
+  it("validates text, choices and an optional empty gateway address", () => {
+    expect(storedAppSettings(decisionHintsManifest, { model: "chosen", sensitivity: "high", gateway_url: "" })).toEqual({ model: "chosen", sensitivity: "high" });
+    expect(() => storedAppSettings(decisionHintsManifest, { model: " " })).toThrow(AppSettingsError);
+    expect(() => storedAppSettings(decisionHintsManifest, { model: "a".repeat(2049) })).toThrow(AppSettingsError);
+    expect(() => storedAppSettings(decisionHintsManifest, { sensitivity: "extreme" })).toThrow(AppSettingsError);
+    expect(() => storedAppSettings(decisionHintsManifest, { gateway_url: "file:///secret" })).toThrow(AppSettingsError);
   });
   it("keeps every bundled plugin's defaults valid and its ids unique", () => {
     for (const plugin of APP_PLUGIN_MANIFESTS) {

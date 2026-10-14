@@ -27,6 +27,7 @@
     "skills",
     "agents",
     "docs/plugins.md",
+    "docs/decision-hints.md",
     "docs/config.md",
     "docs/deployment.md",
     "docs/session-worktrees.md",

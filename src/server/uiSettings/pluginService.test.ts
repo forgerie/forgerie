@@ -68,9 +68,20 @@ describe("plugin management", () => {
   it("lists real Pi resources, app plugins, and built-ins without executing extension code", async () => {
     const catalog = await service.list();
     expect(catalog.profileDir).toBe(profile.dir);
-    expect(catalog.plugins.map((entry) => entry.kind)).toEqual(["package", "extension", "app", "builtin", "builtin", "builtin"]);
+    expect(catalog.plugins.map((entry) => entry.kind)).toEqual(["package", "extension", "app", "app", "builtin", "builtin", "builtin"]);
     expect(catalog.plugins.find((entry) => entry.kind === "extension")).toMatchObject({ name: "loose", description: "", enabled: false });
     expect(catalog.restartRequired).toBe(false);
+  });
+  it("keeps decision hints off by default and saves their master switch without restart", async () => {
+    const catalog = await service.list();
+    expect(catalog.plugins.find((entry) => entry.id === "app:decision-hints")).toMatchObject({ enabled: false, settings: { gateway_url: "", model: "fast", sensitivity: "normal" } });
+    expect((await service.appStates()).plugins.find((entry) => entry.id === "decision-hints")?.enabled).toBe(false);
+    const configured = await service.change(catalog.revision, { type: "settings", id: "app:decision-hints", settings: { gateway_url: "http://127.0.0.1:4000", model: "chosen", sensitivity: "high" } });
+    const enabled = await service.change(configured.revision, { type: "toggle", id: "app:decision-hints", enabled: true });
+    expect(enabled.restartRequired).toBe(false);
+    expect((await service.appStates()).plugins.find((entry) => entry.id === "decision-hints")).toMatchObject({ enabled: true, settings: { model: "chosen", sensitivity: "high" } });
+    await expect(service.change(enabled.revision, { type: "settings", id: "app:decision-hints", settings: { apiKey: "secret" } })).rejects.toMatchObject({ status: 400 });
+    expect(JSON.stringify(await service.list())).not.toContain("secret");
   });
   it("describes a package from its package.json, read as data", async () => {
     const catalog = await service.list();

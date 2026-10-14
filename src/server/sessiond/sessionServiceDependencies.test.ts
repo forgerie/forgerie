@@ -1,4 +1,5 @@
 import { createActiveDurableSessionReader } from "./durableSessionReader.js";
+import { createDecisionHints } from "../decisions/decisionHints.js";
 import { describe, expect, it } from "vitest";
 import { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 import { SessionNotificationStore } from "../sessions/sessionNotificationStore.js";
@@ -83,6 +84,12 @@ describe("sessiond session service dependency assembly", () => {
     // Pins the note to the refresher's answer, so the test above cannot pass on
     // wording that is always appended.
     expect(details).toEqual(["Starting the Pi session", "Loading session extensions"]);
+  });
+
+  it("injects the decision client and live settings as one collaborator", () => {
+    const hints = createDecisionHints({ env: {} });
+    expect(sessionServiceDependencies(daemonCollaborators({ decisionHints: hints })).decisionHints).toBe(hints);
+    expect(sessionServiceDependencies(daemonCollaborators()).decisionHints).toBeUndefined();
   });
 
   it("passes the ask-user preference through to the session service", () => {

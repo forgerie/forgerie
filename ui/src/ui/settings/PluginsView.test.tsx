@@ -6,7 +6,7 @@ import { PluginsView, plainName, tildify } from "./PluginsView";
 import type { PluginsApi } from "../../plugins/pluginsApi";
 import type { PluginCatalog, PluginChange, PluginReadme } from "@shared/pluginsContract";
 import { resolveAppSettings } from "@shared/appPlugins";
-import { accountMetersManifest } from "@shared/appPluginManifests";
+import { accountMetersManifest, decisionHintsManifest } from "@shared/appPluginManifests";
 
 let root: Root;
 let catalog: PluginCatalog;
@@ -199,6 +199,24 @@ describe("Plugins settings", () => {
     expect(calls[1]).toEqual({ type: "settings", id: "app:cliproxyapi-quota", settings: { ...saved, endpoint: "http://127.0.0.1:8317/quota" } });
     expect(status()).toBe("Saved");
     expect(seen.at(-1)!.plugins.find((entry) => entry.id === "app:cliproxyapi-quota")!.settings).toMatchObject({ seven_day: false, endpoint: "http://127.0.0.1:8317/quota" });
+  });
+  it("edits the model, sensitivity and optional gateway address with existing settings controls", async () => {
+    const settings = resolveAppSettings(decisionHintsManifest, undefined);
+    catalog.plugins.push({ id: "app:decision-hints", kind: "app", name: "Decision hints", source: "Forgerie", description: decisionHintsManifest.description,
+      enabled: false, settings, fields: [...decisionHintsManifest.settings] });
+    selected = "app:decision-hints"; await render();
+    expect(button("Load Decision hints").getAttribute("aria-checked")).toBe("false");
+    expect(document.body.textContent).toContain("turn replies and commands leave this machine");
+    await type('input[aria-label="Model"]', "chosen");
+    const choice = document.querySelector<HTMLSelectElement>('select[aria-label="Sensitivity"]')!;
+    await act(async () => { choice.value = "high"; choice.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(calls).toEqual([]); expect(button("Save").disabled).toBe(false);
+    await click("Save");
+    expect(calls[0]).toEqual({ type: "settings", id: "app:decision-hints", settings: { ...settings, model: "chosen", sensitivity: "high" } });
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Gateway address"]')!.required).toBe(false);
+    expect(document.querySelector("input[type=password]")).toBeNull();
+    await click("Load Decision hints");
+    expect(calls[1]).toEqual({ type: "toggle", id: "app:decision-hints", enabled: true });
   });
   it("shows a read failure and retries", async () => {
     let fail = true;

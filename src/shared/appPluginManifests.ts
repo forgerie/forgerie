@@ -27,5 +27,17 @@ export const accountMetersManifest: AppPluginManifest = {
   ],
 };
 
-/** Every plugin bundled with the browser app, in the order Settings lists them. */
-export const APP_PLUGIN_MANIFESTS: readonly AppPluginManifest[] = [accountMetersManifest];
+export const decisionHintsManifest: AppPluginManifest = {
+  id: "decision-hints", name: "Decision hints", defaultEnabled: false, runtime: "server",
+  description: "Adds optional attention and risk hints. When enabled, turn replies and commands leave this machine through the gateway. Hints never approve actions or delay replies or commands.",
+  settings: [
+    { type: "url", id: "gateway_url", label: "Gateway address", description: "The gateway base address, without /v1/systemone. Leave empty for no hints.", default: "", optional: true },
+    { type: "text", id: "model", label: "Model", description: "The model name configured by your gateway.", default: "fast" },
+    { type: "boolean", id: "attention", label: "Attention hints", description: "Suggests which completed turns need your attention.", default: true },
+    { type: "boolean", id: "risk_labels", label: "Risk labels", description: "Adds information to gated actions and commands. Gates stay unchanged.", default: true },
+    { type: "choice", id: "sensitivity", label: "Sensitivity", description: "How readily hints call for your attention.", default: "normal", choices: ["low", "normal", "high"] },
+  ],
+};
+
+/** Every bundled app plugin (browser and server), in the order Settings lists them. */
+export const APP_PLUGIN_MANIFESTS: readonly AppPluginManifest[] = [accountMetersManifest, decisionHintsManifest];

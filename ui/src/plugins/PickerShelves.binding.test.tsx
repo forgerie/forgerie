@@ -51,7 +51,7 @@ describe("the session list's plugin slot", () => {
   it("reads the app plugins' states out of a Settings catalog", () => {
     expect([...statesFromCatalog(catalog(false))]).toEqual([["probe", { enabled: false, settings: { endpoint: "https://x.example/" } }]]);
   });
-  it("registers one interface for every manifest the server lists", () => {
-    expect(APP_PLUGINS.map((plugin) => plugin.manifest)).toEqual([...APP_PLUGIN_MANIFESTS]);
+  it("registers one interface for every browser manifest, not server-only settings", () => {
+    expect(APP_PLUGINS.map((plugin) => plugin.manifest)).toEqual(APP_PLUGIN_MANIFESTS.filter((manifest) => manifest.runtime !== "server"));
   });
 });

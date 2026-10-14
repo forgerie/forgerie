@@ -10,7 +10,7 @@ import { z } from "zod";
 import { activeForgerieProfile, type ForgerieProfile, type Gateway } from "./forgerieProfile.js";
 import { isErrnoCode, SettingsHttpError } from "./http.js";
 import { changeSchema, type ManagedPlugin, type PluginCatalog, type PluginChange, type PluginReadme } from "../../shared/pluginsContract.js";
-import { AppSettingsError, resolveAppSettings, storedAppSettings, type AppPluginManifest, type AppPluginStates } from "../../shared/appPlugins.js";
+import { AppSettingsError, appPluginEnabled, resolveAppSettings, storedAppSettings, type AppPluginManifest, type AppPluginStates } from "../../shared/appPlugins.js";
 import { APP_PLUGIN_MANIFESTS } from "../../shared/appPluginManifests.js";
 
 const objectSchema = z.record(z.string(), z.unknown());
@@ -180,7 +180,7 @@ export class PluginService {
    */
   async appStates(): Promise<AppPluginStates> {
     const { config } = await this.snapshot();
-    return { plugins: this.appPlugins.map((manifest) => ({ id: manifest.id, enabled: config.plugins[manifest.id]?.enabled !== false,
+    return { plugins: this.appPlugins.map((manifest) => ({ id: manifest.id, enabled: appPluginEnabled(manifest, config.plugins[manifest.id]),
       settings: { ...resolveAppSettings(manifest, config.plugins[manifest.id]?.settings) } })) };
   }
   /**
@@ -221,7 +221,7 @@ export class PluginService {
         id: extensionId(entry.path), kind: "extension", name: extensionName(entry.path), source: entry.path, enabled: entry.enabled, description: "" })),
       ...this.appPlugins.map((manifest): ManagedPlugin => ({
         id: appId(manifest.id), kind: "app", name: manifest.name, source: "Forgerie", description: manifest.description,
-        enabled: config.plugins[manifest.id]?.enabled !== false, settings: { ...resolveAppSettings(manifest, config.plugins[manifest.id]?.settings) },
+        enabled: appPluginEnabled(manifest, config.plugins[manifest.id]), settings: { ...resolveAppSettings(manifest, config.plugins[manifest.id]?.settings) },
         fields: [...manifest.settings],
       })),
       ...builtins.map(([name, description]): ManagedPlugin => ({

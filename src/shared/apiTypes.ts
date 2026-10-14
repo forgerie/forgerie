@@ -1,3 +1,4 @@
+import type { DecisionHintsStatus } from "./decisionHints.js";
 import type { TriggersChangedEvent } from "./triggers.js";
 import type { AzureDevopsGlobalConfig } from "./azureDevopsConfig.js";
 export type { PromptRequestOptions } from "./promptRequest.js";
@@ -1043,6 +1044,8 @@ export interface PiWebRuntimeComponent {
   capabilities: PiWebCapability[];
   /** Present only for a session daemon that supports active-profile reporting. */
   activeAgentProfile?: ActiveAgentProfileDescriptor;
+  /** Session daemon only: credential presence, never its value. */
+  decisionHints?: DecisionHintsStatus;
   error?: string;
 }
 

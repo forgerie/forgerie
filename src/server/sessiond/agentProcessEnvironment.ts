@@ -43,7 +43,7 @@ const AGENT_VISIBLE_PI_WEB_PREFIXES = ["PI_WEB_DOCKER_"] as const;
  * it cannot carry the prefix (deployment conventions like `NODE_ENV`) or is a
  * compatibility name owned by the companion CLI (`PI_CODING_AGENT_*`).
  */
-const DAEMON_ONLY_ENV_KEYS = new Set(["NODE_ENV", "PORT", "PI_CODING_AGENT_SESSION_DIR"]);
+const DAEMON_ONLY_ENV_KEYS = new Set(["NODE_ENV", "PORT", "PI_CODING_AGENT_SESSION_DIR", "DECISION_GATEWAY_API_KEY"]);
 
 export function isAgentVisibleEnvKey(key: string): boolean {
   if (key.startsWith("PI_WEB_")) return AGENT_VISIBLE_PI_WEB_PREFIXES.some((prefix) => key.startsWith(prefix));

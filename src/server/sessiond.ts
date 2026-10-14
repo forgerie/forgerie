@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { registerDurableTaskRoutes } from "./sessions/durableTaskRoutes.js";
+import { createDecisionHints } from "./decisions/decisionHints.js";
 import { TriggerService } from "./triggers/triggerService.js";
 import { registerTriggerRoutes } from "./triggers/triggerRoutes.js";
 import { workflowTriggerFire } from "./triggers/triggerFire.js";
@@ -130,6 +131,7 @@ async function createSessionDaemonRuntime() {
   } else {
     app.log.info({ httpIdleTimeoutMs: appliedHttpIdleTimeout.timeoutMs }, "applied agent profile HTTP idle timeout to the session daemon HTTP stack");
   }
+  const decisionHints = createDecisionHints({ env: daemonEnvironment });
   const eventHub = new SessionEventHub();
   const notificationStore = new SessionNotificationStore();
   const unreadStore = new SessionUnreadStore({
@@ -236,6 +238,7 @@ async function createSessionDaemonRuntime() {
   void sessionSearch.scan().catch((error: unknown) => { app.log.error({ err: error }, "session search startup scan failed"); });
   app.addHook("onClose", async () => { await sessionSearch.close(); });
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
+    decisionHints,
     modelRuntime: modelRuntime,
     durableReader: createActiveDurableSessionReader(ref => sessions.activeDurableRead(ref)),
     agentDir: activeAgentProfile.dir,
@@ -344,6 +347,7 @@ async function createSessionDaemonRuntime() {
   const runtimeComponent = Object.freeze({
     ...getPiWebRuntimeComponent("sessiond", SESSIOND_RUNTIME_CAPABILITIES),
     activeAgentProfile,
+    decisionHints: decisionHints.status(),
   });
   await sessions.initializeManagedProcesses();
   const userSessions = new UserSessionWorktrees(sessionWorktrees, sessions);
