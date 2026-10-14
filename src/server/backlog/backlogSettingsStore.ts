@@ -106,7 +106,10 @@ export class BacklogSettingsStore {
     for (const entry of Object.values(legacy.projects)) collect(entry.backlog);
     for (const project of await this.deps.projects?.() ?? []) {
       if (Object.hasOwn(legacy.projects, project.id)) continue;
-      const repo = await canonicalBacklogRoot(project.path);
+      // A registered project whose folder is gone has no repo file to import. Any other
+      // read failure still stops the migration, so no Azure section is lost silently.
+      const repo = await canonicalBacklogRoot(project.path).catch((error: unknown) => { if (isMissingFile(error)) return undefined; throw error; });
+      if (repo === undefined) continue;
       await assertContainedFile(repo, join(repo, ".forgerie/config.json"));
       const loaded = await loadProjectPiWebConfig(repo);
       if (loaded.backlogError !== undefined) throw new Error(loaded.backlogError);

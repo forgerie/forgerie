@@ -64,6 +64,17 @@ it("migrates identical settings and unconfigured repo Azure sections once, retai
   await writeFile(f.path, original); await writeFile(backup, "keep existing backup"); await f.store.read();
   expect(await readFile(backup, "utf8")).toBe("keep existing backup");
 });
+it("migrates when a registered project's folder no longer exists, since it has no repo file to import", async () => {
+  const f = await fixture();
+  const gone = { id: "gone", name: "Gone", path: join(f.root, "deleted-repo"), createdAt: "today" };
+  const store = new BacklogSettingsStore(f.path, { projects: () => Promise.resolve([gone, f.project]) });
+  const azure = { organization: "Org", project: "Board" };
+  await writeFile(f.path, JSON.stringify({ version: 1, projects: { p: { backlog: { providers: ["azure-devops"], azureDevops: azure }, revision: 1, updatedAt: "today" } } }));
+  const file = await store.read();
+  expect(file.version).toBe(2);
+  expect(Object.values(file.sources)).toMatchObject([azure]);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toMatchObject({ version: 2 });
+});
 it("leaves version 1 intact when migration cannot write a backup", async () => {
   const f = await fixture(); const original = JSON.stringify({ version: 1, projects: {} });
   await writeFile(f.path, original);
