@@ -68,6 +68,8 @@ it("lists workflows without any session, including scripts, inputs, land stops a
   const result = await http("GET", `/workflows?cwd=${encodeURIComponent(cwd)}`);
   expect(result.status).toBe(200);
   expect(Check(TriggerWorkflowsResponseSchema, result.value)).toBe(true);
+  if (!Check(TriggerWorkflowsResponseSchema, result.value)) throw new Error("Invalid legacy workflow response");
+  expect(result.value.diagnostics.every((problem) => !("reason" in problem) && !("cwds" in problem))).toBe(true);
   expect(result.value).toMatchObject({ workflows: [{ name: "nightly", kind: "prose", inputs: { task: { type: "string", default: "baseline" } }, hasLandStop: true }, { name: "script", kind: "script" }], diagnostics: [{ name: "broken" }] });
   expect(await http("GET", "/workflows?cwd=/unknown")).toMatchObject({ status: 400, value: { field: "action.targets.cwds" } });
   expect(await http("GET", "/workflows?cwd=relative")).toMatchObject({ status: 400 });
@@ -228,15 +230,15 @@ it("serves common workflows and runs just the requested project through the brow
 
 it("common-workflow diagnostics compare available copies when the first target lacks it", async () => {
   const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
-  const second = join(root, "second");
-  const third = join(root, "third");
+  const second = join(root, "second and ", "nested");
+  const third = join(root, "third and ", "nested");
   for (const target of [second, third]) {
     await mkdir(join(target, ".pi", "prompts"), { recursive: true });
     await writeFile(join(target, ".pi", "prompts", "nightly.md"), prose);
     await projects.add({ path: target });
   }
   await writeFile(join(cwd, ".pi", "prompts", "nightly.md"), "An ordinary prompt, not a workflow.\n");
-  const missing = { name: "nightly", path: cwd, error: `Workflow is unavailable in ${cwd}` };
+  const missing = { name: "nightly", path: cwd, reason: "missing", cwds: [cwd], error: `Workflow is unavailable in ${cwd}` };
   for (const cwds of [[cwd, second], [cwd, second, third]]) {
     const result = await http("POST", "/workflows/common", { kind: "projects", cwds });
     expect(result.status).toBe(200);
@@ -256,4 +258,17 @@ it("common-workflow diagnostics compare available copies when the first target l
   expect(problems[1]?.error).toContain(second);
   expect(problems[1]?.error).toContain(third);
   expect(problems[1]?.error).not.toContain(cwd);
+  expect(problems[1]?.reason).toBe("inputs-differ");
+  expect(problems[1]?.cwds).toEqual([second, third]);
+  for (const [body, reason] of [[prose + "\n```js workflow\nreturn 1\n```\n", "script"], ["---\nworkflow: nope\n---\nBad\n", "unreadable"]]) {
+    await writeFile(join(third, ".pi", "prompts", "nightly.md"), body ?? "");
+    const inventory = await http("POST", "/workflows/common", { kind: "projects", cwds: [cwd, second, third] });
+    expect(inventory.status).toBe(200);
+    if (!Check(TriggerWorkflowsResponseSchema, inventory.value)) throw new Error("Invalid common-workflow response");
+    const diagnostics = inventory.value.diagnostics.filter((problem) => problem.name === "nightly");
+    expect(diagnostics).toHaveLength(2);
+    const problem = diagnostics.find((problem) => problem.reason === reason);
+    expect(problem?.cwds).toEqual([third]);
+    expect(problem?.path).toBe(join(third, ".pi", "prompts", "nightly.md"));
+  }
 });

@@ -141,8 +141,11 @@ export function durableTriggers(options: DurableTriggerOptions) {
       const previous = legacy ? record.history.find((entry) => entry.requestId === request.requestId) : undefined;
       if (previous !== undefined && previous.outcome.kind !== "running") return stop;
       if (previous === undefined && scheduled !== undefined && !armedFor(record, scheduled)) {
-        if (legacy) recordFire(record, { occurrence: request.occurrence, requestId: request.requestId, cause, recordedAt: now(), skippedBefore,
-          outcome: { kind: "failed", error: "Cannot recover version-1 fire admission: its evidence is missing and the trigger is paused or superseded. Use Run now to retry." }, projects: (request.cwds ?? []).map((cwd) => ({ cwd, outcome: { kind: "failed", error: "Cannot recover version-1 fire admission. Use Run now to retry." } })) });
+        if (legacy) {
+          const at = now();
+          recordFire(record, { occurrence: request.occurrence, requestId: request.requestId, cause, recordedAt: at, skippedBefore,
+            outcome: { kind: "failed", error: "Cannot recover version-1 fire admission: its evidence is missing and the trigger is paused or superseded. Use Run now to retry." }, projects: (request.cwds ?? []).map((cwd) => ({ cwd, outcome: { kind: "failed", error: "Cannot recover version-1 fire admission. Use Run now to retry.", failedAt: at } })) });
+        }
         return stop;
       }
       if (previous === undefined) recordFire(record, { occurrence: request.occurrence, requestId: request.requestId, cause, recordedAt: now(), skippedBefore, outcome: { kind: "running", startedAt: now() }, projects: (request.cwds ?? []).map((cwd) => ({ cwd, outcome: { kind: "running", startedAt: now() } })) });
@@ -151,16 +154,21 @@ export function durableTriggers(options: DurableTriggerOptions) {
       return { status: "running", checkpoint: persistedAdmission.checkpoint(request, progress.projects) };
     }, context);
     if (!admission.accepted) return undefined;
-    const projects = await fireTriggerProjects(request, request.cwds ?? [], fire, context, progress.projects, (project) => runtime.commit(async (tx) => {
-      progress.projects = progress.projects.map((previous) => previous.cwd === project.cwd ? project : previous);
-      const record = recordAt((await tx.doc(Triggers)).records, request.triggerId);
-      if (record?.incarnation === incarnation) {
-        const entry = record.history.find((entry) => entry.requestId === request.requestId);
-        if (entry !== undefined) { entry.projects = progress.projects; record.revision += 1; }
-        if (project.outcome.kind === "failed" && record.attention === null) record.attention = { since: now() };
-      }
-      return { status: "running", checkpoint: persistedAdmission.checkpoint(request, progress.projects) };
-    }, context));
+    const projects = await fireTriggerProjects(request, request.cwds ?? [], fire, context, progress.projects, async (project) => {
+      await runtime.commit(async (tx) => {
+        const at = now();
+        if (project.outcome.kind === "failed") project = { ...project, outcome: { ...project.outcome, failedAt: at } };
+        progress.projects = progress.projects.map((previous) => previous.cwd === project.cwd ? project : previous);
+        const record = recordAt((await tx.doc(Triggers)).records, request.triggerId);
+        if (record?.incarnation === incarnation) {
+          const entry = record.history.find((entry) => entry.requestId === request.requestId);
+          if (entry !== undefined) { entry.projects = progress.projects; record.revision += 1; }
+          if (project.outcome.kind === "failed" && record.attention === null) record.attention = { since: at };
+        }
+        return { status: "running", checkpoint: persistedAdmission.checkpoint(request, progress.projects) };
+      }, context);
+      return project;
+    });
     return { outcome: summarizeProjectFires(projects), projects };
   }
 
@@ -206,7 +214,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
           }
           // Timer jitter counts as on time even when the user refuses late runs. It does not extend a longer grace window.
           if (at - occurrence <= Math.max(ON_TIME_TOLERANCE_MS, record.missedGraceMinutes * MINUTE)) return { status: "running", checkpoint: { phase: "fire", admitted: false, occurrence, skippedBefore, request: { triggerId: record.id, name: record.name, timezone: record.schedule.timezone, action: publicAction(record.action), occurrence, requestId: triggerRequestId(record.id, occurrence) } } };
-          recordFire(record, { occurrence, requestId: triggerRequestId(record.id, occurrence), cause: "schedule", recordedAt: at, skippedBefore, outcome: { kind: "missed" }, projects: (await resolveProjects(record.action)).map((cwd) => ({ cwd, outcome: { kind: "missed" } })) });
+          recordFire(record, { occurrence, requestId: triggerRequestId(record.id, occurrence), cause: "schedule", recordedAt: at, skippedBefore, outcome: { kind: "missed" }, projects: (await resolveProjects(record.action)).map((cwd) => ({ cwd, outcome: { kind: "missed", missedAt: at } })) });
           const nextFireAt = nextOccurrence(record.schedule, at);
           record.state = { kind: "active", nextFireAt };
           return { status: "running", checkpoint: { phase: "wait", occurrence: nextFireAt, skippedBefore: 0 } };

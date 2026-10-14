@@ -169,22 +169,29 @@ export class TriggerService {
       try { return { cwd, inventory: await this.options.workflows.list(await this.requireWorkspace(cwd)) }; }
       catch (error) { return { cwd, inventory: { workflows: [], diagnostics: [{ name: "", path: cwd, error: error instanceof Error ? error.message : String(error) }] } }; }
     }));
-    const diagnostics = inventories.flatMap(({ inventory }) => inventory.diagnostics);
+    const diagnostics: TriggerWorkflowsResponse["diagnostics"] = inventories.flatMap(({ cwd, inventory }) => inventory.diagnostics.map((problem) => ({ ...problem, reason: "unreadable" as const, cwds: [cwd] })));
     const names = [...new Set(inventories.flatMap(({ inventory }) => inventory.workflows.map((workflow) => workflow.name)))].sort();
     const workflows: TriggerWorkflow[] = [];
     for (const name of names) {
-      const resolved = inventories.map(({ cwd, inventory }) => ({ cwd, workflow: inventory.workflows.find((workflow) => workflow.name === name) }));
+      const resolved = inventories.map(({ cwd, inventory }) => ({ cwd, workflow: inventory.workflows.find((workflow) => workflow.name === name), unreadable: inventory.diagnostics.some((problem) => problem.name === name || problem.name === "") }));
       const reference = resolved.find(({ workflow }) => workflow !== undefined);
       const first = reference?.workflow;
       let common = first !== undefined;
-      for (const { cwd, workflow } of resolved) {
+      for (const { cwd, workflow, unreadable } of resolved) {
         let error: string | undefined;
+        let reason: NonNullable<TriggerWorkflowsResponse["diagnostics"][number]["reason"]> = "missing";
+        let diagnosticCwds = [cwd];
+        if (workflow === undefined && unreadable) { common = false; continue; }
         if (workflow === undefined) error = `Workflow is unavailable in ${cwd}`;
         else {
-          try { assertProseOnly(workflow); } catch { error = `Workflow must resolve to prose in ${cwd}`; }
-          if (error === undefined && reference?.workflow !== undefined && !isDeepStrictEqual(reference.workflow.definition.inputs ?? {}, workflow.definition.inputs ?? {})) error = `Workflow input declarations differ between ${reference.cwd} and ${cwd}`;
+          try { assertProseOnly(workflow); } catch { error = `Workflow must resolve to prose in ${cwd}`; reason = "script"; }
+          if (error === undefined && reference?.workflow !== undefined && !isDeepStrictEqual(reference.workflow.definition.inputs ?? {}, workflow.definition.inputs ?? {})) {
+            error = `Workflow input declarations differ between ${reference.cwd} and ${cwd}`;
+            reason = "inputs-differ";
+            diagnosticCwds = [reference.cwd, cwd];
+          }
         }
-        if (error !== undefined) { diagnostics.push({ name, path: workflow?.path ?? cwd, error }); common = false; }
+        if (error !== undefined) { diagnostics.push({ name, path: workflow?.path ?? cwd, error, reason, cwds: diagnosticCwds }); common = false; }
       }
       if (common && first !== undefined) workflows.push({ name, ...(first.description === undefined ? {} : { description: first.description }), kind: "prose", inputs: first.definition.inputs ?? {}, hasLandStop: resolved.every(({ workflow }) => workflow?.definition.stages?.some((stage) => stage.stop === "land") === true) });
     }

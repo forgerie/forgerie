@@ -8,7 +8,7 @@ Use the app-wide **Triggers** screen to create and edit schedules, inspect recen
 
 A project workflow in `<cwd>/.pi/prompts` replaces a global workflow of the same name in the agent profile's `prompts` folder. An invalid project override does not fall back to the global file.
 
-The common-workflow list includes a name only if every target resolves it to a valid prose workflow with identical input declarations. Declarations include types, choices, defaults, and input descriptions; object-key order does not matter. Script workflows, missing workflows, and different declarations are excluded with diagnostics. The description comes from the first target's resolved workflow. `hasLandStop` is true only if every target's workflow has a land stop. The workflows can otherwise have different prose and stages.
+The common-workflow list includes a name only if every target resolves it to a valid prose workflow with identical input declarations. Declarations include types, choices, defaults, and input descriptions; object-key order does not matter. Script workflows, missing workflows, and different declarations are excluded with diagnostics. Common-workflow diagnostics include `reason` (`missing`, `script`, `unreadable`, or `inputs-differ`) and `cwds`. Input mismatch diagnostics identify both the reference project and the differing project. Clients use these fields instead of parsing the display text. The existing per-cwd GET keeps its `{name,path,error}` diagnostic shape. The description comes from the first target's resolved workflow. `hasLandStop` is true only if every target's workflow has a land stop. The workflows can otherwise have different prose and stages.
 
 Create and update apply the same common-workflow rule. They fill input defaults before saving the action. Fixed cwds must be existing workspaces of registered projects. The server resolves symlinks and removes duplicate canonical cwds. All projects uses the live registered roots, not every worktree. An unavailable root leaves no workflow common to all projects in the picker; existing All projects triggers still skip it when they fire.
 
@@ -72,9 +72,11 @@ Each fire keeps `projects: [{cwd,outcome}]`. A project outcome is one of:
 | --- | --- | --- |
 | `running` | `startedAt` | Launch is in progress or awaits restart recovery. |
 | `started` | `sessionId`, `runId` | Session and workflow launch were accepted. This does not mean the workflow has finished. |
-| `failed` | `error`, optional `sessionId` | Launch failed; the other projects can still start. |
+| `failed` | `error`, `failedAt`, optional `sessionId` | Launch failed; the other projects can still start. |
 | `unavailable` | `reason` | All projects skipped this project before launch. |
-| `missed` | None | The occurrence passed outside the grace window. |
+| `missed` | `missedAt` | The occurrence passed outside the grace window. |
+
+New project failures record `failedAt` in the same transaction and from the same clock sample as `attention.since`. Missed projects record `missedAt` equal to the fire's `recordedAt`. These timestamps are preserved across recovery. Both fields are optional on read so old documents and task checkpoints remain valid; old times are not backfilled. A client can compare a known `failedAt` to `attention.since` to exclude an acknowledged failure inside a still-running fire.
 
 The existing `outcome` field is a derived fire summary. It stays `running` while projects settle. At completion it uses the first failure, otherwise the first started project, otherwise `unavailable`. Summary session fields link to only that first project; use `projects` to show all sessions. `triggerFireSummary` in the shared contract counts total, started, failed, unavailable, running, and missed outcomes for summaries such as "4 of 5 started".
 

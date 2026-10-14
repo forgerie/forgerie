@@ -60,7 +60,7 @@ export function projectSessionKey(requestId: string, cwd: string): string {
 }
 
 /** Every project starts immediately. One project's failure never cancels its siblings. */
-export async function fireTriggerProjects(request: TriggerFireRequest, cwds: readonly string[], fire: FireTrigger, context: Context, previous: readonly TriggerProjectFire[] = [], onProject?: (project: TriggerProjectFire) => Promise<unknown>): Promise<TriggerProjectFire[]> {
+export async function fireTriggerProjects(request: TriggerFireRequest, cwds: readonly string[], fire: FireTrigger, context: Context, previous: readonly TriggerProjectFire[] = [], onProject?: (project: TriggerProjectFire) => Promise<TriggerProjectFire>): Promise<TriggerProjectFire[]> {
   return Promise.all(cwds.map(async (cwd): Promise<TriggerProjectFire> => {
     const recorded = previous.find((project) => project.cwd === cwd);
     if (recorded !== undefined && recorded.outcome.kind !== "running") return recorded;
@@ -76,8 +76,7 @@ export async function fireTriggerProjects(request: TriggerFireRequest, cwds: rea
         ? { kind: "unavailable", reason: error.message }
         : { kind: "failed", error: error instanceof Error ? error.message : String(error), ...(error instanceof TriggerFireError ? { sessionId: error.sessionId } : {}) } };
     }
-    await onProject?.(project);
-    return project;
+    return onProject === undefined ? project : await onProject(project);
   }));
 }
 
@@ -86,7 +85,9 @@ export class TriggerUnavailableError extends Error {}
 
 export function summarizeProjectFires(projects: readonly TriggerProjectFire[]): import("../../shared/triggers.js").TriggerFire["outcome"] {
   const failed = projects.find((project) => project.outcome.kind === "failed");
-  if (failed?.outcome.kind === "failed") return failed.outcome.sessionId === undefined ? failed.outcome : { ...failed.outcome, cwd: failed.cwd };
+  if (failed?.outcome.kind === "failed") return { kind: "failed", error: failed.outcome.error,
+    ...(failed.outcome.sessionId === undefined ? {} : { sessionId: failed.outcome.sessionId, cwd: failed.cwd }),
+  };
   const started = projects.find((project) => project.outcome.kind === "started");
   if (started?.outcome.kind === "started") return { ...started.outcome, cwd: started.cwd };
   return { kind: "unavailable", reason: "No target projects could start" };

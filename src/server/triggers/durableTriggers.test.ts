@@ -601,3 +601,68 @@ it.each(["started", "failed"])("acknowledges only the failures already recorded 
   expect(finished?.history[0]?.outcome.kind).toBe("failed");
   expect(finished?.attention === null).toBe(sibling === "started");
 });
+
+it("timestamps overlapping fire failures separately across acknowledgement", async () => {
+  const start = at("2026-10-12T12:00:00Z");
+  let instant = start;
+  const clock = { now: () => instant, set: (value: string) => { instant = at(value); } };
+  let failA!: () => void; let failB!: () => void;
+  const a = new Promise<void>((resolve) => { failA = resolve; });
+  const b = new Promise<void>((resolve) => { failB = resolve; });
+  const siblings = recordingFire({ kind: "hold-until-cancelled" });
+  const host = await openHost(clock, async (request, signal) => {
+    if (request.action.cwd === "/work/two") return siblings.fire(request, signal);
+    await (request.occurrence === start ? b : a);
+    throw new Error(request.occurrence === start ? "B failed" : "A failed");
+  });
+  try {
+    await host.triggers.create(host.harness, host.anchor, { ...nightly, action: { ...nightly.action, targets: { kind: "projects", cwds: ["/work/one", "/work/two"] } } }, context);
+    const fireB = await host.triggers.run(host.harness, host.anchor, nightly.id, "B", context);
+    await until(host.harness, (records) => records[0]?.history.some((fire) => fire.requestId === fireB.requestId) === true);
+    instant = start + 1000;
+    const fireA = await host.triggers.run(host.harness, host.anchor, nightly.id, "A", context);
+    await until(host.harness, (records) => records[0]?.history.some((fire) => fire.requestId === fireA.requestId) === true);
+    instant = start + 2000; failA();
+    const [firstFailure] = await until(host.harness, (records) => records[0]?.attention !== null && records[0]?.history.find((fire) => fire.requestId === fireA.requestId)?.projects[0]?.outcome.kind === "failed");
+    const oldFailure = firstFailure?.history.find((fire) => fire.requestId === fireA.requestId)?.projects[0]?.outcome;
+    if (oldFailure?.kind !== "failed") throw new Error("A failure is missing");
+    expect(oldFailure.failedAt).toBe(start + 2000);
+    expect(firstFailure?.attention?.since).toBe(oldFailure.failedAt);
+    instant = start + 3000;
+    await host.triggers.acknowledge(host.harness, nightly.id, context);
+    instant = start + 4000; failB();
+    const [laterFailure] = await until(host.harness, (records) => records[0]?.attention?.since === start + 4000);
+    const newFailure = laterFailure?.history.find((fire) => fire.requestId === fireB.requestId)?.projects[0]?.outcome;
+    if (newFailure?.kind !== "failed") throw new Error("B failure is missing");
+    expect(newFailure.failedAt).toBe(laterFailure?.attention?.since);
+    expect(oldFailure.failedAt).toBeLessThan(newFailure.failedAt ?? 0);
+    expect(laterFailure?.history.find((fire) => fire.requestId === fireA.requestId)?.projects[0]?.outcome).toEqual(oldFailure);
+    expect(laterFailure?.history.every((fire) => fire.outcome.kind === "running")).toBe(true);
+    expect(laterFailure?.history.flatMap((fire) => fire.projects.filter((project) => project.outcome.kind === "failed" && (project.outcome.failedAt ?? 0) >= (laterFailure.attention?.since ?? Infinity)).map(() => fire.requestId))).toEqual([fireB.requestId]);
+    await closeHost(host.harness);
+    const started = recordingFire({ kind: "start" });
+    const recovered = await openHost(clock, started.fire);
+    const [finished] = await until(recovered.harness, (records) => records[0]?.history.length === 2 && records[0].history.every((fire) => fire.outcome.kind === "failed"));
+    expect(started.requests).toHaveLength(2);
+    expect(finished?.history.find((fire) => fire.requestId === fireA.requestId)?.projects[0]?.outcome).toEqual(oldFailure);
+    expect(finished?.history.find((fire) => fire.requestId === fireB.requestId)?.projects[0]?.outcome).toEqual(newFailure);
+    expect(finished?.attention?.since).toBe(start + 4000);
+  } finally { failA(); failB(); }
+});
+
+
+it("records a missed project timestamp on the same clock as attention", async () => {
+  const clock = shiftedClock("2026-10-12T12:00:00Z");
+  const first = await openHost(clock, recordingFire({ kind: "start" }).fire);
+  await first.triggers.create(first.harness, first.anchor, { ...nightly, missedGraceMinutes: 0 }, context);
+  await closeHost(first.harness);
+  clock.set("2026-10-13T04:00:00Z");
+  const recovered = await openHost(clock, recordingFire({ kind: "start" }).fire);
+  const [record] = await until(recovered.harness, fired(1));
+  const fire = record?.history[0];
+  expect(fire?.outcome.kind).toBe("missed");
+  const outcome = fire?.projects[0]?.outcome;
+  if (outcome?.kind !== "missed") throw new Error("Missed project is missing");
+  expect(outcome.missedAt).toBe(fire?.recordedAt);
+  expect(outcome.missedAt).toBe(record?.attention?.since);
+});

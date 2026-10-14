@@ -1,7 +1,7 @@
 import { Check } from "typebox/value";
 import { expect, it } from "vitest";
 import { KNOWN_THINKING_LEVELS } from "./thinkingLevels.js";
-import { TriggerActionSchema, triggerFireSummary, triggerManualRequestId, type TriggerAction } from "./triggers.js";
+import { TriggerActionSchema, TriggerProjectFireSchema, triggerFireSummary, triggerManualRequestId, type TriggerAction } from "./triggers.js";
 
 type KnownLevel = (typeof KNOWN_THINKING_LEVELS)[number];
 type ActionLevel = NonNullable<TriggerAction["thinkingLevel"]>;
@@ -46,4 +46,15 @@ it("counts per-project results for a partial fire summary", () => {
     { cwd: "/three", outcome: { kind: "unavailable", reason: "folder gone" } },
     { cwd: "/four", outcome: { kind: "running", startedAt: 0 } },
   ] })).toEqual({ total: 4, started: 1, failed: 1, unavailable: 1, running: 1, missed: 0 });
+});
+
+
+it("accepts legacy unstamped project outcomes and the new recorded timestamps", () => {
+  for (const outcome of [
+    { kind: "failed", error: "quota" },
+    { kind: "failed", error: "quota", failedAt: 1000 },
+    { kind: "missed" },
+    { kind: "missed", missedAt: 1000 },
+  ]) expect(Check(TriggerProjectFireSchema, { cwd: "/project", outcome })).toBe(true);
+  expect(Check(TriggerProjectFireSchema, { cwd: "/project", outcome: { kind: "failed", error: "quota", failedAt: "1000" } })).toBe(false);
 });

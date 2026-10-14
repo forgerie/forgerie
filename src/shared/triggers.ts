@@ -73,9 +73,10 @@ export const TriggerProjectFireSchema = Type.Object({
   outcome: Type.Union([
     Type.Object({ kind: Type.Literal("running"), startedAt: Type.Number() }, { additionalProperties: false }),
     Type.Object({ kind: Type.Literal("started"), sessionId: Type.String(), runId: Type.String() }, { additionalProperties: false }),
-    Type.Object({ kind: Type.Literal("failed"), error: Type.String(), sessionId: Type.Optional(Type.String()) }, { additionalProperties: false }),
+    /** Optional only for records written before per-project failure times were stored. */
+    Type.Object({ kind: Type.Literal("failed"), error: Type.String(), sessionId: Type.Optional(Type.String()), failedAt: Type.Optional(Type.Number()) }, { additionalProperties: false }),
     Type.Object({ kind: Type.Literal("unavailable"), reason: Type.String() }, { additionalProperties: false }),
-    Type.Object({ kind: Type.Literal("missed") }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("missed"), missedAt: Type.Optional(Type.Number()) }, { additionalProperties: false }),
   ]),
 }, { additionalProperties: false });
 export type TriggerProjectFire = Static<typeof TriggerProjectFireSchema>;
@@ -146,7 +147,12 @@ export const TriggerWorkflowSchema = Type.Object({
 export type TriggerWorkflow = Static<typeof TriggerWorkflowSchema>;
 export const TriggerWorkflowsResponseSchema = Type.Object({
   workflows: Type.Array(TriggerWorkflowSchema),
-  diagnostics: Type.Array(Type.Object({ name: Type.String(), path: Type.String(), error: Type.String() }, { additionalProperties: false })),
+  diagnostics: Type.Array(Type.Object({
+    name: Type.String(), path: Type.String(), error: Type.String(),
+    /** Common-workflow diagnostics always set these; the legacy per-cwd GET omits them. */
+    reason: Type.Optional(Type.Union([Type.Literal("missing"), Type.Literal("script"), Type.Literal("unreadable"), Type.Literal("inputs-differ")])),
+    cwds: Type.Optional(Type.Array(Type.String(), { minItems: 1 })),
+  }, { additionalProperties: false })),
 }, { additionalProperties: false });
 export type TriggerWorkflowsResponse = Static<typeof TriggerWorkflowsResponseSchema>;
 
