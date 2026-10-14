@@ -1,1 +1,0 @@
-../../.forgerie/workflows/nightly-architecture.md
