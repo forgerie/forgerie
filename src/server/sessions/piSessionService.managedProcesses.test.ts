@@ -128,3 +128,21 @@ it("fails archive without deleting managed process evidence or watches when slic
   await access(join(f.process.directory, "command.json"));
   await access(f.watchFile);
 });
+
+it("serves restored registry records through the existing browser routes without private environment", async () => {
+  const f = await fixture();
+  const { registerProcessRoutes } = await import("./processRoutes.js");
+  const app = Fastify(); registerProcessRoutes(app, f.service);
+  try {
+    const base = `/sessions/${f.session.id}/processes`;
+    const response = await app.inject({ url: `${base}?cwd=${encodeURIComponent(f.cwd)}` });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ available: true, writeSupported: true, processes: [{ id: "one", status: "running" }] });
+    expect(response.body).not.toContain("environment"); expect(response.body).not.toContain(f.process.directory);
+    const stopped = await app.inject({ method: "POST", url: `${base}/one/kill`, payload: { cwd: f.cwd } });
+    expect(stopped.json()).toMatchObject({ ok: true, process: { endReason: "lost", errorMessage: "supervisor lost" } });
+    expect(f.control.stopped).toEqual(["owner/one"]);
+    expect((await app.inject({ method: "POST", url: `${base}/one/write`, payload: { cwd: f.cwd, input: "hello" } })).json()).toEqual({ ok: false, reason: "process_exited" });
+    expect((await app.inject({ url: `${base}/bad%20id/output?cwd=${encodeURIComponent(f.cwd)}` })).statusCode).toBe(400);
+  } finally { await app.close(); }
+});

@@ -79,7 +79,7 @@ try {
   await execFileAsync(process.execPath, [
     join(repoRoot, "scripts", "smoke-installed-model-runtime.mjs"), packageRoot, agentDir,
   ], cliOptions);
-  console.log(`Installed-package checks passed with npm ${NPM_VERSION}: tarball rejected by npm's Windows platform validator, Linux installation, patched process sources, pinned CLIProxyAPI provider version, CLI, offline model runtime, and retired-file exclusion. No delegated agent was launched.`);
+  console.log(`Installed-package checks passed with npm ${NPM_VERSION}: tarball rejected by npm's Windows platform validator, Linux installation, owned managed-process execution, pinned CLIProxyAPI provider version, CLI, offline model runtime, and retired-file exclusion. No delegated agent was launched.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }
@@ -102,6 +102,7 @@ function packageTarballFilename(output) {
     throw new Error("npm pack returned an unexpected result");
   }
   const retiredPaths = [
+    "vendor/pi-processes/", "dist/server/sessions/processBridge", "dist/server/sessions/bundledManagedProcesses",
     "dist/docker/", "dist/nativeServices/", "dist/plugin-api", "dist/server/machines/",
     "dist/server/terminals/", "dist/server/terminalProxyRoutes", "dist/server/piWebPluginService",
     "dist/server/sessions/authService", "dist/server/sessions/authRoutes",
@@ -118,17 +119,22 @@ function packageTarballFilename(output) {
 }
 
 async function smokeInstalledManagedProcesses(packageRoot) {
-  const packageRootPath = join(packageRoot, "node_modules", "@aliou", "pi-processes");
-  const [executor, channels] = await Promise.all([
-    readFile(join(packageRootPath, "src", "utils", "command-executor.ts"), "utf8"),
-    readFile(join(packageRootPath, "src", "protocol", "channels.ts"), "utf8"),
-  ]);
-  if (!executor.includes('spawn(shellExecutable, ["-c", command]') || executor.includes('spawn(shellExecutable, ["-lc", command]')) {
-    throw new Error("Installed package does not contain Forgerie's non-login managed-process spawn patch");
-  }
-  if (!channels.includes('COMMAND_WRITE: "processes:command:write"')) {
-    throw new Error("Installed package does not contain Forgerie's managed-process stdin protocol patch");
-  }
+  const { ManagedProcesses } = await import(pathToFileURL(join(packageRoot, "dist/server/processes/managedProcesses.js")).href);
+  const { AttachedManagedProcessLauncher } = await import(pathToFileURL(join(packageRoot, "dist/server/processes/managedProcessLauncher.js")).href);
+  const stateDirectory = await mkdtemp(join(root, "managed-processes-"));
+  const core = new ManagedProcesses({ stateDirectory, sessionId: "package-smoke", launcher: new AttachedManagedProcessLauncher() });
+  try {
+    await core.initialize();
+    const process = await core.start({ command: "printf package-process-ok", cwd: stateDirectory });
+    const deadline = Date.now() + 10_000;
+    while ((await core.status(process.id)).state.kind === "running") {
+      if (Date.now() > deadline) throw new Error("Installed managed process did not finish");
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    const output = await core.readOutput(process.id);
+    if (output.lines[0]?.text !== "package-process-ok") throw new Error("Installed managed process output was incorrect");
+  } finally { await core.dispose(); }
+
 }
 
 async function smokeInstalledWebAccess(packageRoot) {

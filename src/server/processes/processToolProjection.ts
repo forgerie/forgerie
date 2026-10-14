@@ -7,7 +7,7 @@ import type { ProcessToolArguments } from "./processToolSchema.js";
 export function publicProcess(snapshot: ManagedProcessSnapshot, watch: ProcessWatch) {
   const result = snapshot.state.kind === "ended" ? snapshot.state.result : undefined;
   const success = result?.code === "exited" && result.status === "0";
-  const status = snapshot.state.kind === "running" ? (watch.stopped ? "terminating" : "running")
+  const status: "running" | "terminating" | "terminate_timeout" | "killed" | "exited" = snapshot.state.kind === "running" ? (watch.stopped ? "terminating" : "running")
     : result?.result === "timeout" ? "terminate_timeout" : result?.code === "killed" || result?.code === "dumped" ? "killed" : "exited";
   return {
     id: snapshot.id, name: watch.name, command: snapshot.command, cwd: snapshot.cwd, startTime: Date.parse(snapshot.createdAt),

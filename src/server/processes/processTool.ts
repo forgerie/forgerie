@@ -246,7 +246,7 @@ export class ManagedProcessTools {
         const notice = publicProcess(snapshot, watch).notice;
         const matches = new Map<string, ProcessWatchEvent>();
         const now = this.options.now?.() ?? Date.now();
-        // Match pi-processes' 15-second repeat cooldown. Offline log lines have no event timestamps;
+        // Keep the compatible 15-second repeat cooldown. Offline log lines have no event timestamps;
         // resume coalesces all their matches into the single missed-event summary instead.
         const predicates = new Map(watch.watches.map(item => [item.id,
           !missed && item.repeat && item.fired && now - item.lastNotifiedAt < 15_000 ? () => false : matchPattern(item.pattern, item.mode)]));

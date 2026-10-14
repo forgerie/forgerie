@@ -47,6 +47,7 @@ it("reads archived session status through the production factory without opening
   await service.dispose();
   const resumed = f.open();
   expect((await resumed.status(ref)).isStreaming).toBe(false);
+  expect(await resumed.processes(ref)).toEqual({ available: false, writeSupported: false, processes: [] });
   await expect(resumed.getManagedProcesses(ref.id)).rejects.toThrow("Archived sessions cannot start");
   await expect(resumed.prompt(ref, "Start a process")).rejects.toThrow("read-only");
   expect(f.control.started).toHaveLength(0);
@@ -120,6 +121,38 @@ it.each(["offline", "after-startup"] as const)("restores idle-session watches fo
   expect(f.errors.filter(error => typeof error === "object" && error !== null && "text" in error && error.text === "managed process maintenance failed")).toEqual([]);
 }, 15000);
 
+it("rebinds the panel to the restored daemon dispatcher without losing names or intentional Stop state", async () => {
+  const f = await fixture(); const service = f.open();
+  f.provider.setResponses([
+    fauxAssistantMessage([fauxToolCall("process", { action: "start", name: "panel-owned", command: "cat",
+      notify: { logMatches: [{ pattern: "ready", on: "context" }] } })], { stopReason: "toolUse" }),
+    fauxAssistantMessage("Done"),
+  ]);
+  const ref = { id: (await service.start(f.root)).id, cwd: f.root };
+  await service.runCommand(ref, "/name Panel owned");
+  await service.prompt(ref, "Start the managed process.");
+  await vi.waitFor(async () => {
+    expect(f.control.started).toHaveLength(1);
+    expect((await service.status(ref)).isStreaming).toBe(false);
+  }, { timeout: 5000 });
+  const record = f.control.started[0];
+  if (record === undefined) throw new Error("Missing process record");
+  expect((await service.processes(ref)).processes[0]).toMatchObject({ id: record.id, name: "panel-owned", status: "running" });
+  await service.dispose();
+  await writeFile(join(record.directory, "output.log"), "ready\n");
+  const resumed = f.open();
+  await resumed.initializeManagedProcesses();
+  expect((await resumed.processes(ref)).processes[0]).toMatchObject({ id: record.id, name: "panel-owned", status: "running" });
+  expect(await resumed.processOutput(ref, record.id)).toEqual({ ok: true, lines: [{ type: "stdout", text: "ready" }] });
+  expect(JSON.stringify(await resumed.messages(ref))).toContain("forgerie.process-events");
+  expect(await resumed.killProcess(ref, record.id)).toMatchObject({ ok: true });
+  const session = (await f.catalog()).find(item => item.id === ref.id);
+  if (session === undefined) throw new Error("Missing session");
+  const state = processWatchStateSchema.parse(JSON.parse(await readFile(join(dirname(session.path), `${ref.id}.process-watches.json`), "utf8")));
+  expect(state.processes[record.id]?.stopped).toBe(true);
+  expect(f.errors.filter(error => typeof error === "object" && error !== null && "text" in error
+    && typeof error.text === "string" && error.text.startsWith("managed process"))).toEqual([]);
+}, 15000);
 
 it("starts the daemon after an unused session created an empty process owner", async () => {
   const f = await fixture(); const first = f.open();

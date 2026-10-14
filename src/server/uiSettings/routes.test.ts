@@ -45,7 +45,7 @@ describe("settings HTTP routes", () => {
     expect(create.statusCode).toBe(200);
     expect(await readFile(join(dir, "agents", "new-agent.md"), "utf8")).toContain("new-agent");
     expect(await readFile(join(global, "sentinel"), "utf8")).toBe("unchanged");
-    expect((await post("/aui/plugins", { revision: plugins.revision, change: { type: "toggle", id: "builtin:pi-processes", enabled: false } })).statusCode).toBe(403);
+    expect((await post("/aui/plugins", { revision: plugins.revision, change: { type: "toggle", id: "builtin:processes", enabled: false } })).statusCode).toBe(403);
     expect((await post("/aui/plugins", { revision: plugins.revision, change: { type: "add", source: "npm:test" } }, { origin: "https://other.example" })).statusCode).toBe(403);
     expect((await post("/aui/plugins/restart", { revision: plugins.revision, confirm: false })).statusCode).toBe(400);
     expect(restarts).toEqual([]);

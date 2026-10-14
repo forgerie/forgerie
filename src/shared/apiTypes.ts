@@ -1194,8 +1194,10 @@ export interface ManagedProcessLogLine {
   text: string;
 }
 
-/** Browser-safe pi-processes state; daemon log-file paths stay private. */
+/** Browser-safe managed process state; daemon log-file paths stay private. */
 export interface ManagedProcessInfo {
+  supervision?: "systemd" | "attached";
+  notice?: string;
   id: string;
   name: string;
   pid: number;
@@ -1226,8 +1228,8 @@ export type ManagedProcessKillResult =
   | { ok: false; reason: "unavailable" | "not_found" | "timeout" | "error"; process?: ManagedProcessInfo };
 
 export type ManagedProcessWriteResult =
-  | { ok: true }
-  | { ok: false; reason: "unavailable" | "unsupported" | "not_found" | "process_exited" | "stdin_closed" | "write_error" };
+  | { ok: true; bytesWritten?: number }
+  | { ok: false; reason: "unavailable" | "unsupported" | "not_found" | "process_exited" | "stdin_closed" | "stdin_full" | "write_error"; bytesWritten?: number };
 
 /**
  * Transport-level per-session sequence stamp. `SessionEventHub.publish` assigns a

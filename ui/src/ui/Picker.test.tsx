@@ -59,7 +59,7 @@ describe("picker", () => {
     expect(labels).toEqual(["Needs your response", "Working", "Last hour"]);
     const running = host.querySelector('[data-session="run"]');
     expect(running?.querySelector('[aria-label="3 agents working"]')?.textContent).toBe("3");
-    expect(running?.querySelector('[aria-label="1 process running"]')?.textContent).toBe("1");
+    expect(running?.querySelector('[aria-label="1 managed process running"]')?.textContent).toBe("1");
   });
 
   it("marks flagged decisions quietly and never files the session under Needs your response", () => {

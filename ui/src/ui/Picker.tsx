@@ -176,7 +176,7 @@ function PickerRow({ row, selected, pending, held, showPin, menuOpen, onSelect, 
       {held ? <span className="picker-from-backlog" title="Holds a backlog item" aria-label="Holds a backlog item"><ListTodoIcon aria-hidden /></span> : null}
       {row.agents || row.processes || row.flagged ? <span className="picker-work">
         {row.agents ? <span title={`${count(row.agents, "agent", "agents")} working`} aria-label={`${count(row.agents, "agent", "agents")} working`}>{AGENTS}{row.agents}</span> : null}
-        {row.processes ? <span title={`${count(row.processes, "process", "processes")} running`} aria-label={`${count(row.processes, "process", "processes")} running`}>{TERMINAL}{row.processes}</span> : null}
+        {row.processes ? <span title={`${count(row.processes, "managed process", "managed processes")} running`} aria-label={`${count(row.processes, "managed process", "managed processes")} running`}>{TERMINAL}{row.processes}</span> : null}
         {/* Flagged guesses: a muted readout, never the live tone. Nothing waits on them. */}
         {row.flagged ? <IconCount icon={<FlagIcon aria-hidden />} count={row.flagged} label={`${count(row.flagged, "flagged decision", "flagged decisions")} to look at`} /> : null}
       </span> : null}

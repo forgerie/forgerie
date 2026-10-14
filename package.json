@@ -28,7 +28,6 @@
     "agents",
     "docs/plugins.md",
     "docs/config.md",
-    "vendor",
     "docs/deployment.md",
     "docs/session-worktrees.md",
     "docs/workflows.md",
@@ -37,7 +36,6 @@
     "docs/fork-cleanup.md"
   ],
   "bundleDependencies": [
-    "@aliou/pi-processes",
     "pi-web-access",
     "@earendil-works/pi-coding-agent",
     "@router-for-me/pi-cliproxyapi-provider"
@@ -78,7 +76,6 @@
     "knip:ui": "knip --directory ui"
   },
   "dependencies": {
-    "@aliou/pi-processes": "file:vendor/pi-processes/aliou-pi-processes-0.10.4-forgerie.1.tgz",
     "@earendil-works/chord": "1.1.0",
     "@earendil-works/pi-agent-core": "1.1.0",
     "@earendil-works/pi-ai": "1.1.0",

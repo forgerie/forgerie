@@ -124,6 +124,7 @@ function sessionRefFromBody(sessionId: string, body: Record<string, unknown>): S
 function requireProcessId(value: string): string {
   if (value === "") throw new Error("processId is required");
   if (value.length > MAX_PROCESS_ID_LENGTH) throw new Error("processId is too long");
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value)) throw new Error("Invalid processId");
   return value;
 }
 

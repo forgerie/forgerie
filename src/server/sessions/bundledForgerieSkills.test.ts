@@ -23,6 +23,16 @@ describe("bundled Forgerie skills", () => {
       .sort()).toEqual(["ask-user", "handoff", "processes", "relay"]);
   });
 
+  it("drops the legacy profile process skill", async () => {
+    const root = await createTempRoot();
+    const legacy = join(root, "agent", "skills", "pi-processes");
+    await mkdir(legacy, { recursive: true });
+    await writeFile(join(legacy, "SKILL.md"), "---\nname: pi-processes\ndescription: Retired process skill\n---\nLegacy instructions.\n");
+    const loader = await forgerieSkillsLoader(root);
+    expect(loader.getSkills().skills.some(skill => skill.name === "pi-processes")).toBe(false);
+    expect(loader.getSkills().skills.some(skill => skill.name === "processes")).toBe(true);
+  });
+
   it("prefers the bundled handoff over a shared-profile skill with the same name", async () => {
     const root = await createTempRoot();
     const sharedHandoff = join(root, "agent", "skills", "handoff");

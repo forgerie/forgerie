@@ -116,11 +116,10 @@ import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { CODEMODE_TOOL_NAME, codemodeScriptSummary } from "../../shared/codemodeScript.js";
 import { codemodeDefaultTools, hostedCodemodeExtension, isNestedToolEvent } from "./codemode.js";
 import { hostedMcpExtension } from "./mcp.js";
-import { createProcessBridgeExtension, createProcessBridgeSlot, type ProcessBridgeSlot } from "./processBridge.js";
+import { ManagedProcessPanel } from "./managedProcessPanel.js";
 import { createSessionTitleBridgeExtension, createSessionTitleBridgeSlot, type SessionTitleBridgeEvent, type SessionTitleBridgeSlot } from "./sessionTitleBridge.js";
 import { bundledForgerieSkillsPackagePath, preferBundledForgerieSkills } from "./bundledForgerieSkills.js";
 import { withReplyFormatGuide } from "../../shared/replyFormatGuide.js";
-import { bundledManagedProcessesPackagePath } from "./bundledManagedProcesses.js";
 import { bundledCliproxyProviderPackagePath, bundledCliproxyProviderResources } from "./bundledCliproxyProvider.js";
 import { preferBundledExtensions } from "./bundledExtensions.js";
 import { bundledWebAccessPackagePath } from "./bundledWebAccess.js";
@@ -570,7 +569,6 @@ export interface PiAgentSession {
 
 type RuntimeResourceWarnings = NonNullable<RuntimeWarningSources["services"]>;
 type PiWebRuntimeServices = RuntimeResourceWarnings & {
-  processBridgeSlot?: ProcessBridgeSlot;
   sessionTitleBridgeSlot?: SessionTitleBridgeSlot;
   workspaceServicesObserver?: WorkspaceServicesObserver;
 };
@@ -874,7 +872,6 @@ function createDefaultRuntimeFactory(
   processTools?: (ref: PiSessionRef, sessionDir: string) => Promise<ManagedProcessTools | undefined>,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
-    const processBridgeSlot = createProcessBridgeSlot();
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
     const workspaceServicesObserver = workspaceServices === undefined ? undefined : createWorkspaceServicesObserver(cwd, workspaceServices);
     const providerResources = bundledCliproxyProviderResources(cwd, agentDir);
@@ -885,7 +882,6 @@ function createDefaultRuntimeFactory(
       settingsManager: providerResources.settingsManager,
       resourceLoaderOptions: {
         additionalExtensionPaths: [
-          bundledManagedProcessesPackagePath(),
           bundledWebAccessPackagePath(),
           bundledForgerieSkillsPackagePath(),
           bundledCliproxyProviderPackagePath(),
@@ -895,7 +891,6 @@ function createDefaultRuntimeFactory(
         // Tells the agent which rich blocks the browser app renders.
         appendSystemPromptOverride: withReplyFormatGuide,
         extensionFactories: [
-          createProcessBridgeExtension(processBridgeSlot),
           createSessionTitleBridgeExtension(sessionTitleBridgeSlot),
           hostedCodemodeExtension(),
           hostedMcpExtension(),
@@ -906,7 +901,7 @@ function createDefaultRuntimeFactory(
     // After the resource loader's reload, which re-reads settings and would
     // drop an override applied any earlier.
     baseServices.settingsManager.applyOverrides({ defaultTools: codemodeDefaultTools(codemodeEnabled) });
-    const services: PiWebAgentSessionServices = Object.assign(baseServices, { processBridgeSlot, sessionTitleBridgeSlot, ...(workspaceServicesObserver === undefined ? {} : { workspaceServicesObserver }) });
+    const services: PiWebAgentSessionServices = Object.assign(baseServices, { sessionTitleBridgeSlot, ...(workspaceServicesObserver === undefined ? {} : { workspaceServicesObserver }) });
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
     const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, askUser, handoff, github, {
@@ -2830,23 +2825,23 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async processes(ref: PiSessionRef): Promise<ManagedProcessesSnapshot> {
-    const bridge = (await this.getActive(ref)).runtime.services?.processBridgeSlot;
-    return bridge?.snapshot() ?? { available: false, writeSupported: false, processes: [] };
+    const panel = this.processPanels.get((await this.getActive(ref)).runtime.session.sessionId);
+    return panel?.snapshot() ?? { available: false, writeSupported: false, processes: [] };
   }
 
   async processOutput(ref: PiSessionRef, id: string, tailLines?: number): Promise<ManagedProcessOutputResult> {
-    const bridge = (await this.getActive(ref)).runtime.services?.processBridgeSlot;
-    return bridge?.output(id, tailLines) ?? { ok: false, reason: "unavailable" };
+    const panel = this.processPanels.get((await this.getActive(ref)).runtime.session.sessionId);
+    return panel?.output(id, tailLines) ?? { ok: false, reason: "unavailable" };
   }
 
   async killProcess(ref: PiSessionRef, id: string): Promise<ManagedProcessKillResult> {
-    const bridge = (await this.getActive(ref)).runtime.services?.processBridgeSlot;
-    return bridge?.kill(id) ?? { ok: false, reason: "unavailable" };
+    const panel = this.processPanels.get((await this.getActive(ref)).runtime.session.sessionId);
+    return panel?.kill(id) ?? { ok: false, reason: "unavailable" };
   }
 
   async writeProcess(ref: PiSessionRef, id: string, input: string, end?: boolean): Promise<ManagedProcessWriteResult> {
-    const bridge = (await this.getActive(ref)).runtime.services?.processBridgeSlot;
-    return bridge?.write(id, input, end === undefined ? undefined : { end }) ?? { ok: false, reason: "unavailable" };
+    const panel = this.processPanels.get((await this.getActive(ref)).runtime.session.sessionId);
+    return panel?.write(id, input, end) ?? { ok: false, reason: "unavailable" };
   }
 
   /**
@@ -3806,8 +3801,7 @@ export class PiSessionService implements SessionRouteService {
       + (session instanceof DurableAgentSession ? session.workingDurableChildren : 0);
     const waitingOnYou = session instanceof DurableAgentSession ? session.waitingOnUser : 0;
     const flaggedDecisions = session instanceof DurableAgentSession ? session.flaggedDecisions : 0;
-    const bridge = this.active.get(session.sessionId)?.runtime.services?.processBridgeSlot;
-    const runningProcesses = bridge?.snapshot().processes.filter((process) => process.status === "running").length ?? 0;
+    const runningProcesses = this.processPanels.get(session.sessionId)?.runningCount ?? 0;
     return {
       ...(this.pullRequestWatches?.isWatching(session.sessionId) === true ? { watchingPullRequest: true } : {}),
       ...(workingAgents > 0 ? { workingAgents } : {}),
@@ -4179,7 +4173,8 @@ export class PiSessionService implements SessionRouteService {
     } finally {
       this.cancelSessionTitleGeneration(active.runtime.session);
       active.runtime.services?.sessionTitleBridgeSlot?.dispose();
-      active.runtime.services?.processBridgeSlot?.dispose();
+      this.processPanels.get(active.runtime.session.sessionId)?.dispose();
+      this.processPanels.delete(active.runtime.session.sessionId);
       await active.runtime.dispose();
     }
   }
@@ -4392,7 +4387,7 @@ export class PiSessionService implements SessionRouteService {
       ...(options.initialThinkingLevel === undefined ? {} : { initialThinkingLevel: options.initialThinkingLevel }),
     });
     const active: ActiveSession<PiSessionRuntime> = { runtime, unsubscribe: noop };
-    this.bindProcessBridge(runtime, runtime.session);
+    this.bindProcessPanel(runtime.session);
     this.bindSessionTitleBridge(runtime, runtime.session);
     let boundSession = runtime.session;
     let notificationGeneration = options.notificationGeneration;
@@ -4444,7 +4439,11 @@ export class PiSessionService implements SessionRouteService {
             this.notificationGenerationBySession.set(session, candidateGeneration);
           }
           this.cancelSessionTitleGeneration(boundSession);
-          this.bindProcessBridge(runtime, session);
+          if (boundSession.sessionId !== session.sessionId) {
+            this.processPanels.get(boundSession.sessionId)?.dispose();
+            this.processPanels.delete(boundSession.sessionId);
+          }
+          this.bindProcessPanel(session);
           this.bindSessionTitleBridge(runtime, session);
           this.bindRuntime(active, session);
           this.recoverAskAnswerDelivery(session);
@@ -4503,7 +4502,8 @@ export class PiSessionService implements SessionRouteService {
       } finally {
         this.cancelSessionTitleGeneration(runtime.session);
         runtime.services?.sessionTitleBridgeSlot?.dispose();
-        runtime.services?.processBridgeSlot?.dispose();
+        this.processPanels.get(runtime.session.sessionId)?.dispose();
+        this.processPanels.delete(runtime.session.sessionId);
         await runtime.dispose();
       }
       throw error;
@@ -4738,10 +4738,22 @@ export class PiSessionService implements SessionRouteService {
     this.unreadPublicationRetryDelayMs = this.unreadPublicationRetryInitialMs;
   }
 
-  private bindProcessBridge(runtime: PiSessionRuntime, session: PiAgentSession): void {
-    runtime.services?.processBridgeSlot?.setPublisher((event) => {
-      this.events.publish(session.sessionId, event);
-    });
+  private readonly processPanels = new Map<string, ManagedProcessPanel>();
+
+  private bindProcessPanel(session: PiAgentSession): void {
+    this.processPanels.get(session.sessionId)?.dispose();
+    if (this.managedProcesses === undefined) return;
+    // Archived/read-only runtimes intentionally have no daemon-owned dispatcher.
+    if (session instanceof DurableAgentSession && session.processTools === undefined) {
+      this.processPanels.delete(session.sessionId);
+      return;
+    }
+    const panel = new ManagedProcessPanel(() => this.getManagedProcesses(session.sessionId),
+      session instanceof DurableAgentSession ? session.processTools : undefined,
+      (event) => { this.events.publish(session.sessionId, event); if (event.type === "processes.update") this.publishStatus(session); },
+      () => { this.logger.info({ sessionId: session.sessionId }, "managed process panel refresh failed"); });
+    this.processPanels.set(session.sessionId, panel);
+    panel.watch();
   }
 
   private bindSessionTitleBridge(runtime: PiSessionRuntime, session: PiAgentSession): void {

@@ -76,7 +76,7 @@ describe("plugin management", () => {
     const catalog = await service.list();
     expect(catalog.plugins[0]).toMatchObject({ kind: "package", name: "@tests/test-plugin", source: packagePath, version: "1.2.3",
       description: "Adds a test tool.", installed: true, filtered: true });
-    expect(catalog.plugins.find((entry) => entry.id === "builtin:pi-processes")?.description).toContain("long commands");
+    expect(catalog.plugins.find((entry) => entry.id === "builtin:processes")?.description).toContain("long commands");
     expect(catalog.plugins.some((entry) => entry.id === "builtin:pi-subagents")).toBe(false);
     expect(catalog.home).not.toBe("");
   });
@@ -170,7 +170,7 @@ describe("plugin management", () => {
     await json(profile.configPath, { port: 9999, plugins: {} });
     await expect(service.change(catalog.revision, { type: "toggle", id: "app:cliproxyapi-quota", enabled: false })).rejects.toMatchObject({ status: 409 });
     const current = await service.list();
-    await expect(service.change(current.revision, { type: "toggle", id: "builtin:pi-processes", enabled: false })).rejects.toMatchObject({ status: 403 });
+    await expect(service.change(current.revision, { type: "toggle", id: "builtin:processes", enabled: false })).rejects.toMatchObject({ status: 403 });
     await expect(service.change(current.revision, { type: "remove", id: "app:cliproxyapi-quota" })).rejects.toMatchObject({ status: 400 });
     await expect(service.change(current.revision, { type: "toggle", id: "missing", enabled: false })).rejects.toMatchObject({ status: 404 });
   });

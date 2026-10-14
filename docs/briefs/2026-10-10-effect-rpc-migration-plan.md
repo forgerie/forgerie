@@ -89,7 +89,7 @@ Binary bodies stay on HTTP: `POST /api/speech/transcribe` (audio bytes) and `POS
 - `SessionEventHub` becomes a `PubSub` per session plus a global `PubSub`, with `seq` stamped at publish. The RPC stream handler for `sessions.events` subscribes, and the join procedure returns `currentSeq` so the browser keeps the watermark rule.
 - Shutdown moves to `Scope` finalizers in the order the current `shutdown()` function uses. The `attempt()` wrapper that sets `exitCode = 1` on a failed finalizer stays as behavior.
 - Timers move to `Effect.sleep`, `Schedule`, and `Effect.forkScoped` only when the owning module is touched. 37 sites are not a goal in themselves.
-- Pi SDK, `pi-durable`, `pi-subagents`, `pi-processes`, and `chord` stay behind the adapters that already exist. They are not rewritten to Effect.
+- Pi SDK, `pi-durable`, `chord`, and the owned child-agent and managed-process services stay behind the adapters that already exist. They are not rewritten to Effect.
 
 ### Web process
 
@@ -186,13 +186,13 @@ Rules:
 2. `eslint` `no-restricted-imports` forbids `@earendil-works/chord` outside `src/server/sessions/durable*.ts` and the bridge.
 3. Chord types never enter a `ServiceMap` service or an Effect Schema. The Durable adapter converts commits into Forgerie domain events, as today.
 4. Forgerie features do not use chord facets, services, or replicated state. Replicated needs use `SubscriptionRef` or a stream procedure.
-5. Forgerie does not host chord presentation facets in the browser. Decided by the user on 2026-10-10. Plugins send data; Forgerie renders every plugin's UI itself, as it does today for `pi-processes` and `pi-subagents`. No plugin-provided JavaScript runs in the page. Chord is never a browser dependency and never Forgerie's wire. The upstream review ritual may reopen this only if Pi ships a WebUI plugin standard that the user wants to support.
+5. Forgerie does not host chord presentation facets in the browser. Decided by the user on 2026-10-10. Plugins send data; Forgerie renders every plugin's UI itself, as it does for managed processes and child agents. No plugin-provided JavaScript runs in the page. Chord is never a browser dependency and never Forgerie's wire. The upstream review ritual may reopen this only if Pi ships a WebUI plugin standard that the user wants to support.
 6. The upstream review ritual watches for chord's symmetric RPC as a server-side plugin concern only.
 
 ## Out of scope
 
 - Decomposing `PiSessionService`.
-- Rewriting `pi-durable`, `pi-subagents`, `pi-processes`, or Pi SDK adapters in Effect.
+- Rewriting `pi-durable`, the child-agent and managed-process services, or Pi SDK adapters in Effect.
 - Moving React rendering or component state into Effect.
 - Any UI redesign. Screens must look the same after every phase; posture captures are a regression check, not a design pass.
 - Multi-machine or remote daemon support. The `/api/machines/local` prefix is removed, not generalised.

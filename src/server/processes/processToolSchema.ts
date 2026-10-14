@@ -8,7 +8,7 @@ const watchProperties = {
   mode: Type.Optional(mode), stream: Type.Optional(stream), repeat: Type.Optional(Type.Boolean()), on: Type.Optional(attention),
 };
 const watch = Type.Object({ pattern: Type.String({ maxLength: 500 }), ...watchProperties });
-/** The pi-processes action schema, with the child ownership option added. */
+/** The compatible process action schema, with the child ownership option added. */
 export const processToolParameters = Type.Object({
   action: StringEnum(["start", "list", "stop", "output", "write", "update", "clear"] as const),
   name: Type.Optional(Type.String({ description: "Specific process name. Required for start." })),

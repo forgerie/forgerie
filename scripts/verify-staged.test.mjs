@@ -135,7 +135,7 @@ describe("staged validation planning", () => {
     "package.json",
     "package-lock.json",
     "tsconfig.build.json",
-    "vendor/pi-processes/package.tgz",
+    "vendor/example/package.tgz",
   ])("runs the full suite for broad dependency %s", (path) => {
     expect(createValidationPlan([path], { pathExists: () => true }).tests).toEqual({
       mode: "full",

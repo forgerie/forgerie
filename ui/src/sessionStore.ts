@@ -306,6 +306,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
           }
           if (onPiEvent && typeof raw === "object" && raw !== null && "type" in raw && raw.type === "pi.event"
             && "eventType" in raw && typeof raw.eventType === "string") onPiEvent(raw.eventType);
+          if (onPiEvent && typeof raw === "object" && raw !== null && "type" in raw
+            && (raw.type === "processes.update" || raw.type === "processes.output")) onPiEvent(raw.type);
           const parsed = parseEvent(raw);
           if (!parsed || parsed.seq !== undefined && parsed.seq <= attempt.seq) return;
           if (transport.nativeReadModel && parsed.type !== "command.output" && parsed.type !== "session.error" && !parsed.type.startsWith("shell.")) return;

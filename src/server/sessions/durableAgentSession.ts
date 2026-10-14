@@ -133,7 +133,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private gateOptions: GatedActionsExtensionOptions | undefined;
   private gateUnsubscribe: (() => void) | undefined;
   private flaggedCount = 0;
-  private readonly processTools: ManagedProcessTools | undefined;
+  readonly processTools: ManagedProcessTools | undefined;
   private detachProcessEvents: (() => Promise<void>) | undefined;
   private readonly customTools: readonly ToolDefinition[];
   private childRunRecords: DurableChildRunRecords | undefined;

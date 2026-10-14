@@ -43,6 +43,18 @@ describe("bundled web access resources", () => {
     expect(warnings[0]?.warning).toContain(bundledWebAccessPackagePath());
   });
 
+  it("drops all tools and hooks from a profile process package and names its path", async () => {
+    const root = await tempRoot();
+    const stray = await extensionPackage(root, "@aliou/pi-processes", ["process", "extra"]);
+    const { loader } = await webLoader([stray], root);
+    const loaded = loader.getExtensions();
+    expect(loaded.extensions.some(extension => extension.path.startsWith(stray))).toBe(false);
+    expect(loaded.errors).toEqual([]);
+    expect(loaded.warnings).toContainEqual({ path: stray,
+      warning: `Forgerie owns the process tool and ignored @aliou/pi-processes from the Pi profile at ${stray}. Remove this profile copy. Its extension factories already ran; restart after removing it to remove their side effects.` });
+    expectWebTools(loader);
+  });
+
   it("warns for competing web tools, preserves other errors and tools, and keeps Pi's first winner", async () => {
     const root = await tempRoot();
     const competitor = await extensionPackage(root, "other-web-tools", [...webTools, "web_fetch"]);

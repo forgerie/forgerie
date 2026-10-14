@@ -18,7 +18,7 @@ nix shell nixpkgs#nodejs_24 -c npm run verify
 nix shell nixpkgs#nodejs_24 -c npm run build
 ```
 
-The app includes projects, session worktrees, chat, files, diffs, backlog items, Pi packages and extensions, account meters, managed processes, and delegated agents. Dictation uses a separate Whisper worker. A session can run shell commands without an embedded terminal.
+The app includes projects, session worktrees, chat, files, diffs, backlog items, Pi packages and extensions, account meters, [managed processes](docs/plugins.md#managed-processes), and delegated agents. Dictation uses a separate Whisper worker. A session can run shell commands without an embedded terminal.
 
 ## Configuration and deployment
 

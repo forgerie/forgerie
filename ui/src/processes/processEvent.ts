@@ -1,4 +1,4 @@
-// The managed-process events pi-processes writes into a session as
+// Legacy managed-process events saved in a session as
 // `ad-process:notification` custom messages. Each carries one
 // `<process_event>` element. This file is the only reader of that format.
 
@@ -10,7 +10,7 @@ export interface ProcessEvent {
   outcome: ProcessOutcome;
   id: string;
   name: string;
-  /** One sentence from pi-processes, kept for screen readers and copy. */
+  /** One sentence from the saved event, kept for screen readers and copy. */
   summary: string;
   command?: string;
   exitCode?: number;

@@ -21,7 +21,19 @@ Package and extension changes can need a daemon restart. Settings keeps the rest
 
 Restarting stops running agents. Use an approved idle window. The restart action asks for confirmation. If host-side restart is unavailable, follow [deployment](deployment.md).
 
-Forgerie ships pinned `pi-web-access` 0.39.0 and its patched `pi-processes` package. Their hosted tools remain available without installing another browser plugin. Web search uses keyless Exa with no profile configuration. See [web search](web-search.md). Delegation is built in through Durable children. See [child agents](child-agents.md). Hosted sessions also load Pi's built-in MCP extension; see [MCP servers](mcp.md).
+Forgerie ships pinned `pi-web-access` 0.39.0 and its own `process` tool. Their hosted tools remain available without installing another browser plugin. Web search uses keyless Exa with no profile configuration. See [web search](web-search.md). Delegation is built in through Durable children. See [child agents](child-agents.md). Hosted sessions also load Pi's built-in MCP extension; see [MCP servers](mcp.md).
+
+## Managed processes
+
+The agent uses `process` for commands that continue while it works. Open **Managed processes** in the session header to read output, write stdin, close stdin, or stop a command. The panel shows the same session-owned records after reconnecting. stdout and stderr share one ordered log.
+
+Managed processes survive Forgerie restarts on hosts with a working `systemd --user` manager. Session close (archive, delete, or worktree removal) ends them. Closing a browser does not close the session. A handoff or fork leaves them with their original session. Workspace services are separate: a worktree owns those services.
+
+On hosts without a systemd user manager, Forgerie starts an **attached process** and labels it “ends when Forgerie restarts”. If a supervisor disappears, Forgerie reports a **lost process** with reason “supervisor lost”. It never runs that command again by itself. Check what the old command did before starting another.
+
+A child process ends when its child run finishes unless the child sets `keepAfterChild: true`. A kept child process still ends at session close. Exits and watched output missed during a restart reach the session on resume with the watch's requested attention.
+
+Forgerie no longer installs `@aliou/pi-processes`. Hosted sessions ignore a copy in the Pi profile and warn with its path. Remove that copy and restart in an approved window: extension factories ran before filtering, so removing hooks cannot undo their earlier side effects.
 
 ## Current browser-app plugins
 

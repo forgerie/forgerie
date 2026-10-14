@@ -1,7 +1,6 @@
 # Managed process core
 
-This is the server core for ADR 0007. It does not register the `process` tool,
-replace pi-processes or schedule watches. Session lifecycle integration is described below.
+This is the server core for ADR 0007. `processTool.ts` registers the Forgerie-owned `process` tool and schedules watches. Session lifecycle integration is described below.
 A managed process belongs to its originating session. It is not a workspace
 service. A child process uses the same core; the child-agent lifecycle decides
 when to stop it or keep it after its run finishes.
@@ -40,7 +39,7 @@ await processes.dispose(); // systemd managed processes continue
 | `closeStdin(id)` | Explicit EOF request through the second FIFO. A closed writer, disposal, or restart does not request EOF for a systemd managed process. |
 | `readOutput(id, { maxLines?, cursor? }?)` | Read without acknowledgement. Default batch: 1000 lines; maximum: 10,000. Omit cursor for the saved event-reader position. Start an independent panel/tool browse with `{ offset: 0, line: 1 }`; page with the returned cursor. |
 | `acknowledgeOutput(id, cursor)` | Persist a returned cursor. Only the event dispatcher owns this acknowledgement, not a panel browse. Unacknowledged batches can replay after a crash; consumers deduplicate by process ID and line number. |
-| `maintain()` | Apply log retention without advancing the event-reader position. The later lifecycle/watch worker must schedule this even when no user reads output. Reads also apply retention. |
+| `maintain()` | Apply log retention without advancing the event-reader position. The daemon-owned dispatcher spools unread events before scheduling retention, even when no runtime is open. Browsing output does not perform retention. |
 | `stop(id)` | Initiate TERM and timeout escalation. Systemd uses `stop --no-block`. Poll status for completion. |
 | `stopSession()` | Stop the session slice, including descendants that called `setsid`. Attached supervision waits for its owned commands to end. This does not archive/delete the session or delete its records. |
 | `dispose()` | Release the session lease. Leave systemd managed processes running. Stop attached processes. Do not submit more operations once disposal starts. |
@@ -189,7 +188,7 @@ mixed line. That is application write framing, not a reader boundary to infer.
   run. Unit tests cover the missing-supervisor recovery decision.
 - The tool/watch integration must add missed event delivery.
   Watch acknowledgements must follow durable event acceptance. This core does
-  not claim exactly-once event delivery or wire itself into pi-processes.
+  not claim exactly-once event delivery.
 
 ## Verification
 
@@ -242,3 +241,7 @@ by result/lost-record filesystem timestamp, then creation time and ID. It never
 removes running records. `clearFinished()` uses the same removal path, removes
 all finished folders, and returns their IDs. The existing 64 MiB log cap and
 its offline limits still apply. Closing a browser is not session close.
+
+## Browser projection
+
+`managedProcessPanel.ts` reads the session registry through `getManagedProcesses`. It uses the registry's shared, daemon-owned tool dispatcher for names and intentional Stop bookkeeping. Runtimes attach and detach delivery without disposing that dispatcher. Archived/read-only runtimes have no process panel owner. Polling emits `processes.update` and independent `processes.output` batches. Panel browsing never acknowledges the watch reader. Browser payloads allowlist fields; launch environments and private file paths never leave the server. The launcher does not expose a PID or completion timestamp, so the compatible fields remain `pid: 0` and `endTime: null`, not invented observations.

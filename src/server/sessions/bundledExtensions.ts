@@ -11,7 +11,7 @@ const WEB_TOOLS = new Set(["web_search", "fetch_content", "get_search_content", 
  * undo factory side effects. Warnings tell users to remove those copies.
  */
 export function preferBundledExtensions(result: LoadExtensionsResult): LoadExtensionsResult {
-  result = withoutLegacyProcessTool(result);
+  result = withoutLegacyProcessPackage(result);
   const bundles = new Map([
     ["pi-web-access", bundledWebAccessPackagePath()],
   ]);
@@ -80,16 +80,19 @@ function packageName(manifest: string): string | undefined {
   }
 }
 
-/** Keep package hooks until the surface migration removes them, but never its conflicting process tool. */
-function withoutLegacyProcessTool(result: LoadExtensionsResult): LoadExtensionsResult {
+/** Drop the whole legacy extension, not only its conflicting tool. */
+function withoutLegacyProcessPackage(result: LoadExtensionsResult): LoadExtensionsResult {
   const packages = new Map([["@aliou/pi-processes", "forgerie-owned"]]);
-  const warnings = [...result.warnings ?? []];
-  const extensions = result.extensions.map(extension => {
-    if (bundledPackageOwner(extension, packages) === undefined || !extension.tools.has("process")) return extension;
-    const tools = new Map(extension.tools);
-    tools.delete("process");
-    warnings.push({ path: extension.path, warning: "Forgerie replaced @aliou/pi-processes' process tool with its durable managed process tool. Remove any Pi profile copy of @aliou/pi-processes." });
-    return { ...extension, tools };
+  const roots = new Set<string>();
+  const paths = new Set<string>();
+  const extensions = result.extensions.filter(extension => {
+    const owner = bundledPackageOwner(extension, packages);
+    if (owner === undefined) return true;
+    roots.add(owner.root); paths.add(extension.path);
+    return false;
   });
-  return { ...result, extensions, warnings };
+  return { ...result, extensions, errors: result.errors.filter(error => !paths.has(error.path)),
+    warnings: [...result.warnings ?? [], ...[...roots].map(path => ({ path,
+      warning: `Forgerie owns the process tool and ignored @aliou/pi-processes from the Pi profile at ${path}. Remove this profile copy. Its extension factories already ran; restart after removing it to remove their side effects.`,
+    }))] };
 }

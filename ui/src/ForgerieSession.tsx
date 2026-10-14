@@ -1,3 +1,7 @@
+import { TerminalIcon } from "lucide-react";
+import { BadgeButton } from "./ui/BadgeButton";
+import { createProcessesStore } from "./processes/processesStore";
+import { ProcessesPanel } from "./processes/ProcessesPanel";
 import type { RelatedWorkRenderer } from "./projectGroups/relatedWork";
 import { FileTextIcon } from "lucide-react";
 import type { ResourceLensRenderer } from "./resources/resourceLens";
@@ -122,6 +126,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   // Child agents: their own small store, refreshed when the server says any child changed.
   const sessionRef = useRef<{ id: string; cwd: string } | undefined>(undefined);
   const [childAgents] = useState(() => createChildAgentsStore(browserTransport.request, () => sessionRef.current));
+  const [processes] = useState(() => createProcessesStore(browserTransport.request, () => sessionRef.current));
+  const processState = useSyncExternalStore(processes.subscribe, processes.getSnapshot);
+  const [processesOpen, setProcessesOpen] = useState(false);
   // Workflows: the saved ones this session can start, and its runs. Refreshed on the same kind of change events.
   const [workflows] = useState(() => createWorkflowsStore(browserTransport.request, () => sessionRef.current, () => crypto.randomUUID()));
   const flows = useSyncExternalStore(workflows.subscribe, workflows.getSnapshot);
@@ -136,6 +143,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
     | { type: "proposal"; entry: ProposalEntry }>();
   const [store] = useState(() => createSessionStore(id, browserTransport, {}, known, createReadTracker(browserTransport, { subscribe: onUnread, isVisible: () => document.visibilityState === "visible", afterRender: afterTranscriptPaint }),
     (eventType) => {
+      if (eventType === "processes.update" || eventType === "processes.output") processes.refresh();
       if (eventType === CHILDREN_CHANGED_EVENT) { childAgents.refresh(); workflows.refresh(); }
       if (eventType === WORKFLOW_RUNS_CHANGED_EVENT) { workflows.refresh(); decisions.refresh(); gated.refresh(); }
     }));
@@ -152,9 +160,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   sessionRef.current = sessionId && cwd ? { id: sessionId, cwd } : undefined;
   const connected = state.connection.type === "ready";
   // Read the children on every join: a reconnect may have missed their change events.
-  useEffect(() => { if (connected && sessionId) { childAgents.refresh(); workflows.refresh(); decisions.refresh(); gated.refresh(); } },
-    [childAgents, workflows, decisions, gated, connected, sessionId]);
-  useEffect(() => () => { childAgents.dispose(); workflows.dispose(); decisions.dispose(); gated.dispose(); }, [childAgents, workflows, decisions, gated]);
+  useEffect(() => { if (connected && sessionId) { childAgents.refresh(); workflows.refresh(); decisions.refresh(); gated.refresh(); processes.refresh(); } },
+    [childAgents, workflows, decisions, gated, processes, connected, sessionId]);
+  useEffect(() => () => { childAgents.dispose(); workflows.dispose(); decisions.dispose(); gated.dispose(); processes.dispose(); }, [childAgents, workflows, decisions, gated, processes]);
   const mentions = useMemo(() => sessionId && cwd ? createMentionSource({ id: sessionId, cwd }, browserTransport.request) : undefined,
     [sessionId, cwd]);
   const [attachments] = useState(() => createAttachmentAdapter(store.saveAttachment));
@@ -459,6 +467,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   } : undefined;
 
   return <AssistantRuntimeProvider runtime={runtime}>
+    {processesOpen && <ProcessesPanel state={processState} onSelect={processes.select} onStop={processes.stop} onWrite={processes.write}
+      onRefresh={processes.refresh} onClose={() => setProcessesOpen(false)} />}
     <DictationProvider adapter={dictation}>
     <SessionFrame name={state.session?.name ?? "Session"} status={statusChip}
       actions={<>
@@ -474,6 +484,9 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
           onOpen={() => { decisions.refresh(); setDecisionsOpen(true); }} />}
         {childrenAvailable && (children.children.length > 0 || childrenOpen) && <ChildAgentsOpener children={children.children}
           onOpen={() => { childAgents.refresh(); setChildrenOpen(true); }} />}
+        {sessionId && !readOnly && <BadgeButton icon={<TerminalIcon aria-hidden />} label="Managed processes"
+          count={processState.view.kind === "ready" ? processState.view.snapshot.processes.filter(item => item.status === "running").length : 0}
+          onPress={() => { processes.refresh(); setProcessesOpen(true); }} />}
         {changes && !readOnly && <ChangesOpener notes={notes.length} onOpen={() => setReview({})} />}
         <TreeOpener idle={treeAvailable} onOpen={() => onIdleAction("tree")} />
         {archive && <ArchiveNextButton onArchive={archive.onArchive}

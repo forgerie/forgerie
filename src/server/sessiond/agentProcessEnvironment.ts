@@ -60,11 +60,9 @@ export function isAgentVisibleEnvKey(key: string): boolean {
  * `agent.dir` reaches the SDK only where Forgerie passes it explicitly. Code
  * that resolves the profile on its own, through the SDK's `getAgentDir()`,
  * reads `PI_CODING_AGENT_DIR` and falls back to `~/.pi/agent`. That code runs
- * in the daemon (bundled `pi-processes`) and in processes it
- * spawns (`pi` from bash and terminals). Without this, a
- * Forgerie profile that is not `~/.pi/agent` would silently split: sessions use
- * one profile while delegated agents, missions, and terminal `pi` use the
- * other.
+ * in the daemon and in commands agents start, including managed processes.
+ * Without this, a Forgerie profile that is not `~/.pi/agent` would silently
+ * split: hosted sessions use one profile while spawned `pi` commands use another.
  *
  * Applies only to the Pi companion command, whose profile variable this is.
  * Returns whether `env` was changed.

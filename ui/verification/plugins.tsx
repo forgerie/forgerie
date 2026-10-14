@@ -19,7 +19,7 @@ let catalog: PluginCatalog = { profileDir: "/home/simonwjackson/.local/share/for
     { id: "extension:context", kind: "extension", name: "startup-context", source: "/home/simonwjackson/.local/share/forgerie/agent/extensions/startup-context.ts", description: "", enabled: true },
     { id: "app:cliproxyapi-quota", kind: "app", name: accountMetersManifest.name, source: "Forgerie", description: accountMetersManifest.description,
       enabled: true, settings: resolveAppSettings(accountMetersManifest, {}), fields: [...accountMetersManifest.settings] },
-    { id: "builtin:pi-processes", kind: "builtin", name: "pi-processes", source: "Forgerie", description: "Runs dev servers, watchers, and other long commands in the background.", enabled: true },
+    { id: "builtin:processes", kind: "builtin", name: "processes", source: "Forgerie", description: "Runs long commands as session-owned managed processes.", enabled: true },
     { id: "builtin:pi-subagents", kind: "builtin", name: "pi-subagents", source: "Forgerie", description: "Lets a session hand work to the agents in Settings.", enabled: true },
   ] };
 // A README shaped like real ones: a repeated title, badges, HTML, a relative image and link, code, a table, and a fold.
