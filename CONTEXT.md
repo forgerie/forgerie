@@ -68,3 +68,21 @@ A managed process whose supervisor disappeared, for example after a reboot. Forg
 **Attached process**:
 A managed process on a host where Forgerie cannot detach it. It ends when Forgerie restarts, and Forgerie labels it that way wherever it appears.
 _Avoid_: Fallback process
+
+## Triggers
+
+**Trigger**:
+A saved schedule that starts one saved prose workflow, with one set of inputs, in one or more projects. A trigger is one record: one name, one schedule, one Pause.
+_Avoid_: Cron job, scheduled task
+
+**Target projects**:
+The projects a trigger runs in. Every target project gets the same workflow name and the same inputs. The user picks single projects, a fixed list, or **All projects**, a live selection that includes projects added later. **All projects** has no exceptions. Under **All projects**, a project that cannot run, such as one whose folder is gone, is skipped and shown as unavailable; it does not set attention.
+
+**Fire**:
+One occurrence of a trigger, by schedule or by Run now. A scheduled fire starts one new session for each target project, all at once. Run now can start in all target projects or in one. A fire records one outcome for each project, so it can partly fail.
+
+**Project workflow**:
+A workflow file in a project's `.pi/prompts` folder. Only that project has it.
+
+**Global workflow**:
+A workflow file in Forgerie's agent `prompts` folder. Every project has it. A project workflow with the same name replaces it in that project.
