@@ -182,7 +182,7 @@ it("uses the assistant's matching tool call, allowlists subjects, and requires b
   expect(row(safe)).toMatchObject({ label: "Read", subject: "src/private.ts", tool: { name: "read", replay: "safe" }, restart: "resumes", startedAt: null });
   expect(row(savedUnsafe)).toMatchObject({ tool: { name: "read", replay: "unsafe" }, restart: "stops" });
   expect(row(command)).toMatchObject({ label: "Run", subject: "KEY=… run --token … --password=… --secret … --key=… -p …" });
-  expect(row(quoted)).toMatchObject({ subject: "KEY=… run --token … -p …" });
+  expect(row(quoted)).toMatchObject({ subject: null });
   expect(row(longPath)?.subject).toBe("x".repeat(120));
   expect(row(custom)).toMatchObject({ label: "Use `custom`", subject: null, restart: "stops" });
   expect(JSON.stringify(result)).not.toMatch(/PRIVATE|secret value|alpha|beta|gamma|delta|epsilon|zeta|"input"|"checkpoint"|"arguments"|"content"|"password"/);
@@ -280,4 +280,43 @@ it("does not publish a family read that finishes after watch disposal", async ()
     await vi.advanceTimersByTimeAsync(100);
     expect(updates).toEqual([]);
   } finally { resolve(); await watcher.stop(); commit.mockRestore(); vi.useRealTimers(); }
+});
+
+it.each([
+  { command: String.raw`run --token "abc\" SECRET_TAIL"`, expected: "run --token …" },
+  { command: 'env "KEY=first SECRET_TAIL" run', expected: "env KEY=… run" },
+  { command: "env 'KEY=first SECRET_TAIL' run", expected: "env KEY=… run" },
+  { command: String.raw`env K"E"Y=first\ SECRET_TAIL run`, expected: "env KEY=… run" },
+  { command: `run '--password=first SECRET_TAIL'`, expected: "run --password=…" },
+  { command: `run "--secret" 'first SECRET_TAIL'`, expected: "run --secret …" },
+  { command: String.raw`run --key="first\" SECRET_TAIL"`, expected: "run --key=…" },
+  { command: String.raw`run --token 'first'" SECRET_TAIL"`, expected: "run --token …" },
+  { command: String.raw`run --token "first\\\" SECRET_TAIL"`, expected: "run --token …" },
+  { command: `run -p 'first SECRET_TAIL'`, expected: "run -p …" },
+  { command: "run -pSECRET_TAIL", expected: "run -p…" },
+  { command: 'run --token "first SECRET_TAIL', expected: null },
+  { command: "run --token SECRET_TAIL\\", expected: null },
+  { command: 'run --token "$(printf SECRET_TAIL)"', expected: null },
+  { command: "run --token '$(printf SECRET_TAIL)'", expected: null },
+  { command: 'run --token "`printf SECRET_TAIL`"', expected: null },
+  { command: "run <<EOF\nSECRET_TAIL\nEOF", expected: null },
+  { command: "run --token SECRET_TAIL | cat", expected: null },
+  { command: "run --token SECRET_TAIL; echo done", expected: null },
+  { command: "bash -c 'run --token SECRET_TAIL'", expected: null },
+  { command: "bash -c 'KEY=SECRET_TAIL run'", expected: "bash -c KEY=…" },
+  { command: `env --split-string='run --token=SECRET_TAIL'`, expected: null },
+  { command: `env --split-string='KEY=SECRET_TAIL'`, expected: null },
+  { command: "run --token 'first\nSECRET_TAIL'", expected: null },
+  { command: "run --token SECRET_TAIL\necho $(unsupported)", expected: null },
+])("masks shell words or omits unsupported bash syntax: $command", async ({ command, expected }) => {
+  const storage = new MemoryStorage();
+  const parent = await seedConversation(storage);
+  const assistant = await storage.mintId<EntryId>();
+  const call = fauxToolCall("bash", { command });
+  await storage.commit([{ type: "entry", value: { id: assistant, conversationId: parent, kind: AssistantEntry.kind, model: [fauxAssistantMessage([call])] } }], context);
+  await seedTask(storage, parent, "pi.tool", { input: { assistant, callId: call.id }, state: { status: "pending", checkpoint: { phase: "call" } } });
+  const { harness } = await openSeed(storage);
+  const result = await readTaskActivity(harness, parent, context);
+  expect(JSON.stringify(result)).not.toContain("SECRET_TAIL");
+  expect(result.tasks[0]?.subject).toBe(expected);
 });

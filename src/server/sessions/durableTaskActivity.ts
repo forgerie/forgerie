@@ -51,11 +51,81 @@ function subject(name: string, args: unknown): string | null {
   const fields = object(args);
   if (["read", "edit", "write", "ls", "grep", "find"].includes(name)) return typeof fields?.["path"] === "string" ? fields["path"].slice(0, 120) : null;
   if (name !== "bash" || typeof fields?.["command"] !== "string") return null;
-  // Redact before truncation, including quoted values and --flag=value forms.
-  return (fields["command"].split(/\r?\n/)[0] ?? "")
-    .replace(/\b([A-Za-z_][A-Za-z0-9_]*=)(?:"[^"\n]*(?:"|$)|'[^'\n]*(?:'|$)|\\[^\n]|[^\s;&|'"\\])+/g, "$1…")
-    .replace(/((?:--token|--password|--secret|--key|-p)(?:=|\s+))(?:"[^"\n]*(?:"|$)|'[^'\n]*(?:'|$)|\\[^\n]|[^\s;&|'"\\])+/g, "$1…")
-    .slice(0, 120);
+  return bashSubject(fields["command"]);
+}
+
+interface ShellWord { start: number; end: number; value: string }
+const secretOptions = new Set(["--token", "--password", "--secret", "--key", "-p"]);
+
+/** Only simple shell words are supported. Never display syntax whose word boundaries can change at execution. */
+function shellWords(command: string): ShellWord[] | null {
+  for (const char of command) {
+    const code = char.charCodeAt(0);
+    if ((code < 32 && code !== 9 && code !== 10) || code === 127) return null;
+  }
+  const words: ShellWord[] = [];
+  let cursor = 0;
+  while (cursor < command.length) {
+    if (/[ \t\n]/.test(command.charAt(cursor))) { cursor++; continue; }
+    const start = cursor;
+    let value = "";
+    let quote: "'" | '"' | undefined;
+    while (cursor < command.length) {
+      const char = command.charAt(cursor);
+      // Expansions can create words or nested commands. Even quoted expansions fail closed.
+      if (char === "$" || char === "`") return null;
+      if (quote === undefined && /[ \t\n]/.test(char)) break;
+      if (char === "\n") return null;
+      if (char === "\\" && quote !== "'") {
+        const next = command.charAt(cursor + 1);
+        if (next === "" || next === "\n" || next === "$" || next === "`") return null;
+        // In double quotes, backslash only escapes shell-special characters.
+        value += quote === '"' && next !== '"' && next !== "\\" ? `\\${next}` : next;
+        cursor += 2;
+        continue;
+      }
+      if (char === "'" || char === '"') {
+        if (quote === undefined) quote = char;
+        else if (quote === char) quote = undefined;
+        else value += char;
+      } else {
+        if (quote === undefined && ";&|<>(){}*?[]~#!".includes(char)) return null;
+        value += char;
+      }
+      cursor++;
+    }
+    if (quote !== undefined) return null;
+    words.push({ start, end: cursor, value });
+  }
+  return words;
+}
+
+function bashSubject(command: string): string | null {
+  const words = shellWords(command);
+  if (words === null) return null;
+  let masked = "";
+  let cursor = 0;
+  let maskNext = false;
+  for (const word of words) {
+    const gap = command.slice(cursor, word.start);
+    if (maskNext && gap.includes("\n")) return null;
+    let replacement = command.slice(word.start, word.end);
+    const equals = word.value.indexOf("=");
+    const option = equals >= 0 ? word.value.slice(0, equals) : word.value;
+    if (maskNext) replacement = "…";
+    else if (equals >= 0 && secretOptions.has(option)) replacement = `${option}=…`;
+    else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word.value)) replacement = `${word.value.slice(0, equals)}=…`;
+    else if (secretOptions.has(word.value)) replacement = word.value;
+    else if (word.value.startsWith("-p") && word.value.length > 2) replacement = "-p…";
+    // A quoted script is one word to the outer shell, not a command we can safely parse again.
+    else if (/(?:^|\s|=)[A-Za-z_][A-Za-z0-9_]*=|--(?:token|password|secret|key)|(?:^|\s|=)-p/.test(word.value)) return null;
+    maskNext = secretOptions.has(word.value);
+    masked += gap + replacement;
+    cursor = word.end;
+  }
+  if (maskNext) return null;
+  // Validate the complete command and mask whole words before taking the public first-line prefix.
+  return (masked + command.slice(cursor)).split("\n")[0]?.slice(0, 120) ?? "";
 }
 async function toolCall(tx: Tx, input: unknown) {
   const fields = object(input);
