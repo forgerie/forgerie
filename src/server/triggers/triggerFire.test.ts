@@ -1,4 +1,6 @@
-import { triggerManualRequestId } from "../../shared/triggers.js";
+import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
+import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { triggerManualRequestId, TriggerActionSchema, TriggerSchema } from "../../shared/triggers.js";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -11,7 +13,7 @@ import { expect, it } from "vitest";
 import { ProjectService } from "../projects/projectService.js";
 import { ProjectStore } from "../storage/projectStore.js";
 import { defaultPiSessionDir } from "../sessions/piSessionManagerGateway.js";
-import { triggerSessionId } from "./triggerFire.js";
+import { triggerSessionId, projectSessionKey } from "./triggerFire.js";
 
 it("derives a UUIDv7 with occurrence time, sha256 entropy, version and RFC variant", () => {
   const occurrence = Date.parse("2026-10-13T03:00:00Z");
@@ -43,7 +45,7 @@ async function stop(process: ChildProcess) {
   await closed;
 }
 
-it.each(["header", "session", "workflow"])("SIGKILL after %s and a fresh process leave exactly one file, journal and run", async (checkpoint) => {
+it.each(["header", "session", "workflow", "legacy-session", "legacy-workflow"])("SIGKILL after %s and a fresh process leave exactly one file, journal and run", async (checkpoint) => {
   const root = await mkdtemp(join(tmpdir(), "forgerie-trigger-restart-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
@@ -67,13 +69,14 @@ it.each(["header", "session", "workflow"])("SIGKILL after %s and a fresh process
     const header: unknown = JSON.parse((await readFile(join(directory, before[0] ?? ""), "utf8")).split("\n")[0] ?? "");
     if (!Check(Type.Object({ id: Type.String() }), header)) throw new Error("No session header");
     await stop(first.process);
+    if (checkpoint.startsWith("legacy-")) await saveLegacyTriggerProtocol(root);
     const second = child(root, "none"); children.push(second.process);
     expect(await second.closed, second.errors()).toBe(0);
     expect(second.output()).toContain('"history":1,"runs":1,"land":"waiting"');
     const line = second.output().split("\n").find((line) => line.startsWith("RESULT "));
     const result: unknown = JSON.parse(line?.slice(7) ?? "null");
     if (!Check(Type.Object({ sessionId: Type.String(), occurrence: Type.Number(), requestId: Type.String(), name: Type.String(), model: Type.String(), thinkingLevel: Type.String() }), result)) throw new Error("Invalid restart result");
-    expect(result.sessionId).toBe(triggerSessionId(result.requestId, result.occurrence));
+    expect(result.sessionId).toBe(triggerSessionId(checkpoint.startsWith("legacy-") ? result.requestId : projectSessionKey(result.requestId, cwd), result.occurrence));
     expect(result.sessionId).toBe(header.id);
     expect(result.model).toBe("faux-selected");
     expect(result.thinkingLevel).toBe("high");
@@ -93,3 +96,40 @@ it("gives the formerly colliding manual tuples different session IDs at the same
   const occurrence = Date.parse("2026-10-13T03:00:00Z");
   expect(triggerSessionId(triggerManualRequestId("alpha", "beta-run-gamma"), occurrence)).not.toBe(triggerSessionId(triggerManualRequestId("alpha-run-beta", "gamma"), occurrence));
 });
+
+/** Write the pre-upgrade wire protocol only after the first process is dead. */
+async function saveLegacyTriggerProtocol(root: string): Promise<void> {
+  const storage = await openNodeSqliteStorage(join(root, "triggers", "state.sqlite"));
+  const oldAction = (request: object & { action: import("../../shared/triggers.js").TriggerAction }) => {
+    if (request.action.targets.kind !== "projects") throw new Error("Expected one-project fixture");
+    Object.assign(request.action, { cwd: request.action.targets.cwds[0] });
+    Reflect.deleteProperty(request.action, "targets");
+    Reflect.deleteProperty(request, "cwds");
+    Reflect.deleteProperty(request, "legacySessionIdentity");
+  };
+  try {
+    const [record] = (await storage.scanDocuments({ scope: { kind: "session" }, at: "current", kind: "forgerie.triggers" }, 100, undefined, context)).items;
+    if (record === undefined) throw new Error("No trigger document");
+    const document = await storage.document(record.id, "current", context);
+    if (document === undefined) throw new Error("No trigger data");
+    const value = structuredClone(document.value);
+    if (!Check(Type.Object({ records: Type.Record(Type.String(), Type.Object({ ...TriggerSchema.properties, incarnation: Type.String() })) }), value)) throw new Error("Invalid fixture document");
+    for (const trigger of Object.values(value.records)) {
+      oldAction(trigger);
+      for (const fire of trigger.history) Reflect.deleteProperty(fire, "projects");
+    }
+    await storage.commit([{ type: "document.change", id: record.id, content: { version: 1, kind: "base", value } }], context);
+    for (const task of (await storage.scanTasks({}, 100, undefined, context)).items) {
+      if (task.kind !== "forgerie.trigger.manual" && task.kind !== "forgerie.trigger") continue;
+      if (task.state.status === "terminal" || task.state.status === "completing") continue;
+      const input = structuredClone(task.input);
+      if (Check(Type.Object({ request: Type.Object({ action: TriggerActionSchema }) }), input)) oldAction(input.request);
+      const checkpoint = structuredClone(task.state.checkpoint);
+      if (checkpoint === null || typeof checkpoint !== "object" || Array.isArray(checkpoint)) throw new Error("Invalid checkpoint");
+      Reflect.deleteProperty(checkpoint, "projects");
+      if (task.kind === "forgerie.trigger.manual") Reflect.deleteProperty(checkpoint, "request");
+      else if (Check(Type.Object({ request: Type.Object({ action: TriggerActionSchema }) }), checkpoint)) oldAction(checkpoint.request);
+      await storage.commit([{ type: "task", value: { ...task, version: 2, input, state: { status: "pending", checkpoint } } }], context);
+    }
+  } finally { await storage.close(context); }
+}

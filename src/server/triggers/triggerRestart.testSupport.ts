@@ -45,18 +45,21 @@ const library = new WorkflowLibrary(agentDir);
 const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
 const workspaces = new RegisteredProjectWorkspaceCwds({ projects, workspaces: new WorkspaceService() });
 const triggers = await TriggerService.open({ env: { PI_WEB_DATA_DIR: root }, workflows: library, workspaces,
-  fireFactory: (validateWorkspace) => workflowTriggerFire({ sessions, validateWorkspace,
+  fireFactory: (validateWorkspace) => {
+    const fire = workflowTriggerFire({ sessions, validateWorkspace,
     validateAction: async (action) => { const workflow = await library.read(action.cwd, action.workflow); assertProseOnly(workflow); workflowInputs(workflow.definition, action.inputs); },
     afterStep: async (step) => {
-      if (step !== checkpoint) return;
-      process.stdout.write(`CHECKPOINT ${step}\n`);
+      if (step !== checkpoint?.replace("legacy-", "")) return;
+      process.stdout.write(`CHECKPOINT ${checkpoint}\n`);
       await new Promise<never>(() => undefined);
     },
-  }), publish: () => undefined, onError: (error) => { throw error; },
+    });
+    return (request, context) => fire({ ...request, ...(checkpoint?.startsWith("legacy-") === true ? { legacySessionIdentity: true } : {}) }, context);
+  }, publish: () => undefined, onError: (error) => { throw error; },
 });
 try {
   if ((await triggers.list()).triggers.length === 0) {
-    await triggers.create({ id: "night", name: "Nightly refinement", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", cwd, workflow: "nightly", inputs: {}, model: "faux/faux-selected", thinkingLevel: "high" } });
+    await triggers.create({ id: "night", name: "Nightly refinement", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [cwd] }, workflow: "nightly", inputs: {}, model: "faux/faux-selected", thinkingLevel: "high" } });
     await triggers.pause("night");
     await triggers.run("night", { requestId: "restart" });
   }

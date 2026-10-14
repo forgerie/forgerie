@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { Type, type TSchema } from "typebox";
-import { TriggerSchema, TriggerListResponseSchema, TriggerWorkflowsResponseSchema, TriggerRunResponseSchema, TriggerErrorResponseSchema, type TriggerErrorResponse, type TriggerRunRequest } from "../../shared/triggers.js";
+import { TriggerTargetsSchema, TriggerSchema, TriggerListResponseSchema, TriggerWorkflowsResponseSchema, TriggerRunResponseSchema, TriggerErrorResponseSchema, type TriggerErrorResponse, type TriggerRunRequest } from "../../shared/triggers.js";
 import { Check } from "typebox/value";
 import { TriggerError } from "./durableTriggers.js";
 import { triggerBody, type TriggerService } from "./triggerService.js";
@@ -9,7 +9,7 @@ const deleted = Type.Object({ ok: Type.Literal(true) }, { additionalProperties: 
 const empty = Type.Object({}, { additionalProperties: false });
 const query = Type.Object({ cwd: Type.String({ minLength: 1 }) }, { additionalProperties: false });
 
-type TriggerRouteService = { [K in "list" | "get" | "workflows" | "create" | "update" | "pause" | "resume" | "acknowledge" | "run" | "remove"]: (...args: Parameters<TriggerService[K]>) => Promise<unknown> };
+type TriggerRouteService = { [K in "list" | "get" | "workflows" | "commonWorkflows" | "create" | "update" | "pause" | "resume" | "acknowledge" | "run" | "remove"]: (...args: Parameters<TriggerService[K]>) => Promise<unknown> };
 
 export function registerTriggerRoutes(app: FastifyInstance, service: TriggerRouteService, prefix = ""): void {
   // Parser failures must have the same error contract as domain failures.
@@ -17,6 +17,7 @@ export function registerTriggerRoutes(app: FastifyInstance, service: TriggerRout
     routes.setErrorHandler((error, _request, reply) => { void sendError(reply, typeof error === "object" && error !== null && "statusCode" in error && typeof error.statusCode === "number" ? error.statusCode : 500, { error: error instanceof Error ? error.message : String(error) }); });
     routes.get(`${prefix}/triggers`, (_request, reply) => run(reply, TriggerListResponseSchema, () => service.list()));
     routes.get<{ Querystring: unknown }>(`${prefix}/triggers/workflows`, (request, reply) => run(reply, TriggerWorkflowsResponseSchema, () => service.workflows(triggerBody(query, request.query).cwd)));
+    routes.post<{ Body: unknown }>(`${prefix}/triggers/workflows/common`, (request, reply) => run(reply, TriggerWorkflowsResponseSchema, () => service.commonWorkflows(triggerBody(TriggerTargetsSchema, request.body))));
     routes.get<{ Params: { id: string } }>(`${prefix}/triggers/:id`, (request, reply) => run(reply, TriggerSchema, () => service.get(request.params.id)));
     routes.post<{ Body: unknown }>(`${prefix}/triggers`, (request, reply) => run(reply, TriggerSchema, () => service.create(request.body), 201));
     routes.patch<{ Params: { id: string }; Body: unknown }>(`${prefix}/triggers/:id`, (request, reply) => run(reply, TriggerSchema, () => service.update(request.params.id, request.body)));

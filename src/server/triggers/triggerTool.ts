@@ -10,7 +10,7 @@ const schedule = Type.Union([
   Type.Object({ ...TriggerScheduleSchema.anyOf[1].properties, timezone: Type.Optional(TriggerScheduleSchema.anyOf[1].properties.timezone) }, { additionalProperties: false }),
 ]);
 const create = Type.Object({ ...TriggerCreateSchema.properties, schedule,
-  action: Type.Object({ ...TriggerActionSchema.properties, cwd: Type.Optional(TriggerActionSchema.properties.cwd) }, { additionalProperties: false }),
+  action: Type.Object({ ...TriggerActionSchema.properties, targets: Type.Optional(TriggerActionSchema.properties.targets) }, { additionalProperties: false }),
 }, { additionalProperties: false });
 const parameters = Type.Union([
   Type.Object({ action: Type.Literal("list") }, { additionalProperties: false }),
@@ -29,7 +29,7 @@ function nextFire(trigger: Trigger): string {
 export function createWorkflowScheduleTool(cwd: string, service: () => TriggerService) {
   return defineTool({
     name: "workflow_schedule", label: "Workflow schedule", executionMode: "sequential",
-    description: "List, create, update, pause, resume, delete, or run scheduled saved prose workflows of the calling session's project only. Create directly; each fire costs a full workflow run. Create uses trigger, update uses changes and baseRevision. Defaults cwd to this session and timezone to the host. Run now also works when paused and leaves the next scheduled run unchanged. Deleting removes history but keeps sessions.",
+    description: "List, create, update, pause, resume, delete, or run scheduled saved prose workflows of the calling session's project only. Create directly; each fire costs a full workflow run. Create uses trigger, update uses changes and baseRevision. Defaults target projects to this session and timezone to the host. Run now also works when paused and leaves the next scheduled run unchanged. Deleting removes history but keeps sessions.",
     parameters,
     async execute(callId, params, signal, _onUpdate, ctx) {
       signal?.throwIfAborted();
@@ -46,7 +46,7 @@ export function createWorkflowScheduleTool(cwd: string, service: () => TriggerSe
         words = nextFire(await triggers.get(params.id, cwd));
       } else {
         let trigger: Trigger;
-        if (params.action === "create") trigger = await triggers.create({ ...params.trigger, action: { ...params.trigger.action, cwd: params.trigger.action.cwd ?? cwd }, schedule: { ...params.trigger.schedule, timezone: params.trigger.schedule.timezone ?? triggers.timezone } }, { kind: "agent", sessionId: ctx.sessionManager.getSessionId(), cwd }, cwd);
+        if (params.action === "create") trigger = await triggers.create({ ...params.trigger, action: { ...params.trigger.action, targets: params.trigger.action.targets ?? { kind: "projects", cwds: [cwd] } }, schedule: { ...params.trigger.schedule, timezone: params.trigger.schedule.timezone ?? triggers.timezone } }, { kind: "agent", sessionId: ctx.sessionManager.getSessionId(), cwd }, cwd);
         else if (params.action === "update") trigger = await triggers.update(params.id, params.changes, cwd);
         else trigger = await triggers[params.action](params.id, cwd);
         value = trigger;

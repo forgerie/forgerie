@@ -25,6 +25,8 @@ export interface ProjectWorkspaceCwdsDeps {
  * moments ago is included.
  */
 export interface ProjectWorkspaceCwds {
+  /** One registered root per project, including roots that are currently unavailable. */
+  registeredCwds?(): Promise<string[]>;
   /**
    * Workspace paths of the registered project containing `cwd`, or undefined
    * when no registered project contains it. The result includes `cwd` itself.
@@ -36,6 +38,10 @@ export interface ProjectWorkspaceCwds {
 
 export class RegisteredProjectWorkspaceCwds implements ProjectWorkspaceCwds {
   constructor(private readonly deps: ProjectWorkspaceCwdsDeps) {}
+
+  async registeredCwds(): Promise<string[]> {
+    return [...new Set((await this.deps.projects.list()).map((project) => project.path))];
+  }
 
   async canonicalForCwd(cwd: string): Promise<string[] | undefined> {
     for (const project of await this.deps.projects.list()) {

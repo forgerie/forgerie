@@ -87,7 +87,7 @@ try {
   current = await daemon(true);
   shift = occurrence - 4_000 - Date.now();
   const time = new Date(occurrence).toISOString().slice(11, 16);
-  const response = await fetch(`${current.address}/triggers`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "night", name: "Nightly acceptance", schedule: { kind: "daily", at: time, timezone: "UTC" }, action: { kind: "workflow", cwd, workflow: "nightly", inputs: {}, model: `trigger-acceptance/${model}`, thinkingLevel: "off" } }) });
+  const response = await fetch(`${current.address}/triggers`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "night", name: "Nightly acceptance", schedule: { kind: "daily", at: time, timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [cwd] }, workflow: "nightly", inputs: {}, model: `trigger-acceptance/${model}`, thinkingLevel: "off" } }) });
   assert.equal(response.status, 201, await response.text());
   const deadline = Date.now() + 300_000;
   while (!interrupted) { if (Date.now() > deadline) throw new Error("No scheduled launch before deadline"); await sleep(100); }

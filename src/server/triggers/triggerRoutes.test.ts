@@ -27,7 +27,7 @@ let changes = 0;
 let fires = 0;
 let options: Parameters<typeof TriggerService.open>[0];
 const prose = "---\ndescription: Nightly task\nworkflow:\n  version: 1\n  inputs:\n    task: { type: string, default: baseline }\n  stages:\n    - { id: land, name: Land, stop: land }\n---\nReview the task, then stop at land.\n";
-const create = () => ({ name: "Nightly refinement", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", cwd, workflow: "nightly", inputs: {} } });
+const create = () => ({ name: "Nightly refinement", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [cwd] }, workflow: "nightly", inputs: {} } });
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "forgerie-trigger-http-"));
   cwd = join(root, "workspace");
@@ -69,7 +69,7 @@ it("lists workflows without any session, including scripts, inputs, land stops a
   expect(result.status).toBe(200);
   expect(Check(TriggerWorkflowsResponseSchema, result.value)).toBe(true);
   expect(result.value).toMatchObject({ workflows: [{ name: "nightly", kind: "prose", inputs: { task: { type: "string", default: "baseline" } }, hasLandStop: true }, { name: "script", kind: "script" }], diagnostics: [{ name: "broken" }] });
-  expect(await http("GET", "/workflows?cwd=/unknown")).toMatchObject({ status: 400, value: { field: "action.cwd" } });
+  expect(await http("GET", "/workflows?cwd=/unknown")).toMatchObject({ status: 400, value: { field: "action.targets.cwds" } });
   expect(await http("GET", "/workflows?cwd=relative")).toMatchObject({ status: 400 });
 });
 
@@ -94,11 +94,11 @@ it.each([
   ["name", { name: "" }], ["name", { name: "   " }], ["schedule.at", { schedule: { kind: "daily", at: "25:00", timezone: "UTC" } }],
   ["schedule.at", { schedule: { kind: "weekly", on: ["mon"], at: "25:00", timezone: "UTC" } }],
   ["schedule.timezone", { schedule: { kind: "daily", at: "03:00", timezone: "Nowhere/Here" } }],
-  ["action.cwd", { action: { kind: "workflow", cwd: "/unknown", workflow: "nightly", inputs: {} } }],
-  ["action.workflow", { action: { kind: "workflow", cwd: "CURRENT", workflow: "script", inputs: {} } }],
-  ["action.workflow", { action: { kind: "workflow", cwd: "CURRENT", workflow: "missing", inputs: {} } }],
-  ["action.inputs", { action: { kind: "workflow", cwd: "CURRENT", workflow: "nightly", inputs: { task: 9 } } }],
-  ["action.model", { action: { kind: "workflow", cwd: "CURRENT", workflow: "nightly", inputs: {}, model: "not-a-model" } }],
+  ["action.targets.cwds", { action: { kind: "workflow", targets: { kind: "projects", cwds: ["/unknown"] }, workflow: "nightly", inputs: {} } }],
+  ["action.workflow", { action: { kind: "workflow", targets: { kind: "projects", cwds: ["CURRENT"] }, workflow: "script", inputs: {} } }],
+  ["action.workflow", { action: { kind: "workflow", targets: { kind: "projects", cwds: ["CURRENT"] }, workflow: "missing", inputs: {} } }],
+  ["action.inputs", { action: { kind: "workflow", targets: { kind: "projects", cwds: ["CURRENT"] }, workflow: "nightly", inputs: { task: 9 } } }],
+  ["action.model", { action: { kind: "workflow", targets: { kind: "projects", cwds: ["CURRENT"] }, workflow: "nightly", inputs: {}, model: "not-a-model" } }],
 ])("returns a field error for %s", async (field, invalid) => {
   const input: unknown = JSON.parse(JSON.stringify({ ...create(), ...invalid }).replaceAll("CURRENT", cwd));
   const result = await http("POST", "", input);
@@ -165,7 +165,7 @@ it.each([
 ])("refuses a malformed %s %s response before sending", async (method, path, operation) => {
   const server = Fastify();
   const adapted = {
-    list: () => service.list(), get: (id: string) => service.get(id), workflows: (path: string) => service.workflows(path),
+    list: () => service.list(), get: (id: string) => service.get(id), commonWorkflows: (targets: Parameters<TriggerService["commonWorkflows"]>[0]) => service.commonWorkflows(targets), workflows: (path: string) => service.workflows(path),
     create: (value: unknown) => service.create(value), update: (id: string, value: unknown) => service.update(id, value),
     pause: (id: string) => service.pause(id), resume: (id: string) => service.resume(id), acknowledge: (id: string) => service.acknowledge(id),
     run: (id: string, value: unknown) => service.run(id, value), remove: (id: string) => service.remove(id),
@@ -188,7 +188,7 @@ it("does not send an invalid error envelope", async () => {
   const error = new TriggerError("Invalid field", 400, "action.cwd");
   Object.defineProperty(error, "field", { value: 42 });
   const adapted = {
-    list: () => Promise.reject(error), get: (id: string) => service.get(id), workflows: (path: string) => service.workflows(path),
+    list: () => Promise.reject(error), get: (id: string) => service.get(id), commonWorkflows: (targets: Parameters<TriggerService["commonWorkflows"]>[0]) => service.commonWorkflows(targets), workflows: (path: string) => service.workflows(path),
     create: (value: unknown) => service.create(value), update: (id: string, value: unknown) => service.update(id, value),
     pause: (id: string) => service.pause(id), resume: (id: string) => service.resume(id), acknowledge: (id: string) => service.acknowledge(id),
     run: (id: string, value: unknown) => service.run(id, value), remove: (id: string) => service.remove(id),
@@ -201,4 +201,27 @@ it("does not send an invalid error envelope", async () => {
     const value: unknown = await response.json();
     expect(Check(TriggerErrorResponseSchema, value)).toBe(true);
   } finally { await server.close(); }
+});
+
+it("serves common workflows and runs just the requested project through the browser proxy", async () => {
+  const other = join(root, "second");
+  await mkdir(join(other, ".pi", "prompts"), { recursive: true });
+  await writeFile(join(other, ".pi", "prompts", "nightly.md"), prose);
+  const projects = new ProjectService(new ProjectStore(join(root, "projects.json"))); await projects.add({ path: other });
+  const targets = { kind: "projects", cwds: [cwd, other] };
+  const common = await http("POST", "/workflows/common", targets);
+  expect(common.status).toBe(200); expect(Check(TriggerWorkflowsResponseSchema, common.value)).toBe(true);
+  expect(common.value).toMatchObject({ workflows: [{ name: "nightly", kind: "prose" }] });
+  expect(await http("POST", "/workflows/common", { kind: "all" })).toMatchObject({ status: 200, value: { workflows: [{ name: "nightly" }] } });
+  expect(await http("POST", "/workflows/common", { kind: "projects", cwds: [] })).toMatchObject({ status: 400 });
+  const made = await http("POST", "", { ...create(), action: { ...create().action, targets } });
+  expect(made.status).toBe(201);
+  if (!Check(TriggerSchema, made.value)) throw new Error("Invalid trigger");
+  const id = made.value.id;
+  const accepted = await http("POST", `/${id}/run`, { requestId: "single", cwd: other });
+  expect(accepted.status).toBe(202);
+  await vi.waitFor(async () => { expect((await service.get(id)).history[0]?.outcome.kind).toBe("started"); });
+  expect((await service.get(id)).history[0]?.projects.map((project) => project.cwd)).toEqual([other]);
+  expect(fires).toBe(1);
+  expect(await http("POST", `/${id}/run`, { requestId: "outside", cwd: root })).toMatchObject({ status: 400, value: { field: "cwd" } });
 });

@@ -1827,7 +1827,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   /** Internal receipt-keyed session creation. The public start options do not contain sessionId. */
-  async ensureTriggerSession(ref: PiSessionRef, action: TriggerAction): Promise<void> {
+  async ensureTriggerSession(ref: PiSessionRef, action: Pick<TriggerAction, "model" | "thinkingLevel">): Promise<void> {
     const existing = await this.triggerSessionExists(ref) ? await this.historySessionManager(ref) : undefined;
     const branch = existing?.getBranch() ?? [];
     const hasModel = branch.some((entry) => isRecord(entry) && entry["type"] === "model_change");

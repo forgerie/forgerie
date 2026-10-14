@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
-import type { TriggerAction } from "../../shared/triggers.js";
+import type { TriggerProjectFire } from "../../shared/triggers.js";
 import type { PiSessionService } from "../sessions/piSessionService.js";
-import { TriggerFireError, type FireTrigger, type TriggerFireRequest } from "./durableTriggers.js";
+import type { FireTrigger, TriggerFireRequest, ProjectTriggerFireRequest } from "./durableTriggers.js";
+
+export class TriggerFireError extends Error {
+  constructor(message: string, readonly sessionId: string, readonly cwd: string) { super(message); }
+}
 
 /** The UUID's clock is the occurrence, not restart time. Its entropy is the request receipt key. */
 export function triggerSessionId(requestId: string, occurrence: number): string {
@@ -17,14 +21,14 @@ export function triggerSessionId(requestId: string, occurrence: number): string 
 
 export function workflowTriggerFire(options: {
   sessions: Pick<PiSessionService, "ensureTriggerSession" | "triggerSessionExists" | "nameTriggerSession" | "noteTriggerFailure" | "runWorkflow">;
-  validateAction: (action: TriggerAction) => Promise<void>;
+  validateAction: (action: ProjectTriggerFireRequest["action"]) => Promise<void>;
   validateWorkspace?: (cwd: string) => Promise<void>;
   /** Restart acceptance can interrupt at either externally committed effect. */
-  afterStep?: (step: "session" | "workflow", request: TriggerFireRequest, context: Context) => Promise<void>;
+  afterStep?: (step: "session" | "workflow", request: ProjectTriggerFireRequest, context: Context) => Promise<void>;
 }): FireTrigger {
   return async (request, context) => {
     context.abortSignal?.throwIfAborted();
-    const sessionId = triggerSessionId(request.requestId, request.occurrence);
+    const sessionId = triggerSessionId(request.legacySessionIdentity === true ? request.requestId : projectSessionKey(request.requestId, request.action.cwd), request.occurrence);
     const ref = { id: sessionId, cwd: request.action.cwd };
     try {
       await options.validateWorkspace?.(ref.cwd);
@@ -48,4 +52,42 @@ export function workflowTriggerFire(options: {
       throw new TriggerFireError(message, sessionId, ref.cwd);
     }
   };
+}
+
+/** Path participates in session identity: two projects must never share a session event-stream key. */
+export function projectSessionKey(requestId: string, cwd: string): string {
+  return JSON.stringify([requestId, cwd]);
+}
+
+/** Every project starts immediately. One project's failure never cancels its siblings. */
+export async function fireTriggerProjects(request: TriggerFireRequest, cwds: readonly string[], fire: FireTrigger, context: Context, previous: readonly TriggerProjectFire[] = [], onProject?: (project: TriggerProjectFire) => Promise<unknown>): Promise<TriggerProjectFire[]> {
+  return Promise.all(cwds.map(async (cwd): Promise<TriggerProjectFire> => {
+    const recorded = previous.find((project) => project.cwd === cwd);
+    if (recorded !== undefined && recorded.outcome.kind !== "running") return recorded;
+    const { targets, ...action } = request.action;
+    void targets;
+    let project: TriggerProjectFire;
+    try {
+      const receipt = await fire({ ...request, action: { ...action, cwd }, ...(request.action.targets.kind === "all" ? { unavailableIsSkip: true } : {}) }, context);
+      project = { cwd, outcome: { kind: "started", sessionId: receipt.sessionId, runId: receipt.runId } };
+    } catch (error) {
+      if (context.abortSignal?.aborted === true) throw error;
+      project = { cwd, outcome: error instanceof TriggerUnavailableError
+        ? { kind: "unavailable", reason: error.message }
+        : { kind: "failed", error: error instanceof Error ? error.message : String(error), ...(error instanceof TriggerFireError ? { sessionId: error.sessionId } : {}) } };
+    }
+    await onProject?.(project);
+    return project;
+  }));
+}
+
+/** Only preflight failures under All projects use this outcome. Execution failures always need attention. */
+export class TriggerUnavailableError extends Error {}
+
+export function summarizeProjectFires(projects: readonly TriggerProjectFire[]): import("../../shared/triggers.js").TriggerFire["outcome"] {
+  const failed = projects.find((project) => project.outcome.kind === "failed");
+  if (failed?.outcome.kind === "failed") return failed.outcome.sessionId === undefined ? failed.outcome : { ...failed.outcome, cwd: failed.cwd };
+  const started = projects.find((project) => project.outcome.kind === "started");
+  if (started?.outcome.kind === "started") return { ...started.outcome, cwd: started.cwd };
+  return { kind: "unavailable", reason: "No target projects could start" };
 }

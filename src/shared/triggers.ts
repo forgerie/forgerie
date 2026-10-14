@@ -6,10 +6,16 @@ import { WorkflowInputSchema, WorkflowInputsSchema } from "./workflowRuns.js";
 /** Trigger IDs become part of workflow request IDs, which allow only letters, digits, and hyphens. */
 export const TriggerIdSchema = Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,47}$" });
 
-/** What a fire does. The first slice has one action: start a saved workflow in a new session of a project. */
+export const TriggerTargetsSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("projects"), cwds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("all") }, { additionalProperties: false }),
+]);
+export type TriggerTargets = Static<typeof TriggerTargetsSchema>;
+
+/** Start the same saved workflow in a new session of each target project. */
 export const TriggerActionSchema = Type.Object({
   kind: Type.Literal("workflow"),
-  cwd: Type.String({ minLength: 1 }),
+  targets: TriggerTargetsSchema,
   workflow: Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }),
   inputs: WorkflowInputsSchema,
   /** Strict `provider/model-id`, the same form as `POST /sessions` `modelSpec`. Absent: the new-session default. */
@@ -60,7 +66,20 @@ const FireOutcomeSchema = Type.Union([
   /** `sessionId` and `cwd` are present when the session was created before the failure. */
   Type.Object({ kind: Type.Literal("failed"), error: Type.String(), sessionId: Type.Optional(Type.String()), cwd: Type.Optional(Type.String()) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("missed") }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("unavailable"), reason: Type.String() }, { additionalProperties: false }),
 ]);
+export const TriggerProjectFireSchema = Type.Object({
+  cwd: Type.String(),
+  outcome: Type.Union([
+    Type.Object({ kind: Type.Literal("running"), startedAt: Type.Number() }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("started"), sessionId: Type.String(), runId: Type.String() }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("failed"), error: Type.String(), sessionId: Type.Optional(Type.String()) }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("unavailable"), reason: Type.String() }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("missed") }, { additionalProperties: false }),
+  ]),
+}, { additionalProperties: false });
+export type TriggerProjectFire = Static<typeof TriggerProjectFireSchema>;
+
 export const TriggerFireSchema = Type.Object({
   /** The scheduled instant for `schedule` fires; the request time for `manual` fires. Unix milliseconds. */
   occurrence: Type.Number(),
@@ -69,7 +88,9 @@ export const TriggerFireSchema = Type.Object({
   recordedAt: Type.Number(),
   /** Earlier occurrences that passed while the daemon was down and were folded into this one. */
   skippedBefore: Type.Integer({ minimum: 0 }),
+  /** Derived summary. Session identity refers to the first started or failed project only. */
   outcome: FireOutcomeSchema,
+  projects: Type.Array(TriggerProjectFireSchema),
 }, { additionalProperties: false });
 export type TriggerFire = Static<typeof TriggerFireSchema>;
 
@@ -129,7 +150,7 @@ export const TriggerWorkflowsResponseSchema = Type.Object({
 }, { additionalProperties: false });
 export type TriggerWorkflowsResponse = Static<typeof TriggerWorkflowsResponseSchema>;
 
-export const TriggerRunRequestSchema = Type.Object({ requestId: Type.String({ pattern: "^[a-zA-Z0-9-]{1,64}$" }) }, { additionalProperties: false });
+export const TriggerRunRequestSchema = Type.Object({ requestId: Type.String({ pattern: "^[a-zA-Z0-9-]{1,64}$" }), cwd: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: false });
 export type TriggerRunRequest = Static<typeof TriggerRunRequestSchema>;
 export const TriggerRunResponseSchema = Type.Object({ requestId: Type.String() }, { additionalProperties: false });
 export type TriggerRunResponse = Static<typeof TriggerRunResponseSchema>;
@@ -153,4 +174,10 @@ export function triggerRequestId(triggerId: string, occurrence: number): string 
 /** One request ID per manual run. The client picks `runRequestId`; repeating it starts nothing new. */
 export function triggerManualRequestId(triggerId: string, runRequestId: string): string {
   return `trigger-${String(triggerId.length)}-${triggerId}-run-${runRequestId}`;
+}
+
+/** Counts for list and history summaries, such as "4 of 5 started". */
+export function triggerFireSummary(fire: Pick<TriggerFire, "projects">) {
+  const count = (kind: TriggerProjectFire["outcome"]["kind"]) => fire.projects.filter((project) => project.outcome.kind === kind).length;
+  return { total: fire.projects.length, started: count("started"), failed: count("failed"), unavailable: count("unavailable"), running: count("running"), missed: count("missed") };
 }
