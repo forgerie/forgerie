@@ -16,14 +16,16 @@
 //      with the keyboard (Enter on the focused button). Samples again while the
 //      reply streams below.
 //   Each sample must stay within 1 CSS px of the first.
-//   3. Checks that text in a finished message the browser skipped
+//   3. Steps a search through messages, one of them in a page that was
+//      loaded above and never drawn, and checks each lands in view.
+//   4. Checks that text in a finished message the browser skipped
 //      (content-visibility) is still found by window.find, and whether it is in
 //      the accessibility tree. The desktop pass turns accessibility on before
 //      the page loads, as a running screen reader does; the unfolded-portrait
 //      pass turns it on only afterwards. Only the first must expose the text;
 //      the second is recorded as a finding.
 //
-//   4. (states) Captures each load-earlier state of the part, light and dark,
+//   5. (states) Captures each load-earlier state of the part, light and dark,
 //      at every viewport, plus the available state with keyboard focus, and
 //      checks the seam's geometry: the action keeps a full touch target and
 //      nothing reaches past the thread column.
@@ -119,11 +121,26 @@ try {
       const opened = await evaluate(cdp, `(() => { const v = __le.viewport(); return { scrollTop: v.scrollTop, scrollHeight: v.scrollHeight, clientHeight: v.clientHeight, messages: __le.messages().length }; })()`);
       result.opened = { ...opened, gapToBottom: opened.scrollHeight - opened.scrollTop - opened.clientHeight };
 
+      // Waits until the transcript has not scrolled for half a second: the thread's own
+      // scrolling (such as bringing a new turn to the top) must not run under a measurement.
+      const settle = async () => {
+        let last;
+        let still = 0;
+        for (let tries = 0; tries < 200 && still < 5; tries++) {
+          const top = await evaluate(cdp, `__le.viewport().scrollTop`);
+          still = top === last ? still + 1 : 0;
+          last = top;
+          await sleep(100);
+        }
+      };
       const measure = async (label, activate) => {
         // The reader scrolls to the oldest loaded message, as a person reaching the seam would.
+        await settle();
         await evaluate(cdp, `__le.viewport().scrollTo({ top: 0, behavior: "instant" })`);
-        await sleep(600);
+        await settle();
         const anchor = await evaluate(cdp, `__le.readerAnchor()`);
+        const oldest = await evaluate(cdp, `__le.messages()[0].dataset.messageId`);
+        assert.equal(anchor, oldest, `${viewport.name} ${label}: the reader is at the oldest loaded message before loading more`);
         const before = await evaluate(cdp, `__le.messages().length`);
         const sampling = evaluate(cdp, `__le.sample(${JSON.stringify(anchor)}, ${SAMPLE_MS})`);
         await sleep(50);
@@ -172,7 +189,24 @@ try {
       const focused = await evaluate(cdp, `document.activeElement?.className ?? ""`);
       result.focusAfterKeyboardLoad = focused;
 
-      // 3. A skipped finished message is still findable and in the accessibility tree.
+      // 3. Search steps land on messages the browser has not drawn yet. Turn 1484 sits in a page
+      //    loaded above and never drawn, so its neighbours still have estimated heights.
+      await until(`!!document.querySelector(".message-assistant[data-message-id^='stream-reply'][data-finished]")`);
+      await evaluate(cdp, `__le.viewport().scrollTo({ top: __le.viewport().scrollHeight, behavior: "instant" })`);
+      await sleep(800);
+      result.reveal = [];
+      for (const id of ["user-1499", "user-1484", "user-1490"]) {
+        const skipped = await evaluate(cdp, `!document.querySelector('[data-message-id="${id}"] .user-bubble').checkVisibility({ contentVisibilityAuto: true })`);
+        await evaluate(cdp, `document.querySelector('.session-header .header-button').click()`);
+        await sleep(2500);
+        const landed = await evaluate(cdp, `(() => { const r = document.querySelector('[data-message-id="${id}"]').getBoundingClientRect(); const v = __le.viewport().getBoundingClientRect();
+          return { top: Math.round(r.top - v.top), inView: r.top >= v.top && r.bottom <= v.bottom }; })()`);
+        result.reveal.push({ id, skippedBefore: skipped, ...landed });
+        console.log(`${viewport.name} reveal ${id} (skipped before: ${skipped}): top ${landed.top} px, in view ${landed.inView} ${landed.inView ? "PASS" : "FAIL"}`);
+        if (!landed.inView) failures++;
+      }
+
+      // 4. A skipped finished message is still findable and in the accessibility tree.
       if (viewport.name === "desktop" || viewport.name === "unfolded-portrait") {
         const text = await evaluate(cdp, `(() => {
           const top = __le.viewport().getBoundingClientRect().bottom;
