@@ -86,17 +86,30 @@ function transientChildError(detail: string): boolean {
   return !PERMANENT_CHILD_ERROR.test(detail) && TRANSIENT_CHILD_ERROR.test(detail);
 }
 
+/** Workflow declaration > requested > agent file. Null ignores both; a thinking suffix overrides agent-file thinking. */
+function workflowWorkerModelChoice(declared: string | null | undefined, requested?: string, profile?: ChildAgentProfile): {
+  spec: string | undefined; choice: { model: { provider: string; modelId: string } | undefined; thinkingLevel: ThinkingLevel | undefined } | null;
+} {
+  if (declared === null) return { spec: undefined, choice: { model: undefined, thinkingLevel: undefined } };
+  const spec = declared ?? requested;
+  const parsed = spec === undefined ? undefined : modelChoice(spec);
+  return { spec, choice: parsed === null ? null : {
+    model: parsed?.model ?? profile?.model,
+    thinkingLevel: parsed?.thinkingLevel ?? profile?.thinkingLevel,
+  } };
+}
+
 /** Apply a declared model only between turns. The caller may wait, or keep a user steer in the current turn. */
 async function applyWorkflowWorkerModel(tx: Tx, parentId: ConversationId, childId: ConversationId, name: string, catalog?: ChildAgentCatalog): Promise<TaskId | undefined> {
   const declared = await workflowWorkerModel(tx, parentId, name);
   if (declared === undefined) return undefined;
   const record = (await tx.doc(Children, parentId)).agents[name];
   const profile = declared === null || record?.agent == null ? undefined : await catalog?.find(record.agent);
-  const choice = declared === null ? undefined : modelChoice(declared);
+  const { choice } = workflowWorkerModelChoice(declared, undefined, profile);
   if (choice === null) throw new WorkflowError(400, `Invalid workflow model for ${name}: ${declared ?? "default"}`);
   const parent = await tx.doc(AgentDoc, parentId);
-  const model = declared === null ? parent.model : choice?.model ?? profile?.model ?? parent.model;
-  const thinkingLevel = declared === null ? parent.thinkingLevel ?? "off" : choice?.thinkingLevel ?? profile?.thinkingLevel ?? parent.thinkingLevel ?? "off";
+  const model = choice.model ?? parent.model;
+  const thinkingLevel = choice.thinkingLevel ?? parent.thinkingLevel ?? "off";
   const configured = await tx.doc(AgentDoc, childId);
   if (configured.model?.provider === model?.provider && configured.model?.modelId === model?.modelId && (configured.thinkingLevel ?? "off") === thinkingLevel) return undefined;
   const busy = (await tx.doc(LiveDoc, childId)).run?.taskId;
@@ -445,9 +458,8 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         if (held !== undefined) return { content: [{ type: "text" as const, text: held }], isError: true };
         // A model the workflow declares for this worker is the user's choice: it wins over the agent's argument.
         const declared = action === "spawn" ? await api.commit((tx) => workflowWorkerModel(tx, api.conversationId, name), context) : undefined;
-        const spec = declared === null ? undefined : declared ?? (action === "spawn" ? args.model : undefined);
-        const model = spec === undefined ? undefined : modelChoice(spec);
-        if (model === null) return { content: [{ type: "text" as const, text: `Write model as provider/model-id, optionally with :thinking-level. Got ${spec ?? ""}${declared === undefined ? "" : " from the workflow file"}.` }], isError: true };
+        const { spec, choice } = workflowWorkerModelChoice(declared, action === "spawn" ? args.model : undefined);
+        if (choice === null) return { content: [{ type: "text" as const, text: `Write model as provider/model-id, optionally with :thinking-level. Got ${spec ?? ""}${declared === undefined ? "" : " from the workflow file"}.` }], isError: true };
         if (existing?.worktreeId !== undefined) await requireWorktrees(selected.worktrees).assertWritable(existing.worktreeId);
         const profile = action === "spawn" && args.agent !== undefined ? await selected.catalog?.find(args.agent) : undefined;
         if (action === "spawn" && args.agent !== undefined && profile === undefined) {
@@ -487,11 +499,10 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
             const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
             // Re-read in the allocation commit, so a route edit during worktree preparation wins too.
             const current = await workflowWorkerModel(tx, api.conversationId, name);
-            const spec = current === null ? undefined : current ?? args.model;
-            const choice = spec === undefined ? undefined : modelChoice(spec);
+            const { spec, choice } = workflowWorkerModelChoice(current, args.model, profile);
             if (choice === null) throw new WorkflowError(400, `Invalid workflow model for ${name}: ${spec ?? ""}`);
-            const chosenModel = current === null ? undefined : choice?.model ?? profile?.model;
-            const chosenThinking = current === null ? undefined : choice?.thinkingLevel ?? profile?.thinkingLevel;
+            const chosenModel = choice.model;
+            const chosenThinking = choice.thinkingLevel;
             const plan = runtime ?? planChildRuntime(profile, availableNames(selected), []);
             await configure(tx, child.id, {
               ...(checkout === undefined ? {} : { cwd: checkout.path }),
