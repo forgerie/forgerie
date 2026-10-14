@@ -91,7 +91,7 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
   const fileParams = Type.Object({ ...FileIssueInputSchema.properties, worktreeId: targetWorktree }, { additionalProperties: false });
   const file = defineTool<typeof fileParams, FileIssueResult>({
     name: "file_issue", label: "File issue", exposure: MODEL_ONLY_EXPOSURE, executionMode: "sequential",
-    description: "Parent only: file a GitHub issue after searching open and closed issues. Supply the search queries in duplicates (at least one). Also searches the title itself and refuses close matches unless all their numbers are in notDuplicateOf. Adds agent-filed, creating that label if missing. If label creation is refused, files without it and reports why. Logs an issue decision.",
+    description: "Parent only: file a GitHub issue after searching open and closed issues. Supply the search queries in duplicates (at least one). Also searches the title itself and refuses close matches unless all their numbers are in notDuplicateOf. Adds agent-filed, creating that label if missing. Refuses before filing if agent-filed cannot be established. The user can create the label or grant the GitHub App Issues: write permission. Logs an issue decision.",
     promptSnippet: "file_issue: file a GitHub issue after checking duplicates, with agent-filed and a decision",
     promptGuidelines: ["Search open and closed issues with github_read before file_issue. Put the queries you ran in duplicates. Only override a matching issue with notDuplicateOf after checking that it is different work. Children suggest issues in reports; only the parent files them. Keep working after filing."],
     parameters: fileParams,

@@ -15,7 +15,8 @@ export const FileIssueResultSchema = Type.Union([
 ]);
 export type FileIssueResult = Static<typeof FileIssueResultSchema>;
 
-const titleWords = (title: string) => title.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+const CLASSIFICATION_PREFIX = /^(?:(?:bug|feat|fix|chore|docs)(?:\([^()\r\n]+\))?!?(?:\s*:|[ \t]+[-–—])\s*|\[(?:bug|feat|fix|chore|docs)\]\s*)+/u;
+const titleWords = (title: string) => title.normalize("NFKC").toLowerCase().trim().replace(CLASSIFICATION_PREFIX, "").match(/[\p{L}\p{N}]+/gu) ?? [];
 /** Search enough title words to intersect every possible close match. Prefer longer, less broad words. */
 export function issueTitleSearchTerms(title: string): string[] {
   const words = [...new Set(titleWords(title))];
@@ -25,12 +26,12 @@ export function issueTitleSearchTerms(title: string): string[] {
   return words.sort((a, b) => b.length - a.length).slice(0, words.length - minimumShared + 1);
 }
 
-/** Case/punctuation-insensitive equality, or Dice >= 0.8 with at least three shared words. */
+/** Equal word sets after classification prefixes, or Dice >= 0.8 with at least three shared words. */
 export function closeIssueTitle(left: string, right: string): boolean {
   const a = titleWords(left); const b = titleWords(right);
   if (a.length === 0 || b.length === 0) return false;
-  if (a.join(" ") === b.join(" ")) return true;
   const x = new Set(a); const y = new Set(b);
   const shared = [...x].filter(word => y.has(word)).length;
+  if (shared === x.size && shared === y.size) return true;
   return shared >= 3 && 2 * shared / (x.size + y.size) >= 0.8;
 }

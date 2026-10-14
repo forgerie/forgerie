@@ -38,9 +38,13 @@ unless the project lists everyone.
 
 ## Duplicate rule
 
-Normalize titles with Unicode NFKC, lowercase them, and split into Unicode
-letter/number words. Titles match when their normalized word sequences are
-equal. Otherwise they match when they share at least three unique words and
+Normalize titles with Unicode NFKC and lowercase them. Strip leading
+classification prefixes `bug:`, `feat:`, `fix:`, `chore:`, `docs:`, bracketed
+forms such as `[bug]`, and dash forms such as `bug -`. Conventional-commit
+scopes and breaking-change markers such as `feat(ui)!:` are also stripped.
+Split the remainder into Unicode letter/number words. Equal word sets match,
+regardless of order, repetition, or length. Different word sets match only
+when they share at least three unique words and
 `2 * shared / (leftWords + rightWords) >= 0.8` (Dice similarity).
 
 The client searches title words with GitHub's search API, scoped by
@@ -49,7 +53,11 @@ For `n` unique title words, a close match must share at least
 `min(n, max(3, ceil(2*n/3)))` words. Searching one more than the maximum number
 of missing words makes every close match share at least one search term.
 Each query pages through up to 1,000 results. An incomplete search, a larger
-result set, or an invalid response refuses filing. No partial search is treated
+result set, or an invalid response refuses filing. Each page must contain the
+expected number of items (100 except for the last page). The total must remain
+stable, and the collected unique issue count must equal `total_count` before
+filing. Short pages and repeated issues refuse filing, including an empty
+single-page result when `total_count` is positive. No partial search is treated
 as permission to create an issue.
 
 This rule catches wording overlap, not semantic duplicates or spelling errors.
@@ -64,13 +72,22 @@ It creates `agent-filed` only if missing. A second process winning the label
 creation race is accepted after a fresh label check. Completed checks are not
 cached: GitHub remains the source of truth.
 
-If GitHub refuses label creation, the issue is still filed with its other labels.
-The result sets `agentFiled: false` and explains the failure in `labelWarning`
-and tool text. A missing label in the creation response is also reported, not
-claimed as attached. This explicit fallback is an exception to ADR 0002's every-issue
-label goal. It keeps the backlog write, but that issue cannot be found by the
-label and closing it remains gated. Unknown caller-supplied labels still refuse
-filing before any write.
+ADR 0002 requires the label. If GitHub refuses label creation, or its label
+creation response omits `agent-filed`, the tool refuses **before** creating an
+issue. It explains why and tells the user to create the label or grant the
+GitHub App `Issues: write` permission. Unknown caller-supplied labels also
+refuse filing before any write. There is no unlabelled fallback.
+
+The issue POST always includes the established label. Successful results always
+set `agentFiled: true`. The existing result schema still accepts `agentFiled`
+as a boolean and optional `labelWarning` for older transcript results.
+
+If GitHub accepts that issue POST but returns an issue without the label, the
+tool reports an error with the created number and URL and prohibits refiling.
+That response arrives after creation, so it cannot be checked before the POST.
+The user must repair the existing issue's label or grant permission. The client
+cannot make GitHub's issue creation and label attachment atomic against remote
+failures or concurrent label deletion.
 
 Success calls `logDecision` in the parent conversation. The record uses
 `id: "issue:<lowercase repo>:<number>"`, `kind: "issue"`, `by: "parent"`, the title

@@ -82,13 +82,13 @@ describe("file_issue", () => {
     expect(calls).toEqual([[{ id: "s1", cwd: "/repo-a" }, "owned"], ["/repo-b", "s1", input]]);
     await expect(file.execute("t2", { ...input, worktreeId: "foreign" }, undefined, undefined, ctxFor("s1"))).rejects.toThrow("Not owned");
   });
-  it("reports label warnings in text and rejects missing duplicate searches at the schema boundary", async () => {
+  it("reports label establishment failure and rejects missing duplicate searches at the schema boundary", async () => {
     const file = createGitHubToolDefinitions("/repo", { read: () => Promise.resolve(""), write: () => Promise.resolve({ text: "" }),
-      fileIssue: () => Promise.resolve({ state: "created", repo: "o/r", number: 9, title: "New", url: "https://github.com/o/r/issues/9", agentFiled: false, labelWarning: "Issue filed without agent-filed: permission refused" }),
+      fileIssue: () => Promise.reject(new Error("No issue was filed: agent-filed could not be established. The user can create agent-filed or grant permission.")),
     })[2];
     expect(Check(file.parameters, { title: "New", body: "", duplicates: [] })).toBe(false);
     expect(Check(file.parameters, { title: "New", body: "" })).toBe(false);
-    const result = await file.execute("t1", { title: "New", body: "", duplicates: ["New"] }, undefined, undefined, ctxFor("s1"));
-    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("without agent-filed"));
+    await expect(file.execute("t1", { title: "New", body: "", duplicates: ["New"] }, undefined, undefined, ctxFor("s1"))).rejects.toThrow("The user can create agent-filed or grant permission");
+    expect(file.description).toContain("Refuses before filing");
   });
 });

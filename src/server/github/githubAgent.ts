@@ -63,7 +63,7 @@ const StatusSchema = Type.Object({ state: Type.String(), statuses: Type.Array(Ty
 const ReviewSchema = Type.Object({ user, state: Type.String() });
 const RepoSchema = Type.Object({ default_branch: Type.String() });
 const MergeSchema = Type.Object({ sha: Type.String(), merged: Type.Boolean() });
-const SearchSchema = Type.Object({ total_count: Type.Integer(), incomplete_results: Type.Optional(Type.Boolean()), items: Type.Array(Type.Unknown()) });
+const SearchSchema = Type.Object({ total_count: Type.Integer({ minimum: 0 }), incomplete_results: Type.Optional(Type.Boolean()), items: Type.Array(Type.Unknown()) });
 type Issue = Static<typeof IssueSchema>;
 
 /** Check conclusions that let a merge go ahead. */
@@ -137,16 +137,23 @@ export class GitHubAgent {
     // Title-word searches avoid AND search missing titles with an omitted word.
     // GitHub caps search at 1000 results. Fail closed rather than pretend a partial search is complete.
     for (const word of words) {
+      let total: number | undefined;
+      const collected = new Set<number>();
       for (let page = 1; ; page++) {
         const q = `repo:${repo.slug} is:issue in:title ${word}`;
         const found = await call.get(`/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=${String(page)}`, SearchSchema, "Issues: read", { absolute: true });
         if (found.total_count > 1000 || found.incomplete_results === true) throw new GitHubToolError("Duplicate search is incomplete. Use a more specific title and search again; no issue was filed.");
+        total ??= found.total_count;
+        if (found.total_count !== total) throw new GitHubToolError("Duplicate search changed while paging; no issue was filed. Search again.");
+        const expected = Math.min(100, total - (page - 1) * 100);
+        if (found.items.length !== expected) throw new GitHubToolError(`Duplicate search came back short or inconsistent: expected ${String(expected)} items on page ${String(page)}, got ${String(found.items.length)}; no issue was filed.`);
         for (const item of found.items) {
           if (!Check(IssueSchema, item)) throw new GitHubToolError("GitHub sent an invalid duplicate search result; no issue was filed.");
+          if (collected.has(item.number)) throw new GitHubToolError("Duplicate search repeated an issue while paging; no issue was filed. Search again.");
+          collected.add(item.number);
           if (item.pull_request === undefined && closeIssueTitle(input.title, item.title)) candidates.set(item.number, item);
         }
-        if (page * 100 >= found.total_count) break;
-        if (found.items.length === 0) throw new GitHubToolError("Duplicate search ended early; no issue was filed.");
+        if (collected.size === total) break;
       }
     }
     const issues = [...candidates.values()];
@@ -158,34 +165,40 @@ export class GitHubAgent {
     if (matches.some(issue => input.notDuplicateOf?.includes(issue.number) !== true)) return { state: "duplicate", repo: repo.slug, matches };
     const requested = [...new Set((input.labels ?? []).filter(label => label.toLowerCase() !== "agent-filed"))];
     await this.requireLabels(call, requested);
-    const labelWarning = await this.ensureAgentFiled(repo.slug, call);
-    const labels = labelWarning === undefined ? [...requested, "agent-filed"] : requested;
+    await this.ensureAgentFiled(repo.slug, call);
+    const labels = [...requested, "agent-filed"];
     const issue = await call.send("POST", "/issues", { title: input.title.trim(), body: `${input.body}\n\n<!-- forgerie-session: ${sessionId} -->`, labels }, IssueSchema, "Issues: write");
-    const agentFiled = labelsOf(issue).some(label => label.toLowerCase() === "agent-filed");
-    const warning = agentFiled ? undefined : labelWarning ?? "Issue filed without agent-filed: GitHub did not attach the requested label.";
-    return { state: "created", repo: repo.slug, number: issue.number, title: issue.title, url: issue.html_url, agentFiled, ...(warning === undefined ? {} : { labelWarning: warning }) };
+    if (!labelsOf(issue).some(label => label.toLowerCase() === "agent-filed")) throw new GitHubToolError(`GitHub created #${String(issue.number)} ${issue.html_url} but did not attach the established agent-filed label. Do not file it again. The user must repair the label or grant the GitHub App Issues: write permission.`);
+    return { state: "created", repo: repo.slug, number: issue.number, title: issue.title, url: issue.html_url, agentFiled: true };
   }
 
-  private readonly agentFiledLabelChecks = new Map<string, Promise<string | undefined>>();
-  private async ensureAgentFiled(repo: string, call: Caller): Promise<string | undefined> {
+  private readonly agentFiledLabelChecks = new Map<string, Promise<void>>();
+  private async ensureAgentFiled(repo: string, call: Caller): Promise<void> {
     const key = repo.toLowerCase();
     const existing = this.agentFiledLabelChecks.get(key);
     if (existing !== undefined) return existing;
     const pending = (async () => {
-      const labels = await this.existingLabels(call);
-      if (labels.some(label => label.name.toLowerCase() === "agent-filed")) return undefined;
-      try { await call.send("POST", "/labels", { name: "agent-filed", color: "ededed", description: "Filed by a Forgerie parent agent" }, LabelSchema, "Issues: write"); }
-      catch (error) {
+      try {
+        const labels = await this.existingLabels(call);
+        if (labels.some(label => label.name.toLowerCase() === "agent-filed")) return;
+        let created;
+        try {
+          created = await call.send("POST", "/labels", { name: "agent-filed", color: "ededed", description: "Filed by a Forgerie parent agent" }, Type.Object({ name: Type.Optional(Type.String()) }), "Issues: write");
+        } catch (error) {
+          if (!(error instanceof GitHubToolError)) throw error;
+          // Another process can create the same label between the GET and POST.
+          const current = await this.existingLabels(call).catch(() => []);
+          if (current.some(label => label.name.toLowerCase() === "agent-filed")) return;
+          throw error;
+        }
+        if (created.name?.toLowerCase() !== "agent-filed") throw new GitHubToolError("GitHub's label creation response did not include agent-filed.");
+      } catch (error) {
         if (!(error instanceof GitHubToolError)) throw error;
-        // Another process can create the same label between the GET and POST.
-        const current = await this.existingLabels(call).catch(() => []);
-        if (current.some(label => label.name.toLowerCase() === "agent-filed")) return undefined;
-        return `Issue filed without agent-filed: label creation failed: ${error.message}`;
+        throw new GitHubToolError(`No issue was filed: could not establish agent-filed: ${error.message} The user can create agent-filed or grant the GitHub App Issues: write permission, then try again.`, { cause: error });
       }
-      return undefined;
     })();
     this.agentFiledLabelChecks.set(key, pending);
-    try { return await pending; }
+    try { await pending; }
     finally { if (this.agentFiledLabelChecks.get(key) === pending) this.agentFiledLabelChecks.delete(key); }
   }
 
