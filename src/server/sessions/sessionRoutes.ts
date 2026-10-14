@@ -1,3 +1,5 @@
+import { sessionEarlierQuerySchema, sessionOpenQuerySchema } from "../../shared/sessionOpen.js";
+import { SessionOpenError } from "./sessionOpen.js";
 import type { DurableBrowserSessionService } from "./durableParentContracts.js";
 import type { DurableBrowserAttachment } from "./durableParentReadModel.js";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -21,6 +23,8 @@ interface MessageQuery extends SessionQuery {
   before?: string;
   limit?: string;
   preview?: string;
+  historyId?: string;
+  around?: string;
 }
 
 interface PromptRequestBody {
@@ -215,9 +219,28 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
+  app.get<{ Params: { sessionId: string }; Querystring: MessageQuery }>(`${prefix}/sessions/:sessionId/open`, async (request, reply) => {
+    const query = sessionOpenQuerySchema.safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: query.error.message });
+    try {
+      if (sessions.open === undefined) throw new SessionOpenError("Consistent session opens are unavailable", 503, "OPEN_UNAVAILABLE");
+      return await sessions.open({ id: request.params.sessionId, cwd: normalizeRequestCwd(query.data.cwd) }, query.data);
+    } catch (error) {
+      return reply.code(openErrorStatus(error)).send({ error: errorMessage(error), ...(error instanceof SessionOpenError ? { code: error.code } : {}) });
+    }
+  });
+
   app.get<{ Params: { sessionId: string }; Querystring: MessageQuery }>(`${prefix}/sessions/:sessionId/messages`, async (request, reply) => {
     const ref = sessionRefFromQueryOr400(request.params.sessionId, request.query, reply);
     if (ref === undefined) return reply;
+    if (request.query.historyId !== undefined) {
+      const query = sessionEarlierQuerySchema.safeParse(request.query);
+      if (!query.success) return reply.code(400).send({ error: query.error.message });
+      try {
+        if (sessions.earlier === undefined) throw new SessionOpenError("Consistent older pages are unavailable", 503, "OPEN_UNAVAILABLE");
+        return await sessions.earlier(ref, query.data);
+      } catch (error) { return reply.code(openErrorStatus(error)).send({ error: errorMessage(error), ...(error instanceof SessionOpenError ? { code: error.code } : {}) }); }
+    }
     try {
       const page = { ...optionalField("before", optionalNumber(request.query.before)), ...optionalField("limit", optionalNumber(request.query.limit)) };
       const messages = await sessions.messages(ref, page);
@@ -862,4 +885,10 @@ function requireKnownThinkingLevel(body: Record<string, unknown>): ThinkingLevel
   const value = requireNonEmptyString(body, "thinkingLevel");
   if (!isKnownThinkingLevel(value)) throw new Error(`Unknown thinking level "${value}"`);
   return value;
+}
+
+function openErrorStatus(error: unknown): number {
+  if (error instanceof SessionOpenError) return error.status;
+  if (error instanceof RangeError) return 400;
+  return isSessionNotFoundError(error) ? 404 : 503;
 }

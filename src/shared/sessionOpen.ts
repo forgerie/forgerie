@@ -13,6 +13,16 @@ export const sessionOpenRequestSchema = z.object({
 });
 export type SessionOpenRequest = z.infer<typeof sessionOpenRequestSchema>;
 
+const queryInteger = z.string().regex(/^\d+$/u, "Expected a nonnegative integer").transform(Number);
+export const sessionOpenQuerySchema = z.object({ cwd: sessionOpenRequestSchema.shape.cwd,
+  limit: queryInteger.pipe(z.number().int().min(1).max(500)).optional(),
+  around: queryInteger.pipe(safePosition).optional(),
+}).transform(value => sessionOpenRequestSchema.parse(value));
+export const sessionEarlierQuerySchema = z.object({ cwd: sessionOpenRequestSchema.shape.cwd,
+  limit: queryInteger.pipe(z.number().int().min(1).max(500)).prefault("50"),
+  before: queryInteger.pipe(safePosition), historyId: identity,
+});
+
 /** A pre-read completion boundary, never permission to acknowledge later work. */
 export const sessionOpenReceiptSchema = z.object({
   catalogId: identity,

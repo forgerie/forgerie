@@ -1,3 +1,5 @@
+import type { SessionOpenHistoryPage, SessionOpenResult } from "./sessionOpen.js";
+import type { SessionOpenRequest } from "../../shared/sessionOpen.js";
 import type { PromptRequestOptions } from "../../shared/promptRequest.js";
 import type {
   AskUserCloseResponse,
@@ -65,6 +67,8 @@ export interface SessionRouteService {
     initialModelSpec?: string;
     initialThinkingLevel?: ClientThinkingLevel;
   }): Promise<ClientSession>;
+  open?(ref: SessionRouteRef, page: Pick<SessionOpenRequest, "limit" | "around">): Promise<SessionOpenResult>;
+  earlier?(ref: SessionRouteRef, page: { before: number; limit: number; historyId: string }): Promise<SessionOpenHistoryPage>;
   messages(ref: SessionRouteRef, page?: { before?: number; limit?: number }): Promise<ClientMessagePage>;
   tree(ref: SessionRouteRef): Promise<SessionTreeResponse>;
   status(ref: SessionRouteRef): Promise<ClientSessionStatus>;

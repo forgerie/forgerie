@@ -1,10 +1,18 @@
 import { z } from "zod";
+import type { Static } from "typebox";
+import { copyJson } from "@earendil-works/chord";
 import { Check } from "typebox/value";
 import { ChildRunUsageStateSchema } from "../../shared/childRuns.js";
 import { randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
 import type { ContextView, ConversationView, Cursor, EntryRecord, UsageState, WatchEnd, WatchHandle } from "@earendil-works/pi-durable";
-import { UsageDoc } from "@earendil-works/pi-durable";
+import { AgentDoc, InboxDoc, LiveDoc, UsageDoc } from "@earendil-works/pi-durable";
+import { ParentAsks, ParentAsksSchema, ParentResponse, ParentResponseSchema, Presentation, PresentationSchema, SessionName, SessionNameSchema } from "./durableParentDocuments.js";
+import type { SessionOpenResult } from "./sessionOpen.js";
+import type { SessionEventHub } from "../realtime/sessionEventHub.js";
+import { ASK_USER_ANSWERS_CUSTOM_TYPE } from "../../shared/apiTypes.js";
+import { ParentAskOutcomeSchema } from "./sessionResponse.js";
+import { renderAskUserAnswersText } from "./sessionAsks.js";
 import type { SessionStatus } from "../../shared/apiTypes.js";
 import { durableBrowserMessageSchema, durableBrowserSnapshotSchema, type DurableBrowserAppState, type DurableBrowserMessage, type DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import { projectBrowserMessage, projectBrowserMessageResponse, projectBrowserSessionEvent } from "../browserMessageProjection.js";
@@ -46,6 +54,85 @@ export interface DurableBrowserAttachment {
 /** Committed parent reads. No read, attachment, or replacement resumes the scheduler. */
 export class DurableParentReadModel {
   constructor(private readonly options: DurableParentReadModelOptions) {}
+
+  /**
+   * Preload document membership, then use only Tx reads on the serialized line.
+   * Membership is guarded by adoption: Tx.doc creates absent documents, which an open must never do.
+   */
+  async open(cwd: string, request: MessagePageRequest, hub: SessionEventHub, context: Context,
+    hostStatus: () => Partial<SessionStatus> = () => ({})): Promise<SessionOpenResult> {
+    const { handle } = this.options;
+    const id = handle.conversation.id;
+    let revision = 0;
+    const stop = handle.harness.subscribeCommits(publication => { if (publication.changes.length) revision++; });
+    const unobserve = hub.observeNative(handle.address.sessionId, handle.harness, id);
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const before = hub.currentSeq(handle.address.sessionId);
+        const membershipRevision = revision;
+        const required = await Promise.all([
+          handle.harness.snapshot(LiveDoc, id, context), handle.harness.snapshot(InboxDoc, id, context),
+          handle.harness.snapshot(AgentDoc, id, context), handle.harness.snapshot(UsageDoc, id, context),
+          handle.harness.snapshot(ParentAsks, id, context), handle.harness.snapshot(ParentResponse, id, context),
+          handle.harness.snapshot(SessionName, id, context),
+        ]);
+        if (required.some(value => value === undefined)) throw new Error("Native open requires initialized parent documents");
+        const keys: string[] = [];
+        let cursor: Cursor | undefined;
+        do {
+          const page = await handle.conversation.entries({ order: "ascending" }, SCAN_SIZE, cursor, context);
+          for (const entry of page.items) {
+            const key = String(entry.id);
+            if (await handle.harness.snapshot(Presentation, id, key, context) !== undefined) keys.push(key);
+          }
+          cursor = page.next;
+        } while (cursor !== undefined);
+        const cut = await handle.conversation.commit(async tx => {
+          if (membershipRevision !== revision) return undefined;
+          const entries: EntryRecord[] = [];
+          let cursor: Cursor | undefined;
+          do {
+            const page = await tx.scanEntries({ conversationId: id, order: "ascending" }, SCAN_SIZE, cursor);
+            entries.push(...page.items); cursor = page.next;
+          } while (cursor !== undefined);
+          // No table reads may follow document acquisition (which can stage initialization).
+          const live = await tx.doc(LiveDoc, id), inbox = await tx.doc(InboxDoc, id);
+          const agent = await tx.doc(AgentDoc, id), usage = await tx.doc(UsageDoc, id);
+          const asks = copyJson(await tx.doc(ParentAsks, id)), response = await tx.doc(ParentResponse, id), name = await tx.doc(SessionName, id);
+          if (!Check(ParentAsksSchema, asks) || !Check(ParentResponseSchema, response) || !Check(SessionNameSchema, name)) throw new Error("Invalid native parent documents");
+          const envelopes = new Map<string, Static<typeof PresentationSchema>>();
+          for (const key of keys) {
+            const document = await tx.doc(Presentation, id, key, null);
+            if (!Check(PresentationSchema, document)) throw new Error("Invalid native presentation document");
+            const detached = copyJson(document);
+            if (!Check(PresentationSchema, detached)) throw new Error("Invalid detached native presentation");
+            envelopes.set(key, detached);
+          }
+          const messages = entries.flatMap(entry => this.entryMessages(entry, nativePresentation(entry, envelopes.get(String(entry.id))?.envelope)));
+          const seq = hub.currentSeq(handle.address.sessionId);
+          const partial = live.generation?.message;
+          const tools = (live.tools ?? []).filter(slot => projectBrowserSessionEvent({ type: "tool.start", toolName: slot.name, toolCallId: slot.callId, summary: "" }).type === "tool.start")
+            .map(slot => ({ toolCallId: slot.callId, toolName: slot.name, status: slot.status, output: slot.output ?? "" }));
+          const queuedMessages = inbox.items.flatMap(item => item.mode === "write" ? [] : [{ kind: item.mode,
+            text: typeof item.content === "string" ? item.content : item.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n") }]);
+          hub.savedHostOutput(handle.address.sessionId, messages);
+          const status: SessionStatus = { ...hostStatus(), sessionId: handle.address.sessionId, persisted: true,
+            isStreaming: live.run !== undefined, isCompacting: (live.compactions?.length ?? 0) > 0,
+            isBashRunning: hub.transientEvents(handle.address.sessionId).some(event => event.type === "shell.start") && !hub.transientEvents(handle.address.sessionId).some(event => event.type === "shell.end"),
+            pendingMessageCount: queuedMessages.length, queuedMessages, messageCount: messages.length, ...durableUsageTotals(usage),
+            ...(agent.model === undefined ? {} : { model: { ...agent.model, name: agent.model.modelId } }),
+            ...(asks.pending === undefined ? {} : { pendingAsk: asks.pending }),
+            response: asks.pending !== undefined ? { kind: "needs-response", reason: "questions" }
+              : response.intent === "nothing" ? { kind: "none" } : { kind: "needs-response", reason: response.intent === "questions" ? "reply" : response.intent } };
+          return structuredClone({ session: { id: handle.address.sessionId, cwd, ...(name.name === undefined ? {} : { name: name.name }) }, readPath: "native" as const,
+            epoch: hub.epoch, seq, historyId: `native:${handle.address.journalId}:${String(id)}`, page: this.page(messages, { ...request, completeTurns: true }),
+            snapshot: { seq, partial: partial === undefined ? null : durableBrowserMessageSchema.parse(projectBrowserMessage(partial)), tools, transientEvents: hub.transientEvents(handle.address.sessionId) }, status, receipt: null });
+        }, context);
+        if (cut !== undefined && before === hub.currentSeq(handle.address.sessionId)) return cut;
+      }
+      throw new Error("Native open could not acquire a consistent checkpoint after three attempts");
+    } finally { stop(); unobserve(); }
+  }
 
   context(context: Context): Promise<ContextView> { return this.options.handle.conversation.context(context); }
 
@@ -198,8 +285,8 @@ export class DurableParentReadModel {
     return result;
   }
 
-  private entryMessages(entry: EntryRecord): DurableBrowserMessage[] {
-    const projected = this.options.projectEntry?.(entry) ?? defaultEntryMessages(entry);
+  private entryMessages(entry: EntryRecord, committed?: readonly unknown[]): DurableBrowserMessage[] {
+    const projected = committed ?? this.options.projectEntry?.(entry) ?? defaultEntryMessages(entry);
     const messages = projected.map((message, index) => {
       const safe = durableBrowserMessageSchema.parse(projectBrowserMessage(message));
       return { ...safe, id: this.options.messageId(entry, index) };
@@ -232,4 +319,24 @@ export function durableUsageTotals(usage: Readonly<UsageState>): { tokens: Sessi
     tokens.total += value.totalTokens; cost += value.cost.total;
   }
   return { tokens, cost };
+}
+
+/** Committed presentation facts, not the SDK view's independently refreshed cache. */
+function nativePresentation(entry: EntryRecord, envelope: Static<typeof PresentationSchema>["envelope"]): readonly unknown[] {
+  if (envelope === undefined) return defaultEntryMessages(entry);
+  const first = entry.model?.[0];
+  const data = typeof entry.data === "object" && entry.data !== null && !Array.isArray(entry.data) ? entry.data : {};
+  let content = first?.content ?? data["content"];
+  if (envelope.type === "custom") {
+    if (envelope.display !== true) return [];
+    if (content === undefined && envelope.customType === ASK_USER_ANSWERS_CUSTOM_TYPE && Check(ParentAskOutcomeSchema, envelope.details)) content = renderAskUserAnswersText(envelope.details);
+    if (content === undefined) throw new Error("Native custom presentation has no content");
+    return [{ role: "custom", customType: envelope.customType, content, details: envelope.details, ...(first === undefined ? {} : { timestamp: first.timestamp }) }];
+  }
+  const text = typeof content === "string" ? content : Array.isArray(content) ? content.flatMap(part => typeof part === "object" && part !== null && "type" in part && part.type === "text" && "text" in part && typeof part.text === "string" ? [part.text] : []).join("\n") : "";
+  const prefix = `Ran \`${envelope.command ?? ""}\`\n`;
+  const start = prefix.length + 4, end = text.lastIndexOf("\n```");
+  const output = typeof data["output"] === "string" ? data["output"] : text.startsWith(prefix + "```\n") && end >= start ? text.slice(start, end) : text.startsWith(prefix + "(no output)") ? "" : undefined;
+  if (output === undefined) throw new Error("Native shell presentation has no recoverable output");
+  return [{ role: "bashExecution", ...envelope, output, ...(first === undefined ? {} : { timestamp: first.timestamp }) }];
 }

@@ -4,6 +4,9 @@ const MAX_LIMIT = 500;
 export interface MessagePageRequest {
   before?: number;
   limit?: number;
+  around?: number | undefined;
+  /** New cursor callers reject unsafe ends; legacy reads retain their contract. */
+  completeTurns?: true;
 }
 
 export interface MessagePageResult<T> {
@@ -12,44 +15,32 @@ export interface MessagePageResult<T> {
   total: number;
 }
 
+/** Cursors and positions name the projected sequence, never the compacted context. */
 export function pageMessagesAtSafeBoundary<T>(messages: T[], page?: MessagePageRequest): MessagePageResult<T> {
   const total = messages.length;
-  if (page?.before === undefined && page?.limit === undefined) return { messages, start: 0, total };
-  const before = clampInteger(page.before ?? total, 0, total);
-  const limit = clampInteger(page.limit ?? DEFAULT_LIMIT, 1, MAX_LIMIT);
+  if (page?.before === undefined && page?.limit === undefined && page?.around === undefined) return { messages, start: 0, total };
+  const limit = page.limit ?? DEFAULT_LIMIT;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIMIT) throw new RangeError("limit must be an integer from 1 to 500");
+  let before = page.before ?? total;
+  if (!Number.isSafeInteger(before) || before < 0 || before > total) throw new RangeError("before must name a position in this history");
+  if (page.completeTurns === true && before !== total && before !== 0 && !isTurnBoundary(messages[before])) throw new RangeError("before must name a complete-turn boundary");
+  if (page.around !== undefined) {
+    if (!Number.isSafeInteger(page.around) || page.around < 0 || page.around >= total) throw new RangeError("around must name a message in this history");
+    before = page.around + 1;
+    while (before < total && !isTurnBoundary(messages[before])) before++;
+  }
   const requestedStart = Math.max(0, before - limit);
-  const start = expandStartToSafeBoundary(messages, requestedStart);
+  const start = expandStartToSafeBoundary(messages, page.around === undefined ? requestedStart : Math.min(requestedStart, page.around));
   return { messages: messages.slice(start, before), start, total };
 }
 
 export function expandStartToSafeBoundary(messages: unknown[], requestedStart: number): number {
-  const start = clampInteger(requestedStart, 0, messages.length);
-  if (start === 0 || isTurnBoundary(messages[start])) return start;
-  for (let index = start - 1; index >= 0; index -= 1) {
-    if (isTurnBoundary(messages[index])) return index;
-  }
+  if (!Number.isSafeInteger(requestedStart) || requestedStart < 0 || requestedStart > messages.length) throw new RangeError("Invalid start position");
+  if (requestedStart === 0 || requestedStart === messages.length || isTurnBoundary(messages[requestedStart])) return requestedStart;
+  for (let index = requestedStart - 1; index >= 0; index--) if (isTurnBoundary(messages[index])) return index;
   return 0;
 }
 
 function isTurnBoundary(message: unknown): boolean {
-  return getString(message, "role") === "user";
-}
-
-function getProperty(value: unknown, key: string): unknown {
-  if (!isRecord(value)) return undefined;
-  return value[key];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function getString(value: unknown, key: string): string | undefined {
-  const property = getProperty(value, key);
-  return typeof property === "string" ? property : undefined;
-}
-
-function clampInteger(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return max;
-  return Math.max(min, Math.min(max, Math.floor(value)));
+  return typeof message === "object" && message !== null && "role" in message && message.role === "user";
 }

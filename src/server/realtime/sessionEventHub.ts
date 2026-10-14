@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
+import type { Harness } from "@earendil-works/pi-durable";
+import type { SessionOpenTransientEvent } from "../../shared/sessionOpen.js";
 import type { GlobalSessionEvent, RealtimeEvent, SessionNotificationSummaryEvent, SessionUiEvent } from "../../shared/apiTypes.js";
 import { durableBrowserSnapshotSchema, type DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import { projectBrowserSessionEvent } from "../browserMessageProjection.js";
@@ -20,6 +24,61 @@ export class SessionEventHub {
   private readonly nativeSockets = new WeakSet<RealtimeSocket>();
   private readonly globalSockets = new Set<RealtimeSocket>();
   private readonly seqBySession = new Map<string, number>();
+  readonly epoch = randomUUID();
+  private readonly hostBySession = new Map<string, SessionOpenTransientEvent[]>();
+  private readonly adopted = new WeakMap<Harness, Map<string, { count: number; stop: () => void }>>();
+
+  /** One checkpoint per adopted native commit, independent of SDK callbacks and watch revisions. */
+  observeNative(sessionId: string, harness: Harness, conversationId: number): () => void {
+    let sessions = this.adopted.get(harness);
+    if (!sessions) { sessions = new Map(); this.adopted.set(harness, sessions); }
+    const key = `${sessionId}:${String(conversationId)}`;
+    let observation = sessions.get(key);
+    if (!observation) {
+      observation = { count: 0, stop: harness.subscribeCommits((publication) => {
+        if (publication.changes.some(change => (change.type === "document" || change.type === "document.copy")
+          ? change.conversationId === conversationId || change.conversationId === undefined
+          : change.type === "conversation" ? change.value.id === conversationId : change.value.conversationId === conversationId)) {
+          this.seqBySession.set(sessionId, this.currentSeq(sessionId) + 1);
+        }
+      }) };
+      sessions.set(key, observation);
+    }
+    observation.count++;
+    let stopped = false;
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      if (--observation.count === 0) { observation.stop(); sessions.delete(key); }
+    };
+  }
+
+  transientEvents(sessionId: string): SessionOpenTransientEvent[] {
+    return structuredClone(this.hostBySession.get(sessionId) ?? []);
+  }
+
+  /** Saved shell records replace their matching ephemeral command, never an unrelated run. */
+  savedHostOutput(sessionId: string, messages: readonly { role: string; command?: string | undefined; output?: string | undefined }[]): void {
+    const events = this.hostBySession.get(sessionId);
+    const start = events?.find(event => event.type === "shell.start");
+    const end = events?.find(event => event.type === "shell.end");
+    if (start?.type === "shell.start" && end?.type === "shell.end" && end.isError !== true
+      && messages.some(message => message.role === "bashExecution" && message.command === start.command && message.output === end.output)) {
+      this.hostBySession.set(sessionId, (events ?? []).filter(event => !event.type.startsWith("shell.")));
+    }
+  }
+
+  private rememberHostOutput(sessionId: string, event: SessionUiEvent): void {
+    const events = this.hostBySession.get(sessionId) ?? [];
+    if (event.type === "shell.start") this.hostBySession.set(sessionId, [...events.filter(item => !item.type.startsWith("shell.")), event]);
+    else if (event.type === "shell.chunk") {
+      const chunk = events.find(item => item.type === "shell.chunk");
+      // Same live tail as shellRun.LIVE_OUTPUT_LIMIT; final output retains the producer's disclosure.
+      const output = ((chunk?.type === "shell.chunk" ? chunk.chunk : "") + event.chunk).slice(-DEFAULT_MAX_BYTES);
+      this.hostBySession.set(sessionId, [...events.filter(item => item.type !== "shell.chunk"), { type: "shell.chunk", chunk: output }]);
+    } else if (event.type === "shell.end") this.hostBySession.set(sessionId, [...events.filter(item => item.type !== "shell.end"), event]);
+    else if (event.type === "command.output") this.hostBySession.set(sessionId, [...events.filter(item => item.type !== "command.output"), event]);
+  }
 
   add(sessionId: string, socket: RealtimeSocket): void {
     let sockets = this.socketsBySession.get(sessionId);
@@ -70,6 +129,7 @@ export class SessionEventHub {
   }
 
   publish(sessionId: string, event: SessionUiEvent): void {
+    this.rememberHostOutput(sessionId, event);
     const seq = (this.seqBySession.get(sessionId) ?? 0) + 1;
     this.seqBySession.set(sessionId, seq);
     const payload = JSON.stringify({ ...projectBrowserSessionEvent(event), seq });

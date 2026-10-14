@@ -1,4 +1,8 @@
 import type { TaskActivity } from "../../shared/durableTaskActivity.js";
+import { durableBrowserMessageSchema } from "../../shared/durableBrowserSnapshot.js";
+import { z } from "zod";
+import type { SessionOpenRequest } from "../../shared/sessionOpen.js";
+import { PresentationHistoryIdentity, SessionOpenError, type SessionOpenResult, type SessionOpenMessage, type SessionOpenHistoryPage } from "./sessionOpen.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { ManagedProcessRegistry, type ManagedProcessRegistryOptions } from "../processes/managedProcessRegistry.js";
 import type { ManagedProcesses } from "../processes/managedProcesses.js";
@@ -1135,6 +1139,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly pullRequestWatches: PiSessionServiceDependencies["pullRequestWatches"];
   private readonly sessionManager: PiSessionManagerGateway;
   private readonly durableReader: DurableSessionReader | undefined;
+  private readonly presentationHistory = new PresentationHistoryIdentity();
   private readonly preparingFamilies = new WeakMap<Harness, Promise<void>>();
   private readonly sessionWorktrees: SessionWorktrees | undefined;
   private readonly createRuntime: PiWebCreateAgentSessionRuntimeFactory;
@@ -2794,6 +2799,76 @@ export class PiSessionService implements SessionRouteService {
   async attachDurableBrowser(ref: PiSessionRef, send: (snapshot: DurableBrowserSnapshot) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment> {
     if (this.durableReader === undefined) throw new Error("Native Durable browser reads are not configured");
     return this.durableReader.attach(ref, send, onFailure);
+  }
+
+  /** Preparation may await. The active classic cut below must not. */
+  async open(ref: PiSessionRef, page: Pick<SessionOpenRequest, "limit" | "around"> & { before?: number }): Promise<SessionOpenResult> {
+    const active = this.activeForRef(ref)?.runtime.session;
+    if (active instanceof DurableAgentSession) await active.flushDurableMutations();
+    const catalog = await this.unreadCatalog(); // Capture before any transcript acquisition.
+    const receiptFor = (id: string, cwd: string) => {
+      const unread = catalog.sessions.find(item => item.sessionId === id && item.cwd === canonicalizeStoredCwd(cwd));
+      return unread === undefined ? null : { catalogId: catalog.catalogId, throughCompletionOrder: unread.completionOrder };
+    };
+    const native = await this.durableReader?.open(ref, page, this.events, () => {
+      const session = this.activeForRef(ref)?.runtime.session;
+      return session === undefined ? {} : this.statusFromSession(session);
+    });
+    if (native !== undefined) return { ...native, receipt: receiptFor(native.session.id, native.session.cwd) };
+    const readonly = await this.sessionWorktrees?.store.readOnly(ref);
+    const archived = await this.getArchived(ref);
+    const worktree = await this.sessionWorktrees?.store.forSession(ref);
+    const worktreeInfo = worktree === undefined ? undefined : await this.sessionWorktrees?.info(worktree, ref.id);
+    if (readonly !== undefined || archived !== undefined) {
+      const path = readonly?.transcriptPath ?? archived?.archivePath;
+      if (path === undefined) throw new SessionOpenError("Saved session history is unavailable", 503, "OPEN_UNAVAILABLE");
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const before = await stat(path);
+        const manager = await (this.sessionManager.openReadOnly?.(path) ?? this.sessionManager.open(path));
+        const after = await stat(path);
+        if (before.ino !== after.ino || before.dev !== after.dev || before.size !== after.size || before.mtimeMs !== after.mtimeMs) continue;
+        const messages = this.openMessages(manager);
+        const id = manager.getSessionId(), cwd = manager.getCwd();
+        const status: ClientSessionStatus = { sessionId: id, readOnly: true, persisted: true, isStreaming: false, isCompacting: false,
+          isBashRunning: false, pendingMessageCount: 0, queuedMessages: [], messageCount: messages.length, ...savedTranscriptUsage(messages),
+          ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) };
+        return this.classicOpenCut(id, cwd, messages, null, status, page, receiptFor(id, cwd));
+      }
+      throw new SessionOpenError("Saved history changed during open", 503, "OPEN_UNAVAILABLE");
+    }
+    const session = await this.getOrOpen(ref);
+    // Worktree/file/unread preparation is complete. All values below share one synchronous tick.
+    const messages = this.openMessages(session.sessionManager);
+    const streaming = session.state.streamingMessage;
+    const partial = streaming == null ? null : openMessageSchema.parse(annotateAssistantThinkingLevel(projectBrowserMessage(streaming), session.thinkingLevel));
+    const status = { ...this.statusFromSession(session), ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) };
+    return this.classicOpenCut(session.sessionId, session.sessionManager.getCwd(), messages, partial, status, page, receiptFor(session.sessionId, session.sessionManager.getCwd()));
+  }
+
+  private openMessages(manager: PiSessionManager): SessionOpenMessage[] {
+    const ids: string[] = [];
+    const raw = historyMessages(manager, (id, position) => { ids[position] = id; });
+    const visible: SessionOpenMessage[] = [];
+    projectBrowserMessageResponse({ messages: raw, start: 0, total: raw.length }, (position) => {
+      visible.push(openMessageSchema.parse({ ...openMessageSchema.parse(projectBrowserMessage(raw[position])), ...(ids[position] === undefined ? {} : { id: ids[position] }) }));
+    });
+    return structuredClone(visible);
+  }
+
+  private classicOpenCut(id: string, cwd: string, messages: SessionOpenMessage[], partial: SessionOpenMessage | null, status: ClientSessionStatus,
+    page: Pick<SessionOpenRequest, "limit" | "around"> & { before?: number }, receipt: SessionOpenResult["receipt"]): SessionOpenResult {
+    const seq = this.events.currentSeq(id);
+    this.events.savedHostOutput(id, messages);
+    return structuredClone({ session: { id, cwd }, readPath: "classic", epoch: this.events.epoch, seq,
+      historyId: this.presentationHistory.identify(JSON.stringify([cwd, id]), messages),
+      page: pageMessagesAtSafeBoundary(messages, { ...page, completeTurns: true }),
+      snapshot: { seq, partial, tools: [], transientEvents: this.events.transientEvents(id) }, status, receipt });
+  }
+
+  async earlier(ref: PiSessionRef, page: { before: number; limit: number; historyId: string }): Promise<SessionOpenHistoryPage> {
+    const opened = await this.open(ref, { limit: page.limit, before: page.before });
+    if (opened.historyId !== page.historyId) throw new SessionOpenError("Session history changed", 409, "HISTORY_CHANGED");
+    return { ...opened.page, historyId: opened.historyId, epoch: opened.epoch, seq: opened.seq };
   }
 
   async messages(ref: PiSessionRef, page?: { before?: number; limit?: number }): Promise<ClientMessagePage> {
@@ -6157,3 +6232,5 @@ function stringifyPrimitive(value: unknown): string {
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
   return "";
 }
+
+const openMessageSchema = durableBrowserMessageSchema.extend({ fullOutputPath: z.string().optional(), thinkingLevel: z.string().optional() });
