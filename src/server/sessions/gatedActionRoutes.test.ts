@@ -25,7 +25,7 @@ beforeEach(async () => {
   await run("git", ["-C", cwd, "push", "origin", "main"]);
   const hook = join(cwd, ".git", "hooks", "pre-push"); await writeFile(hook, '#!/bin/sh\necho run >> "' + join(root, "push-count") + '"\n'); await chmod(hook, 0o700);
   const models = await ModelRuntime.create({authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json")});
-  const provider = fauxProvider({tokensPerSecond: 100000}); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider({tokensPerSecond: 100000}); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   provider.setResponses(Array.from({length: 100}, () => request => {
     const last = [...request.messages].reverse().find(m => m.role !== "system");
     const content = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content);

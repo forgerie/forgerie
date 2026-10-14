@@ -24,7 +24,7 @@ async function fixture({ supportsOff = false, defaultThinkingLevel = "high" }: {
   const modelRuntime = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json") });
   const provider = fauxProvider({ models: [{ id: "reasoning-one", reasoning: true }, { id: "reasoning-two", reasoning: true }] });
   for (const model of provider.models) model.thinkingLevelMap = { ...(supportsOff ? {} : { off: null, minimal: null }), xhigh: "xhigh", max: "max" };
-  modelRuntime.registerNativeProvider(provider.provider);
+  modelRuntime.registerNativeProvider(provider.provider); await modelRuntime.refresh({ allowNetwork: false });
   const model = modelRuntime.getModel("faux", "reasoning-one");
   const otherModel = modelRuntime.getModel("faux", "reasoning-two");
   if (model === undefined || otherModel === undefined) throw new Error("Configured reasoning models must exist");

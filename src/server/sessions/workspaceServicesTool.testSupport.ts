@@ -9,7 +9,7 @@ import { DurableSessionRuntime, type DurableRuntimeOptions } from "./durableSess
 /** Actual SDK and Durable wiring with a configured local provider and an isolated profile. */
 export async function servicesToolRuntime(cwd: string, root: string, services: WorkspaceServices) {
   const modelRuntime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: join(root, "models.json") });
-  const provider = fauxProvider(); modelRuntime.registerNativeProvider(provider.provider);
+  const provider = fauxProvider(); modelRuntime.registerNativeProvider(provider.provider); await modelRuntime.refresh({ allowNetwork: false });
   const model = modelRuntime.getModel("faux", "faux-1");
   if (model === undefined) throw new Error("Missing configured provider model");
   const errors: string[] = [];

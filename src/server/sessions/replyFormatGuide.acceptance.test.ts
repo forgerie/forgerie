@@ -26,7 +26,7 @@ async function promptOnce(profile: { systemMd?: string; appendMd?: string }): Pr
   if (profile.appendMd !== undefined) await writeFile(join(agentDir, "APPEND_SYSTEM.md"), profile.appendMd);
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
   const provider = fauxProvider();
-  models.registerNativeProvider(provider.provider);
+  models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   const prompts: string[] = [];
   // Title generation shares the provider, so script more answers than turns.
   provider.setResponses(recordingResponses(prompts, 6));

@@ -21,7 +21,7 @@ it("runs the hosted SDK process tool, retains it on reload, and leaves the injec
   const root = await mkdtemp(join(tmpdir(), "forgerie-hosted-process-tool-"));
   const agentDir = join(root, "agent");
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   const model = models.getModel("faux", "faux-1");
   if (model === undefined) throw new Error("Missing model");
   const manager = SessionManager.create(root, join(root, "sessions"));
@@ -72,7 +72,7 @@ it("wires the production hosted child tool to the persisted run ID and keeps onl
   const root = await mkdtemp(join(tmpdir(), "forgerie-child-process-tool-"));
   const agentDir = join(root, "agent");
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   const control = controlledManagedProcessLauncher();
   const records = new ChildRunStore(join(root, "child-runs.json"));
   const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] });

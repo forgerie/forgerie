@@ -27,7 +27,7 @@ async function fixture() {
   const agentDir = join(directory, "agent");
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
   const provider = fauxProvider();
-  models.registerNativeProvider(provider.provider);
+  models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: directory }, sessionDirEnvKeys: [] });
   const open = (archiveStore = emptyArchiveStore()) => {
     const hub = new CapturingSessionEventHub();

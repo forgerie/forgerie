@@ -17,7 +17,7 @@ it("files through the hosted tool, logs a parent issue decision, and reopens the
   const root = await mkdtemp(join(tmpdir(), "forgerie-file-issue-"));
   const agentDir = join(root, "agent"); await mkdir(agentDir);
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   const input = { title: "Retry children", body: "Details", duplicates: ["child retry", "retry state:closed"], worktreeId: "owned-b" };
   provider.setResponses(Array.from({ length: 20 }, () => context => {
     const last = context.messages.at(-1);
@@ -64,7 +64,7 @@ it("logs a known created issue once before returning its missing-label error thr
   const root = await mkdtemp(join(tmpdir(), "forgerie-file-issue-label-error-"));
   const agentDir = join(root, "agent"); await mkdir(agentDir);
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   const input = { title: "Export decision log", body: "Add JSON export", duplicates: ["decision log export state:all"] };
   provider.setResponses(Array.from({ length: 20 }, () => context => {
     const last = context.messages.at(-1);

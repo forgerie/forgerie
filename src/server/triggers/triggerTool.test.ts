@@ -28,7 +28,7 @@ it("hosts all seven tool operations, defaults cwd and zone, and records the call
   await mkdir(join(cwd, ".pi", "prompts"), { recursive: true });
   await writeFile(join(cwd, ".pi", "prompts", "nightly.md"), "---\nworkflow: { version: 1 }\n---\nReview the task.\n");
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-  const provider = fauxProvider(); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider(); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   let command: JsonObject = { action: "list" };
   provider.setResponses(Array.from({ length: 80 }, () => (transcript) => {
     const last = transcript.messages.at(-1);
@@ -102,7 +102,7 @@ it("persists a failed fire message without a model turn, with session identity a
   const root = await mkdtemp(join(tmpdir(), "forgerie-trigger-failure-"));
   const agentDir = join(root, "agent");
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-  const provider = fauxProvider(); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider(); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] });
   const sessions = new PiSessionService(new CapturingSessionEventHub(), { agentDir, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore() });
   try {
@@ -128,7 +128,7 @@ it("keeps a persisted model and thinking choice when a trigger retry proposes an
   const agentDir = join(root, "agent");
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
   const provider = fauxProvider({ models: [{ id: "faux-1", reasoning: true }, { id: "faux-selected", reasoning: true }] });
-  models.registerNativeProvider(provider.provider);
+  models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] });
   const open = () => new PiSessionService(new CapturingSessionEventHub(), { agentDir, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore() });
   let sessions = open();
@@ -149,7 +149,7 @@ it("keeps the existing session identity when restart workspace validation fails"
   await mkdir(cwd); await mkdir(join(agentDir, "prompts"), { recursive: true });
   await writeFile(join(agentDir, "prompts", "nightly.md"), "---\nworkflow: { version: 1 }\n---\nReview.\n");
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-  const provider = fauxProvider(); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider(); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   const sessions = new PiSessionService(new CapturingSessionEventHub(), { agentDir, modelRuntime: models, archiveStore: emptyArchiveStore(), sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] }) });
   const projects = new ProjectService(new ProjectStore(join(root, "projects.json"))); await projects.add({ path: cwd });
   let enter!: () => void;
@@ -184,7 +184,7 @@ it("starts real sessions in two projects with distinct identities and the same w
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: [], defaultProvider: "faux", defaultModel: "faux-1" }));
   await writeFile(join(agentDir, "prompts", "nightly.md"), "---\nworkflow: { version: 1, inputs: { task: { type: string, default: baseline } } }\n---\nReview the task.\n");
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-  const provider = fauxProvider({ models: [{ id: "faux-1", reasoning: true }, { id: "faux-selected", reasoning: true }] }); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider({ models: [{ id: "faux-1", reasoning: true }, { id: "faux-selected", reasoning: true }] }); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   provider.setResponses(Array.from({ length: 10 }, () => fauxAssistantMessage("Review started")));
   const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
   for (const cwd of cwds) { await mkdir(cwd); await projects.add({ path: cwd }); }

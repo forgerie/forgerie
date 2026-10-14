@@ -41,7 +41,7 @@ describe("Forgerie default Durable runtime", () => {
     const agentDir = join(directory, "agent");
     const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
     const provider = fauxProvider();
-    models.registerNativeProvider(provider.provider);
+    models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     let entered = false;
@@ -79,7 +79,7 @@ describe("Forgerie default Durable runtime", () => {
       const result = stream.result.bind(stream);
       stream.result = async () => { const message = await result(); calculateCost(model, message.usage); return message; };
       return stream;
-    } });
+    } }); await models.refresh({ allowNetwork: false });
     // Title generation shares this provider with the parent. Both paths use configured responses.
     provider.setResponses([fauxAssistantMessage("durable service answer"), fauxAssistantMessage("durable service answer"), fauxAssistantMessage("durable service answer")]);
     const hub = new CompletionSessionEventHub();

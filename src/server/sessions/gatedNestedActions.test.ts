@@ -31,7 +31,7 @@ async function fixture() {
     execute: async (_id, _args, _signal, _onUpdate, ctx) => (await ctx.executeTool(ebay.name, {text: "child message"})).result,
   });
   const models = await ModelRuntime.create({authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json")});
-  const provider = fauxProvider({tokensPerSecond: 100000}); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider({tokensPerSecond: 100000}); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   provider.setResponses(Array.from({length: 100}, () => fauxAssistantMessage("Result received")));
   const codemode = hostedCodemodeExtension(); if (typeof codemode === "function") throw new Error("Expected the named hosted codemode extension");
   const createServices = () => createAgentSessionServices({cwd, agentDir, modelRuntime: models, resourceLoaderOptions: {noExtensions: true, noSkills: true, noContextFiles: true, noPromptTemplates: true, extensionFactories: [{...codemode, builtin: false}]}});

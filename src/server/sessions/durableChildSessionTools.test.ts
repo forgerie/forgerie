@@ -25,7 +25,7 @@ async function fixture(named: string[], definitions: Pick<ToolDefinition, "name"
   await writeFile(join(agentDir, "agents", "probe.md"), `---\nname: probe\ndescription: Tool probe\ntools: ${named.join(", ")}\n---\nCHILD-PROBE\n`);
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
   const provider = fauxProvider({ tokensPerSecond: 10000 });
-  models.registerNativeProvider(provider.provider);
+  models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   const model = models.getModel("faux", "faux-1");
   if (model === undefined) throw new Error("Missing configured model");
   const calls: { id: string; name: string; version: number }[] = [];

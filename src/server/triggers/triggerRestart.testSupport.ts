@@ -24,7 +24,7 @@ const cwd = join(root, "workspace");
 const agentDir = join(root, "agent");
 const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
 const provider = fauxProvider({ models: [{ id: "faux-1", reasoning: true }, { id: "faux-selected", reasoning: true }] });
-models.registerNativeProvider(provider.provider);
+models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
 provider.setResponses(Array.from({ length: 30 }, () => (transcript) => {
   const launch = transcript.messages.find((message) => message.role === "user" && JSON.stringify(message.content).includes("Workflow run "));
   const runId = /Workflow run ([a-f0-9]+)/u.exec(JSON.stringify(launch?.content))?.[1];

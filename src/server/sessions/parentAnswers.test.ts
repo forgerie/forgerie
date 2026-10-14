@@ -36,7 +36,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "forgerie-parent-answers-")); await mkdir(join(root, "agent"));
   mode = "answer"; busy = false; releaseBusy = undefined; parentQuestions = [];
   models = await ModelRuntime.create({ authPath: join(root, "agent/auth.json"), modelsPath: join(root, "agent/models.json") });
-  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   provider.setResponses(Array.from({ length: 200 }, () => async (request) => {
     const last = [...request.messages].reverse().find((message) => message.role !== "system"); const said = text(last?.content);
     const call = (name: string, args: Record<string, string | boolean>) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });

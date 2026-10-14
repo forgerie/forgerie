@@ -18,7 +18,7 @@ async function fixture() {
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider);
+  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   provider.setResponses(Array.from({ length: 30 }, () => fauxAssistantMessage("Done")));
   const control = controlledManagedProcessLauncher();
   const archive = new SessionArchiveStore(join(root, "archive.json"));

@@ -158,7 +158,7 @@ beforeEach(async () => {
   runRecords = new ChildRunStore(join(agentDir, "child-runs.json"));
   models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
   const provider = fauxProvider({ tokensPerSecond: 400 });
-  models.registerNativeProvider(provider.provider);
+  models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   provider.setResponses(Array.from({ length: 400 }, () => route));
   index = new LiveChildSessionIndex(join(directory, "live-children.json"));
   service = openService();

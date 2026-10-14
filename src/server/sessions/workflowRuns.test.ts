@@ -175,7 +175,7 @@ beforeEach(async () => {
   models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
   // A second model lets a test tell a declared worker model from the session default.
   const provider = fauxProvider({ tokensPerSecond: 600, models: [{ id: "faux-1", reasoning: true }, { id: "faux-declared", reasoning: true }] });
-  models.registerNativeProvider(provider.provider);
+  models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   provider.setResponses(Array.from({ length: 300 }, () => route));
   service = openService();
 });

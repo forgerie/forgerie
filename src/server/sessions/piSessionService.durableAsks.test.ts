@@ -15,7 +15,7 @@ import { undeliveredAskAnswers } from "./askAnswerDelivery.js";
 it("recovers an accepted SDK decision only through its Durable receipt, not an additional JSONL notification", async () => {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-accepted-decision-"));
   const modelRuntime = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json") });
-  const provider = fauxProvider(); modelRuntime.registerNativeProvider(provider.provider);
+  const provider = fauxProvider(); modelRuntime.registerNativeProvider(provider.provider); await modelRuntime.refresh({ allowNetwork: false });
   provider.setResponses([fauxAssistantMessage("accepted answer delivered"), fauxAssistantMessage("duplicate answer must not run")]);
   const gateway = createPiSessionManagerGateway({ agentDir: directory, env: {}, sessionDirEnvKeys: [] });
   const manager = gateway.create(directory);
@@ -58,7 +58,7 @@ it("recovers an accepted SDK decision only through its Durable receipt, not an a
 async function liveAskFixture(holdResume = false) {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-live-durable-ask-"));
   const modelRuntime = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json") });
-  const provider = fauxProvider(); modelRuntime.registerNativeProvider(provider.provider);
+  const provider = fauxProvider(); modelRuntime.registerNativeProvider(provider.provider); await modelRuntime.refresh({ allowNetwork: false });
   const gateway = createPiSessionManagerGateway({ agentDir: directory, env: {}, sessionDirEnvKeys: [] });
   const manager = gateway.create(directory);
   if (!(manager instanceof SessionManager)) throw new Error("Concrete SDK manager required");
@@ -152,7 +152,7 @@ it("commits native cancel and chat-reply transitions without a legacy custom del
 it("commits the production end_turn declaration to the native parent response", async () => {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-native-declare-"));
   const modelRuntime = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json") });
-  const provider = fauxProvider(); modelRuntime.registerNativeProvider(provider.provider);
+  const provider = fauxProvider(); modelRuntime.registerNativeProvider(provider.provider); await modelRuntime.refresh({ allowNetwork: false });
   const { fauxToolCall } = await import("@earendil-works/pi-ai/providers/faux");
   provider.setResponses([fauxAssistantMessage([{ type: "text", text: "The result is ready." }, fauxToolCall("end_turn", { awaiting: "nothing" })], { stopReason: "toolUse" })]);
   const gateway = createPiSessionManagerGateway({ agentDir: directory, env: {}, sessionDirEnvKeys: [] });

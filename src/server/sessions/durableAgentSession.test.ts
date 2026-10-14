@@ -33,7 +33,7 @@ async function fixture(customTools: Parameters<typeof DurableAgentSession.open>[
     const result = stream.result.bind(stream);
     stream.result = async () => { const message = await result(); calculateCost(model, message.usage); return message; };
     return stream;
-  } } : provider.provider);
+  } } : provider.provider); await modelRuntime.refresh({ allowNetwork: false });
   const model = modelRuntime.getModel("faux", "faux-1");
   if (model === undefined) throw new Error("Configured provider must have a model");
   let contextCalls = 0;
