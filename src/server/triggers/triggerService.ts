@@ -174,14 +174,15 @@ export class TriggerService {
     const workflows: TriggerWorkflow[] = [];
     for (const name of names) {
       const resolved = inventories.map(({ cwd, inventory }) => ({ cwd, workflow: inventory.workflows.find((workflow) => workflow.name === name) }));
-      const first = resolved[0]?.workflow;
+      const reference = resolved.find(({ workflow }) => workflow !== undefined);
+      const first = reference?.workflow;
       let common = first !== undefined;
       for (const { cwd, workflow } of resolved) {
         let error: string | undefined;
         if (workflow === undefined) error = `Workflow is unavailable in ${cwd}`;
         else {
           try { assertProseOnly(workflow); } catch { error = `Workflow must resolve to prose in ${cwd}`; }
-          if (error === undefined && !isDeepStrictEqual(first?.definition.inputs ?? {}, workflow.definition.inputs ?? {})) error = `Workflow input declarations differ in ${cwd}`;
+          if (error === undefined && reference?.workflow !== undefined && !isDeepStrictEqual(reference.workflow.definition.inputs ?? {}, workflow.definition.inputs ?? {})) error = `Workflow input declarations differ between ${reference.cwd} and ${cwd}`;
         }
         if (error !== undefined) { diagnostics.push({ name, path: workflow?.path ?? cwd, error }); common = false; }
       }

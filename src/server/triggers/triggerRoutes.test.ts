@@ -225,3 +225,35 @@ it("serves common workflows and runs just the requested project through the brow
   expect(fires).toBe(1);
   expect(await http("POST", `/${id}/run`, { requestId: "outside", cwd: root })).toMatchObject({ status: 400, value: { field: "cwd" } });
 });
+
+it("common-workflow diagnostics compare available copies when the first target lacks it", async () => {
+  const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
+  const second = join(root, "second");
+  const third = join(root, "third");
+  for (const target of [second, third]) {
+    await mkdir(join(target, ".pi", "prompts"), { recursive: true });
+    await writeFile(join(target, ".pi", "prompts", "nightly.md"), prose);
+    await projects.add({ path: target });
+  }
+  await writeFile(join(cwd, ".pi", "prompts", "nightly.md"), "An ordinary prompt, not a workflow.\n");
+  const missing = { name: "nightly", path: cwd, error: `Workflow is unavailable in ${cwd}` };
+  for (const cwds of [[cwd, second], [cwd, second, third]]) {
+    const result = await http("POST", "/workflows/common", { kind: "projects", cwds });
+    expect(result.status).toBe(200);
+    if (!Check(TriggerWorkflowsResponseSchema, result.value)) throw new Error("Invalid common-workflow response");
+    expect(result.value.workflows).toEqual([]);
+    expect(result.value.diagnostics.filter((problem) => problem.name === "nightly")).toEqual([missing]);
+  }
+  await writeFile(join(third, ".pi", "prompts", "nightly.md"), prose.replace("default: baseline", "default: different"));
+  const result = await http("POST", "/workflows/common", { kind: "projects", cwds: [cwd, second, third] });
+  expect(result.status).toBe(200);
+  if (!Check(TriggerWorkflowsResponseSchema, result.value)) throw new Error("Invalid common-workflow response");
+  const problems = result.value.diagnostics.filter((problem) => problem.name === "nightly");
+  expect(problems).toHaveLength(2);
+  expect(problems[0]).toEqual(missing);
+  expect(problems[1]?.path).toBe(join(third, ".pi", "prompts", "nightly.md"));
+  expect(problems[1]?.error).toContain("input declarations differ");
+  expect(problems[1]?.error).toContain(second);
+  expect(problems[1]?.error).toContain(third);
+  expect(problems[1]?.error).not.toContain(cwd);
+});
