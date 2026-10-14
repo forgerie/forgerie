@@ -115,10 +115,10 @@ export class ManagedProcesses {
   acknowledgeOutput(id: string, cursor: ManagedProcessLogCursor): Promise<void> {
     return this.exclusive(async () => { await this.log(await this.record(id)).acknowledge(cursor); });
   }
-  /** Call periodically while Forgerie is up, even when nobody reads output. */
-  maintain(): Promise<void> {
+  /** Only IDs whose terminal events are durably spooled may be reclaimed. Exits after that scan wait for the next pass. */
+  maintain(spooledFinished: readonly string[] = []): Promise<void> {
     return this.exclusive(async () => {
-      await this.removeFinished(50);
+      await this.removeFinished(50, new Set(spooledFinished));
       for (const record of await this.snapshots()) await this.log(record).maintain();
     });
   }
@@ -139,7 +139,7 @@ export class ManagedProcesses {
     }
     return snapshots;
   }
-  private async removeFinished(keep: number): Promise<string[]> {
+  private async removeFinished(keep: number, spooled?: ReadonlySet<string>): Promise<string[]> {
     const finished = [];
     for (const record of await this.snapshots()) {
       if (record.state.kind === "running") continue;
@@ -147,7 +147,7 @@ export class ManagedProcesses {
       finished.push({ record, endedAt });
     }
     finished.sort((a, b) => a.endedAt - b.endedAt || a.record.createdAt.localeCompare(b.record.createdAt) || a.record.id.localeCompare(b.record.id));
-    const removed = finished.slice(0, Math.max(0, finished.length - keep));
+    const removed = finished.filter(({ record }) => spooled === undefined || spooled.has(record.id)).slice(0, Math.max(0, finished.length - keep));
     for (const { record } of removed) await rm(record.directory, { recursive: true, force: true });
     return removed.map(({ record }) => record.id);
   }

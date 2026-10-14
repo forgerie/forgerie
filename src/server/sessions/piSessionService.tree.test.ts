@@ -504,7 +504,10 @@ describe("PiSessionService session-tree fork-from-entry", () => {
   it("leaves managed processes with their original session when a fork changes runtime identity", async () => {
     const root = await mkdtemp(join(tmpdir(), "managed-fork-"));
     const control = controlledManagedProcessLauncher();
-    const { service, fake } = treeHarness({}, {}, { managedProcesses: { stateDirectory: root, prepareLauncher: () => Promise.resolve(control.launcher) } });
+    const { service, fake } = treeHarness({}, {}, {
+      managedProcesses: { stateDirectory: root, prepareLauncher: () => Promise.resolve(control.launcher) },
+      sessionManager: sessionGateway([SESSION_ID, "forked"].map(id => ({ ...sessionRecord(id), path: join(root, `${id}.jsonl`) }))),
+    });
     try {
       const processes = await service.getManagedProcesses(SESSION_ID);
       await processes.start({ id: "original", command: "cat", cwd: root });

@@ -1,6 +1,4 @@
-import { join } from "node:path";
-import type { ManagedProcesses } from "../processes/managedProcesses.js";
-import { ManagedProcessTools } from "../processes/processTool.js";
+import type { ManagedProcessTools } from "../processes/processTool.js";
 import { acceptProcessEvents, processEventsExtension } from "./durableProcessEvents.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -45,7 +43,7 @@ import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
 import type { WorkflowModels, WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 
 export interface DurableAgentSessionOptions {
-  getManagedProcesses?: (sessionId: string) => Promise<ManagedProcesses>;
+  processTools?: ManagedProcessTools;
   gatedIssueLabels?: GatedActionReads["issueLabels"];
   autonomyPolicy?: AutonomyPolicySource;
   handle?: DurableSessionHandle;
@@ -136,6 +134,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private gateUnsubscribe: (() => void) | undefined;
   private flaggedCount = 0;
   private readonly processTools: ManagedProcessTools | undefined;
+  private detachProcessEvents: (() => Promise<void>) | undefined;
   private readonly customTools: readonly ToolDefinition[];
   private childRunRecords: DurableChildRunRecords | undefined;
 
@@ -163,11 +162,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.thinkingLevel = this.model === undefined ? "off" : clampThinkingLevel(this.model, level);
     const extensions = this.resourceLoader.getExtensions();
     this.runner = new ExtensionRunner(extensions.extensions, extensions.runtime, services.cwd, sessionManager, new ModelRegistry(this.modelRuntime));
-    this.processTools = options.getManagedProcesses === undefined ? undefined : new ManagedProcessTools({
-      sessionId: this.sessionId, cwd: services.cwd,
-      stateFile: join(sessionManager.getSessionDir(), `${this.sessionId}.process-watches.json`),
-      getManagedProcesses: options.getManagedProcesses,
-    });
+    this.processTools = options.processTools;
     this.customTools = [...options.customTools ?? [], ...this.processTools === undefined ? [] : [this.processTools.definition(async id => {
       const caller = this.tools.caller(id);
       if (caller.conversationId === this.journal.conversation.id) return caller;
@@ -192,7 +187,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       await session.initialize();
       return session;
     } catch (error) {
-      await session.processTools?.dispose();
+      await session.detachProcessEvents?.();
       await session.stream?.stop();
       await session.parentAppWatch?.stop();
       session.sdkView?.close();
@@ -319,8 +314,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     await this.startGatedActions();
     await this.startChildAgents();
     await this.startEventStream();
-    await this.processTools?.initialize(summary => acceptProcessEvents(this.journal.conversation, summary, context));
-    this.processTools?.watch(error => { this.report(error); });
+    this.detachProcessEvents = await this.processTools?.attach(summary => acceptProcessEvents(this.journal.conversation, summary, context));
   }
 
   private async startEventStream(): Promise<void> {
@@ -930,7 +924,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    await this.processTools?.dispose();
+    await this.detachProcessEvents?.();
     this.bashController?.abort();
     this.branchSummaryController?.abort();
     this.gateUnsubscribe?.();

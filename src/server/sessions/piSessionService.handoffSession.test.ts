@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { PiSessionService, type PiSessionManager, type PiSessionServiceDependencies } from "./piSessionService.js";
-import { CapturingSessionEventHub, fakeRuntime, sessionGateway, testModelRuntime, type RuntimeCreator } from "./piSessionService.testSupport.js";
+import { CapturingSessionEventHub, fakeRuntime, sessionGateway, sessionRecord, testModelRuntime, type RuntimeCreator } from "./piSessionService.testSupport.js";
 
 const TEST_AGENT_DIR = "/tmp/pi-web-test-agent";
 const tempRoots: string[] = [];
@@ -498,7 +498,10 @@ function handoffService(runtimes: ReturnType<typeof fakeRuntime>["runtime"][], w
     ...(managedProcesses === undefined ? {} : { managedProcesses }),
     modelRuntime: testModelRuntime,
     createAgentRuntime,
-    sessionManager: sessionGateway([]),
+    // Managed watch state is real durable state, even when the agent runtime is controlled.
+    sessionManager: sessionGateway(managedProcesses === undefined ? [] : runtimes.map(runtime => ({
+      ...sessionRecord(runtime.session.sessionId, workspace), path: join(workspace, `${runtime.session.sessionId}.jsonl`),
+    }))),
     spawnTargets: { resolveSpawnTarget: (_source, requested) => Promise.resolve({ allowed: true, cwd: requested ?? workspace }) },
     logger: { info: (details, message) => { log.push({ details, message }); } },
     heartbeatIntervalMs: 60_000,

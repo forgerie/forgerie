@@ -23,23 +23,42 @@ interface ProcessToolResult {
   error?: string; id?: string; notice?: string;
 }
 
-/** Runtime-scoped tool/watch owner. The session service, not this adapter, owns the core lease. */
+/** One daemon-owned tool/watch dispatcher per core owner. Runtime bindings only drain the durable outbox. */
 export class ManagedProcessTools {
   private state: ProcessWatchState = { version: 1, processes: {} };
   private operations = Promise.resolve();
   private deliver: ((summary: ProcessEventSummary) => Promise<void>) | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private closed = false;
+  private requestTurn: (() => Promise<void>) | undefined;
+  private report: ((error: unknown) => void) | undefined;
+  private wake: Promise<void> | undefined;
   constructor(private readonly options: ProcessToolOptions) {}
 
-  async initialize(deliver: (summary: ProcessEventSummary) => Promise<void>): Promise<void> {
+  async initialize(deliver?: (summary: ProcessEventSummary) => Promise<void>): Promise<void> {
     await mkdir(dirname(this.options.stateFile), { recursive: true, mode: 0o700 });
     try { this.state = processWatchStateSchema.parse(JSON.parse(await readFile(this.options.stateFile, "utf8"))); }
     catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
     this.deliver = deliver;
     await this.dispatch(true);
   }
-  watch(onError: (error: unknown) => void): void {
+  /** Binding does not own the dispatcher or its core lease. Detach before closing the runtime journal. */
+  async attach(deliver: (summary: ProcessEventSummary) => Promise<void>): Promise<() => Promise<void>> {
+    await this.exclusive(async () => {
+      if (this.deliver !== undefined) throw new Error("Process event delivery already has a runtime");
+      this.deliver = deliver;
+      try { await this.finishPending(await this.core()); }
+      catch (error) { this.deliver = undefined; throw error; }
+    });
+    return () => this.exclusive(() => {
+      if (this.deliver === deliver) this.deliver = undefined;
+      return Promise.resolve();
+    });
+  }
+  watch(onError: (error: unknown) => void, requestTurn?: () => Promise<void>): void {
+    this.report = onError;
+    this.requestTurn = requestTurn;
+    this.notifyTurn();
     const tick = () => {
       this.timer = setTimeout(() => {
         void this.dispatch(false).catch(onError).finally(() => { if (!this.closed) tick(); });
@@ -133,7 +152,31 @@ export class ManagedProcessTools {
       }
     });
   }
-  dispatch(missed: boolean): Promise<void> { return this.exclusive(async () => this.dispatchNow(missed, await this.core())); }
+  dispatch(missed: boolean): Promise<void> {
+    return this.exclusive(async () => this.dispatchNow(missed, await this.core())).then(() => { this.notifyTurn(); });
+  }
+  /** Spooling and retention share the tool mutation line; only terminal receipts authorize deletion. */
+  maintain(): Promise<void> {
+    return this.exclusive(async () => {
+      const core = await this.core();
+      await this.spoolNow(false, core);
+      await core.maintain(Object.entries(this.state.processes).filter(([, watch]) => watch.exitDelivered).map(([id]) => id));
+      const retained = new Set((await core.list()).map(record => record.id));
+      const before = Object.keys(this.state.processes).length;
+      this.state.processes = Object.fromEntries(Object.entries(this.state.processes).filter(([id]) => retained.has(id)));
+      if (Object.keys(this.state.processes).length !== before) await this.save();
+      await this.drainOutbox();
+    }).then(() => { this.notifyTurn(); });
+  }
+  private notifyTurn(): void {
+    const pending = this.state.pending;
+    const request = this.requestTurn;
+    if (this.closed || this.deliver !== undefined || request === undefined || pending === undefined
+      || !pending.summary.events.some(event => event.attention === "turn") || this.wake !== undefined) return;
+    // Never await runtime startup on the dispatcher mutation line: startup attaches to that same line.
+    this.wake = Promise.resolve().then(request).catch((error: unknown) => { this.report?.(error); })
+      .finally(() => { this.wake = undefined; });
+  }
   private core(): Promise<ManagedProcesses> { return this.options.getManagedProcesses(this.options.sessionId); }
   private metadata(snapshot: ManagedProcessSnapshot): ProcessWatch {
     if (Object.hasOwn(this.state.processes, snapshot.id)) {
@@ -144,10 +187,14 @@ export class ManagedProcessTools {
   }
   private save(): Promise<void> { return atomicWrite(this.options.stateFile, JSON.stringify(this.state)); }
   private async finishPending(core: ManagedProcesses): Promise<void> {
+    await this.acknowledgePending(core);
+    await this.drainOutbox();
+  }
+  private async acknowledgePending(core: ManagedProcesses): Promise<void> {
     const pending = this.state.pending;
     if (pending === undefined) return;
-    if (this.deliver === undefined) throw new Error("Process event delivery is not initialized");
-    if (pending.summary.events.length > 0) await this.deliver(pending.summary);
+    // The fsynced outbox, not a live model, now owns these events. A passive session can stay closed.
+    // Acknowledgement is still dispatcher-only, and always follows durable spooling.
     for (const [id, cursor] of Object.entries(pending.cursors)) {
       try { await core.acknowledgeOutput(id, cursor); }
       catch (error) {
@@ -155,13 +202,29 @@ export class ManagedProcessTools {
         if (!hasCode(error, "ENOENT")) throw error;
       }
     }
+    if (Object.keys(pending.cursors).length > 0) {
+      pending.cursors = {};
+      await this.save();
+    }
+  }
+  private async drainOutbox(): Promise<void> {
+    const pending = this.state.pending;
+    if (pending === undefined) return;
+    if (pending.summary.events.length > 0) {
+      if (this.deliver === undefined) return;
+      await this.deliver(pending.summary);
+    }
     delete this.state.pending;
     await this.save();
   }
   private async dispatchNow(missed: boolean, core: ManagedProcesses): Promise<void> {
-    // On resume, combine an unaccepted pre-crash outbox with new missed events into one summary.
-    // The Durable consumer also deduplicates by process/watch/line if the old outbox was accepted.
-    if (!missed) await this.finishPending(core);
+    await this.spoolNow(missed, core);
+    await this.drainOutbox();
+  }
+  private async spoolNow(missed: boolean, core: ManagedProcesses): Promise<void> {
+    // On resume, combine the saved outbox and new events. Consumers deduplicate accepted lines.
+    // Retry cursor publication first; no runtime is needed to make spooled records reclaimable.
+    await this.acknowledgePending(core);
     const previous = structuredClone(this.state);
     const pending = this.state.pending;
     const events: ProcessWatchEvent[] = [...pending?.summary.events ?? []];
@@ -213,11 +276,17 @@ export class ManagedProcessTools {
           }
         }
       }
-      if (events.length === 0 && Object.keys(cursors).length === 0) return;
-      this.state.pending = { summary: { id: randomUUID(), missed, events }, cursors };
+      if (events.length === 0 && Object.keys(cursors).length === 0) {
+        if (JSON.stringify(this.state) !== JSON.stringify(previous)) await this.save();
+        return;
+      }
+      // A previous delivery might have committed before the daemon died. New events need a fresh
+      // wake receipt; unchanged retries reuse theirs. The consumer deduplicates old process/watch/lines.
+      const id = events.length === pending?.summary.events.length ? pending.summary.id : randomUUID();
+      this.state.pending = { summary: { id, missed: missed || (pending?.summary.missed ?? false), events }, cursors };
       await this.save();
     } catch (error) { this.state = previous; throw error; }
-    await this.finishPending(core);
+    await this.acknowledgePending(core);
   }
   private async output(core: ManagedProcesses, id: string, args: ProcessToolArguments) {
     const matches = args.pattern === undefined ? () => true : matchPattern(args.pattern, args.mode);

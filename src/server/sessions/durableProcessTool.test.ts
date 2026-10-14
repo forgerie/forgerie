@@ -1,3 +1,4 @@
+import { ManagedProcessTools } from "../processes/processTool.js";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -26,12 +27,15 @@ it("runs the hosted SDK process tool, retains it on reload, and leaves the injec
   const manager = SessionManager.create(root, join(root, "sessions"));
   const core = new ManagedProcesses({ stateDirectory: root, sessionId: manager.getSessionId(), launcher: new AttachedManagedProcessLauncher(), environment: { PATH: process.env["PATH"], PRIVATE_TOKEN: "not-for-models" } });
   await core.initialize();
+  const processTools = new ManagedProcessTools({ sessionId: manager.getSessionId(), cwd: root, stateFile: join(root, "watches.json"),
+    getManagedProcesses: (id) => { expect(id).toBe(manager.getSessionId()); return Promise.resolve(core); } });
+  await processTools.initialize();
   let session: DurableAgentSession | undefined;
   try {
     const services = await createAgentSessionServices({ cwd: root, agentDir, modelRuntime: models, resourceLoaderOptions: { noExtensions: true, noSkills: true, noContextFiles: true, noPromptTemplates: true } });
     services.settingsManager.applyOverrides({ compaction: { enabled: false } });
     session = await DurableAgentSession.open({ services, sessionManager: manager, initialModel: model,
-      getManagedProcesses: (id) => { expect(id).toBe(manager.getSessionId()); return Promise.resolve(core); } });
+      processTools });
     session.subscribe(() => undefined); await session.bindExtensions({});
     provider.setResponses([
       request => {
@@ -60,7 +64,7 @@ it("runs the hosted SDK process tool, retains it on reload, and leaves the injec
     expect(process?.replay).toBe("unsafe");
     await session.close(); session = undefined;
     expect((await core.status(record.id)).state.kind).toBe("running");
-  } finally { await session?.close(); await core.dispose(); await rm(root, { recursive: true, force: true }); }
+  } finally { await session?.close(); await processTools.dispose(); await core.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 
 

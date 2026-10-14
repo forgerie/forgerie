@@ -5,7 +5,10 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { hasCode } from "./managedProcessFiles.js";
 import { prepareManagedProcessLauncher } from "./managedProcessLauncher.js";
 import { ManagedProcesses } from "./managedProcesses.js";
+import { ManagedProcessTools } from "./processTool.js";
 import type { ManagedProcessLauncher } from "./managedProcessTypes.js";
+
+export interface ManagedProcessSession { cwd: string; stateFile: string }
 
 export interface ManagedProcessRegistryOptions {
   stateDirectory: string;
@@ -14,11 +17,14 @@ export interface ManagedProcessRegistryOptions {
   onError(error: unknown, sessionId: string): void;
   intervalMs?: number;
   logCapBytes?: number;
+  resolveSession?(sessionId: string): Promise<ManagedProcessSession | undefined>;
+  onTurn?(sessionId: string): Promise<void>;
 }
 
 /** Sessiond ownership, independent of browser connections and agent runtimes. */
 export class ManagedProcessRegistry {
   private readonly owners = new Map<string, Promise<ManagedProcesses>>();
+  private readonly dispatchers = new Map<string, ManagedProcessTools>();
   private readonly closing = new Map<string, Promise<void>>();
   private timer: NodeJS.Timeout | undefined;
   private maintenance: Promise<void> | undefined;
@@ -41,16 +47,23 @@ export class ManagedProcessRegistry {
     this.start();
   }
 
-  get(sessionId: string): Promise<ManagedProcesses> {
+  get(sessionId: string, session?: ManagedProcessSession): Promise<ManagedProcesses> {
     if (this.stopped || this.closing.has(sessionId)) return Promise.reject(new Error("Managed process owner is closing"));
     let owner = this.owners.get(sessionId);
     if (owner === undefined) {
-      owner = this.open(sessionId);
+      owner = this.open(sessionId, session);
       this.owners.set(sessionId, owner);
       void owner.catch(() => { if (this.owners.get(sessionId) === owner) this.owners.delete(sessionId); });
       this.start();
     }
     return owner;
+  }
+
+  async tools(sessionId: string, session?: ManagedProcessSession): Promise<ManagedProcessTools> {
+    await this.get(sessionId, session);
+    const dispatcher = this.dispatchers.get(sessionId);
+    if (dispatcher === undefined) throw new Error(`No managed process watch location for session ${sessionId}`);
+    return dispatcher;
   }
 
   closeSession(sessionId: string): Promise<void> {
@@ -59,9 +72,11 @@ export class ManagedProcessRegistry {
     const owner = this.get(sessionId);
     const closing = (async () => {
       const processes = await owner;
+      await this.dispatchers.get(sessionId)?.dispose();
       await processes.closeSession();
       await processes.dispose();
       this.owners.delete(sessionId);
+      this.dispatchers.delete(sessionId);
       await rm(join(this.options.stateDirectory, "managed-processes", sessionId), { recursive: true, force: true });
     })();
     this.closing.set(sessionId, closing);
@@ -80,14 +95,19 @@ export class ManagedProcessRegistry {
     clearInterval(this.timer); this.timer = undefined;
     await this.maintenance;
     const closing = await Promise.allSettled(this.closing.values());
-    const disposed = await Promise.allSettled([...this.owners.values()].map(async (owner) => (await owner).dispose()));
+    const disposed = await Promise.allSettled([...this.owners].map(async ([id, owner]) => {
+      const core = await owner;
+      await this.dispatchers.get(id)?.dispose();
+      await core.dispose();
+    }));
+    this.dispatchers.clear();
     this.owners.clear();
     const failures: unknown[] = [];
     for (const result of [...closing, ...disposed]) if (result.status === "rejected") failures.push(result.reason);
     if (failures.length > 0) throw new AggregateError(failures, "Managed process owners could not all be disposed");
   }
 
-  private async open(sessionId: string): Promise<ManagedProcesses> {
+  private async open(sessionId: string, session?: ManagedProcessSession): Promise<ManagedProcesses> {
     const launcher = await (this.options.prepareLauncher?.() ?? prepareManagedProcessLauncher(this.options.environment));
     const owner = new ManagedProcesses({ stateDirectory: this.options.stateDirectory, sessionId, launcher,
       ...(this.options.environment === undefined ? {} : { environment: this.options.environment }),
@@ -95,9 +115,20 @@ export class ManagedProcessRegistry {
     // A killed daemon's lease stays fresh for ten seconds. Never bypass a live owner.
     const deadline = Date.now() + 15_000;
     for (;;) {
-      try { await owner.initialize(); return owner; }
+      try { await owner.initialize(); break; }
       catch (error) { if (!hasCode(error, "ELOCKED") || Date.now() >= deadline) throw error; await sleep(250); }
     }
+    try {
+      const resolved = session ?? await this.options.resolveSession?.(sessionId);
+      if (resolved !== undefined) {
+        const dispatcher = new ManagedProcessTools({ sessionId, ...resolved, getManagedProcesses: () => Promise.resolve(owner) });
+        await dispatcher.initialize();
+        this.dispatchers.set(sessionId, dispatcher);
+        dispatcher.watch(error => { this.options.onError(error, sessionId); },
+          this.options.onTurn === undefined ? undefined : () => this.options.onTurn?.(sessionId) ?? Promise.resolve());
+      }
+      return owner;
+    } catch (error) { await owner.dispose(); throw error; }
   }
 
   private start(): void {
@@ -109,10 +140,15 @@ export class ManagedProcessRegistry {
     }, interval);
     this.timer.unref();
   }
-  private async maintain(): Promise<void> {
+  async maintain(): Promise<void> {
     for (const [sessionId, owner] of this.owners) {
       if (this.closing.has(sessionId)) continue;
-      try { await (await owner).maintain(); }
+      try {
+        const core = await owner;
+        const dispatcher = this.dispatchers.get(sessionId);
+        if (dispatcher === undefined) await core.maintain(); // No delivery receipt: preserve finished records.
+        else await dispatcher.maintain();
+      }
       catch (error) { this.options.onError(error, sessionId); }
     }
   }

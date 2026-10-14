@@ -30,7 +30,7 @@ export function processEventText(value: unknown): string {
   return text.length <= 32_000 ? text : `${text.slice(0, 32_000)}\n[Summary shortened: ${String(summary.events.length)} watch events. Use process list/output for details. Attached processes end when Forgerie restarts.]`;
 }
 
-/** Acceptance, deduplication, and the one wake are committed together, before log acknowledgement. */
+/** Consume the daemon outbox: acceptance, line deduplication and the one model wake commit together. */
 export async function acceptProcessEvents(conversation: Conversation, summary: ProcessEventSummary, context: Context): Promise<void> {
   await conversation.commit(async tx => {
     const receipts = await tx.doc(Receipts, conversation.id);

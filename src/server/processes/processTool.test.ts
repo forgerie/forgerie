@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -107,23 +107,26 @@ it("validates before launch, updates watches from current output, and suppresses
   expect((await f.tool.execute({ action: "list", statuses: ["running"] })).processes).toEqual([]);
 });
 
-it("keeps failed delivery unacknowledged and merges its outbox with later missed events on resume", async () => {
+it("retains failed delivery in the fsynced outbox and merges it with later missed events on resume", async () => {
   const f = await fixture();
   const started = await f.tool.execute({ action: "start", name: "repeat", command: "repeat", notify: { logMatches: [{ pattern: "ready", repeat: true }] } });
   const id = started.process?.id;
   if (id === undefined) throw new Error("No ID");
   await f.tool.dispose();
   const failing = new ManagedProcessTools({ sessionId: "test", cwd: f.root, stateFile: join(f.root, "watches.json"), getManagedProcesses: () => Promise.resolve(f.core()) });
-  await failing.initialize(() => Promise.reject(new Error("Delivery unavailable")));
+  let failedId: string | undefined;
+  await failing.initialize(summary => { failedId = summary.id; return Promise.reject(new Error("Delivery unavailable")); });
   await f.log(id, "ready\n");
   await expect(failing.dispatch(false)).rejects.toThrow("Delivery unavailable");
-  expect((await f.core().readOutput(id)).lines.map(line => line.number)).toEqual([1]);
+  expect((await f.core().readOutput(id)).lines).toEqual([]);
+  expect(await readFile(join(f.root, "watches.json"), "utf8")).toContain('"samples":[{"number":1,"text":"ready"}]');
   await failing.dispose(); await f.core().dispose();
   await f.log(id, "ready\n");
   await f.open();
   expect(f.summaries).toHaveLength(1);
   expect(f.summaries[0]?.missed).toBe(true);
   expect(f.summaries[0]?.events.map(event => event.line)).toEqual([1, 2]);
+  expect(f.summaries[0]?.id).not.toBe(failedId);
   expect((await f.core().readOutput(id)).lines).toEqual([]);
 });
 

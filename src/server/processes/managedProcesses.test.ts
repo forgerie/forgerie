@@ -49,6 +49,8 @@ describe("managed processes", () => {
         live.delete(record.id);
       }
       await manager.maintain();
+      expect((await manager.list()).filter(record => record.state.kind !== "running")).toHaveLength(52);
+      await manager.maintain((await manager.list()).filter(record => record.state.kind !== "running").map(record => record.id));
       expect((await manager.list()).map((item) => item.id)).toEqual([...Array.from({ length: 50 }, (_, n) => `ended-${String(n + 2).padStart(2, "0")}`), "running"]);
       await expect(readFile(join(root, "managed-processes/retention/ended-00/command.json"))).rejects.toMatchObject({ code: "ENOENT" });
       await manager.start({ id: "lost", command: "cat", cwd: root });

@@ -1,3 +1,4 @@
+import type { ManagedProcessTools } from "../processes/processTool.js";
 import { ManagedProcessRegistry, type ManagedProcessRegistryOptions } from "../processes/managedProcessRegistry.js";
 import type { ManagedProcesses } from "../processes/managedProcesses.js";
 import type { SessionWorktreeRecord } from "../../shared/sessionWorktree.js";
@@ -870,8 +871,7 @@ function createDefaultRuntimeFactory(
   beforeResume?: (session: DurableAgentSession) => Promise<boolean>,
   triggers?: () => TriggerService,
   azurePr?: AzurePrToolDeps,
-  getManagedProcesses?: (sessionId: string) => Promise<ManagedProcesses>,
-  processToolsAllowed?: (ref: PiSessionRef) => Promise<boolean>,
+  processTools?: (ref: PiSessionRef, sessionDir: string) => Promise<ManagedProcessTools | undefined>,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
     const processBridgeSlot = createProcessBridgeSlot();
@@ -916,9 +916,9 @@ function createDefaultRuntimeFactory(
       },
     }, projectTools, workspaceServices, triggers);
     if (azurePr !== undefined) customTools.push(...await createAzurePrTools(cwd, azurePr));
-    const allowProcesses = await processToolsAllowed?.({ id: sessionManager.getSessionId(), cwd }) ?? true;
+    const managedTools = await processTools?.({ id: sessionManager.getSessionId(), cwd }, sessionManager.getSessionDir());
     const session = await DurableAgentSession.open({
-      ...(getManagedProcesses === undefined || !allowProcesses ? {} : { getManagedProcesses }),
+      ...(managedTools === undefined ? {} : { processTools: managedTools }),
       ...(handle === undefined ? {} : { handle }),
       ...(beforeResume === undefined ? {} : { beforeResume }),
       services,
@@ -1185,6 +1185,18 @@ export class PiSessionService implements SessionRouteService {
     this.projectWorkspaces = deps.projectWorkspaces;
     this.logger = deps.logger ?? noopLogger;
     this.managedProcesses = deps.managedProcesses === undefined ? undefined : new ManagedProcessRegistry({ ...deps.managedProcesses,
+      resolveSession: async (id) => {
+        if (await this.archiveStore.isArchived(id)) return undefined;
+        const entry = await this.managedProcessSession(id);
+        if (await this.sessionWorktrees?.store.readOnly(entry) !== undefined) return undefined;
+        return { cwd: entry.cwd, stateFile: join(dirname(entry.path), `${id}.process-watches.json`) };
+      },
+      onTurn: async (id) => {
+        if (this.stopping || await this.archiveStore.isArchived(id)) return;
+        const entry = await this.managedProcessSession(id);
+        if (await this.sessionWorktrees?.store.readOnly(entry) !== undefined) return;
+        await this.getOrOpen(entry);
+      },
       onError: (error, sessionId) => { this.logger.info({ err: error, sessionId }, "managed process maintenance failed"); } });
     this.sessionTitleModel = deps.sessionTitleModel;
     this.now = deps.now ?? (() => new Date());
@@ -1239,8 +1251,11 @@ export class PiSessionService implements SessionRouteService {
       (session) => this.prepareDurableFamily(session),
       deps.triggers,
       deps.azurePr,
-      this.managedProcesses === undefined ? undefined : (sessionId) => this.getManagedProcesses(sessionId),
-      async (ref) => !await this.archiveStore.isArchived(ref.id) && await this.sessionWorktrees?.store.readOnly(ref) === undefined,
+      this.managedProcesses === undefined ? undefined : async (ref, sessionDir) => {
+        if (await this.archiveStore.isArchived(ref.id) || await this.sessionWorktrees?.store.readOnly(ref) !== undefined) return undefined;
+        if (this.managedProcesses === undefined) throw new Error("Managed processes are not configured");
+        return this.managedProcesses.tools(ref.id, { cwd: ref.cwd, stateFile: join(sessionDir, `${ref.id}.process-watches.json`) });
+      },
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;
@@ -1556,6 +1571,12 @@ export class PiSessionService implements SessionRouteService {
       .filter(isDefined);
     const ownedSessions = (await this.withSessionWorktrees(await this.withRelatedSessionsElsewhere(withSessionTabs([...unarchivedSessions, ...archivedSessions], tabsBySessionId(tabsRecords)), cwd), cwd)).map((session) => this.pullRequestWatches?.isWatching(session.id) === true ? { ...session, watchingPullRequest: true } : session);
     return withSessionTabs(withPinnedFlags(ownedSessions, pinnedSessionIdSet(pinnedRecords)), tabsBySessionId(tabsRecords));
+  }
+
+  private async managedProcessSession(id: string): Promise<{ id: string; cwd: string; path: string }> {
+    const entry = (await (this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll())).find(session => session.id === id);
+    if (entry === undefined) throw new Error(`Cannot resolve managed process session ${id}; its events were retained`);
+    return { id: entry.id, cwd: entry.cwd, path: entry.path };
   }
 
   async initializeManagedProcesses(): Promise<void> {
