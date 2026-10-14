@@ -175,6 +175,8 @@ export async function readTaskActivity(harness: Harness, parent: ConversationId,
   const tasks: ReadyActivity["tasks"] = [];
   for (const task of live) {
     const record = task.record;
+    const checkpoint = "checkpoint" in record.state ? object(record.state.checkpoint) : undefined;
+    const phase = checkpoint?.["phase"];
     let tool: ReadyActivity["tasks"][number]["tool"] = null;
     let toolSubject: string | null = null;
     let label = record.kind === "pi.generation" && record.conversationId !== parent ? "Answering" : (Object.hasOwn(labels, record.kind) ? labels[record.kind] : undefined) ?? "Working";
@@ -187,8 +189,7 @@ export async function readTaskActivity(harness: Harness, parent: ConversationId,
           policy = new Map((await conversation?.agent(context))?.tools.map(tool => [tool.name, tool.replay ?? "unsafe"]) ?? []);
           policies.set(record.conversationId, policy);
         }
-        const checkpoint = "checkpoint" in record.state ? object(record.state.checkpoint) : undefined;
-        const savedSafe = checkpoint?.["phase"] === "call" || checkpoint?.["phase"] === "execute" && checkpoint["replay"] === "safe";
+        const savedSafe = phase === "call" || phase === "execute" && checkpoint?.["replay"] === "safe";
         tool = { name: call.name, replay: policy.get(call.name) === "safe" && savedSafe ? "safe" : "unsafe" };
         toolSubject = subject(call.name, call.arguments);
         label = (Object.hasOwn(verbs, call.name) ? verbs[call.name] : undefined) ?? `Use \`${call.name}\``;
@@ -196,6 +197,9 @@ export async function readTaskActivity(harness: Harness, parent: ConversationId,
     }
     const reporterTarget = record.kind === "forgerie.child-reporter" ? object(record.input)?.["conversationId"] : undefined;
     const agentConversationId = typeof reporterTarget === "number" ? agents.find(agent => agent.conversationId === reporterTarget)?.conversationId ?? null : null;
+    // Before intent, recovery runs the call normally even when its tool policy is unsafe.
+    const stopsOnRestart = record.kind === "pi.tool" && phase === "execute" && tool?.replay !== "safe"
+      || record.kind === "forgerie.gated-action-run" && phase === "unknown";
     tasks.push({
       id: record.id, kind: record.kind, label, subject: toolSubject, conversationId: record.conversationId,
       owner: record.owner !== undefined && ids.has(record.owner) ? record.owner : null,
@@ -205,7 +209,7 @@ export async function readTaskActivity(harness: Harness, parent: ConversationId,
       blockedReason: task.state.kind === "blocked" ? task.state.reason : null,
       scheduler: schedulerText(task), startedAt: record.startedAt ?? null, tool,
       restart: task.state.kind === "blocked" ? "blocked"
-        : record.kind === "forgerie.gated-action-run" || record.kind === "pi.tool" && tool?.replay !== "safe" ? "stops"
+        : stopsOnRestart ? "stops"
           : Object.hasOwn(labels, record.kind) ? "resumes" : "unknown",
     });
   }

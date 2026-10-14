@@ -84,7 +84,7 @@ it("classifies persisted pending, waiting, completing, blocked and unknown work 
   const tooOld = await seedTask(storage, parent, "forgerie.trigger", { version: 2 });
   const missing = await seedTask(storage, parent, "missing");
   const migration = await seedTask(storage, parent, "migration");
-  const approved = await seedTask(storage, parent, "forgerie.gated-action-run");
+  const approved = await seedTask(storage, parent, "forgerie.gated-action-run", { state: { status: "pending", checkpoint: { phase: "unknown" } } });
   const { harness } = await openSeed(storage, [taskDefinition("custom.work"), taskDefinition("forgerie.trigger"), taskDefinition("migration", 2), taskDefinition("forgerie.gated-action-run")]);
   const result = await readTaskActivity(harness, parent, context);
   const row = (id: TaskId) => result.tasks.find(task => task.id === id);
@@ -319,4 +319,36 @@ it.each([
   const result = await readTaskActivity(harness, parent, context);
   expect(JSON.stringify(result)).not.toContain("SECRET_TAIL");
   expect(result.tasks[0]?.subject).toBe(expected);
+});
+
+it.each([
+  { kind: "pi.tool", phase: "call", resolved: "unsafe", saved: "unsafe", restart: "resumes" },
+  { kind: "pi.tool", phase: "execute", resolved: "unsafe", saved: "safe", restart: "stops" },
+  { kind: "pi.tool", phase: "execute", resolved: "safe", saved: "unsafe", restart: "stops" },
+  { kind: "pi.tool", phase: "execute", resolved: "safe", saved: "safe", restart: "resumes" },
+  { kind: "forgerie.gated-action-run", phase: "ready", resolved: "unsafe", saved: "unsafe", restart: "resumes" },
+  { kind: "forgerie.gated-action-run", phase: "unknown", resolved: "unsafe", saved: "unsafe", restart: "stops" },
+])("maps restart after saved intent only: $kind $phase $resolved/$saved", async ({ kind, phase, resolved, saved, restart }) => {
+  const storage = new MemoryStorage();
+  const parent = await seedConversation(storage);
+  const assistant = await storage.mintId<EntryId>();
+  const call = fauxToolCall("activity_tool", {});
+  await storage.commit([{ type: "entry", value: { id: assistant, conversationId: parent, kind: AssistantEntry.kind, model: [fauxAssistantMessage([call])] } }], context);
+  const id = await seedTask(storage, parent, kind, { input: { assistant, callId: call.id }, state: { status: "pending", checkpoint: { phase, replay: saved, arguments: {} } } });
+  const { harness, registry } = await openSeed(storage, [taskDefinition("forgerie.gated-action-run")]);
+  let executions = 0;
+  const tools = defineExtension({ name: "restart-policy", tools: [defineTool({ name: "activity_tool", description: "Controlled activity", parameters: Type.Object({}), replay: resolved === "safe" ? "safe" : "unsafe", execute: () => { executions++; return Promise.resolve({ content: [] }); } })] });
+  registry.install(tools);
+  const conversation = await harness.conversation(parent, context);
+  if (conversation === undefined) throw new Error("Missing seeded conversation");
+  await conversation.configure({ extensions: [tools] }, context);
+  const result = await readTaskActivity(harness, parent, context);
+  expect(result.tasks[0]).toMatchObject({ id, status: "pending", restart });
+  expect(result.tasks[0]?.tool).toEqual(kind === "pi.tool" ? { name: "activity_tool", replay: resolved === "safe" && (phase === "call" || saved === "safe") ? "safe" : "unsafe" } : null);
+  expect(JSON.stringify(result)).not.toMatch(/"(?:checkpoint|phase|input|arguments)"/);
+  if (kind === "pi.tool" && phase === "call") {
+    harness.resume();
+    await harness.waitForTask(id, context);
+    expect(executions).toBe(1);
+  }
 });
