@@ -67,6 +67,14 @@ describe("Finished messages", () => {
     expect(row("s1").dataset.finished).toBe("true");
   });
 
+  it("keeps a finished reply's copy action while another reply streams", async () => {
+    await render([question, finishedReply, followUp, streaming("Working")], true);
+    const copies = () => [...document.querySelectorAll('button[aria-label="Copy response"]')].map((button) => button.closest("[data-message-id]")?.getAttribute("data-message-id"));
+    expect(copies()).toEqual(["a1"]);
+    await render([question, finishedReply, followUp, streaming("Done.")]);
+    expect(copies()).toEqual(["a1", "a2"]);
+  });
+
   it("streams into one reply without highlighting a finished reply's code again", async () => {
     await render([question, finishedReply, followUp, streaming("One")], true);
     const code = row("a1").querySelector(".code-body code");

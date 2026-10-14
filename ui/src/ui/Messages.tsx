@@ -170,9 +170,11 @@ export function AssistantMessage({ fileLinks }: { fileLinks?: FileLinks | undefi
       </ErrorPrimitive.Root></MessagePrimitive.Error>
     </div>
     <ReplyGallery />
-    <ActionBarPrimitive.Root hideWhenRunning autohide="never" className="message-actions">
+    {/* Only the reply that streams waits for its copy action. A thread-wide "while running" rule
+        would hide every finished reply's action and re-render each one when a run starts and ends. */}
+    {settled && <ActionBarPrimitive.Root autohide="never" className="message-actions">
       <ResponseCopy />
-    </ActionBarPrimitive.Root>
+    </ActionBarPrimitive.Root>}
   </MessagePrimitive.Root>;
 }
 
