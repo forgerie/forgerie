@@ -304,6 +304,13 @@ it.each([
   { command: "KEY=SECRET_TAIL TOKEN='SECRET_TAIL x' npm test -- durableTriggers", expected: "npm" },
   { command: "/home/SECRET_TAIL/bin/deploy --now", expected: "deploy" },
   { command: "./node_modules/.bin/vitest run", expected: "vitest" },
+  // A quoted or escaped `NAME=` is the program, not an assignment, so the name check rejects it.
+  { command: "'KEY=x' --token=/SECRET_TAIL", expected: null },
+  { command: "'KEY=x' -p/SECRET_TAIL", expected: null },
+  { command: `K"E"Y=x SECRET_TAIL`, expected: null },
+  { command: String.raw`KEY\=x SECRET_TAIL`, expected: null },
+  { command: `KEY='quoted value' npm test`, expected: "npm" },
+  { command: `KEY=x "TOKEN=y/path" /private/SECRET_TAIL`, expected: null },
   // Nothing to show, or syntax the parser refuses.
   { command: "KEY=SECRET_TAIL", expected: null },
   { command: "'SECRET_TAIL program' --flag", expected: null },

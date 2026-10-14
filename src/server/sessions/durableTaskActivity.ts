@@ -108,8 +108,12 @@ function bashSubject(command: string): string | null {
   const words = shellWords(command);
   if (words === null) return null;
   // Leading `NAME=value` words only set the environment. Their values are private, so skip them.
-  const first = words.find(word => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word.value));
+  // Bash needs the name and `=` unquoted in the source: `'KEY=x' arg` and `KEY\=x arg` run `KEY=x` as
+  // the program. So test the written text, never the decoded word.
+  const first = words.find(word => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(command.slice(word.start, word.end)));
   if (first === undefined) return null;
+  // The whole word must be a plain path, so a word bash would not run as a program (`TOKEN=y/x`) gives null.
+  if (!/^[A-Za-z0-9_.+/-]+$/.test(first.value)) return null;
   // The path can name private folders: keep the basename.
   const program = first.value.slice(first.value.lastIndexOf("/") + 1);
   return PROGRAM_NAME.test(program) ? program.slice(0, 120) : null;
