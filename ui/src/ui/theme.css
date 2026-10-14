@@ -12,7 +12,8 @@
   --primary: oklch(0.205 0.006 var(--tint));
   --primary-foreground: oklch(0.985 0.003 var(--tint));
   --muted: oklch(0.97 0.004 var(--tint));
-  --muted-foreground: oklch(0.556 0.007 var(--tint));
+  /* 0.53, not 0.556: secondary text keeps 4.5:1 on the code and tint surfaces (#f1f1f0 gave 4.15:1). */
+  --muted-foreground: oklch(0.53 0.007 var(--tint));
   --destructive: oklch(0.577 0.245 27.325);
   --line: color-mix(in oklab, var(--foreground) 10%, transparent);
   --line-focus: color-mix(in oklab, var(--foreground) 25%, transparent);
