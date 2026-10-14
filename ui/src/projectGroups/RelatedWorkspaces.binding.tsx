@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ChangesReview } from "../ui/ChangesReview";
 import { markdownView } from "../ui/markdownView";
 import type { MarkdownView } from "../ui/useMarkdownView";
@@ -24,7 +24,8 @@ const message = (cause: unknown) => cause instanceof Error ? cause.message : Str
  * them again after each run, so a new one appears when the run that made it
  * ends. Nothing is added to the input bar.
  */
-export function RelatedWorkspaces({ api, request, source, busy, links, onAsk, own, commands }: {
+export function RelatedWorkspaces({ api, request, source, busy, visible = true, links, onAsk, own, commands }: {
+  visible?: boolean | undefined;
   api: ProjectGroupApi; request: Fetch; source: { id: string; cwd: string }; busy: boolean; links: readonly PullLink[]; onAsk: (text: string) => void;
   own?: OwnWorktree | undefined;
   commands?: SessionMenuSection["commands"] | undefined;
@@ -49,7 +50,13 @@ export function RelatedWorkspaces({ api, request, source, busy, links, onAsk, ow
     // A failed read keeps the chips already drawn; the next run's end reads again.
     try { setRelated((await api.context(ref)).related); } catch { /* Keep the last known chips. */ }
   }, [api, ref]);
-  useEffect(() => { if (!busy) void refresh(); }, [busy, refresh]);
+  const observed = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const key = JSON.stringify([source.id, source.cwd, busy]);
+    if (observed.current === key) return;
+    observed.current = key;
+    if (!busy) void refresh();
+  }, [source.id, source.cwd, busy, refresh]);
 
   // Review notes wait per worktree, saved with this chat's drafts, until they go into a message.
   const [drafts] = useState(() => createDraftStore(browserStorage()));
@@ -85,13 +92,13 @@ export function RelatedWorkspaces({ api, request, source, busy, links, onAsk, ow
     }
   };
   return <>
-    <SessionMenu info={own?.info} onCommand={own?.onCommand} busy={busy} commands={commands}
-      sections={relatedSections(related, { busy: busy || retrying, notes: counts, failures, onAction: act })} />
-    {panel?.kind === "changes" && changes && reviewTray && <ChangesReview source={changes.source} files={changes.files} notes={reviewNotes}
+    {visible && <SessionMenu info={own?.info} onCommand={own?.onCommand} busy={busy} commands={commands}
+      sections={relatedSections(related, { busy: busy || retrying, notes: counts, failures, onAction: act })} />}
+    {visible && panel?.kind === "changes" && changes && reviewTray && <ChangesReview source={changes.source} files={changes.files} notes={reviewNotes}
       onAdd={reviewTray.add} onEdit={reviewTray.edit} onRemove={reviewTray.remove} onClose={() => setPanel(undefined)}
       markdownView={reviewView} onMarkdownView={chooseReviewView} />}
-    {panel?.kind === "pulls" && <RelatedPulls request={request} target={{ id: ref.id, cwd: panel.info.path }} links={links} onClose={() => setPanel(undefined)} onAsk={onAsk} />}
-    {panel?.kind === "command" && <WorktreeDialog command={panel.command} info={panel.info} api={worktrees} onClose={() => setPanel(undefined)}
+    {visible && panel?.kind === "pulls" && <RelatedPulls request={request} target={{ id: ref.id, cwd: panel.info.path }} links={links} onClose={() => setPanel(undefined)} onAsk={onAsk} />}
+    {visible && panel?.kind === "command" && <WorktreeDialog command={panel.command} info={panel.info} api={worktrees} onClose={() => setPanel(undefined)}
       onDone={() => { void refresh(); }} onAsk={async (text) => { onAsk(`In related checkout ${panel.info.path}:\n${text}`); setPanel(undefined); }} />}
   </>;
 }

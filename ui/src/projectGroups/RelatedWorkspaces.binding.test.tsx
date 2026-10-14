@@ -68,3 +68,24 @@ it("opens a related worktree's review in the view chosen on this device since th
   expect(pressed()).toBe("Rich");
   expect(document.querySelector('.changes-body [role="textbox"] h1')?.textContent).toBe("Plugins");
 });
+
+it("retains its context on reveal and excludes hidden body-level review portals", async () => {
+  const context = vi.fn(async () => related);
+  const bound = { ...api, context };
+  const render = (visible: boolean, id = "chat", busy = false) => root.render(<RelatedWorkspaces api={bound} request={request} source={{ id, cwd: "/code/korri" }} busy={busy} visible={visible} links={[]} onAsk={() => undefined} />);
+  await act(async () => render(true));
+  await until(() => context.mock.calls.length === 1);
+  await openReadme();
+  expect(document.querySelector("dialog.changes-dialog")).not.toBeNull();
+  await act(async () => render(false));
+  expect(document.querySelector("dialog.changes-dialog")).toBeNull();
+  expect(context).toHaveBeenCalledTimes(1);
+  await act(async () => render(true));
+  expect(context).toHaveBeenCalledTimes(1);
+  await until(() => document.querySelector("dialog.changes-dialog") !== null);
+  await act(async () => render(true, "other"));
+  expect(context).toHaveBeenCalledTimes(2);
+  await act(async () => render(true, "other", true));
+  await act(async () => render(true, "other", false));
+  expect(context).toHaveBeenCalledTimes(3);
+});

@@ -50,7 +50,7 @@ export function AppBinding({ shelves }: { shelves?: ReactNode }) {
   const groups = useProjectGroups(api);
   const scope = useMemo(() => scopeFolders(groups.catalog.projects, groups.scope), [groups.catalog.projects, groups.scope]);
   const search = useSessionSearch(searchApi, scope);
-  const related = useCallback<RelatedWorkRenderer>(({ ref, busy, links, onAsk, own, commands }) => <RelatedWorkspaces key={ref.id} source={ref} busy={busy} links={links} onAsk={onAsk} own={own} commands={commands} api={api} request={request} />, []);
+  const related = useCallback<RelatedWorkRenderer>(({ ref, busy, visible, links, onAsk, own, commands }) => <RelatedWorkspaces key={ref.id} source={ref} busy={busy} visible={visible} links={links} onAsk={onAsk} own={own} commands={commands} api={api} request={request} />, []);
   const settings = useCallback<SettingsPageRenderer>(({ back, close, item, onOpen }) =>
     <ProjectGroupSettings api={api} state={groups} group={item} onOpen={onOpen} back={back} close={close} />, [groups]);
   const triggerList = useTriggerList(triggersApi, triggerChanges);

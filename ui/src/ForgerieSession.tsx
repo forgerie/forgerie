@@ -184,15 +184,17 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
   const changes = useMemo(() => cwd ? { source: createChangesSource(cwd, browserTransport.request), files: createFilesSource(cwd, browserTransport.request) } : undefined, [cwd]);
   const filesSource = changes?.files;
   const [resolvedFileBase, setResolvedFileBase] = useState<{ source: FilesSource; result: { type: "ready"; base: string } | { type: "failed"; error: string } }>();
+  const fileBaseRequested = useRef<FilesSource | undefined>(undefined);
   useEffect(() => {
-    if (!filesSource) return;
-    const controller = new AbortController();
+    if (!filesSource || resolvedFileBase?.source === filesSource) return;
+    if (fileBaseRequested.current === filesSource) return;
+    fileBaseRequested.current = filesSource;
+    const controller = { signal: entry.signal };
     filesSource.linkBase(controller.signal).then(
       (base) => { if (!controller.signal.aborted) setResolvedFileBase({ source: filesSource, result: { type: "ready", base: new URL(base, window.location.href).href } }); },
       (error: unknown) => { if (!controller.signal.aborted) setResolvedFileBase({ source: filesSource, result: { type: "failed", error: `File links are unavailable. ${error instanceof Error ? error.message : String(error)}` } }); },
     );
-    return () => controller.abort();
-  }, [filesSource]);
+  }, [filesSource, entry.signal, resolvedFileBase?.source]);
   // Never reuse another folder's base while this folder's lookup is pending.
   const fileBase = resolvedFileBase?.source === filesSource ? resolvedFileBase?.result : undefined;
   const openLinkedFile = useCallback((path: string) => {
@@ -204,7 +206,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
   }, [cwd]);
   const pullRef = useMemo(() => sessionId && cwd ? { id: sessionId, cwd } : undefined, [sessionId, cwd]);
   const ownPulls = useMemo(() => catalogPulls?.filter((link) => link.session.cwd === cwd) ?? NO_LINKS, [catalogPulls, cwd]);
-  const pull = useSessionPulls(pullRequests, pullRef, ownPulls);
+  const pull = useSessionPulls(pullRequests, pullRef, ownPulls, entry.signal);
   const [pullOpen, setPullOpen] = useState(false);
   const [pullSelected, setPullSelected] = useState<number>();
   const pullItems = pull.load.type === "ready" ? pull.load.items : [];
@@ -498,7 +500,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
           // The catalog's status can lag the live one; the server refuses an archive during any run.
           availability={isBashRunning(state) || state.status?.isStreaming === true || state.status?.isCompacting === true
             ? { type: "blocked", reason: "Stop the run first" } : archive.availability} />}
-        {sessionId && cwd && relatedWork ? relatedWork({ ref: { id: sessionId, cwd }, busy, links: catalogPulls ?? NO_LINKS, onAsk: appendToDraft, commands: sessionCommands,
+        {sessionId && cwd && relatedWork ? relatedWork({ visible, ref: { id: sessionId, cwd }, busy, links: catalogPulls ?? NO_LINKS, onAsk: appendToDraft, commands: sessionCommands,
           own: worktree && worktrees && worktree.state.kind === "active" ? { info: worktree, onCommand: setWorktreeCommand } : undefined })
           : visible ? <SessionMenu info={worktree && worktrees && worktree.state.kind === "active" ? worktree : undefined} busy={busy} onCommand={setWorktreeCommand} commands={sessionCommands} /> : null}
       </>}>

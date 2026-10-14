@@ -36,8 +36,14 @@ export function useSessionWorktree(api: Pick<WorktreeApi, "get"> | undefined, so
       if (attempt === latest.current) setFetched(result.info);
     } catch { /* The counts stay as last read; the status read still describes the worktree. */ }
   }, [api, id]);
-  // Each run's end, and the first open, read Git again.
-  useEffect(() => { if (!running && active) void refresh(); }, [running, active, refresh]);
+  const observed = useRef<string | undefined>(undefined);
+  // Each observed run's end, and the first open, read Git again; not an unchanged Activity reveal.
+  useEffect(() => {
+    const key = JSON.stringify([id, running, active]);
+    if (observed.current === key) return;
+    observed.current = key;
+    if (!running && active) void refresh();
+  }, [id, running, active, refresh]);
   const info = combineWorktree({ ...sources, fetched: fetched?.id === id ? fetched : undefined });
   return { info, refresh };
 }
