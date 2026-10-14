@@ -242,3 +242,42 @@ Browser checks/harness:
 The shared seam is the `EarlierHistory` union, store methods, native runtime options and optional Thread prop defined in section 6. Full-stack must not edit Thread, Messages, MarkdownText, Trace or theme.css. Front-end must not edit ForgerieSession, App, sessionStore, contracts or registry. The architect adds Thread's **type-only** optional `earlier` property before builders start so both branches typecheck independently. Front-end then implements its presentation. Full-stack can pass the prop without waiting for presentation code. No runtime semantics are implemented by the architect's seam.
 
 Neither builder edits package manifests/lockfiles; the architect owns the assistant-ui upgrade. Neither builder edits this brief or ADR during parallel work. Parent handles design changes and integration acceptance. No new dependency, custom viewport, or virtualization without the parent revising this contract.
+
+## Known pre-existing failures (upgrade comparison)
+
+All logs are retained in `/home/simonwjackson/.cache/research/chat-fast-open-20261014T172957/logs/`. No deadlines, assertions or gate baselines were changed. The parent authorized the upgrade with these findings; review means **no new failures beyond this list**, not an unqualified green suite.
+
+`npm --prefix ui run verify`: build and lint pass. Final run: 2466 tests pass, 10 fail, 1 skip; 202 test files pass, 3 fail, 1 skip. The same 10 architecture failures reproduce with the pre-upgrade package.json/lock and npm ci (`fast-chat-preupgrade-gates.log`). They concern existing PluginReadme and stylesheet/component ownership, not assistant-ui runtime behavior:
+
+| Gate file | Failing assertion |
+| --- | --- |
+| `gates/css-ownership.test.ts` | each component stylesheet is imported only by its sibling component |
+| `gates/decomposition.test.ts` | no component lacks a sibling part |
+| `gates/decomposition.test.ts` | no file declares a second component |
+| `gates/decomposition.test.ts` | no className literal appears in two component files |
+| `gates/decomposition.test.ts` | no class selector is defined in two stylesheets |
+| `gates/decomposition.test.ts` | no class is rendered by two components |
+| `gates/layers.test.ts` | no system component names a domain concept |
+| `gates/layers.test.ts` | the shared space imports nothing from a feature |
+| `gates/layers.test.ts` | every system component is listed in the shared catalogue |
+| `gates/layers.test.ts` | system component files hold no product-specific copy |
+
+UI logs: `fast-chat-upgrade-ui-verify.log`, `fast-chat-upgrade-ui-verify-final.log`. The first run also discovered this workflow's fixture using node:test under Vitest; the upgrade commit changes that import to Vitest. This suite-registration error is fixed, not accepted as a baseline failure. No assistant-ui API breaking changes observed. Upgraded react 0.15.28, transitive core 0.3.28/store 0.3.20, react-streamdown 0.3.20, tap 0.9.23, streamdown 2.7.0; React remains 19.3.0.
+
+Root suite is timing-flaky under load on this machine. Root sources/dependencies are unchanged by the UI package upgrade. The affected tests import server/Pi/Vitest code, not ui/ or @assistant-ui. Do not claim they fail identically on both trees:
+
+| Run | Result | Log |
+| --- | --- | --- |
+| Upgrade `npm test` | 2991 pass, 4 fail, 5 skip: durableChildAgents steer test and workflowRuns timeouts | `fast-chat-upgrade-root-tests.log` |
+| Upgrade `npm test -- --no-file-parallelism` | 2994 pass, 1 fail, 5 skip: durableChildAgents steer test | `fast-chat-upgrade-root-serial.log` |
+| Step-1 90401251 archive, exact focused steer test | passes | `fast-chat-preupgrade-root-failure.log` |
+| Upgrade exact focused steer test, three runs | fail (child builder timeout), pass, pass | `fast-chat-upgrade-focused-1.log`, `fast-chat-upgrade-focused-2.log`, `fast-chat-upgrade-focused-3.log` |
+| Step-1 90401251 archive, full serial suite | 2993 pass, 2 fail, 5 skip: replyFormatGuide.acceptance production-factory 5000 ms timeout; workflowRuns saved-prose workflow condition timeout. durableChildAgents passes. | `fast-chat-preupgrade-root-serial.log` |
+
+Seen test names:
+
+- `durableChildAgents.test.ts`: "lists a child, reads it, and delivers a user steer that the parent also sees" (full suite also hit its report wait).
+- `replyFormatGuide.acceptance.test.ts`: "reaches the model's system message through the production factory".
+- `workflowRuns.test.ts`: "saves, launches, snapshots, recovers, links children, explicitly finishes, and copies a variation"; upgrade parallel run also timed out temporary workflow proposal tests.
+
+`npm run verify:static` passes (`fast-chat-upgrade-static.log`). Follow-up, medium importance: diagnose root timing sensitivity and repair existing UI architectural ownership in separate work; do not lower gates in this workflow.

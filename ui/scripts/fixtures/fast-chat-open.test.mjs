@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { fixtureMessages, fixtures } from "./fast-chat-open.mjs";
 test("fixtures contain complete turns with stable tool identities and rich content", () => {
   for (const fixture of fixtures) {
