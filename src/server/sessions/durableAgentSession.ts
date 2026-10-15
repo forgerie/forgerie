@@ -40,6 +40,7 @@ import { decisionExtension, decisions, overturnDecision, flaggedDecisions, decis
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
 import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops, workflowProposals, startWorkflowProposal, decideWorkflowProposal, openWorkflowProposals } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
+import { byContentIndex, sdkMessageChanges } from "./durableMessageChanges.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
 import type { WorkflowModels, WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 
@@ -996,12 +997,15 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
         await this.extensionRunner.emit({ type: "agent_end", messages: this.messages });
         this.emit({ type: "agent_settled", aborted: false }); await this.extensionRunner.emit({ type: "agent_settled", aborted: false });
         break;
-      case "message_start": if (event.message.role === "assistant") this.partial = structuredClone(event.message); this.emit(event); break;
+      case "message_start":
+        if (event.message.role !== "assistant") { this.emit(event); break; }
+        // The first commit can already hold text. As in the SDK, the start is empty and that text follows as deltas.
+        this.partial = { ...structuredClone(event.message), content: [] };
+        this.emit({ type: "message_start", message: structuredClone(this.partial) });
+        this.emitChanges([{ type: "message", message: event.message }]);
+        break;
       case "message_update":
-        for (const change of event.changes) {
-          this.applyChange(change);
-          this.emit({ type: "message_update", message: this.partial, assistantMessageEvent: { ...change, partial: this.partial } });
-        }
+        this.emitChanges(event.changes);
         break;
       case "message_end":
         // A model copy, such as a custom message's user form, already showed in its own form. Live must match the projection.
@@ -1052,6 +1056,16 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     }
     if (saved.thinkingLevel !== this.thinkingLevel || !this.sessionManager.getBranch().some((entry) => entry.type === "thinking_level_change")) {
       this.sessionManager.appendThinkingLevelChange(this.thinkingLevel);
+    }
+  }
+
+  /** SDK readers follow starts and deltas, so text that Durable coalesced into one commit is restated as deltas. */
+  private emitChanges(changes: readonly MessageChange[]): void {
+    for (const coalesced of byContentIndex(changes)) {
+      for (const change of sdkMessageChanges(this.partial, coalesced)) {
+        this.applyChange(change);
+        this.emit({ type: "message_update", message: this.partial, assistantMessageEvent: { ...change, partial: this.partial } });
+      }
     }
   }
 
