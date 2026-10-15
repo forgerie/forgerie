@@ -24,6 +24,10 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `EventLine` (molecule): one quiet line for something that happened, with a tone dot, a time, an always-visible quote, and details on request.
 - `EventSentence` (molecule): one quiet event told as a sentence after a tone dot; the words wrap instead of cutting off, a `<strong>` in them is the thing named and an `<a>` the way to it.
 - `AlertCard` (molecule): a failure that may need the reader (or, in the warn tone, trouble that may clear on its own), drawn as a rail and wash in its tone: subject and phrase, explanation, wrapped code, quiet actions or a disclosure, and an output panel the actions fill; long code can be cut to a few lines with Show more.
+- `CodeSheetHead` (molecule): the header of a code sheet: its language, or "text", and a Copy button for its code.
+- `CodeSheetBody` (atom): a code sheet's code, under `CodeSheetHead`: coloured by language once it stops arriving, scrolling sideways instead of wrapping.
+- `MarkdownArticle` (molecule): a whole Markdown document that someone else wrote, under a titled head with its source: drawn like a reply, its HTML sanitized as GitHub does, links in a new tab, https images only, a problem in place of the text, and an optional closing note.
+- `MarkdownSurface` (atom): the box that gives rendered Markdown the transcript's type: headings, lists, links, tables and quotes as a reply draws them.
 - `MarkdownFragment` (atom): renders a short piece of Markdown inside a block, under the reply's link and image policy, with no outer margin.
 - `Checklist` (molecule): shows progress on a list of tasks from `[x]`/`[~]`/`[ ]`/`[!]`/`[-]` lines, with an in-order meter and a count.
 - `FileTree` (molecule): shows the files a change touched as a tree, marked added, changed or deleted, with single-child directories folded.

@@ -13,6 +13,7 @@ import { writeClipboardText } from "../../clipboard";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import { useMenu } from "../useMenu";
 import { GitHubConnect } from "./GitHubConnect";
+import { MarkdownSurface } from "../MarkdownSurface";
 import "../settings/settings.css";
 import "./backlog.css";
 
@@ -357,10 +358,10 @@ function ItemPage({ item: ref, binding }: { item: ItemRef; binding: BacklogBindi
       {issue ? <p className="bl-note-line bl-untrusted"><InfoIcon aria-hidden size={14} />
         Someone on {source?.name} wrote this {source?.noun}. Read it before you start a session: the session gets it as quoted text and is told not to follow instructions in it.
         {item.provider === "azure-devops" ? " Starting or releasing a session does not change its Azure assignment or status." : null}</p> : null}
-      <div className="markdown bl-body">
+      <MarkdownSurface className="bl-body">
         <Streamdown className="markdown-content" mode="static" controls={false} skipHtml linkSafety={{ enabled: false }} components={markdownComponents}>
           {bodyUnderTitle(detail.value.body, item.title)}</Streamdown>
-      </div>
+      </MarkdownSurface>
     </article>
   </SettingsFrame>;
 }

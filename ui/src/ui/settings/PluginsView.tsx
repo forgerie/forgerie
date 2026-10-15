@@ -10,7 +10,7 @@ import { SettingsField } from "./SettingsField";
 import { SettingsToggle } from "./SettingsToggle";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { useMenu } from "../useMenu";
-import { PluginReadmeSection, type ReadmeLoad } from "./PluginReadme";
+import { PluginReadme, type ReadmeLoad } from "../../plugins/PluginReadme";
 import "./settings.css";
 import "./plugins.css";
 
@@ -161,7 +161,7 @@ export function PluginsView({ selected, onOpen, onBack, onClose, onCatalog, api 
         <div className="agent-properties plugin-fields">{fields.map((def) => fieldOf(def, appValues, typed, busy, setSwitch,
           (id, text) => setTyped((current) => ({ ...current, [id]: text }))))}</div>
       </form> : null}
-      {readmeId && readme?.id === readmeId ? <PluginReadmeSection load={readme.load} name={plainName(plugin)} packageName={plugin.name} /> : null}
+      {readmeId && readme?.id === readmeId ? <PluginReadme load={readme.load} name={plainName(plugin)} packageName={plugin.name} /> : null}
     </PluginDetail> : null}
     {catalog && selected && !adding && !plugin ? <p className="settings-hint">This plugin is no longer listed. Go back to Plugins.</p> : null}
     {confirmRestart ? <ConfirmDialog title="Restart Forgerie?" icon={<RotateCwIcon size={16} />} confirmLabel="Stop runs and restart"

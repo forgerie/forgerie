@@ -476,6 +476,7 @@
   "ui/settings/ModelsView.tsx -> ../../models/modelPrefsApi",
   "ui/settings/ModelsView.tsx -> ../../newSession",
   "ui/settings/ModelsView.tsx -> @shared/modelPrefsContract",
+  "ui/settings/PluginsView.tsx -> ../../plugins/PluginReadme",
   "ui/settings/PluginsView.tsx -> ../../plugins/pluginsApi",
   "ui/settings/PromptEditor.tsx -> ../../agents/promptMarkdown",
   "ui/settings/SettingsView.tsx -> ../../agents/agentDrafts",

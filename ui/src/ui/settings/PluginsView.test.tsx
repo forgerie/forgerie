@@ -117,27 +117,27 @@ describe("Plugins settings", () => {
         + "<p align=\"center\"><script>alert(1)</script><a href=\"javascript:alert(1)\">bad</a></p>\n\n```sh\nnpm i pi-goal\n```\n" };
     selected = "package:pi-goal"; await render();
     expect(readmeReads).toEqual(["package:pi-goal"]);
-    const section = document.querySelector(".plugin-readme")!;
+    const section = document.querySelector(".markdown-article")!;
     expect(section.querySelector("h2")!.textContent).toBe("Readme");
-    expect(section.querySelector<HTMLAnchorElement>(".plugin-readme-source")!.href).toBe("https://github.com/o/r/blob/HEAD/README.md");
+    expect(section.querySelector<HTMLAnchorElement>(".markdown-article-source")!.href).toBe("https://github.com/o/r/blob/HEAD/README.md");
     // The title repeats the page's name, so it is dropped.
-    expect(section.querySelector(".plugin-readme-body h1")).toBeNull();
-    expect(section.querySelector(".plugin-readme-body strong")!.textContent).toBe("goals");
-    const links = [...section.querySelectorAll<HTMLAnchorElement>(".plugin-readme-body a")];
+    expect(section.querySelector(".markdown-article-body h1")).toBeNull();
+    expect(section.querySelector(".markdown-article-body strong")!.textContent).toBe("goals");
+    const links = [...section.querySelectorAll<HTMLAnchorElement>(".markdown-article-body a")];
     expect(links.find((link) => link.textContent === "usage")).toMatchObject({ href: "https://github.com/o/r/blob/HEAD/docs/usage.md", target: "_blank" });
     expect(links.some((link) => link.textContent === "install" || link.textContent === "bad")).toBe(false);
     expect(section.textContent).toContain("install");
-    const images = [...section.querySelectorAll<HTMLImageElement>(".plugin-readme-body img")];
+    const images = [...section.querySelectorAll<HTMLImageElement>(".markdown-article-body img")];
     expect(images.map((image) => image.getAttribute("src"))).toEqual(["https://raw.githubusercontent.com/o/r/HEAD/shot.png"]);
     expect(images[0]!.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(section.querySelector("script")).toBeNull();
     expect(section.querySelector(".code-header")!.textContent).toContain("sh");
     expect(section.querySelector(".code-body code")!.textContent).toBe("npm i pi-goal");
-    expect(section.querySelector(".plugin-readme-more")!.textContent).toContain("Read all of it on GitHub");
+    expect(section.querySelector(".markdown-article-end")!.textContent).toContain("Read all of it on GitHub");
   });
   it("shows no README section when a package has none, and never reads one for a missing package", async () => {
     selected = "package:pi-goal"; await render();
-    expect(document.querySelector(".plugin-readme")).toBeNull();
+    expect(document.querySelector(".markdown-article")).toBeNull();
     await act(async () => root.unmount());
     root = createRoot(document.body.appendChild(document.createElement("div")));
     readmeReads = [];

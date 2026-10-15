@@ -3,8 +3,8 @@ import { StreamdownTextPrimitive,
   type CodeHeaderProps, type SyntaxHighlighterProps, type StreamdownTextComponents } from "@assistant-ui/react-streamdown";
 import { useAuiState } from "@assistant-ui/react";
 import { memo, useMemo } from "react";
-import { CopyButton } from "./CopyButton";
-import { highlightCode } from "./highlightCode";
+import { CodeSheetHead } from "./CodeSheetHead";
+import { CodeSheetBody } from "./CodeSheetBody";
 import { fragmentRehypePlugins, markdownElements } from "./markdown/markdownPolicy";
 import { useMarkdownLinkScope } from "./markdown/linkScope";
 import { rehypeCallouts } from "./markdown/rehypeCallouts";
@@ -13,19 +13,13 @@ import { blockFences, noHeader } from "./markdown/blockFences";
 import { FileTree, type FileLinks } from "./FileTree";
 
 function CodeHeader({ language, code }: CodeHeaderProps) {
-  return <div className="code-header">
-    <span title={language || "text"}>{language || "text"}</span>
-    <CopyButton label="Copy code" getText={() => code} />
-  </div>;
+  return <CodeSheetHead language={language ?? ""} getText={() => code} />;
 }
 
 function SyntaxHighlighter({ code, language }: SyntaxHighlighterProps) {
+  // Only highlight completed fences.
   const streaming = useAuiState((s) => s.part.status.type === "running");
-  // Only highlight completed fences. The library escapes all source text.
-  const highlighted = streaming ? undefined : highlightCode(code, language);
-  return <pre className="code-body" tabIndex={0} aria-label={`${language || "Text"} code`}>
-    {highlighted === undefined ? <code>{code}</code> : <code dangerouslySetInnerHTML={{ __html: highlighted }} />}
-  </pre>;
+  return <CodeSheetBody code={code} language={language ?? ""} highlight={!streaming} />;
 }
 
 const components: StreamdownTextComponents = { ...markdownElements, blockquote: CalloutQuote };
