@@ -1,0 +1,19 @@
+/* A column of value boxes, each with its Remove, an empty text when there are none, and the add action under the last. */
+.value-list { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2); inline-size: 100%; min-inline-size: 0; }
+/* The empty text takes a box's row, so the field's label lines up with it as it does with a first box. */
+.value-list-empty { display: flex; align-items: center; min-block-size: var(--control-size); margin: 0; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.45; }
+.value-list-rows { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.value-list-row { display: flex; flex-direction: column; gap: var(--space-1); min-inline-size: 0; }
+.value-list-entry { display: flex; align-items: center; gap: var(--space-1); min-inline-size: 0; }
+.value-list-entry [aria-invalid="true"] { border-color: var(--destructive-line); }
+/* Remove is drawn at the control size, so its drawn square is its whole target. */
+.value-list-remove { display: grid; place-items: center; flex: none; inline-size: var(--control-size); block-size: var(--control-size); padding: 0; border: 0;
+  border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); transition: color 150ms, background-color 150ms; }
+.value-list-remove:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
+.value-list-remove:not(:disabled):active { background: var(--active-surface); }
+.value-list-remove:disabled { opacity: 0.45; }
+.value-list-remove svg { inline-size: 1rem; block-size: 1rem; }
+.value-list-problem { margin: 0; color: var(--destructive); font-size: var(--label-text); line-height: 1.45; overflow-wrap: anywhere; }
+/* The add action's wash starts on the boxes' edge, so the list never reaches past its own box. */
+.value-list-add { display: flex; }
+@media (prefers-reduced-motion: reduce) { .value-list-remove { transition: none; } }

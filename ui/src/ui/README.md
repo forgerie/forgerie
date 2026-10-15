@@ -10,6 +10,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 
 - `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions; an input such as a reply box can take the actions' place under the reason; a failed action's problem shows in the failure ink above them.
 - `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays, and a refusal may offer one follow-up (such as Create) to confirm in place.
+- `ValueList` (molecule): a short list of typed values: each in its own box with a Remove named for it, a problem under any box, an empty text, and an add action that turns off at a limit; focus moves into a new box and stays in the list after a removal.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place; inside a list it opens at window level, above the button when the room below is short.
 - `ChoiceList` (molecule): pick any number of rows; the legend counts the choice, a long list gets a search field, a chosen id with no row stays visible, and an optional every row on top chooses every row, including rows added later.

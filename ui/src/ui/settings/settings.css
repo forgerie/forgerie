@@ -78,9 +78,13 @@
 
 /* Properties: label beside value while the column has room, above it when it does not. */
 .agent-properties { margin-block: var(--space-6) 0; border-block: 1px solid var(--line); padding-block: var(--space-1); }
-.agent-field { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-4); padding-block: var(--space-2); }
+.agent-field { display: flex; flex-wrap: wrap; align-items: start; column-gap: var(--space-4); padding-block: var(--space-2); }
 .agent-field + .agent-field { border-block-start: 1px solid color-mix(in oklab, var(--line) 60%, transparent); }
-.agent-field-label { flex: 0 0 8rem; min-block-size: 2rem; display: flex; align-items: center; color: var(--muted-foreground); font-size: var(--small-text); }
+/* The row aligns to its top. The label fills the row up to one control's height and centres its words there, so beside a
+   one-row value (a toggle, a box) its words sit on the value's centre line as before, and beside a taller value (a
+   list of boxes, a wrapped group) they sit on the first row's centre line, not the middle of the whole value. */
+.agent-field-label { flex: 0 0 8rem; align-self: stretch; min-block-size: 2rem; max-block-size: var(--control-size); display: flex; align-items: center;
+  color: var(--muted-foreground); font-size: var(--small-text); }
 .agent-field-value { flex: 1 1 14rem; min-inline-size: 0; display: flex; align-items: center; min-block-size: 2rem; }
 .agent-field-hint { flex: 1 1 100%; margin: var(--space-1) 0 0; color: color-mix(in oklab, var(--muted-foreground) 85%, transparent); font-size: var(--label-text); line-height: 1.45; }
 .agent-field[data-hint-tone="readable"] > .agent-field-hint { color: var(--muted-foreground); }
