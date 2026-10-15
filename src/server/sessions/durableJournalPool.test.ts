@@ -78,3 +78,18 @@ it("keeps a sibling's provider run alive when the parent lease closes and never 
     await reopened.release(context);
   } finally { await pool.close(context); await rm(directory, { recursive: true, force: true }); }
 });
+
+
+it("borrows only a live execution owner and cannot reopen it after it stops, even while another read lease remains", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "forgerie-family-read-"));
+  const pool = new DurableJournalPool();
+  try {
+    const owner = await pool.acquire({ databasePath: join(directory, "state.sqlite"), sessionId: "parent", create: {} }, { models: createModels(), registry: createRegistry() }, context);
+    const reader = await pool.acquireRead(owner.address, context);
+    expect(reader.harness).toBe(owner.harness);
+    await owner.release(context);
+    await expect(pool.acquireRead(owner.address, context)).rejects.toThrow("Active Durable read owner closed");
+    await reader.release(context);
+    await expect(pool.acquireRead(owner.address, context)).rejects.toThrow("Active Durable read owner closed");
+  } finally { await pool.close(context); await rm(directory, { recursive: true, force: true }); }
+});

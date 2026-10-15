@@ -39,6 +39,7 @@ import {
   type ResourceDiagnostic,
 } from "@earendil-works/pi-coding-agent";
 import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientNewSessionModelSelection, ClientSession, ClientSessionCleanupExecuteResponse, ClientSessionCleanupPreviewResponse, ClientSessionModel, ClientSessionStatus, ClientSessionTreeForkRequest, ClientSessionTreeForkResult, ClientSessionTreeNavigateRequest, ClientSessionTreeNavigateResult, ClientThinkingLevel, SessionStreamSnapshot, SessionUiEvent } from "../types.js";
+import type { DurableSessionAddress } from "./durableSessionAddress.js";
 import type { DurableSessionReader } from "./durableSessionReader.js";
 import type { DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import type { DurableBrowserAttachment } from "./durableParentReadModel.js";
@@ -2795,7 +2796,13 @@ export class PiSessionService implements SessionRouteService {
     return positions;
   }
 
-  async attachOpenBrowser(ref: PiSessionRef, send: (open: SessionOpenResult) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment> {
+  /** Production native admission is active-only. A reader never chooses execution options. */
+  activeDurableRead(ref: PiSessionRef): { address: DurableSessionAddress; sessionFile: string | undefined } | undefined {
+    const session = this.activeForRef(ref)?.runtime.session;
+    return session instanceof DurableAgentSession ? { address: session.durableAddress, sessionFile: session.sessionFile } : undefined;
+  }
+
+  async attachOpenBrowser(ref: PiSessionRef, send: (open: SessionOpenResult) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment | undefined> {
     if (this.durableReader === undefined) throw new Error("Native Durable browser reads are not configured");
     return this.durableReader.attachOpen(ref, this.events, send, onFailure, () => {
       const session = this.activeForRef(ref)?.runtime.session;
@@ -2810,7 +2817,9 @@ export class PiSessionService implements SessionRouteService {
 
   /** Preparation may await. The active classic cut below must not. */
   async open(ref: PiSessionRef, page: SessionOpenPageRequest): Promise<SessionOpenResult> {
+    // Freeze admission before preparation. A stopped native owner is an error, not a fallback.
     const active = this.activeForRef(ref)?.runtime.session;
+    const nativeAddress = await this.durableReader?.locate(ref);
     if (active instanceof DurableAgentSession) await active.flushDurableMutations();
     const catalog = await this.unreadCatalog(); // Capture before any transcript acquisition.
     const receiptFor = (id: string, cwd: string) => {
@@ -2821,15 +2830,18 @@ export class PiSessionService implements SessionRouteService {
     const archived = await this.getArchived(ref);
     const worktree = await this.sessionWorktrees?.store.forSession(ref);
     const worktreeInfo = worktree === undefined ? undefined : await this.sessionWorktrees?.info(worktree, ref.id);
-    const native = await this.durableReader?.open(ref, page, this.events, () => {
+    const native = nativeAddress === undefined ? undefined : await this.durableReader?.openAddress(ref, nativeAddress, page, this.events, () => {
       const session = this.activeForRef(ref)?.runtime.session;
       return { ...(session === undefined ? {} : this.statusFromSession(session)),
         ...(readonly === undefined && archived === undefined ? {} : { readOnly: true }),
         ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) };
     });
     if (native !== undefined) return { ...native, receipt: receiptFor(native.session.id, native.session.cwd) };
-    if (readonly !== undefined || archived !== undefined) {
-      const path = readonly?.transcriptPath ?? archived?.archivePath;
+    const inactiveClassic = this.durableReader !== undefined && nativeAddress === undefined && active === undefined;
+    if (readonly !== undefined || archived !== undefined || inactiveClassic) {
+      const match = inactiveClassic && readonly === undefined && archived === undefined
+        ? await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader) : undefined;
+      const path = readonly?.transcriptPath ?? archived?.archivePath ?? match?.path;
       if (path === undefined) throw new SessionOpenError("Saved session history is unavailable", 503, "OPEN_UNAVAILABLE");
       for (let attempt = 0; attempt < 3; attempt++) {
         const before = await stat(path);
@@ -2838,14 +2850,14 @@ export class PiSessionService implements SessionRouteService {
         if (before.ino !== after.ino || before.dev !== after.dev || before.size !== after.size || before.mtimeMs !== after.mtimeMs) continue;
         const messages = this.openMessages(manager);
         const id = manager.getSessionId(), cwd = manager.getCwd();
-        const status: ClientSessionStatus = { sessionId: id, readOnly: true, persisted: true, isStreaming: false, isCompacting: false,
+        const status: ClientSessionStatus = { sessionId: id, ...(readonly === undefined && archived === undefined ? {} : { readOnly: true }), persisted: true, isStreaming: false, isCompacting: false,
           isBashRunning: false, pendingMessageCount: 0, queuedMessages: [], messageCount: messages.length, ...savedTranscriptUsage(messages),
           ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) };
         return this.classicOpenCut(id, cwd, messages, null, status, page, receiptFor(id, cwd));
       }
       throw new SessionOpenError("Saved history changed during open", 503, "OPEN_UNAVAILABLE");
     }
-    const session = await this.getOrOpen(ref);
+    const session = active ?? await this.getOrOpen(ref);
     if (session instanceof DurableAgentSession) {
       // This cohort still exports SDK callback state. It has no event-line drain seam, and
       // project() can advance its branch before applyEvent updates the partial and emits.
@@ -2885,7 +2897,7 @@ export class PiSessionService implements SessionRouteService {
     assertHistoryIdentity(historyId, page.historyId);
     const seq = this.events.currentSeq(id);
     this.events.savedHostOutput(id, messages);
-    return structuredClone({ session: { id, cwd }, readPath: "classic", epoch: this.events.epoch, seq, historyId,
+    return structuredClone({ session: { id, cwd }, readPath: "classic", cut: "classic", epoch: this.events.epoch, seq, historyId,
       page: pageMessagesAtSafeBoundary(messages, { ...page, completeTurns: true }),
       snapshot: { seq, partial, tools: [], transientEvents: this.events.transientEvents(id) }, status, receipt });
   }
@@ -2903,10 +2915,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async tree(ref: PiSessionRef): Promise<SessionTreeResponse> {
-    const active = this.activeForRef(ref)?.runtime.session;
-    if (active instanceof DurableAgentSession) return { tree: await active.getDurableTree() };
     const native = await this.durableReader?.tree(ref);
     if (native !== undefined) return { tree: native };
+    const active = this.activeForRef(ref)?.runtime.session;
+    if (active instanceof DurableAgentSession) return { tree: await active.getDurableTree() };
     const manager = await this.historySessionManager(ref, (path) => {
       if (this.sessionManager.openReadOnly === undefined) throw new Error("Read-only session loading is not available with this Pi runtime");
       return this.sessionManager.openReadOnly(path);

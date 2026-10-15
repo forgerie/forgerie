@@ -23,7 +23,7 @@ export interface DurableSessionReaderOptions {
 export class DurableSessionReader {
   private stopped = false;
   private readonly attachments = new Set<DurableBrowserAttachment>();
-  private readonly opening = new Set<Promise<DurableBrowserAttachment>>();
+  private readonly opening = new Set<Promise<DurableBrowserAttachment | undefined>>();
   constructor(private readonly options: DurableSessionReaderOptions) {}
 
   async close(): Promise<void> {
@@ -38,8 +38,18 @@ export class DurableSessionReader {
     return await this.read(ref, handle => readTaskActivity(handle.harness, handle.conversation.id, context)) ?? { kind: "unsupported" };
   }
 
+  locate(ref: SessionRef): Promise<DurableSessionAddress | undefined> { return this.options.locate(ref); }
+
   open(ref: SessionRef, page: SessionOpenPageRequest, hub: SessionEventHub, hostStatus?: () => Partial<SessionStatus>): Promise<SessionOpenResult | undefined> {
     return this.read(ref, handle => this.options.readModel(handle).open(ref.cwd, page, hub, context, hostStatus));
+  }
+
+  async openAddress(ref: SessionRef, address: DurableSessionAddress, page: SessionOpenPageRequest, hub: SessionEventHub,
+    hostStatus?: () => Partial<SessionStatus>): Promise<SessionOpenResult> {
+    if (this.stopped) throw new Error("Durable session reader is closed");
+    const handle = await this.options.acquire(address);
+    try { return await this.options.readModel(handle).open(ref.cwd, page, hub, context, hostStatus); }
+    finally { await handle.release(context); }
   }
 
   messages(ref: SessionRef, page?: MessagePageRequest): Promise<DurableBrowserSnapshot["history"] | undefined> {
@@ -52,18 +62,19 @@ export class DurableSessionReader {
 
   /** One coalescing replacement publisher. Adoption listeners never call Harness APIs. */
   attachOpen(ref: SessionRef, hub: SessionEventHub, send: (open: SessionOpenResult) => Promise<void>,
-    onFailure: (error: Error) => void, hostStatus?: () => Partial<SessionStatus>): Promise<DurableBrowserAttachment> {
+    onFailure: (error: Error) => void, hostStatus?: () => Partial<SessionStatus>): Promise<DurableBrowserAttachment | undefined> {
     if (this.stopped) return Promise.reject(new Error("Durable session reader is closed"));
-    const opening = this.openCheckpointAttachment(ref, hub, send, onFailure, hostStatus);
+    const opening = this.locate(ref).then(address => {
+      if (this.stopped) throw new Error("Durable session reader is closed");
+      return address === undefined ? undefined : this.openCheckpointAttachment(ref, address, hub, send, onFailure, hostStatus);
+    });
     this.opening.add(opening);
     void opening.then(() => { this.opening.delete(opening); }, () => { this.opening.delete(opening); });
     return opening;
   }
 
-  private async openCheckpointAttachment(ref: SessionRef, hub: SessionEventHub, send: (open: SessionOpenResult) => Promise<void>,
+  private async openCheckpointAttachment(ref: SessionRef, address: DurableSessionAddress, hub: SessionEventHub, send: (open: SessionOpenResult) => Promise<void>,
     onFailure: (error: Error) => void, hostStatus?: () => Partial<SessionStatus>): Promise<DurableBrowserAttachment> {
-    const address = await this.options.locate(ref);
-    if (address === undefined) throw new Error("Session has no native Durable locator");
     const handle = await this.options.acquire(address);
     const unobserve = hub.observeNative(address.sessionId, handle.harness, handle.conversation.id);
     let stopped = false, dirty = true;
@@ -74,11 +85,12 @@ export class DurableSessionReader {
     let resolveClosed!: (end: Awaited<DurableBrowserAttachment["closed"]>) => void;
     const closed: DurableBrowserAttachment["closed"] = new Promise(resolve => { resolveClosed = resolve; });
     const reader = this.options.readModel(handle);
+    let publishedSeq = -1;
     const publish = async () => {
       while (isDirty() && !isStopped()) {
         dirty = false;
         const open = await reader.open(ref.cwd, { limit: 50 }, hub, context, hostStatus);
-        if (!isStopped()) await send(open);
+        if (!isStopped() && open.seq > publishedSeq) { await send(open); publishedSeq = open.seq; }
       }
     };
     let releasing: Promise<void> | undefined;
@@ -88,9 +100,10 @@ export class DurableSessionReader {
       dirty = true;
       queueMicrotask(schedule);
     });
+    const stopHost = hub.observeHostState(address.sessionId, () => { dirty = true; queueMicrotask(schedule); });
     const finish = async (end: Awaited<DurableBrowserAttachment["closed"]>) => {
       if (stopped) return;
-      stopped = true; stopWatch(); unobserve();
+      stopped = true; stopWatch(); stopHost(); unobserve();
       try { await release(); } finally { this.attachments.delete(attachment); resolveClosed(end); }
     };
     function schedule() {

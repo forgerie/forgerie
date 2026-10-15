@@ -27,6 +27,15 @@ export class SessionEventHub {
   private readonly seqBySession = new Map<string, number>();
   readonly epoch = randomUUID();
   private readonly hostBySession = new Map<string, { shells: { events: SessionOpenTransientEvent[]; after?: string | undefined }[]; consumed: Set<string>; command?: Extract<SessionOpenTransientEvent, { type: "command.output" }> }>();
+  private readonly nativeRefresh = new Map<string, Set<() => void>>();
+
+  /** Host-only state has no Durable commit. Reacquire a native cut instead of forwarding SDK status. */
+  observeHostState(sessionId: string, changed: () => void): () => void {
+    const listeners = this.nativeRefresh.get(sessionId) ?? new Set<() => void>();
+    this.nativeRefresh.set(sessionId, listeners); listeners.add(changed);
+    return () => { listeners.delete(changed); if (listeners.size === 0) this.nativeRefresh.delete(sessionId); };
+  }
+
   private readonly shellAnchor = new Map<string, string | undefined>();
 
   prepareHostShell(sessionId: string, after: string | undefined): void { this.shellAnchor.set(sessionId, after); }
@@ -109,9 +118,11 @@ export class SessionEventHub {
   }
 
   addDurable(sessionId: string, socket: RealtimeSocket): void {
-    this.nativeSockets.add(socket);
+    this.markDurable(socket);
     this.add(sessionId, socket);
   }
+
+  markDurable(socket: RealtimeSocket): void { this.nativeSockets.add(socket); }
 
   addGlobal(socket: RealtimeSocket): void {
     this.globalSockets.add(socket);
@@ -155,6 +166,7 @@ export class SessionEventHub {
     this.rememberHostOutput(sessionId, event);
     const seq = (this.seqBySession.get(sessionId) ?? 0) + 1;
     this.seqBySession.set(sessionId, seq);
+    if (event.type === "status.update") for (const changed of this.nativeRefresh.get(sessionId) ?? []) changed();
     const payload = JSON.stringify({ ...projectBrowserSessionEvent(event), seq });
     this.sendToSockets(this.socketsBySession.get(sessionId), payload, event.type.startsWith("shell.") || event.type === "command.output" || event.type.startsWith("dialog.") || event.type === "session.error" || event.type === "pi.event" || event.type === "processes.update" || event.type === "processes.output");
   }

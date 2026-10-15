@@ -280,6 +280,18 @@ describe("native read-model HTTP and WebSocket paths", () => {
     expect(await tasks.json()).toEqual({ kind: "unsupported" });
     expect((await fetch(`${base}/sessions/unknown/tasks?${new URLSearchParams({ cwd: f.directory })}`)).status).toBe(404);
     expect(f.acquired()).toBe(0);
+    const opened = await fetch(`${base}/sessions/${id}/open?${new URLSearchParams({ cwd: f.directory })}`);
+    expect(opened.status).toBe(200);
+    expect(await opened.json()).toMatchObject({ readPath: "classic", cut: "classic", page: { messages: [{ content: "legacy input" }] } });
+    const socket = new WebSocket(`${base.replace("http:", "ws:")}/sessions/${id}/events?${new URLSearchParams({ cwd: f.directory, native: "1", open: "1" })}`);
+    const frames: unknown[] = [];
+    socket.on("message", payload => { frames.push(JSON.parse(Buffer.isBuffer(payload) ? payload.toString("utf8") : new TextDecoder().decode(payload instanceof ArrayBuffer ? payload : Buffer.concat(payload)))); });
+    try {
+      await vi.waitFor(() => { expect(frames[0]).toMatchObject({ type: "session.checkpoint", readPath: "classic" }); });
+      f.hub.publish(id, { type: "assistant.delta", text: "classic authority" });
+      await vi.waitFor(() => { expect(frames[1]).toMatchObject({ type: "assistant.delta", text: "classic authority" }); });
+      expect(f.acquired()).toBe(0);
+    } finally { await new Promise<void>(resolve => { socket.once("close", () => { resolve(); }); socket.close(); }); }
   });
 
   it.each(["stalled", "buffered"] as const)("closes a %s real socket instead of hiding an unbounded transport queue", async (kind) => {

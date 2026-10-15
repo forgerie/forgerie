@@ -3,14 +3,14 @@ import type { ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
-import { createSessionStore, type SessionTransport, type SessionStore } from "./sessionStore";
+import { browserTransport, createSessionStore, type SessionTransport, type SessionStore } from "./sessionStore";
 import type { DurableBrowserSnapshot, SessionOpen } from "./contracts";
 import { messageText } from "./transcript";
 
 const disposals: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const dispose of disposals.splice(0).reverse()) await dispose(); });
 
-async function fixture() {
+async function fixture(readPath: "native" | "classic" = "native") {
   const requests: string[] = [];
   let seed: SessionOpen | undefined;
   const waiting: ServerResponse[] = [];
@@ -39,18 +39,19 @@ async function fixture() {
   const origin = `http://127.0.0.1:${address.port}`;
   const transport: SessionTransport = { nativeReadModel: true, request: (path, init) => fetch(origin + path, init),
     connect: (path) => new WebSocket(origin.replace("http:", "ws:") + path) };
-  const store = createSessionStore("native", transport, { retryDelayMs: 5 }, { id: "native", cwd: "/temporary" });
+  const piEvents: string[] = [];
+  const store = createSessionStore("native", transport, { retryDelayMs: 5 }, { id: "native", cwd: "/temporary" }, undefined, event => piEvents.push(event));
   disposals.push(async () => {
     for (const client of ws.clients) client.terminate();
     ws.close(); http.closeAllConnections();
     await new Promise<void>((resolve) => { http.close(() => { resolve(); }); });
   });
   disposals.push(store.dispose);
-  return { store, requests, connections: () => connections,
+  return { store, requests, piEvents, connections: () => connections,
     emit: (frame: unknown) => {
       if (typeof frame === "object" && frame !== null && "type" in frame && frame.type === "session.snapshot") {
         const value = frame as DurableBrowserSnapshot;
-        seed = openFixture({ session: { id: "native", cwd: "/temporary" }, readPath: "native", epoch: value.epoch,
+        seed = openFixture({ session: { id: "native", cwd: "/temporary" }, readPath, epoch: value.epoch,
           page: { ...value.history, total: Math.max(value.history.total, value.history.start + value.history.messages.length) },
           snapshot: { seq: value.revision * 10, partial: value.partial }, tools: value.tools, transientEvents,
           status: { isStreaming: value.isStreaming, isCompacting: value.isCompacting, isBashRunning: transientEvents.some(event => event.type === "shell.start"), queuedMessages: value.queuedMessages, pendingAsk: value.app?.pendingAsk } });
@@ -91,6 +92,46 @@ async function join(f: Awaited<ReturnType<typeof fixture>>, frame = snapshot()) 
 }
 
 describe("native browser replacement", () => {
+  it("requests native admission in the production browser transport", () => {
+    expect(browserTransport.nativeReadModel).toBe(true);
+  });
+
+  it("accepts classic SDK messages and status when native admission selects an inactive or non-Durable session", async () => {
+    const f = await fixture("classic");
+    await join(f);
+    f.emit({ type: "assistant.delta", text: "classic live reply", seq: 1 });
+    f.emit({ type: "status.update", status: { isStreaming: true, isCompacting: false, isBashRunning: false }, seq: 2 });
+    await waitFor(f.store, () => f.store.getSnapshot().status?.isStreaming === true);
+    expect(f.store.getSnapshot().transcript.messages.map(messageText)).toEqual(["first contribution", "second contribution", "classic live reply"]);
+  });
+
+  it("does not let later host output hide a native completion checkpoint, and keeps errors, commands, dialogs and tree notifications", async () => {
+    const f = await fixture();
+    await join(f);
+    f.emit({ type: "shell.start", command: "running shell", seq: 20 });
+    f.emit({ type: "shell.chunk", chunk: "output after cut", seq: 21 });
+    f.emit({ type: "session.error", message: "visible native failure", seq: 22 });
+    f.emit({ type: "command.output", level: "info", message: "command completed", seq: 23 });
+    f.emit({ type: "pi.event", eventType: "session_tree", seq: 24 });
+    await waitFor(f.store, () => f.store.getSnapshot().commandResult?.type === "done");
+    const completed = openFixture({ session: { id: "native", cwd: "/temporary" }, readPath: "native", epoch: "one", snapshot: { seq: 10, partial: null },
+      page: { start: 0, total: 3, messages: [...snapshot().history.messages, { id: "completed", role: "assistant", content: "new native completion" }] },
+      status: { isStreaming: false, isCompacting: false, isBashRunning: true, pendingDialogs: [{ kind: "confirm", dialogId: "dialog", title: "Confirm", message: "Continue?", askedAt: "2026-10-15T00:00:00Z" }] } });
+    f.emit({ type: "session.open", open: completed });
+    await waitFor(f.store, () => f.store.getSnapshot().transcript.messages.some(message => messageText(message) === "new native completion"));
+    expect(f.store.getSnapshot().transcript.messages.filter(message => messageText(message) === "new native completion")).toHaveLength(1);
+    expect(f.store.getSnapshot().transcript.messages.at(-1)?.parts).toMatchObject([{ type: "shell", run: { result: { type: "running", output: "output after cut" } } }]);
+    expect(f.store.getSnapshot().transcript.error).toBe("visible native failure");
+    expect(f.store.getSnapshot().commandResult).toMatchObject({ type: "done", message: "command completed" });
+    expect(f.store.getSnapshot().status?.pendingDialogs).toMatchObject([{ dialogId: "dialog" }]);
+    expect(f.piEvents).toEqual(["session_tree"]);
+    f.emit({ type: "status.update", seq: 25, status: { isStreaming: true, isCompacting: true, isBashRunning: false } });
+    f.emit({ type: "assistant.delta", text: "stale SDK projection", seq: 26 });
+    await new Promise(resolve => { setTimeout(resolve, 20); });
+    expect(f.store.getSnapshot().status?.isStreaming).toBe(false);
+    expect(f.store.getSnapshot().status?.isCompacting).toBe(false);
+    expect(f.store.getSnapshot().transcript.messages.map(messageText)).not.toContain("stale SDK projection");
+  });
   it("joins from one HTTP open seed plus the socket without separate history, partial, or status reads", async () => {
     const f = await fixture();
     await join(f);

@@ -9,6 +9,7 @@ import type { PiSessionServiceDependencies } from "../sessions/piSessionService.
  */
 export interface SessionServiceDependencyInput {
   agentDir: string;
+  durableReader: NonNullable<PiSessionServiceDependencies["durableReader"]>;
   managedProcesses?: PiSessionServiceDependencies["managedProcesses"];
   sessionSearch?: PiSessionServiceDependencies["sessionSearch"];
   /** Daemon-lifetime session archive, constructed against the captured daemon environment. */
@@ -61,6 +62,7 @@ export interface SessionServiceDependencyInput {
 export function sessionServiceDependencies(input: SessionServiceDependencyInput): PiSessionServiceDependencies {
   return {
     modelRuntime: input.modelRuntime,
+    durableReader: input.durableReader,
     agentDir: input.agentDir,
     ...(input.managedProcesses === undefined ? {} : { managedProcesses: input.managedProcesses }),
     ...(input.sessionSearch === undefined ? {} : { sessionSearch: input.sessionSearch }),

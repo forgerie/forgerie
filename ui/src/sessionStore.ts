@@ -45,11 +45,12 @@ export interface SessionState {
 export interface SessionTransport {
   request: (path: string, init: RequestInit) => Promise<Response>;
   connect: (path: string) => WebSocket;
-  /** Enable only after the daemon composes native locators and parent app-document watches. */
+  /** Request native admission. Inactive and non-Durable sessions negotiate classic events. */
   nativeReadModel?: boolean;
   watchRecovery?: (recover: () => void) => () => void;
 }
 export const browserTransport: SessionTransport = {
+  nativeReadModel: true,
   request: (path, init) => fetch(path, init),
   connect: (path) => {
     const url = new URL(path, window.location.href);
@@ -87,6 +88,7 @@ interface Join {
   seq: number;
   epoch?: string;
   checkpoint?: SessionOpen;
+  readPath?: SessionOpen["readPath"];
 }
 class CheckpointUncertain extends Error {}
 class ReadFailure extends Error {
@@ -272,8 +274,18 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     const version = statusVersion;
     if (!session || !attempt) return;
     try {
-      const status = await request(readPath("status", session), statusSchema, {}, attempt.controller.signal);
-      if (current(attempt) && version === statusVersion) { statusVersion++; update(withStatus(state, status)); }
+      if (attempt.readPath === "native") {
+        const open = await request(`${readPath("open", session)}&limit=50`, sessionOpenSchema, {}, attempt.controller.signal);
+        if (current(attempt) && open.readPath !== attempt.readPath) { recover("Session read path changed; reconnecting to resync."); return; }
+        if (current(attempt) && version === statusVersion && open.seq >= (attempt.checkpoint?.seq ?? 0)) {
+          statusVersion++; attempt.checkpoint = open;
+          update(applyOpen(state, open, attempt.buffered));
+          attempt.buffered = attempt.buffered.filter(event => (event.seq ?? Infinity) > open.seq);
+        }
+      } else {
+        const status = await request(readPath("status", session), statusSchema, {}, attempt.controller.signal);
+        if (current(attempt) && version === statusVersion) { statusVersion++; update(withStatus(state, status)); }
+      }
     } catch {
       // The mutation already succeeded. Recover reads only; never restore its text as an unsent command.
       if (current(attempt)) recover();
@@ -284,7 +296,11 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     if (isOperationEvent(event)) return withOperation(previous, event);
     return { ...previous, transcript: reduceEvent(previous.transcript, event) };
   }
+  function nativeHostEvent(event: UiEvent): boolean {
+    return event.type === "command.output" || event.type === "session.error" || event.type.startsWith("shell.");
+  }
   function applyOpen(previous: SessionState, open: SessionOpen, buffered: readonly UiEvent[]): SessionState {
+    if (open.readPath === "native") buffered = buffered.filter(nativeHostEvent);
     const running = open.status.isStreaming || open.status.isCompacting;
     const hostSeq = open.cut === "sequential" ? open.statusSeq ?? open.seq : open.seq;
     const newerShell = buffered.filter(event => event.type.startsWith("shell.") && (event.seq ?? Infinity) > hostSeq);
@@ -330,7 +346,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     let next = withStatus({ ...previous, session: open.session, transcript, ask: resyncAsk(previous.ask, open.status.pendingAsk),
       earlier: { type: open.page.start === 0 ? "complete" : "available" } }, open.status);
     for (const event of open.snapshot.transientEvents) if (isOperationEvent(event)) next = applyEvent(next, event);
-    next = { ...next, transcript: reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)) };
+    next = { ...next, transcript: { ...reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)),
+      ...(previous.transcript.error === undefined ? {} : { error: previous.transcript.error }) } };
     for (const event of buffered) if ((event.seq ?? Infinity) > open.seq) next = applyEvent(next, event);
     page = { start: open.page.start, total: open.page.total, historyId: open.historyId, epoch: open.epoch };
     if (open.receipt !== null) pendingReceipt = { ...open.receipt, session: open.session };
@@ -367,6 +384,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
             const frame = z.object({ epoch: z.string().min(1), seq: z.number().int().nonnegative().safe() }).parse(raw);
             if (attempt.epoch !== undefined && attempt.epoch !== frame.epoch) throw new CheckpointUncertain("Daemon epoch changed; reconnect to resync.");
             attempt.epoch = frame.epoch;
+            if ("readPath" in raw && raw.readPath === "classic") attempt.readPath = "classic";
             return;
           }
           if (typeof raw === "object" && raw !== null && "type" in raw && raw.type === "session.open" && "open" in raw) {
@@ -375,9 +393,15 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
             attempt.epoch = open.epoch;
             if (attempt.checkpoint !== undefined && open.seq <= attempt.checkpoint.seq) return;
             attempt.checkpoint = open;
-            if (!attempt.seeding && open.seq >= attempt.seq) {
-              attempt.seq = open.seq;
-              update(applyOpen(state, open, [])); acknowledge(); scheduleReadRefresh();
+            attempt.readPath = open.readPath;
+            if (!attempt.seeding) {
+              statusVersion++;
+              attempt.seq = Math.max(attempt.seq, open.seq);
+              // Host events can arrive while a detached native cut waits on its transport.
+              // Their higher seq must not hide an earlier, newer transcript checkpoint.
+              update(applyOpen(state, open, attempt.buffered));
+              attempt.buffered = attempt.buffered.filter(event => (event.seq ?? Infinity) > open.seq);
+              acknowledge(); scheduleReadRefresh();
             }
             return;
           }
@@ -387,11 +411,15 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
             && (raw.type === "processes.update" || raw.type === "processes.output")) onPiEvent(raw.type);
           const parsed = parseEvent(raw);
           if (!parsed || parsed.seq !== undefined && parsed.seq <= attempt.seq) return;
-          if (transport.nativeReadModel && !isOperationEvent(parsed) && parsed.type !== "session.error" && !parsed.type.startsWith("shell.")) return;
+          if (!attempt.seeding && attempt.readPath === "native" && !nativeHostEvent(parsed)) return;
           if (attempt.seeding) {
             if (attempt.buffered.length >= 10_000) throw new CheckpointUncertain("Session event buffer overflow; reconnect to resync.");
             attempt.buffered.push(parsed);
           } else {
+            if (attempt.readPath === "native") {
+              if (attempt.buffered.length >= 10_000) throw new CheckpointUncertain("Native host event buffer overflow; reconnect to resync.");
+              attempt.buffered.push(parsed);
+            }
             if (parsed.seq !== undefined) attempt.seq = parsed.seq;
             if (parsed.type === "status.update") statusVersion++;
             update(applyEvent(state, parsed));
@@ -420,14 +448,17 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       const response = await read(`${readPath("open", session)}&limit=50`, sessionOpenSchema);
       if (!current(attempt)) return;
       if (attempt.epoch !== undefined && response.epoch !== attempt.epoch) throw new Error("Open checkpoint belongs to another daemon epoch.");
+      if (attempt.readPath !== undefined && attempt.readPath !== response.readPath) throw new CheckpointUncertain("Session read path changed; reconnect to resync.");
       const open = attempt.checkpoint !== undefined && attempt.checkpoint.seq > response.seq ? attempt.checkpoint : response;
       // The HTTP receipt remains conservative even if a newer socket replacement won the race.
       if (response.receipt !== null) pendingReceipt = { ...response.receipt, session: response.session };
       const joined = applyOpen(state, open, attempt.buffered);
       attempt.epoch = open.epoch;
-      attempt.seq = Math.max(open.seq, ...attempt.buffered.map(event => event.seq ?? 0));
+      attempt.seq = Math.max(open.seq, ...attempt.buffered.filter(event => open.readPath !== "native" || nativeHostEvent(event)).map(event => event.seq ?? 0));
       attempt.checkpoint = open;
-      attempt.seeding = false; attempt.buffered.length = 0;
+      attempt.readPath = open.readPath;
+      attempt.seeding = false;
+      attempt.buffered = open.readPath === "native" ? attempt.buffered.filter(event => nativeHostEvent(event) && (event.seq ?? Infinity) > open.seq) : [];
       statusVersion++; retryDelay = initialDelay; attempts = 0;
       if (capturedCatalogVersion === catalogVersion) readRefreshRequested = false;
       update({ ...joined, connection: { type: "ready" }, lastReadyAt: now() });

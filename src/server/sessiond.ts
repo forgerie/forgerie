@@ -81,6 +81,7 @@ import { SESSIOND_RUNTIME_CAPABILITIES } from "../shared/capabilities.js";
 import { agentSessionDirEnvKeys, effectivePiWebConfig, loadPiWebConfig, maxUploadBytes, offlineModeEnabled, piWebDataDir } from "../config.js";
 import { createActiveAgentProfileDescriptor } from "../sessiond/activeAgentProfile.js";
 import { applyAgentHttpIdleTimeout } from "./sessiond/agentHttpDispatcher.js";
+import { createActiveDurableSessionReader } from "./sessiond/durableSessionReader.js";
 import { sessionServiceDependencies } from "./sessiond/sessionServiceDependencies.js";
 import { pinAgentDirEnv, scrubNonAgentVisibleEnvKeys } from "./sessiond/agentProcessEnvironment.js";
 import { usesPiCodingAgentStateCompatibility } from "../shared/activeAgentProfile.js";
@@ -236,6 +237,7 @@ async function createSessionDaemonRuntime() {
   app.addHook("onClose", async () => { await sessionSearch.close(); });
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
     modelRuntime: modelRuntime,
+    durableReader: createActiveDurableSessionReader(ref => sessions.activeDurableRead(ref)),
     agentDir: activeAgentProfile.dir,
     managedProcesses: { stateDirectory: piWebDataDir(daemonEnvironment), environment: daemonEnvironment },
     sessionSearch,

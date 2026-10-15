@@ -145,10 +145,11 @@ export class DurableParentReadModel {
             ...(asks.pending === undefined ? {} : { pendingAsk: asks.pending }),
             response: asks.pending !== undefined ? { kind: "needs-response", reason: "questions" }
               : response.intent === "nothing" ? { kind: "none" } : { kind: "needs-response", reason: response.intent === "questions" ? "reply" : response.intent } };
+          if (asks.pending === undefined) delete status.pendingAsk;
           if (before !== hub.currentSeq(handle.address.sessionId)) return undefined;
           const historyId = `native:${handle.address.journalId}:${String(id)}`;
           assertHistoryIdentity(historyId, request.historyId);
-          return structuredClone({ session: { id: handle.address.sessionId, cwd, ...(name.name === undefined ? {} : { name: name.name }) }, readPath: "native" as const,
+          return structuredClone({ session: { id: handle.address.sessionId, cwd, ...(name.name === undefined ? {} : { name: name.name }) }, readPath: "native" as const, cut: "native" as const,
             epoch: hub.epoch, seq, historyId, page: this.page(messages, { ...request, completeTurns: true }),
             snapshot: { seq, partial: partial === undefined ? null : durableBrowserMessageSchema.parse(projectBrowserMessage(partial)), tools, transientEvents: hub.transientEvents(handle.address.sessionId) }, status, receipt: null });
         }, context);
@@ -166,7 +167,11 @@ export class DurableParentReadModel {
     let cursor: Cursor | undefined;
     do {
       const page = await this.options.handle.conversation.entries({ order: "ascending" }, SCAN_SIZE, cursor, context);
-      for (const entry of page.items) messages.push(...this.entryMessages(entry));
+      for (const entry of page.items) {
+        const presentation = await this.options.handle.harness.snapshot(Presentation, this.options.handle.conversation.id, String(entry.id), context);
+        if (presentation !== undefined && !Check(PresentationSchema, presentation)) throw new Error("Invalid native presentation document");
+        messages.push(...this.entryMessages(entry, nativePresentation(entry, presentation?.envelope)));
+      }
       cursor = page.next;
     } while (cursor !== undefined);
     return messages;

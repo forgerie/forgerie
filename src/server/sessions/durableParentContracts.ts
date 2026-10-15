@@ -21,6 +21,6 @@ export interface DurableParentMutations {
 
 /** Opt-in transport capability while the mixed-store reader is composed at daemon startup. */
 export interface DurableBrowserSessionService {
-  attachOpenBrowser?(ref: SessionRef, send: (open: SessionOpenResult) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment>;
+  attachOpenBrowser?(ref: SessionRef, send: (open: SessionOpenResult) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment | undefined>;
   attachDurableBrowser(ref: SessionRef, send: (snapshot: DurableBrowserSnapshot) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment>;
 }

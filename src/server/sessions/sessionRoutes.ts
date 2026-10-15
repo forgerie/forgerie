@@ -603,16 +603,23 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
         void attachment?.stop().catch((error: unknown) => { request.log.error({ err: error }, "Native Durable browser detach failed"); });
       });
       try {
-        if (request.query.cwd === undefined || sessions.attachDurableBrowser === undefined) throw new Error("Native Durable events require cwd and a configured reader");
+        if (request.query.cwd === undefined) throw new Error("Native Durable events require cwd");
         const ref = { id: request.params.sessionId, cwd: normalizeRequestCwd(request.query.cwd) };
-        eventHub.addDurable(request.params.sessionId, socket);
+        // Subscribe before admission. Buffer SDK events until the read path is known.
+        eventHub.add(request.params.sessionId, socket);
         const opening = request.query.open === "1"
-          ? sessions.attachOpenBrowser?.(ref, (open) => eventHub.sendOpenSnapshot(socket, open), fail)
-          : sessions.attachDurableBrowser(ref, (snapshot) => eventHub.sendDurableSnapshot(socket, snapshot), fail);
-        if (opening === undefined) throw new Error("Consistent native events are unavailable");
+          ? sessions.attachOpenBrowser?.(ref, (open) => { eventHub.markDurable(socket); return eventHub.sendOpenSnapshot(socket, open); }, fail)
+          : sessions.attachDurableBrowser?.(ref, (snapshot) => { eventHub.markDurable(socket); return eventHub.sendDurableSnapshot(socket, snapshot); }, fail);
+        if (opening === undefined) {
+          if (request.query.open !== "1") throw new Error("Consistent native events are unavailable");
+          socket.send(JSON.stringify({ type: "session.checkpoint", readPath: "classic", epoch: eventHub.epoch, seq: eventHub.currentSeq(request.params.sessionId) }));
+          return;
+        }
         void opening.then(async (attached) => {
           attachment = attached;
-          if (closed) await attached.stop();
+          if (attached === undefined) {
+            if (!closed) socket.send(JSON.stringify({ type: "session.checkpoint", readPath: "classic", epoch: eventHub.epoch, seq: eventHub.currentSeq(request.params.sessionId) }));
+          } else if (closed) await attached.stop();
         }).catch((error: unknown) => { fail(error instanceof Error ? error : new Error(String(error))); });
       } catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
       return;

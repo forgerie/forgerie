@@ -45,8 +45,8 @@ export function createSessionOpenSchema<MessageSchema extends z.ZodType, StatusS
   return z.object({
     session: z.object({ id: identity, cwd: identity, name: z.string().optional() }),
     readPath: z.enum(["classic", "native"]),
-    /** Compatibility facade reads retain the previous three-read reconciliation until native cutover. */
-    cut: z.literal("sequential").optional(),
+    /** The authority and consistency used for this cut; optional for older transports. */
+    cut: z.enum(["native", "classic", "sequential"]).optional(),
     statusSeq: safePosition.optional(),
     epoch: identity,
     seq: safePosition,

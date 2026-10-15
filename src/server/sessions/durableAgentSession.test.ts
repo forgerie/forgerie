@@ -16,6 +16,7 @@ import { createEndTurnToolDefinition } from "./endTurnTool.js";
 const directories: string[] = [];
 const sessions: DurableAgentSession[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(sessions.splice(0).map((session) => session.close()));
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
@@ -783,4 +784,172 @@ it("opens the production Durable facade without a native reader and labels its e
     expect(result.snapshot.seq).toBe(result.seq);
     expect(result.statusSeq).toBeGreaterThanOrEqual(result.seq);
   } finally { await app.close(); await service.dispose(); }
+});
+
+
+import { createActiveDurableSessionReader } from "../sessiond/durableSessionReader.js";
+import { DurableSessionJournal } from "./durableSessionJournal.js";
+import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
+import type { SessionOpenResult } from "./sessionOpen.js";
+import { WebSocket } from "ws";
+import { z } from "zod";
+import { createSessionOpenSchema } from "../../shared/sessionOpen.js";
+import { durableBrowserMessageSchema } from "../../shared/durableBrowserSnapshot.js";
+
+it("reads a native reply and tool completion during preparation while the SDK event line is stalled, then streams strictly after the cut", async () => {
+  const tool = defineTool({ name: "checkpoint_tool", label: "Checkpoint", description: "Complete a tool", parameters: Type.Object({}),
+    execute: () => Promise.resolve({ content: [{ type: "text" as const, text: "tool completed" }], details: undefined }) });
+  const { session, provider, manager, services, directory } = await fixture([tool]);
+  const hub = new SessionEventHub();
+  const reader = createActiveDurableSessionReader(ref => service.activeDurableRead(ref));
+  const service = new PiSessionService(hub, { agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime, durableReader: reader,
+    sessionManager: { ...sessionGateway([]), create: () => manager }, archiveStore: emptyArchiveStore(),
+    createAgentRuntime: () => Promise.resolve({ session, cwd: directory, setRebindSession: () => { /* This test retains its original facade. */ }, fork: () => Promise.reject(new Error("Not exercised")), dispose: () => Promise.resolve() }), heartbeatIntervalMs: 60_000 });
+  const app = Fastify(); await app.register(websocket); registerSessionRoutes(app, service, hub);
+  let releaseProvider!: () => void, releaseSdk!: () => void;
+  const heldProvider = new Promise<void>(resolve => { releaseProvider = resolve; });
+  const heldSdk = new Promise<void>(resolve => { releaseSdk = resolve; });
+  const nativeOpenSchema = createSessionOpenSchema(durableBrowserMessageSchema, z.unknown());
+  const frames: z.infer<typeof nativeOpenSchema>[] = [];
+  let socket: WebSocket | undefined;
+  const eventTypes: string[] = [];
+  try {
+    await service.start(directory);
+    provider.setResponses([async () => { await heldProvider; return fauxAssistantMessage([fauxToolCall("checkpoint_tool", {}, { id: "checkpoint-call" })], { stopReason: "toolUse" }); }, fauxAssistantMessage("finished during native open")]);
+    const prompting = session.prompt("native cut input");
+    await vi.waitFor(() => { expect(session.isStreaming).toBe(true); });
+    const refresh = session.refreshDurableReads.bind(session);
+    vi.spyOn(session, "refreshDurableReads").mockImplementation(async () => { await heldSdk; await refresh(); });
+    const acquireRead = DurableSessionJournal.pool.acquireRead.bind(DurableSessionJournal.pool);
+    vi.spyOn(DurableSessionJournal.pool, "acquireRead").mockImplementationOnce(async (address, ctx) => {
+      const handle = await acquireRead(address, ctx);
+      const entries = handle.conversation.entries.bind(handle.conversation);
+      vi.spyOn(handle.conversation, "entries").mockImplementationOnce(async (...args) => {
+        releaseProvider();
+        await vi.waitFor(async () => { expect((await session.journal.harness.snapshot(LiveDoc, session.journal.conversation.id, context))?.run).toBeUndefined(); });
+        return entries(...args);
+      });
+      return handle;
+    });
+    const response = await app.inject({ url: `/sessions/${session.sessionId}/open?${new URLSearchParams({ cwd: directory, limit: "50" })}` });
+    expect(response.statusCode).toBe(200);
+    const cut = response.json<SessionOpenResult>();
+    expect(cut).toMatchObject({ readPath: "native", cut: "native", snapshot: { partial: null }, status: { isStreaming: false } });
+    expect(cut.page.messages.map(message => message.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
+    expect(cut.page.messages[1]?.content).toMatchObject([{ type: "toolCall", id: "checkpoint-call" }]);
+    expect(cut.page.messages[2]?.content).toMatchObject([{ type: "text", text: "tool completed" }]);
+    expect(cut.page.messages[3]?.content).toMatchObject([{ type: "text", text: "finished during native open" }]);
+    expect(new Set(cut.page.messages.map(message => message.id)).size).toBe(4);
+    expect(session.isStreaming).toBe(true); // The SDK projection is deliberately not the cut authority.
+    const origin = await app.listen({ host: "127.0.0.1", port: 0 });
+    socket = new WebSocket(`${origin.replace("http:", "ws:")}/sessions/${session.sessionId}/events?${new URLSearchParams({ cwd: directory, native: "1", open: "1" })}`);
+    socket.on("message", data => {
+      const raw: unknown = JSON.parse(Buffer.isBuffer(data) ? data.toString("utf8") : new TextDecoder().decode(data instanceof ArrayBuffer ? data : Buffer.concat(data)));
+      const frame = z.object({ type: z.string(), open: nativeOpenSchema.optional() }).parse(raw);
+      eventTypes.push(frame.type);
+      if (frame.type === "session.open" && frame.open !== undefined) frames.push(frame.open);
+    });
+    await vi.waitFor(() => { expect(frames[0]).toBeDefined(); });
+    const baseline = frames.at(-1);
+    expect(baseline?.page.messages).toEqual(cut.page.messages);
+    const beforeNext = frames.length;
+    releaseSdk(); await prompting;
+    await vi.waitFor(() => { expect(session.isStreaming).toBe(false); });
+    provider.setResponses([fauxAssistantMessage("next reply")]);
+    await session.prompt("next input");
+    await vi.waitFor(() => { expect(frames.at(-1)?.page.messages).toHaveLength(6); });
+    const later = frames.slice(beforeNext);
+    expect(later.every(frame => frame.seq > cut.seq)).toBe(true);
+    expect(frames.every((frame, index) => index === 0 || frame.seq > (frames[index - 1]?.seq ?? -1))).toBe(true);
+    expect(later.every(frame => frame.page.messages.slice(0, 4).map(message => message.id).join() === cut.page.messages.map(message => message.id).join())).toBe(true);
+    expect(frames.at(-1)?.page.messages.map(message => message.role)).toEqual(["user", "assistant", "toolResult", "assistant", "user", "assistant"]);
+    const messages = await service.messages({ id: session.sessionId, cwd: directory });
+    expect(messages.messages).toEqual(frames.at(-1)?.page.messages);
+    const tree = await service.tree({ id: session.sessionId, cwd: directory });
+    const transcriptIds = frames.at(-1)?.page.messages.map(message => message.id);
+    expect(tree.tree.nodes.filter(node => ["user", "assistant", "tool-result"].includes(node.kind)).map(node => node.id)).toEqual(transcriptIds);
+    expect(tree.tree.activePathIds.filter(id => transcriptIds?.includes(id) === true)).toEqual(transcriptIds);
+    expect(eventTypes).not.toContain("message.end");
+    expect(eventTypes).not.toContain("tool.end");
+    expect(eventTypes).not.toContain("status.update");
+  } finally {
+    releaseProvider(); releaseSdk();
+    if (socket !== undefined && socket.readyState !== WebSocket.CLOSED) await new Promise<void>(resolve => { socket?.once("close", () => { resolve(); }); socket?.close(); });
+    await app.close(); await service.dispose();
+  }
+});
+
+it("keeps inactive native admission read-only and gives a later Durable runtime its own execution hooks", async () => {
+  const { session, provider, services, manager, directory, contextCalls } = await fixture();
+  provider.setResponses([fauxAssistantMessage("saved before closing")]);
+  await session.prompt("saved input");
+  const file = manager.getSessionFile();
+  if (file === undefined) throw new Error("Missing session file");
+  await session.close();
+  const hub = new SessionEventHub();
+  const reader = createActiveDurableSessionReader(ref => service.activeDurableRead(ref));
+  const gateway = createPiSessionManagerGateway({ agentDir: join(directory, "agent"), env: { TEST_SESSION_DIR: join(directory, "sessions") }, sessionDirEnvKeys: ["TEST_SESSION_DIR"] });
+  const service = new PiSessionService(hub, { agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime, durableReader: reader, sessionManager: gateway, archiveStore: emptyArchiveStore(), heartbeatIntervalMs: 60_000 });
+  const acquire = vi.spyOn(DurableSessionJournal.pool, "acquire");
+  const acquireRead = vi.spyOn(DurableSessionJournal.pool, "acquireRead");
+  try {
+    const ref = { id: session.sessionId, cwd: directory };
+    const opened = await service.open(ref, { limit: 50 });
+    expect(opened).toMatchObject({ readPath: "classic", cut: "classic", snapshot: { partial: null }, status: { isStreaming: false } });
+    expect(opened.page.messages.map(message => message.role)).toEqual(["user", "assistant"]);
+    expect(await service.attachOpenBrowser(ref, async () => { /* An inactive session cannot send a native seed. */ }, () => { /* No native failure expected. */ })).toBeUndefined();
+    expect(acquire).not.toHaveBeenCalled(); expect(acquireRead).not.toHaveBeenCalled();
+    const before = contextCalls();
+    const reopened = await DurableAgentSession.open({ services, sessionManager: SessionManager.open(file) }); sessions.push(reopened);
+    await reopened.bindExtensions({});
+    reopened.subscribe(() => { /* Binding owns observation; assertions read the public state. */ });
+    provider.setResponses([fauxAssistantMessage("execution hooks preserved")]);
+    await reopened.prompt("later input");
+    expect(contextCalls()).toBeGreaterThan(before);
+    expect(reopened.messages.at(-1)).toMatchObject({ role: "assistant", content: [{ type: "text", text: "execution hooks preserved" }] });
+    expect(acquire).toHaveBeenCalledTimes(1); expect(acquireRead).not.toHaveBeenCalled();
+  } finally { acquire.mockRestore(); acquireRead.mockRestore(); await service.dispose(); }
+});
+
+it("returns an active native owner-close error instead of reopening a family or silently choosing classic", async () => {
+  const { session, manager, services, directory } = await fixture();
+  const hub = new SessionEventHub();
+  const reader = createActiveDurableSessionReader(ref => service.activeDurableRead(ref));
+  const service = new PiSessionService(hub, { agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime, durableReader: reader,
+    sessionManager: { ...sessionGateway([]), create: () => manager }, archiveStore: emptyArchiveStore(),
+    createAgentRuntime: () => Promise.resolve({ session, cwd: directory, setRebindSession: () => { /* This test retains its original facade. */ }, fork: () => Promise.reject(new Error("Not exercised")), dispose: () => Promise.resolve() }), heartbeatIntervalMs: 60_000 });
+  const original = DurableSessionJournal.pool.acquireRead.bind(DurableSessionJournal.pool);
+  const acquire = vi.spyOn(DurableSessionJournal.pool, "acquireRead").mockImplementationOnce(async (address, ctx) => {
+    await session.close(); return original(address, ctx);
+  });
+  try {
+    await service.start(directory);
+    await expect(service.open({ id: session.sessionId, cwd: directory }, { limit: 50 })).rejects.toThrow("Active Durable read owner closed");
+    expect(acquire).toHaveBeenCalledTimes(1);
+  } finally { acquire.mockRestore(); await service.dispose(); }
+});
+
+
+it("keeps an inactive classic route when the Durable session activates during preparation, then routes the next read natively", async () => {
+  const { session, provider, services, directory } = await fixture();
+  provider.setResponses([fauxAssistantMessage("saved answer")]); await session.prompt("saved input");
+  const hub = new SessionEventHub();
+  const reader = createActiveDurableSessionReader(ref => service.activeDurableRead(ref));
+  const gateway = createPiSessionManagerGateway({ agentDir: join(directory, "agent"), env: { TEST_SESSION_DIR: join(directory, "sessions") }, sessionDirEnvKeys: ["TEST_SESSION_DIR"] });
+  const service = new PiSessionService(hub, { agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime, durableReader: reader, sessionManager: gateway, archiveStore: emptyArchiveStore(),
+    createAgentRuntime: () => Promise.resolve({ session, cwd: directory, setRebindSession: () => { /* This test retains its original facade. */ }, fork: () => Promise.reject(new Error("Not exercised")), dispose: () => Promise.resolve() }), heartbeatIntervalMs: 60_000 });
+  const catalog = service.unreadCatalog.bind(service);
+  vi.spyOn(service, "unreadCatalog").mockImplementationOnce(async () => { await service.start(directory); return catalog(); });
+  const acquireRead = vi.spyOn(DurableSessionJournal.pool, "acquireRead");
+  try {
+    const ref = { id: session.sessionId, cwd: directory };
+    const classic = await service.open(ref, { limit: 50 });
+    expect(classic).toMatchObject({ readPath: "classic", cut: "classic" });
+    expect(classic.page.messages.map(message => message.role)).toEqual(["user", "assistant"]);
+    expect(acquireRead).not.toHaveBeenCalled();
+    const native = await service.open(ref, { limit: 50 });
+    expect(native).toMatchObject({ readPath: "native", cut: "native" });
+    expect(acquireRead).toHaveBeenCalledTimes(1);
+    expect(native.page.messages.map(message => message.role)).toEqual(["user", "assistant"]);
+  } finally { await service.dispose(); }
 });

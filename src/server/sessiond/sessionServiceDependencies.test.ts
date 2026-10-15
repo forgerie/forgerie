@@ -1,3 +1,4 @@
+import { createActiveDurableSessionReader } from "./durableSessionReader.js";
 import { describe, expect, it } from "vitest";
 import { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 import { SessionNotificationStore } from "../sessions/sessionNotificationStore.js";
@@ -18,6 +19,7 @@ const AGENT_DIR = "/tmp/pi-web-test-agent";
 function daemonCollaborators(patch: Partial<SessionServiceDependencyInput> = {}): SessionServiceDependencyInput {
   return {
     agentDir: AGENT_DIR,
+    durableReader: createActiveDurableSessionReader(() => undefined),
     archiveStore: emptyArchiveStore(),
     pinStore: new SessionPinStore(),
     tabsStore: new SessionTabsStore(),
