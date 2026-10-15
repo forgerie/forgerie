@@ -555,3 +555,60 @@ it.each(["hide", "same-count"] as const)("invalidates HTTP cursors and publisher
     expect(frames.at(-1)?.historyId).toBe(rejoined?.historyId);
   } finally { await attachment?.stop(); }
 });
+
+
+it("keeps the latest committed run-start fence through completion and detached fast runs", async () => {
+  const f = await fixture();
+  await f.conversation().commit(async tx => {
+    await initializeParentDocuments(tx, { id: f.conversation().id });
+    const taskId = await tx.createTask(GenerationTask, {}, { ownership: { kind: "conversation" } });
+    (await tx.doc(LiveDoc, f.conversation().id)).run = { taskId, inputs: [] };
+  }, context);
+  const ref = { id: "logical", cwd: f.directory };
+  const initial = await f.reader.open(ref, { limit: 50 }, f.hub);
+  expect(initial?.status.isStreaming).toBe(true);
+  expect(initial?.runStartSeq).toBe(0); // Never invent a start fence for an already active run.
+  await f.conversation().commit(async tx => { delete (await tx.doc(LiveDoc, f.conversation().id)).run; }, context);
+  const frames: SessionOpenResult[] = [];
+  let attachment = await f.reader.attachOpen(ref, f.hub, cut => { frames.push(cut); return Promise.resolve(); }, error => { throw error; });
+  const startRun = () => f.conversation().commit(async tx => {
+    const taskId = await tx.createTask(GenerationTask, {}, { ownership: { kind: "conversation" } });
+    (await tx.doc(LiveDoc, f.conversation().id)).run = { taskId, inputs: [] };
+  }, context);
+  const endRun = () => f.conversation().commit(async tx => { delete (await tx.doc(LiveDoc, f.conversation().id)).run; }, context);
+  try {
+    await startRun();
+    await vi.waitFor(() => { expect(frames.at(-1)?.status.isStreaming).toBe(true); });
+    const started = frames.at(-1); if (started === undefined) throw new Error("Missing run cut");
+    expect(started.runStartSeq).toBeGreaterThan(0);
+    expect(started.runStartSeq).toBeLessThanOrEqual(started.seq);
+    await endRun();
+    await vi.waitFor(() => { expect(frames.at(-1)?.status.isStreaming).toBe(false); });
+    expect(frames.at(-1)?.runStartSeq).toBe(started.runStartSeq);
+    await attachment?.stop(); attachment = undefined;
+    await startRun(); await endRun();
+    const current = await f.reader.open(ref, { limit: 50 }, f.hub);
+    expect(current?.status.isStreaming).toBe(false);
+    expect(current?.runStartSeq).toBeGreaterThan(started.runStartSeq ?? 0);
+    attachment = await f.reader.attachOpen(ref, f.hub, cut => { frames.push(cut); return Promise.resolve(); }, error => { throw error; });
+    expect(frames.at(-1)?.runStartSeq).toBe(current?.runStartSeq);
+  } finally { await attachment?.stop(); await f.reader.close(); }
+});
+
+
+it("indexes retained run-boundary observation by conversation instead of adding a listener per logical session", async () => {
+  const f = await fixture();
+  const sibling = await f.harness().createConversation({ ownership: { kind: "ownerless" } }, context);
+  const subscribe = vi.spyOn(f.harness(), "subscribeCommits");
+  f.hub.observeNativeRuns("logical", f.harness(), f.conversation().id);
+  f.hub.observeNativeRuns("sibling", f.harness(), sibling.id);
+  expect(subscribe).toHaveBeenCalledTimes(1);
+  expect(f.hub.nativeRunStartSeq("logical", f.harness(), f.conversation().id, undefined)).toBe(0);
+  expect(f.hub.nativeRunStartSeq("sibling", f.harness(), sibling.id, undefined)).toBe(0);
+  await f.conversation().commit(async tx => {
+    const taskId = await tx.createTask(GenerationTask, {}, { ownership: { kind: "conversation" } });
+    (await tx.doc(LiveDoc, f.conversation().id)).run = { taskId, inputs: [] };
+  }, context);
+  expect(f.hub.currentSeq("logical")).toBeGreaterThan(0);
+  expect(f.hub.currentSeq("sibling")).toBe(0);
+});

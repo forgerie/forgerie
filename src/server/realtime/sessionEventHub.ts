@@ -1,3 +1,4 @@
+import { DurableRunBoundaries } from "../sessions/durableRunBoundaries.js";
 import { DurableHistoryGenerations } from "../sessions/durableHistoryGenerations.js";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
@@ -28,6 +29,16 @@ export class SessionEventHub {
   private readonly seqBySession = new Map<string, number>();
   readonly epoch = randomUUID();
   private readonly nativeHistories = new DurableHistoryGenerations();
+  private readonly nativeRuns = new DurableRunBoundaries(sessionId => {
+    const seq = this.currentSeq(sessionId) + 1; this.seqBySession.set(sessionId, seq); return seq;
+  });
+
+  observeNativeRuns(sessionId: string, harness: Harness, conversationId: ConversationId): void {
+    this.nativeRuns.observe(sessionId, harness, conversationId);
+  }
+  nativeRunStartSeq(sessionId: string, harness: Harness, conversationId: ConversationId, taskId: number | undefined): number {
+    return this.nativeRuns.checkpoint(sessionId, harness, conversationId, taskId);
+  }
 
   nativeHistoryId(journalId: string, harness: Harness, conversationId: ConversationId): string {
     return this.nativeHistories.identify(journalId, harness, conversationId);

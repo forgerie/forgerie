@@ -75,3 +75,10 @@ it("labels compatibility facade cuts and requires their status boundary", () => 
   expect(schema.safeParse(value).success).toBe(false);
   expect(schema.safeParse({ ...value, statusSeq: 2 }).success).toBe(true);
 });
+
+
+it("accepts only committed native run fences covered by the open watermark", () => {
+  expect(schema.parse({ ...open, readPath: "native", runStartSeq: 0 }).runStartSeq).toBe(0);
+  expect(schema.parse({ ...open, readPath: "native", runStartSeq: 12 }).runStartSeq).toBe(12);
+  for (const runStartSeq of [-1, 13, 1.5, Number.MAX_SAFE_INTEGER + 1]) expect(schema.safeParse({ ...open, readPath: "native", runStartSeq }).success).toBe(false);
+});

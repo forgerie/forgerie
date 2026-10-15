@@ -48,6 +48,8 @@ export function createSessionOpenSchema<MessageSchema extends z.ZodType, StatusS
     /** The authority and consistency used for this cut; optional for older transports. */
     cut: z.enum(["native", "classic", "sequential"]).optional(),
     statusSeq: safePosition.optional(),
+    /** Latest observed committed native run start, in this epoch's event sequence; zero means unknown. */
+    runStartSeq: safePosition.optional(),
     epoch: identity,
     seq: safePosition,
     historyId: identity,
@@ -62,6 +64,7 @@ export function createSessionOpenSchema<MessageSchema extends z.ZodType, StatusS
     receipt: sessionOpenReceiptSchema.nullable(),
   }).superRefine((value, context) => {
     if (value.cut === "sequential" && value.statusSeq === undefined) context.addIssue({ code: "custom", path: ["statusSeq"], message: "Sequential facade reads require a status boundary" });
+    if (value.runStartSeq !== undefined && value.runStartSeq > value.seq) context.addIssue({ code: "custom", path: ["runStartSeq"], message: "Run boundary must be covered by the open watermark" });
     if (value.seq !== value.snapshot.seq) context.addIssue({ code: "custom", path: ["snapshot", "seq"], message: "Open and snapshot watermarks must match" });
   });
 }

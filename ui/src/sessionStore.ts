@@ -81,6 +81,7 @@ interface RecoveryTiming {
   now?: () => number;
 }
 interface Join {
+  identity: symbol;
   controller: AbortController;
   socket?: WebSocket;
   buffered: UiEvent[];
@@ -156,7 +157,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   let readRefreshRequested = false;
   let catalogVersion = 0;
   let refreshPaint: AbortSignal | undefined;
-  let page: { start: number; end: number; total: number; historyId: string; epoch: string } | undefined;
+  let page: { start: number; end: number; total: number; historyId: string; epoch: string; seq: number } | undefined;
   let earlierRead: Promise<void> | undefined;
   let pendingReceipt: ReadReceipt | undefined;
   let activation = new AbortController();
@@ -291,10 +292,27 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       if (current(attempt)) recover();
     }
   }
+  let lastErrorReport: { event: Extract<UiEvent, { type: "session.error" }>; epoch: string | undefined; attempt: symbol | undefined } | undefined;
   function applyEvent(previous: SessionState, event: UiEvent): SessionState {
     if (isAskEvent(event)) return { ...previous, ask: reduceAskEvent(previous.ask, event) };
     if (isOperationEvent(event)) return withOperation(previous, event);
+    if (event.type === "session.error") {
+      const sameEpoch = lastErrorReport !== undefined && (lastErrorReport.epoch !== undefined && lastErrorReport.epoch === join?.epoch || lastErrorReport.epoch === undefined && lastErrorReport.attempt === join?.identity);
+      if (join?.readPath === "native" && sameEpoch && event.seq !== undefined && lastErrorReport?.event.seq !== undefined && event.seq < lastErrorReport.event.seq) return previous;
+      const replay = sameEpoch && (event.seq !== undefined ? event.seq === lastErrorReport?.event.seq : event === lastErrorReport?.event);
+      if (!replay) lastErrorReport = { event, epoch: join?.epoch, attempt: join?.identity };
+      const next = { ...previous, transcript: reduceEvent(previous.transcript, event) };
+      // A fresh report can have the same words as a dismissed error. A replay cannot.
+      return join?.readPath === "native" && !replay ? withProblem(next, "Pi reported an error", event.message) : next;
+    }
     return { ...previous, transcript: reduceEvent(previous.transcript, event) };
+  }
+  function errorBeforeRun(error: string, open: SessionOpen): boolean {
+    if (open.readPath !== "native" || !open.runStartSeq) return false;
+    const report = lastErrorReport?.event.message === error ? lastErrorReport : undefined;
+    const epoch = report === undefined ? page?.epoch : report.epoch ?? (report.attempt === join?.identity ? open.epoch : undefined);
+    const seq = report === undefined ? page?.seq : report.event.seq;
+    return epoch !== undefined && (epoch !== open.epoch || seq !== undefined && seq < open.runStartSeq);
   }
   function nativeHostEvent(event: UiEvent): boolean {
     return event.type === "command.output" || event.type === "session.error" || event.type.startsWith("shell.");
@@ -323,7 +341,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         if (isAskEvent(event) && (event.seq ?? Infinity) > open.seq) next = applyEvent(next, event);
         if (isOperationEvent(event) && (event.seq ?? Infinity) > (open.statusSeq ?? open.seq)) next = applyEvent(next, event);
       }
-      page = { start: open.page.start, end: open.page.start + open.page.messages.length, total: open.page.total, historyId: open.historyId, epoch: open.epoch };
+      page = { start: open.page.start, end: open.page.start + open.page.messages.length, total: open.page.total, historyId: open.historyId, epoch: open.epoch, seq: open.seq };
       if (open.receipt !== null) pendingReceipt = { ...open.receipt, session: open.session };
       return { ...next, transcript: reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)) };
     }
@@ -348,22 +366,29 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       transcript = reduceEvent(transcript, { type: "tool.start", toolCallId: tool.toolCallId, toolName: tool.toolName, args: undefined });
       transcript = reduceEvent(transcript, { type: "tool.update", toolCallId: tool.toolCallId, toolName: tool.toolName, text: tool.output });
     }
+    // Clear only errors before the committed run start, not before the replacement's
+    // watermark. That replacement may arrive after an error from its own new run.
+    if (previous.transcript.error !== undefined && !errorBeforeRun(previous.transcript.error, open)) transcript = { ...transcript, error: previous.transcript.error };
     // Host output is already reconstructed. Apply operation output before carry/dedup.
     let next = withStatus({ ...previous, session: open.session, transcript, ask: resyncAsk(previous.ask, open.status.pendingAsk),
       earlier: { type: start === 0 ? "complete" : "available" } }, open.status);
     for (const event of open.snapshot.transientEvents) if (isOperationEvent(event)) next = applyEvent(next, event);
     // Reconstruct events above the detached cut before matching previous completed shell rows.
-    for (const event of buffered) if ((event.seq ?? Infinity) > open.seq) next = applyEvent(next, event);
-    next = { ...next, transcript: { ...reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)),
-      ...(previous.transcript.error === undefined ? {} : { error: previous.transcript.error }) } };
-    page = { start, end: open.page.start + open.page.messages.length, total: open.page.total, historyId: open.historyId, epoch: open.epoch };
+    for (const event of buffered) {
+      // Errors are host state, not a field of the native cut. Keep even covered reports
+      // from this run; drop only reports covered by a later committed run start.
+      const currentRunError = open.readPath === "native" && event.type === "session.error" && (event.seq ?? Infinity) >= (open.runStartSeq ?? 0);
+      if ((event.seq ?? Infinity) > open.seq || currentRunError) next = applyEvent(next, event);
+    }
+    next = { ...next, transcript: reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)) };
+    page = { start, end: open.page.start + open.page.messages.length, total: open.page.total, historyId: open.historyId, epoch: open.epoch, seq: open.seq };
     if (open.receipt !== null) pendingReceipt = { ...open.receipt, session: open.session };
     return next;
   }
 
   async function connect() {
     if (lifetime.signal.aborted) return;
-    const attempt: Join = { controller: new AbortController(), buffered: [], seeding: true, seq: -1 };
+    const attempt: Join = { identity: Symbol(), controller: new AbortController(), buffered: [], seeding: true, seq: -1 };
     join = attempt;
     const read = <T>(path: string, schema: z.ZodType<T>) => request(path, schema, {}, attempt.controller.signal);
     try {
@@ -459,8 +484,9 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       const open = attempt.checkpoint !== undefined && attempt.checkpoint.seq > response.seq ? attempt.checkpoint : response;
       // The HTTP receipt remains conservative even if a newer socket replacement won the race.
       if (response.receipt !== null) pendingReceipt = { ...response.receipt, session: response.session };
-      const joined = applyOpen(state, open, attempt.buffered);
       attempt.epoch = open.epoch;
+      attempt.readPath = open.readPath;
+      const joined = applyOpen(state, open, attempt.buffered);
       attempt.seq = Math.max(open.seq, ...attempt.buffered.filter(event => open.readPath !== "native" || nativeHostEvent(event)).map(event => event.seq ?? 0));
       attempt.checkpoint = open;
       attempt.readPath = open.readPath;

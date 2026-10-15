@@ -82,6 +82,7 @@ export class DurableParentReadModel {
     const id = handle.conversation.id;
     // Begin observing before preparation; the callback reads the generation on the same cut line.
     hub.nativeHistoryId(handle.address.journalId, handle.harness, id);
+    hub.observeNativeRuns(handle.address.sessionId, handle.harness, id);
     let retiredRequired = 0;
     const keys = new Set<string>();
     const membership = new Map<string, number>();
@@ -171,7 +172,8 @@ export class DurableParentReadModel {
           const historyId = hub.nativeHistoryId(handle.address.journalId, handle.harness, id);
           assertHistoryIdentity(historyId, request.historyId);
           return structuredClone({ session: { id: handle.address.sessionId, cwd, ...(name.name === undefined ? {} : { name: name.name }) }, readPath: "native" as const, cut: "native" as const,
-            epoch: hub.epoch, seq, historyId, page: this.page(messages, { ...request, completeTurns: true }),
+            epoch: hub.epoch, seq, historyId, runStartSeq: hub.nativeRunStartSeq(handle.address.sessionId, handle.harness, id, live.run?.taskId),
+            page: this.page(messages, { ...request, completeTurns: true }),
             snapshot: { seq, partial: partial === undefined ? null : durableBrowserMessageSchema.parse(projectBrowserMessage(partial)), tools, transientEvents: hub.transientEvents(handle.address.sessionId) }, status, receipt: null });
         }, context);
         if (cut !== undefined) return cut;

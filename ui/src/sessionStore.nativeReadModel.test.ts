@@ -2,7 +2,7 @@ import { openFixture } from "./testing/openFixture";
 import type { ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserTransport, createSessionStore, type SessionTransport, type SessionStore } from "./sessionStore";
 import type { DurableBrowserSnapshot, SessionOpen } from "./contracts";
 import { messageText } from "./transcript";
@@ -147,6 +147,54 @@ describe("native browser replacement", () => {
     expect(shells).toHaveLength(count);
     expect(new Set(shells.map(message => message.id)).size).toBe(count);
     expect(shells.every(message => message.parts[0]?.type === "shell" && message.parts[0].run.result.type === "done")).toBe(true);
+  });
+
+  it.each([true, false])("reports the same dismissed failure again after a native run boundary (streaming=%s)", async streaming => {
+    const f = await fixture(); await join(f);
+    f.emit({ type: "session.error", message: "same native failure", seq: 1 });
+    await waitFor(f.store, () => f.store.getSnapshot().problems.length === 1);
+    f.store.dismissProblems();
+    expect(f.store.getSnapshot().problems).toEqual([]);
+    f.emit({ type: "session.open", open: { ...openFixture({ session: { id: "native", cwd: "/temporary" }, readPath: "native", epoch: "one", snapshot: { seq: 10, partial: null },
+      page: { start: 0, total: 3, messages: [...snapshot().history.messages, { id: "next-run", role: "user", content: "next run input" }] },
+      status: { isStreaming: streaming, isCompacting: false, isBashRunning: false } }), runStartSeq: 5 } });
+    await waitFor(f.store, () => f.store.getSnapshot().transcript.messages.some(message => message.id === "next-run"));
+    expect(f.store.getSnapshot().transcript.error).toBeUndefined();
+    f.emit({ type: "session.error", message: "same native failure", seq: 11 });
+    await waitFor(f.store, () => f.store.getSnapshot().problems.length === 1);
+    expect(f.store.getSnapshot().problems[0]).toMatchObject({ title: "Pi reported an error", message: "same native failure" });
+  });
+
+  it.each([10, 30])("keeps a new error across a run-boundary cut at seq %i and never re-reports a dismissed replay", async cutSeq => {
+    const f = await fixture(); await join(f);
+    f.emit({ type: "session.error", message: "same native failure", seq: 1 });
+    await waitFor(f.store, () => f.store.getSnapshot().problems.length === 1);
+    f.store.dismissProblems();
+    f.emit({ type: "session.error", message: "same native failure", seq: 20 });
+    const cut = { ...openFixture({ session: { id: "native", cwd: "/temporary" }, readPath: "native", epoch: "one", snapshot: { seq: cutSeq, partial: null },
+      page: { start: 0, total: 3, messages: [...snapshot().history.messages, { id: "new-run-cut", role: "user", content: "new run cut" }] },
+      status: { isStreaming: true, isCompacting: false, isBashRunning: false } }), runStartSeq: 5 };
+    f.emit({ type: "session.open", open: cut });
+    await waitFor(f.store, () => f.store.getSnapshot().transcript.messages.some(message => message.id === "new-run-cut"));
+    expect(f.store.getSnapshot().transcript.error).toBe("same native failure");
+    expect(f.store.getSnapshot().problems).toHaveLength(1);
+    f.store.dismissProblems();
+    f.emit({ type: "session.open", open: { ...cut, seq: 31, snapshot: { ...cut.snapshot, seq: 31 }, status: { ...cut.status, isStreaming: false } } });
+    await waitFor(f.store, () => f.store.getSnapshot().status?.isStreaming === false);
+    expect(f.store.getSnapshot().transcript.error).toBe("same native failure");
+    expect(f.store.getSnapshot().problems).toEqual([]);
+  });
+
+  it("keeps an initial host error covered by the native cut when no later run start covers it", async () => {
+    const f = await fixture();
+    const starting = f.store.start();
+    await vi.waitFor(() => { expect(f.requests).toContain("/api/sessions/native/open"); });
+    f.emit({ type: "session.error", message: "initial native failure", seq: 8 });
+    f.emit(snapshot(1));
+    await starting;
+    await waitFor(f.store, () => f.store.getSnapshot().connection.type === "ready");
+    expect(f.store.getSnapshot().transcript.error).toBe("initial native failure");
+    expect(f.store.getSnapshot().problems).toHaveLength(1);
   });
 
   it("joins from one HTTP open seed plus the socket without separate history, partial, or status reads", async () => {
