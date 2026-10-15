@@ -2,12 +2,11 @@ import { readTaskActivity } from "./durableTaskActivity.js";
 import type { TaskActivity } from "../../shared/durableTaskActivity.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import type { SessionOpenPageRequest, SessionOpenResult } from "./sessionOpen.js";
-import type { SessionStatus } from "../../shared/apiTypes.js";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { SessionRef, SessionTreeSnapshot } from "../../shared/apiTypes.js";
 import type { DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import type { DurableNativeHistory } from "./durableNativeHistory.js";
-import { DurableParentReadModel, type DurableBrowserAttachment } from "./durableParentReadModel.js";
+import { DurableParentReadModel, type DurableBrowserAttachment, type DurableHostState } from "./durableParentReadModel.js";
 import type { DurableSessionAddress, DurableSessionHandle } from "./durableSessionAddress.js";
 import type { MessagePageRequest } from "./messagePaging.js";
 
@@ -40,12 +39,12 @@ export class DurableSessionReader {
 
   locate(ref: SessionRef): Promise<DurableSessionAddress | undefined> { return this.options.locate(ref); }
 
-  open(ref: SessionRef, page: SessionOpenPageRequest, hub: SessionEventHub, hostStatus?: () => Partial<SessionStatus>): Promise<SessionOpenResult | undefined> {
+  open(ref: SessionRef, page: SessionOpenPageRequest, hub: SessionEventHub, hostStatus?: () => DurableHostState): Promise<SessionOpenResult | undefined> {
     return this.read(ref, handle => this.options.readModel(handle).open(ref.cwd, page, hub, context, hostStatus));
   }
 
   async openAddress(ref: SessionRef, address: DurableSessionAddress, page: SessionOpenPageRequest, hub: SessionEventHub,
-    hostStatus?: () => Partial<SessionStatus>): Promise<SessionOpenResult> {
+    hostStatus?: () => DurableHostState): Promise<SessionOpenResult> {
     if (this.stopped) throw new Error("Durable session reader is closed");
     const handle = await this.options.acquire(address);
     try { return await this.options.readModel(handle).open(ref.cwd, page, hub, context, hostStatus); }
@@ -62,7 +61,7 @@ export class DurableSessionReader {
 
   /** One coalescing replacement publisher. Adoption listeners never call Harness APIs. */
   attachOpen(ref: SessionRef, hub: SessionEventHub, send: (open: SessionOpenResult) => Promise<void>,
-    onFailure: (error: Error) => void, hostStatus?: () => Partial<SessionStatus>): Promise<DurableBrowserAttachment | undefined> {
+    onFailure: (error: Error) => void, hostStatus?: () => DurableHostState): Promise<DurableBrowserAttachment | undefined> {
     if (this.stopped) return Promise.reject(new Error("Durable session reader is closed"));
     const opening = this.locate(ref).then(address => {
       if (this.stopped) throw new Error("Durable session reader is closed");
@@ -74,7 +73,7 @@ export class DurableSessionReader {
   }
 
   private async openCheckpointAttachment(ref: SessionRef, address: DurableSessionAddress, hub: SessionEventHub, send: (open: SessionOpenResult) => Promise<void>,
-    onFailure: (error: Error) => void, hostStatus?: () => Partial<SessionStatus>): Promise<DurableBrowserAttachment> {
+    onFailure: (error: Error) => void, hostStatus?: () => DurableHostState): Promise<DurableBrowserAttachment> {
     const handle = await this.options.acquire(address);
     if (this.stopped) { await handle.release(context); throw new Error("Durable session reader is closed"); }
     const unobserve = hub.observeNative(address.sessionId, handle.harness, handle.conversation.id);

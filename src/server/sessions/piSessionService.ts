@@ -42,7 +42,7 @@ import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult,
 import type { DurableSessionAddress } from "./durableSessionAddress.js";
 import type { DurableSessionReader } from "./durableSessionReader.js";
 import type { DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
-import type { DurableBrowserAttachment } from "./durableParentReadModel.js";
+import type { DurableBrowserAttachment, DurableHostState } from "./durableParentReadModel.js";
 import { ParentAsks, ParentAsksSchema } from "./durableParentDocuments.js";
 import { Check } from "typebox/value";
 import { BACKGROUND_CONTEXT as durableContext } from "@earendil-works/chord/context";
@@ -2806,7 +2806,7 @@ export class PiSessionService implements SessionRouteService {
     if (this.durableReader === undefined) throw new Error("Native Durable browser reads are not configured");
     return this.durableReader.attachOpen(ref, this.events, send, onFailure, () => {
       const session = this.activeForRef(ref)?.runtime.session;
-      return session === undefined ? {} : this.statusFromSession(session);
+      return this.nativeHostState(session);
     });
   }
 
@@ -2832,9 +2832,10 @@ export class PiSessionService implements SessionRouteService {
     const worktreeInfo = worktree === undefined ? undefined : await this.sessionWorktrees?.info(worktree, ref.id);
     const native = nativeAddress === undefined ? undefined : await this.durableReader?.openAddress(ref, nativeAddress, page, this.events, () => {
       const session = this.activeForRef(ref)?.runtime.session;
-      return { ...(session === undefined ? {} : this.statusFromSession(session)),
+      const host = this.nativeHostState(session);
+      return { ...host, status: { ...host.status,
         ...(readonly === undefined && archived === undefined ? {} : { readOnly: true }),
-        ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) };
+        ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) } };
     });
     if (native !== undefined) return { ...native, receipt: receiptFor(native.session.id, native.session.cwd) };
     const inactiveClassic = this.durableReader !== undefined && nativeAddress === undefined && active === undefined;
@@ -5446,6 +5447,17 @@ export class PiSessionService implements SessionRouteService {
     const activity = { sessionId: session.sessionId, ...stored };
     this.events.publish(session.sessionId, { type: "activity.update", activity });
     this.events.publishGlobal({ type: "activity.update", activity });
+  }
+
+  private nativeHostState(session: PiAgentSession | undefined): DurableHostState {
+    if (session === undefined) return {};
+    const warnings = this.warningsForSession(session);
+    return { status: { ...this.liveWorkCounts(session),
+      doubleEscapeAction: session.settingsManager.getDoubleEscapeAction?.() ?? "tree",
+      ...(warnings.length === 0 ? {} : { warnings }),
+      pendingDialogs: this.pendingExtensionDialogStore.pendingDialogs(session.sessionId) },
+      compaction: { isRunning: this.compactionQueue.isCompactionRunning(session.sessionId),
+        queuedMessages: this.compactionQueue.queuedMessages(session.sessionId, []) } };
   }
 
   private statusFromSession(session: PiAgentSession): ClientSessionStatus {

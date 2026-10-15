@@ -37,6 +37,12 @@ const mountedInboxSchema = z.object({ items: z.array(z.object({
 const SCAN_SIZE = 256;
 const HISTORY_LIMIT = 500;
 
+export interface DurableHostState {
+  /** Only state owned by the host. Runtime transcript, ask, queue and compaction state stay native. */
+  status?: Pick<Partial<SessionStatus>, "readOnly" | "worktree" | "workingAgents" | "runningProcesses" | "watchingPullRequest" | "waitingOnYou" | "flaggedDecisions" | "warnings" | "pendingDialogs" | "doubleEscapeAction">;
+  compaction?: { isRunning: boolean; queuedMessages: SessionStatus["queuedMessages"] };
+}
+
 export interface DurableParentReadModelOptions {
   handle: DurableSessionHandle;
   /** The native-history owner supplies the shared presentation-ID policy. */
@@ -61,7 +67,7 @@ export class DurableParentReadModel {
    * Membership is guarded by adoption: Tx.doc creates absent documents, which an open must never do.
    */
   async open(cwd: string, request: SessionOpenPageRequest, hub: SessionEventHub, context: Context,
-    hostStatus: () => Partial<SessionStatus> = () => ({})): Promise<SessionOpenResult> {
+    hostStatus: () => DurableHostState = () => ({})): Promise<SessionOpenResult> {
     const { handle } = this.options;
     const id = handle.conversation.id;
     let retiredRequired = 0;
@@ -133,11 +139,12 @@ export class DurableParentReadModel {
           const partial = live.generation?.message;
           const tools = (live.tools ?? []).filter(slot => projectBrowserSessionEvent({ type: "tool.start", toolName: slot.name, toolCallId: slot.callId, summary: "" }).type === "tool.start")
             .map(slot => ({ toolCallId: slot.callId, toolName: slot.name, status: slot.status, output: slot.output ?? "" }));
-          const queuedMessages = inbox.items.flatMap(item => item.mode === "write" ? [] : [{ kind: item.mode,
-            text: typeof item.content === "string" ? item.content : item.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n") }]);
+          const host = hostStatus();
+          const queuedMessages = [...inbox.items.flatMap(item => item.mode === "write" ? [] : [{ kind: item.mode,
+            text: typeof item.content === "string" ? item.content : item.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n") }]), ...(host.compaction?.queuedMessages ?? [])];
           hub.savedHostOutput(handle.address.sessionId, messages);
-          const status: SessionStatus = { ...hostStatus(), sessionId: handle.address.sessionId, persisted: true,
-            isStreaming: live.run !== undefined, isCompacting: (live.compactions?.length ?? 0) > 0,
+          const status: SessionStatus = { ...host.status, sessionId: handle.address.sessionId, persisted: true,
+            isStreaming: live.run !== undefined, isCompacting: host.compaction?.isRunning === true || (live.compactions?.length ?? 0) > 0,
             isBashRunning: hub.transientEvents(handle.address.sessionId).reverse().find(event => event.type === "shell.start" || event.type === "shell.end")?.type === "shell.start",
             pendingMessageCount: queuedMessages.length, queuedMessages, messageCount: messages.length, ...durableUsageTotals(usage),
             ...(agent.model === undefined ? {} : { model: { provider: agent.model.provider, id: agent.model.modelId, name: agent.model.modelId } }),

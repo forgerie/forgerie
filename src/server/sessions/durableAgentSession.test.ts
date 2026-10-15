@@ -967,3 +967,44 @@ it.each(["dialog", "streaming"] as const)("retries an inactive open when %s star
     expect(acquireRead).toHaveBeenCalledTimes(1);
   } finally { release(); await prompting; await service.dispose(); }
 });
+
+
+it("combines native state with the host compaction boundary and following prompts during preparation", async () => {
+  const { session, provider, manager, services, directory } = await fixture();
+  const hub = new SessionEventHub();
+  const reader = createActiveDurableSessionReader(ref => service.activeDurableRead(ref));
+  const service = new PiSessionService(hub, { agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime, durableReader: reader,
+    sessionManager: { ...sessionGateway([]), create: () => manager }, archiveStore: emptyArchiveStore(),
+    createAgentRuntime: () => Promise.resolve({ session, cwd: directory, setRebindSession: () => { /* No rebind in this test. */ }, fork: () => Promise.reject(new Error("Not exercised")), dispose: () => Promise.resolve() }), heartbeatIntervalMs: 60_000 });
+  let releaseReply!: () => void, releaseCompaction!: () => void;
+  const reply = new Promise<void>(resolve => { releaseReply = resolve; });
+  const preparation = new Promise<void>(resolve => { releaseCompaction = resolve; });
+  vi.spyOn(session, "compact").mockImplementation(async () => { await preparation; throw new Error("Configured preparation failure"); });
+  let prompting: Promise<void> | undefined;
+  try {
+    await service.start(directory);
+    const ref = { id: session.sessionId, cwd: directory };
+    provider.setResponses([async () => { await reply; return fauxAssistantMessage("before compact"); }]);
+    prompting = session.prompt("active input");
+    await vi.waitFor(() => { expect(session.isStreaming).toBe(true); });
+    await service.runCommand(ref, "/compact host instructions");
+    await service.prompt(ref, "after compaction", "followUp");
+    const queued = await service.open(ref, { limit: 50 });
+    expect(queued.readPath).toBe("native");
+    expect(queued.status.queuedMessages).toEqual([{ kind: "followUp", text: "/compact host instructions" }, { kind: "followUp", text: "after compaction" }]);
+    expect(queued.status.pendingMessageCount).toBe(2);
+    expect(session.getFollowUpMessages()).toEqual([]);
+    vi.spyOn(session, "getFollowUpMessages").mockReturnValue(["stale SDK queue"]);
+    expect((await service.open(ref, { limit: 50 })).status.queuedMessages).toEqual(queued.status.queuedMessages);
+    releaseReply(); await prompting;
+    await vi.waitFor(async () => { expect((await service.status(ref)).isCompacting).toBe(true); });
+    expect(session.isCompacting).toBe(false);
+    const preparing = await service.open(ref, { limit: 50 });
+    expect(preparing.status.isCompacting).toBe(true);
+    expect(preparing.status.queuedMessages).toEqual([{ kind: "followUp", text: "after compaction" }]);
+    expect(preparing.status.pendingMessageCount).toBe(1);
+  } finally {
+    await service.clearQueue({ id: session.sessionId, cwd: directory });
+    releaseReply(); releaseCompaction(); await prompting; await service.dispose();
+  }
+});
