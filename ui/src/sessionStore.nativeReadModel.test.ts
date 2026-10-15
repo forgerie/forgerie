@@ -1,10 +1,17 @@
+import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
+import { createModels } from "@earendil-works/pi-ai/models";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { Harness, LiveDoc, createRegistry, defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { MemoryStorage } from "@earendil-works/pi-durable/storage/memory";
+import { Type } from "typebox";
+import { DurableRunBoundaries } from "../../src/server/sessions/durableRunBoundaries";
 import { openFixture } from "./testing/openFixture";
 import type { ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserTransport, createSessionStore, type SessionTransport, type SessionStore } from "./sessionStore";
-import type { DurableBrowserSnapshot, SessionOpen } from "./contracts";
+import { sessionOpenSchema, type DurableBrowserSnapshot, type SessionOpen } from "./contracts";
 import { messageText } from "./transcript";
 
 const disposals: (() => void | Promise<void>)[] = [];
@@ -47,7 +54,12 @@ async function fixture(readPath: "native" | "classic" = "native") {
     await new Promise<void>((resolve) => { http.close(() => { resolve(); }); });
   });
   disposals.push(store.dispose);
-  return { store, requests, piEvents, connections: () => connections,
+  function publishOpen(open: SessionOpen) {
+    seed = open;
+    for (const response of waiting.splice(0)) { response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify(seed)); }
+    socket?.send(JSON.stringify({ type: "session.open", open: seed }));
+  }
+  return { store, requests, piEvents, connections: () => connections, publishOpen,
     emit: (frame: unknown) => {
       if (typeof frame === "object" && frame !== null && "type" in frame && frame.type === "session.snapshot") {
         const value = frame as DurableBrowserSnapshot;
@@ -55,8 +67,7 @@ async function fixture(readPath: "native" | "classic" = "native") {
           page: { ...value.history, total: Math.max(value.history.total, value.history.start + value.history.messages.length) },
           snapshot: { seq: value.revision * 10, partial: value.partial }, tools: value.tools, transientEvents,
           status: { isStreaming: value.isStreaming, isCompacting: value.isCompacting, isBashRunning: transientEvents.some(event => event.type === "shell.start"), queuedMessages: value.queuedMessages, pendingAsk: value.app?.pendingAsk } });
-        for (const response of waiting.splice(0)) { response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify(seed)); }
-        socket?.send(JSON.stringify({ type: "session.open", open: seed }));
+        publishOpen(seed);
       } else {
         if (typeof frame === "object" && frame !== null && "type" in frame && typeof frame.type === "string" && frame.type.startsWith("shell.")) transientEvents.push(frame as SessionOpen["snapshot"]["transientEvents"][number]);
         socket?.send(JSON.stringify(frame));
@@ -147,6 +158,82 @@ describe("native browser replacement", () => {
     expect(shells).toHaveLength(count);
     expect(new Set(shells.map(message => message.id)).size).toBe(count);
     expect(shells.every(message => message.parts[0]?.type === "shell" && message.parts[0].run.result.type === "done")).toBe(true);
+  });
+
+  it.each([[true, false], [false, false], [true, true]] as const)("keeps a current-run error across a real tool handOver and clears it only on a real new run (observe before run=%s, steer=%s)", async (observeBeforeRun, steer) => {
+    const f = await fixture();
+    let seq = 0;
+    const boundaries = new DurableRunBoundaries(() => ++seq);
+    const provider = fauxProvider(), models = createModels(), registry = createRegistry();
+    models.setProvider(provider.provider);
+    let releaseTool!: () => void, releaseAnswer!: () => void, releaseNextRun!: () => void;
+    const toolHeld = new Promise<void>(resolve => { releaseTool = resolve; });
+    const answerHeld = new Promise<void>(resolve => { releaseAnswer = resolve; });
+    const nextRunHeld = new Promise<void>(resolve => { releaseNextRun = resolve; });
+    registry.install(defineExtension({ name: "handover-test", tools: [defineTool({ name: "held_tool", description: "Hold the tool turn", parameters: Type.Object({}), replay: "unsafe",
+      execute: async (_args, api) => { api.output("tool held"); await toolHeld; return { content: [{ type: "text", text: "tool finished" }] }; } })] }));
+    provider.setResponses([
+      fauxAssistantMessage([fauxToolCall("held_tool", {})], { stopReason: "toolUse" }),
+      async () => { await answerHeld; return fauxAssistantMessage("first run finished"); },
+      async () => { await nextRunHeld; return fauxAssistantMessage("new run finished"); },
+    ]);
+    const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
+    const conversation = await harness.root(context);
+    const model = provider.getModel();
+    await conversation.configure({ model: { provider: model.provider, modelId: model.id } }, context);
+    const stopNative = harness.subscribeCommits(() => { seq++; });
+    // The real Durable writer and production run observer own the changing state.
+    // This cut fixture supplies the browser envelope without importing the server TS project.
+    const cut = async () => {
+      const live = await harness.snapshot(LiveDoc, conversation.id, context);
+      const entries = await conversation.entries({ order: "ascending" }, 100, undefined, context);
+      const messages = entries.items.flatMap(entry => (entry.model ?? []).map((message, index) => ({ ...message, id: `entry:${String(entry.conversationId)}:${String(entry.id)}:${String(index)}` })));
+      const runStartSeq = boundaries.checkpoint("native", harness, conversation.id, live?.run?.inputs[0]);
+      return sessionOpenSchema.parse({ ...openFixture({ session: { id: "native", cwd: "/temporary" }, readPath: "native", epoch: "one",
+        snapshot: { seq, partial: null }, page: { start: 0, total: messages.length, messages },
+        status: { isStreaming: live?.run !== undefined, isCompacting: false, isBashRunning: false } }), runStartSeq });
+    };
+    try {
+      const startStore = async () => {
+        const starting = f.store.start();
+        await vi.waitFor(() => { expect(f.requests).toContain("/api/sessions/native/open"); });
+        f.publishOpen(await cut()); await starting;
+      };
+      if (observeBeforeRun) await startStore();
+      harness.resume();
+      const submission = await conversation.submit({ type: "input", content: "use the held tool" }, context);
+      await vi.waitFor(async () => { expect((await harness.snapshot(LiveDoc, conversation.id, context))?.tools?.[0]?.output).toBe("tool held"); });
+      if (!observeBeforeRun) await startStore();
+      const before = await harness.snapshot(LiveDoc, conversation.id, context);
+      const toolCut = await cut(); f.publishOpen(toolCut);
+      if (observeBeforeRun) expect(toolCut.runStartSeq).toBeGreaterThan(0);
+      else expect(toolCut.runStartSeq).toBe(0);
+      await waitFor(f.store, () => f.store.getSnapshot().status?.isStreaming === true);
+      const errorSeq = ++seq;
+      f.emit({ type: "session.error", message: "current tool-run error", seq: errorSeq });
+      await waitFor(f.store, () => f.store.getSnapshot().transcript.error === "current tool-run error");
+      const steered = steer ? await conversation.submit({ type: "input", content: "steer the same run", whenBusy: "steer" }, context) : undefined;
+      releaseTool();
+      await vi.waitFor(() => { expect(provider.state.callCount).toBe(2); });
+      const after = await harness.snapshot(LiveDoc, conversation.id, context);
+      expect(after?.run?.taskId).not.toBe(before?.run?.taskId);
+      expect(after?.run?.inputs).toEqual(steered === undefined ? before?.run?.inputs : [...(before?.run?.inputs ?? []), steered.id]);
+      const handedOver = await cut(); f.publishOpen(handedOver);
+      await waitFor(f.store, () => f.store.getSnapshot().transcript.messages.some(message => message.parts.some(part => part.type === "tool" && part.state.type === "done" && part.state.output === "tool finished")));
+      expect(f.store.getSnapshot().transcript.error).toBe("current tool-run error");
+      expect(handedOver.runStartSeq).toBe(toolCut.runStartSeq);
+      releaseAnswer(); await submission.wait(context); await conversation.waitForIdle(context);
+      f.publishOpen(await cut());
+      await waitFor(f.store, () => f.store.getSnapshot().status?.isStreaming === false);
+      expect(f.store.getSnapshot().transcript.error).toBe("current tool-run error");
+      const next = await conversation.submit({ type: "input", content: "start a real new run" }, context);
+      await vi.waitFor(() => { expect(provider.state.callCount).toBe(3); });
+      const newRun = await cut(); f.publishOpen(newRun);
+      await waitFor(f.store, () => f.store.getSnapshot().status?.isStreaming === true);
+      expect(newRun.runStartSeq).toBeGreaterThan(errorSeq);
+      expect(f.store.getSnapshot().transcript.error).toBeUndefined();
+      releaseNextRun(); await next.wait(context); await conversation.waitForIdle(context);
+    } finally { releaseTool(); releaseAnswer(); releaseNextRun(); await conversation.waitForIdle(context); stopNative(); await harness.close(context); }
   });
 
   it.each([true, false])("reports the same dismissed failure again after a native run boundary (streaming=%s)", async streaming => {

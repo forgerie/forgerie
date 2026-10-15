@@ -559,11 +559,14 @@ it.each(["hide", "same-count"] as const)("invalidates HTTP cursors and publisher
 
 it("keeps the latest committed run-start fence through completion and detached fast runs", async () => {
   const f = await fixture();
-  await f.conversation().commit(async tx => {
-    await initializeParentDocuments(tx, { id: f.conversation().id });
+  await f.conversation().commit(tx => initializeParentDocuments(tx, { id: f.conversation().id }), context);
+  const startRun = () => f.conversation().commit(async tx => {
+    const entry = await tx.appendEntry(UserEntry, f.conversation().id, { model: [{ role: "user", content: "logical run", timestamp: 1 }] });
+    const input = await tx.createSubmission({ type: "input", conversationId: f.conversation().id, status: "placed", entry: entry.id });
     const taskId = await tx.createTask(GenerationTask, {}, { ownership: { kind: "conversation" } });
-    (await tx.doc(LiveDoc, f.conversation().id)).run = { taskId, inputs: [] };
+    (await tx.doc(LiveDoc, f.conversation().id)).run = { taskId, inputs: [input.id] };
   }, context);
+  await startRun();
   const ref = { id: "logical", cwd: f.directory };
   const initial = await f.reader.open(ref, { limit: 50 }, f.hub);
   expect(initial?.status.isStreaming).toBe(true);
@@ -571,10 +574,6 @@ it("keeps the latest committed run-start fence through completion and detached f
   await f.conversation().commit(async tx => { delete (await tx.doc(LiveDoc, f.conversation().id)).run; }, context);
   const frames: SessionOpenResult[] = [];
   let attachment = await f.reader.attachOpen(ref, f.hub, cut => { frames.push(cut); return Promise.resolve(); }, error => { throw error; });
-  const startRun = () => f.conversation().commit(async tx => {
-    const taskId = await tx.createTask(GenerationTask, {}, { ownership: { kind: "conversation" } });
-    (await tx.doc(LiveDoc, f.conversation().id)).run = { taskId, inputs: [] };
-  }, context);
   const endRun = () => f.conversation().commit(async tx => { delete (await tx.doc(LiveDoc, f.conversation().id)).run; }, context);
   try {
     await startRun();
@@ -606,8 +605,10 @@ it("indexes retained run-boundary observation by conversation instead of adding 
   expect(f.hub.nativeRunStartSeq("logical", f.harness(), f.conversation().id, undefined)).toBe(0);
   expect(f.hub.nativeRunStartSeq("sibling", f.harness(), sibling.id, undefined)).toBe(0);
   await f.conversation().commit(async tx => {
+    const entry = await tx.appendEntry(UserEntry, f.conversation().id, { model: [{ role: "user", content: "logical run", timestamp: 1 }] });
+    const input = await tx.createSubmission({ type: "input", conversationId: f.conversation().id, status: "placed", entry: entry.id });
     const taskId = await tx.createTask(GenerationTask, {}, { ownership: { kind: "conversation" } });
-    (await tx.doc(LiveDoc, f.conversation().id)).run = { taskId, inputs: [] };
+    (await tx.doc(LiveDoc, f.conversation().id)).run = { taskId, inputs: [input.id] };
   }, context);
   expect(f.hub.currentSeq("logical")).toBeGreaterThan(0);
   expect(f.hub.currentSeq("sibling")).toBe(0);

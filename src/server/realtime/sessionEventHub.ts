@@ -3,7 +3,7 @@ import { DurableHistoryGenerations } from "../sessions/durableHistoryGenerations
 import { randomUUID } from "node:crypto";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
 import type { SessionOpenResult } from "../sessions/sessionOpen.js";
-import type { ConversationId, Harness } from "@earendil-works/pi-durable";
+import type { ConversationId, Harness, SubmissionId } from "@earendil-works/pi-durable";
 import type { SessionOpenTransientEvent } from "../../shared/sessionOpen.js";
 import type { GlobalSessionEvent, RealtimeEvent, SessionNotificationSummaryEvent, SessionUiEvent } from "../../shared/apiTypes.js";
 import { durableBrowserSnapshotSchema, type DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
@@ -36,8 +36,8 @@ export class SessionEventHub {
   observeNativeRuns(sessionId: string, harness: Harness, conversationId: ConversationId): void {
     this.nativeRuns.observe(sessionId, harness, conversationId);
   }
-  nativeRunStartSeq(sessionId: string, harness: Harness, conversationId: ConversationId, taskId: number | undefined): number {
-    return this.nativeRuns.checkpoint(sessionId, harness, conversationId, taskId);
+  nativeRunStartSeq(sessionId: string, harness: Harness, conversationId: ConversationId, firstInput: SubmissionId | undefined): number {
+    return this.nativeRuns.checkpoint(sessionId, harness, conversationId, firstInput);
   }
 
   nativeHistoryId(journalId: string, harness: Harness, conversationId: ConversationId): string {

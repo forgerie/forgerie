@@ -1,8 +1,8 @@
-import { LiveDoc, type ConversationId, type Harness } from "@earendil-works/pi-durable";
+import { LiveDoc, type ConversationId, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
 
 interface RunBoundary {
   known: boolean;
-  taskId: number | undefined;
+  firstInput: number | undefined;
   startSeq: number;
 }
 
@@ -24,10 +24,13 @@ export class DurableRunBoundaries {
           if (sessions === undefined) continue;
           if (change.type === "document.copy" || change.value === null) { for (const state of sessions.values()) state.known = false; continue; }
           const run = change.value["run"];
-          const taskId = typeof run === "object" && run !== null && !Array.isArray(run) && typeof run["taskId"] === "number" ? run["taskId"] : undefined;
+          const inputs = typeof run === "object" && run !== null && !Array.isArray(run) ? run["inputs"] : undefined;
+          const firstInput = Array.isArray(inputs) && typeof inputs[0] === "number" ? inputs[0] : undefined;
           for (const [logicalId, state] of sessions) {
-            if (state.known && taskId !== undefined && taskId !== state.taskId) state.startSeq = this.advance(logicalId);
-            state.known = true; state.taskId = taskId;
+            // Durable's run_start uses inputs[0]. Generation ownership changes on
+            // handOver, and steers extend inputs, without starting another run.
+            if (state.known && firstInput !== undefined && firstInput !== state.firstInput) state.startSeq = this.advance(logicalId);
+            state.known = true; state.firstInput = firstInput;
           }
         }
       });
@@ -35,15 +38,15 @@ export class DurableRunBoundaries {
     let sessions = conversations.get(conversationId);
     if (sessions === undefined) { sessions = new Map(); conversations.set(conversationId, sessions); }
     let state = sessions.get(sessionId);
-    if (state === undefined) { state = { known: false, taskId: undefined, startSeq: 0 }; sessions.set(sessionId, state); }
+    if (state === undefined) { state = { known: false, firstInput: undefined, startSeq: 0 }; sessions.set(sessionId, state); }
     return state;
   }
 
-  checkpoint(sessionId: string, harness: Harness, conversationId: ConversationId, taskId: number | undefined): number {
+  checkpoint(sessionId: string, harness: Harness, conversationId: ConversationId, firstInput: SubmissionId | undefined): number {
     const state = this.observe(sessionId, harness, conversationId);
     // An already active run at first attachment has no observed start watermark. Do not
     // invent one at read time: it could erase a valid error already emitted by that run.
-    state.known = true; state.taskId = taskId;
+    state.known = true; state.firstInput = firstInput;
     return state.startSeq;
   }
 }
