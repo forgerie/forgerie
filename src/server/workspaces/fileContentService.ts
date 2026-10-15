@@ -1,9 +1,8 @@
-import { openBrowserFile, type BrowserFileAccess } from "../browserFileAccess.js";
-import type { WorkspacePathAccess } from "./pathAccessPolicy.js";
 import { createHash } from "node:crypto";
-import { lstat, mkdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { lstat, mkdir, open, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { DeleteWorkspaceFileResponse, FileContentResponse, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse } from "../../shared/apiTypes.js";
+import type { DeleteWorkspaceFileResponse, FileContentResponse, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse, PiWebPathAccessConfig, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse } from "../../shared/apiTypes.js";
 import { imageMimeTypeForPath } from "./imagePreviewService.js";
 import { resolveWorkspacePathAccessTarget } from "./pathAccessPolicy.js";
 import { ensureInside, isNodeErrorWithCode, normalizeRelativePath, resolveInsideWorkspace, resolveParentInsideWorkspace } from "./pathSafety.js";
@@ -16,9 +15,9 @@ export function contentVersion(bytes: Buffer): string {
 }
 
 // Streamed, so a file an agent made huge is not read into memory to be compared.
-async function fileVersion(target: string, access?: BrowserFileAccess): Promise<string> {
+async function fileVersion(target: string): Promise<string> {
   const hash = createHash("sha256");
-  const stream = (await openBrowserFile(target, access)).createReadStream();
+  const stream = createReadStream(target);
   stream.on("data", (chunk) => hash.update(chunk));
   await new Promise<void>((resolve, reject) => { stream.on("end", resolve); stream.on("error", reject); });
   return hash.digest("hex");
@@ -32,14 +31,13 @@ export class WorkspaceFileConflictError extends Error {
   }
 }
 
-export async function readWorkspaceFile(rootPath: string, path: string | undefined, pathAccess?: WorkspacePathAccess): Promise<FileContentResponse> {
+export async function readWorkspaceFile(rootPath: string, path: string | undefined, pathAccess?: PiWebPathAccessConfig): Promise<FileContentResponse> {
   if (path === undefined || path === "") throw new Error("path query parameter is required");
   const { target, displayPath } = await resolveWorkspacePathAccessTarget(rootPath, path, pathAccess);
   const s = await stat(target);
-  await pathAccess?.browserFiles?.assertReadable(target, s);
   if (!s.isFile()) throw new Error("Path is not a file");
   const bytesToRead = Math.min(s.size, MAX_BYTES);
-  const buffer = await readFilePrefix(target, bytesToRead, pathAccess?.browserFiles);
+  const buffer = await readFilePrefix(target, bytesToRead);
   const media = mediaForPath(displayPath);
   const binary = media.mediaType === "image" || isProbablyBinary(buffer);
   const truncated = s.size > MAX_BYTES;
@@ -59,10 +57,10 @@ export async function readWorkspaceFile(rootPath: string, path: string | undefin
   };
 }
 
-async function readFilePrefix(target: string, bytesToRead: number, access?: BrowserFileAccess): Promise<Buffer> {
+async function readFilePrefix(target: string, bytesToRead: number): Promise<Buffer> {
   if (bytesToRead === 0) return Buffer.alloc(0);
   const buffer = Buffer.alloc(bytesToRead);
-  const handle = await openBrowserFile(target, access);
+  const handle = await open(target, "r");
   try {
     const result = await handle.read(buffer, 0, bytesToRead, 0);
     return buffer.subarray(0, result.bytesRead);
@@ -71,7 +69,7 @@ async function readFilePrefix(target: string, bytesToRead: number, access?: Brow
   }
 }
 
-export async function writeWorkspaceFile(rootPath: string, path: string | undefined, content: Buffer, options: WriteWorkspaceFileOptions = {}, access?: BrowserFileAccess): Promise<WriteWorkspaceFileResponse> {
+export async function writeWorkspaceFile(rootPath: string, path: string | undefined, content: Buffer, options: WriteWorkspaceFileOptions = {}): Promise<WriteWorkspaceFileResponse> {
   if (path === undefined || path === "") throw new Error("path query parameter is required");
 
   const createDirs = options.createDirs ?? true;
@@ -80,13 +78,12 @@ export async function writeWorkspaceFile(rootPath: string, path: string | undefi
   let exists = false;
   try {
     const { target, relativePath } = await resolveInsideWorkspace(rootPath, path);
-    await access?.assertReadable(target);
     const s = await stat(target);
     if (!s.isFile()) throw new Error("Path is not a file");
     if (!overwrite) throw new Error(`File already exists: ${relativePath}`);
     exists = true;
     if (options.expectedVersion !== undefined) {
-      const current = await fileVersion(target, access);
+      const current = await fileVersion(target);
       if (current !== options.expectedVersion) throw new WorkspaceFileConflictError(relativePath, current);
     }
   } catch (error: unknown) {
@@ -108,7 +105,6 @@ export async function writeWorkspaceFile(rootPath: string, path: string | undefi
   const realParent = await realpath(dirname(target));
   const realTarget = join(realParent, basename(target));
   ensureInside(root, realTarget);
-  await access?.assertReadable(realTarget);
   await writeFile(realTarget, content);
 
   const s = await stat(realTarget);
@@ -121,7 +117,7 @@ export async function writeWorkspaceFile(rootPath: string, path: string | undefi
   };
 }
 
-export async function deleteWorkspaceFile(rootPath: string, path: string | undefined, access?: BrowserFileAccess): Promise<DeleteWorkspaceFileResponse> {
+export async function deleteWorkspaceFile(rootPath: string, path: string | undefined): Promise<DeleteWorkspaceFileResponse> {
   if (path === undefined || path === "") throw new Error("path query parameter is required");
   // Use resolveParentInsideWorkspace + lstat so that deleting a symlink
   // deletes the symlink itself, not the target it points to.
@@ -136,7 +132,6 @@ export async function deleteWorkspaceFile(rootPath: string, path: string | undef
     const realParent = await realpath(dirname(target));
     const realTarget = join(realParent, basename(target));
     ensureInside(root, realTarget);
-    await access?.assertReadable(realTarget);
     const s = await lstat(realTarget);
     // Allow deleting regular files and symlinks, but not directories
     if (s.isDirectory()) throw new Error("Path is a directory, use directory deletion instead");
@@ -149,7 +144,7 @@ export async function deleteWorkspaceFile(rootPath: string, path: string | undef
   }
 }
 
-export async function moveWorkspaceFile(rootPath: string, fromPath: string | undefined, toPath: string | undefined, options: MoveWorkspaceFileOptions = {}, access?: BrowserFileAccess): Promise<MoveWorkspaceFileResponse> {
+export async function moveWorkspaceFile(rootPath: string, fromPath: string | undefined, toPath: string | undefined, options: MoveWorkspaceFileOptions = {}): Promise<MoveWorkspaceFileResponse> {
   if (fromPath === undefined || fromPath === "") throw new Error("fromPath query parameter is required");
   if (toPath === undefined || toPath === "") throw new Error("toPath query parameter is required");
 
@@ -158,7 +153,6 @@ export async function moveWorkspaceFile(rootPath: string, fromPath: string | und
 
   // Source: must exist and be a file (uses realpath via resolveInsideWorkspace)
   const { target: source, relativePath: fromRelative } = await resolveInsideWorkspace(rootPath, fromPath);
-  await access?.assertReadable(source);
   const sourceStat = await stat(source);
   if (!sourceStat.isFile()) throw new Error("Source path is not a file");
 
@@ -183,7 +177,6 @@ export async function moveWorkspaceFile(rootPath: string, fromPath: string | und
     }
   }
 
-  await access?.assertReadable(realDest);
   await rename(source, realDest);
   const finalStat = await stat(realDest);
   return { fromPath: fromRelative, toPath: destRelative, size: finalStat.size, modifiedAt: finalStat.mtime.toISOString() };

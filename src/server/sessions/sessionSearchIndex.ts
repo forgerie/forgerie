@@ -1,4 +1,3 @@
-import { BrowserFileAccess, openBrowserFile } from "../browserFileAccess.js";
 import { chmod, mkdir, open, readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -30,14 +29,12 @@ interface MessageRow extends SearchMessage { sessionId: string }
 export interface SessionSearchIndexOptions {
   filePath: string;
   sessionsDir: string;
-  agentDir?: string;
   log: (message: string) => void;
   onProgress?: (status: SessionSearchIndexStatus) => void;
 }
 
 /** The worker alone owns this connection. Source transcripts are opened with "r". */
 export class SessionSearchIndex {
-  private readonly browserFiles: BrowserFileAccess | undefined;
   private readonly db: DatabaseSync;
   private readonly queryDb: DatabaseSync;
   private discovery: Promise<void> = Promise.resolve();
@@ -53,7 +50,6 @@ export class SessionSearchIndex {
   }
 
   private constructor(private readonly options: SessionSearchIndexOptions) {
-    this.browserFiles = options.agentDir === undefined ? undefined : new BrowserFileAccess(options.agentDir);
     this.db = new DatabaseSync(options.filePath);
     try {
       this.db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA cache_size=-8192; CREATE TABLE IF NOT EXISTS versions(schemaVersion INTEGER, extractionVersion INTEGER)");
@@ -186,13 +182,12 @@ export class SessionSearchIndex {
   }
 
   private async indexFile(file: SearchFile): Promise<boolean> {
-    if (this.browserFiles !== undefined && !await this.browserFiles.isReadable(file.path)) return false;
     const cached = this.db.prepare("SELECT * FROM files WHERE sessionId=?").get(file.sessionId);
     if (cached?.["dev"] === file.dev && cached["ino"] === file.ino && Number(cached["size"]) === file.size && cached["mtime"] === file.mtime) {
       this.db.prepare("UPDATE files SET path=? WHERE sessionId=?").run(file.path, file.sessionId);
       return true;
     }
-    const source = await openBrowserFile(file.path, this.browserFiles).catch((error: unknown) => { this.logSkip(file.path, error); return undefined; });
+    const source = await open(file.path, "r").catch((error: unknown) => { this.logSkip(file.path, error); return undefined; });
     if (source === undefined) return false;
     let metadata;
     try { metadata = await source.stat(); }
@@ -243,9 +238,8 @@ export class SessionSearchIndex {
 
   private async describeFile(path: string): Promise<SearchFile | undefined> {
     try {
-      if (this.browserFiles !== undefined && !await this.browserFiles.isReadable(path)) return undefined;
       const metadata = await stat(path);
-      const file = await openBrowserFile(path, this.browserFiles);
+      const file = await open(path, "r");
       let header: Record<string, unknown> | undefined;
       try {
         const buffer = Buffer.alloc(4096);

@@ -381,16 +381,3 @@ describe("main checkout commits", () => {
     expect(git(project, ["rev-parse", "HEAD"])).toBe(head);
   });
 });
-
-
-it("excludes private gateway aliases from resource discovery and direct reads", async () => {
-  const path = join(profile, "prompts/private.md"); await file(path, "Ordinary prompt.");
-  const editor = service(); const entry = resourceAt(await editor.inventory(), path);
-  const key = join(profile, "decision-gateway.json"); await file(key, '{"apiKey":"DISTINCTIVE-private-resource-key"}');
-  await rm(path); await link(key, path);
-  const skillPath = join(profile, "skills/private/SKILL.md"); await mkdir(dirname(skillPath), { recursive: true }); await symlink(key, skillPath);
-  const inventory = await editor.inventory();
-  expect(inventory.resources.some(resource => resource.path === path || resource.path === skillPath)).toBe(false);
-  expect(JSON.stringify(inventory)).not.toContain("DISTINCTIVE-private-resource-key");
-  await expect(editor.read(entry.id)).rejects.toMatchObject({ kind: "not-found" });
-});

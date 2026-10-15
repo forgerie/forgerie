@@ -1,4 +1,3 @@
-import { BrowserFileAccess } from "../browserFileAccess.js";
 import { createHash } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -21,8 +20,7 @@ export interface WorkflowInventory { workflows: ProseWorkflow[]; diagnostics: { 
 
 /** Saved workflows use prompt files. Invalid project overrides never fall back to a profile file. */
 export class WorkflowLibrary {
-  private readonly browserFiles: BrowserFileAccess;
-  constructor(private readonly agentDir: string) { this.browserFiles = new BrowserFileAccess(agentDir); }
+  constructor(private readonly agentDir: string) {}
   async list(cwd: string): Promise<WorkflowInventory> {
     const result: WorkflowInventory = { workflows: [], diagnostics: [] };
     const seen = new Set<string>();
@@ -34,9 +32,8 @@ export class WorkflowLibrary {
         if (seen.has(name)) continue;
         seen.add(name);
         const path = join(dir, file.name);
-        if (!await this.browserFiles.isReadable(path)) continue;
         try {
-          const { text } = await readResourceFile(path, this.browserFiles);
+          const { text } = await readResourceFile(path);
           const parsed = parseFrontmatter(text);
           if (parsed.frontmatter["workflow"] === undefined) continue;
           result.workflows.push(parseWorkflow(name, path, text));
@@ -49,7 +46,7 @@ export class WorkflowLibrary {
     if (promptNameProblem(name) !== undefined) throw new WorkflowError(400, "Invalid workflow name");
     for (const dir of [join(cwd, ".pi", "prompts"), join(this.agentDir, "prompts")]) {
       const path = join(dir, `${name}.md`);
-      try { return parseWorkflow(name, path, (await readResourceFile(path, this.browserFiles)).text); }
+      try { return parseWorkflow(name, path, (await readResourceFile(path)).text); }
       catch (error) { if (!isMissingResource(error)) throw error; }
     }
     throw new WorkflowError(404, `No workflow named ${name}`);

@@ -1,4 +1,4 @@
-import { link, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAssistantMessageEventStream, InMemoryCredentialStore, type AssistantMessage } from "@earendil-works/pi-ai";
@@ -39,21 +39,6 @@ afterEach(() => {
 });
 
 describe("PiSessionService prompt, queue, and auth warnings", () => {
-  it("excludes private prompt and skill aliases from the browser's active command list", async () => {
-    const root = await mkdtemp(join(tmpdir(), "private-active-commands-"));
-    const key = join(root, "decision-gateway.json"); await writeFile(key, '{"apiKey":"DISTINCTIVE-private-command-key"}');
-    const alias = join(root, "alias.md"); await link(key, alias);
-    const runtime = fakeRuntime("private-command-session", {
-      promptTemplates: [{ name: "private", description: "DISTINCTIVE-private-command-key", content: "private", filePath: alias }],
-      resourceLoader: { getSkills: () => ({ skills: [{ name: "private", description: "DISTINCTIVE-private-command-key", filePath: alias, baseDir: root }] }) },
-    });
-    const service = new PiSessionService(new CapturingSessionEventHub(), {
-      agentDir: root, modelRuntime: testModelRuntime, createAgentRuntime: runtimeCreator(runtime.runtime),
-      sessionManager: sessionGateway([sessionRecord("private-command-session")]), heartbeatIntervalMs: 60_000,
-    });
-    try { expect(JSON.stringify(await service.commands(sessionRef("private-command-session")))).not.toContain("DISTINCTIVE"); }
-    finally { await service.dispose(); await rm(root, { recursive: true, force: true }); }
-  });
   it("shares the preflight receipt for concurrent retries without echoing twice", async () => {
     const runtime = fakeRuntime("concurrent-request-session");
     const hub = new CapturingSessionEventHub();

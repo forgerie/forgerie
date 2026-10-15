@@ -1,4 +1,3 @@
-import { BrowserFileAccess } from "../browserFileAccess.js";
 import { stat, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { DefaultPackageManager, SettingsManager, loadSkills, loadProjectContextFiles, parseFrontmatter, type ResolvedResource } from "@earendil-works/pi-coding-agent";
@@ -18,18 +17,14 @@ const CONTEXT_NAMES = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.m
 /** Resolves configured files only. Never loads extension code or installs missing packages. */
 export class ResourceEditorDiscovery {
   private readonly agentDir: string;
-  private readonly browserFiles: BrowserFileAccess;
   private readonly bundledPaths: readonly string[];
   constructor(options: EditorDiscoveryOptions) {
     this.agentDir = resolve(options.agentDir);
-    this.browserFiles = new BrowserFileAccess(this.agentDir);
     this.bundledPaths = options.bundledPaths ?? [bundledForgerieSkillsPackagePath()];
   }
 
   async discover(scope: ResourceEditorScope): Promise<EditorDiscovery> {
     const cwd = scope.kind === "settings" ? this.agentDir : scope.cwd;
-    await this.browserFiles.assertReadable(join(this.agentDir, "settings.json"));
-    await this.browserFiles.assertReadable(join(cwd, ".pi", "settings.json"));
     const fileSettings = SettingsManager.create(cwd, this.agentDir, { projectTrusted: scope.kind === "session" });
     const settingsErrors = fileSettings.drainErrors();
     if (settingsErrors.length > 0) throw new ResourceEditorError("io-error", `Could not read Pi settings: ${settingsErrors.map((error) => error.error.message).join("; ")}`);
@@ -48,7 +43,6 @@ export class ResourceEditorDiscovery {
       for (const source of pathsForKind) {
         if (scope.kind === "settings" && source.metadata.scope === "project") continue;
         for (const path of await resourceFiles(source.path, kind)) {
-          if (!await this.browserFiles.isReadable(path)) continue;
           const identity = `${kind}:${String(source.enabled)}:${await realpath(path)}`;
           const configuredPath = `${kind}:${resolve(path)}`;
           if (seenFiles.has(identity) || seenConfiguredPaths.has(configuredPath)) continue;
@@ -80,7 +74,7 @@ export class ResourceEditorDiscovery {
       activation: enabled ? { kind: "active" } : { kind: "disabled" }, manual: false,
     };
     try {
-      const { text } = await readResourceFile(path, this.browserFiles);
+      const { text } = await readResourceFile(path);
       if (kind === "skill") {
         const fields = parseFrontmatter(text).frontmatter;
         if (typeof fields["name"] === "string" && fields["name"] !== "") entry.name = fields["name"];
@@ -113,7 +107,7 @@ export class ResourceEditorDiscovery {
     for (const directory of directories) {
       for (const name of CONTEXT_NAMES) {
         const path = join(directory, name);
-        if (await regularFile(path)) { await this.browserFiles.assertReadable(path); candidates.push(path); }
+        if (await regularFile(path)) candidates.push(path);
       }
     }
     // The SDK reads context synchronously. Bound every candidate before asking it
@@ -135,7 +129,7 @@ export class ResourceEditorDiscovery {
       const winner = project !== undefined && await regularFile(project) ? project : await regularFile(user) ? user : undefined;
       if (winner === undefined) continue;
       for (const path of [project, user]) {
-        if (path !== undefined && await regularFile(path) && await this.browserFiles.isReadable(path)) resources.push(contextResource(path, dirname(path), this.agentDir, path === winner ? undefined : winner));
+        if (path !== undefined && await regularFile(path)) resources.push(contextResource(path, dirname(path), this.agentDir, path === winner ? undefined : winner));
       }
     }
     assertItemLimit(resources.length);

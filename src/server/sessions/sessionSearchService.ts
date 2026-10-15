@@ -29,7 +29,7 @@ export class SessionSearchService implements SessionSearchRoutesService {
 
   constructor(private readonly deps: SessionSearchDependencies) {
     const url = new URL("./sessionSearchWorker.js", import.meta.url);
-    const options: SearchWorkerOptions = { filePath: deps.filePath, sessionsDir: deps.sessionsDir, ...deps.agentDir === undefined ? {} : { agentDir: deps.agentDir } };
+    const options: SearchWorkerOptions = { filePath: deps.filePath, sessionsDir: deps.sessionsDir };
     if (import.meta.url.endsWith(".ts")) {
       url.pathname = url.pathname.replace(/\.js$/u, ".ts");
       // Node's worker loader does not inherit tsx's in-process registration.

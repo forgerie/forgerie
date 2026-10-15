@@ -1,12 +1,11 @@
-import type { WorkspacePathAccess } from "./pathAccessPolicy.js";
 import { lstat, readdir } from "node:fs/promises";
 import { isAbsolute, join, win32 } from "node:path";
-import type { FileTreeEntry, FileTreeResponse } from "../../shared/apiTypes.js";
+import type { FileTreeEntry, FileTreeResponse, PiWebPathAccessConfig } from "../../shared/apiTypes.js";
 import { resolveWorkspacePathAccessTarget } from "./pathAccessPolicy.js";
 
 const MAX_ENTRIES = 1000;
 
-export async function listWorkspaceTree(rootPath: string, path: string | undefined, pathAccess?: WorkspacePathAccess): Promise<FileTreeResponse> {
+export async function listWorkspaceTree(rootPath: string, path: string | undefined, pathAccess?: PiWebPathAccessConfig): Promise<FileTreeResponse> {
   const { target, displayPath } = await resolveWorkspacePathAccessTarget(rootPath, path, pathAccess);
   const stat = await lstat(target);
   if (!stat.isDirectory()) throw new Error("Path is not a directory");
@@ -16,18 +15,16 @@ export async function listWorkspaceTree(rootPath: string, path: string | undefin
     if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
-  const readable = (await Promise.all(sorted.map(async entry => ({ entry, readable: await pathAccess?.browserFiles?.isReadable(join(target, entry.name)) ?? true })))).filter(row => row.readable).map(row => row.entry);
-  const selected = readable.slice(0, MAX_ENTRIES);
+  const selected = sorted.slice(0, MAX_ENTRIES);
   const entries = await Promise.all(selected.map(async (entry): Promise<FileTreeEntry> => {
     const absolute = join(target, entry.name);
     const childPath = appendRequestPath(displayPath, entry.name);
     const childStat = await lstat(absolute);
-    await pathAccess?.browserFiles?.assertReadable(absolute, childStat);
     const type: FileTreeEntry["type"] = entry.isDirectory() ? "directory" : entry.isSymbolicLink() ? "symlink" : "file";
     return { name: entry.name, path: childPath, type, size: childStat.size, modifiedAt: childStat.mtime.toISOString() };
   }));
 
-  return { path: displayPath, entries, scannedAt: new Date().toISOString(), truncated: readable.length > selected.length };
+  return { path: displayPath, entries, scannedAt: new Date().toISOString(), truncated: sorted.length > selected.length };
 }
 
 function appendRequestPath(base: string, name: string): string {

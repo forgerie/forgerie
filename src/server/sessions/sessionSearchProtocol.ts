@@ -1,7 +1,7 @@
 import type { SessionSearchIndexStatus, SessionSearchMatch } from "../../shared/sessionSearch.js";
 import type { IndexedSearchHit } from "./sessionSearchIndex.js";
 
-export interface SearchWorkerOptions { filePath: string; sessionsDir: string; agentDir?: string }
+export interface SearchWorkerOptions { filePath: string; sessionsDir: string }
 export type SearchWorkerRequest = { id: number } & SearchWorkerCommand;
 export type SearchWorkerCommand = (
   | { kind: "search"; query: string }

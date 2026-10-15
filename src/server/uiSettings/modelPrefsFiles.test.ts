@@ -1,5 +1,3 @@
-import { BrowserFileAccess } from "../browserFileAccess.js";
-import { dirname } from "node:path";
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -107,7 +105,7 @@ describe("model list files", () => {
   it("serves GET and PUT, and refuses a change from another site", async () => {
     const files = await paths({ enabledModels: ["proxy/a"] });
     const app = Fastify({ logger: false });
-    await registerUiSettingsRoutes(app, { modelPrefsPaths: () => Promise.resolve(files), fileAccess: () => Promise.resolve(new BrowserFileAccess(dirname(files.settings))) });
+    await registerUiSettingsRoutes(app, { modelPrefsPaths: () => Promise.resolve(files) });
     const read: { revision: string } = (await app.inject("/aui/model-prefs")).json();
     const put = async (headers: Record<string, string> = {}) => {
       const response = await app.inject({ method: "PUT", url: "/aui/model-prefs", headers: { "content-type": "application/json", host: "forgerie.test", ...headers },

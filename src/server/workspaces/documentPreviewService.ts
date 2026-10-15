@@ -1,8 +1,7 @@
-import { openBrowserFile } from "../browserFileAccess.js";
-import type { WorkspacePathAccess } from "./pathAccessPolicy.js";
-import type { ReadStream } from "node:fs";
+import { createReadStream, type ReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { extname } from "node:path";
+import type { PiWebPathAccessConfig } from "../../shared/apiTypes.js";
 import { MAX_DOCUMENT_PREVIEW_BYTES, MAX_DOCUMENT_PREVIEW_LABEL } from "../../shared/workspaceFiles.js";
 import { DOCUMENT_PREVIEW_MIME_TYPES } from "../../shared/workspacePreviewMime.js";
 import { resolveWorkspacePathAccessTarget } from "./pathAccessPolicy.js";
@@ -26,11 +25,10 @@ export function documentMimeTypeForPath(path: string): string | undefined {
   return DOCUMENT_PREVIEW_MIME_TYPES[extname(path).toLowerCase()];
 }
 
-export async function readWorkspaceDocumentPreview(rootPath: string, path: string | undefined, pathAccess?: WorkspacePathAccess): Promise<WorkspaceDocumentPreview> {
+export async function readWorkspaceDocumentPreview(rootPath: string, path: string | undefined, pathAccess?: PiWebPathAccessConfig): Promise<WorkspaceDocumentPreview> {
   if (path === undefined || path === "") throw new Error("path is required");
   const { target, displayPath } = await resolveWorkspacePathAccessTarget(rootPath, path, pathAccess);
   const s = await stat(target);
-  await pathAccess?.browserFiles?.assertReadable(target, s);
   if (!s.isFile()) throw new Error("Path is not a file");
   const mimeType = documentMimeTypeForPath(displayPath);
   if (mimeType === undefined) throw new Error("Document preview is not supported for this file type");
@@ -40,6 +38,6 @@ export async function readWorkspaceDocumentPreview(rootPath: string, path: strin
     mimeType,
     size: s.size,
     modifiedAt: s.mtime.toISOString(),
-    stream: (await openBrowserFile(target, pathAccess?.browserFiles)).createReadStream(),
+    stream: createReadStream(target),
   };
 }

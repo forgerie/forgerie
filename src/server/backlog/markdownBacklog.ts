@@ -1,6 +1,6 @@
-import { openBrowserFile, type BrowserFileAccess } from "../browserFileAccess.js";
 import { execFile } from "node:child_process";
-import { readdir, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { BacklogConfig, BacklogWarning, Project } from "../../shared/apiTypes.js";
@@ -18,15 +18,11 @@ export const DEFAULT_BACKLOG_DIRECTORY = ".forgerie/backlog/";
 /** Repo-local markdown items with frontmatter, read from one configured directory. Never writes. */
 export const markdownBacklogProvider: BacklogProvider = {
   id: "markdown",
-  scan: (project, repo, config) => scanMarkdownBacklog(project, repo, config),
+  scan: scanMarkdownBacklog,
   prompt: ({ item, body }) => `This is backlog item ${item.id}.\n\n${body}`,
 };
 
-export function createMarkdownBacklogProvider(browserFiles: BrowserFileAccess): BacklogProvider {
-  return { ...markdownBacklogProvider, scan: (project, repo, config) => scanMarkdownBacklog(project, repo, config, browserFiles) };
-}
-
-async function scanMarkdownBacklog(project: Project, repo: string, config: BacklogConfig | undefined, browserFiles?: BrowserFileAccess): Promise<BacklogProviderScan> {
+async function scanMarkdownBacklog(project: Project, repo: string, config: BacklogConfig | undefined): Promise<BacklogProviderScan> {
   const warnings: BacklogWarning[] = [];
   const entries: ScannedBacklogItem[] = [];
   const warn = (kind: BacklogWarning["kind"], path: string, message: string) => { warnings.push({ projectId: project.id, provider: "markdown", kind, path, message }); };
@@ -47,10 +43,9 @@ async function scanMarkdownBacklog(project: Project, repo: string, config: Backl
       if (child.isSymbolicLink()) { warn("invalid-item", path, "Backlog scanner does not follow symbolic links"); continue; }
       if (child.isDirectory()) { await walk(path, depth + 1); continue; }
       if (!child.isFile() || !child.name.endsWith(".md")) continue;
-      if (browserFiles !== undefined && !await browserFiles.isReadable(path)) continue;
       try {
         await assertContainedFile(directory, path);
-        const handle = await openBrowserFile(path, browserFiles);
+        const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
         let content: string;
         try {
           if ((await handle.stat()).size > MAX_ITEM_BYTES) throw new Error("Item exceeds 256 KiB");

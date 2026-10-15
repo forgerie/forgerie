@@ -1,4 +1,3 @@
-import { BrowserFileAccessError } from "../browserFileAccess.js";
 import { z } from "zod";
 import { mutationSchema } from "../../shared/pluginsContract.js";
 import { errorMessage, readJsonBody, refuseCrossSite, sendJson, SettingsHttpError } from "./http.js";
@@ -41,7 +40,7 @@ export function pluginMiddleware(service: PluginService): Middleware {
       return service.change(input.revision, input.change);
     };
     handle().then((value) => { sendJson(response, 200, value); }).catch((error: unknown) => {
-      sendJson(response, error instanceof BrowserFileAccessError ? 403 : error instanceof SettingsHttpError ? error.status : error instanceof z.ZodError ? 400 : 500, { error: errorMessage(error) });
+      sendJson(response, error instanceof SettingsHttpError ? error.status : error instanceof z.ZodError ? 400 : 500, { error: errorMessage(error) });
     });
   };
 }

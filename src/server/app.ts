@@ -1,4 +1,3 @@
-import { activeBrowserFileAccess } from "./browserFileAccess.js";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,7 +116,6 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
   const sessionDaemon = deps.sessionDaemon ?? new SessionDaemonClient();
   const agentProfileProvider = deps.agentProfileProvider ?? new SessionDaemonActiveAgentProfileProvider(sessionDaemon);
 
-  const fileAccess = () => activeBrowserFileAccess(agentProfileProvider);
   const piPackages = deps.piPackages ?? createActiveProfilePiPackageService(agentProfileProvider);
   // Local runtime diagnostics never query a release registry or execute installers.
   app.get("/api/pi-web/status", async () => getPiWebVersionStatus(sessionDaemon));
@@ -134,13 +132,13 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
 
   registerSessionProxyRoutes(app, sessionDaemon);
   registerSessionProxyRoutes(app, sessionDaemon, "/api/machines/local");
-  registerWorkspaceExplorerRoutes(app, projects, workspaces, "/api", { config: configService, fileAccess });
-  registerWorkspaceExplorerRoutes(app, projects, workspaces, "/api/machines/local", { config: configService, fileAccess });
+  registerWorkspaceExplorerRoutes(app, projects, workspaces, "/api", { config: configService });
+  registerWorkspaceExplorerRoutes(app, projects, workspaces, "/api/machines/local", { config: configService });
   registerPromptResourceCatalogProxyRoutes(app, projects, workspaces, sessionDaemon, "/api");
   registerPromptResourceCatalogProxyRoutes(app, projects, workspaces, sessionDaemon, "/api/machines/local");
-  registerGitRoutes(app, projects, workspaces, "/api", fileAccess);
-  registerGitRoutes(app, projects, workspaces, "/api/machines/local", fileAccess);
-  await registerUiSettingsRoutes(app, { ...deps.uiSettings, fileAccess }, sessionDaemon);
+  registerGitRoutes(app, projects, workspaces);
+  registerGitRoutes(app, projects, workspaces, "/api/machines/local");
+  await registerUiSettingsRoutes(app, deps.uiSettings, sessionDaemon);
 
   const packagedClientDist = join(dirname(fileURLToPath(import.meta.url)), "..", "client");
   const clientDist = deps.clientDist ?? (existsSync(packagedClientDist) ? packagedClientDist : join(process.cwd(), "dist", "client"));

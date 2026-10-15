@@ -1,10 +1,10 @@
-import { openBrowserFile, type BrowserFileAccess } from "../browserFileAccess.js";
+import { open } from "node:fs/promises";
 
 export class PromptResourceContentLimitError extends Error {}
 
-export async function readBoundedPromptResourceFile(filePath: string, maxBytes: number, signal?: AbortSignal, browserFiles?: BrowserFileAccess): Promise<string> {
+export async function readBoundedPromptResourceFile(filePath: string, maxBytes: number, signal?: AbortSignal): Promise<string> {
   throwIfAborted(signal);
-  const handle = await openBrowserFile(filePath, browserFiles);
+  const handle = await open(filePath, "r");
   try {
     const file = await handle.stat();
     if (!file.isFile() || file.size > maxBytes) throw new PromptResourceContentLimitError();

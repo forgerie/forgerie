@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { z } from "zod";
 import { decisionGatewayApiKeySchema, type DecisionHintsStatus } from "../../shared/decisionHints.js";
 
-export const DECISION_GATEWAY_KEY_FILE_NAME = "decision-gateway.json";
 const fileSchema = z.object({ apiKey: decisionGatewayApiKeySchema });
 export class DecisionGatewayKeyError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -21,7 +20,7 @@ export class DecisionGatewayKeyStore {
   private readonly environmentKey: string | undefined;
   private cached: { stamp: string; apiKey: string } | undefined;
   constructor(private readonly options: { agentDir: string; env: NodeJS.ProcessEnv; stat?: (path: string) => Promise<BigIntStats> }) {
-    this.path = join(options.agentDir, DECISION_GATEWAY_KEY_FILE_NAME);
+    this.path = join(options.agentDir, "decision-gateway.json");
     const environmentKey = options.env["DECISION_GATEWAY_API_KEY"]?.trim();
     this.environmentKey = environmentKey === "" ? undefined : environmentKey;
   }

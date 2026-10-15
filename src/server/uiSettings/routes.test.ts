@@ -1,4 +1,4 @@
-import { link, symlink, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -33,17 +33,6 @@ async function settingsServer(options: { available?: boolean } = {}) {
 }
 
 describe("settings HTTP routes", () => {
-  it("excludes private file aliases from agent lists and direct content reads", async () => {
-    const { app, dir, home } = await settingsServer();
-    const key = join(dir, "decision-gateway.json"); await writeFile(key, '{"apiKey":"DISTINCTIVE-agent-file-key"}');
-    await link(key, join(dir, "agents", "private.md")); await symlink(key, join(home, "private.md"));
-    const list = await app.inject("/aui/agents"); expect(list.statusCode).toBe(200); expect(list.body).not.toContain("DISTINCTIVE-agent-file-key");
-    expect(list.body).not.toContain('"file":"private"');
-    for (const scope of ["user", "home"]) {
-      const response = await app.inject(`/aui/agents/${scope}/private`);
-      expect(response.statusCode).toBe(403); expect(response.json()).toEqual({ error: "Path is outside allowed paths" });
-    }
-  });
   it("writes Agents and Plugins to the same daemon profile and refuses unsafe plugin requests", async () => {
     const { app, dir, global, restarts, post } = await settingsServer();
     const agents: { userDir: string; agents: { scope: string }[] } = (await app.inject("/aui/agents")).json();

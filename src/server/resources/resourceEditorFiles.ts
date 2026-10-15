@@ -1,4 +1,3 @@
-import type { BrowserFileAccess } from "../browserFileAccess.js";
 import { constants } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { access, lstat, open, realpath, rename, unlink } from "node:fs/promises";
@@ -18,13 +17,11 @@ export function insideResourceRoot(path: string, root: string): boolean {
 export interface ResourceFileContents { text: string; revision: string; canonicalPath: string; mode: number }
 
 /** Reads the real file, but never follows a final symlink after opening it. */
-export async function readResourceFile(path: string, browserFiles?: BrowserFileAccess): Promise<ResourceFileContents> {
+export async function readResourceFile(path: string): Promise<ResourceFileContents> {
   const canonicalPath = await realpath(path);
-  await browserFiles?.assertReadable(canonicalPath);
   const handle = await open(canonicalPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = await handle.stat();
-    await browserFiles?.assertReadable(canonicalPath, before);
     if (!before.isFile()) throw new ResourceEditorError("read-only", "This resource is not a regular file.");
     if (before.size > RESOURCE_EDITOR_MAX_BYTES) throw new ResourceEditorError("over-limit", "Resource files are limited to 1 MiB.");
     const buffer = Buffer.alloc(before.size + 1);

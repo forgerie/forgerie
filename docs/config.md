@@ -217,13 +217,13 @@ With neither source set, requests have no `Authorization` header. Status exposes
 only presence and source, never the saved key or a fingerprint. A damaged file
 adds `invalid: true`, prevents requests without auth, and stays repairable through
 Replace or Remove in Settings. Credential reads use asynchronous I/O in the
-background ask. Browser file access excludes this file and its aliases even when
-the profile is inside an allowed root. This does not change browser access to
-`auth.json` or `cliproxyapi.json`.
+background ask. Like `auth.json` and `cliproxyapi.json`, browser file routes can
+read the saved key when its profile is inside `pathAccess.allowedPaths` or a
+registered workspace.
 
 Agent bash runs as the same Unix user and can read profile credential files.
 Use the scrubbed environment variable instead, and remove the key file, if agents
-must not read this key. See [Decision hints security costs](decision-hints.md#gateway-key).
+and browser file routes must not read this key. See [Decision hints security costs](decision-hints.md#gateway-key).
 
 ## Project settings and worktree hooks
 

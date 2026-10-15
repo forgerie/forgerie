@@ -67,14 +67,19 @@ Settings shows **Saved key file is unreadable**, keeps the input empty, and allo
 Replace with a new key or Remove. Empty files, malformed JSON and empty `apiKey`
 values all use this repairable state.
 
-**Security cost:** agent `bash` runs as the same Unix user as Forgerie. It can read
-the profile key file despite mode `0600`. This is already true of `auth.json` and
-`cliproxyapi.json`. The file is not hidden from agents. Users who need agents
-unable to read this key must use the environment variable instead and must remove
-any key file. Sessiond scrubs that variable before agent bash and managed processes
+**Security cost:** `decision-gateway.json` has the same exposure as `auth.json`
+and `cliproxyapi.json`. Agents running as the same Unix user can read it despite
+mode `0600`. Forgerie's browser file routes can also read it when the profile
+directory is inside `pathAccess.allowedPaths` or a registered workspace. This
+includes ordinary file reads, previews, metadata, searches and Git patches under
+their existing access rules. There is no special browser exclusion for this file.
+
+Users who need the key hidden from both agents and browser file routes should use
+`DECISION_GATEWAY_API_KEY` in sessiond's environment instead and remove any saved
+key file. Sessiond scrubs that variable before agent bash and managed processes
 start. This environment isolation is not a sandbox against host file access.
 
-Do not put a key in plugin settings, the gateway URL, or browser storage. Read
+Do not put a key in plugin settings, the gateway URL, or browser storage. Gateway-key Settings read
 routes report only `{ keyPresent, source }`, where source is `environment`,
 `settings` or `none`. An invalid file reports
 `{ keyPresent: false, source: "settings", invalid: true }`. They never return the
@@ -92,14 +97,6 @@ replaces the value without reading it; simultaneous key writes are last-writer
 wins. Values are trimmed, non-empty, at most 4096 characters, and cannot contain
 control characters. The runtime endpoint also includes public status at
 `components.sessiond.decisionHints`.
-
-Browser file APIs exclude the active profile's key file and private temporary
-writes, even when allowed roots include the profile. Checks use canonical paths
-and device/inode identity, including symlinks and hard links. File reads, previews,
-tree/search results, resource content, process output and Git patches must not
-expose those files or their content fingerprints. This is a file-identity boundary,
-not a content scanner for copies an agent made or old committed copies. Existing
-`auth.json` and `cliproxyapi.json` browser exposure is unchanged by this exclusion.
 
 Key-bearing web-to-sessiond requests never follow redirects. Every 3xx response
 fails with fixed text, without parsing or forwarding the redirect body.

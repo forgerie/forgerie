@@ -1,6 +1,5 @@
-import { openBrowserFile, BrowserFileAccess } from "../browserFileAccess.js";
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { execFile } from "node:child_process";
@@ -80,15 +79,14 @@ export function githubRepository(repository: string | { url: string; directory?:
  * The README in a package folder, read as text. Only a regular file counts:
  * a symlink could point anywhere on this host, so it is skipped.
  */
-export async function readReadme(folder: string, browserFiles?: BrowserFileAccess): Promise<PluginReadme> {
+export async function readReadme(folder: string): Promise<PluginReadme> {
   let names: string[];
   try { names = await readdir(folder); } catch { return { text: null, truncated: false }; }
   for (const name of names.filter((entry) => readmeName.test(entry)).sort((a, b) => readmeRank(a) - readmeRank(b))) {
     const path = join(folder, name);
     const info = await lstat(path).catch(() => undefined);
     if (info?.isFile() !== true) continue;
-    if (browserFiles !== undefined && !await browserFiles.isReadable(path)) continue;
-    const handle = await openBrowserFile(path, browserFiles);
+    const handle = await open(path, "r");
     try {
       const buffer = Buffer.alloc(Math.min(info.size, README_MAX_BYTES));
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
@@ -128,11 +126,8 @@ export const localPluginServices: PluginServices = {
 const packageManager = (profile: ForgerieProfile) => new DefaultPackageManager({ cwd: profile.dir, agentDir: profile.dir,
   settingsManager: SettingsManager.create(profile.dir, profile.dir, { projectTrusted: false }) });
 
-async function textAt(path: string, browserFiles?: BrowserFileAccess): Promise<string> {
-  try {
-    const file = await openBrowserFile(path, browserFiles);
-    try { return await file.readFile("utf8"); } finally { await file.close(); }
-  } catch (error) {
+async function textAt(path: string): Promise<string> {
+  try { return await readFile(path, "utf8"); } catch (error) {
     if (isErrnoCode(error, "ENOENT")) return "{}";
     throw error;
   }
@@ -172,10 +167,7 @@ export class PluginService {
   private async snapshot() {
     const profile = await this.profile();
     const settingsPath = join(profile.dir, "settings.json");
-    const browserFiles = new BrowserFileAccess(profile.dir);
-    await browserFiles.assertReadable(settingsPath);
-    await browserFiles.assertReadable(profile.configPath);
-    const [settingsText, configText] = await Promise.all([textAt(settingsPath, browserFiles), textAt(profile.configPath, browserFiles)]);
+    const [settingsText, configText] = await Promise.all([textAt(settingsPath), textAt(profile.configPath)]);
     const settings = settingsSchema.parse(parseJson(settingsText, settingsPath));
     const config = webConfigSchema.parse(parseJson(configText, profile.configPath));
     return { profile, settingsPath, settingsText, configText, settings, config,
@@ -207,7 +199,7 @@ export class PluginService {
     if (entry === undefined) throw new PluginError(404, "That package is not in this profile's plugin list.");
     let path: string | undefined;
     try { path = packageManager(profile).getInstalledPath(packageSource(entry), "user"); } catch { path = undefined; }
-    return path === undefined ? { text: null, truncated: false } : readReadme(path, new BrowserFileAccess(profile.dir));
+    return path === undefined ? { text: null, truncated: false } : readReadme(path);
   }
   async list(): Promise<PluginCatalog> {
     const data = await this.snapshot();

@@ -1,5 +1,4 @@
-import { BrowserFileAccess } from "../browserFileAccess.js";
-import { link, mkdir, appendFile, mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -178,13 +177,4 @@ describe("managed process log retention", () => {
       expect((await readFile(file)).subarray(-6).toString()).toBe("after\n");
     } finally { await writer.close(); }
   });
-});
-
-
-it("does not publish a credential hard-linked as process output", async () => {
-  const { directory, file } = await setup(1024);
-  const profile = join(directory, "profile"); await mkdir(profile);
-  const key = join(profile, "decision-gateway.json"); await writeFile(key, '{"apiKey":"private-output-key"}');
-  await rm(file); await link(key, file);
-  await expect(new ManagedProcessLog(directory, 1024, new BrowserFileAccess(profile)).read(true)).rejects.toThrow("Path is outside allowed paths");
 });

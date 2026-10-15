@@ -8,7 +8,7 @@ if (port === null) throw new Error("Session search requires a worker thread");
 const send = (reply: SearchWorkerReply) => { port.postMessage(reply); };
 const rawOptions = searchRecord(workerData);
 if (typeof rawOptions?.["filePath"] !== "string" || typeof rawOptions["sessionsDir"] !== "string") throw new Error("Invalid session search worker options");
-const options: SearchWorkerOptions = { filePath: rawOptions["filePath"], sessionsDir: rawOptions["sessionsDir"], ...typeof rawOptions["agentDir"] === "string" ? { agentDir: rawOptions["agentDir"] } : {} };
+const options: SearchWorkerOptions = { filePath: rawOptions["filePath"], sessionsDir: rawOptions["sessionsDir"] };
 const index = SessionSearchIndex.open({ ...options,
   log: (message) => { send({ kind: "log", message }); },
   onProgress: (status) => { send({ kind: "progress", index: status }); },

@@ -1,4 +1,3 @@
-import { BrowserFileAccess } from "../browserFileAccess.js";
 import type { TaskActivity } from "../../shared/durableTaskActivity.js";
 import { durableBrowserMessageSchema } from "../../shared/durableBrowserSnapshot.js";
 import { z } from "zod";
@@ -3126,26 +3125,17 @@ export class PiSessionService implements SessionRouteService {
       : readonly === undefined ? {} : { readOnlyReason: "This session's worktree is no longer writable." }) };
   }
 
-  private async browserCommandResources(session: PiAgentSession) {
-    const browserFiles = new BrowserFileAccess(this.agentDir);
-    const readable = async <T extends { filePath?: string | undefined }>(resources: readonly T[]) => (await Promise.all(resources.map(async resource => ({ resource,
-      readable: resource.filePath === undefined || await browserFiles.isReadable(resolve(session.sessionManager.getCwd(), resource.filePath)),
-    })))).filter(row => row.readable).map(row => row.resource);
-    return { browserFiles, prompts: await readable(session.promptTemplates), skills: await readable(session.resourceLoader.getSkills().skills) };
-  }
-
   async commands(ref: PiSessionRef): Promise<ClientCommand[]> {
     const session = await this.getOrOpen(ref);
-    const { prompts, skills } = await this.browserCommandResources(session);
     return buildActiveCommandList({
       builtins: BUILTIN_COMMANDS.map((command) => ({ name: command.name, ...(command.description === undefined ? {} : { description: command.description }), source: "builtin" as const })),
       extensions: session.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, ...(command.description === undefined ? {} : { description: command.description }), source: "extension" as const })),
-      prompts: prompts.map((template) => ({
+      prompts: session.promptTemplates.map((template) => ({
         name: template.name,
         ...(template.description === undefined ? {} : { description: template.description }),
         origin: canonicalPromptResourceOrigin("prompt", template.filePath, template.sourceInfo),
       })),
-      skills: skills.map((skill) => ({
+      skills: session.resourceLoader.getSkills().skills.map((skill) => ({
         name: skill.name,
         ...(skill.description === undefined ? {} : { description: skill.description }),
         origin: canonicalPromptResourceOrigin("skill", skill.filePath, skill.sourceInfo),
@@ -3154,20 +3144,19 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async activeCommandCatalog(session: PiAgentSession): Promise<ActiveCommandCatalog> {
-    const { prompts, skills, browserFiles } = await this.browserCommandResources(session);
     return await buildActiveCommandCatalog({
       builtins: BUILTIN_COMMANDS.map((command) => ({ name: command.name, ...(command.description === undefined ? {} : { description: command.description }), source: "builtin" as const })),
       extensions: session.extensionRunner.getRegisteredCommands().map((command) => ({ name: command.invocationName, ...(command.description === undefined ? {} : { description: command.description }), source: "extension" as const })),
-      prompts: prompts.map((template) => ({
+      prompts: session.promptTemplates.map((template) => ({
         name: template.name,
         ...(template.description === undefined ? {} : { description: template.description }),
         content: boundedActivePromptContent(template.content ?? ""),
         origin: canonicalPromptResourceOrigin("prompt", template.filePath, template.sourceInfo),
       })),
-      skills: await Promise.all(skills.map(async (skill) => ({
+      skills: await Promise.all(session.resourceLoader.getSkills().skills.map(async (skill) => ({
         name: skill.name,
         ...(skill.description === undefined ? {} : { description: skill.description }),
-        content: await readActiveSkillContent(skill.filePath, browserFiles),
+        content: await readActiveSkillContent(skill.filePath),
         origin: canonicalPromptResourceOrigin("skill", skill.filePath, skill.sourceInfo),
         baseDir: skill.baseDir ?? "",
         ...(skill.filePath === undefined ? {} : { filePath: skill.filePath }),
@@ -6214,10 +6203,10 @@ function boundedActivePromptContent(content: string): string {
   }
 }
 
-async function readActiveSkillContent(filePath: string | undefined, browserFiles: BrowserFileAccess): Promise<string> {
+async function readActiveSkillContent(filePath: string | undefined): Promise<string> {
   if (filePath === undefined) throw new Error("Prompt-resource skill content is unavailable.");
   try {
-    return await readBoundedPromptResourceFile(filePath, PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes, undefined, browserFiles);
+    return await readBoundedPromptResourceFile(filePath, PROMPT_RESOURCE_CATALOG_LIMITS.maxSerializedBytes);
   } catch {
     throw new Error("Prompt-resource skill content is unavailable.");
   }

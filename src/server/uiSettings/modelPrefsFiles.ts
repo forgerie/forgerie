@@ -1,6 +1,5 @@
-import { openBrowserFile, BrowserFileAccessError, type BrowserFileAccess } from "../browserFileAccess.js";
 import { createHash } from "node:crypto";
-import { mkdir, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -32,11 +31,11 @@ export async function defaultPrefsPaths(gateway: Gateway): Promise<ModelPrefsPat
 const visibleFileSchema = z.object({ visible: z.array(z.string()) });
 const settingsSchema = z.record(z.string(), z.unknown());
 
-async function readText(path: string, browserFiles?: BrowserFileAccess): Promise<string | undefined> {
-  try {
-    const file = await openBrowserFile(path, browserFiles);
-    try { return await file.readFile("utf8"); } finally { await file.close(); }
-  } catch (error) { if (isErrnoCode(error, "ENOENT")) return undefined; throw error; }
+async function readText(path: string): Promise<string | undefined> {
+  return readFile(path, "utf8").catch((error: unknown) => {
+    if (isErrnoCode(error, "ENOENT")) return undefined;
+    throw error;
+  });
 }
 function parseSettings(text: string | undefined, path: string): Record<string, unknown> {
   if (text === undefined) return {};
@@ -70,15 +69,15 @@ async function replaceFile(path: string, text: string): Promise<void> {
   await rename(temp, path);
 }
 
-async function readVisible(path: string, browserFiles?: BrowserFileAccess): Promise<string[] | null> {
-  const text = await readText(path, browserFiles);
+async function readVisible(path: string): Promise<string[] | null> {
+  const text = await readText(path);
   if (text === undefined) return null;
   try { return visibleFileSchema.parse(JSON.parse(text)).visible; }
   catch { throw new PrefsError(500, `${path} is not a list of models. Fix or delete it.`); }
 }
 
-export async function readPrefs(paths: ModelPrefsPaths, browserFiles?: BrowserFileAccess): Promise<ModelPrefs> {
-  const [settingsText, visible, configText] = await Promise.all([readText(paths.settings, browserFiles), readVisible(paths.visible, browserFiles), readText(paths.config, browserFiles)]);
+export async function readPrefs(paths: ModelPrefsPaths): Promise<ModelPrefs> {
+  const [settingsText, visible, configText] = await Promise.all([readText(paths.settings), readVisible(paths.visible), readText(paths.config)]);
   const settings = parseSettings(settingsText, paths.settings);
   const favorites = favoritesOf(settings);
   const defaultModel = defaultOf(settings);
@@ -109,16 +108,16 @@ async function withSettingsLock<T>(path: string, task: () => Promise<T>): Promis
   finally { await rmdir(lock).catch(() => undefined); }
 }
 
-export async function savePrefs(paths: ModelPrefsPaths, save: ModelPrefsSave, browserFiles?: BrowserFileAccess): Promise<ModelPrefs> {
+export async function savePrefs(paths: ModelPrefsPaths, save: ModelPrefsSave): Promise<ModelPrefs> {
   return withSettingsLock(paths.settings, async () => {
-    const current = await readPrefs(paths, browserFiles);
+    const current = await readPrefs(paths);
     if (current.revision !== save.revision) throw new PrefsError(409, "The model lists changed since this page read them. Reload to see the current lists.");
     const favorites = [...new Set(save.favorites)];
     const favoritesChanged = JSON.stringify(favorites) !== JSON.stringify(current.favorites);
     const defaultChanged = save.defaultModel !== undefined && save.defaultModel !== current.defaultModel;
     const levelChanged = save.defaultThinkingLevel !== undefined && save.defaultThinkingLevel !== current.defaultThinkingLevel;
     if (favoritesChanged || defaultChanged || levelChanged) {
-      const text = await readText(paths.settings, browserFiles);
+      const text = await readText(paths.settings);
       const settings = parseSettings(text, paths.settings);
       // Pi drops an empty list rather than store one; an empty list would hide every model in Pi.
       if (favoritesChanged) { if (favorites.length === 0) delete settings["enabledModels"]; else settings["enabledModels"] = favorites; }
@@ -143,30 +142,27 @@ export async function savePrefs(paths: ModelPrefsPaths, save: ModelPrefsSave, br
     }
     if (save.titleModel !== undefined && save.titleModel !== current.titleModel) {
       // Only this key changes. Every other key in Forgerie's config stays as it is.
-      const config = parseConfig(await readText(paths.config, browserFiles), paths.config);
+      const config = parseConfig(await readText(paths.config), paths.config);
       if (save.titleModel === null) delete config["sessionTitleModel"]; else config["sessionTitleModel"] = save.titleModel;
       await replaceFile(paths.config, `${JSON.stringify(config, null, 2)}\n`);
     }
-    return readPrefs(paths, browserFiles);
+    return readPrefs(paths);
   });
 }
 
 const limits = { maxBytes: 500_000, tooLarge: "Model lists are limited to 500 KB.", requireJsonType: true };
 
-export function modelPrefsMiddleware(paths: () => Promise<ModelPrefsPaths>, fileAccess?: () => Promise<BrowserFileAccess>): Middleware {
+export function modelPrefsMiddleware(paths: () => Promise<ModelPrefsPaths>): Middleware {
   return (request, response, next) => {
     if (new URL(request.url ?? "/", "http://local").pathname !== MODEL_PREFS_PATH) { next(); return; }
     const handle = async () => {
-      if (request.method !== "GET" && request.method !== "PUT") throw new PrefsError(405, "Use GET or PUT.");
-      if (request.method === "PUT") refuseCrossSite(request, "Model changes must come from this app.");
-      const files = await paths();
-      const browserFiles = await fileAccess?.();
-      for (const path of [files.settings, files.visible, files.config]) await browserFiles?.assertReadable(path);
-      if (request.method === "GET") return readPrefs(files, browserFiles);
-      return savePrefs(files, modelPrefsSaveSchema.parse(await readJsonBody(request, limits)), browserFiles);
+      if (request.method === "GET") return readPrefs(await paths());
+      if (request.method !== "PUT") throw new PrefsError(405, "Use GET or PUT.");
+      refuseCrossSite(request, "Model changes must come from this app.");
+      return savePrefs(await paths(), modelPrefsSaveSchema.parse(await readJsonBody(request, limits)));
     };
     handle().then((value) => { sendJson(response, 200, value); }).catch((error: unknown) => {
-      sendJson(response, error instanceof BrowserFileAccessError ? 403 : error instanceof SettingsHttpError ? error.status : error instanceof z.ZodError ? 400 : 500, { error: errorMessage(error) });
+      sendJson(response, error instanceof SettingsHttpError ? error.status : error instanceof z.ZodError ? 400 : 500, { error: errorMessage(error) });
     });
   };
 }

@@ -1,4 +1,3 @@
-import type { BrowserFileAccess } from "../browserFileAccess.js";
 import type { Dirent } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,7 +11,6 @@ import type { ManagedProcessLauncher } from "./managedProcessTypes.js";
 export interface ManagedProcessSession { cwd: string; stateFile: string }
 
 export interface ManagedProcessRegistryOptions {
-  browserFiles?: BrowserFileAccess;
   stateDirectory: string;
   environment?: NodeJS.ProcessEnv;
   prepareLauncher?: () => Promise<ManagedProcessLauncher>;
@@ -120,7 +118,6 @@ export class ManagedProcessRegistry {
     const resolved = session ?? await this.options.resolveSession?.(sessionId);
     const launcher = await (this.options.prepareLauncher?.() ?? prepareManagedProcessLauncher(this.options.environment));
     const owner = new ManagedProcesses({ stateDirectory: this.options.stateDirectory, sessionId, launcher,
-      ...this.options.browserFiles === undefined ? {} : { browserFiles: this.options.browserFiles },
       ...(this.options.environment === undefined ? {} : { environment: this.options.environment }),
       ...(this.options.logCapBytes === undefined ? {} : { logCapBytes: this.options.logCapBytes }) });
     // A killed daemon's lease stays fresh for ten seconds. Never bypass a live owner.
