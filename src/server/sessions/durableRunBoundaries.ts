@@ -1,4 +1,5 @@
 import { LiveDoc, type ConversationId, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
+import { conversationDocumentChanges, createHarnessCommitObserver } from "./durableHarnessObservers.js";
 
 interface RunBoundary {
   known: boolean;
@@ -8,33 +9,29 @@ interface RunBoundary {
 
 /** Keep the latest observed committed run boundary even when a run ends between replacement frames. */
 export class DurableRunBoundaries {
-  private readonly harnesses = new WeakMap<Harness, Map<ConversationId, Map<string, RunBoundary>>>();
+  private readonly conversationsFor = createHarnessCommitObserver(
+    () => new Map<ConversationId, Map<string, RunBoundary>>(),
+    (conversations, publication) => {
+      for (const change of conversationDocumentChanges(publication, LiveDoc.definition.kind)) {
+        const sessions = conversations.get(change.conversationId);
+        if (sessions === undefined) continue;
+        if (change.type === "document.copy" || change.value === null) { for (const state of sessions.values()) state.known = false; continue; }
+        const run = change.value["run"];
+        const inputs = typeof run === "object" && run !== null && !Array.isArray(run) ? run["inputs"] : undefined;
+        const firstInput = Array.isArray(inputs) && typeof inputs[0] === "number" ? inputs[0] : undefined;
+        for (const [logicalId, state] of sessions) {
+          // Durable's run_start uses inputs[0]. Generation ownership changes on
+          // handOver, and steers extend inputs, without starting another run.
+          if (state.known && firstInput !== undefined && firstInput !== state.firstInput) state.startSeq = this.advance(logicalId);
+          state.known = true; state.firstInput = firstInput;
+        }
+      }
+    },
+  );
   constructor(private readonly advance: (sessionId: string) => number) {}
 
   observe(sessionId: string, harness: Harness, conversationId: ConversationId): RunBoundary {
-    let conversations = this.harnesses.get(harness);
-    if (conversations === undefined) {
-      conversations = new Map(); this.harnesses.set(harness, conversations);
-      const observed = conversations;
-      // One lifetime observer, not one listener for every session ever opened in this family.
-      harness.subscribeCommits(publication => {
-        for (const change of publication.changes) {
-          if ((change.type !== "document" && change.type !== "document.copy") || change.conversationId === undefined || change.record.kind !== LiveDoc.definition.kind) continue;
-          const sessions = observed.get(change.conversationId);
-          if (sessions === undefined) continue;
-          if (change.type === "document.copy" || change.value === null) { for (const state of sessions.values()) state.known = false; continue; }
-          const run = change.value["run"];
-          const inputs = typeof run === "object" && run !== null && !Array.isArray(run) ? run["inputs"] : undefined;
-          const firstInput = Array.isArray(inputs) && typeof inputs[0] === "number" ? inputs[0] : undefined;
-          for (const [logicalId, state] of sessions) {
-            // Durable's run_start uses inputs[0]. Generation ownership changes on
-            // handOver, and steers extend inputs, without starting another run.
-            if (state.known && firstInput !== undefined && firstInput !== state.firstInput) state.startSeq = this.advance(logicalId);
-            state.known = true; state.firstInput = firstInput;
-          }
-        }
-      });
-    }
+    const conversations = this.conversationsFor(harness);
     let sessions = conversations.get(conversationId);
     if (sessions === undefined) { sessions = new Map(); conversations.set(conversationId, sessions); }
     let state = sessions.get(sessionId);
