@@ -43,6 +43,14 @@ export const FAILED: WorkflowRun = { ...BUILDING, state: { kind: "finished", out
     { conversationId: 21, reporterId: 5, name: "build", stage: "build", state: { kind: "settled", outcome: "failed", result: "Build failed.", delivered: true } },
   ] };
 
+/** The build worker failed, the woken agent did nothing, and the run now waits for the user. */
+export const STALLED: WorkflowRun = { ...BUILDING,
+  stall: { state: "flagged", child: "build", error: "model_error: unknown provider for model gpt-6.1-sol", at: AT + 1_500_000 },
+  children: [
+    { conversationId: 15, reporterId: 4, name: "design", stage: "build", state: { kind: "settled", outcome: "answered", result: "Done.", delivered: true } },
+    { conversationId: 21, reporterId: 5, name: "build", stage: "build", state: { kind: "settled", outcome: "failed", result: "model_error: unknown provider for model gpt-6.1-sol", delivered: true } },
+  ] };
+
 export const LAND_WAITING: WorkflowRun = { ...base, state: { kind: "running" },
   stops: { contract: { state: "approved", round: 1 }, land: { state: "waiting", summary: "Two branches are ready.", round: 0 } },
   children: [

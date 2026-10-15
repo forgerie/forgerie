@@ -42,6 +42,8 @@ export const workflowRunSchema = z.object({
   ]),
   stages: z.array(stageSchema).optional(),
   stops: z.record(z.string(), stopStateSchema).optional(),
+  /** The run sat idle after a child failed (src/shared/workflowRuns.ts, WorkflowStallSchema). flagged: it waits for the user. */
+  stall: z.object({ state: z.enum(["woken", "flagged"]), child: z.string(), error: z.string(), at: z.number() }).optional(),
   children: z.array(z.object({
     conversationId: z.number(), reporterId: z.number(), name: z.string(), stage: z.string().optional(),
     state: z.discriminatedUnion("kind", [
@@ -183,6 +185,7 @@ export function runStatus(run: WorkflowRun): string {
   const views = viewsOf(run);
   const waiting = stages.find((stage) => views[stage.id] === "waiting");
   if (waiting) return `${waiting.name}, waiting for you`;
+  if (run.stall?.state === "flagged") return `Stalled: ${run.stall.child} failed, waiting for you`;
   const working = stages.filter((stage) => views[stage.id] === "working");
   if (working.length === 0) return stages.length === 0 ? "Running" : "Working";
   const busy = run.children.filter((child) => child.state.kind === "working" && working.some((stage) => stage.id === child.stage)).length;
@@ -349,5 +352,6 @@ export function proseOf(text: string): string {
 
 /** How many stops wait on the reader in this run. */
 export function waitingStops(run: WorkflowRun | undefined): number {
-  return run?.state.kind === "running" ? Object.values(run.stops ?? {}).filter((stop) => stop.state === "waiting").length : 0;
+  if (run?.state.kind !== "running") return 0;
+  return Object.values(run.stops ?? {}).filter((stop) => stop.state === "waiting").length + (run.stall?.state === "flagged" ? 1 : 0);
 }

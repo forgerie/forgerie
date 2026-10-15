@@ -44,7 +44,7 @@ import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { decisionExtension, decisions, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals } from "./durableWorkflowRuns.js";
+import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowDecisions, acknowledgeWorkflowStall, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import { applySdkCommit } from "./durableMessageChanges.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
@@ -590,7 +590,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     const parent = this.journal.conversation.id;
     // Child questions, workflow stops, and open proposals wait on the user; the status counts them so the session list can say so.
     const recountWaiting = async () => {
-      const waiting = await openChildQuestions(this.journal.harness, parent, context) + await waitingWorkflowStops(this.journal.harness, parent, context) + await openWorkflowProposals(this.journal.harness, parent, context);
+      const waiting = await openChildQuestions(this.journal.harness, parent, context) + await waitingWorkflowDecisions(this.journal.harness, parent, context) + await openWorkflowProposals(this.journal.harness, parent, context);
       const flagged = await flaggedDecisions(this.journal.harness, parent, context);
       if (waiting === this.waitingCount && flagged === this.flaggedCount) return;
       this.waitingCount = waiting;
@@ -724,6 +724,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.systemPrompt = await buildSdkSystemPrompt(before.systemPromptOptions);
     for (const message of before.messages) await this.sendCustomMessage(message);
     const content = images === undefined || images.length === 0 ? text : [{ type: "text" as const, text }, ...images];
+    // Only the user's own messages pass here. One answers a stalled run's flag.
+    await this.journal.conversation.commit((tx) => acknowledgeWorkflowStall(tx, this.journal.conversation.id), context);
     const submission = await this.journal.conversation.submit({ type: "input", content, ...(options?.requestId === undefined ? {} : { requestId: options.requestId }), ...(options?.streamingBehavior === undefined ? { whenBusy: "reject" as const } : { whenBusy: options.streamingBehavior }) }, context);
     await this.receivePromptSubmission(submission, options?.preflightResult);
   }

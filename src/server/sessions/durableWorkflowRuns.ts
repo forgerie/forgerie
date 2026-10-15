@@ -6,6 +6,7 @@ import { Check } from "typebox/value";
 import { WorkflowOutcomeSchema, WorkflowModelSchema, WorkflowModelsSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowChildDelivery, type WorkflowInputs, type WorkflowModels, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
 import { WorkflowProposalSchema, WorkflowProposalToolSchema, type WorkflowProposal, type WorkflowProposalTool } from "../../shared/workflowProposals.js";
 import { admitChild, completionProblem, declaredWorker, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
+import { gateWaitsInTx } from "./durableGateRecords.js";
 import { assertProseOnly, parseWorkflow, WorkflowError, workflowInputs, workflowPrompt, workflowRouteText, type ProseWorkflow, type WorkflowInventory, type WorkflowLibrary } from "../resources/workflowLibrary.js";
 
 export const WORKFLOW_DOC_KIND = "forgerie.workflow-runs";
@@ -32,7 +33,8 @@ export function workflowEntryText(kind: string, data: unknown): string {
   if (kind === WORKFLOW_PROPOSAL_KIND) return `Proposed workflow ${field("name")}: ${field("summary")}`;
   return `${field("workflow")} waits for you at ${field("stageName")}: ${field("summary")}`;
 }
-const Runs = defineDoc<{ active: string | null; records: Record<string, WorkflowRun & { requestedInputs: WorkflowInputs; requestedModels?: WorkflowModels }>; receipts?: Record<string, boolean>; stopReceipts?: Record<string, string> }>({
+type RunRecord = WorkflowRun & { requestedInputs: WorkflowInputs; requestedModels?: WorkflowModels; stallWatch?: number };
+const Runs = defineDoc<{ active: string | null; records: Record<string, RunRecord>; receipts?: Record<string, boolean>; stopReceipts?: Record<string, string> }>({
   kind: WORKFLOW_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({ active: null, records: {} }),
 });
 
@@ -79,6 +81,96 @@ const Cancel = defineTask<{ parent: ConversationId; runId: string }, { phase: "c
   } },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });
+
+/** How long a run may sit idle after a child failed before Forgerie wakes the agent, and again before it flags the user. */
+export const WORKFLOW_STALL_GRACE_MS = 120_000;
+interface StallInput { runId: string; child: string; error: string; children: number }
+type StallState = { phase: "start" } | { phase: "watch"; until: number; woken: boolean };
+
+/**
+ * Why the run is not stalled, or undefined when it is. `progress` means someone acted, so the watch ends.
+ * `busy` means work may still be under way, so the watch checks again later.
+ */
+async function stallBlocker(tx: Tx, parent: ConversationId, run: RunRecord, input: StallInput): Promise<"progress" | "busy" | undefined> {
+  await reconcileReportFailures(tx, parent, run);
+  if (run.children.length > input.children || run.children.some((child) => child.state.kind === "working")) return "progress";
+  if (Object.values(run.stops ?? {}).some((stop) => stop.state === "waiting")) return "progress";
+  const live = await tx.doc(LiveDoc, parent);
+  if (live.run !== undefined || (await tx.doc(InboxDoc, parent)).items.length > 0) return "busy";
+  if (await gateWaitsInTx(tx, parent) || !(await childWorkSettled(tx, parent))) return "busy";
+  return undefined;
+}
+
+/**
+ * Watches a run after a child failed. If nothing runs for the grace period, it wakes the agent once. If nothing runs
+ * for another grace period, it flags the run for the user. It sleeps on the Harness clock, so it survives restarts.
+ */
+const StallWatch = defineTask<StallInput, StallState, null>({
+  name: "forgerie.workflow-stall", version: 1, initial: () => ({ phase: "start" }),
+  phases: {
+    start: (_task, runtime, context) => runtime.commit(() => ({ status: "running", checkpoint: { phase: "watch", until: runtime.now() + WORKFLOW_STALL_GRACE_MS, woken: false } }), context),
+    watch: async (task, runtime, context) => {
+      const { until, woken } = task.state.checkpoint;
+      await runtime.sleep(until, context);
+      await runtime.commit(async (tx) => {
+        const parent = runtime.conversationId;
+        const doc = await tx.doc(Runs, parent);
+        const run = doc.records[task.input.runId];
+        const done = { status: "terminal" as const, outcome: { status: "completed" as const, result: null } };
+        if (run?.state.kind !== "running" || doc.active !== run.id) return done;
+        const end = () => {
+          if (run.stallWatch === Number(task.id)) delete run.stallWatch;
+          return done;
+        };
+        // The user wrote to the agent after it was woken: they are engaged, so do not flag.
+        if (woken && run.stall?.state !== "woken") return end();
+        const blocker = await stallBlocker(tx, parent, run, task.input);
+        if (blocker === "progress") {
+          if (run.stall?.state === "woken") delete run.stall;
+          return end();
+        }
+        const later = { status: "running" as const, checkpoint: { phase: "watch" as const, until: runtime.now() + WORKFLOW_STALL_GRACE_MS, woken } };
+        if (blocker === "busy") return later;
+        const { child, error } = task.input;
+        if (woken) {
+          run.stall = { state: "flagged", child, error, at: Date.now() };
+          return end();
+        }
+        run.stall = { state: "woken", child, error, at: Date.now() };
+        await tx.createTask(Launch, { runId: run.id, prompt: stallPrompt(run.definition.name, child, error), requestId: `workflow-stall:${run.id}:${String(task.id)}` },
+          { ownership: { kind: "conversation" }, background: true });
+        return { ...later, checkpoint: { ...later.checkpoint, woken: true } };
+      }, context);
+    },
+  },
+  abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+});
+
+function stallPrompt(workflow: string, child: string, error: string): string {
+  const reason = error.length > 600 ? `${error.slice(0, 600)}…` : error;
+  return [`[workflow ${workflow}] Child "${child}" failed and nothing has run since: ${reason}`,
+    "Do one of these now: retry the work, change the approach, or finish the run with workflow_finish.",
+    "If only the user can unblock the run, say what you need in your reply and end your turn.",
+    `If nothing runs ${String(WORKFLOW_STALL_GRACE_MS / 60_000)} minutes after this message, Forgerie flags the run for the user.`].join("\n");
+}
+
+/** Called where a child of the active run settles. One watch per run covers failures that land while it waits. */
+async function watchForStall(tx: Tx, parent: ConversationId, child: WorkflowChild): Promise<void> {
+  if (child.state.kind !== "settled" || child.state.outcome !== "failed") return;
+  const doc = await tx.doc(Runs, parent);
+  const run = doc.active === null ? undefined : doc.records[doc.active];
+  if (run?.state.kind !== "running" || !run.children.some((candidate) => candidate.reporterId === child.reporterId) || run.stallWatch !== undefined) return;
+  const id = await tx.createTask(StallWatch, { runId: run.id, child: child.name, error: child.state.result, children: run.children.length },
+    { conversationId: parent, ownership: { kind: "conversation" }, background: true });
+  run.stallWatch = Number(id);
+}
+
+/** The user wrote to the agent. A stall waiting for them, or about to, is answered. */
+export async function acknowledgeWorkflowStall(tx: Tx, parent: ConversationId): Promise<void> {
+  const doc = await tx.doc(Runs, parent);
+  const run = doc.active === null ? undefined : doc.records[doc.active];
+  if (run?.stall !== undefined) delete run.stall;
+}
 
 /** One durable cancellation request per run. Returns immediately; the run stays active until all work stops. */
 export async function cancelWorkflow(harness: Harness, parent: Conversation, runId: string, context: Context): Promise<WorkflowRun> {
@@ -139,7 +231,7 @@ function savedWorkflowsText(inventory: WorkflowInventory, name?: string): string
 export function workflowExtension(options: { library?: WorkflowLibrary; cwd?: string } = {}) {
   const inventory = async (): Promise<WorkflowInventory> => options.library === undefined || options.cwd === undefined
     ? { workflows: [], diagnostics: [] } : options.library.list(options.cwd);
-  return defineExtension({ name: "forgerie.workflows", tasks: [Launch, Cancel], tools: [defineTool({
+  return defineExtension({ name: "forgerie.workflows", tasks: [Launch, Cancel, StallWatch], tools: [defineTool({
     name: "saved_workflows",
     description: "List the user's saved workflows with their descriptions and routes, or read one in full by name. Call it before propose_workflow.",
     parameters: Type.Object({ name: Type.Optional(Type.String({ description: "A saved workflow to read in full." })) }, { additionalProperties: false }),
@@ -210,6 +302,8 @@ export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId:
   if (problem !== undefined || stage?.stop === undefined) throw new WorkflowError(409, problem ?? "Not a stop");
   const round = current.round ?? 0;
   run.stops = { ...run.stops, [stageId]: { state: "waiting", summary, requestedAt: Date.now(), round } };
+  // The stop already asks the user; a stall flag would ask twice.
+  delete run.stall;
   await tx.appendEntry(parent, { kind: WORKFLOW_STOP_KIND, data: { runId, stage: stageId, stageName: stage.name, stop: stage.stop, summary, workflow: run.definition.name, round } });
   return remember(`Waiting for the user at "${stage.name}". End your turn now. Their decision arrives as a new message; do not start later stages until then.`);
 }
@@ -499,6 +593,7 @@ export async function associateWorkflowChild(tx: Tx, parent: ConversationId, chi
   const run = doc.active === null ? undefined : doc.records[doc.active];
   if (run === undefined) return undefined;
   const stage = stageForChild(run, name);
+  delete run.stall;
   run.children.push({ conversationId: Number(child), reporterId: Number(reporter), name, ...(stage === undefined ? {} : { stage: stage.id }), state: { kind: "working" } });
   return run.id;
 }
@@ -509,7 +604,10 @@ async function reporterChildren(tx: Tx, parent: ConversationId, reporter: TaskId
   return Object.values(doc.records).flatMap((run) => run.children.filter((child) => child.reporterId === Number(reporter)));
 }
 export async function settleWorkflowChild(tx: Tx, parent: ConversationId, reporter: TaskId, submission: SubmissionRecord): Promise<void> {
-  for (const child of await reporterChildren(tx, parent, reporter)) child.state = await submissionState(tx, submission);
+  for (const child of await reporterChildren(tx, parent, reporter)) {
+    child.state = await submissionState(tx, submission);
+    await watchForStall(tx, parent, child);
+  }
 }
 export async function deliveredWorkflowChild(tx: Tx, parent: ConversationId, reporter: TaskId): Promise<void> {
   for (const child of await reporterChildren(tx, parent, reporter)) {
@@ -531,11 +629,12 @@ async function submissionState(tx: Tx, submission: SubmissionRecord): Promise<Wo
   const result = answer.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
   return { kind: "settled", outcome: "answered", result, delivered: false };
 }
-/** Stops of the active run that wait for the user's decision. */
-export async function waitingWorkflowStops(harness: Harness, parent: ConversationId, context: Context): Promise<number> {
+/** Stops of the active run that wait for the user's decision, plus one when the run is flagged as stalled. */
+export async function waitingWorkflowDecisions(harness: Harness, parent: ConversationId, context: Context): Promise<number> {
   const doc = await harness.snapshot(Runs, parent, context);
   const run = doc?.active == null ? undefined : doc.records[doc.active];
-  return run?.state.kind === "running" ? Object.values(run.stops ?? {}).filter((stop) => stop.state === "waiting").length : 0;
+  if (run?.state.kind !== "running") return 0;
+  return Object.values(run.stops ?? {}).filter((stop) => stop.state === "waiting").length + (run.stall?.state === "flagged" ? 1 : 0);
 }
 export async function activeWorkflowRunInTx(tx: Tx, parent: ConversationId): Promise<string | undefined> {
   return (await tx.doc(Runs, parent)).active ?? undefined;
@@ -576,19 +675,22 @@ async function reconcileReportFailures(tx: Tx, parent: ConversationId, run: Work
   }
 }
 async function assertChildWorkSettled(tx: Tx, parent: ConversationId): Promise<void> {
+  if (!(await childWorkSettled(tx, parent))) throw new WorkflowError(409, "Wait for child work, reports, and workflow launch delivery to settle");
+}
+/** No child task, child report, or workflow message to the agent is pending. */
+async function childWorkSettled(tx: Tx, parent: ConversationId): Promise<boolean> {
   for (const status of ["pending", "running", "waiting", "completing"] as const) {
     let cursor: Cursor | undefined;
     do {
       const page = await tx.scanTasks({ status }, 100, cursor);
-      if (page.items.some((task) => task.conversationId !== parent || task.kind === "forgerie.child-reporter" || task.kind === "forgerie.workflow-launch")) {
-        throw new WorkflowError(409, "Wait for child work, reports, and workflow launch delivery to settle");
-      }
+      if (page.items.some((task) => task.conversationId !== parent || task.kind === "forgerie.child-reporter" || task.kind === "forgerie.workflow-launch")) return false;
       cursor = page.next;
     } while (cursor !== undefined);
   }
+  return true;
 }
-function publicRun(run: WorkflowRun & { requestedInputs?: WorkflowInputs; requestedModels?: WorkflowModels }): WorkflowRun {
-  const value = Object.fromEntries(Object.entries(run).filter(([key]) => key !== "requestedInputs" && key !== "requestedModels"));
+function publicRun(run: WorkflowRun & { requestedInputs?: WorkflowInputs; requestedModels?: WorkflowModels; stallWatch?: number }): WorkflowRun {
+  const value = Object.fromEntries(Object.entries(run).filter(([key]) => key !== "requestedInputs" && key !== "requestedModels" && key !== "stallWatch"));
   // Doc drafts are transaction overlays. Materialize nested fields before the commit settles.
   const plain: unknown = JSON.parse(JSON.stringify(value));
   if (!Check(WorkflowRunSchema, plain)) throw new Error("Invalid workflow record");

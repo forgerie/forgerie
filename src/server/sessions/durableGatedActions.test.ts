@@ -24,7 +24,8 @@ import { defaultAutonomyPolicy } from "../../shared/autonomyPolicy.js";
 import { durableChildExtensions, listChildren } from "./durableChildAgents.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { decisions, decisionExtension } from "./durableDecisions.js";
-import { gatedActions, gatedActionsExtension, decideGatedAction, waitingGatedActions, GATED_ACTIONS_DOC_KIND, gatedActionsChanged } from "./durableGatedActions.js";
+import { gatedActions, gatedActionsExtension, decideGatedAction, waitingGatedActions, gatedActionsChanged } from "./durableGatedActions.js";
+import { GATED_ACTIONS_DOC_KIND } from "./durableGateRecords.js";
 
 const roots: string[] = []; const journals: DurableSessionJournal[] = [];
 afterEach(async () => { for (const journal of journals) await journal.close(); for (const root of roots) await rm(root, {recursive: true, force: true}); journals.length = 0; roots.length = 0; });

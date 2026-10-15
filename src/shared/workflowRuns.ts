@@ -62,6 +62,14 @@ export type WorkflowStopState = Static<typeof WorkflowStopStateSchema>;
 /** Suppression is a delivery state, not a delivery error. Old false flags remain false. */
 export const WorkflowChildDeliverySchema = Type.Union([Type.Boolean(), Type.Literal("duplicate"), Type.Literal("aborted")]);
 export type WorkflowChildDelivery = Static<typeof WorkflowChildDeliverySchema>;
+/**
+ * The run sat idle after a child failed. woken: Forgerie told the agent once. flagged: nothing ran after that, so the
+ * run waits for the user. A new child, a stop request, the user's next message, or the end of the run clears it.
+ */
+const WorkflowStallSchema = Type.Object({
+  state: Type.Union([Type.Literal("woken"), Type.Literal("flagged")]),
+  child: Type.String(), error: Type.String(), at: Type.Number(),
+}, { additionalProperties: false });
 export const WorkflowRunSchema = Type.Object({
   id: Type.String(), requestId: Type.String(), startedAt: Type.Number(),
   session: Type.Object({ id: Type.String(), cwd: Type.String() }),
@@ -76,6 +84,7 @@ export const WorkflowRunSchema = Type.Object({
   stages: Type.Optional(Type.Array(WorkflowStageSchema)),
   /** One entry per stop stage, keyed by stage id. */
   stops: Type.Optional(Type.Record(Type.String(), WorkflowStopStateSchema)),
+  stall: Type.Optional(WorkflowStallSchema),
   children: Type.Array(Type.Object({ conversationId: Type.Number(), reporterId: Type.Number(), name: Type.String(),
     /** The stage this child request belongs to, when the run has stages. */
     stage: Type.Optional(Type.String()),
