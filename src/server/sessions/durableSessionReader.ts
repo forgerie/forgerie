@@ -28,8 +28,8 @@ export class DurableSessionReader {
 
   async close(): Promise<void> {
     this.stopped = true;
-    // Seeds await bounded transport completion. Then stop all leases, including a seed admitted
-    // just before shutdown. Rejected openings already release their candidate in openAttachment.
+    // Stop admitted publishers before waiting for seeds. New admissions observe stopped and release.
+    await Promise.all([...this.attachments].map((attachment) => attachment.stop()));
     await Promise.allSettled(this.opening);
     await Promise.all([...this.attachments].map((attachment) => attachment.stop()));
   }
@@ -76,6 +76,7 @@ export class DurableSessionReader {
   private async openCheckpointAttachment(ref: SessionRef, address: DurableSessionAddress, hub: SessionEventHub, send: (open: SessionOpenResult) => Promise<void>,
     onFailure: (error: Error) => void, hostStatus?: () => Partial<SessionStatus>): Promise<DurableBrowserAttachment> {
     const handle = await this.options.acquire(address);
+    if (this.stopped) { await handle.release(context); throw new Error("Durable session reader is closed"); }
     const unobserve = hub.observeNative(address.sessionId, handle.harness, handle.conversation.id);
     let stopped = false, dirty = true;
     const isStopped = () => stopped;
@@ -87,11 +88,10 @@ export class DurableSessionReader {
     const reader = this.options.readModel(handle);
     let publishedSeq = -1;
     const publish = async () => {
-      while (isDirty() && !isStopped()) {
-        dirty = false;
-        const open = await reader.open(ref.cwd, { limit: 50 }, hub, context, hostStatus);
-        if (!isStopped() && open.seq > publishedSeq) { await send(open); publishedSeq = open.seq; }
-      }
+      if (isStopped() || isClosed()) return;
+      dirty = false;
+      const open = await reader.open(ref.cwd, { limit: 50 }, hub, context, hostStatus);
+      if (!isStopped() && !isClosed() && open.seq > publishedSeq) { await send(open); publishedSeq = open.seq; }
     };
     let releasing: Promise<void> | undefined;
     const release = () => { releasing ??= handle.release(context); return releasing; };
@@ -107,12 +107,12 @@ export class DurableSessionReader {
       try { await release(); } finally { this.attachments.delete(attachment); resolveClosed(end); }
     };
     function schedule() {
-      if (stopped || line !== undefined) return;
+      if (stopped || isClosed() || line !== undefined) return;
       line = publish().catch(async (error: unknown) => {
         const failure = error instanceof Error ? error : new Error(String(error));
         if (!isStopped()) onFailure(failure);
         await finish({ reason: "listener_error", error: failure });
-      }).finally(() => { line = undefined; if (dirty && !stopped) schedule(); });
+      }).finally(() => { line = undefined; if (dirty && !stopped && !isClosed()) schedule(); });
     }
     const attachment: DurableBrowserAttachment = { closed, stop: async () => { await finish({ reason: "stopped" }); await line; } };
     this.attachments.add(attachment);

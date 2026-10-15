@@ -334,3 +334,37 @@ it("serves a configured native open as one read-only cut and releases its lease 
   expect(await failed.json()).toMatchObject({ error: "native read unavailable" });
   expect(f.leased()).toBe(0);
 });
+
+
+it("publishes one seed and shuts down even when every native acquisition makes the session dirty again", async () => {
+  const f = await fixture();
+  await f.conversation().commit(tx => initializeParentDocuments(tx, { id: f.conversation().id }), context);
+  let keepDirty = true, releases = 0;
+  let seed!: () => void;
+  const seeded = new Promise<void>(resolve => { seed = resolve; });
+  const reader = new DurableSessionReader({
+    locate: () => Promise.resolve({ journalId: "family", databasePath: join(f.directory, "state.sqlite"), sessionId: "logical", conversationId: f.conversation().id }),
+    acquire: address => Promise.resolve({ address, harness: f.harness(), conversation: f.conversation(), release: () => { releases++; return Promise.resolve(); } }),
+    readModel: handle => {
+      const model = new DurableParentReadModel({ handle, messageId: entry => String(entry.id) });
+      const open = model.open.bind(model);
+      model.open = async (...args) => {
+        const cut = await open(...args);
+        if (keepDirty) await f.user("commit during native acquisition");
+        await new Promise<void>(resolve => { setImmediate(resolve); });
+        return cut;
+      };
+      return model;
+    },
+    history: () => { throw new Error("Not read"); },
+  });
+  const opening = reader.attachOpen({ id: "logical", cwd: f.directory }, f.hub, () => { seed(); return Promise.resolve(); }, error => { throw error; });
+  let closing: Promise<void> | undefined;
+  try {
+    await seeded;
+    closing = reader.close();
+    expect(await Promise.race([closing.then(() => "closed"), new Promise<string>(resolve => { setTimeout(() => { resolve("timed out"); }, 200); })])).toBe("closed");
+    expect(await opening).toBeDefined();
+    expect(releases).toBe(1);
+  } finally { keepDirty = false; await closing; await opening; await reader.close(); }
+});
