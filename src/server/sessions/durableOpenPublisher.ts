@@ -1,3 +1,4 @@
+import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import type { Context } from "@earendil-works/chord";
 import type { WatchEnd } from "@earendil-works/pi-durable";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
@@ -26,6 +27,7 @@ export class DurableOpenPublisher {
   private readonly stopHistory: () => void;
   private readonly stopCommits: () => void;
   private readonly stopHost: () => void;
+  private readonly stopLabels: () => void;
   private readonly unobserve: () => void;
   private hostFingerprint: string;
   private resolveClosed!: () => void;
@@ -44,6 +46,11 @@ export class DurableOpenPublisher {
       const fingerprint = JSON.stringify(hostState());
       if (fingerprint === this.hostFingerprint) return;
       this.hostFingerprint = fingerprint;
+      this.changed();
+    });
+    this.stopLabels = decisionAnnotations(handle.harness).subscribe((scope, key) => {
+      if (this.stopped || scope !== String(handle.conversation.id) || !key.startsWith("tool:")) return;
+      this.hub.noteDecisionHintChange(handle.address.sessionId);
       this.changed();
     });
   }
@@ -122,6 +129,7 @@ export class DurableOpenPublisher {
     this.stopped = true;
     this.onStop();
     if (this.scheduled !== undefined) clearImmediate(this.scheduled);
+    this.stopLabels();
     this.stopCommits(); this.stopHost(); this.unobserve();
     const subscribers = [...this.subscribers];
     for (const subscriber of subscribers) subscriber.finish({ reason: "stopped" });

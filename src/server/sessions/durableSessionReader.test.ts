@@ -1,3 +1,4 @@
+import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,7 +8,7 @@ import { WebSocket } from "ws";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxToolCall, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
-import { Harness, GenerationTask, InboxDoc, LiveDoc, UsageDoc, UserEntry, createRegistry, defineExtension, defineTool, type EntryRecord } from "@earendil-works/pi-durable";
+import { AssistantEntry, Harness, GenerationTask, InboxDoc, LiveDoc, UsageDoc, UserEntry, createRegistry, defineExtension, defineTool, type EntryRecord } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -612,4 +613,39 @@ it("indexes retained run-boundary observation by conversation instead of adding 
   }, context);
   expect(f.hub.currentSeq("logical")).toBeGreaterThan(0);
   expect(f.hub.currentSeq("sibling")).toBe(0);
+});
+
+
+it("keeps optional labels in native open cuts and replacements without commits, cursor changes or post-close publications", async () => {
+  const f = await fixture();
+  await f.conversation().commit(tx => initializeParentDocuments(tx, { id: f.conversation().id }), context);
+  await f.user("Run bash");
+  const entry = await f.conversation().commit(tx => tx.appendEntry(AssistantEntry, f.conversation().id,
+    { model: [fauxAssistantMessage([fauxToolCall("bash", { command: "true" }, { id: "call" })])] }), context);
+  const store = decisionAnnotations(f.harness()); store.setRiskVisibility(() => true);
+  const invocationId = JSON.stringify([f.conversation().id, entry.id, "call", 0]);
+  const annotation = { target: "tool", id: "call", invocationId, sourceInvocationId: invocationId,
+    label: { model: "native-opinion", deletes_data: 0, outside_worktree: 0, acts_as_user: 0, risk: "low", risk_score: 0 } };
+  const ref = { id: "logical", cwd: f.directory };
+  const frames: SessionOpenResult[] = [], failures: Error[] = [], commits: unknown[] = [];
+  const attachment = await f.reader.attachOpen(ref, f.hub, cut => { frames.push(cut); return Promise.resolve(); }, error => { failures.push(error); });
+  if (attachment === undefined) throw new Error("Native attachment missing");
+  const baseline = frames[0]; if (baseline === undefined) throw new Error("Native seed missing");
+  const off = f.harness().subscribeCommits(commit => { commits.push(commit); });
+  try {
+    expect(await store.write(String(f.conversation().id), `tool:${invocationId}`, annotation)).toBe("stored");
+    await vi.waitFor(() => { expect(JSON.stringify(frames.at(-1)?.page)).toContain("native-opinion"); });
+    const latest = frames.at(-1); if (latest === undefined) throw new Error("Native replacement missing");
+    expect(latest.seq).toBeGreaterThan(baseline.seq);
+    expect(latest.historyId).toBe(baseline.historyId); expect(latest.status).toEqual(baseline.status);
+    expect(latest.page).toMatchObject({ start: baseline.page.start, total: baseline.page.total });
+    expect(latest.page.messages.map(message => message.id)).toEqual(baseline.page.messages.map(message => message.id));
+    expect(JSON.stringify(await f.reader.open(ref, { limit: 50 }, f.hub))).toContain("native-opinion");
+    expect(commits).toEqual([]); expect(failures).toEqual([]); expect(await f.scheduling()).toBe("paused");
+    await attachment.stop();
+    const count = frames.length, seq = f.hub.currentSeq(ref.id);
+    await store.write(String(f.conversation().id), `tool:${invocationId}`, { ...annotation, label: { ...annotation.label, model: "after-close" } });
+    await new Promise<void>(resolve => { setImmediate(resolve); });
+    expect(frames).toHaveLength(count); expect(f.hub.currentSeq(ref.id)).toBe(seq);
+  } finally { off(); await attachment.stop(); await f.reader.close(); }
 });

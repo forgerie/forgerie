@@ -212,6 +212,10 @@ original publication behavior. In particular, a startup dialog must publish
 Needs your response before its runtime becomes active. No gateway result changes the
 session response, admits a command, or delays the turn end.
 
+Native open cuts apply risk annotations after required paging and validation.
+A late annotation refreshes only a live native publisher and advances its
+transport sequence, not its history identity. It writes no Durable entry.
+
 Hints use the same independent in-memory annotation store as risk labels, not
 the Durable journal or SDK metadata queue. They retain probabilities, answering
 model, timestamp and turn identity only while the session family stays open.

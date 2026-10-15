@@ -174,7 +174,7 @@ export class DurableParentReadModel {
           assertHistoryIdentity(historyId, request.historyId);
           return structuredClone({ session: { id: handle.address.sessionId, cwd, ...(name.name === undefined ? {} : { name: name.name }) }, readPath: "native" as const, cut: "native" as const,
             epoch: hub.epoch, seq, historyId, runStartSeq: hub.nativeRunStartSeq(handle.address.sessionId, handle.harness, id, live.run?.inputs[0]),
-            page: this.page(messages, { ...request, completeTurns: true }),
+            page: this.annotate(this.page(messages, { ...request, completeTurns: true })),
             snapshot: { seq, partial: partial === undefined ? null : durableBrowserMessageSchema.parse(projectBrowserMessage(partial)), tools, transientEvents: hub.transientEvents(handle.address.sessionId) }, status, receipt: null });
         }, context);
         if (cut !== undefined) return cut;

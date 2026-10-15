@@ -53,6 +53,11 @@ export class SessionEventHub {
     return () => { listeners.delete(changed); if (listeners.size === 0) this.nativeRefresh.delete(sessionId); };
   }
 
+  /** Optional metadata needs a newer transport cut, not a Durable write or history invalidation. */
+  noteDecisionHintChange(sessionId: string): void {
+    this.seqBySession.set(sessionId, this.currentSeq(sessionId) + 1);
+  }
+
   private readonly shellAnchor = new Map<string, string | undefined>();
 
   prepareHostShell(sessionId: string, after: string | undefined): void { this.shellAnchor.set(sessionId, after); }
