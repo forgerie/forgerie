@@ -48,3 +48,11 @@ it("accepts a 64-character workflow file name and rejects a blank display name",
   expect(parseScheduledWorkflow(name, `/${name}.md`, file('  at: "03:00"\n  projects: all'), "UTC")?.input.id).toBe(name);
   expect(() => parseScheduledWorkflow("night", "/night.md", file('  name: "  "\n  at: "03:00"\n  projects: all'), "UTC")).toThrow("non-empty name");
 });
+
+it("limits the base model to 128 characters independently of its thinking suffix", () => {
+  const model = `p/${"m".repeat(126)}`;
+  expect(parseScheduledWorkflow("night", "/night.md", file(`  at: "03:00"\n  projects: all\n  model: ${model}:minimal`), "UTC")?.input.action).toMatchObject({ model, thinkingLevel: "minimal" });
+  for (const invalid of [`${model}m`, `${model}m:high`, `${model}:unknown`]) {
+    expect(() => parseScheduledWorkflow("night", "/night.md", file(`  at: "03:00"\n  projects: all\n  model: ${invalid}`), "UTC")).toThrow();
+  }
+});

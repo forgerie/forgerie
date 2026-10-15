@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import { KNOWN_THINKING_LEVELS } from "./thinkingLevels.js";
 import { WEEKDAYS } from "./triggerSchedules.js";
 import { WorkflowDefinitionSchema, WorkflowInputsSchema } from "./workflowRuns.js";
 
@@ -10,6 +11,9 @@ import { WorkflowDefinitionSchema, WorkflowInputsSchema } from "./workflowRuns.j
  * receipts in its own store, keyed by the same ID. A `schedule:` block in a project's `.pi/prompts` copy is ignored
  * and reported as a warning.
  */
+
+export const TRIGGER_MODEL_MAX_LENGTH = 128;
+const MAX_MODEL_REFERENCE_LENGTH = TRIGGER_MODEL_MAX_LENGTH + 1 + Math.max(...KNOWN_THINKING_LEVELS.map((level) => level.length));
 
 const LocalTimeSchema = Type.String({ pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" });
 const WeekdaySchema = Type.Union([
@@ -32,7 +36,7 @@ export const WorkflowScheduleBlockSchema = Type.Object({
   /** Registered project names, absolute workspace paths, or "all". */
   projects: Type.Union([Type.Literal("all"), Type.Array(Type.String({ minLength: 1 }), { minItems: 1 })]),
   /** The coordinator's model, `provider/model-id`, optionally `:thinking-level`. Omitted: new-session default. */
-  model: Type.Optional(Type.String({ minLength: 3, maxLength: 160, pattern: "^[^/\\s]+/\\S+$" })),
+  model: Type.Optional(Type.String({ minLength: 3, maxLength: MAX_MODEL_REFERENCE_LENGTH, pattern: `^(?=.{3,${String(TRIGGER_MODEL_MAX_LENGTH)}}(?::(?:${KNOWN_THINKING_LEVELS.join("|")}))?$)[^/\\s]+/\\S+$` })),
   /** True stops future runs without removing the schedule. */
   paused: Type.Optional(Type.Boolean()),
   /** Values that replace the workflow's input defaults for scheduled runs only. */

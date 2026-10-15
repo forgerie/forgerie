@@ -320,3 +320,18 @@ it("keeps a durable pause when a linked file cannot be rewritten", async () => {
   await unlink(file()); await writeFile(file(), scheduled().replace("Review.", "Fixed.")); await triggers.syncFiles();
   expect((await triggers.get("night")).state.kind).toBe("active");
 });
+
+it("isolates an oversized model to its file instead of disabling trigger startup or saving it", async () => {
+  await writeFile(file(), scheduled()); const first = await open(); await first.close();
+  const oversized = `p/${"m".repeat(127)}`;
+  await writeFile(file(), scheduled(`at: "03:00", projects: [Repo], model: ${oversized}`));
+  await writeFile(join(agent, "prompts", "healthy.md"), scheduled());
+  const triggers = await open();
+  expect((await triggers.get("night")).file?.status).toBe("invalid");
+  expect((await triggers.get("night")).action.model).toBeUndefined();
+  expect((await triggers.get("healthy")).file?.status).toBe("ok");
+  const document = await triggers.file("healthy");
+  await expect(triggers.saveFile("healthy", { text: document.text, baseSha256: document.sha256, schedule: { at: "03:00", projects: ["Repo"], model: oversized } })).rejects.toMatchObject({ status: 400 });
+  expect((await triggers.file("healthy")).sha256).toBe(document.sha256);
+  expect((await triggers.list()).attentionCount).toBe(1);
+});

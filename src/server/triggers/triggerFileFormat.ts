@@ -1,7 +1,7 @@
 import { isMap, isNode, LineCounter, parseDocument } from "yaml";
 import { Check, Errors } from "typebox/value";
 import { DEFAULT_LATE, lateMinutes, WorkflowScheduleBlockSchema, type WorkflowScheduleBlock } from "../../shared/triggerFiles.js";
-import { TriggerIdSchema, type TriggerCreate } from "../../shared/triggers.js";
+import { TriggerActionSchema, TriggerIdSchema, type TriggerCreate } from "../../shared/triggers.js";
 import { parseTriggerSchedule } from "../../shared/triggerSchedules.js";
 import { parseModelReference } from "../../shared/thinkingLevels.js";
 import { assertProseOnly, parseWorkflow, workflowInputs } from "../resources/workflowLibrary.js";
@@ -69,5 +69,10 @@ export function parseScheduledWorkflow(name: string, path: string, text: string,
   catch (error) { problem(error instanceof Error ? error.message : String(error), "inputs"); }
   const input: TriggerCreate = { id: name, name: block.name ?? name, schedule, missedGraceMinutes,
     action: { kind: "workflow", workflow: name, targets: block.projects === "all" ? { kind: "all" } : { kind: "projects", cwds: block.projects }, inputs: inputs ?? {}, ...(block.model === undefined ? {} : parseModelReference(block.model)) } };
-  return { block, input, workflow, projectsLine: parsed.line(["schedule", "projects"]) };
+  if (!Check(TriggerActionSchema, input.action)) {
+    const error = Errors(TriggerActionSchema, input.action)[0];
+    const key = error?.instancePath.split("/")[1];
+    problem(error?.message ?? "Invalid scheduled workflow action", key === "targets" ? "projects" : key === "thinkingLevel" ? "model" : key);
+  }
+  return { block, input, workflow, projectsLine: parsed.line(["schedule", "projects"]), modelLine: parsed.line(["schedule", "model"]) };
 }

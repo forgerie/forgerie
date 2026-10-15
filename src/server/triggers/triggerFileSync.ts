@@ -3,8 +3,8 @@ import { mkdir } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { lateText, type TriggerFileState, type WorkflowScheduleBlock } from "../../shared/triggerFiles.js";
-import { DEFAULT_MISSED_GRACE_MINUTES, TriggerIdSchema, type Trigger, type TriggerCreate, type TriggerCreator, type TriggerUpdate, type TriggerTargets } from "../../shared/triggers.js";
-import { Check } from "typebox/value";
+import { DEFAULT_MISSED_GRACE_MINUTES, TriggerActionSchema, TriggerIdSchema, type Trigger, type TriggerCreate, type TriggerCreator, type TriggerUpdate, type TriggerTargets } from "../../shared/triggers.js";
+import { Check, Errors } from "typebox/value";
 import type { ProjectWorkspaceCwds } from "../workspaces/projectWorkspaceCwds.js";
 import { editScheduleBlock, parseScheduledWorkflow } from "./triggerFileFormat.js";
 import { TriggerError } from "./durableTriggers.js";
@@ -154,6 +154,11 @@ export class TriggerFileSync {
         catch (error) { throw new TriggerError(error instanceof Error ? error.message : String(error), 400, "schedule.projects", parsed.projectsLine); }
       }
       parsed.input.action.targets = { kind: "projects", cwds: [...new Set(cwds)] };
+    }
+    if (!Check(TriggerActionSchema, parsed.input.action)) {
+      const error = Errors(TriggerActionSchema, parsed.input.action)[0];
+      const projects = error?.instancePath.startsWith("/targets") === true;
+      throw new TriggerError(error?.message ?? "Invalid scheduled workflow action", 400, projects ? "schedule.projects" : "schedule.model", projects ? parsed.projectsLine : parsed.modelLine);
     }
     return parsed;
   }

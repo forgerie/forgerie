@@ -38,7 +38,7 @@ Review the selected work. Stop at land for the user's review.
 | `days` | Optional unique weekdays: `sun`, `mon`, `tue`, `wed`, `thu`, `fri`, `sat`. Omit for every day. |
 | `timezone` | IANA time zone. Defaults to the daemon host's zone. |
 | `projects` | Required list of registered project names or absolute workspace paths, or `all`. Unknown or ambiguous names are invalid. Forgerie writes unique names and uses paths otherwise. |
-| `model` | Optional coordinator `provider/model-id`, optionally followed by a known `:thinking-level`. Omit for the new-session default. |
+| `model` | Optional coordinator `provider/model-id` (at most 128 characters), optionally followed by a separate known `:thinking-level` suffix. Omit for the new-session default. |
 | `late` | `"0"`, or a positive integer with `m`, `h` or `d`, at most 7 days. Defaults to `6h` (360 minutes). |
 | `paused` | `true` stops future runs. Omit or set `false` to run. |
 | `inputs` | Optional overrides of this file's `workflow.inputs` defaults. Required inputs still need values. Unknown inputs, wrong types and values outside choices are invalid. |
