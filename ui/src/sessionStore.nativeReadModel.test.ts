@@ -132,6 +132,23 @@ describe("native browser replacement", () => {
     expect(f.store.getSnapshot().status?.isCompacting).toBe(false);
     expect(f.store.getSnapshot().transcript.messages.map(messageText)).not.toContain("stale SDK projection");
   });
+  it.each([1, 2])("replays a late native cut without duplicating %i completed identical shell runs", async count => {
+    const f = await fixture(); await join(f);
+    for (let index = 0; index < count; index++) {
+      f.emit({ type: "shell.start", command: "same command", seq: 20 + index * 3 });
+      f.emit({ type: "shell.chunk", chunk: "same output", seq: 21 + index * 3 });
+      f.emit({ type: "shell.end", output: "same output", exitCode: 0, seq: 22 + index * 3 });
+    }
+    await waitFor(f.store, () => f.store.getSnapshot().transcript.messages.filter(message => message.role === "shell").length === count);
+    f.emit({ type: "session.open", open: openFixture({ session: { id: "native", cwd: "/temporary" }, readPath: "native", epoch: "one", snapshot: { seq: 10, partial: null },
+      page: { start: 0, total: 3, messages: [...snapshot().history.messages, { id: "cut", role: "assistant", content: "late cut" }] } }) });
+    await waitFor(f.store, () => f.store.getSnapshot().transcript.messages.some(message => messageText(message) === "late cut"));
+    const shells = f.store.getSnapshot().transcript.messages.filter(message => message.role === "shell");
+    expect(shells).toHaveLength(count);
+    expect(new Set(shells.map(message => message.id)).size).toBe(count);
+    expect(shells.every(message => message.parts[0]?.type === "shell" && message.parts[0].run.result.type === "done")).toBe(true);
+  });
+
   it("joins from one HTTP open seed plus the socket without separate history, partial, or status reads", async () => {
     const f = await fixture();
     await join(f);

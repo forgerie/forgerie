@@ -343,6 +343,7 @@ export function carryUnsavedShellRows(previous: Transcript, refreshed: Transcrip
   const messages = [...refreshed.messages];
   const ids = new Set(messages.map((message) => message.id));
   const carried = new Set<string>();
+  const matched = new Set<string>();
   let nextId = refreshed.nextId;
   let anchor: string | undefined;
   for (const message of previous.messages) {
@@ -350,10 +351,11 @@ export function carryUnsavedShellRows(previous: Transcript, refreshed: Transcrip
     const run = shellRunOf(message);
     if (!run || run.result.type !== "done" && run.result.type !== "failed") continue;
     const at = anchor === undefined ? -1 : messages.findIndex((item) => item.key === anchor);
-    const replayed = messages.some((item) => !item.key && !carried.has(item.id) && shellRunOf(item) && isSameRun(shellRunOf(item)!, run));
-    // Only a record after the anchor can be this row's: an earlier one is an older identical command.
-    const saved = messages.slice(at + 1).some((item) => item.key && shellRunOf(item) && isSavedCopy(shellRunOf(item)!, run));
-    if (replayed || saved) continue;
+    const replayed = messages.slice(at + 1).find((item) => !item.key && !carried.has(item.id) && !matched.has(item.id) && shellRunOf(item) && isSameRun(shellRunOf(item)!, run));
+    // Each replayed/saved row consumes one previous run, not every identical command.
+    const saved = messages.slice(at + 1).find((item) => item.key && !matched.has(item.id) && shellRunOf(item) && isSavedCopy(shellRunOf(item)!, run));
+    const copy = replayed ?? saved;
+    if (copy) { matched.add(copy.id); continue; }
     let index = anchor === undefined ? 0 : at < 0 ? messages.length : at + 1;
     while (index < messages.length && carried.has(messages[index]!.id)) index++;
     const id = ids.has(message.id) ? `carried-${nextId++}` : message.id;

@@ -352,9 +352,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     let next = withStatus({ ...previous, session: open.session, transcript, ask: resyncAsk(previous.ask, open.status.pendingAsk),
       earlier: { type: start === 0 ? "complete" : "available" } }, open.status);
     for (const event of open.snapshot.transientEvents) if (isOperationEvent(event)) next = applyEvent(next, event);
+    // Reconstruct events above the detached cut before matching previous completed shell rows.
+    for (const event of buffered) if ((event.seq ?? Infinity) > open.seq) next = applyEvent(next, event);
     next = { ...next, transcript: { ...reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)),
       ...(previous.transcript.error === undefined ? {} : { error: previous.transcript.error }) } };
-    for (const event of buffered) if ((event.seq ?? Infinity) > open.seq) next = applyEvent(next, event);
     page = { start, end: open.page.start + open.page.messages.length, total: open.page.total, historyId: open.historyId, epoch: open.epoch };
     if (open.receipt !== null) pendingReceipt = { ...open.receipt, session: open.session };
     return next;

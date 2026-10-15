@@ -146,6 +146,14 @@ describe("unsaved shell rows across a reload", () => {
     const refreshed = transcript(...fromHistory([record("date", "now\n", 5)]).messages, live("pwd", "/w\n", "shell-41"));
     expect(carryUnsavedShellRows(previous, refreshed)).toEqual(refreshed);
   });
+  it("matches repeated identical completed runs one-to-one against a replay or saved record", () => {
+    const previous = transcript(live("date", "now\\n", "shell-7"), live("date", "now\\n", "shell-8"));
+    for (const refreshed of [transcript(live("date", "now\\n", "shell-41")), transcript(...fromHistory([record("date", "now\\n", 5)]).messages)]) {
+      const carried = carryUnsavedShellRows(previous, refreshed);
+      expect(carried.messages.filter(message => message.role === "shell")).toHaveLength(2);
+      expect(new Set(carried.messages.map(message => message.id)).size).toBe(2);
+    }
+  });
   it("does not carry rows still running or rows that came from history", () => {
     const running: TranscriptMessage = { id: "shell-9", role: "shell", parts: [{ type: "shell", run: { result: { type: "running", output: "" } } }] };
     const saved = { ...live("ls", "a\n", "history-1"), key: "bashExecution:4" };
