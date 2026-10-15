@@ -24,7 +24,7 @@ export function createGitHubBacklogProvider(deps: GitHubBacklogDependencies): Ba
       if (slug === undefined) {
         return warn("provider-unavailable", repo, "This project has no GitHub repo. Add a github.com origin remote, or set backlog.github.repo to owner/name in .forgerie/config.json.");
       }
-      const result = await deps.issues.openIssues(slug);
+      const result = await deps.issues.openIssues(slug, config?.github?.trustedBots);
       if (!result.ok) return warn(result.kind === "auth" ? "provider-auth" : result.kind === "install" ? "provider-install" : "provider-unavailable", slug, result.message);
       const warnings: BacklogWarning[] = [];
       const note = (kind: BacklogWarning["kind"], message: string) => { warnings.push({ projectId: project.id, provider: "github", kind, path: slug, message }); };

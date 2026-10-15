@@ -15,11 +15,13 @@ it("validates settings routes, guards revisions, shows origins, and restores the
     const get = () => app.inject({ method: "GET", url: "/backlog/settings" });
     expect((await get()).json()).toMatchObject({ projects: [{ projectId: "p", source: "repo-file", backlog: { providers: ["github"] } }] });
     const url = "/backlog/settings/projects/p";
-    for (const backlog of [{}, { providers: [] }, { providers: ["azure-devops"], azureDevops: { organization: "x", project: "y", pat: "secret" } }, { providers: ["markdown"], dir: "../secrets" }]) {
+    const invalidBots = [["coderabbitai"], ["a[bot]", "a[bot]"], Array.from({ length: 21 }, (_, i) => `bot-${String(i)}[bot]`)];
+    const invalidBotSettings = invalidBots.map(trustedBots => ({ providers: ["github"], github: { trustedBots } }));
+    for (const backlog of [...invalidBotSettings, {}, { providers: [] }, { providers: ["azure-devops"], azureDevops: { organization: "x", project: "y", pat: "secret" } }, { providers: ["markdown"], dir: "../secrets" }]) {
       expect((await app.inject({ method: "PUT", url, payload: { backlog, baseRevision: 0 } })).statusCode).toBe(400);
     }
-    expect((await app.inject({ method: "PUT", url, payload: { backlog: { providers: ["github"] }, baseRevision: 0 } })).statusCode).toBe(200);
-    expect((await get()).json()).toMatchObject({ projects: [{ source: "forgerie", revision: 1 }] });
+    expect((await app.inject({ method: "PUT", url, payload: { backlog: { providers: ["github"], github: { repo: "owner/repo", authors: "trusted", trustedBots: ["coderabbitai[bot]"] } }, baseRevision: 0 } })).statusCode).toBe(200);
+    expect((await get()).json()).toMatchObject({ projects: [{ source: "forgerie", revision: 1, backlog: { github: { repo: "owner/repo", authors: "trusted", trustedBots: ["coderabbitai[bot]"] } } }] });
     expect((await app.inject({ method: "PUT", url, payload: { backlog: { providers: ["markdown"] }, baseRevision: 0 } })).statusCode).toBe(409);
     expect((await app.inject({ method: "DELETE", url, payload: { baseRevision: 0 } })).statusCode).toBe(409);
     expect((await app.inject({ method: "DELETE", url, payload: { baseRevision: 1 } })).statusCode).toBe(200);

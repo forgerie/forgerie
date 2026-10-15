@@ -1,3 +1,5 @@
+import { FakeGitHub, issue as apiIssue, json } from "../github/fakeGitHub.testSupport.js";
+import { GitHubIssueClient } from "../github/githubIssues.js";
 import { describe, expect, it } from "vitest";
 import type { BacklogConfig, Project } from "../../shared/apiTypes.js";
 import type { GitHubIssue, IssuesResult } from "../github/githubIssues.js";
@@ -35,6 +37,21 @@ describe("GitHub backlog provider", () => {
     expect(p.asked).toEqual(["korri-os/other"]);
     expect(scan.entries).toHaveLength(1);
     expect(scan.warnings).toEqual([]);
+  });
+
+  it("lists configured bots through the shared author judge, but not other bots", async () => {
+    const api = new FakeGitHub();
+    api.always("GET https://api.github.com/repos/owner/repo/issues", json([
+      apiIssue(1, { author_association: "NONE", user: { login: "CodeRabbitAI[bot]" } }),
+      apiIssue(2, { author_association: "NONE", user: { login: "other[bot]" } }),
+    ]));
+    const issues = new GitHubIssueClient({ fetch: api.fetch, app: { tokenFor: () => Promise.resolve({ ok: true, token: "installation" }), dropToken: () => undefined, installUrl: () => undefined } });
+    const provider = createGitHubBacklogProvider({ issues });
+    const scan = await provider.scan(project, project.path, { github: { repo: "owner/repo", trustedBots: ["coderabbitai[bot]"] } }, { scope: "everyone" });
+    expect(scan.entries.map(entry => entry.item.id)).toEqual(["1"]);
+    expect(scan.warnings).toMatchObject([{ kind: "items-hidden" }]);
+    const removed = await provider.scan(project, project.path, { github: { repo: "owner/repo" } }, { scope: "everyone" });
+    expect(removed.entries).toEqual([]);
   });
 
   it("turns each failure into a warning that names its fix", async () => {

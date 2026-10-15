@@ -12,6 +12,14 @@ function ctxFor(sessionId: string): ExtensionToolContext {
 }
 
 describe("GitHub tools", () => {
+  it("exposes ready_pr and passes its number through github_write", async () => {
+    const calls: unknown[] = [];
+    const [, write] = createGitHubToolDefinitions("/workspace", { read: () => Promise.resolve(""), write: (cwd, id, request) => { calls.push([cwd, id, request]); return Promise.resolve({ text: "Ready", url: "https://github.com/o/r/pull/9" }); } });
+    expect(Check(write.parameters, { action: "ready_pr", number: 9 })).toBe(true);
+    const result = await write.execute("ready", { action: "ready_pr", number: 9 }, undefined, undefined, ctxFor("s1"));
+    expect(calls).toEqual([["/workspace", "s1", { action: "ready_pr", number: 9 }]]);
+    expect(result.content).toEqual([{ type: "text", text: "Ready\nhttps://github.com/o/r/pull/9" }]);
+  });
   it("exposes opt-in watch control only when wired and scopes it to the current session", async () => {
     const calls: unknown[] = [];
     const tools = createGitHubToolDefinitions("/workspace", { read: () => Promise.resolve(""), write: () => Promise.resolve({ text: "" }),

@@ -12,8 +12,8 @@ import { readGitHubPull, type GitHubPullSnapshot } from "./githubPullRead.js";
 /** A GitHub request the agent can fix or report. The message says what happened and what to do. */
 export class GitHubToolError extends Error {}
 
-/** The repo a session works on, and whether its project lists text from everyone. */
-export interface SessionRepo { slug: string; everyone: boolean }
+/** The session repository and its project author policy. */
+export interface SessionRepo { slug: string; everyone: boolean; trustedBots?: string[] }
 
 export interface GitHubAgentDependencies {
   app: Pick<GitHubApp, "tokenFor" | "dropToken" | "status">;
@@ -26,7 +26,7 @@ export interface GitHubAgentDependencies {
 }
 
 export const READ_ACTIONS = ["issues", "issue", "labels", "prs", "pr"] as const;
-export const WRITE_ACTIONS = ["comment", "edit", "close", "reopen", "label", "create_pr", "merge_pr"] as const;
+export const WRITE_ACTIONS = ["comment", "edit", "close", "reopen", "label", "create_pr", "ready_pr", "merge_pr"] as const;
 export interface ReadRequest {
   action: typeof READ_ACTIONS[number];
   number?: number; state?: "open" | "closed" | "all"; labels?: string[]; query?: string; limit?: number;
@@ -60,7 +60,12 @@ const CheckRunsSchema = Type.Object({ total_count: Type.Integer(), check_runs: T
   name: Type.String(), status: Type.String(), conclusion: Type.Union([Type.String(), Type.Null()]),
 })) });
 const StatusSchema = Type.Object({ state: Type.String(), statuses: Type.Array(Type.Object({ context: Type.String(), state: Type.String() })) });
-const ReviewSchema = Type.Object({ user, state: Type.String() });
+const ReviewSchema = Type.Object({ user, author_association: Type.String(), state: Type.String(), body: Type.Optional(Type.String()) });
+const ReadyPullSchema = Type.Object({ ...PullSchema.properties, node_id: Type.String() });
+const ReadyResultSchema = Type.Object({
+  errors: Type.Optional(Type.Array(Type.Object({ message: Type.String() }))),
+  data: Type.Optional(Type.Union([Type.Null(), Type.Object({ markPullRequestReadyForReview: Type.Union([Type.Null(), Type.Object({ pullRequest: Type.Object({ url: Type.String(), isDraft: Type.Boolean() }) })]) })])),
+});
 const RepoSchema = Type.Object({ default_branch: Type.String() });
 const MergeSchema = Type.Object({ sha: Type.String(), merged: Type.Boolean() });
 const SearchSchema = Type.Object({ total_count: Type.Integer({ minimum: 0 }), incomplete_results: Type.Optional(Type.Boolean()), items: Type.Array(Type.Unknown()) });
@@ -75,7 +80,7 @@ const MAX_COMMENTS = 100;
 /**
  * GitHub work for agents in Forgerie sessions, done as Forgerie's GitHub App on the session's own repo.
  * Every text an author wrote passes the same trust rule as the backlog, so an outside contributor's words
- * reach the agent only when the project lists everyone. Only file_issue creates the agent-filed label; a merge waits for
+ * reach the agent only when the project lists everyone or explicitly trusts that bot. Only file_issue creates the agent-filed label; a merge waits for
  * CI to pass on the exact commit it merges.
  */
 export class GitHubAgent {
@@ -246,6 +251,22 @@ export class GitHubAgent {
         catch (error) { throw new GitHubToolError(`Opened PR #${String(pull.number)} at ${pull.html_url}, but could not save its session link: ${error instanceof Error ? error.message : String(error)}. Do not create another PR; link this one again.`); }
         return { text: `Opened pull request #${String(pull.number)} (${head} → ${base}).`, url: pull.html_url };
       }
+      case "ready_pr": {
+        const target = number();
+        const pull = await call.get(`/pulls/${String(target)}`, ReadyPullSchema, "Pull requests: read");
+        const refuse = (reason: string): never => { throw new GitHubToolError(`Did not mark PR #${String(target)} ready for review: ${reason}`); };
+        if (pull.merged === true) refuse("it is already merged.");
+        if (pull.state !== "open") refuse("it is closed.");
+        if (pull.draft !== true) refuse("it is not a draft.");
+        const result = await call.graphql({
+          query: "mutation($pullRequestId:ID!) { markPullRequestReadyForReview(input:{pullRequestId:$pullRequestId}) { pullRequest { url isDraft } } }",
+          variables: { pullRequestId: pull.node_id },
+        }, ReadyResultSchema, "Pull requests: write");
+        if (result.errors !== undefined && result.errors.length > 0) refuse(`GitHub refused: ${result.errors.map(error => error.message).join("; ")}`);
+        const ready = result.data?.markPullRequestReadyForReview?.pullRequest;
+        if (ready === undefined || ready.isDraft) return refuse("GitHub did not confirm that it is ready. Read the PR before trying again.");
+        return { text: `Marked PR #${String(target)} ready for review.`, url: ready.url };
+      }
       case "merge_pr": return this.merge(call, number(), request.method ?? "rebase");
     }
   }
@@ -287,12 +308,13 @@ export class GitHubAgent {
 
   private async showPull(repo: SessionRepo, call: Caller, number: number): Promise<string> {
     const pull = await call.get(`/pulls/${String(number)}`, PullSchema, "Pull requests: read");
-    const [checks, comments, reviews] = await Promise.all([
+    const [checks, comments, reviews, inline] = await Promise.all([
       this.checks(call, pull.head.sha),
       call.get(`/issues/${String(number)}/comments?per_page=${String(MAX_COMMENTS)}`, Type.Array(CommentSchema), "Pull requests: read"),
       call.get(`/pulls/${String(number)}/reviews?per_page=100`, Type.Array(ReviewSchema), "Pull requests: read"),
+      call.get(`/pulls/${String(number)}/comments?per_page=${String(MAX_COMMENTS)}`, Type.Array(CommentSchema), "Pull requests: read"),
     ]);
-    const trusted = await this.judge(repo, call, [authorOf(pull), ...comments.map(authorOf)]);
+    const trusted = await this.judge(repo, call, [authorOf(pull), ...comments.map(authorOf), ...reviews.map(authorOf), ...inline.map(authorOf)]);
     const latest = new Map<string, string>();
     for (const review of reviews) if (review.state !== "COMMENTED") latest.set(who(review.user), review.state);
     const state = pull.merged === true ? "merged" : pull.draft === true ? `${pull.state}, draft` : pull.state;
@@ -304,6 +326,8 @@ export class GitHubAgent {
       `CI: ${checks.summary}`, ...checks.lines.map((line) => `  ${line}`),
       "", textOf(pull, pull.body, trusted),
       ...commentLines(comments, comments.length, trusted),
+      ...commentLines(inline, inline.length, trusted, "Inline comments"),
+      ...reviews.filter(review => review.body !== undefined && review.body.trim() !== "").flatMap(review => ["", `— Review by ${who(review.user)} (${review.state.toLowerCase()}):`, textOf(review, review.body, trusted)]),
     ].join("\n");
   }
 
@@ -363,7 +387,7 @@ export class GitHubAgent {
 
   private async judge(repo: SessionRepo, call: Caller, authors: GitHubAuthor[]): Promise<(author: GitHubAuthor) => boolean> {
     if (repo.everyone) return () => true;
-    return this.deps.trust.judge(repo.slug, await call.token(), authors);
+    return this.deps.trust.judge(repo.slug, await call.token(), authors, repo.trustedBots);
   }
 
   private caller(slug: string): Caller {
@@ -402,7 +426,7 @@ export class GitHubAgent {
       token: async () => token ?? mint(),
       get: (path, schema, permission, options) => request("GET", path, undefined, schema, permission, options),
       send: (method, path, body, schema, permission) => request(method, path, body, schema, permission),
-      graphql: (body, schema) => request("POST", "/graphql", body, schema, "Pull requests: read", { absolute: true }),
+      graphql: (body, schema, permission = "Pull requests: read") => request("POST", "/graphql", body, schema, permission, { absolute: true }),
       remove: async (path, permission) => { await respond("DELETE", path, undefined, permission, { missingOk: true }); },
     };
   }
@@ -430,7 +454,7 @@ export class GitHubAgent {
 
 export interface Caller {
   token(): Promise<string>;
-  graphql<S extends TSchema>(body: unknown, schema: S): Promise<Static<S>>;
+  graphql<S extends TSchema>(body: unknown, schema: S, permission?: string): Promise<Static<S>>;
   get<S extends TSchema>(path: string, schema: S, permission: string, options?: { absolute?: boolean }): Promise<Static<S>>;
   send<S extends TSchema>(method: string, path: string, body: unknown, schema: S, permission: string): Promise<Static<S>>;
   /** DELETE that treats "already gone" (404) as done. */
@@ -444,7 +468,7 @@ async function sessionRepo(cwd: string, config?: (root: string) => Promise<Backl
   const github = backlog.github;
   const slug = github?.repo ?? await originGitHubRepo(root);
   if (slug === undefined) throw new GitHubToolError("This session's project has no GitHub repo. Its origin remote is not on github.com, and .forgerie/config.json sets no backlog.github.repo.");
-  return { slug, everyone: github?.authors === "all" };
+  return { slug, everyone: github?.authors === "all", ...(github?.trustedBots === undefined ? {} : { trustedBots: github.trustedBots }) };
 }
 
 function required<T>(value: T | undefined, field: string, action: string): T {
@@ -461,12 +485,12 @@ function titleOf(value: Authored & { title: string }, trusted: (author: GitHubAu
   return trusted(authorOf(value)) ? value.title : `(title hidden: outside contributor ${who(value.user)})`;
 }
 function textOf(value: Authored, body: string | null | undefined, trusted: (author: GitHubAuthor) => boolean): string {
-  if (!trusted(authorOf(value))) return `(text hidden: written by outside contributor ${who(value.user)}. The project's backlog.github.authors setting decides this.)`;
+  if (!trusted(authorOf(value))) return "(text hidden: outside contributor)";
   return body === null || body === undefined || body.trim() === "" ? "(no description)" : body;
 }
-function commentLines(comments: Static<typeof CommentSchema>[], total: number, trusted: (author: GitHubAuthor) => boolean): string[] {
+function commentLines(comments: Static<typeof CommentSchema>[], total: number, trusted: (author: GitHubAuthor) => boolean, heading = "Comments"): string[] {
   if (comments.length === 0) return [];
-  const lines = ["", `Comments (${String(total)}):`];
+  const lines = ["", `${heading} (${String(total)}):`];
   for (const comment of comments) lines.push("", `— ${who(comment.user)} at ${comment.created_at}:`, textOf(comment, comment.body, trusted));
   if (total > comments.length) lines.push("", `(${String(total - comments.length)} newer comments not shown.)`);
   return lines;

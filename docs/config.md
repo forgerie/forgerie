@@ -118,6 +118,36 @@ the override. With neither section, Forgerie reads Markdown from
 list containing Markdown, GitHub, or both. Turning off a provider leaves files
 and remote items unchanged.
 
+The same project GitHub settings work in a saved override or in the repo file:
+
+```json
+{
+  "backlog": {
+    "providers": ["github"],
+    "github": {
+      "repo": "owner/repo",
+      "authors": "trusted",
+      "trustedBots": ["coderabbitai[bot]"]
+    }
+  }
+}
+```
+
+| GitHub setting | Meaning |
+| --- | --- |
+| `backlog.github.repo` | Optional `owner/name`; otherwise use the GitHub origin remote. |
+| `backlog.github.authors` | `"trusted"` (default) accepts owners, members, collaborators, authors with write access, Forgerie's own app, and listed trusted bots. `"all"` accepts everyone. |
+| `backlog.github.trustedBots` | Optional list of at most 20 unique bot logins. Each must match `^[A-Za-z0-9][A-Za-z0-9-]{0,38}\[bot\]$`. Matching logins is case-insensitive. |
+
+With **Trusted authors only** on, listed bots' issue, PR, comment, and review
+text reaches agents in `github_read`, GitHub backlog launches, and `github_watch`
+notifications. Other outside authors stay hidden. Only bot accounts can have a
+`[bot]` login, so a person cannot register the listed name. Trust still has a
+cost: a listed bot can send external text to an agent. Add only bots you intend
+to trust. This setting does not make their text instructions to follow. A new
+bot policy uses a separate issue-list cache to avoid sharing trust decisions
+between projects; the first read can make an extra GitHub request.
+
 Azure sources contain an organization, Azure project, optional exact Area Path,
 and optional registered destination project. They belong to no code repository
 or project group. Saves reject overlapping Area Paths on the same board.

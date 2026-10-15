@@ -25,6 +25,16 @@ describe("GitHub author trust", () => {
     expect(authors.map(judge)).toEqual([false, false]);
   });
 
+  it("trusts only listed bot logins case-insensitively, scoped to the current policy", async () => {
+    const f = trust(() => undefined);
+    const authors = [{ login: "CodeRabbitAI[bot]", association: "NONE" }, { login: "other[bot]", association: "NONE" }];
+    const allowed = await f.trust.judge(SLUG, "token", authors, ["coderabbitai[bot]"]);
+    expect(authors.map(allowed)).toEqual([true, false]);
+    expect(f.urls.some(url => url.includes("CodeRabbitAI"))).toBe(false);
+    expect((await f.trust.judge("other/repo", "token", authors))({ login: "CodeRabbitAI[bot]", association: "NONE" })).toBe(false);
+    expect((await f.trust.judge(SLUG, "token", authors))({ login: "CodeRabbitAI[bot]", association: "NONE" })).toBe(false);
+  });
+
   it("trusts no app when none is configured", async () => {
     const f = trust(() => undefined);
     const judge = await f.trust.judge(SLUG, "token", [{ login: "forgerie-zao[bot]", association: "NONE" }]);

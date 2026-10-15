@@ -51,7 +51,7 @@ export async function readGitHubPull(repo: SessionRepo, call: Caller, trust: Pic
   ]);
   const authors = [pull, ...comments.items, ...reviewComments.items, ...reviews.items].map((item) => ({ login: item.user?.login, association: item.author_association }));
   authors.push(...graph.comments.map((item) => ({ login: item.author?.login, association: item.authorAssociation })));
-  const allowed = repo.everyone ? () => true : await trust.judge(repo.slug, await call.token(), authors);
+  const allowed = repo.everyone ? () => true : await trust.judge(repo.slug, await call.token(), authors, repo.trustedBots);
   const safe = (login: string | undefined, association: string, body: string) => allowed({ login, association }) ? body.slice(0, MAX_TEXT) : "(text hidden: outside contributor)";
   const checks: PullCheck[] = runs.check_runs.map((run): PullCheck => {
     const seconds = run.started_at === null || run.completed_at === null ? undefined : (Date.parse(run.completed_at) - Date.parse(run.started_at)) / 1000;

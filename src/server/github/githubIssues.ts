@@ -59,14 +59,15 @@ export class GitHubIssueClient {
     this.trust = deps.trust ?? new GitHubAuthorTrust({ fetch: deps.fetch, now: this.now });
   }
 
-  openIssues(slug: string): Promise<IssuesResult> {
-    const run = this.queue.then(() => this.read(slug), () => this.read(slug));
+  openIssues(slug: string, trustedBots: readonly string[] = []): Promise<IssuesResult> {
+    const run = this.queue.then(() => this.read(slug, trustedBots), () => this.read(slug, trustedBots));
     this.queue = run.catch(() => undefined);
     return run;
   }
 
-  private async read(slug: string): Promise<IssuesResult> {
-    const key = slug.toLowerCase();
+  private async read(slug: string, trustedBots: readonly string[]): Promise<IssuesResult> {
+    // A cached trust decision must never cross project policies, even for the same repository.
+    const key = JSON.stringify([slug.toLowerCase(), [...new Set(trustedBots.map(login => login.toLowerCase()))].sort()]);
     const cached = this.cache.get(key);
     if (cached !== undefined && this.now() - cached.fetchedAt < FRESH_MS) return listed(cached);
     if (this.now() < this.blockedUntil) return stale(cached, `GitHub rate limit reached; Forgerie asks again after ${clock(this.blockedUntil)}.`);
@@ -100,16 +101,16 @@ export class GitHubIssueClient {
       return stale(cached, `GitHub is unreachable: ${error instanceof Error ? error.message : String(error)}`);
     }
     const listing: Listing = { pages, truncated, fetchedAt: this.now() };
-    await this.checkAuthors(slug, listing, token);
+    await this.checkAuthors(slug, listing, token, trustedBots);
     this.cache.set(key, listing);
     return listed(listing);
   }
 
   /** Marks each issue trusted or not, so the backlog can hide outside contributions. */
-  private async checkAuthors(slug: string, listing: Listing, token: string): Promise<void> {
+  private async checkAuthors(slug: string, listing: Listing, token: string, trustedBots: readonly string[]): Promise<void> {
     const issues = listing.pages.flatMap((page) => page.issues);
     const authorOf = (issue: GitHubIssue) => ({ login: issue.user?.login, association: issue.author_association });
-    const trusted = await this.trust.judge(slug, token, issues.map(authorOf));
+    const trusted = await this.trust.judge(slug, token, issues.map(authorOf), trustedBots);
     for (const issue of issues) issue.trusted = trusted(authorOf(issue));
   }
 

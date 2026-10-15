@@ -32,7 +32,7 @@ const ReadParams = Type.Object({
 const WriteParams = Type.Object({
   worktreeId: targetWorktree,
   action: Type.Union(WRITE_ACTIONS.map((action) => Type.Literal(action)), {
-    description: "comment: number, body. edit: number, title and/or body (replaces them). close: number, reason, optional body posted as a comment first. reopen: number, optional body. label: number, add and/or remove. create_pr: head (a pushed branch), title, body, base, draft. merge_pr: number, method; refused unless all CI on the head commit passed.",
+    description: "comment: number, body. edit: number, title and/or body (replaces them). close: number, reason, optional body posted as a comment first. reopen: number, optional body. label: number, add and/or remove. create_pr: head (a pushed branch), title, body, base, draft. ready_pr: number; marks an open draft ready for review. merge_pr: number, method; refused unless all CI on the head commit passed.",
   }),
   number,
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
@@ -60,7 +60,7 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
   const read = defineTool<typeof ReadParams, { action: string }>({
     name: "github_read",
     label: "GitHub",
-    description: "Read issues, labels, and pull requests (with CI checks) of this session's GitHub repo. Text by outside contributors is hidden unless the project lists everyone.",
+    description: "Read issues, labels, and pull requests (with CI checks) of this session's GitHub repo. Text by outside contributors is hidden unless the project lists everyone or explicitly trusts that bot.",
     promptSnippet: "github_read: list/read issues, labels, and pull requests with CI status on this project's GitHub repo",
     promptGuidelines: [
       "The project's backlog is its GitHub issues. Use github_read to find and read them, file_issue to file new issues after searching open and closed issues for duplicates, and github_write to comment, close, label, open pull requests, and merge. They default to this session's own repo. For a secondary repo, supply its owned worktreeId from project_worktree.",
@@ -76,10 +76,10 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
     name: "github_write",
     exposure: MODEL_ONLY_EXPOSURE,
     label: "GitHub write",
-    description: "Change this session's GitHub repo as Forgerie's GitHub App: comment on, edit, close, reopen, and label issues; open and merge pull requests. Uses only existing labels. merge_pr merges only when every CI check on the head commit passed.",
-    promptSnippet: "github_write: comment, close, label issues; open and merge pull requests on this project's GitHub repo",
+    description: "Change this session's GitHub repo as Forgerie's GitHub App: comment on, edit, close, reopen, and label issues; open pull requests, mark drafts ready for review, and merge pull requests. Uses only existing labels. merge_pr merges only when every CI check on the head commit passed.",
+    promptSnippet: "github_write: comment, close, label issues; open, ready, and merge pull requests on this project's GitHub repo",
     promptGuidelines: [
-      "With github_write, close an issue only when its work is done or the user says so, and say why in body. Push a branch with git before create_pr. Read a pull request with github_read before merge_pr, and merge only work the user asked you to land.",
+      "With github_write, close an issue only when its work is done or the user says so, and say why in body. Push a branch with git before create_pr. Open a draft first with create_pr draft:true, then use ready_pr number when the build is done. Read a pull request with github_read before merge_pr, and merge only work the user asked you to land.",
     ],
     parameters: WriteParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

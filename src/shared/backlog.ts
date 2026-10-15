@@ -8,6 +8,8 @@ export const BacklogGitHubConfigSchema = Type.Object({
   /** `owner/name`. Overrides the repo read from the project's `origin` remote. */
   repo: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$" })),
   authors: Type.Optional(BacklogGitHubAuthorsSchema),
+  /** Bot logins whose text reaches the agent even when only trusted authors are listed. */
+  trustedBots: Type.Optional(Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\[bot\\]$" }), { maxItems: 20, uniqueItems: true })),
 }, { additionalProperties: false });
 /** Server-owned credentials are never accepted in project config. */
 export const BacklogAzureDevopsConfigSchema = Type.Object({

@@ -29,6 +29,20 @@ describe("GitHub issue client", () => {
     expect(f.github.requests[0]?.headers).toMatchObject({ authorization: "Bearer ghs_token", "x-github-api-version": "2026-03-10" });
   });
 
+  it("keeps cached bot trust isolated by project policy, including removals", async () => {
+    const f = fixture();
+    f.github.always(LIST, json([issue(1, { author_association: "NONE", user: { login: "CodeRabbitAI[bot]" } }), issue(2, { author_association: "NONE", user: { login: "unlisted[bot]" } })]));
+    f.github.always("GET https://api.github.com/repos/korri-os/korri/collaborators/CodeRabbitAI%5Bbot%5D/permission", json({ permission: "read" }));
+    f.github.always("GET https://api.github.com/repos/korri-os/korri/collaborators/unlisted%5Bbot%5D/permission", json({ permission: "read" }));
+    const listed = await f.client.openIssues("korri-os/korri", ["coderabbitai[bot]"]);
+    expect(listed.ok && listed.issues.map(item => item.trusted)).toEqual([true, false]);
+    const removed = await f.client.openIssues("korri-os/korri");
+    expect(removed.ok && removed.issues.map(item => item.trusted)).toEqual([false, false]);
+    const restored = await f.client.openIssues("korri-os/korri", ["CODERABBITAI[bot]"]);
+    expect(restored.ok && restored.issues.map(item => item.trusted)).toEqual([true, false]);
+    expect(f.github.count(LIST)).toBe(2);
+  });
+
   it("reuses a list for a minute, then revalidates with its ETag and reuses it on 304", async () => {
     const f = fixture();
     f.github.on(LIST, json([issue(1)], { headers: { etag: '"v1"' } }), new Response(null, { status: 304 }));

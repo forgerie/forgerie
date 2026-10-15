@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { Check } from "typebox/value";
 import { PullRequestSchema } from "../../shared/pullRequests.js";
 import { FakeGitHub, json } from "./fakeGitHub.testSupport.js";
+import { GitHubAuthorTrust } from "./githubTrust.js";
+import { evaluateWatch, initialCursor } from "./pullRequestWatch.js";
 import { GitHubAgent } from "./githubAgent.js";
 import { PR_SHA, PR_TIME } from "./pullRequest.testSupport.js";
 const API = "https://api.github.com/repos/owner/repo";
@@ -13,10 +15,10 @@ const graph = (threads: unknown[] = [], sha = PR_SHA, more = false) => ({ data: 
   reviewThreads: { nodes: threads, pageInfo: { hasNextPage: more, endCursor: more ? "next" : null } },
   commits: { nodes: [{ commit: { oid: sha, statusCheckRollup: { contexts: { nodes: [{ __typename: "CheckRun", name: "tests", isRequired: true }], pageInfo: { hasNextPage: false, endCursor: null } } } } }] },
 } } } });
-function fixture(onPullCreated?: (input: { id: string; cwd: string; repo: string; number: number }) => Promise<void>) {
+function fixture(onPullCreated?: (input: { id: string; cwd: string; repo: string; number: number }) => Promise<void>, trustedBots?: string[]) {
   const api = new FakeGitHub();
   const agent = new GitHubAgent({ fetch: api.fetch, app: { tokenFor: () => Promise.resolve({ ok: true, token: "installation" }), dropToken: () => undefined, status: () => ({ state: "configured", app: { slug: "forgerie", owner: "owner", url: "https://github.com/apps/forgerie" }, installUrl: "https://github.com/install" }) },
-    resolveRepo: () => Promise.resolve({ slug: "owner/repo", everyone: false }), trust: { judge: () => Promise.resolve((author) => author.association === "OWNER") }, ...(onPullCreated === undefined ? {} : { onPullCreated }) });
+    resolveRepo: () => Promise.resolve({ slug: "owner/repo", everyone: false, ...(trustedBots === undefined ? {} : { trustedBots }) }), trust: trustedBots === undefined ? { judge: () => Promise.resolve((author) => author.association === "OWNER") } : new GitHubAuthorTrust({ fetch: api.fetch }), ...(onPullCreated === undefined ? {} : { onPullCreated }) });
   api.always(`GET ${API}/pulls/9`, json(restPull()));
   api.always(`GET ${API}/commits/${PR_SHA}/check-runs`, json({ total_count: 1, check_runs: [run] }));
   api.always(`GET ${API}/commits/${PR_SHA}/status`, json({ total_count: 0, statuses: [] }));
@@ -40,6 +42,26 @@ describe("structured GitHub pull reads", () => {
     expect(result.remarks[0]?.body).toBe("(text hidden: outside contributor)");
     expect(JSON.stringify(result)).not.toContain("malicious");
     expect(result.ownLogin).toBe("forgerie[bot]");
+  });
+  it("includes listed bot text and hides unlisted bots in PR watch messages", async () => {
+    const f = fixture(undefined, ["CodeRabbitAI[bot]"]);
+    f.api.always(`GET ${API}/collaborators/unlisted%5Bbot%5D/permission`, json({ permission: "read" }));
+    const bot = (login: string, id: number) => comment({ id, user: { login }, author_association: "NONE", body: `${login} comment text` });
+    const comments = [bot("coderabbitai[bot]", 1), bot("unlisted[bot]", 2)];
+    f.api.always(`GET ${API}/issues/9/comments`, json(comments));
+    f.api.always(`GET ${API}/pulls/9/comments`, json(comments.map(item => ({ ...item, body: item.body.replace("comment", "inline") }))));
+    f.api.always(`GET ${API}/pulls/9/reviews`, json(comments.map(item => ({ ...item, state: "COMMENTED", submitted_at: PR_TIME, body: item.body.replace("comment", "review") }))));
+    f.api.always("POST https://api.github.com/graphql", json(graph(comments.map(item => ({ isResolved: false, comments: { nodes: [{ id: `thread-${String(item.id)}`, author: item.user, authorAssociation: item.author_association, body: item.body.replace("comment", "thread"), path: "src/test.ts", line: 10, updatedAt: PR_TIME, url: item.html_url }] } })))));
+    const snapshot = await f.agent.pull("/workspace", 9);
+    expect(snapshot.pull.comments.map(item => item.body)).toEqual(["coderabbitai[bot] thread text", "(text hidden: outside contributor)"]);
+    expect(snapshot.remarks.filter(item => item.author === "unlisted[bot]").map(item => item.body)).toEqual(Array(3).fill("(text hidden: outside contributor)"));
+    const text = evaluateWatch(initialCursor(PR_TIME), snapshot).text;
+    for (const kind of ["comment", "inline", "review"]) expect(text).toContain(`coderabbitai[bot] ${kind} text`);
+    expect(text).toContain("(text hidden: outside contributor)");
+    expect(text).not.toContain("unlisted[bot] comment text");
+    expect(text).not.toContain("unlisted[bot] inline text");
+    expect(text).not.toContain("unlisted[bot] review text");
+    expect(text).not.toContain("unlisted[bot] thread text");
   });
   it("never calls zero, truncated, pending or unknown checks ready to merge", async () => {
     const f = fixture();

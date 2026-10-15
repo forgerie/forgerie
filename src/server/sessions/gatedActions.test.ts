@@ -175,3 +175,7 @@ it("uses real read-only Git observations for dirty checkout forms and unmerged b
     expect((await git("status", "--porcelain", "--", "preview-check")).stdout).toBe("");
   } finally { await rm(root, {recursive: true, force: true}); }
 });
+
+it("does not gate marking a draft PR ready for review", async () => {
+  expect(await gatedAction("github_write", { action: "ready_pr", number: 9 }, "/repo")).toBeUndefined();
+});
