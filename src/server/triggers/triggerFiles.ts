@@ -20,6 +20,16 @@ export class TriggerFiles {
     const files = await readdir(this.directory, { withFileTypes: true }).catch((error: unknown) => { if (isMissingResource(error)) return []; throw error; });
     return files.filter((file) => file.name.endsWith(".md") && (file.isFile() || file.isSymbolicLink())).map((file) => file.name.slice(0, -3));
   }
+  /** A watch echo needs only byte hashes, not YAML parsing, versions or durable reads. */
+  async hashes(): Promise<Map<string, string>> {
+    const hashes = new Map<string, string>();
+    for (const id of await this.names()) {
+      if (!Check(TriggerIdSchema, id)) continue;
+      try { hashes.set(id, resourceHash((await readResourceFile(this.path(id))).text)); }
+      catch (error) { if (!isMissingResource(error)) throw error; }
+    }
+    return hashes;
+  }
   async document(id: string): Promise<TriggerFileDocument> {
     const path = this.path(id);
     try {

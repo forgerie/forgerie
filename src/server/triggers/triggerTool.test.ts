@@ -19,7 +19,7 @@ import { WorkflowLibrary, workflowInputs } from "../resources/workflowLibrary.js
 import { workflowTriggerFire } from "./triggerFire.js";
 import { TriggerService } from "./triggerService.js";
 
-it.each(["scope", "lifecycle"] as const)("hosts workflow_schedule %s through a real calling agent", async (scenario) => {
+it.each([["scope", "inline"], ["lifecycle", "inline"], ["scope", "watch"], ["lifecycle", "watch"]] as const)("hosts workflow_schedule %s through a real calling agent (%s delivery)", async (scenario, delivery) => {
   const root = await mkdtemp(join(tmpdir(), "forgerie-trigger-tools-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
@@ -43,9 +43,8 @@ it.each(["scope", "lifecycle"] as const)("hosts workflow_schedule %s through a r
   const sessions = new PiSessionService(hub, { agentDir, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore(), triggers: () => triggers });
   let now = Date.parse("2026-10-13T00:00:00Z");
   const triggers = await TriggerService.open({ env: { PI_WEB_DATA_DIR: root }, workflows: new WorkflowLibrary(agentDir), workspaces,
-    // Tool writes sync inline. Atomic saves also emit several fs.watch events, whose unrelated scans
-    // otherwise compete with agent turns. Watch delivery and the fallback have their own sync tests.
-    fileSync: { watch: () => ({ close: () => undefined }), interval: () => () => undefined },
+    // Verify inline tool sync in isolation and with real watch/timer delivery, without wall-clock fires.
+    fileSync: delivery === "watch" ? {} : { watch: () => ({ close: () => undefined }), interval: () => () => undefined },
     now: () => now++,
     fire: (request) => Promise.resolve({ sessionId: "manual-session", cwd, runId: request.requestId }), publish: () => { hub.publishGlobal({ type: "triggers.changed" }); }, onError: (error) => { throw error; },
   });
@@ -64,8 +63,14 @@ it.each(["scope", "lifecycle"] as const)("hosts workflow_schedule %s through a r
       command = value;
       const previous = await readFile(caller.path, "utf8").catch(() => "");
       const count = provider.state.callCount;
+      const eventStart = hub.sessionEvents.length;
       await sessions.prompt(caller, "Schedule operation", undefined, undefined, { requestId: `tool-${String(request++)}` });
-      await vi.waitFor(async () => { expect(provider.state.callCount).toBeGreaterThan(count); expect((await sessions.status(caller)).isStreaming).toBe(false); }, { timeout: 5000, interval: 10 });
+      // isStreaming clears before end handlers settle. Avoid refreshing durable reads on every poll.
+      await vi.waitFor(() => {
+        expect(provider.state.callCount).toBeGreaterThan(count);
+        expect(hub.sessionEvents.slice(eventStart).some(({ sessionId, event }) => sessionId === caller.id && event.type === "pi.event" && event.eventType === "agent_settled")).toBe(true);
+      }, { timeout: 5000, interval: 10 });
+      expect((await sessions.status(caller)).isStreaming).toBe(false);
       return (await readFile(caller.path, "utf8")).slice(previous.length);
     };
     await invoke({ action: "create", trigger: { name: "Agent night", schedule: { kind: "daily", at: "03:00" }, action: { kind: "workflow", workflow: "agent-night", inputs: {} } } });

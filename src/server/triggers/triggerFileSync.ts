@@ -25,6 +25,7 @@ interface FileSyncStore {
 export interface TriggerFileSyncRuntime {
   watch?: (directory: string, changed: () => void) => { close(): void };
   interval?: (callback: () => void, milliseconds: number) => () => void;
+  timeout?: (callback: () => void, milliseconds: number) => () => void;
 }
 interface FileSyncOptions {
   files: TriggerFiles;
@@ -39,6 +40,9 @@ interface FileSyncOptions {
   runtime?: TriggerFileSyncRuntime;
 }
 
+interface PendingScan { kind: "queued" | "running"; dirty: boolean; force: boolean }
+type BackgroundScan = { kind: "idle" } | { kind: "debouncing"; cancel: () => void } | PendingScan;
+
 /** Reconciles user-owned files into the existing durable scheduling operations. No second scheduling engine. */
 export class TriggerFileSync {
   private queue: Promise<unknown> = Promise.resolve();
@@ -48,6 +52,8 @@ export class TriggerFileSync {
   private readonly states = new Map<string, TriggerFileState>();
   private readonly lastGoodHashes = new Map<string, string>();
   private skipped = new Set<string>();
+  private background: BackgroundScan = { kind: "idle" };
+  private syncedHashes = new Map<string, string>();
   constructor(private readonly options: FileSyncOptions) {}
   state(id: string): TriggerFileState | undefined { return this.states.get(id); }
   managed(id: string): boolean { return !this.skipped.has(id); }
@@ -61,10 +67,56 @@ export class TriggerFileSync {
   async start(): Promise<void> {
     await mkdir(this.options.files.directory, { recursive: true });
     await this.transaction(async () => { await this.migrate(); await this.scan(); });
-    const changed = () => { void this.transaction(() => this.scan()).catch(this.options.onError); };
+    const changed = () => { this.requestBackgroundScan(); };
     const interval = this.options.runtime?.interval ?? ((callback, ms) => { const timer = setInterval(callback, ms); timer.unref(); return () => { clearInterval(timer); }; });
-    this.cancelInterval = interval(() => { this.watch(changed); changed(); }, 60_000);
+    this.cancelInterval = interval(() => { this.watch(changed); this.requestBackgroundScan(true); }, 60_000);
     this.watch(changed);
+  }
+  private requestBackgroundScan(force = false): void {
+    if (this.closed) return;
+    const current = this.background;
+    if (current.kind === "queued" || current.kind === "running") {
+      current.dirty = true;
+      current.force ||= force;
+      return;
+    }
+    if (current.kind === "debouncing") current.cancel();
+    // The fallback must run even when continuous watch traffic never reaches a quiet period.
+    if (force) { this.enqueueBackgroundScan(true); return; }
+    const pending: Extract<BackgroundScan, { kind: "debouncing" }> = { kind: "debouncing", cancel: () => undefined };
+    this.background = pending;
+    const timeout = this.options.runtime?.timeout ?? ((callback, ms) => { const timer = setTimeout(callback, ms); timer.unref(); return () => { clearTimeout(timer); }; });
+    pending.cancel = timeout(() => {
+      if (!this.closed && this.background === pending) this.enqueueBackgroundScan(false);
+    }, 150);
+  }
+  private enqueueBackgroundScan(force: boolean): void {
+    const pending: PendingScan = { kind: "queued", dirty: false, force };
+    this.background = pending;
+    void this.transaction(async () => {
+      if (this.closed) { this.background = { kind: "idle" }; return; }
+      pending.kind = "running";
+      // Events received while queued are covered by this read; only events during it need a follow-up.
+      pending.dirty = false;
+      const forced = pending.force;
+      pending.force = false;
+      try {
+        let unchanged = false;
+        if (!forced) {
+          try {
+            const hashes = await this.options.files.hashes();
+            for (const id of this.skipped) hashes.delete(id);
+            unchanged = isDeepStrictEqual(hashes, this.syncedHashes);
+          } catch { /* A full scan reports file IO problems instead of treating a failed probe as an echo. */ }
+        }
+        if (!unchanged) await this.scan();
+      } finally { this.finishBackgroundScan(pending); }
+    }).catch(this.options.onError);
+  }
+  private finishBackgroundScan(pending: PendingScan): void {
+    this.background = { kind: "idle" };
+    // Events can mark the request dirty while its asynchronous reads are in progress.
+    if (!this.closed && pending.dirty) this.enqueueBackgroundScan(pending.force);
   }
   private watch(changed: () => void): void {
     if (this.watcher !== undefined || this.closed) return;
@@ -76,7 +128,12 @@ export class TriggerFileSync {
       }))(this.options.files.directory, changed);
     } catch (error) { this.options.onError(error); }
   }
-  async close(): Promise<void> { this.closed = true; this.watcher?.close(); this.cancelInterval?.(); await this.queue; }
+  async close(): Promise<void> {
+    this.closed = true;
+    this.watcher?.close(); this.cancelInterval?.();
+    if (this.background.kind === "debouncing") { this.background.cancel(); this.background = { kind: "idle" }; }
+    await this.queue;
+  }
   async validate(id: string, text: string): Promise<NonNullable<ReturnType<typeof parseScheduledWorkflow>>> {
     const parsed = parseScheduledWorkflow(id, this.options.files.path(id), text, this.options.timezone);
     if (parsed === undefined) throw new TriggerError("A scheduled workflow needs a schedule block", 400, "schedule");
@@ -114,6 +171,7 @@ export class TriggerFileSync {
   }
   async scan(created?: { id: string; creator: TriggerCreator }): Promise<void> {
     const before = JSON.stringify([...this.states]);
+    const hashes = new Map<string, string>();
     const records = await this.options.store.list();
     this.skipped = new Set((await this.options.store.migration()).skipped);
     const names = new Set([...await this.options.files.names(), ...records.filter((record) => this.managed(record.id)).map((record) => record.id)]);
@@ -127,6 +185,7 @@ export class TriggerFileSync {
         if (error instanceof TriggerError && error.status === 404) { await this.missing(id, current); continue; }
         this.invalid(id, error, current === undefined); continue;
       }
+      hashes.set(id, document.sha256);
       await this.options.files.observe(id, document.text, "outside");
       let parsed;
       try {
@@ -165,6 +224,7 @@ export class TriggerFileSync {
       this.states.set(id, { path: document.path, status: "ok", lastGoodAt: previous?.status === "ok" && this.lastGoodHashes.get(id) === document.sha256 ? previous.lastGoodAt ?? this.options.now() : this.options.now() });
       this.lastGoodHashes.set(id, document.sha256);
     }
+    this.syncedHashes = hashes;
     if (before !== JSON.stringify([...this.states])) this.options.publish();
   }
   private invalid(id: string, error: unknown, diagnose: boolean): void {
