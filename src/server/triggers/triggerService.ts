@@ -82,7 +82,7 @@ export class TriggerService {
       }
       return configured(request, signal);
     }, resolveProjects: (action) => this.targetCwds(action.targets), now: options.now ?? Date.now });
-    this.files = new TriggerFiles(options.workflows.globalDirectory, join(piWebDataDir(options.env), "triggers", "versions"), this.timezone, options.now ?? Date.now);
+    this.files = new TriggerFiles(options.workflows.globalDirectory, join(piWebDataDir(options.env), "triggers", "versions"), this.timezone, options.now ?? Date.now, options.onError);
     this.fileSync = new TriggerFileSync({ files: this.files, timezone: this.timezone, now: options.now ?? Date.now, workspaces: options.workspaces,
       requireWorkspace: (path) => this.requireWorkspace(path),
       requireGlobalWorkflow: async (record) => {

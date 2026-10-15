@@ -281,3 +281,15 @@ it("does not let an unchanged legacy file force scans for another file's inline 
   await host.triggers.close(); expect(host.scans).not.toHaveBeenCalled();
   expect(await readdir(join(root, "triggers", "versions", "own"))).toHaveLength(2);
 });
+
+it("starts and keeps valid versions when a prior archive contains partial JSON", async () => {
+  await writeFile(file(), scheduled()); const first = await open();
+  const original = (await first.versions("night")).versions; await first.close();
+  const corrupt = join(root, "triggers", "versions", "night", "corrupt.json"); await writeFile(corrupt, '{"id":');
+  const reopened = await open();
+  expect((await reopened.get("night")).state.kind).toBe("active");
+  expect((await reopened.versions("night")).versions).toEqual(original);
+  expect(errors.map(String).join("\n")).toContain("corrupt.json");
+  expect((await reopened.version("night", original[0]?.id ?? "")).text).toBe(scheduled());
+  await expect(reopened.version("night", "corrupt")).rejects.toMatchObject({ status: 404 });
+});
