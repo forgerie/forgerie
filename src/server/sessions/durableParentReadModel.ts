@@ -9,6 +9,7 @@ import type { ContextView, ConversationView, Cursor, EntryRecord, UsageState, Wa
 import { AgentDoc, InboxDoc, LiveDoc, UsageDoc } from "@earendil-works/pi-durable";
 import { ParentAsks, ParentAsksSchema, ParentResponse, ParentResponseSchema, Presentation, PresentationSchema, SessionName, SessionNameSchema } from "./durableParentDocuments.js";
 import { assertHistoryIdentity, SessionOpenError, type SessionOpenPageRequest, type SessionOpenResult } from "./sessionOpen.js";
+import { DurableLiveHistory } from "./durableLiveHistory.js";
 import { SessionBindings } from "./durableSessionBindings.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE } from "../../shared/apiTypes.js";
@@ -60,7 +61,16 @@ export interface DurableBrowserAttachment {
 
 /** Committed parent reads. No read, attachment, or replacement resumes the scheduler. */
 export class DurableParentReadModel {
+  private liveHistory: DurableLiveHistory | undefined;
   constructor(private readonly options: DurableParentReadModelOptions) {}
+
+  /** A publisher owns this subscription. Ordinary HTTP readers never retain a history cache. */
+  observeHistory(): () => void {
+    if (this.liveHistory !== undefined) throw new Error("Native history is already observed");
+    const history = new DurableLiveHistory(this.options.handle, (entry, envelope) => this.entryMessages(entry, nativePresentation(entry, envelope), true));
+    this.liveHistory = history;
+    return () => { history.close(); if (this.liveHistory === history) this.liveHistory = undefined; };
+  }
 
   /**
    * Preload document membership, then use only Tx reads on the serialized line.
@@ -90,16 +100,17 @@ export class DurableParentReadModel {
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
         const membershipRevision = retiredRequired;
-        const required = await Promise.all([
+        const cached = this.liveHistory?.value;
+        const required = cached === undefined ? await Promise.all([
           handle.harness.snapshot(LiveDoc, id, context), handle.harness.snapshot(InboxDoc, id, context),
           handle.harness.snapshot(AgentDoc, id, context), handle.harness.snapshot(UsageDoc, id, context),
           handle.harness.snapshot(ParentAsks, id, context), handle.harness.snapshot(ParentResponse, id, context),
           handle.harness.snapshot(SessionName, id, context),
-        ]);
+        ]) : [];
         if (required.some(value => value === undefined)) throw new Error("Native open requires initialized parent documents");
-        const bound = await handle.harness.snapshot(SessionBindings, context);
+        const bound = cached?.bound ?? (await handle.harness.snapshot(SessionBindings, context)) !== undefined;
         let cursor: Cursor | undefined;
-        do {
+        if (cached === undefined) do {
           const page = await handle.conversation.entries({ order: "ascending" }, SCAN_SIZE, cursor, context);
           for (const entry of page.items) {
             const key = String(entry.id);
@@ -110,31 +121,31 @@ export class DurableParentReadModel {
           cursor = page.next;
         } while (cursor !== undefined);
         const cut = await handle.conversation.commit(async tx => {
-          if (membershipRevision !== retiredRequired) return undefined;
+          if (membershipRevision !== retiredRequired || cached !== undefined && cached !== this.liveHistory?.value) return undefined;
           const before = hub.currentSeq(handle.address.sessionId);
           const entries: EntryRecord[] = [];
           let cursor: Cursor | undefined;
-          do {
+          if (cached === undefined) do {
             const page = await tx.scanEntries({ conversationId: id, order: "ascending" }, SCAN_SIZE, cursor);
             entries.push(...page.items); cursor = page.next;
           } while (cursor !== undefined);
           // No table reads may follow document acquisition (which can stage initialization).
-          if (bound !== undefined && (await tx.doc(SessionBindings)).sessions[handle.address.sessionId]?.conversationId !== id) {
+          if (bound && (await tx.doc(SessionBindings)).sessions[handle.address.sessionId]?.conversationId !== id) {
             throw new SessionOpenError("Session history changed during native open", 409, "HISTORY_CHANGED");
           }
           const live = await tx.doc(LiveDoc, id), inbox = await tx.doc(InboxDoc, id);
           const agent = await tx.doc(AgentDoc, id), usage = await tx.doc(UsageDoc, id);
           const asks = copyJson(await tx.doc(ParentAsks, id)), response = await tx.doc(ParentResponse, id), name = await tx.doc(SessionName, id);
           if (!Check(ParentAsksSchema, asks) || !Check(ParentResponseSchema, response) || !Check(SessionNameSchema, name)) throw new Error("Invalid native parent documents");
-          const envelopes = new Map<string, Static<typeof PresentationSchema>>();
-          for (const key of keys) {
+          const envelopes = cached?.envelopes ?? new Map<string, Static<typeof PresentationSchema>>();
+          for (const key of cached === undefined ? keys : []) {
             const document = await tx.doc(Presentation, id, key, null);
             if (!Check(PresentationSchema, document)) throw new Error("Invalid native presentation document");
             const detached = copyJson(document);
             if (!Check(PresentationSchema, detached)) throw new Error("Invalid detached native presentation");
             envelopes.set(key, detached);
           }
-          const messages = entries.flatMap(entry => this.entryMessages(entry, nativePresentation(entry, envelopes.get(String(entry.id))?.envelope), true));
+          const messages = cached?.messages ?? entries.flatMap(entry => this.entryMessages(entry, nativePresentation(entry, envelopes.get(String(entry.id))?.envelope), true));
           const seq = hub.currentSeq(handle.address.sessionId);
           const partial = live.generation?.message;
           const tools = (live.tools ?? []).filter(slot => projectBrowserSessionEvent({ type: "tool.start", toolName: slot.name, toolCallId: slot.callId, summary: "" }).type === "tool.start")
@@ -154,6 +165,7 @@ export class DurableParentReadModel {
               : response.intent === "nothing" ? { kind: "none" } : { kind: "needs-response", reason: response.intent === "questions" ? "reply" : response.intent } };
           if (asks.pending === undefined) delete status.pendingAsk;
           if (before !== hub.currentSeq(handle.address.sessionId)) return undefined;
+          if (cached === undefined) this.liveHistory?.seed(entries, envelopes, messages, bound);
           const historyId = `native:${handle.address.journalId}:${String(id)}`;
           assertHistoryIdentity(historyId, request.historyId);
           return structuredClone({ session: { id: handle.address.sessionId, cwd, ...(name.name === undefined ? {} : { name: name.name }) }, readPath: "native" as const, cut: "native" as const,

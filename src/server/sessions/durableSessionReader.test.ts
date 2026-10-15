@@ -13,9 +13,10 @@ import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { durableBrowserSnapshotSchema, type DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import { SessionEventHub, type RealtimeSocket } from "../realtime/sessionEventHub.js";
-import { initializeParentDocuments } from "./durableParentDocuments.js";
-import { DurableParentReadModel } from "./durableParentReadModel.js";
+import { initializeParentDocuments, Presentation } from "./durableParentDocuments.js";
+import { DurableParentReadModel, type DurableHostState } from "./durableParentReadModel.js";
 import { DurableSessionReader } from "./durableSessionReader.js";
+import type { SessionOpenResult } from "./sessionOpen.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { PiSessionService } from "./piSessionService.js";
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
@@ -367,4 +368,139 @@ it("publishes one seed and shuts down even when every native acquisition makes t
     expect(await opening).toBeDefined();
     expect(releases).toBe(1);
   } finally { keepDirty = false; await closing; await opening; await reader.close(); }
+});
+
+
+it("shares native tail acquisition across attachments and ignores SDK-only status and unrelated family commits", async () => {
+  const f = await fixture();
+  await f.conversation().commit(tx => initializeParentDocuments(tx, { id: f.conversation().id }), context);
+  const sibling = await f.harness().createConversation({ ownership: { kind: "ownerless" } }, context);
+  let acquisitions = 0, leases = 0;
+  const scans = vi.spyOn(f.conversation(), "entries");
+  const reader = new DurableSessionReader({
+    locate: () => Promise.resolve({ journalId: "family", databasePath: join(f.directory, "state.sqlite"), sessionId: "logical", conversationId: f.conversation().id }),
+    acquire: address => { leases++; return Promise.resolve({ address, harness: f.harness(), conversation: f.conversation(), release: () => { leases--; return Promise.resolve(); } }); },
+    readModel: handle => {
+      const model = new DurableParentReadModel({ handle, messageId: entry => String(entry.id) });
+      const open = model.open.bind(model);
+      model.open = (...args) => { acquisitions++; return open(...args); };
+      return model;
+    }, history: () => { throw new Error("Not read"); },
+  });
+  const frames: SessionOpenResult[][] = [[], [], []];
+  let host: DurableHostState = {};
+  try {
+    await Promise.all(frames.map(output => reader.attachOpen({ id: "logical", cwd: f.directory }, f.hub, cut => { output.push(cut); return Promise.resolve(); }, error => { throw error; }, () => host)));
+    expect(acquisitions).toBe(1); expect(leases).toBe(1);
+    const initialScans = scans.mock.calls.length;
+    await f.user("new committed input");
+    await vi.waitFor(() => { expect(frames.map(output => output.at(-1)?.page.total)).toEqual([1, 1, 1]); });
+    expect(acquisitions).toBe(2);
+    expect(frames[0]?.at(-1)).toBe(frames[2]?.at(-1));
+    expect(Object.isFrozen(frames[0]?.at(-1)?.page.messages[0])).toBe(true);
+    expect(scans).toHaveBeenCalledTimes(initialScans);
+    const baseline = acquisitions;
+    for (let index = 0; index < 3; index++) f.hub.publish("logical", { type: "status.update", status: { sessionId: "logical", isStreaming: index % 2 === 0, isCompacting: false, isBashRunning: false, pendingMessageCount: 0, queuedMessages: [], tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: 0 } });
+    await sibling.commit(tx => tx.appendEntry(UserEntry, sibling.id, { model: [{ role: "user", content: "unrelated", timestamp: 1 }] }), context);
+    await new Promise<void>(resolve => { setImmediate(resolve); });
+    expect(acquisitions).toBe(baseline);
+    host = { compaction: { isRunning: true, queuedMessages: [{ kind: "followUp", text: "host-owned queued prompt" }] } };
+    for (let index = 0; index < 3; index++) f.hub.publish("logical", { type: "status.update", status: { sessionId: "logical", isStreaming: false, isCompacting: false, isBashRunning: false, pendingMessageCount: 0, queuedMessages: [], tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: 0 } });
+    await vi.waitFor(() => { expect(frames.every(output => output.at(-1)?.status.isCompacting === true)).toBe(true); });
+    expect(acquisitions).toBe(baseline + 1);
+    expect(frames.map(output => output.at(-1)?.status.queuedMessages)).toEqual(Array.from({ length: 3 }, () => [{ kind: "followUp", text: "host-owned queued prompt" }]));
+    await f.conversation().commit(async tx => { (await tx.doc(LiveDoc, f.conversation().id)).generation = { attempt: 1, message: { role: "assistant", api: "faux", provider: "faux", model: "faux-1", stopReason: "stop", timestamp: 1,
+      usage: fauxAssistantMessage("").usage, content: [{ type: "text", text: "bounded partial" }] } }; }, context);
+    await vi.waitFor(() => { expect(frames.every(output => output.at(-1)?.snapshot.partial?.content === undefined ? false : JSON.stringify(output.at(-1)?.snapshot.partial?.content).includes("bounded partial"))).toBe(true); });
+    expect(acquisitions).toBe(baseline + 2);
+    expect(scans).toHaveBeenCalledTimes(initialScans);
+    await f.conversation().commit(async tx => {
+      const entry = await tx.appendEntry(UserEntry, f.conversation().id, { model: [{ role: "user", content: "committed custom content", timestamp: 2 }] });
+      (await tx.doc(Presentation, f.conversation().id, String(entry.id), null)).envelope = { type: "custom", customType: "native-notice", display: true };
+    }, context);
+    await vi.waitFor(() => { expect(frames.every(output => output.at(-1)?.page.messages.at(-1)?.role === "custom")).toBe(true); });
+    expect(scans).toHaveBeenCalledTimes(initialScans);
+    const full = await reader.open({ id: "logical", cwd: f.directory }, { limit: 50 }, f.hub, () => host);
+    expect(frames.every(output => JSON.stringify(output.at(-1)?.page) === JSON.stringify(full?.page))).toBe(true);
+  } finally { await reader.close(); }
+  expect(leases).toBe(0);
+});
+
+
+it("releases a native lease admitted while shutdown waits for acquisition", async () => {
+  const f = await fixture();
+  let admitted!: () => void, release!: () => void;
+  const acquiring = new Promise<void>(resolve => { admitted = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let releases = 0;
+  const sends = vi.fn(() => Promise.resolve());
+  const reader = new DurableSessionReader({
+    locate: () => Promise.resolve({ journalId: "family", databasePath: join(f.directory, "state.sqlite"), sessionId: "logical", conversationId: f.conversation().id }),
+    acquire: async address => { admitted(); await gate; return { address, harness: f.harness(), conversation: f.conversation(), release: () => { releases++; return Promise.resolve(); } }; },
+    readModel: () => { throw new Error("A shutdown admission must not read"); }, history: () => { throw new Error("Not read"); },
+  });
+  const opening = reader.attachOpen({ id: "logical", cwd: f.directory }, f.hub, sends, () => { /* No source has attached. */ });
+  const rejected = expect(opening).rejects.toThrow("reader is closed");
+  await acquiring;
+  const closing = reader.close(); release();
+  await closing; await rejected;
+  expect(sends).not.toHaveBeenCalled(); expect(releases).toBe(1);
+});
+
+
+it("keeps healthy native attachments current while another transport stalls and fails", async () => {
+  const f = await fixture();
+  await f.conversation().commit(tx => initializeParentDocuments(tx, { id: f.conversation().id }), context);
+  let leases = 0, acquisitions = 0, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const reader = new DurableSessionReader({
+    locate: () => Promise.resolve({ journalId: "family", databasePath: join(f.directory, "state.sqlite"), sessionId: "logical", conversationId: f.conversation().id }),
+    acquire: address => { leases++; return Promise.resolve({ address, harness: f.harness(), conversation: f.conversation(), release: () => { leases--; return Promise.resolve(); } }); },
+    readModel: handle => {
+      const model = new DurableParentReadModel({ handle, messageId: entry => String(entry.id) });
+      const open = model.open.bind(model);
+      model.open = (...args) => { acquisitions++; return open(...args); }; return model;
+    }, history: () => { throw new Error("Not read"); },
+  });
+  const healthy: SessionOpenResult[] = [];
+  const errors: string[] = [];
+  try {
+    const slow = await reader.attachOpen({ id: "logical", cwd: f.directory }, f.hub, async cut => {
+      if (cut.page.total === 0) return;
+      await gate; throw new Error("Configured stalled transport failure");
+    }, error => { errors.push(error.message); });
+    await reader.attachOpen({ id: "logical", cwd: f.directory }, f.hub, cut => { healthy.push(cut); return Promise.resolve(); }, error => { errors.push(error.message); });
+    await f.user("first progress");
+    await vi.waitFor(() => { expect(healthy.at(-1)?.page.total).toBe(1); });
+    await f.user("latest progress");
+    await vi.waitFor(() => { expect(healthy.at(-1)?.page.total).toBe(2); });
+    expect(acquisitions).toBe(3); expect(leases).toBe(1);
+    release();
+    expect(await slow?.closed).toMatchObject({ reason: "listener_error" });
+    expect(errors).toEqual(["Configured stalled transport failure"]);
+    await f.user("after failure");
+    await vi.waitFor(() => { expect(healthy.at(-1)?.page.total).toBe(3); });
+    expect(leases).toBe(1);
+  } finally { release(); await reader.close(); }
+  expect(leases).toBe(0);
+});
+
+
+it("releases admission without observers if obtaining initial host state fails", async () => {
+  const f = await fixture();
+  let observations = 0, leases = 0;
+  const subscribe = f.harness().subscribeCommits.bind(f.harness());
+  const observed = vi.spyOn(f.harness(), "subscribeCommits").mockImplementation(listener => {
+    observations++; const stop = subscribe(listener);
+    return () => { observations--; stop(); };
+  });
+  const reader = new DurableSessionReader({
+    locate: () => Promise.resolve({ journalId: "family", databasePath: join(f.directory, "state.sqlite"), sessionId: "logical", conversationId: f.conversation().id }),
+    acquire: address => { leases++; return Promise.resolve({ address, harness: f.harness(), conversation: f.conversation(), release: () => { leases--; return Promise.resolve(); } }); },
+    readModel: handle => new DurableParentReadModel({ handle, messageId: entry => String(entry.id) }), history: () => { throw new Error("Not read"); },
+  });
+  try {
+    await expect(reader.attachOpen({ id: "logical", cwd: f.directory }, f.hub, () => Promise.resolve(), () => { /* Admission fails before observation. */ }, () => { throw new Error("Host state unavailable"); })).rejects.toThrow("Host state unavailable");
+    expect(leases).toBe(0); expect(observations).toBe(0);
+  } finally { observed.mockRestore(); await reader.close(); }
 });
