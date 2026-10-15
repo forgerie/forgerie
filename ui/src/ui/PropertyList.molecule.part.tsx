@@ -10,3 +10,10 @@ export default function Fields() {
     <SettingsField label="Time">3:00 AM</SettingsField>
   </PropertyList>;
 }
+/** In a side panel: short labels beside their values. */
+export function Narrow() {
+  return <PropertyList label="Schedule" narrow>
+    <SettingsField label="Repeat">Every day</SettingsField>
+    <SettingsField label="Run late" hint="If Forgerie is off at 1:00 AM, the run starts when it is back, up to 6 hours late.">Up to 6 hours</SettingsField>
+  </PropertyList>;
+}

@@ -18,3 +18,5 @@ export function NoRuns() { return <TriggerStatus trigger={notes} clock={clock} p
 export function SeveralProjects() { return <TriggerStatus trigger={spreadNotes} clock={clock} projectName={projectLabel} starting={false} onPause={none} onResume={none} onOpenSession={none} />; }
 export function AllProjectsPartlyFailed() { return <TriggerStatus trigger={everywhere} clock={clock} projectName={projectLabel} starting={false} onPause={none} onResume={none} onOpenSession={none} />; }
 export function AllProjectsNarrow() { return <TriggerStatus trigger={everywhere} clock={clock} projectName={projectLabel} narrow starting={false} onPause={none} onResume={none} onOpenSession={none} />; }
+/** As a workflow file's head: the strip leads the last run, the projects stay in Runs, and no pause on the line. */
+export function AsHead() { return <TriggerStatus trigger={everywhere} clock={clock} projectName={projectLabel} variant="head" starting={false} onPause={none} onResume={none} onOpenSession={none} />; }

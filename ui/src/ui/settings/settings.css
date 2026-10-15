@@ -9,6 +9,10 @@
 /* A short page keeps its rows: the space above the column shrinks first. */
 .settings-shell[data-density="compact"] .settings-scroll { padding-block-start: var(--space-2); }
 .settings-column { container: settings / inline-size; max-inline-size: var(--thread-max-width); margin-inline: auto; }
+/* A document with a side panel: the reading measure plus the panel, so the text keeps its measure beside it. */
+.settings-shell[data-width="wide"] .settings-column { max-inline-size: 70rem; }
+/* Changes not saved yet: a dot after the title in the warn hue, named by its label. */
+.settings-title-mark { flex: none; inline-size: 0.45rem; block-size: 0.45rem; margin-inline-start: calc(-1 * var(--space-1)); border-radius: 50%; background: var(--diff-modify); }
 .settings-hint { margin: var(--space-3) 0; color: var(--muted-foreground); font-size: var(--small-text); }
 .settings-lede { margin: 0 0 var(--space-6); color: var(--muted-foreground); font-size: var(--small-text); line-height: var(--line-height); }
 .settings-lede code, .settings-hint code { font-family: var(--code-font); font-size: 0.92em; overflow-wrap: anywhere; }
@@ -83,13 +87,15 @@
 /* The row aligns to its top. The label fills the row up to one control's height and centres its words there, so beside a
    one-row value (a toggle, a box) its words sit on the value's centre line as before, and beside a taller value (a
    list of boxes, a wrapped group) they sit on the first row's centre line, not the middle of the whole value. */
-.agent-field-label { flex: 0 0 8rem; align-self: stretch; min-block-size: 2rem; max-block-size: var(--control-size); display: flex; align-items: center;
+.agent-field-label { flex: 0 0 var(--field-label-size, 8rem); align-self: stretch; min-block-size: 2rem; max-block-size: var(--control-size); display: flex; align-items: center;
   color: var(--muted-foreground); font-size: var(--small-text); }
-.agent-field-value { flex: 1 1 14rem; min-inline-size: 0; display: flex; align-items: center; min-block-size: 2rem; }
+.agent-field-value { flex: 1 1 var(--field-value-size, 14rem); min-inline-size: 0; display: flex; align-items: center; min-block-size: 2rem; }
 .agent-field-hint { flex: 1 1 100%; margin: var(--space-1) 0 0; color: color-mix(in oklab, var(--muted-foreground) 85%, transparent); font-size: var(--label-text); line-height: 1.45; }
 .agent-field[data-hint-tone="readable"] > .agent-field-hint { color: var(--muted-foreground); }
 .agent-field-problem { flex: 1 1 100%; margin: var(--space-1) 0 0; color: var(--destructive); font-size: var(--label-text); line-height: 1.45; }
-@container settings (min-width: 30rem) { .agent-field-hint, .agent-field-problem { padding-inline-start: calc(8rem + var(--space-4)); } }
+@container settings (min-width: 30rem) { .agent-field-hint, .agent-field-problem { padding-inline-start: calc(var(--field-label-size, 8rem) + var(--space-4)); } }
+/* In a list narrower than a label, the gap and a value (a side panel's), the label sits above the value, so the hint does not indent. */
+@container field-list (max-width: 15.49rem) { .agent-field-hint, .agent-field-problem { padding-inline-start: 0; } }
 .agent-model, .agent-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); inline-size: 100%; }
 .agent-field .model-trigger { flex: 0 1 auto; margin-inline-start: calc(-1 * var(--space-2)); color: var(--foreground); }
 .agent-field .model-trigger:disabled { opacity: 1; color: var(--foreground); }

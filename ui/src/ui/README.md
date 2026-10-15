@@ -11,13 +11,14 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions; an input such as a reply box can take the actions' place under the reason; a failed action's problem shows in the failure ink above them.
 - `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays, and a refusal may offer one follow-up (such as Create) to confirm in place.
 - `ValueList` (molecule): a short list of typed values: each in its own box with a Remove named for it, a problem under any box, an empty text, and an add action that turns off at a limit; focus moves into a new box and stays in the list after a removal.
-- `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
+- `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page; `plain` draws a second action beside it with a hairline.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place; inside a list it opens at window level, above the button when the room below is short.
 - `ChoiceList` (molecule): pick any number of rows; the legend counts the choice, a long list gets a search field, a chosen id with no row stays visible, and an optional every row on top chooses every row, including rows added later.
 - `ChoicePicker` (molecule): any number of choices as one chip, with words before it, that opens a `ChoiceList` at window level; the panel stays open while rows are checked and closes with Done, Escape, or a press outside.
 - `NestedRows` (molecule): a short list of `<li>` rows under the line or row they belong to, indented on a hairline.
 - `ListSection` (molecule): a titled list of `<li>` rows on a settings-style page, with an optional readout beside the title, an empty text, a control under the rows, and a note on where the items live. `placement="document"` lines it up under a document page's fields.
 - `ActionRow` (molecule): a list item that is not a link: name and status on one line, a detail under them, its commands at the end. `layout="head"` lines the commands up with the status; `"stacked"` puts the status under the name for a narrow row; `tone="quiet"` mutes a row that needs nothing; `below` takes the full width under it.
+- `DocumentTitle` (atom): a document's title in the title face, as the page's `h2`, with a standfirst under it, when the title is read rather than typed.
 - `TitleField` (atom): a document title typed in place, in the title face, with its standfirst under it.
 - `Lede` (atom): the one quiet paragraph that opens a page.
 - `FilterChip` (atom): a filter that is on, above the list it narrows, with a clear button; not drawn when no filter is on.
@@ -40,8 +41,8 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `TileStrip` (molecule): one row of tiles that keeps its height and scrolls sideways, with each failure in full below.
 - `SplitButton` (molecule): an action and the one setting that changes what it does, in one chip; the second half shows the setting in effect and opens its choices, each explained, at window level.
 - `NoticeBar` (molecule): a full-width bar that stops the reader until they choose: a message and its actions, in a plain or alert tone.
-- `CodeEditor` (molecule): an editable CodeMirror editor with line numbers, undo, Tab to indent, Ctrl/Cmd+S, and syntax colour from the file name; read-only, it still selects and copies.
-- `MarkdownEditor` (organism): a Markdown file formatted like a transcript reply and edited in place with Tiptap, front matter as a read-only block above it, Ctrl/Cmd+S, and an optional notice with one action. `useMarkdownView` picks Rich or Source for a file and says when Rich is read-only or off.
+- `CodeEditor` (molecule): an editable CodeMirror editor with line numbers, undo, Tab to indent, Ctrl/Cmd+S, and syntax colour from the file name; read-only, it still selects and copies; it can mark one line and open with the caret on a line.
+- `MarkdownEditor` (organism): a Markdown file formatted like a transcript reply and edited in place with Tiptap, front matter as a read-only block above it (or hidden, when the host shows it elsewhere), Ctrl/Cmd+S, and an optional notice with one action. `useMarkdownView` picks Rich or Source for a file and says when Rich is read-only or off.
 - `Diagram` (molecule): draws Mermaid source once it stops changing, keeps a readable scale by scrolling, and shows the source when it cannot draw.
 - `ClaimList` (molecule): shows findings tagged verified, inferred, opinion or unknown, with a text label and evidence under each.
 - `Disclosure` (molecule): hides supporting material behind a one-line summary, closed by default and uncontrolled so it stays open while text streams.
@@ -62,7 +63,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `ErrorBoundary` (atom): replaces children that throw while drawing with a fallback, so everything around them keeps working.
 - `LaneGrid` (molecule): named groups of measurement lanes on one set of columns, each group named by text or an icon, with optional captions, a marked block, trailing cells that span rows, a small action chip per block, a press on the whole block, an inline group whose one-reading blocks stand side by side as tokens, a group flag that tints its name or icon, a chosen block brought into view, and a roomy size.
 - `RiskBadge` (molecule): an outside opinion of an action's risk that may arrive late: low in muted ink (never a clearance), check in the warn ink, danger in the destructive ink, each with its own icon and word; `block` says the raised signals and the source as a wrapping sentence, `inline` ends a one-line row with icon and word and keeps the rest in its hover and screen-reader text.
-- `Consequence` (molecule): one consequence the reader must see before acting, set apart by a wash and an icon, plain or warn.
+- `Consequence` (molecule): one consequence the reader must see before acting, set apart by a wash and an icon, plain or warn, with optional quiet next steps that wrap.
 - `FloatingPanel` (atom): the surface of a window-level panel that scrolls inside the height it gets; its host places it, and it sits inside the window edges until then.
 - `OptionRow` (atom): one choice as a button: a name, a variant, a leading mark, short details (their own line, or the name's line giving way at the end), and a check on the choice in effect.
 - `OptionList` (molecule): choices in named groups with search, one status line and a foot command; rows take focus, or follow a text field's highlight.
@@ -97,21 +98,22 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `MarkStrip` (atom): past outcomes in a line, oldest first: a dot for one that went as planned, a square for a failure, a ring for one that never happened, a pulsing ring for one under way; past a limit the oldest fold into a count in the worst tone they hide.
 - `RecordRow` (molecule): one record as one press target: a trouble mark, a two-line title, a time slot, meta parts that truncate from the end (or wrap to a second line when narrow), a foot with an outcome strip and words, and an inline action and ⋯ above the press target.
 - `RecordGroup` (molecule): a counted group of records under a heading with a rule to the edge, opened and closed from the heading, its name in full ink when it wants the reader. `compact` takes less room above the heading in a short list.
-- `PropertyList` (molecule): a document's property rows between two rules, under its title.
+- `PropertyList` (molecule): a document's property rows between two rules, under its title; `narrow` gives short labels for a side panel.
 - `EmptyState` (molecule): an empty list as an invitation: an icon, a title, what goes here, and the action that adds the first one.
 - `LoadingLines` (atom): a first read in progress: pulsing bars of different lengths and one line that says what is being read.
 - `ReadoutLine` (molecule): one sentence about a state with the action that changes it at the line's end; the action wraps under the sentence first.
 - `TextButton` (atom): a quiet action drawn as words at the text's size, with a control-sized target, a danger tone, and a pressed state for a toggle.
 - `TimeField` (atom): a time of day as `HH:mm`, typed or picked with the browser's control in the reader's locale.
-- `OptionPicker` (molecule): one choice as a chip that opens searchable options at window level; a blocked option stays visible and says why.
+- `OptionPicker` (molecule): one choice as a chip that opens searchable options at window level; a blocked option stays visible and says why; `look="icon"` makes the chip an icon-only header control with a heading over its list.
 - `HeaderIcon` (atom): an icon-only header control, such as Close, muted until hovered, with a control-sized target and its label as name and tooltip.
 - `BackButton` (atom): a page header's way back, named for where it goes, divided from the title by a rule; a narrow header keeps only its chevron.
-- `PageSection` (molecule): a titled part of a document page: a small quiet heading set apart by the page's largest gap, then its content at full width, and a problem under it that describes the controls inside.
+- `PageSection` (molecule): a titled part of a document page: a small quiet heading set apart by the page's largest gap (or, in a side panel, a rule), one optional quiet action or toggle at the heading's end, then its content at full width, and a problem under it that describes the controls inside.
 - `SettingsInput` (atom): one typed settings value, using the existing Settings input style.
+- `DocumentRail` (template): a document with a side panel beside it from 46rem of its own width, and below that one column of head, panel between two rules, then the document; the page around it scrolls.
 - `SplitSheet` (organism): a modal sheet with a document and a rail beside it at 50rem and wider, one column that scrolls as one below that (the rail first or after the document), a lead above the document, a detail view that scrolls on its own in the document's place, and a foot in view at every size; pickers opened inside stay usable.
 - `MarkdownProse` (atom): a whole Markdown document outside a chat, drawn by the reply's own renderer with every block a reply gets.
 - `NumberedSections` (molecule): a document in sections whose headings carry the numbers of a list beside it, marked done or at work, added or removed; it brings a section into view on request and names the one being read.
-- `RouteList` (molecule): a process as a flat numbered list: steps with one line and the reader's own block, items with their blocks in a margin column, a control under an item, folding into blocks, pressable rows, remove buttons and controls between steps for editing.
+- `RouteList` (molecule): a process as a flat numbered list: steps with one line and the reader's own block, items with their blocks in a margin column, a control under an item, folding into blocks, pressable rows, remove buttons and controls between steps for editing; its head can hide under a heading that already names it.
 - `BlockRun` (atom): units of work as blocks on one line, in the tally's shape and tones, plus a solid live block for one that waits on the reader.
 - `DetailPane` (molecule): one item opened in a pane: a way back, title, status and actions, a bar of settings, a body that scrolls on its own, and a foot that stays in view.
 - `RuleBlock` (molecule): something to read before the text under it, marked by the decision card's rule in a tone, with a title, one quiet action, lines to take back one by one, content, and a note.

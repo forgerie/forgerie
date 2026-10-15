@@ -117,3 +117,7 @@ export function Lossy() {
     : <MarkdownEditor label="Read decomposition.md" text={DECOMPOSITION} readOnly onChange={() => undefined} onSave={() => undefined}
       notice={{ message: MARKDOWN_WORDS.lossy(changes), action: { label: MARKDOWN_WORDS.editSource, onPress: () => setSource(true) } }} />;
 }
+/** The host shows the front matter elsewhere, such as in a side panel: the body alone, and saving keeps the front matter. */
+export function FrontMatterHidden() {
+  return <MarkdownEditor label="Edit SKILL.md" text={SKILL} frontMatter="hidden" onChange={() => undefined} onSave={() => undefined} />;
+}

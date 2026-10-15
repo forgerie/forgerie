@@ -10,3 +10,8 @@ export default function Plain() {
 export function Warn() {
   return <Consequence tone="warn" icon={<HourglassIcon />}><p>The weekly reset does not move. It stays at <strong>Sat, Oct 10, 8:00 AM</strong>, so you have <strong>23h</strong> to use the refill.</p></Consequence>;
 }
+export function WithActions() {
+  return <Consequence tone="warn" icon={<HourglassIcon />} actions={[{ label: "Show line 5", onPress: () => undefined }, { label: "Pause until fixed", onPress: () => undefined }]}>
+    <p><strong>Line 5 of the file has an error.</strong> The time must look like "01:00".</p>
+  </Consequence>;
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createTriggersApi, runRefusedBeforeAdmission, TriggerRefusal } from "./triggersApi";
 import { mixedList, nightly } from "./fixtures/triggers";
+import { maintenance, maintenanceDocument, maintenanceVersions, versionList } from "./fixtures/triggerFiles";
 
 /** The client takes its fetch as an argument: the test hands it one that records each request. */
 function served(status: number, body: unknown) {
@@ -84,5 +85,32 @@ describe("the trigger routes", () => {
     expect(refusal).toMatchObject({ status: 400, field: "schedule.timezone", message: "Unknown time zone \"Mars/Olympus\"." });
     const off = await served(503, { error: "database is locked" }).api.list().catch((error: unknown) => error);
     expect(off).toMatchObject({ status: 503, message: "database is locked" });
+  });
+  it("reads and writes a trigger's workflow file and its versions on their routes", async () => {
+    const read = served(200, maintenanceDocument);
+    expect(await read.api.file("nightly-maintenance")).toEqual(maintenanceDocument);
+    const save = served(200, { trigger: maintenance, document: maintenanceDocument });
+    const body = { text: maintenanceDocument.text, baseSha256: maintenanceDocument.sha256, schedule: { at: "02:00", projects: "all" as const } };
+    expect(await save.api.saveFile("nightly-maintenance", body)).toEqual({ trigger: maintenance, document: maintenanceDocument });
+    const list = served(200, { versions: [...versionList, { id: "x" }] });
+    expect((await list.api.versions("nightly-maintenance")).versions.map((version) => version.id)).toEqual(["v3", "v2", "v1"]);
+    const one = served(200, maintenanceVersions[1]);
+    expect(await one.api.version("nightly-maintenance", "v2")).toEqual(maintenanceVersions[1]);
+    expect([...read.calls, ...save.calls, ...list.calls, ...one.calls]).toEqual([
+      { path: "/api/triggers/nightly-maintenance/file", method: "GET" },
+      { path: "/api/triggers/nightly-maintenance/file", method: "PUT", body },
+      { path: "/api/triggers/nightly-maintenance/versions", method: "GET" },
+      { path: "/api/triggers/nightly-maintenance/versions/v2", method: "GET" },
+    ]);
+  });
+  it("carries the line of a file that would not run, and only a whole line number", async () => {
+    const refused = await served(400, { error: "`at` must be a time.", field: "schedule.at", line: 5 }).api
+      .saveFile("nightly-maintenance", { text: "", baseSha256: "a".repeat(64) }).catch((error: unknown) => error);
+    expect(refused).toMatchObject({ status: 400, field: "schedule.at", line: 5, message: "`at` must be a time." });
+    const odd = await served(400, { error: "Bad.", line: "5" }).api.file("x").catch((error: unknown) => error);
+    expect(odd).toMatchObject({ status: 400, line: undefined });
+  });
+  it("refuses a file answer it cannot read instead of showing a part of it", async () => {
+    await expect(served(200, { path: "/p", text: "x" }).api.file("x")).rejects.toThrow("Forgerie sent a workflow file this app cannot read.");
   });
 });

@@ -38,9 +38,11 @@ const modelOf = (spec: string | undefined): SessionModel | undefined => {
  * projects and the workflow, the days and time in a zone, the model, and how
  * late a run may start. The workflow's inputs follow at full width. Each
  * problem shows under its field. A chosen workflow that the target projects do
- * not share stays chosen and says why at once.
+ * not share stays chosen and says why at once. In a workflow file's side
+ * panel (`placement="panel"`) the file is the workflow, so the form keeps only
+ * the schedule's fields, with short labels, and the panel shows the inputs.
  */
-export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, timezones, projectName, projects, workflows, listModels, locale }: {
+export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, timezones, projectName, projects, workflows, listModels, locale, placement = "page" }: {
   draft: TriggerDraft; onDraft: (draft: TriggerDraft) => void;
   problems: DraftProblems; disabled: boolean;
   /** The daemon host's zone, the default for a new schedule. */
@@ -52,7 +54,9 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
   workflows: WorkflowsLoad;
   listModels: (signal: AbortSignal) => Promise<SessionModel[]>;
   locale?: string | undefined;
+  placement?: "page" | "panel" | undefined;
 }) {
+  const panel = placement === "panel";
   const modelAnchor = useRef<HTMLDivElement>(null);
   const [modelOpen, setModelOpen] = useState<PickerOpen>();
   // The fixed list the reader had before All projects, so turning All off gives it back.
@@ -96,15 +100,15 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
   const lateChoices = RUN_LATE_CHOICES.includes(draft.grace as (typeof RUN_LATE_CHOICES)[number]) ? [...RUN_LATE_CHOICES] : [...RUN_LATE_CHOICES, draft.grace].sort((a, b) => a - b);
   // While a save is in flight every control is locked, so nothing typed during the request is lost when it lands.
   return <FormLock locked={disabled}>
-    <PropertyList label="Trigger settings">
-      <SettingsField label="Project" fieldId={fieldDomId("project")} hint={targeted ? targetHint(draft.targets) : undefined} problem={problems.project}>
+    <PropertyList label={panel ? "Schedule settings" : "Trigger settings"} narrow={panel}>
+      <SettingsField label={panel ? "Projects" : "Project"} fieldId={fieldDomId("project")} hint={targeted ? targetHint(draft.targets) : undefined} problem={problems.project}>
         <ChoicePicker label="Target projects" lead="Runs in" icon={<FolderIcon aria-hidden size={14} />} disabled={disabled}
           value={targetChip(draft.targets, projectName)} placeholder="Choose projects" title={targeted ? targetNames(draft.targets, projectName) : undefined}
           list={{ legend: projectsLegend, choices, chosen: [...fixedCwds(draft.targets)], missing: "Project no longer registered", search: "Find a project",
             onChange: chooseCwds,
             every: { label: "All projects", detail: "Every registered project, including projects added later.", on: draft.targets.kind === "all", onChange: chooseAll } }} />
       </SettingsField>
-      <SettingsField label="Workflow" fieldId={fieldDomId("workflow")} problem={problems.workflow ?? gap} hint={workflowHint}>
+      {panel ? null : <SettingsField label="Workflow" fieldId={fieldDomId("workflow")} problem={problems.workflow ?? gap} hint={workflowHint}>
         <OptionPicker label="Workflow" value={draft.workflow || undefined} placeholder="Choose a workflow" search="Find a workflow"
           icon={<WorkflowIcon aria-hidden size={14} />} disabled={disabled || !targeted} status={workflowStatus}
           options={[...listed.map((item) => ({ id: item.name, name: item.name, current: item.name === draft.workflow, blocked: item.kind === "script",
@@ -112,7 +116,7 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
           ...workflows.type === "ready" ? leftOut.map((name) => ({ id: name, name, current: name === draft.workflow, blocked: true,
             details: [gapShort(name, workflows.diagnostics, projectName) ?? "Not common to every target project"] })) : []]}
           onChoose={(name) => set({ workflow: name, inputs: {} })} />
-      </SettingsField>
+      </SettingsField>}
       <SettingsField label="Repeat">
         <ToggleGroup label="Repeat" value={draft.repeat} onChange={(repeat) => set({ repeat })}
           options={[{ value: "daily", label: "Every day" }, { value: "days", label: "Some days" }]} />
@@ -142,7 +146,7 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
           options={lateChoices.map((minutes) => ({ value: String(minutes), label: graceWords(minutes) }))} />
       </SettingsField>
     </PropertyList>
-    {fields.inputs.length > 0 || problems.inputs ? <PageSection title="Inputs" fieldId={fieldDomId("inputs")} problem={problems.inputs}>
+    {!panel && (fields.inputs.length > 0 || problems.inputs) ? <PageSection title="Inputs" fieldId={fieldDomId("inputs")} problem={problems.inputs}>
       <WorkflowInputFields inputs={fields.inputs} values={fields.values} onChange={(name, value) => set({ inputs: { ...draft.inputs, [name]: value } })} />
     </PageSection> : null}
   </FormLock>;

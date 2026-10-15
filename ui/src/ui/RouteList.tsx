@@ -91,10 +91,12 @@ const remove = (action: { label: string; onPress: () => void }) =>
  * in it, each with its blocks in a margin column. No boxes and no rules between steps; space separates them, and only
  * a row the reader points at or has open takes a wash. A step or an item with `onPress` is a button. A step can fold
  * its items into their blocks at its end. Between steps, `gap` can place a control, such as one that inserts a step.
- * With no steps, `empty` says so, and the gap before the first step can still add one.
+ * With no steps, `empty` says so, and the gap before the first step can still add one. Under a heading that already
+ * names it, `head="hidden"` leaves the label as the list's accessible name only; meta and action still show.
  */
-export function RouteList({ label, meta, action, steps, gap, empty }: {
+export function RouteList({ label, head = "shown", meta, action, steps, gap, empty }: {
   label: string;
+  head?: "shown" | "hidden" | undefined;
   /** A readout beside the label, such as a count. */
   meta?: ReactNode;
   /** One quiet action beside the label, such as a switch into editing. */
@@ -108,11 +110,11 @@ export function RouteList({ label, meta, action, steps, gap, empty }: {
   const slot = (after: string | undefined) => { const content = gap?.(after); return content === undefined || content === null || content === false
     ? null : <li className="route-list-gap">{content}</li>; };
   return <section className="route-list" aria-label={label}>
-    <div className="route-list-head">
-      <h3 className="route-list-label">{label}</h3>
+    {head === "shown" || meta !== undefined || action !== undefined ? <div className="route-list-head">
+      {head === "shown" ? <h3 className="route-list-label">{label}</h3> : null}
       {meta !== undefined && <span className="route-list-meta">{meta}</span>}
       {action !== undefined && <TextButton label={action.label} pressed={action.pressed} onPress={action.onPress} />}
-    </div>
+    </div> : null}
     {steps.length === 0 && empty !== undefined && <p className="route-list-empty">{empty}</p>}
     <ol className="route-list-steps" role="list">
       {slot(undefined)}

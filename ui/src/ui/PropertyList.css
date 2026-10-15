@@ -1,2 +1,6 @@
 /* The agent page's property block: a rule above and below, the rows' own rules between. */
 .property-list { margin-block: var(--space-6) 0; padding-block: var(--space-1); border-block: var(--hairline) solid var(--line); }
+/* In a side panel the section's rules frame the rows, and the labels take less of the row. The rows read these sizes,
+   and the list is their container, so a hint lines up under the value only while the label still fits beside it. */
+.property-list[data-narrow] { --field-label-size: 5.5rem; --field-value-size: 9rem; container: field-list / inline-size;
+  margin-block-start: 0; padding-block: 0; border-block: 0; }

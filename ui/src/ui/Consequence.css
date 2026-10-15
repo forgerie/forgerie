@@ -9,3 +9,5 @@
 .consequence-text { min-inline-size: 0; overflow-wrap: anywhere; }
 .consequence-text p { margin: 0; }
 .consequence-text strong { font-weight: 600; }
+/* Next steps: the words line up with the text above; each button's own padding is the gap between them. */
+.consequence-actions { display: flex; flex-wrap: wrap; gap: 0 var(--space-1); margin: var(--space-1) 0 0 calc(-1 * var(--space-2)); }
