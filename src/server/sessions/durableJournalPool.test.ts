@@ -93,3 +93,24 @@ it("borrows only a live execution owner and cannot reopen it after it stops, eve
     await expect(pool.acquireRead(owner.address, context)).rejects.toThrow("Active Durable read owner closed");
   } finally { await pool.close(context); await rm(directory, { recursive: true, force: true }); }
 });
+
+
+it("does not treat a sibling execution lease as ownership of a closed logical session", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "forgerie-family-owner-"));
+  const pool = new DurableJournalPool();
+  const options = { models: createModels(), registry: createRegistry() };
+  try {
+    const parent = await pool.acquire({ databasePath: join(directory, "state.sqlite"), sessionId: "parent", create: {} }, options, context);
+    const anchor = (await parent.conversation.entries({}, 1, undefined, context)).items[0];
+    if (anchor === undefined) throw new Error("Missing origin");
+    await parent.conversation.fork(anchor.id, { ownership: { kind: "ownerless" }, init: async (tx, id) => {
+      (await tx.doc(SessionBindings)).sessions["sibling"] = { conversationId: id, retained: [id] };
+    } }, context);
+    const sibling = await pool.acquire({ ...parent.address, sessionId: "sibling" }, options, context);
+    await parent.release(context);
+    await expect(pool.acquireRead(parent.address, context)).rejects.toThrow("Active Durable read owner closed");
+    const read = await pool.acquireRead(sibling.address, context);
+    expect(read.harness).toBe(sibling.harness);
+    await read.release(context); await sibling.release(context);
+  } finally { await pool.close(context); await rm(directory, { recursive: true, force: true }); }
+});

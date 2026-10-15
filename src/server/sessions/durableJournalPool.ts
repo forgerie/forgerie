@@ -21,7 +21,7 @@ interface AcquireOptions {
   candidate?: boolean;
   existingOnly?: boolean;
 }
-interface Family { storage: Storage; harness: Harness; ownership: DurableOwnership | undefined; leases: number; readLeases: number }
+interface Family { storage: Storage; harness: Harness; ownership: DurableOwnership | undefined; leases: number; executionLeases: Map<string, number> }
 
 /** Daemon-owned storage. A runtime lease never aborts or closes a sibling's work. */
 export class DurableJournalPool {
@@ -58,13 +58,13 @@ export class DurableJournalPool {
         let storage: Storage | undefined;
         try {
           storage = await openNodeSqliteStorage(ownership.databasePath);
-          family = { storage, harness: await Harness.open(storage, options, context), ownership, leases: 0, readLeases: 0 };
+          family = { storage, harness: await Harness.open(storage, options, context), ownership, leases: 0, executionLeases: new Map() };
           this.families.set(path, family);
         } catch (error) { await storage?.close(BACKGROUND_CONTEXT); await ownership.release(); throw error; }
       }
       try {
         family.ownership?.assertOwned();
-        if (request.existingOnly === true && family.leases === family.readLeases) throw new Error("Active Durable read owner closed; retry session routing");
+        if (request.existingOnly === true && (family.executionLeases.get(request.sessionId) ?? 0) === 0) throw new Error("Active Durable read owner closed; retry session routing");
         const bindings = await family.harness.snapshot(SessionBindings, context);
         if (bindings === undefined && request.create !== undefined) {
           const journalId = request.journalId ?? randomUUID();
@@ -93,7 +93,7 @@ export class DurableJournalPool {
         const conversation = await family.harness.conversation(id, context);
         if (conversation === undefined) throw new Error("Missing bound Durable conversation");
         family.leases++;
-        if (request.existingOnly === true) family.readLeases++;
+        if (request.existingOnly !== true) family.executionLeases.set(request.sessionId, (family.executionLeases.get(request.sessionId) ?? 0) + 1);
         const address: DurableSessionAddress = { databasePath: family.ownership?.databasePath ?? path, journalId: state.journalId, sessionId: request.sessionId, conversationId: id };
         let released = false;
         return { address, harness: family.harness, conversation, release: (cleanupContext) => this.serialize(async () => {
@@ -101,7 +101,11 @@ export class DurableJournalPool {
           released = true;
           const current = this.families.get(path);
           if (current === undefined) return;
-          if (request.existingOnly === true) current.readLeases--;
+          if (request.existingOnly !== true) {
+            const owners = (current.executionLeases.get(request.sessionId) ?? 1) - 1;
+            if (owners === 0) current.executionLeases.delete(request.sessionId);
+            else current.executionLeases.set(request.sessionId, owners);
+          }
           if (--current.leases === 0) await this.closeFamily(path, current, cleanupContext);
         }) };
       } catch (error) {
@@ -125,7 +129,7 @@ export class DurableJournalPool {
       } });
       await this.serialize(() => {
         if (this.stopped) throw new Error("Durable journal pool is closed");
-        this.families.set(databasePath, { storage, harness, ownership: undefined, leases: 0, readLeases: 0 });
+        this.families.set(databasePath, { storage, harness, ownership: undefined, leases: 0, executionLeases: new Map() });
         return Promise.resolve();
       });
       return await this.acquire({ databasePath, sessionId, journalId }, options, context);
