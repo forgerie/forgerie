@@ -1,5 +1,28 @@
 # Verification and limits
 
+## Reader bookmarks during late media growth
+
+A kept chat must hold the message being read after its diagrams finish drawing, not just on the first return frame. The same rule applies to late image and code-block growth in a visible chat. `useReaderAnchor` records the first message intersecting the transcript and its offset when the reader scrolls. A content ResizeObserver restores that offset before paint. It yields if another controller, native anchoring, or the reader has already changed scrollTop. At the bottom it leaves scrolling to assistant-ui. Activity disconnects the observer while hidden and captures a fresh bookmark on return. The bookmark keeps its original fractional offset through correction scroll events, so rounding cannot accumulate.
+
+### Cause checked in Chromium 146
+
+The stricter fast-open check failed before this fix on `ae8b8f65`: the same connected message moved from -231.1875 to -73.765625 CSS px after six diagrams drew. scrollTop stayed at 8930. The first return frame had no movement. Each earlier diagram grew by about 31.5 px.
+
+The source-node swap is a growth trigger, not the reason anchoring fails. In the unmodified app, inserting a 100 px block above the reader, without removing any existing node, also moved the message by 100 px. No application scrollTo ran. A Blink debug trace found a `LayoutText #text` anchor, computed `[0 100]`, and entered `ScrollAnchor::Adjust`, but did not apply a `new_offset`. Changing only `.session-shell` from `container-type: size` to `inline-size` restored the adjustment: scrollTop 2100 -> 2200, with no message movement. Returning to `size` reproduced the failure. Blurring focus, excluding the composer from anchoring, and removing the flex layout did not restore it.
+
+This isolates native anchoring suppression in this app's size-container layout, rather than a missing anchor node. The Chromium 146 `ScrollAnchor::Adjust` source discards a nonzero adjustment when `scroll_anchor_disabling_style_changed_` is set; the trace is consistent with that path. The exact Blink style invalidation that sets the flag is not proven. A separate, simple size-container page does anchor, so this is not a claim that all size containers disable anchoring.
+
+### Choice, cost, and checks
+
+The fix retains the existing layout and all height queries. Dropping the size container would change height adaptation. Reserving diagram size needs the draw result and does not cover other late media. A stable diagram source node cannot fix the insertion-only failure. A local resize-time bookmark therefore supplies the missing reader behavior without changing Diagram or duplicating assistant-ui's tail/prepend intent.
+
+Cost: one ResizeObserver and one passive scroll listener per visible Thread, with a scan of loaded message roots on reader scroll. Hidden screens have neither. This is message-level anchoring, not word-level anchoring within a changing message. Chromium scroll rounding can leave up to half a CSS pixel. Geometry is checked in Chromium, not happy-dom or physical devices.
+
+- `fast-chat-open-acceptance.mjs` keeps its first-frame and <=1 px assertions, waits at least 1.5 s and until every diagram has drawn, then checks the same connected bookmark again. It also checks a real wheel gesture followed by image and code growth in a visible screen.
+- `finished-messages-acceptance.mjs open` checks tail following through late draws in the built app.
+- `load-earlier-acceptance.mjs all` checks prepend anchoring during late draws and streaming at all four Fold postures and desktop, plus search, accessibility, and the paging states.
+- Seven happy-dom tests check scroll ownership, user scrolling before its event, fractional rounding, and Activity effect cleanup. They do not prove layout.
+
 ## Session search (browser side)
 
 Search is an icon in the session list's header, beside New session (issue #37). Pressing it opens the search box in the header's place, in the same row, so the list loses no height to it. Ctrl+K (Cmd+K on a Mac) reaches the box from anywhere and opens the list first; `/` reaches it from anywhere but a text field. The box stays open while it holds a query, wherever focus goes; an empty box closes when focus leaves it, and the back arrow closes it and clears the query. A query with no term of 3 or more characters narrows the list by title, archived sessions included, and says how to search messages. A longer query replaces the list with hits from `GET /api/sessions/search`. Opening any hit reads the session's `search-matches` first, because a hit's `offBranch` dates from indexing: the hit's own `passage.entryId` in that answer decides. On the branch, the thread marks the message, scrolls to it, and a match bar steps through the matches; off it, the history tree opens on the entry, through `/tree` once a writable session is idle, or through `GET /api/sessions/:id/tree` in a read-only session, where Continue and Fork stay disabled. An entry the answer does not hold is reported in the match bar; no other passage stands in for it. A group with no project folder searches nothing and asks nothing. Escape on the box or its hits clears a typed query; Escape on an empty box closes the box, and only the next Escape closes the list. The query and its hits live in `useSessionSearch`, called by `app/App.binding.tsx` above the layout switch.

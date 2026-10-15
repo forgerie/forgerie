@@ -21,6 +21,7 @@ import type { DialogBinding } from "./DialogLayer";
 import type { NotesBinding } from "./NoteTray";
 import type { ComposerSessionKeys } from "./useComposerKeyboard";
 import type { EarlierHistory } from "../historyPaging";
+import { useReaderAnchor } from "./useReaderAnchor";
 
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode. `working` says what a draft can
@@ -72,6 +73,7 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
     SystemMessage: hasArtifact ? () => <SystemMessage artifact={artifactView} /> : SystemMessage }), [hasArtifact, artifactView, fileLinks]);
   const linkScope = useMemo(() => linkBase === undefined ? undefined : { base: linkBase, error: linkError, openFile: onOpenFile }, [linkBase, linkError, onOpenFile]);
   const column = useRef<HTMLDivElement>(null);
+  useReaderAnchor(column);
   const earlierError = useId();
   // The first reveal lands as the thread opens; a later key is a step from one marked message to the next.
   const revealed = useRef<string | undefined>(undefined);

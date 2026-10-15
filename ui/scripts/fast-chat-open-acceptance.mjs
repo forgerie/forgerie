@@ -119,6 +119,43 @@ try {
   result.bookmarkRequests=result.requests.slice(bookmarkRequestStart).filter(request=>request.at<=result.bookmarkAfter.paintAt);
   assert.equal(result.bookmarkAfter.id,result.bookmarkBefore.id);assert.ok(result.bookmarkAfter.sameNode);
   assert.ok(Math.abs(result.bookmarkAfter.y-result.bookmarkBefore.y)<=1,"kept bookmark moved more than one CSS pixel");assert.deepEqual(result.bookmarkRequests,[]);
+  // Effects restart when Activity shows a kept screen. Do not stop at the first
+  // frame: diagrams can replace their source and grow only after that frame.
+  await sleep(1500);
+  await until(`(()=>{const v=[...document.querySelectorAll('.transcript')].find(node=>node.getBoundingClientRect().width>0);return v.querySelectorAll('.diagram').length>0 && !v.querySelector('.diagram:not([data-drawing="drawn"])');})()`);
+  result.bookmarkSettled = await evaluate(cdp, `(()=>{
+    const viewport=[...document.querySelectorAll('.transcript')].find(node=>node.getBoundingClientRect().width>0);
+    const node=window.__keptBookmark;
+    return {sameNode:node?.isConnected===true,y:node.getBoundingClientRect().top-viewport.getBoundingClientRect().top,scrollTop:viewport.scrollTop,drawn:viewport.querySelectorAll('.diagram[data-drawing="drawn"]').length};
+  })()`);
+  assert.ok(result.bookmarkSettled.sameNode);
+  assert.ok(Math.abs(result.bookmarkSettled.y-result.bookmarkBefore.y)<=1,"settled kept bookmark moved more than one CSS pixel");
+  // The same contract holds in a visible screen, after a reader's own scroll,
+  // for late image loading and a code block changing height (not just Mermaid).
+  const readerScrollBefore=await evaluate(cdp, `[...document.querySelectorAll('.transcript')].find(node=>node.getBoundingClientRect().width>0).scrollTop`);
+  await cdp.send("Input.dispatchMouseEvent", {type:"mouseWheel",x:1000,y:400,deltaX:0,deltaY:-73});
+  await sleep(250);
+  result.readerScroll=await evaluate(cdp, `[...document.querySelectorAll('.transcript')].find(node=>node.getBoundingClientRect().width>0).scrollTop`);
+  assert.ok(Math.abs(readerScrollBefore-result.readerScroll-73)<=1,"the reader's wheel scroll must not be undone");
+  result.visibleGrowth = await evaluate(cdp, `(async()=>{
+    const viewport=[...document.querySelectorAll('.transcript')].find(node=>node.getBoundingClientRect().width>0);
+    const node=window.__keptBookmark;
+    const frame=()=>new Promise(done=>requestAnimationFrame(done));
+    const y=()=>node.getBoundingClientRect().top-viewport.getBoundingClientRect().top;
+    const before=y(),scrollTop=viewport.scrollTop;
+    const above=viewport.querySelector('.message-assistant');
+    const image=new Image();image.alt='';image.style.cssText='display:block;width:1px';above.append(image);
+    await new Promise((loaded,failed)=>{image.onload=loaded;image.onerror=failed;image.src='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="137"/>');});
+    await frame();await frame();
+    const afterImage=y();
+    const code=above.querySelector('.code-body');
+    code.style.minHeight=(code.getBoundingClientRect().height+63)+'px';
+    await frame();await frame();
+    return {before,afterImage,afterCode:y(),scrollTop,afterScrollTop:viewport.scrollTop};
+  })()`);
+  assert.ok(Math.abs(result.visibleGrowth.afterImage-result.visibleGrowth.before)<=1,"visible reader moved after image loading");
+  assert.ok(Math.abs(result.visibleGrowth.afterCode-result.visibleGrowth.before)<=1,"visible reader moved after code growth");
+  assert.ok(Math.abs(result.visibleGrowth.afterScrollTop-result.visibleGrowth.scrollTop-200)<=1,"late media must anchor, not undo the reader's scroll");
   await evaluate(cdp, `(()=>{const v=[...document.querySelectorAll('.transcript')].find(node=>node.getBoundingClientRect().width>0);v.scrollTop=v.scrollHeight;return true;})()`);
   await open("streaming", false, "Readable streaming last turn.");
   await open("huge-2", true);
