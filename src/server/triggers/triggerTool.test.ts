@@ -41,7 +41,12 @@ it.each(["scope", "lifecycle"] as const)("hosts workflow_schedule %s through a r
   const hub = new CapturingSessionEventHub();
   const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] });
   const sessions = new PiSessionService(hub, { agentDir, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore(), triggers: () => triggers });
+  let now = Date.parse("2026-10-13T00:00:00Z");
   const triggers = await TriggerService.open({ env: { PI_WEB_DATA_DIR: root }, workflows: new WorkflowLibrary(agentDir), workspaces,
+    // Tool writes sync inline. Atomic saves also emit several fs.watch events, whose unrelated scans
+    // otherwise compete with agent turns. Watch delivery and the fallback have their own sync tests.
+    fileSync: { watch: () => ({ close: () => undefined }), interval: () => () => undefined },
+    now: () => now++,
     fire: (request) => Promise.resolve({ sessionId: "manual-session", cwd, runId: request.requestId }), publish: () => { hub.publishGlobal({ type: "triggers.changed" }); }, onError: (error) => { throw error; },
   });
   try {
