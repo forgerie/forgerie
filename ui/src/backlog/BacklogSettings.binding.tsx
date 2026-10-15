@@ -7,7 +7,7 @@ import { BacklogSettingsRefusal, type BacklogSettingsApi, type BacklogSettingsCa
 import { BacklogSettingsList } from "./BacklogSettingsList";
 import { BacklogProjectSettings } from "./BacklogProjectSettings";
 import { BacklogSourceSettings, NO_DESTINATION, type SourceDraft, type SourceProblems } from "./BacklogSourceSettings";
-import { readBacklogSettingsPlace } from "./backlogSettingsModel";
+import { readBacklogSettingsPlace, trustedBotProblems, trustedBotsToSend } from "./backlogSettingsModel";
 type Load = { type: "loading" } | { type: "failed"; message: string } | { type: "ready"; value: BacklogSettingsCatalog };
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 /** A project save's 409 is always a newer save. A source's 409 may also be an overlap, and the server's words say which. */
@@ -89,11 +89,20 @@ function ProjectEditorBinding({ entry, name, back, close, busy, error, onSave, o
   const [providers, setProviders] = useState<("markdown" | "github")[]>((entry.backlog.providers ?? ["markdown"]).filter((p): p is "markdown" | "github" => p === "markdown" || p === "github"));
   const [repo, setRepo] = useState(entry.backlog.github?.repo ?? "");
   const [trusted, setTrusted] = useState(entry.backlog.github?.authors !== "all");
+  const [bots, setBots] = useState<string[]>(entry.backlog.github?.trustedBots ?? []);
+  const github = providers.includes("github");
+  // The bots field shows only while GitHub lists trusted authors only, so only then can its problems hold Save.
+  const botProblems = trustedBotProblems(bots);
+  const botsShown = github && trusted;
+  // The list is sent as it is when trusted-only is off: with all authors listed it changes nothing, and turning
+  // trusted-only back on finds it again. A row with a problem is never sent; while the field is hidden, it does not
+  // hold Save either, because the reader cannot see it. An empty list is left out.
+  const trustedBots = trustedBotsToSend(bots);
   const backlog: BacklogConfig = { ...(entry.backlog.dir === undefined ? {} : { dir: entry.backlog.dir }), providers,
-    ...(providers.includes("github") ? { github: { ...(repo.trim() ? { repo: repo.trim() } : {}), authors: trusted ? "trusted" : "all" } } : {}) };
-  const valid = providers.length > 0 && Check(BacklogConfigSchema, backlog);
+    ...(github ? { github: { ...(repo.trim() ? { repo: repo.trim() } : {}), authors: trusted ? "trusted" : "all", ...(trustedBots.length ? { trustedBots } : {}) } } : {}) };
+  const valid = providers.length > 0 && Check(BacklogConfigSchema, backlog) && !(botsShown && botProblems.some(Boolean));
   return <BacklogProjectSettings entry={entry} name={name} back={back} close={close} busy={busy} error={error} valid={valid}
     providers={providers} onSources={(sources) => setProviders(sources.filter((p): p is "markdown" | "github" => p === "markdown" || p === "github"))}
-    repo={repo} onRepo={setRepo} trusted={trusted} onTrusted={setTrusted}
+    repo={repo} onRepo={setRepo} trusted={trusted} onTrusted={setTrusted} bots={bots} botProblems={botProblems} onBots={setBots}
     onSave={() => onSave(backlog)} onRemove={onRemove} onReload={onReload} />;
 }

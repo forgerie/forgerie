@@ -32,6 +32,9 @@ export const overlapping = [
 
 const markdownProject: BacklogProjectSettings = { projectId: projects[0]!.id, source: "default", backlog: { providers: ["markdown"] } };
 const githubProject: BacklogProjectSettings = { projectId: projects[1]!.id, source: "forgerie", revision: 2, backlog: { providers: ["markdown", "github"], github: { authors: "trusted" } } };
+/** A GitHub project that lists trusted authors only, and three review bots whose text still reaches the agent. */
+export const trustedBotsProject: BacklogProjectSettings = { projectId: projects[1]!.id, source: "forgerie", revision: 3,
+  backlog: { providers: ["markdown", "github"], github: { authors: "trusted", trustedBots: ["coderabbitai[bot]", "sourcery-ai[bot]", "copilot-pull-request-reviewer[bot]"] } } };
 /** A project whose repo file still has an Azure DevOps section, which Forgerie no longer reads. */
 export const retiredAzureProject: BacklogProjectSettings = { projectId: projects[2]!.id, source: "repo-file", backlog: { providers: ["markdown"] },
   warnings: ["This repository's .forgerie/config.json has an Azure DevOps section. Forgerie now reads Azure boards from Settings → Backlog → Sources."] };
