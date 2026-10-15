@@ -115,3 +115,5 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `DetailPane` (molecule): one item opened in a pane: a way back, title, status and actions, a bar of settings, a body that scrolls on its own, and a foot that stays in view.
 - `RuleBlock` (molecule): something to read before the text under it, marked by the decision card's rule in a tone, with a title, one quiet action, lines to take back one by one, content, and a note.
 - `TermList` (atom): a few named values in two aligned columns, each value cut to two lines.
+- `SecretEdit` (molecule): a write-only password draft with a public status, separate save and remove actions, and container-wrapping controls; it never receives the saved value.
+- `SecretSettingsField` (molecule): a write-only settings row with injected public status reads and secret writes; it clears drafts and keeps server error text out of the page.

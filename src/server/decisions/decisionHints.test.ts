@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -15,7 +16,7 @@ describe("decision hint credentials and runtime wiring", () => {
       await writeFile(path, JSON.stringify({ plugins: { "decision-hints": { enabled: true, settings: { gateway_url: "https://gateway.example" } } } }));
       const env = { PI_WEB_CONFIG: path, DECISION_GATEWAY_API_KEY: "private-test-key", PATH: "/usr/bin" };
       const captured = { ...env }; let authorization: string | null = null;
-      const hints = createDecisionHints({ env: captured, fetch: (_url, init) => {
+      const hints = createDecisionHints({ env: captured, agentDir: root, fetch: (_url, init) => {
         authorization = new Headers(init?.headers).get("authorization");
         return Promise.resolve(Response.json({ model: "answering-model", answers: { attention: { type: "noul", noul: 0.6 } } }));
       } });
@@ -28,13 +29,13 @@ describe("decision hint credentials and runtime wiring", () => {
       const runtime = await getPiWebRuntime({ request: () => Promise.resolve({ statusCode: 200, body: JSON.stringify({
         component: "sessiond", label: "Session daemon", available: true, capabilities: [], decisionHints: { ...hints.status(), apiKey: "must-be-dropped" },
       }) }) });
-      expect(runtime.components.sessiond.decisionHints).toEqual({ keyPresent: true });
+      expect(runtime.components.sessiond.decisionHints).toEqual({ keyPresent: true, source: "environment" });
       expect(JSON.stringify(runtime)).not.toMatch(/private-test-key|must-be-dropped|apiKey/);
       await writeFile(path, JSON.stringify({ plugins: { "decision-hints": { enabled: false } } }));
       expect(await hints.client.ask({ model: "fast", state: "reply", questions: { attention: { type: "noul", instructions: "Needs attention?" } } })).toBeUndefined();
     } finally { await rm(root, { recursive: true, force: true }); }
   });
   it.each([undefined, "", "  "])("reports no key for %j", (value) => {
-    expect(createDecisionHints({ env: value === undefined ? {} : { DECISION_GATEWAY_API_KEY: value } }).status()).toEqual({ keyPresent: false });
+    expect(createDecisionHints({ agentDir: join(tmpdir(), randomUUID()), env: value === undefined ? {} : { DECISION_GATEWAY_API_KEY: value } }).status()).toEqual({ keyPresent: false, source: "none" });
   });
 });

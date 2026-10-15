@@ -68,6 +68,7 @@ Settings writes desired configuration through `/api/config`. Retired `allowedHos
 | `PI_WEB_DURABLE_CHILDREN` | Durable child-agent tool override. |
 | `PI_WEB_OFFLINE`, `PI_OFFLINE` | Disable background network work when set to any non-empty value. |
 | `FORGERIE_WHISPER_STT_WORKER` | Absolute path to the dictation worker. |
+| `DECISION_GATEWAY_API_KEY` | Sessiond-only Decision hints gateway key. A non-empty value overrides the Settings key file; Settings cannot replace or remove it. |
 | `FORGERIE_SPEECH_ALLOWED_HOSTS` | Explicit comma-separated host allowlist for speech requests. |
 
 Feature overrides enable a tool for `1` or case-insensitive `true`. Every other non-empty value disables it. An unset or empty value leaves the file setting in control.
@@ -198,6 +199,26 @@ Keep connection settings in the active agent profile's `cliproxyapi.json`, or se
 Forgerie excludes other copies from Pi package settings, explicit extension paths, and auto-discovered extension folders before their factories run. It reports a warning for a different copy. Existing settings files and the terminal Pi profile stay unchanged. To share the bundled version with terminal Pi, use the package path named in the warning.
 
 Restart the session daemon after a Forgerie upgrade changes the bundled provider. Changing connection settings also needs a restart because the shared provider baseline is fixed at daemon startup.
+
+## Decision hints gateway key
+
+Use **Settings → Plugins → Decision hints → Gateway key** to save, replace or
+remove the key. Sessiond stores it in the active agent profile's
+`decision-gateway.json` as `{ "apiKey": "…" }`, beside `auth.json` and
+`cliproxyapi.json`. The file is mode `0600`, written through a private temporary
+file and atomic rename. It is never part of the browser-readable config or plugin
+settings. A desired `agent.dir` change does not redirect the write.
+
+A non-empty `DECISION_GATEWAY_API_KEY` in sessiond's environment wins over the file.
+Settings reports the source and refuses changes while this override is active.
+File edits apply to the next gateway request without a restart. Service environment
+changes still need a sessiond restart, since a running process cannot acquire them.
+With neither source set, requests have no `Authorization` header. Status exposes
+only presence and source, never the saved key or a fingerprint.
+
+Agent bash runs as the same Unix user and can read profile credential files.
+Use the scrubbed environment variable instead, and remove the key file, if agents
+must not read this key. See [Decision hints security costs](decision-hints.md#gateway-key).
 
 ## Project settings and worktree hooks
 

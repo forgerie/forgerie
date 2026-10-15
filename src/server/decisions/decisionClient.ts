@@ -59,7 +59,7 @@ function matchesQuestions(response: DecisionAnswers, request: DecisionRequest): 
  */
 export function createDecisionClient(options: {
   readConfig: () => DecisionClientConfig;
-  apiKey?: string;
+  readApiKey?: () => string | undefined;
   timeoutMs?: number;
   fetch?: typeof fetch;
 }): DecisionClient {
@@ -72,9 +72,10 @@ export function createDecisionClient(options: {
       url.pathname = `${url.pathname.replace(/\/+$/u, "")}/v1/systemone`;
       const parsedRequest = requestSchema.safeParse(request);
       if (!parsedRequest.success) return undefined;
+      const apiKey = options.readApiKey?.();
       const response = await (options.fetch ?? fetch)(url, {
         method: "POST", redirect: "error", signal: AbortSignal.timeout(options.timeoutMs ?? 2000),
-        headers: { "content-type": "application/json", ...(options.apiKey === undefined || options.apiKey.trim() === "" ? {} : { authorization: `Bearer ${options.apiKey}` }) },
+        headers: { "content-type": "application/json", ...(apiKey === undefined || apiKey.trim() === "" ? {} : { authorization: `Bearer ${apiKey}` }) },
         body: JSON.stringify(parsedRequest.data),
       });
       if (!response.ok) { await response.body?.cancel(); return undefined; }

@@ -1,7 +1,7 @@
 import "./SettingsInput.css";
 /** A typed settings value using the input style shared by Settings pages. */
 export function SettingsInput({ label, value, onChange, disabled = false, type = "text", required = false, placeholder, choices }: {
-  label: string; value: string; onChange: (value: string) => void; disabled?: boolean; type?: "text" | "url"; required?: boolean; placeholder?: string; choices?: readonly string[];
+  label: string; value: string; onChange: (value: string) => void; disabled?: boolean; type?: "text" | "url" | "password"; required?: boolean; placeholder?: string; choices?: readonly string[];
 }) {
   if (choices) return <select className="settings-input" aria-label={label} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
     {choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}

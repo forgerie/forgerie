@@ -43,22 +43,49 @@ consumers must check the live setting before publishing its result.
 
 ## Gateway key
 
-Set `DECISION_GATEWAY_API_KEY` in the **sessiond service environment**. Restart
-sessiond after changing the key; it captures its private environment at startup.
-The gateway receives it as a Bearer token. A gateway without authentication can
-leave this variable unset. This foundation uses the environment only, not a
-profile key file.
+Set a key in **Settings > Plugins > Decision hints > Gateway key**. The password
+input is never prefilled. Use Save (or Replace) to set it, and Remove to clear it.
+Forgerie stores it in `<active agent profile>/decision-gateway.json`, next to
+`auth.json` and `cliproxyapi.json`, as `{ "apiKey": "…" }`. The file has mode
+`0600`. Writes use a private temporary file and an atomic rename. It does not go
+in the browser-readable global config or plugin settings.
 
-Do not put a key in plugin settings, the gateway URL, or browser storage. Sessiond
-removes this variable before agent bash processes can start. Managed processes
-also filter it out. This is environment isolation, not a sandbox against an agent
-reading host files.
+Alternatively, set a non-empty `DECISION_GATEWAY_API_KEY` in the **sessiond service
+environment**. The environment value takes precedence over the file. Settings
+shows that source and disables Save, Replace and Remove, because the UI cannot
+change an environment value. Changing a service environment still requires a
+sessiond restart to give the process the new value.
 
-The plugin form has no secret field. The existing status endpoint
-`GET /api/pi-web/runtime` reports only
-`components.sessiond.decisionHints.keyPresent`. This reports presence, not whether
-the gateway accepts the key. Settings shows it as the Gateway key row (see
-[What you see](#what-you-see)).
+File changes need **no restart**. Sessiond reads the effective key on each gateway
+request and caches the file by mtime, size and inode. Set, replace and clear apply
+to the next request; a request already sent keeps its original authorization.
+The gateway receives the key as a Bearer token. With no key, Forgerie sends requests
+without `Authorization`, so gateways without authentication still work. A damaged
+or unreadable key file stops the optional ask instead of sending it without auth.
+
+**Security cost:** agent `bash` runs as the same Unix user as Forgerie. It can read
+the profile key file despite mode `0600`. This is already true of `auth.json` and
+`cliproxyapi.json`. The file is not hidden from agents. Users who need agents
+unable to read this key must use the environment variable instead and must remove
+any key file. Sessiond scrubs that variable before agent bash and managed processes
+start. This environment isolation is not a sandbox against host file access.
+
+Do not put a key in plugin settings, the gateway URL, or browser storage. Read
+routes report only `{ keyPresent, source }`, where source is `environment`,
+`settings` or `none`. They never return the key, a prefix, hash or length. Presence
+does not mean the gateway accepts the key. The write-only Settings routes are:
+
+- `GET /aui/plugins/decision-hints/gateway-key`: public status only.
+- `POST /aui/plugins/decision-hints/gateway-key`: `{ revision, apiKey }`.
+- `POST /aui/plugins/decision-hints/gateway-key/clear`: `{ revision }`.
+
+Both writes use the current plugin catalog revision and Settings' same-origin
+protection. They return only public status. The revision covers plugin settings
+and the active profile, not a credential fingerprint. A key change deliberately
+replaces the value without reading it; simultaneous key writes are last-writer
+wins. Values are trimmed, non-empty, at most 4096 characters, and cannot contain
+control characters. The runtime endpoint also includes public status at
+`components.sessiond.decisionHints`.
 
 ## Risk labels
 
@@ -296,12 +323,14 @@ appears without the fade.
 ### Settings
 
 Settings > Plugins > Decision hints shows a **Gateway key** row under the
-gateway address. It reads `GET /api/pi-web/runtime` each time the page opens:
+gateway address, even when the plugin is off. It reads `GET /api/pi-web/runtime`
+when the page opens:
 
-| Value | Hint |
+| Value | Controls |
 | --- | --- |
-| Present | Sessiond has it. Forgerie never shows the key. |
-| Not set | Set `DECISION_GATEWAY_API_KEY` in sessiond's environment, then restart sessiond. |
-| Unknown | Sessiond did not report it. Check that sessiond is running. |
+| Set here | Empty password input, Replace and Remove. |
+| Set by DECISION_GATEWAY_API_KEY | Disabled controls; Settings cannot change an environment key. |
+| Not set | Empty password input and Save. Remove is disabled. |
+| Unknown | Disabled controls. Check that sessiond is running. |
 
-The page never receives the key itself.
+The input clears after a save attempt. The page never receives the saved key.

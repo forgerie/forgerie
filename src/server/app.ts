@@ -138,7 +138,7 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
   registerPromptResourceCatalogProxyRoutes(app, projects, workspaces, sessionDaemon, "/api/machines/local");
   registerGitRoutes(app, projects, workspaces);
   registerGitRoutes(app, projects, workspaces, "/api/machines/local");
-  await registerUiSettingsRoutes(app, deps.uiSettings);
+  await registerUiSettingsRoutes(app, deps.uiSettings, sessionDaemon);
 
   const packagedClientDist = join(dirname(fileURLToPath(import.meta.url)), "..", "client");
   const clientDist = deps.clientDist ?? (existsSync(packagedClientDist) ? packagedClientDist : join(process.cwd(), "dist", "client"));

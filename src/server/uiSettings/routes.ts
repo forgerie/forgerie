@@ -1,3 +1,5 @@
+import { SessionDaemonClient, type SessionDaemonRequestClient } from "../../sessiond/sessionDaemonClient.js";
+import { decisionGatewayKeyMiddleware } from "./decisionGatewayKeyRoutes.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { FastifyInstance } from "fastify";
 import { agentFilesMiddleware, defaultAgentDirs, type AgentDirs } from "./agentFiles.js";
@@ -22,11 +24,13 @@ export interface UiSettingsOptions {
  * `/aui/`. The handlers read their own request bodies with their own limits,
  * so this scope leaves the body stream unparsed.
  */
-export async function registerUiSettingsRoutes(app: FastifyInstance, options: UiSettingsOptions = {}): Promise<void> {
+export async function registerUiSettingsRoutes(app: FastifyInstance, options: UiSettingsOptions = {}, daemon: SessionDaemonRequestClient = new SessionDaemonClient()): Promise<void> {
   const gateway = inProcessGateway(app);
+  const plugins = new PluginService({ gateway, ...(options.pluginServices === undefined ? {} : { services: options.pluginServices }) });
   const handlers: Middleware[] = [
+    decisionGatewayKeyMiddleware(plugins, daemon),
     agentFilesMiddleware(() => (options.agentDirs ?? defaultAgentDirs)(gateway)),
-    pluginMiddleware(new PluginService({ gateway, ...(options.pluginServices === undefined ? {} : { services: options.pluginServices }) })),
+    pluginMiddleware(plugins),
     modelPrefsMiddleware(() => (options.modelPrefsPaths ?? defaultPrefsPaths)(gateway)),
   ];
   await app.register((scope, _options, done) => {

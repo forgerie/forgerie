@@ -1,6 +1,6 @@
 // Dev-only entry point for the Decision hints surfaces, with fixture data and no network.
 // Scenarios (?scenario=): picker, picker-off, picker-narrow, bash, bash-open, bash-off, gate, gate-off, gate-arrives, settings-present,
-// settings-missing, settings-unknown. The gate card's other states are Caliper parts:
+// settings-missing, settings-environment, settings-unknown. The gate card's other states are Caliper parts:
 // src/gatedActions/GatedActionCard.organism.part.tsx.
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -130,8 +130,13 @@ const api: PluginsApi = {
   restart: async () => catalog,
   readme: async () => ({ text: null, truncated: false }),
 };
-const key: GatewayKey = scenario === "settings-missing" ? "missing" : scenario === "settings-unknown" ? "unknown" : "present";
-const runtime: RuntimeApi = { gatewayKey: async () => key };
+let key: GatewayKey = scenario === "settings-missing" ? { keyPresent: false, source: "none" } : scenario === "settings-unknown" ? "unknown"
+  : scenario === "settings-environment" ? { keyPresent: true, source: "environment" } : { keyPresent: true, source: "settings" };
+const runtime: RuntimeApi = {
+  gatewayKey: async () => key,
+  setGatewayKey: async () => { key = { keyPresent: true, source: "settings" }; return key; },
+  clearGatewayKey: async () => { key = { keyPresent: false, source: "none" }; return key; },
+};
 function SettingsScreen() {
   const [selected, setSelected] = useState<string | undefined>("app:decision-hints");
   return <AppShell open={false} onOpenChange={() => {}} picker={() => <span />}

@@ -1,7 +1,8 @@
+import { SecretSettingsField } from "../SecretSettingsField";
 import { SettingsInput } from "./SettingsInput";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ChevronLeftIcon, EllipsisIcon, PlusIcon, RefreshCwIcon, RotateCwIcon, Trash2Icon, XIcon } from "lucide-react";
-import { createPluginsApi, createRuntimeApi, GATEWAY_KEY_PLUGIN, type GatewayKey, type PluginsApi, type RuntimeApi } from "../../plugins/pluginsApi";
+import { createPluginsApi, createRuntimeApi, gatewayKeyView, GATEWAY_KEY_PLUGIN, type PluginsApi, type RuntimeApi } from "../../plugins/pluginsApi";
 import type { ManagedPlugin, PluginCatalog, PluginChange } from "@shared/pluginsContract";
 import type { AppSettingDef, AppSettings } from "@shared/appPlugins";
 import { SettingsFrame } from "./SettingsFrame";
@@ -16,13 +17,6 @@ import "./plugins.css";
 
 const liveApi = createPluginsApi((path, init) => fetch(path, init));
 const liveRuntime = createRuntimeApi((path, init) => fetch(path, init));
-/** The gateway key's presence in words. The key itself never reaches the browser. */
-const KEY_WORDS: Record<GatewayKey | "checking", { value: string; hint?: ReactNode }> = {
-  checking: { value: "Checking…" },
-  present: { value: "Present", hint: "Sessiond has it. Forgerie never shows the key." },
-  missing: { value: "Not set", hint: <>Set <code>DECISION_GATEWAY_API_KEY</code> in sessiond's environment, then restart sessiond.</> },
-  unknown: { value: "Unknown", hint: "Sessiond did not report it. Check that sessiond is running." },
-};
 type Load = { type: "loading" } | { type: "ready"; value: PluginCatalog } | { type: "failed"; message: string };
 /** Progress and outcome words for the header, e.g. "Installing…" then "Installed". */
 type Phase = { type: "idle" } | { type: "busy"; label: string } | { type: "done"; label: string } | { type: "failed"; message: string };
@@ -44,7 +38,7 @@ function origin(plugin: ManagedPlugin, home: string): string {
 /** Binding: one data edge for the list, selected plugin, mutations, and confirmations. */
 export function PluginsView({ selected, onOpen, onBack, onClose, onCatalog, api = liveApi, runtime = liveRuntime }: {
   selected?: string | undefined; onOpen: (id: string | undefined) => void; onBack: () => void; onClose?: (() => void) | undefined; api?: PluginsApi;
-  /** Reads whether sessiond has a plugin's gateway key, for the plugin that needs one. */
+  /** Reads public key status and makes write-only credential changes. */
   runtime?: RuntimeApi;
   /** Every catalog this page reads or saves, so the app's own plugins follow a change at once. */
   onCatalog?: ((catalog: PluginCatalog) => void) | undefined;
@@ -84,22 +78,13 @@ export function PluginsView({ selected, onOpen, onBack, onClose, onCatalog, api 
       .catch((error: unknown) => { if (!controller.signal.aborted) setReadme({ id: readmeId, load: { type: "failed", message: errorText(error) } }); });
     return () => controller.abort();
   }, [api, readmeId]);
-  // Whether sessiond has the gateway key, read each time its plugin opens. Only presence is read.
-  const keyed = plugin?.id === GATEWAY_KEY_PLUGIN;
-  const [gatewayKey, setGatewayKey] = useState<GatewayKey | "checking">("checking");
-  useEffect(() => {
-    if (!keyed) return;
-    const controller = new AbortController();
-    setGatewayKey("checking");
-    runtime.gatewayKey(controller.signal).then((value) => { if (!controller.signal.aborted) setGatewayKey(value); })
-      .catch(() => { if (!controller.signal.aborted) setGatewayKey("unknown"); });
-    return () => controller.abort();
-  }, [runtime, keyed]);
-  const keyField = keyed ? <SettingsField key="gateway-key" label="Gateway key" hint={KEY_WORDS[gatewayKey].hint}>
-    <span className="plugin-value">{KEY_WORDS[gatewayKey].value}</span></SettingsField> : null;
   const { setOpen: setMenuOpen } = menu;
   useEffect(() => { setMenuOpen(false); setRemoving(false); setTyped({}); }, [selected, setMenuOpen]);
   const busy = phase.type === "busy";
+  const keyField = plugin?.id === GATEWAY_KEY_PLUGIN && catalog
+    ? <SecretSettingsField key="gateway-key" label="Gateway key" read={runtime.gatewayKey} describe={gatewayKeyView} busy={busy}
+      write={key => runtime.setGatewayKey(catalog.revision, key)} clear={() => runtime.clearGatewayKey(catalog.revision)}
+      failure={clear => `Could not ${clear ? "remove" : "save"} the gateway key. Reload Settings and try again.`} /> : null;
   const appValues = plugin?.kind === "app" ? (plugin.settings ?? {}) as AppSettings : undefined;
   const typedDirty = appValues !== undefined && Object.entries(typed).some(([id, text]) => text !== appValues[id]);
   const dirty = typedDirty;

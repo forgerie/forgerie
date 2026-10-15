@@ -12,7 +12,7 @@ const input = (catalog: CatalogState): BoardInput => ({ ...catalog, now, locate:
 it("keeps picker observations identical without configured reachable attention hints, without waiting for a hanging gateway", async () => {
   await assertDecisionHintOffEquivalence(({ client, settings }) => {
     let catalog = state;
-    const hints = new AttentionHints(client === undefined ? undefined : { client, readSettings: () => settings, status: () => ({ keyPresent: false }) }, (error) => { throw error; }, () => new Date(now));
+    const hints = new AttentionHints(client === undefined ? undefined : { client, readSettings: () => settings, status: () => ({ keyPresent: false, source: "none" as const }) }, (error) => { throw error; }, () => new Date(now));
     const session: AttentionSession = { branch: () => [{ id: "turn-1", type: "message", message: { role: "assistant" } }], messages: () => [{ role: "assistant", content: [{ type: "text", text: "Please review." }] }], awaiting: () => "nothing", persist: () => Promise.resolve("stored"), publish: () => update() };
     function update() { catalog = applyCatalogEvent(catalog, { type: "status.update", status: { ...idle, response: { kind: "none" }, attentionHint: hints.read(session) } }); }
     update(); hints.settled(session);

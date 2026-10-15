@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { registerDecisionGatewayKeyRoutes } from "./decisions/decisionGatewayKeyRoutes.js";
 import { registerDurableTaskRoutes } from "./sessions/durableTaskRoutes.js";
-import { createDecisionHints } from "./decisions/decisionHints.js";
+import { createDecisionHints, decisionHintsRuntimeStatus } from "./decisions/decisionHints.js";
 import { TriggerService } from "./triggers/triggerService.js";
 import { registerTriggerRoutes } from "./triggers/triggerRoutes.js";
 import { workflowTriggerFire } from "./triggers/triggerFire.js";
@@ -131,7 +132,7 @@ async function createSessionDaemonRuntime() {
   } else {
     app.log.info({ httpIdleTimeoutMs: appliedHttpIdleTimeout.timeoutMs }, "applied agent profile HTTP idle timeout to the session daemon HTTP stack");
   }
-  const decisionHints = createDecisionHints({ env: daemonEnvironment });
+  const decisionHints = createDecisionHints({ env: daemonEnvironment, agentDir: activeAgentProfile.dir });
   const eventHub = new SessionEventHub();
   const notificationStore = new SessionNotificationStore();
   const unreadStore = new SessionUnreadStore({
@@ -347,7 +348,6 @@ async function createSessionDaemonRuntime() {
   const runtimeComponent = Object.freeze({
     ...getPiWebRuntimeComponent("sessiond", SESSIOND_RUNTIME_CAPABILITIES),
     activeAgentProfile,
-    decisionHints: decisionHints.status(),
   });
   await sessions.initializeManagedProcesses();
   const userSessions = new UserSessionWorktrees(sessionWorktrees, sessions);
@@ -363,10 +363,11 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credentials: azureCredentials, fetch });
   const backlog = new BacklogService({ settings: backlogSettings, projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues })], sourceProvider: createAzureDevopsBacklogProvider(azureItems) });
-  return { triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
+  return { decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 
-function registerSessionDaemonRoutes({ triggers, eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
+  registerDecisionGatewayKeyRoutes(app, decisionHints.gatewayKey, activeAgentProfile.revision);
   registerTriggerRoutes(app, triggers);
   registerBacklogRoutes(app, backlog);
   registerBacklogSettingsRoutes(app, backlogSettings, projects);
@@ -403,7 +404,7 @@ function registerSessionDaemonRoutes({ triggers, eventHub, workspaceActivity, se
     },
   }));
 
-  app.get("/runtime", () => runtimeComponent);
+  app.get("/runtime", () => ({ ...runtimeComponent, ...decisionHintsRuntimeStatus(decisionHints) }));
 }
 
 async function listenSessionDaemon({ triggers, sessions, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): Promise<void> {

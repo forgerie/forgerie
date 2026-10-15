@@ -65,7 +65,7 @@ async function fixture(hints?: DecisionHints) {
 
 it("bash has off-equivalence and executes before a hanging gateway times out", async () => {
   await assertDecisionHintOffEquivalence(async ({client, settings: live}) => {
-    const f = await fixture(client === undefined ? undefined : {client, readSettings: () => live, status: () => ({keyPresent: false})});
+    const f = await fixture(client === undefined ? undefined : {client, readSettings: () => live, status: () => ({keyPresent: false, source: "none" as const})});
     await f.run();
     return {observe: async () => ({effect: await readFile(join(f.root, "effect"), "utf8"),
       gates: await f.session.gatedActions(), errors: f.errors,
@@ -77,7 +77,7 @@ it("bash has off-equivalence and executes before a hanging gateway times out", a
 
 it.each([false, true])("delivers a late bash label live and through volatile history (nested=%s)", async nested => {
   let answer: ((value: DecisionAnswers) => void) | undefined; let asks = 0; let request: DecisionRequest | undefined;
-  const f = await fixture({client: {ask: value => {asks++; request = value; return new Promise(resolve => {answer = resolve;});}}, readSettings: () => settings, status: () => ({keyPresent: false})});
+  const f = await fixture({client: {ask: value => {asks++; request = value; return new Promise(resolve => {answer = resolve;});}}, readSettings: () => settings, status: () => ({keyPresent: false, source: "none" as const})});
   await f.run(nested);
   expect(await readFile(join(f.root, "effect"), "utf8")).toBe("RAN"); expect(asks).toBe(1);
   expect(request?.state).toMatchObject({cwd: f.root, tool: "bash", arguments: JSON.stringify({command: "printf RAN > effect"})});
@@ -107,7 +107,7 @@ it("redacts the real HTTP gateway payload while a real bash command keeps its or
   const address = server.address(); if (address === null || typeof address === "string") throw new Error("Missing gateway address");
   const live = {...settings, baseUrl: `http://127.0.0.1:${String(address.port)}`};
   const client = createDecisionClient({readConfig: () => live});
-  const f = await fixture({client, readSettings: () => live, status: () => ({keyPresent: false})});
+  const f = await fixture({client, readSettings: () => live, status: () => ({keyPresent: false, source: "none" as const})});
   const command = `KEY='must-stay-local' bash -c 'printf %s "$KEY" > effect'`;
   await f.run(false, command);
   expect(await readFile(join(f.root, "effect"), "utf8")).toBe("must-stay-local");
@@ -120,7 +120,7 @@ it("redacts the real HTTP gateway payload while a real bash command keeps its or
 
 it("native child bash has off-equivalence and does not wait for the hanging gateway", async () => {
   await assertDecisionHintOffEquivalence(async ({client, settings: live}) => {
-    const f = await fixture(client === undefined ? undefined : {client, readSettings: () => live, status: () => ({keyPresent: false})});
+    const f = await fixture(client === undefined ? undefined : {client, readSettings: () => live, status: () => ({keyPresent: false, source: "none" as const})});
     const child = await f.runChild();
     return {observe: async () => ({effect: await readFile(join(f.root, "child-effect"), "utf8"),
       gates: await f.session.gatedActions(), errors: f.errors,
@@ -132,7 +132,7 @@ it("native child bash has off-equivalence and does not wait for the hanging gate
 
 it("records a native child bash label by the child call id after that call ends", async () => {
   let answer: ((value: DecisionAnswers) => void) | undefined; let asks = 0; let request: DecisionRequest | undefined;
-  const f = await fixture({client: {ask: value => {asks++; request = value; return new Promise(resolve => {answer = resolve;});}}, readSettings: () => settings, status: () => ({keyPresent: false})});
+  const f = await fixture({client: {ask: value => {asks++; request = value; return new Promise(resolve => {answer = resolve;});}}, readSettings: () => settings, status: () => ({keyPresent: false, source: "none" as const})});
   const child = await f.runChild();
   expect(asks).toBe(1); expect(request?.state).toMatchObject({tool: "bash", cwd: f.root});
   answer?.(opinion);
@@ -145,7 +145,7 @@ it("records a native child bash label by the child call id after that call ends"
 
 it.each(["sdk", "nested", "child"] as const)("a rejected %s bash-label write cannot poison later declarations, execution intent or results", async source => {
   let answer: ((value: DecisionAnswers) => void) | undefined;
-  const f = await fixture({ client: { ask: () => new Promise(resolve => { answer = resolve; }) }, readSettings: () => settings, status: () => ({ keyPresent: false }) });
+  const f = await fixture({ client: { ask: () => new Promise(resolve => { answer = resolve; }) }, readSettings: () => settings, status: () => ({ keyPresent: false as const, source: "none" as const }) });
   if (source === "child") await f.runChild(); else await f.run(source === "nested");
   vi.spyOn(decisionAnnotations(f.session.journal.harness), "write").mockRejectedValueOnce(new Error("bash label write rejected"));
   answer?.(opinion);
@@ -161,7 +161,7 @@ it.each(["sdk", "nested", "child"] as const)("a rejected %s bash-label write can
 
 it.each([false, true])("repeated SDK call ids keep both invocation labels, even when the older answer arrives last (nested=%s)", async nested => {
   const answers: ((value: DecisionAnswers) => void)[] = [];
-  const f = await fixture({client: {ask: () => new Promise(resolve => {answers.push(resolve);})}, readSettings: () => settings, status: () => ({keyPresent: false})});
+  const f = await fixture({client: {ask: () => new Promise(resolve => {answers.push(resolve);})}, readSettings: () => settings, status: () => ({keyPresent: false, source: "none" as const})});
   await f.run(nested, "printf FIRST"); await f.run(nested, "printf SECOND");
   expect(answers).toHaveLength(2);
   answers[1]?.({...opinion, model: "SECOND-model"});
@@ -182,7 +182,7 @@ it.each([false, true])("repeated SDK call ids keep both invocation labels, even 
 it("native child repeated ids never reuse a prior label or let a late prior answer label the next turn", async () => {
   const answers: ((value: DecisionAnswers) => void)[] = [];
   const live = {...settings};
-  const f = await fixture({client: {ask: () => new Promise(resolve => {answers.push(resolve);})}, readSettings: () => live, status: () => ({keyPresent: false})});
+  const f = await fixture({client: {ask: () => new Promise(resolve => {answers.push(resolve);})}, readSettings: () => live, status: () => ({keyPresent: false, source: "none" as const})});
   const child = await f.runChild("FIRST");
   f.childState.command = "printf SECOND > child-effect";
   await f.session.messageDurableChild(child.conversationId, "CHILD");
@@ -202,7 +202,7 @@ it("native child repeated ids never reuse a prior label or let a late prior answ
 
 it.each(["enabled", "risk_labels"] as const)("parent overlays hide existing labels when the live %s switch is off", async key => {
   const live = {...settings};
-  const f = await fixture({client: {ask: () => Promise.resolve(opinion)}, readSettings: () => live, status: () => ({keyPresent: false})});
+  const f = await fixture({client: {ask: () => Promise.resolve(opinion)}, readSettings: () => live, status: () => ({keyPresent: false, source: "none" as const})});
   await f.run();
   await vi.waitFor(() => {expect(JSON.stringify(f.session.messages)).toContain("actual-risk-model");});
   const before = await f.session.parentReadModel.history({limit: 100}, context);
@@ -215,7 +215,7 @@ it.each(["enabled", "risk_labels"] as const)("parent overlays hide existing labe
 
 it("whole-family close clears existing annotations and discards a late gateway answer", async () => {
   const answers: ((value: DecisionAnswers) => void)[] = [];
-  const f = await fixture({client: {ask: () => new Promise(resolve => {answers.push(resolve);})}, readSettings: () => settings, status: () => ({keyPresent: false})});
+  const f = await fixture({client: {ask: () => new Promise(resolve => {answers.push(resolve);})}, readSettings: () => settings, status: () => ({keyPresent: false, source: "none" as const})});
   await f.run(); answers[0]?.(opinion);
   await vi.waitFor(() => {expect(JSON.stringify(f.session.messages)).toContain("actual-risk-model");});
   await f.run(false, "printf SECOND");

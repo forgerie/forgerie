@@ -173,6 +173,12 @@ export class PluginService {
     return { profile, settingsPath, settingsText, configText, settings, config,
       revision: hash(JSON.stringify([profile.revision, settingsText, configText])) };
   }
+  /** Check the same non-secret catalog revision used by plugin edits; return the daemon profile revision. */
+  async requireRevision(revision: string): Promise<string> {
+    const data = await this.snapshot();
+    if (data.revision !== revision) throw new SettingsHttpError(409, "Settings or the active profile changed. Reload before changing the gateway key.");
+    return data.profile.revision;
+  }
   /**
    * What the browser app needs to render its bundled plugins: on or off, and
    * every setting resolved. Reads Forgerie's config only, so the app can ask

@@ -515,7 +515,7 @@ describe("PiSessionService extension dialog status projection", () => {
 });
 
 describe.each(["absent", "present"] as const)("PiSessionService session_start dialog startup reachability (hints %s)", mode => {
-  const hints = mode === "absent" ? undefined : { client: { ask: () => Promise.resolve(undefined) }, readSettings: () => ({ ...readDecisionHintsSettings({}), enabled: true, baseUrl: "http://gateway.invalid" }), status: () => ({ keyPresent: false }) };
+  const hints = mode === "absent" ? undefined : { client: { ask: () => Promise.resolve(undefined) }, readSettings: () => ({ ...readDecisionHintsSettings({}), enabled: true, baseUrl: "http://gateway.invalid" }), status: () => ({ keyPresent: false as const, source: "none" as const }) };
   /**
    * A `session_start` dialog parks session construction before the session
    * ever becomes active: the bind below models the issue's probe by awaiting

@@ -16,7 +16,7 @@ function fixture() {
   const settings = { ...readDecisionHintsSettings({}), enabled: true, baseUrl: "http://gateway.invalid" };
   let resolve!: (result: DecisionAnswers | undefined) => void;
   const requests: DecisionRequest[] = [];
-  const deps: DecisionHints = { readSettings: () => settings, status: () => ({ keyPresent: false }), client: { ask(request) {
+  const deps: DecisionHints = { readSettings: () => settings, status: () => ({ keyPresent: false, source: "none" }), client: { ask(request) {
     requests.push(request); return new Promise((done) => { resolve = done; });
   } } };
   const branch: unknown[] = [{ id: "reply-1", type: "message", message: { role: "assistant" } }];

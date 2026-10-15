@@ -52,7 +52,7 @@ async function fixture(decisionHints?: DecisionHints, replyText = "Please approv
 
 it("turn end and status publication are equivalent with hints off, unconfigured, unreachable or hanging", async () => {
   await assertDecisionHintOffEquivalence(async ({ client, settings }) => {
-    const f = await fixture(client === undefined ? undefined : { client, readSettings: () => settings, status: () => ({ keyPresent: false }) });
+    const f = await fixture(client === undefined ? undefined : { client, readSettings: () => settings, status: () => ({ keyPresent: false as const, source: "none" as const }) });
     try {
       await f.turn();
       return { observe: async () => {
@@ -82,7 +82,7 @@ it("asks a real HTTP gateway after settlement, keeps the hint only for the live 
   await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve); });
   const address = server.address(); if (address === null || typeof address === "string") throw new Error("Missing server port");
   const settings = { ...readDecisionHintsSettings({}), enabled: true, baseUrl: `http://127.0.0.1:${String(address.port)}` };
-  const f = await fixture({ client: createDecisionClient({ readConfig: () => settings }), readSettings: () => settings, status: () => ({ keyPresent: false }) }, "Please approve. API_KEY=local-api-key Authorization: Bearer local-bearer");
+  const f = await fixture({ client: createDecisionClient({ readConfig: () => settings }), readSettings: () => settings, status: () => ({ keyPresent: false as const, source: "none" as const }) }, "Please approve. API_KEY=local-api-key Authorization: Bearer local-bearer");
   try {
     await f.turn();
     await vi.waitFor(async () => { expect((await f.service().status(f.ref)).attentionHint).toMatchObject({ likelyNeedsYou: true, model: "gateway-answering-model", kind: "decision", urgency: "high" }); });
@@ -110,7 +110,7 @@ const oldTurnAnswer: DecisionAnswers = { model: "OLD-TURN", answers: {
 it.each(["closed family", "sealed store", "master switched off", "attention switched off"] as const)("a retired turn cannot overwrite a reopened runtime's declared reply (%s)", async mode => {
   const live = { ...readDecisionHintsSettings({}), enabled: true, baseUrl: "http://gateway.invalid" };
   const answers: ((value: DecisionAnswers) => void)[] = [];
-  const f = await fixture({ client: { ask: () => new Promise(resolve => { answers.push(resolve); }) }, readSettings: () => live, status: () => ({ keyPresent: false }) });
+  const f = await fixture({ client: { ask: () => new Promise(resolve => { answers.push(resolve); }) }, readSettings: () => live, status: () => ({ keyPresent: false as const, source: "none" as const }) });
   try {
     await f.turn();
     expect((await f.service().status(f.ref)).response).toEqual({ kind: "none" });
@@ -150,7 +150,7 @@ it.each(["closed family", "sealed store", "master switched off", "attention swit
 it("a sealed store discards an attention result without publishing even if its runtime is still active", async () => {
   let answer: ((value: DecisionAnswers) => void) | undefined;
   const live = { ...readDecisionHintsSettings({}), enabled: true, baseUrl: "http://gateway.invalid" };
-  const f = await fixture({ client: { ask: () => new Promise(resolve => { answer = resolve; }) }, readSettings: () => live, status: () => ({ keyPresent: false }) });
+  const f = await fixture({ client: { ask: () => new Promise(resolve => { answer = resolve; }) }, readSettings: () => live, status: () => ({ keyPresent: false as const, source: "none" as const }) });
   try {
     await f.turn(); const source = f.sources[0]; if (source === undefined) throw new Error("Missing runtime");
     closeDecisionAnnotations(source.session.journal.harness);
@@ -166,7 +166,7 @@ it("a sealed store discards an attention result without publishing even if its r
 it("service disposal retires outstanding attention publication", async () => {
   let answer: ((value: DecisionAnswers) => void) | undefined;
   const live = { ...readDecisionHintsSettings({}), enabled: true, baseUrl: "http://gateway.invalid" };
-  const f = await fixture({ client: { ask: () => new Promise(resolve => { answer = resolve; }) }, readSettings: () => live, status: () => ({ keyPresent: false }) });
+  const f = await fixture({ client: { ask: () => new Promise(resolve => { answer = resolve; }) }, readSettings: () => live, status: () => ({ keyPresent: false as const, source: "none" as const }) });
   try {
     await f.turn(); await f.service().dispose(); const before = f.hub().globalEvents.length;
     answer?.(oldTurnAnswer); await new Promise<void>(resolve => { setImmediate(resolve); });
@@ -177,7 +177,7 @@ it("service disposal retires outstanding attention publication", async () => {
 it("native runtime close retires attention even before the service removes its active handle", async () => {
   let answer: ((value: DecisionAnswers) => void) | undefined;
   const live = { ...readDecisionHintsSettings({}), enabled: true, baseUrl: "http://gateway.invalid" };
-  const f = await fixture({ client: { ask: () => new Promise(resolve => { answer = resolve; }) }, readSettings: () => live, status: () => ({ keyPresent: false }) });
+  const f = await fixture({ client: { ask: () => new Promise(resolve => { answer = resolve; }) }, readSettings: () => live, status: () => ({ keyPresent: false as const, source: "none" as const }) });
   try {
     await f.turn(); const source = f.sources[0]; if (source === undefined) throw new Error("Missing runtime");
     await source.session.close(); const before = f.hub().globalEvents.length;

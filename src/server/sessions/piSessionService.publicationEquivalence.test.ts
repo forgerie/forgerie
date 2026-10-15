@@ -56,7 +56,7 @@ async function legacyPublications(hints?: DecisionHints) {
 
 it("preserves main publications with hints absent, off, unconfigured or unavailable", async () => {
   await assertDecisionHintOffEquivalence(async ({ client, settings }) => {
-    const run = await legacyPublications(client === undefined ? undefined : { client, readSettings: () => settings, status: () => ({ keyPresent: false }) });
+    const run = await legacyPublications(client === undefined ? undefined : { client, readSettings: () => settings, status: () => ({ keyPresent: false as const, source: "none" as const }) });
     try {
       const trace = run.observe();
       expect(trace.map(step => [step.path, step.statuses.length])).toEqual([

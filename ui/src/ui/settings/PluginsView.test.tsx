@@ -19,7 +19,11 @@ let readmeReads: string[];
 let gatewayKey: GatewayKey;
 let runtimeFails = false;
 let keyReads: number;
-const runtime: RuntimeApi = { gatewayKey: async () => { keyReads += 1; if (runtimeFails) throw new Error("sessiond is unavailable"); return gatewayKey; } };
+const runtime: RuntimeApi = {
+  gatewayKey: async () => { keyReads += 1; if (runtimeFails) throw new Error("sessiond is unavailable"); return gatewayKey; },
+  setGatewayKey: async () => ({ keyPresent: true, source: "settings" }),
+  clearGatewayKey: async () => ({ keyPresent: false, source: "none" }),
+};
 const settle = () => act(async () => { for (let index = 0; index < 6; index++) await new Promise((resolve) => setTimeout(resolve, 0)); });
 const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent?.trim() === text || node.getAttribute("aria-label") === text)!;
 const click = async (text: string) => { const node = button(text); expect(node, text).toBeDefined(); await act(async () => node.click()); await settle(); };
@@ -56,7 +60,7 @@ beforeEach(() => {
   };
   readmeReads = [];
   readme = { text: null, truncated: false };
-  gatewayKey = "present"; keyReads = 0; runtimeFails = false;
+  gatewayKey = { keyPresent: true, source: "settings" }; keyReads = 0; runtimeFails = false;
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
@@ -219,7 +223,7 @@ describe("Plugins settings", () => {
     await click("Save");
     expect(calls[0]).toEqual({ type: "settings", id: "app:decision-hints", settings: { ...settings, model: "chosen", sensitivity: "high" } });
     expect(document.querySelector<HTMLInputElement>('input[aria-label="Gateway address"]')!.required).toBe(false);
-    expect(document.querySelector("input[type=password]")).toBeNull();
+    expect(document.querySelector<HTMLInputElement>("input[type=password]")!.value).toBe("");
     await click("Load Decision hints");
     expect(calls[1]).toEqual({ type: "toggle", id: "app:decision-hints", enabled: true });
   });
@@ -243,20 +247,19 @@ describe("the gateway key's presence", () => {
   });
   it("says the key is present under the gateway address, never the key", async () => {
     catalog.plugins.push(hints()); selected = "app:decision-hints"; await render();
-    expect(field()?.querySelector(".agent-field-value")?.textContent).toBe("Present");
+    expect(field()?.querySelector("[role=status]")?.textContent).toBe("Set here");
     expect(field()?.previousElementSibling?.querySelector(".agent-field-label")?.textContent).toBe("Gateway address");
     expect(field()?.textContent).not.toContain("DECISION_GATEWAY_API_KEY");
-    expect(document.querySelector("input[type=password]")).toBeNull();
+    expect(document.querySelector<HTMLInputElement>("input[type=password]")!.value).toBe("");
   });
-  it("says how to set a missing key for sessiond, in one line", async () => {
-    gatewayKey = "missing"; catalog.plugins.push(hints()); selected = "app:decision-hints"; await render();
-    expect(field()?.querySelector(".agent-field-value")?.textContent).toBe("Not set");
-    expect(field()?.querySelector(".agent-field-hint")?.textContent).toBe("Set DECISION_GATEWAY_API_KEY in sessiond's environment, then restart sessiond.");
-    expect(field()?.querySelector(".agent-field-hint code")?.textContent).toBe("DECISION_GATEWAY_API_KEY");
+  it("offers a write-only input for a missing key", async () => {
+    gatewayKey = { keyPresent: false, source: "none" }; catalog.plugins.push(hints()); selected = "app:decision-hints"; await render();
+    expect(field()?.querySelector("[role=status]")?.textContent).toBe("Not set");
+    expect(field()?.querySelector(".agent-field-hint")?.textContent).toBe("Forgerie never shows the saved key. Changes apply to the next gateway request.");
   });
   it("says unknown when sessiond does not answer", async () => {
     runtimeFails = true; catalog.plugins.push(hints()); selected = "app:decision-hints"; await render();
-    expect(field()?.querySelector(".agent-field-value")?.textContent).toBe("Unknown");
+    expect(field()?.querySelector("[role=status]")?.textContent).toBe("Unknown");
   });
 });
 
@@ -266,10 +269,10 @@ describe("the runtime read", () => {
   const runtimeOf = (decisionHints?: object, available = true) => ({ packageName: "forgerie", generatedAt: "2026-10-14T12:00:00Z", capabilities: [],
     components: { web: { component: "web", label: "Web/UI", available: true, capabilities: [] }, sessiond: sessiond({ available, ...(decisionHints ? { decisionHints } : {}) }) } });
   it("reads only the key's presence from sessiond's status", async () => {
-    expect(await createRuntimeApi(response(runtimeOf({ keyPresent: true }))).gatewayKey()).toBe("present");
-    expect(await createRuntimeApi(response(runtimeOf({ keyPresent: false }))).gatewayKey()).toBe("missing");
+    expect(await createRuntimeApi(response(runtimeOf({ keyPresent: true, source: "settings" }))).gatewayKey()).toEqual({ keyPresent: true, source: "settings" });
+    expect(await createRuntimeApi(response(runtimeOf({ keyPresent: false, source: "none" }))).gatewayKey()).toEqual({ keyPresent: false, source: "none" });
     expect(await createRuntimeApi(response(runtimeOf())).gatewayKey()).toBe("unknown");
-    expect(await createRuntimeApi(response(runtimeOf({ keyPresent: true }, false))).gatewayKey()).toBe("unknown");
+    expect(await createRuntimeApi(response(runtimeOf({ keyPresent: true, source: "environment" }, false))).gatewayKey()).toBe("unknown");
     expect(await createRuntimeApi(response({ error: "down" }, false)).gatewayKey()).toBe("unknown");
   });
 });

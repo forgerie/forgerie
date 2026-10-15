@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { createActiveDurableSessionReader } from "./durableSessionReader.js";
 import { createDecisionHints } from "../decisions/decisionHints.js";
 import { describe, expect, it } from "vitest";
@@ -87,7 +90,7 @@ describe("sessiond session service dependency assembly", () => {
   });
 
   it("injects the decision client and live settings as one collaborator", () => {
-    const hints = createDecisionHints({ env: {} });
+    const hints = createDecisionHints({ env: {}, agentDir: join(tmpdir(), randomUUID()) });
     expect(sessionServiceDependencies(daemonCollaborators({ decisionHints: hints })).decisionHints).toBe(hints);
     expect(sessionServiceDependencies(daemonCollaborators()).decisionHints).toBeUndefined();
   });
