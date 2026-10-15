@@ -6,6 +6,7 @@ import { RISK_LABEL_ENTRY_KIND, RiskLabelEntrySchema, riskToolIdentity, type Ris
 // Bounds apply to the whole family, not independently to each conversation.
 export const DECISION_ANNOTATION_MAX_RECORDS = 2048;
 export const DECISION_ANNOTATION_MAX_BYTES = 2 * 1024 * 1024;
+export type DecisionAnnotationWrite = "stored" | "discarded";
 interface AnnotationRecord {scope: string; key: string; value: JsonValue; bytes: number}
 
 /** Volatile, bounded sidecar. It never calls Durable or storage methods. */
@@ -15,11 +16,11 @@ class OptionalDecisionAnnotations {
   private riskVisibility: (() => boolean) | undefined;
   private bytes = 0;
   private closed = false;
-  write(scope: string, key: string, value: JsonValue): Promise<void> {
+  write(scope: string, key: string, value: JsonValue): Promise<DecisionAnnotationWrite> {
     return Promise.resolve().then(() => {
-      if (this.closed) return;
+      if (this.closed) return "discarded";
       const bytes = Buffer.byteLength(JSON.stringify(value)) + Buffer.byteLength(scope) + Buffer.byteLength(key) + 64;
-      if (bytes > DECISION_ANNOTATION_MAX_BYTES) return;
+      if (bytes > DECISION_ANNOTATION_MAX_BYTES) return "discarded";
       const id = JSON.stringify([scope, key]);
       const copied = structuredClone(value);
       this.bytes -= this.records.get(id)?.bytes ?? 0;
@@ -32,6 +33,7 @@ class OptionalDecisionAnnotations {
         this.records.delete(oldest[0]); this.bytes -= oldest[1].bytes; changed.push(oldest[1]);
       }
       for (const change of changed) for (const listener of this.listeners) listener(change.scope, change.key);
+      return this.records.has(id) ? "stored" : "discarded";
     });
   }
   read(scope: string, key: string): JsonValue | undefined { return structuredClone(this.records.get(JSON.stringify([scope, key]))?.value); }

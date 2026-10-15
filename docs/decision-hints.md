@@ -201,7 +201,12 @@ optional `SessionStatus.attentionHint` through the existing `status.update`:
 
 Raw probabilities stay on the server. Turning either switch off suppresses hints
 on the next status read or publication. A late answer re-checks live settings and
-turn identity before storage and publication. No gateway result changes the
+turn identity before storage and publication. Closing, replacing or disposing a
+runtime retires its pending attention request. A closed, oversized or otherwise
+discarded cache write is not a publication success. Status publication also
+checks the active session object, so an old runtime cannot overwrite a reopened
+runtime's response. Gate, child-watch and risk-label notifications use the same
+active-runtime publication boundary. No gateway result changes the
 session response, admits a command, or delays the turn end.
 
 Hints use the same independent in-memory annotation store as risk labels, not

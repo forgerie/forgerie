@@ -1,3 +1,4 @@
+import type { DecisionAnnotationWrite } from "./optionalDecisionAnnotations.js";
 import { redactDecisionText } from "./decisionPayloadRedaction.js";
 import { z } from "zod";
 import { attentionKindSchema, attentionUrgencySchema, type AttentionHint } from "../../shared/attentionHints.js";
@@ -20,7 +21,7 @@ export interface AttentionSession {
   branch(): readonly unknown[];
   messages(): readonly unknown[];
   awaiting(): string;
-  persist(data: StoredHint | { version: 1; invalidated: true }): Promise<void>;
+  persist(data: StoredHint | { version: 1; invalidated: true }): Promise<DecisionAnnotationWrite>;
   publish(): void;
 }
 
@@ -61,17 +62,21 @@ const DISPLAY_CONFIDENCE = 0.75;
 export class AttentionHints {
   private closed = false;
   dispose(): void { this.closed = true; }
+  private readonly retired = new WeakSet<AttentionSession>();
+  retire(session: AttentionSession): void { this.retired.add(session); this.states.delete(session); }
   private readonly states = new WeakMap<AttentionSession, HintState>();
   constructor(private readonly deps: DecisionHints | undefined, private readonly onError: (error: unknown) => void, private readonly now: () => Date) {}
 
   configured(): boolean { return this.deps !== undefined; }
 
   restore(session: AttentionSession, data: unknown): void {
+    if (this.closed || this.retired.has(session)) return;
     const parsed = storedHintSchema.safeParse(data);
     this.states.set(session, { suppressed: !parsed.success, canSettle: true, ...(parsed.success ? { hint: parsed.data } : {}) });
   }
 
   invalidate(session: AttentionSession): void {
+    if (this.closed || this.retired.has(session)) return;
     const old = this.states.get(session);
     this.states.set(session, { suppressed: true, canSettle: false });
     // A tombstone prevents queued input from reviving a hint after restart.
@@ -83,11 +88,13 @@ export class AttentionHints {
   }
 
   started(session: AttentionSession): void {
+    if (this.closed || this.retired.has(session)) return;
     this.invalidate(session);
     this.states.set(session, { suppressed: true, canSettle: true });
   }
 
   read(session: AttentionSession): AttentionHint | undefined {
+    if (this.closed || this.retired.has(session)) return undefined;
     const settings = this.deps?.readSettings();
     if (settings?.enabled !== true || !settings.attention || !settings.baseUrl) return undefined;
     const state = this.states.get(session);
@@ -103,7 +110,7 @@ export class AttentionHints {
 
   settled(session: AttentionSession): void {
     const settings = this.deps?.readSettings();
-    if (this.closed || settings?.enabled !== true || !settings.attention || !settings.baseUrl || this.deps === undefined) return;
+    if (this.closed || this.retired.has(session) || settings?.enabled !== true || !settings.attention || !settings.baseUrl || this.deps === undefined) return;
     const id = turnId(session);
     if (id === undefined) return;
     const old = this.states.get(session);
@@ -130,8 +137,8 @@ export class AttentionHints {
         urgency: { value: ["low", "normal", "high"][Math.round(urgency.score)], confidence: urgency.confidence },
       });
       if (!hint.success) return;
-      await session.persist(hint.data);
-      if (!current()) return;
+      const written = await session.persist(hint.data);
+      if (written !== "stored" || !current()) return;
       state.hint = hint.data;
       session.publish();
     }).catch(this.onError);

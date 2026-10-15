@@ -1462,6 +1462,7 @@ export class PiSessionService implements SessionRouteService {
     if (pendingOpens.length > 0) await Promise.allSettled(pendingOpens);
     const activeSessions = Array.from(new Set(this.active.values()));
     for (const active of activeSessions) {
+      this.retireAttentionSession(active.runtime.session);
       this.forgetUnreadActivity(active.runtime.session);
       this.endSessionExtensionDialogs(active.runtime.session.sessionId);
     }
@@ -4310,6 +4311,7 @@ export class PiSessionService implements SessionRouteService {
       this.publishNotificationMutations(mutations);
     }
     if (!active) return;
+    this.retireAttentionSession(active.runtime.session);
     this.forgetUnreadActivity(active.runtime.session);
     // Questions remain on the durable branch. Only live extension dialogs own
     // parked Promises in the dying runtime, so settle those waits.
@@ -4449,8 +4451,14 @@ export class PiSessionService implements SessionRouteService {
     return archived;
   }
 
+  private isCurrentSessionContext(session: PiAgentSession): boolean {
+    return !this.stopping && !(session instanceof DurableAgentSession && session.isClosed)
+      && (this.isCurrentActiveSession(session) || this.startupSessions.get(session.sessionId) === session);
+  }
+
   private isCurrentActiveSession(session: PiAgentSession): boolean {
-    return this.active.get(session.sessionId)?.runtime.session === session;
+    return !this.stopping && !(session instanceof DurableAgentSession && session.isClosed)
+      && this.active.get(session.sessionId)?.runtime.session === session;
   }
 
   /**
@@ -4583,6 +4591,7 @@ export class PiSessionService implements SessionRouteService {
       this.bindRuntime(active);
       this.recoverAskAnswerDelivery(runtime.session);
       runtime.setRebindSession(async (session) => {
+        const outgoingSession = boundSession;
         const priorGeneration = notificationGeneration;
         let candidateGeneration: SessionNotificationGeneration | undefined;
         try {
@@ -4613,7 +4622,9 @@ export class PiSessionService implements SessionRouteService {
             this.publishNotificationMutations(this.notificationStore.commitReplacement(candidateGeneration));
             notificationGeneration = candidateGeneration;
           }
+          if (outgoingSession !== session) this.retireAttentionSession(outgoingSession);
         } catch (error: unknown) {
+          if (outgoingSession !== session) this.retireAttentionSession(session);
           if (candidateGeneration !== undefined) {
             this.publishNotificationMutations(this.notificationStore.abortReplacement(candidateGeneration, "candidate"));
             notificationGeneration = candidateGeneration;
@@ -4630,6 +4641,8 @@ export class PiSessionService implements SessionRouteService {
       this.publishStatus(runtime.session);
       return active;
     } catch (error: unknown) {
+      this.retireAttentionSession(boundSession);
+      this.retireAttentionSession(runtime.session);
       if (notificationGeneration !== undefined) {
         if (notificationOwnership === "registered") {
           this.publishNotificationMutations(this.notificationStore.clearSession(runtime.session.sessionId, "initialization-failed"));
@@ -4681,6 +4694,7 @@ export class PiSessionService implements SessionRouteService {
         uiContext,
         mode: "rpc",
         onError: (error) => {
+          if (!this.isCurrentSessionContext(session)) return;
           const message = `${error.extensionPath}: ${error.error}`;
           this.publishActivity(session, "extension error", "error", message);
           this.events.publish(session.sessionId, { type: "session.error", message });
@@ -4906,7 +4920,7 @@ export class PiSessionService implements SessionRouteService {
     }
     const panel = new ManagedProcessPanel(() => this.getManagedProcesses(session.sessionId),
       session instanceof DurableAgentSession ? session.processTools : undefined,
-      (event) => { this.events.publish(session.sessionId, event); if (event.type === "processes.update") this.publishStatus(session); },
+      (event) => { if (!this.isCurrentActiveSession(session)) return; this.events.publish(session.sessionId, event); if (event.type === "processes.update") this.publishStatus(session); },
       () => { this.logger.info({ sessionId: session.sessionId }, "managed process panel refresh failed"); });
     this.processPanels.set(session.sessionId, panel);
     panel.watch();
@@ -4942,6 +4956,8 @@ export class PiSessionService implements SessionRouteService {
       }
     }
     active.unsubscribe = session.subscribe((event) => {
+      if (getString(event, "type") === "session_retired") { this.retireAttentionSession(session); return; }
+      if (!this.isCurrentActiveSession(session)) return;
       if (getString(event, "type") === "agent_start") {
         this.attentionHints.started(this.attentionSession(session));
         this.appendResponseEvent(session, { version: 1, kind: "started" });
@@ -5423,6 +5439,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private publishActivity(session: PiAgentSession, label: string, phase: "active" | "idle" | "error", detail?: string): void {
+    if (!this.isCurrentSessionContext(session)) return;
     const at = new Date().toISOString();
     const previous = this.activities.get(session.sessionId);
     // SDK tool/message completion events can briefly say idle while the turn is
@@ -5447,7 +5464,9 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private publishStatus(session: PiAgentSession): void {
-    const status = this.statusFromSession(session);
+    const current = this.active.get(session.sessionId)?.runtime.session;
+    if (current !== session || !this.isCurrentActiveSession(current)) return;
+    const status = this.statusFromSession(current);
     // Attachment can start with a running snapshot and no agent_start event. Seed activity now,
     // rather than waiting for a provider update or the first heartbeat after daemon startup.
     const runStartedAt = session instanceof DurableAgentSession ? session.getActiveRunStartedAt() : undefined;
@@ -5501,19 +5520,23 @@ export class PiSessionService implements SessionRouteService {
     } catch (err) { this.logger.info({ err, sessionId: session.sessionId }, "attention hint restore failed"); }
   }
 
+  private retireAttentionSession(session: PiAgentSession): void {
+    const attention = this.attentionSessions.get(session);
+    if (attention !== undefined) this.attentionHints.retire(attention);
+  }
+
   private attentionSession(session: PiAgentSession): AttentionSession {
     let attention = this.attentionSessions.get(session);
     if (attention === undefined) {
       attention = {
         branch: () => session.sessionManager.getBranch(), messages: () => session.messages,
         awaiting: () => { const response = this.responseProjection(session).response; return response.kind === "none" ? "nothing" : response.reason === "undeclared" ? "undeclared" : "reply"; },
-        persist: async (data) => {
-          if (session instanceof DurableAgentSession) await appendAttentionHint(session.journal.handle, durableJson(data));
-          else {
-            await decisionAnnotations(session.sessionManager).write(session.sessionId, ATTENTION_HINT_CUSTOM_TYPE, durableJson(data));
-          }
+        persist: (data) => {
+          if (!this.isCurrentActiveSession(session)) return Promise.resolve("discarded");
+          return session instanceof DurableAgentSession ? appendAttentionHint(session.journal.handle, durableJson(data))
+            : decisionAnnotations(session.sessionManager).write(session.sessionId, ATTENTION_HINT_CUSTOM_TYPE, durableJson(data));
         },
-        publish: () => { this.publishStatus(session); },
+        publish: () => { if (this.isCurrentActiveSession(session)) this.publishStatus(session); },
       };
       this.attentionSessions.set(session, attention);
     }

@@ -33,17 +33,17 @@ it("bounds approximate serialized bytes, including multibyte values, without let
   expect(store.read("0", "0")).toBeUndefined(); expect(store.read("1", "3")).toBe(value);
   const before = [...store.values("0"), ...store.values("1")];
   expect(Buffer.byteLength(JSON.stringify(before))).toBeLessThan(DECISION_ANNOTATION_MAX_BYTES);
-  await store.write("2", "too-big", "x".repeat(DECISION_ANNOTATION_MAX_BYTES));
+  expect(await store.write("2", "too-big", "x".repeat(DECISION_ANNOTATION_MAX_BYTES))).toBe("discarded");
   expect(store.read("2", "too-big")).toBeUndefined();
   expect([...store.values("0"), ...store.values("1")]).toEqual(before);
 });
 
 it("family close clears records and listeners, seals queued writes, and cannot be undone by a late result", async () => {
   const owner = {}; const store = decisionAnnotations(owner); const listener = vi.fn();
-  store.subscribe(listener); await store.write("1", "old", {saved: true});
+  store.subscribe(listener); expect(await store.write("1", "old", {saved: true})).toBe("stored");
   const queued = store.write("1", "queued", {saved: true});
-  closeDecisionAnnotations(owner); await queued;
-  store.subscribe(listener); await store.write("1", "late", {saved: true});
+  closeDecisionAnnotations(owner); expect(await queued).toBe("discarded");
+  store.subscribe(listener); expect(await store.write("1", "late", {saved: true})).toBe("discarded");
   expect(decisionAnnotations(owner)).toBe(store); expect(store.values("1")).toEqual([]);
   expect(store.read("1", "old")).toBeUndefined(); expect(listener).toHaveBeenCalledTimes(1);
 });
@@ -58,4 +58,11 @@ it.each(["enabled", "risk_labels"] as const)("hides existing annotations when th
   live[key] = false;
   expect(withRiskAnnotations(owner, 1, source)[0]?.decisionAnnotations).toBeUndefined();
   expect(store.values("1")).toHaveLength(1);
+});
+
+it("reports a discarded write if publication closes the store before acceptance returns", async () => {
+  const owner = {}; const store = decisionAnnotations(owner);
+  store.subscribe(() => { closeDecisionAnnotations(owner); });
+  expect(await store.write("scope", "hint", "opinion")).toBe("discarded");
+  expect(store.values("scope")).toEqual([]);
 });

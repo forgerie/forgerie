@@ -129,6 +129,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private preparedContextTokens: number | undefined;
   private basePrompt: BuildSystemPromptOptions;
   private closed = false;
+  get isClosed(): boolean { return this.closed; }
   private bound = false;
   private taskWatch: { stop(): Promise<void> } | undefined;
   private childTasksLive = false;
@@ -611,6 +612,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   }
 
   subscribe(listener: (event: unknown) => void): () => void {
+    if (this.closed) return () => undefined;
     this.listeners.add(listener);
     if (this.bound) void this.resumeFamily().catch((error: unknown) => { this.report(error); });
     return () => { this.listeners.delete(listener); };
@@ -974,6 +976,10 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.emit({ type: "session_retired" });
+    // Pending gate recounts, child watches and risk-label notifications can finish
+    // during the async close. None may call observers of the retired runtime.
+    this.listeners.clear();
     await this.detachProcessEvents?.();
     this.bashController?.abort();
     this.branchSummaryController?.abort();

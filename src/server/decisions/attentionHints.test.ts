@@ -22,7 +22,7 @@ function fixture() {
   const branch: unknown[] = [{ id: "reply-1", type: "message", message: { role: "assistant" } }];
   const published = vi.fn();
   const session: AttentionSession = { branch: () => branch, messages: () => [{ role: "assistant", content: [{ type: "thinking", text: "private thinking" }, { type: "text", text: "Please review. " + "x".repeat(9000) }] }], awaiting: () => "nothing",
-    persist: (data) => { branch.push({ type: "custom", customType: ATTENTION_HINT_CUSTOM_TYPE, data }); return Promise.resolve(); }, publish: published };
+    persist: (data) => { branch.push({ type: "custom", customType: ATTENTION_HINT_CUSTOM_TYPE, data }); return Promise.resolve("stored"); }, publish: published };
   const errors = vi.fn();
   const hints = new AttentionHints(deps, errors, now);
   return { hints, session, branch, settings, deps, requests, published, errors, resolve: (result: DecisionAnswers | undefined) => { resolve(result); } };
@@ -133,6 +133,27 @@ describe("attention hints", () => {
     f.hints.settled(f.session);
     const state = f.requests[0]?.state;
     expect(state).toEqual({ reply: "Public note. ".repeat(620) + 'API_KEY="[redacted]"', awaiting: "nothing" });
+  });
+
+  it("does not cache or publish a discarded optional write", async () => {
+    const f = fixture(); const persist = vi.fn<AttentionSession["persist"]>(() => Promise.resolve("discarded")); f.session.persist = persist;
+    f.hints.settled(f.session); f.resolve(answers());
+    await vi.waitFor(() => { expect(persist).toHaveBeenCalledOnce(); });
+    expect(f.hints.read(f.session)).toBeUndefined(); expect(f.published).not.toHaveBeenCalled(); expect(f.errors).not.toHaveBeenCalled();
+  });
+  it.each(["gateway", "write"] as const)("retirement is permanent while the %s is pending", async pending => {
+    const f = fixture();
+    let finishWrite: ((value: "stored") => void) | undefined;
+    const persist = vi.fn<AttentionSession["persist"]>(() => new Promise(resolve => { finishWrite = resolve; }));
+    f.session.persist = persist;
+    f.hints.settled(f.session);
+    if (pending === "write") { f.resolve(answers()); await vi.waitFor(() => { expect(persist).toHaveBeenCalledOnce(); }); }
+    f.hints.retire(f.session);
+    f.hints.started(f.session); f.hints.restore(f.session, {}); f.hints.settled(f.session);
+    if (pending === "gateway") f.resolve(answers()); else finishWrite?.("stored");
+    await new Promise<void>(resolve => { setImmediate(resolve); });
+    expect(f.requests).toHaveLength(1); expect(f.hints.read(f.session)).toBeUndefined(); expect(f.published).not.toHaveBeenCalled();
+    expect(persist).toHaveBeenCalledTimes(pending === "gateway" ? 0 : 1);
   });
 
 });
