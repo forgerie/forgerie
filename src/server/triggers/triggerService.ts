@@ -291,7 +291,7 @@ export class TriggerService {
       if (parseScheduledWorkflow(id, document.path, document.text, this.timezone) !== undefined) throw new TriggerError(`Global workflow "${id}" already has a schedule`, 400, "action.workflow");
       const block = await this.fileSync.block({ ...input, action: { ...action, inputs: input.action.inputs }, missedGraceMinutes: input.missedGraceMinutes ?? DEFAULT_MISSED_GRACE_MINUTES, state: { kind: "active", nextFireAt: 0 } });
       await this.files.save(id, { text: document.text, baseSha256: document.sha256, schedule: block }, async (text) => { await this.fileSync.validate(id, text); });
-      await this.fileSync.scan(creator);
+      await this.fileSync.scan({ id, creator });
       return this.get(id, actorCwd);
     });
   }

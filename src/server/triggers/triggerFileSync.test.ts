@@ -166,3 +166,11 @@ it("does not re-arm prose edits, updates lastGoodAt only for changed valid bytes
   await rm(file()); await triggers.syncFiles();
   await expect(triggers.saveFile("night", { text: document.text, baseSha256: saved.sha256 })).rejects.toMatchObject({ status: 404 });
 });
+it("attributes only the agent's own file when create also discovers an outside schedule", async () => {
+  await writeFile(file(), prose); const triggers = await open();
+  await writeFile(join(agent, "prompts", "outside.md"), scheduled('at: "03:00", projects: all'));
+  const creator = { kind: "agent" as const, sessionId: "caller", cwd };
+  const own = await triggers.create({ name: "Own", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", workflow: "night", targets: { kind: "projects", cwds: [cwd] }, inputs: {} } }, creator, cwd);
+  expect(own.createdBy).toEqual(creator);
+  expect((await triggers.get("outside")).createdBy).toEqual({ kind: "user" });
+});

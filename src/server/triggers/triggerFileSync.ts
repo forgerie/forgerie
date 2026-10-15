@@ -112,7 +112,7 @@ export class TriggerFileSync {
       return project !== undefined && registered.filter((entry) => entry.name === project.name).length === 1 ? project.name : cwd;
     });
   }
-  async scan(creator?: TriggerCreator): Promise<void> {
+  async scan(created?: { id: string; creator: TriggerCreator }): Promise<void> {
     const before = JSON.stringify([...this.states]);
     const records = await this.options.store.list();
     this.skipped = new Set((await this.options.store.migration()).skipped);
@@ -135,7 +135,7 @@ export class TriggerFileSync {
       } catch (error) { this.invalid(id, error, current === undefined); continue; }
       const { input, block } = parsed;
       let record = current;
-      if (record === undefined) record = await this.options.store.create(input, creator);
+      if (record === undefined) record = await this.options.store.create(input, created?.id === id ? created.creator : undefined);
       else {
         const changes: TriggerUpdate = { baseRevision: record.revision };
         if (record.name !== input.name) changes.name = input.name;
