@@ -80,6 +80,8 @@ export class DurableParentReadModel {
     hostStatus: () => DurableHostState = () => ({})): Promise<SessionOpenResult> {
     const { handle } = this.options;
     const id = handle.conversation.id;
+    // Begin observing before preparation; the callback reads the generation on the same cut line.
+    hub.nativeHistoryId(handle.address.journalId, handle.harness, id);
     let retiredRequired = 0;
     const keys = new Set<string>();
     const membership = new Map<string, number>();
@@ -166,7 +168,7 @@ export class DurableParentReadModel {
           if (asks.pending === undefined) delete status.pendingAsk;
           if (before !== hub.currentSeq(handle.address.sessionId)) return undefined;
           if (cached === undefined) this.liveHistory?.seed(entries, envelopes, messages, bound);
-          const historyId = `native:${handle.address.journalId}:${String(id)}`;
+          const historyId = hub.nativeHistoryId(handle.address.journalId, handle.harness, id);
           assertHistoryIdentity(historyId, request.historyId);
           return structuredClone({ session: { id: handle.address.sessionId, cwd, ...(name.name === undefined ? {} : { name: name.name }) }, readPath: "native" as const, cut: "native" as const,
             epoch: hub.epoch, seq, historyId, page: this.page(messages, { ...request, completeTurns: true }),

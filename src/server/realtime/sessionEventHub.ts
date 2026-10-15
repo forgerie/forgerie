@@ -1,7 +1,8 @@
+import { DurableHistoryGenerations } from "../sessions/durableHistoryGenerations.js";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
 import type { SessionOpenResult } from "../sessions/sessionOpen.js";
-import type { Harness } from "@earendil-works/pi-durable";
+import type { ConversationId, Harness } from "@earendil-works/pi-durable";
 import type { SessionOpenTransientEvent } from "../../shared/sessionOpen.js";
 import type { GlobalSessionEvent, RealtimeEvent, SessionNotificationSummaryEvent, SessionUiEvent } from "../../shared/apiTypes.js";
 import { durableBrowserSnapshotSchema, type DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
@@ -26,6 +27,11 @@ export class SessionEventHub {
   private readonly globalSockets = new Set<RealtimeSocket>();
   private readonly seqBySession = new Map<string, number>();
   readonly epoch = randomUUID();
+  private readonly nativeHistories = new DurableHistoryGenerations();
+
+  nativeHistoryId(journalId: string, harness: Harness, conversationId: ConversationId): string {
+    return this.nativeHistories.identify(journalId, harness, conversationId);
+  }
   private readonly hostBySession = new Map<string, { shells: { events: SessionOpenTransientEvent[]; after?: string | undefined }[]; consumed: Set<string>; command?: Extract<SessionOpenTransientEvent, { type: "command.output" }> }>();
   private readonly nativeRefresh = new Map<string, Set<() => void>>();
 

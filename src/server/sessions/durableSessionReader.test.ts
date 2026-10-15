@@ -504,3 +504,54 @@ it("releases admission without observers if obtaining initial host state fails",
     expect(leases).toBe(0); expect(observations).toBe(0);
   } finally { observed.mockRestore(); await reader.close(); }
 });
+
+
+it.each(["hide", "same-count"] as const)("invalidates HTTP cursors and publisher generations for a %s presentation correction, including reconnect", async kind => {
+  const f = await fixture();
+  const entries: EntryRecord[] = [];
+  await f.conversation().commit(async tx => {
+    await initializeParentDocuments(tx, { id: f.conversation().id });
+    for (let index = 0; index < 200; index++) entries.push(await tx.appendEntry(UserEntry, f.conversation().id, { model: [{ role: "user", content: `m${String(index)}`, timestamp: index }] }));
+  }, context);
+  const ref = { id: "logical", cwd: f.directory };
+  const first = await f.reader.open(ref, { limit: 50 }, f.hub);
+  if (first === undefined) throw new Error("Missing native seed");
+  const base = await f.start();
+  const older = await fetch(`${base}/sessions/logical/messages?${new URLSearchParams({ cwd: f.directory, before: "150", limit: "50", historyId: first.historyId })}`);
+  expect(older.status).toBe(200);
+  expect(await older.json()).toMatchObject({ start: 100, total: 200, historyId: first.historyId });
+  const frames: SessionOpenResult[] = [];
+  let attachment = await f.reader.attachOpen(ref, f.hub, cut => { frames.push(cut); return Promise.resolve(); }, error => { throw error; });
+  try {
+    expect(frames.at(-1)?.historyId).toBe(first.historyId);
+    const target = entries[105]; if (target === undefined) throw new Error("Missing correction target");
+    await f.conversation().commit(async tx => {
+      (await tx.doc(Presentation, f.conversation().id, String(target.id), null)).envelope = { type: "custom", customType: "corrected", display: kind !== "hide" };
+    }, context);
+    await vi.waitFor(() => { expect(frames.at(-1)?.seq).toBeGreaterThan(first.seq); });
+    const corrected = frames.at(-1); if (corrected === undefined) throw new Error("Missing corrected cut");
+    expect(corrected.page.total).toBe(kind === "hide" ? 199 : 200);
+    expect(corrected.historyId).not.toBe(first.historyId);
+    const current = await fetch(`${base}/sessions/logical/open?${new URLSearchParams({ cwd: f.directory })}`);
+    expect(await current.json()).toMatchObject({ historyId: corrected.historyId });
+    const stale = await fetch(`${base}/sessions/logical/messages?${new URLSearchParams({ cwd: f.directory, before: "150", limit: "50", historyId: first.historyId })}`);
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ code: "HISTORY_CHANGED" });
+    await attachment?.stop(); attachment = undefined;
+    // No publisher exists during this correction. A reconnect and HTTP read must still agree.
+    await f.conversation().commit(async tx => {
+      (await tx.doc(Presentation, f.conversation().id, String(target.id), null)).envelope = { type: "custom", customType: "corrected-again", display: true };
+    }, context);
+    const rejoined = await f.reader.open(ref, { limit: 50 }, f.hub);
+    expect(rejoined?.historyId).not.toBe(corrected.historyId);
+    attachment = await f.reader.attachOpen(ref, f.hub, cut => { frames.push(cut); return Promise.resolve(); }, error => { throw error; });
+    expect(frames.at(-1)?.historyId).toBe(rejoined?.historyId);
+    const appended = await f.conversation().commit(async tx => {
+      const entry = await tx.appendEntry(UserEntry, f.conversation().id, { model: [{ role: "user", content: "ordinary append", timestamp: 201 }] });
+      (await tx.doc(Presentation, f.conversation().id, String(entry.id), null)).envelope = { type: "custom", customType: "new-append", display: true };
+      return entry;
+    }, context);
+    await vi.waitFor(() => { expect(frames.at(-1)?.page.messages.at(-1)?.id).toBe(`entry:${String(appended.conversationId)}:${String(appended.id)}:0`); });
+    expect(frames.at(-1)?.historyId).toBe(rejoined?.historyId);
+  } finally { await attachment?.stop(); }
+});

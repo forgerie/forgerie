@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSessionStore } from "./sessionStore";
-import { threadMessageIdAt } from "./transcript";
+import { messageText, threadMessageIdAt } from "./transcript";
 import { createOpenServer, openFixture } from "./testing/openFixture";
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -136,4 +136,43 @@ it("finishes an in-flight native prepend after a same-history live checkpoint ad
   expect(store.getSnapshot().transcript.messages.map(message => message.position)).toEqual(Array.from({ length: 10 }, (_, index) => index + 4));
   expect(store.getSnapshot().transcript.messages.find(message => message.position === 8)).toBe(tail);
   await store.ensurePosition(13);
+});
+
+
+it.each([
+  ["hide", "live"], ["same-count", "live"], ["hide", "reconnect"], ["same-count", "reconnect"],
+] as const)("replaces a prepended prefix for a %s correction on %s", async (kind, delivery) => {
+  let corrected = false;
+  const current = () => !corrected ? messages : kind === "hide" ? messages.filter(message => message.id !== "m5")
+    : messages.map(message => message.id === "m5" ? { ...message, content: "corrected m5" } : message);
+  const generation = () => corrected ? "corrected-generation" : "original-generation";
+  const open = () => openFixture({ readPath: "native", historyId: generation(), snapshot: { seq: corrected ? 10 : 0, partial: null },
+    page: { start: current().length - 4, total: current().length, messages: current().slice(-4) } });
+  const server = await createOpenServer(url => {
+    if (url.pathname.endsWith("/open")) return open();
+    if (url.pathname.endsWith("/messages")) {
+      const before = Number(url.searchParams.get("before"));
+      return { messages: current().slice(Math.max(0, before - 4), before), start: Math.max(0, before - 4), total: current().length,
+        historyId: generation(), epoch: "test-daemon", seq: corrected ? 10 : 0 };
+    }
+    return [];
+  }); cleanup.push(server.close);
+  const store = createSessionStore("known", { ...server.transport, nativeReadModel: true }, { retryDelayMs: 5 }, { id: "known", cwd: "/workspace" }); cleanup.push(store.dispose);
+  await store.start(); await store.loadEarlier();
+  expect(store.getSnapshot().transcript.messages.map(message => message.id)).toEqual(messages.slice(4).map(message => message.id));
+  corrected = true;
+  if (delivery === "live") server.emit({ type: "session.open", open: open() });
+  else for (const socket of server.sockets.clients) socket.close();
+  await vi.waitFor(() => {
+    expect(store.getSnapshot().connection.type).toBe("ready");
+    expect(store.getSnapshot().transcript.messages.map(message => message.position)).toEqual(Array.from({ length: 4 }, (_, index) => current().length - 4 + index));
+  });
+  expect(store.getSnapshot().transcript.messages.map(message => message.id)).toEqual(current().slice(-4).map(message => message.id));
+  await store.ensurePosition(4);
+  expect(store.getSnapshot().transcript.messages.map(message => message.id)).toEqual(current().slice(-8).map(message => message.id));
+  expect(store.getSnapshot().transcript.messages.map(message => message.position)).toEqual(Array.from({ length: 8 }, (_, index) => current().length - 8 + index));
+  expect(store.getSnapshot().transcript.messages.some(message => message.id === "m7")).toBe(true);
+  if (kind === "hide") expect(store.getSnapshot().transcript.messages.some(message => message.id === "m5")).toBe(false);
+  else expect(messageText(store.getSnapshot().transcript.messages.find(message => message.id === "m5")!)).toBe("corrected m5");
+  expect(server.requests.filter(url => url.pathname.endsWith("/messages")).at(-1)?.searchParams.get("historyId")).toBe("corrected-generation");
 });
