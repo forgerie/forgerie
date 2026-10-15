@@ -1,3 +1,4 @@
+import { withRiskAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { RISK_LABEL_ENTRY_KIND, RiskLabelEntrySchema, type RiskLabelEntry } from "../../shared/riskLabels.js";
 import { launchRiskLabel } from "../decisions/riskLabels.js";
 /**
@@ -662,10 +663,10 @@ export async function childMessages(harness: Harness, parent: ConversationId, co
   const live = await harness.snapshot(LiveDoc, child.id, context);
   const partial = live?.generation?.message;
   return {
-    messages: view.entries.flatMap<Message | {role: "custom"; customType: string; content: string; details: RiskLabelEntry}>(entry =>
+    messages: withRiskAnnotations(harness, child.id, view.entries.flatMap<Message | {role: "custom"; customType: string; content: string; details: RiskLabelEntry}>(entry =>
       entry.kind === RISK_LABEL_ENTRY_KIND && Check(RiskLabelEntrySchema, entry.data)
         ? [{role: "custom", customType: RISK_LABEL_ENTRY_KIND, content: "Risk opinion (not approval)", details: entry.data}]
-        : entry.model ?? []).filter(message => message.role !== "system"),
+        : entry.model ?? []).filter(message => message.role !== "system")),
     busy: live?.run !== undefined,
     ...(partial === undefined ? {} : { partial }),
   };

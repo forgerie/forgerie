@@ -1,3 +1,4 @@
+import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -195,4 +196,22 @@ describe("native Durable parent reads", () => {
     }, context);
     await expect(reader.history(undefined, context)).rejects.toThrow("exceeds 500 messages");
   });
+});
+
+it("overlays volatile labels in history and live replacements without writing or adding model input", async () => {
+  const { reader, harness, conversation, user } = await fixture();
+  await user("Run command");
+  await conversation.commit(tx => tx.appendEntry(AssistantEntry, conversation.id, { model: [fauxAssistantMessage([fauxToolCall("bash", { command: "true" }, { id: "call" })], { stopReason: "toolUse" })] }), context);
+  const frames: DurableBrowserSnapshot[] = []; const errors: Error[] = []; const publications: unknown[] = [];
+  const off = harness.subscribeCommits(publication => { publications.push(publication); });
+  const attachment = await reader.attach(snapshot => { frames.push(snapshot); return Promise.resolve(); }, error => { errors.push(error); }, context);
+  try {
+    await decisionAnnotations(harness).write(String(conversation.id), "tool:call", { target: "tool", id: "call", label: { model: "opinion-model", deletes_data: 0, outside_worktree: 0, acts_as_user: 0, risk: "low", risk_score: 0 } });
+    await vi.waitFor(() => { expect(JSON.stringify(frames.at(-1))).toContain("opinion-model"); });
+    expect(publications).toEqual([]); expect(errors).toEqual([]);
+    expect(JSON.stringify(await reader.history(undefined, context))).toContain("opinion-model");
+    expect(JSON.stringify(await reader.context(context))).not.toContain("opinion-model");
+    await user("Required input after annotation");
+    expect((await reader.messages(context)).at(-1)?.content).toBe("Required input after annotation");
+  } finally { off(); await attachment.stop(); }
 });

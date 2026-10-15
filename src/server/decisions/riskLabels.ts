@@ -1,4 +1,4 @@
-import { redactRiskLabelArguments, redactRiskLabelText } from "./riskLabelRedaction.js";
+import { redactDecisionArguments, redactDecisionText } from "./decisionPayloadRedaction.js";
 import { Check } from "typebox/value";
 import { RiskLabelSchema, type RiskLabel } from "../../shared/riskLabels.js";
 import type { GatedCategory } from "../../shared/autonomyPolicy.js";
@@ -26,7 +26,7 @@ function labelOf(result: DecisionAnswers): RiskLabel | undefined {
 }
 
 /** Even settings reads and request construction run outside admission/execution's await chain.
- * Publication is a separate transaction, against current state, and must only add information.
+ * Publication uses an independent optional store and must only add information.
  */
 export function launchRiskLabel(hints: RiskLabelHints | undefined, input: RiskLabelInput,
   publish: (label: RiskLabel) => void | Promise<void>, onError: (error: unknown) => void): void {
@@ -34,10 +34,10 @@ export function launchRiskLabel(hints: RiskLabelHints | undefined, input: RiskLa
   void Promise.resolve().then(async () => {
     const settings = enabled(hints);
     if (settings === undefined) return;
-    const cwd = redactRiskLabelText(input.cwd);
+    const cwd = redactDecisionText(input.cwd);
     const request: DecisionRequest = { model: settings.model,
-      state: { tool: redactRiskLabelText(input.tool), arguments: redactRiskLabelArguments(input.args).slice(0, 8000), cwd,
-        ...(input.gate === undefined ? {} : { category: input.gate.category, description: redactRiskLabelText(input.gate.description).slice(0, 4000) }) },
+      state: { tool: redactDecisionText(input.tool), arguments: redactDecisionArguments(input.args).slice(0, 8000), cwd,
+        ...(input.gate === undefined ? {} : { category: input.gate.category, description: redactDecisionText(input.gate.description).slice(0, 4000) }) },
       questions: {
         deletes_data: { type: "noul", instructions: "Does this delete or overwrite data?" },
         outside_worktree: { type: "noul", instructions: `Does this act outside the working directory ${cwd}?` },

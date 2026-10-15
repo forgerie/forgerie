@@ -1,3 +1,4 @@
+import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { RISK_LABEL_ENTRY_KIND } from "../../shared/riskLabels.js";
 import type { RiskLabelOptions } from "../decisions/riskLabels.js";
 import { readDecisionHintsSettings } from "../decisions/decisionHintsSettings.js";
@@ -23,7 +24,7 @@ import { defaultAutonomyPolicy } from "../../shared/autonomyPolicy.js";
 import { durableChildExtensions, listChildren } from "./durableChildAgents.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { decisions, decisionExtension } from "./durableDecisions.js";
-import { gatedActions, gatedActionsExtension, decideGatedAction, waitingGatedActions, GATED_ACTIONS_DOC_KIND, gatedActionsChanged, gateRiskLabelsChanged } from "./durableGatedActions.js";
+import { gatedActions, gatedActionsExtension, decideGatedAction, waitingGatedActions, GATED_ACTIONS_DOC_KIND, gatedActionsChanged } from "./durableGatedActions.js";
 
 const roots: string[] = []; const journals: DurableSessionJournal[] = [];
 afterEach(async () => { for (const journal of journals) await journal.close(); for (const root of roots) await rm(root, {recursive: true, force: true}); journals.length = 0; roots.length = 0; });
@@ -235,10 +236,10 @@ it.each(["approved", "refused"] as const)("a late label cannot change %s, its de
   const f = await fixture({hints: {client: {ask: () => { asks++; return new Promise(resolve => {answer = resolve;}); }}, readSettings: () => labelSettings}, onError: error => {errors.push(error);} });
   const id = await blocked(f);
   const changed: boolean[] = []; const labels: boolean[] = [];
+  const offLabels = decisionAnnotations(f.journal.harness).subscribe((scope, key) => { if (scope === String(f.journal.conversation.id) && key.startsWith("gate:")) labels.push(true); });
   const unsubscribe = f.journal.harness.subscribeCommits(publication => {
     if (!publication.changes.some(change => change.type === "entry" && change.value.kind === RISK_LABEL_ENTRY_KIND)) return;
     changed.push(gatedActionsChanged(publication, f.journal.conversation.id));
-    labels.push(gateRiskLabelsChanged(publication, f.journal.conversation.id));
   });
   try {
     await decideGatedAction(f.journal.harness, f.journal.conversation, id, choice, context);
@@ -253,10 +254,10 @@ it.each(["approved", "refused"] as const)("a late label cannot change %s, its de
     expect(await decisions(f.journal.harness, f.journal.conversation.id, context)).toStrictEqual(beforeDecisions);
     expect(await waitingGatedActions(f.journal.harness, f.journal.conversation.id, context)).toBe(0);
     expect(f.state.runs).toBe(choice === "approved" ? 1 : 0); expect(asks).toBe(1);
-    expect(changed).toEqual([false]); expect(labels).toEqual([true]); expect(errors).toEqual([]);
+    expect(changed).toEqual([]); expect(labels).toEqual([true]); expect(errors).toEqual([]);
     await f.reopen();
-    expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.riskLabel).toEqual(riskLabel);
-  } finally {unsubscribe();}
+    expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.riskLabel).toBeUndefined();
+  } finally {unsubscribe(); offLabels();}
 });
 
 it.each(["approved", "refused"] as const)("gate %s has off-equivalence, including an unreachable and hanging gateway", async choice => {
@@ -333,4 +334,22 @@ it("redacts gate hint arguments without changing the saved call or its approved 
   expect(await readFile(join(f.root, "effect"), "utf8")).toBe(value);
   expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.args).toEqual({value});
   expect(f.state.runs).toBe(1);
+});
+
+it.each(["approved", "refused"] as const)("a rejected gate-label write cannot poison later gate %s or admission", async choice => {
+  let answer: ((value: DecisionAnswers) => void) | undefined;
+  const errors: unknown[] = [];
+  const f = await fixture({ hints: { client: { ask: () => new Promise(resolve => { answer = resolve; }) }, readSettings: () => labelSettings }, onError: error => { errors.push(error); } });
+  const id = await blocked(f);
+  vi.spyOn(decisionAnnotations(f.journal.harness), "write").mockRejectedValueOnce(new Error("gate label write rejected"));
+  answer?.(labelAnswers);
+  await vi.waitFor(() => { expect(errors).toHaveLength(1); });
+  expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.riskLabel).toBeUndefined();
+  await decideGatedAction(f.journal.harness, f.journal.conversation, id, choice, context);
+  await vi.waitFor(async () => { expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.state.kind).toBe(choice === "approved" ? "ran" : "refused"); });
+  const next = await call(f.journal, undefined, { value: "later admission" });
+  f.journal.harness.resume(); await f.journal.harness.waitForTask(next, context);
+  expect(await waitingGatedActions(f.journal.harness, f.journal.conversation.id, context)).toBe(1);
+  expect(f.state.runs).toBe(choice === "approved" ? 1 : 0);
+  expect((await f.journal.conversation.context(context)).entries.some(entry => entry.kind === RISK_LABEL_ENTRY_KIND)).toBe(false);
 });

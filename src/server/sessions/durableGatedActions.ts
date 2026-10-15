@@ -1,5 +1,4 @@
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { RISK_LABEL_ENTRY_KIND, RiskLabelEntrySchema, type RiskLabel } from "../../shared/riskLabels.js";
+import { decisionAnnotations, riskAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { launchRiskLabel, type RiskLabelOptions } from "../decisions/riskLabels.js";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { AgentDoc, LiveDoc, ToolTask, UsageDoc, defineDoc, defineExtension, defineTask, hook, section, type JsonObject, type CommitPublication, type Conversation, type ConversationId, type Harness, type HookApi, type ToolDiagnostic, type ToolExecutionApi, type Tx, type TaskRuntime } from "@earendil-works/pi-durable";
@@ -18,7 +17,6 @@ export const GATED_ACTIONS_DOC_KIND = "forgerie.gated-actions";
 export const GATED_ACTION_GUIDANCE = "Irreversible actions and actions outside the project in the user's name are gated. While approval waits, keep working on parts that do not depend on it. Do not retry the blocked call; its result will arrive as a message.";
 /* eslint-disable @typescript-eslint/consistent-type-definitions */
 type GateRecord = { id: string; conversationId: ConversationId; by: string; tool: string; args: JsonObject; category: GatedCategory; description: string; requestedAt: number;
-  riskLabel?: RiskLabel;
   state: {kind: "waiting" | "approved" | "refused"} | {kind: "ran"; result: JsonValue; at: number} | {kind: "failed"; error: string; at: number} };
 type RunInput = { parent: ConversationId; id: string; cwd: string; nestedTools?: string };
 type RunState = { phase: "ready" } | { phase: "unknown" };
@@ -27,12 +25,7 @@ const Gates = defineDoc<{ records: Record<string, GateRecord>; cwd: Record<strin
   kind: GATED_ACTIONS_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({records: {}, cwd: {}}),
 });
 export function gatedActionsChanged(publication: CommitPublication, parent: ConversationId): boolean {
-  return !gateRiskLabelsChanged(publication, parent) && publication.changes.some(change => change.type === "document" && change.conversationId === parent && change.record.kind === GATED_ACTIONS_DOC_KIND);
-}
-/** Label-only commits notify readers, but never recount response needs or act as state changes. */
-export function gateRiskLabelsChanged(publication: CommitPublication, parent: ConversationId): boolean {
-  return publication.changes.some(change => change.type === "entry" && change.value.conversationId === parent
-    && change.value.kind === RISK_LABEL_ENTRY_KIND && Check(RiskLabelEntrySchema, change.value.data) && change.value.data.target === "gate");
+  return publication.changes.some(change => change.type === "document" && change.conversationId === parent && change.record.kind === GATED_ACTIONS_DOC_KIND);
 }
 function publicGate(record: GateRecord): GatedAction {
   const plain: unknown = JSON.parse(JSON.stringify(record));
@@ -40,7 +33,12 @@ function publicGate(record: GateRecord): GatedAction {
   return plain;
 }
 export async function gatedActions(harness: Harness, parent: ConversationId, context: Context): Promise<GatedAction[]> {
-  return Object.values((await harness.snapshot(Gates, parent, context))?.records ?? {}).map(publicGate).sort((a, b) => b.requestedAt - a.requestedAt || b.id.localeCompare(a.id));
+  const labels = riskAnnotations(harness, parent);
+  return Object.values((await harness.snapshot(Gates, parent, context))?.records ?? {}).map(record => {
+    const gate = publicGate(record);
+    const label = labels.find(entry => entry.target === "gate" && entry.id === gate.id)?.label;
+    return label === undefined ? gate : { ...gate, riskLabel: label };
+  }).sort((a, b) => b.requestedAt - a.requestedAt || b.id.localeCompare(a.id));
 }
 export async function waitingGatedActions(harness: Harness, parent: ConversationId, context: Context): Promise<number> {
   return (await gatedActions(harness, parent, context)).filter(gate => gate.state.kind === "waiting").length;
@@ -156,14 +154,8 @@ export async function gateToolCall(options: GatedActionsExtensionOptions, call: 
   }, context);
   if (admitted && options.riskLabels !== undefined) launchRiskLabel(options.riskLabels.hints,
     {tool: call.name, args: call.arguments, cwd: executionCwd, gate: found}, async label => {
-      // Read the live record in a new transaction. Never write back an admission snapshot:
-      // approval, refusal, execution intent and results can all have committed in the meantime.
-      await harness.commit(async tx => {
-        const gate = (await tx.doc(Gates, options.parent)).records[id];
-        if (gate === undefined || gate.riskLabel !== undefined) return;
-        gate.riskLabel = label;
-        await tx.appendEntry(options.parent, {kind: RISK_LABEL_ENTRY_KIND, data: durableJson({target: "gate", id, label})});
-      }, BACKGROUND_CONTEXT);
+      // Labels have no write access to the gate document or its harness.
+      await decisionAnnotations(harness).write(String(options.parent), `gate:${id}`, durableJson({target: "gate", id, label}));
     }, options.riskLabels.onError);
   return blocked(id);
 }

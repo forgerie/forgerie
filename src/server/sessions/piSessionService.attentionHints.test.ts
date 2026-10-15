@@ -13,11 +13,11 @@ import { readDecisionHintsSettings } from "../decisions/decisionHintsSettings.js
 import { assertDecisionHintOffEquivalence } from "../decisions/decisionHintsOffEquivalence.testSupport.js";
 import type { DecisionHints } from "../decisions/decisionHints.js";
 
-async function fixture(decisionHints?: DecisionHints) {
+async function fixture(decisionHints?: DecisionHints, replyText = "Please approve the result.") {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-attention-"));
   const models = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json"), allowModelNetwork: false });
   const provider = fauxProvider(); models.registerNativeProvider(provider.provider);
-  provider.setResponses([fauxAssistantMessage([{ type: "text", text: "Please approve the result." }, fauxToolCall("end_turn", { awaiting: "nothing" })], { stopReason: "toolUse" })]);
+  provider.setResponses([fauxAssistantMessage([{ type: "text", text: replyText }, fauxToolCall("end_turn", { awaiting: "nothing" })], { stopReason: "toolUse" })]);
   const gateway = createPiSessionManagerGateway({ agentDir: directory, env: { HOME: directory }, sessionDirEnvKeys: [] });
   let hub = new CapturingSessionEventHub();
   const create = () => new PiSessionService(hub, { agentDir: directory, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore(), heartbeatIntervalMs: 60_000, ...(decisionHints === undefined ? {} : { decisionHints }), now: () => new Date("2026-10-14T12:00:00Z") });
@@ -52,7 +52,7 @@ it("turn end and status publication are equivalent with hints off, unconfigured,
   }, { timeoutMs: 1000 });
 }, 30_000);
 
-it("asks a real HTTP gateway after settlement, persists the hint through restart, and clears it on new input", async () => {
+it("asks a real HTTP gateway after settlement, keeps the hint only for the live runtime, and clears it on new input", async () => {
   let requestBody = "";
   const server = createServer((request, response) => {
     request.setEncoding("utf8"); request.on("data", (chunk: string) => { requestBody += chunk; });
@@ -68,16 +68,18 @@ it("asks a real HTTP gateway after settlement, persists the hint through restart
   await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve); });
   const address = server.address(); if (address === null || typeof address === "string") throw new Error("Missing server port");
   const settings = { ...readDecisionHintsSettings({}), enabled: true, baseUrl: `http://127.0.0.1:${String(address.port)}` };
-  const f = await fixture({ client: createDecisionClient({ readConfig: () => settings }), readSettings: () => settings, status: () => ({ keyPresent: false }) });
+  const f = await fixture({ client: createDecisionClient({ readConfig: () => settings }), readSettings: () => settings, status: () => ({ keyPresent: false }) }, "Please approve. API_KEY=local-api-key Authorization: Bearer local-bearer");
   try {
     await f.turn();
     await vi.waitFor(async () => { expect((await f.service().status(f.ref)).attentionHint).toMatchObject({ likelyNeedsYou: true, model: "gateway-answering-model", kind: "decision", urgency: "high" }); });
-    const original = (await f.service().status(f.ref)).attentionHint;
-    expect(JSON.parse(requestBody)).toMatchObject({ state: { reply: "Please approve the result.", awaiting: "nothing" } });
+    expect(JSON.parse(requestBody)).toMatchObject({ state: { reply: "Please approve. API_KEY=[redacted] Authorization: Bearer [redacted]", awaiting: "nothing" } });
     expect((await f.service().status(f.ref)).response).toEqual({ kind: "none" });
+    expect(JSON.stringify(await f.service().messages(f.ref))).toContain("local-api-key");
+    expect(requestBody).not.toContain("local-api-key");
+    expect(requestBody).not.toContain("local-bearer");
     expect(f.hub().globalEvents.some((event) => event.type === "status.update" && event.status.attentionHint?.model === "gateway-answering-model")).toBe(true);
     await f.restart();
-    expect((await f.service().status(f.ref)).attentionHint).toEqual(original);
+    expect((await f.service().status(f.ref)).attentionHint).toBeUndefined();
     settings.attention = false;
     await f.service().prompt(f.ref, "Continue");
     expect((await f.service().status(f.ref)).attentionHint).toBeUndefined();

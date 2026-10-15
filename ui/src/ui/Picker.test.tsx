@@ -556,11 +556,13 @@ describe("attention hints in the list", () => {
   });
   it("marks a promoted row as a guess, apart from a row the agent marked as waiting", () => {
     hinted({ guessed: { ...idle, attentionHint: { ...hint, kind: "review", urgency: "high" } }, bare: { ...idle, attentionHint: hint },
-      asked: { ...idle, needsResponse: true } }, ["guessed", "bare"]);
+      asked: { ...idle, needsResponse: true, attentionHint: { ...hint, kind: "review", urgency: "high" } } }, ["guessed", "bare"]);
     expect(row("guessed").dataset["state"]).toBe("blocked");
     expect(row("guessed").hasAttribute("data-likely-needs-you")).toBe(true);
     expect(row("asked").hasAttribute("data-likely-needs-you")).toBe(false);
     expect(row("asked").querySelector(".guess-tag")).toBeNull();
+    expect(row("asked").hasAttribute("data-attention-kind")).toBe(false);
+    expect(row("asked").hasAttribute("data-attention-urgency")).toBe(false);
     const tag = row("guessed").querySelector<HTMLElement>(".guess-tag")!;
     expect(tag.querySelector(".guess-tag-face")?.textContent).toBe("Review");
     expect(tag.querySelector(".guess-tag-said")?.textContent).toBe("Likely needs you: review, high urgency");

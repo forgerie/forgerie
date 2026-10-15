@@ -1,3 +1,4 @@
+import { redactDecisionText } from "./decisionPayloadRedaction.js";
 import { z } from "zod";
 import { attentionKindSchema, attentionUrgencySchema, type AttentionHint } from "../../shared/attentionHints.js";
 import type { DecisionHints } from "./decisionHints.js";
@@ -74,7 +75,9 @@ export class AttentionHints {
     const old = this.states.get(session);
     this.states.set(session, { suppressed: true, canSettle: false });
     // A tombstone prevents queued input from reviving a hint after restart.
-    if (old?.asked !== undefined || old?.hint !== undefined || storedHint(session) !== undefined) {
+    const settings = this.deps?.readSettings();
+    if (settings?.enabled === true && settings.attention && settings.baseUrl.trim() !== ""
+      && (old?.asked !== undefined || old?.hint !== undefined || storedHint(session) !== undefined)) {
       void session.persist({ version: 1, invalidated: true }).catch(this.onError);
     }
   }
@@ -111,7 +114,7 @@ export class AttentionHints {
       if (replySchema.safeParse(message).success) { reply = message; break; }
     }
     const parsed = replySchema.safeParse(reply);
-    const text = parsed.success ? parsed.data.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n").trim().slice(0, 8192) : "";
+    const text = parsed.success ? redactDecisionText(parsed.data.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n").trim()).slice(0, 8192) : "";
     const state: HintState = { suppressed: false, canSettle: true, asked: id };
     this.states.set(session, state);
     const current = () => {

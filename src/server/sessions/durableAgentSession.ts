@@ -1,13 +1,14 @@
 import { readTaskActivity, watchTaskActivity } from "./durableTaskActivity.js";
+import { decisionAnnotations, riskAnnotationMessages, withRiskAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { durableJson } from "./durableJson.js";
-import { RISK_LABEL_ENTRY_KIND, type RiskLabel } from "../../shared/riskLabels.js";
+import type { RiskLabel } from "../../shared/riskLabels.js";
 import type { DecisionHints } from "../decisions/decisionHints.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { acceptProcessEvents, processEventsExtension } from "./durableProcessEvents.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
-import { gatedActionsExtension, gateToolCall, type GatedActionsExtensionOptions, gatedActions, decideGatedAction, waitingGatedActions, gatedActionsChanged, gateRiskLabelsChanged } from "./durableGatedActions.js";
+import { gatedActionsExtension, gateToolCall, type GatedActionsExtensionOptions, gatedActions, decideGatedAction, waitingGatedActions, gatedActionsChanged } from "./durableGatedActions.js";
 import type { GatedActionReads } from "./gatedActions.js";
 import type { AutonomyPolicySource } from "../../shared/autonomyPolicy.js";
 import { readFile } from "node:fs/promises";
@@ -249,7 +250,10 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   get sessionId(): string { return this.sessionManager.getSessionId(); }
   get sessionFile(): string | undefined { return this.sessionManager.getSessionFile(); }
   get sessionName(): string | undefined { return this.sessionManager.getSessionName(); }
-  get messages() { return this.sessionManager.buildSessionContext().messages; }
+  get messages() {
+    const messages = this.sessionManager.buildSessionContext().messages;
+    return this.journalValue === undefined ? messages : withRiskAnnotations(this.journal.harness, this.journal.conversation.id, messages);
+  }
   get promptTemplates() { return this.resourceLoader.getPrompts().prompts; }
   get state(): { streamingMessage?: AssistantMessage } { return this.partial === undefined ? {} : { streamingMessage: this.partial }; }
   get isStreaming(): boolean { return this.streaming; }
@@ -456,11 +460,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   }
 
   private async recordToolRiskLabel(conversation: ConversationId, id: string, label: RiskLabel): Promise<void> {
-    // A gateway can answer after the source task ended. Use the session journal, not the task's expired execution API.
-    await this.journal.harness.commit(async tx => {
-      if (await tx.conversation(conversation) === undefined) return;
-      await tx.appendEntry(conversation, {kind: RISK_LABEL_ENTRY_KIND, data: durableJson({target: "tool", id, label})});
-    }, context);
+    await decisionAnnotations(this.journal.harness).write(String(conversation), `tool:${id}`, durableJson({target: "tool", id, label}));
   }
 
   private async startGatedActions(): Promise<void> {
@@ -486,12 +486,20 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     };
     await recount();
     let pending = Promise.resolve();
-    this.gateUnsubscribe = this.journal.harness.subscribeCommits(publication => {
-      if (gateRiskLabelsChanged(publication, parent)) { this.emit({type: "workflow_runs_changed"}); return; }
+    const offLabels = decisionAnnotations(this.journal.harness).subscribe((scope, key) => {
+      if (scope !== String(parent)) return;
+      if (key.startsWith("gate:")) this.emit({type: "workflow_runs_changed"});
+      if (key.startsWith("tool:")) {
+        const message = riskAnnotationMessages(this.journal.harness, parent).find(item => `tool:${item.details.id}` === key);
+        if (message !== undefined) { this.emit({type: "message_start", message}); this.emit({type: "message_end", message}); }
+      }
+    });
+    const offCommits = this.journal.harness.subscribeCommits(publication => {
       if (!gatedActionsChanged(publication, parent) && !decisionsChanged(publication, parent)) return;
       this.emit({type: "workflow_runs_changed"});
       pending = pending.then(recount).catch((error: unknown) => { this.report(error); });
     });
+    this.gateUnsubscribe = () => { offLabels(); offCommits(); };
   }
 
   private async startChildAgents(): Promise<void> {

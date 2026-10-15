@@ -70,7 +70,9 @@ The gateway receives the tool name, JSON arguments limited to 8000 characters,
 and execution cwd. Gate asks also include category and description (limited to
 4000 characters). Before applying these limits or sending the request, a pure
 redaction step replaces likely secrets with `[redacted]`. It covers authorization
-headers, secret-bearing flags and environment assignments, URL credentials,
+headers (including X-Api-Key, X-Auth-Token, Cookie, Set-Cookie and
+Proxy-Authorization), curl `-u`/`--user` credentials, secret-bearing flags and
+environment assignments, URL credentials,
 sensitive JSON fields, common OpenAI/GitHub/Slack/AWS key formats, and long opaque
 credential-like strings. It keeps command verbs, flag names and ordinary
 configuration readable. The same step covers gate descriptions and other state
@@ -88,21 +90,21 @@ answers are numbers from 0 to 1. The risk score runs from 0 to 2 for `low`,
 and the answering model are retained. A low label is not "safe to approve".
 Sensitivity does not alter risk labels.
 
-Gate responses add optional `riskLabel` to the gate record. The shape is
+Gate responses add optional `riskLabel` to the gate read model. The shape is
 `{model, deletes_data, outside_worktree, acts_as_user, risk, risk_score}`.
-A separate journal transaction updates only this field, even if approval,
-refusal, or execution has finished. It also appends a display-only
-`forgerie.risk-label` entry `{target:"gate", id, label}`. Label-only commits
-refresh the gate read without recounting Needs your response.
+Labels live in an independent in-memory store, keyed by session family,
+conversation and gate or tool-call ID. They never change the gate document or
+append an entry to its required journal. An independent notification refreshes
+the gate read without recounting Needs your response.
 
-Bash responses append the same display-only entry with `target:"tool"` and the
-tool call ID. The existing message stream delivers it live. The transcript
-folds it into that call's `riskLabel`, carried in the UI tool-call artifact.
-Native child transcripts project and poll the same durable entries. Entries
-and gate labels survive restart; ordinary bash cards recover their label on
-reload. Nested SDK bash labels are live when their nested call row exists;
-those nested call rows are not themselves persisted by the SDK adapter, so a
-reload can retain the annotation without showing a nested row.
+Bash responses add display-only `forgerie.risk-label` messages with
+`{target:"tool", id, label}` to browser history and the live message stream. The
+transcript folds them into the source call's `riskLabel`. Native child transcript
+polls use the same in-memory store. Neither model context nor the required
+journal contains these annotations. Browser reload recovers labels while the
+session family remains open. Closing that family or restarting sessiond loses
+all labels. Nested SDK call rows are themselves live-only, so their labels can
+be retained in memory without a corresponding nested row after browser reload.
 
 The gate card and the bash line draw the label (see
 [What you see](#what-you-see)). Child call rows in a child's exchange log keep
@@ -111,9 +113,9 @@ recommendation is added.
 
 No call awaits a gateway response. A disabled feature, empty address, invalid
 answer, timeout, or gateway failure adds nothing. Turning either switch off
-before an answer arrives discards that late answer. Already stored annotations
-remain history. Storage errors are reported through the session's extension
-error channel; they never alter gate state or tool results.
+before an answer arrives discards that late answer. Annotations already in memory remain history until the family closes.
+Annotation errors are reported through the session's extension error channel.
+They cannot poison Durable because no optional write calls its harness or storage.
 
 ## Maintainer contract
 
@@ -134,7 +136,8 @@ that waits for the hanging gateway timeout. See its tests for an example.
 
 With Attention enabled, each settled agent turn sends one background ask. The
 state contains the final assistant reply's visible text (at most 8192 characters)
-and the declared awaiting state (`nothing`, `reply`, or `undeclared`). Thinking
+and the declared awaiting state (`nothing`, `reply`, or `undeclared`). A shared
+payload scrubber redacts likely credentials before this limit is applied. Thinking
 and earlier narration are not sent. The questions classify the reply as
 `decision`, `review`, `blocked`, `failed`, `done`, or `fyi`; estimate whether it
 asks the user to answer, decide or approve; score urgency as low, normal or high;
@@ -150,13 +153,15 @@ asks-user and stopped-early probabilities must meet the inclusive threshold:
 | normal | 0.75 |
 | low | 0.90 |
 
-A declared response request stays a response request. Open, Working, Errored and
-Archived rows do not move because of a hint. Needs your response orders by
-high, normal, then low urgency, followed by recency. Unknown urgency ranks as
-normal. Pinned rows keep their existing section and recency order before the
-other sections. Project grouping retains its existing pinned-first recency order.
-Kind and urgency reach the view model only at confidence 0.75 or above. Urgency
-uses the nearest score level (0 = low, 1 = normal, 2 = high).
+Rows that today's rules place in Needs your response receive no hint mark,
+kind or urgency. Their existing recency order stays exact, and they come before
+all hint-promoted rows. Only hint-promoted rows then sort by high, normal, low
+urgency and recency; unknown urgency ranks as normal. Open, Working, Errored and
+Archived rows do not move because of a hint. Pinned rows keep their existing
+section and recency order before other sections. Project grouping retains its
+existing pinned-first recency order. Only baseline Unread rows can receive kind
+and urgency, each at confidence 0.75 or above. Urgency uses the nearest score
+level (0 = low, 1 = normal, 2 = high).
 
 The server selects display fields using live settings. The browser receives an
 optional `SessionStatus.attentionHint` through the existing `status.update`:
@@ -177,20 +182,22 @@ on the next status read or publication. A late answer re-checks live settings an
 turn identity before storage and publication. No gateway result changes the
 session response, admits a command, or delays the turn end.
 
-Hints use the native session journal's rewindable `ExtensionEntries` metadata
-family, as session response declarations do. The journal stores probabilities,
-answering model, timestamp and turn identity. Queued user input and a new run
-invalidate the old hint immediately and write a background tombstone. A reply
-from an older turn cannot promote a newer one. Optional writes use their own
-native commit instead of the SDK metadata intent queue, so a hint write failure
-does not poison later response declarations. Persistence errors are logged.
+Hints use the same independent in-memory annotation store as risk labels, not
+the Durable journal or SDK metadata queue. They retain probabilities, answering
+model, timestamp and turn identity only while the session family stays open.
+Queued user input and a new run invalidate the old hint immediately. No
+invalidation writes a tombstone while attention is off or unconfigured. In all
+modes, hints and labels make zero writes to required session storage.
 
-Browser reload retains live-session hints. After a daemon restart, persisted
-hints return when that session's runtime opens (for example, on a status request
-or selecting the session). The cold catalog does not open all inactive journals
-just to read hints. This limits restart discovery but avoids per-session database
-reads for a large picker. See [What you see](#what-you-see) for the picker's
-mark and label.
+Browser reload retains live-session hints. Closing the session family or
+restarting sessiond loses them. The next completed turn can obtain a new hint.
+This loss is deliberate: an ordinary storage error in any Durable commit can
+poison the required journal even if SQLite rolled it back. A separate native
+commit is not an isolation boundary. Keeping optional annotations outside that
+journal makes optional failures unable to block declarations, gate decisions,
+execution intent or results. No storage error is reclassified as safe, and
+`node_modules` remains unchanged. See [What you see](#what-you-see) for the
+picker's mark and label.
 
 ## What you see
 
@@ -209,7 +216,7 @@ The row's second line adds a short muted word after the project:
 | --- | --- | --- |
 | Moved by a hint, with a kind | `Decision`, `Review`, `Blocked`, `Failed`, `Done` or `FYI` | "Likely needs you: review" |
 | Moved by a hint, without a kind | `Likely needs you` | "Likely needs you" |
-| Unread or waiting, not moved, with a kind | The kind | "Hint: done" |
+| Unread, not moved, with a kind | The kind | "Hint: done" |
 
 High urgency draws the word in full ink and weight with a small double-chevron
 mark, and adds "high urgency" to the spoken text. It uses no signal colour.

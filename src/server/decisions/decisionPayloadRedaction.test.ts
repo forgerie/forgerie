@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { redactRiskLabelArguments, redactRiskLabelText } from "./riskLabelRedaction.js";
+import { redactDecisionArguments, redactDecisionText } from "./decisionPayloadRedaction.js";
 
-describe("outbound risk-label redaction", () => {
+describe("outbound decision-payload redaction", () => {
   it.each([
     ['curl -H "Authorization: Bearer short-secret" https://api.example.test/items', 'curl -H "Authorization: Bearer [redacted]" https://api.example.test/items'],
     ["curl -H 'authorization: Basic dXNlcjpwYXNz' https://api.example.test", "curl -H 'authorization: Basic [redacted]' https://api.example.test"],
@@ -16,8 +16,8 @@ describe("outbound risk-label redaction", () => {
     ['echo xoxb-123456789012-123456789012-abcDEFghijklMNOPqrstuvWX AKIAIOSFODNN7EXAMPLE ASIA1234567890ABCDEF', 'echo [redacted] [redacted] [redacted]'],
     ['printf %s wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', 'printf %s [redacted]'],
   ])("redacts credentials but preserves command structure: %s", (command, expected) => {
-    expect(redactRiskLabelText(command)).toBe(expected);
-    expect(redactRiskLabelText(expected)).toBe(expected);
+    expect(redactDecisionText(command)).toBe(expected);
+    expect(redactDecisionText(expected)).toBe(expected);
   });
 
   it.each([
@@ -31,7 +31,7 @@ describe("outbound risk-label redaction", () => {
     "echo --token-count 123 --password-policy strict",
     "printf '%s\\n' public-information-with-a-long-but-readable-name",
   ])("keeps non-secret command text unchanged: %s", command => {
-    expect(redactRiskLabelText(command)).toBe(command);
+    expect(redactDecisionText(command)).toBe(command);
   });
 
   it("redacts nested gate arguments without mutating their saved values", () => {
@@ -39,8 +39,30 @@ describe("outbound risk-label redaction", () => {
     const args = Object.freeze({headers, password: "short", apiKey: "short-key", env: Object.freeze({AWS_SECRET_ACCESS_KEY: "short-aws-secret", NODE_ENV: "production"}),
       targets: Object.freeze(["https://user:pass@host.test/data", 7, null]), message: "Publish updated listing"});
     const original = JSON.stringify(args);
-    expect(JSON.parse(redactRiskLabelArguments(args))).toEqual({headers: {Authorization: "[redacted]", Accept: "application/json"}, password: "[redacted]", apiKey: "[redacted]",
+    expect(JSON.parse(redactDecisionArguments(args))).toEqual({headers: {Authorization: "[redacted]", Accept: "application/json"}, password: "[redacted]", apiKey: "[redacted]",
       env: {AWS_SECRET_ACCESS_KEY: "[redacted]", NODE_ENV: "production"}, targets: ["https://[redacted]@host.test/data", 7, null], message: "Publish updated listing"});
     expect(JSON.stringify(args)).toBe(original);
   });
+});
+
+it.each([
+  ['curl -u user:shortpass https://api.test', 'curl -u [redacted] https://api.test'],
+  ["curl --user 'user:short pass' https://api.test", "curl --user '[redacted]' https://api.test"],
+  ['curl --user=user:shortpass https://api.test', 'curl --user=[redacted] https://api.test'],
+  ['X-Api-Key: short-api-key\nCookie: sid=short; theme=dark\nSet-Cookie: sid=short; HttpOnly\nProxy-Authorization: Bearer short-proxy\nX-Auth-Token: short-token', 'X-Api-Key: [redacted]\nCookie: [redacted]\nSet-Cookie: [redacted]\nProxy-Authorization: Bearer [redacted]\nX-Auth-Token: [redacted]'],
+  ['curl -H "X-Api-Key: short" -H "Cookie: sid=secret; theme=dark" -H "X-Auth-Token: short-token" https://api.test', 'curl -H "X-Api-Key: [redacted]" -H "Cookie: [redacted]" -H "X-Auth-Token: [redacted]" https://api.test'],
+])("redacts basic auth and secret-bearing headers: %s", (text, expected) => {
+  expect(redactDecisionText(text)).toBe(expected);
+});
+it.each(['curl --user-agent "Public client" -I https://api.test', 'git status -u', 'id --user', 'useradd --user-group public'])('keeps unrelated commands: %s', text => {
+  expect(redactDecisionText(text)).toBe(text);
+});
+
+it.each([
+  ['Proxy-Authorization: Digest username=name, response=short-secret', 'Proxy-Authorization: [redacted]'],
+  ['Proxy-Authorization: Digest username="name", response="short-secret"', 'Proxy-Authorization: [redacted]'],
+  [String.raw`curl -H "Proxy-Authorization: Digest username=\"name\", response=\"short-secret\"" https://api.test`, 'curl -H "Proxy-Authorization: [redacted]" https://api.test'],
+  ['X-Api-Key: two word-secret', 'X-Api-Key: [redacted]'],
+])("redacts an entire authentication header, not only its first token: %s", (text, expected) => {
+  expect(redactDecisionText(text)).toBe(expected);
 });

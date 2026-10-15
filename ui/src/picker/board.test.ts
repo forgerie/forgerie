@@ -181,3 +181,14 @@ describe("attention hints", () => {
     expect(rows(input({ sessions: [s], statuses: { a: idle }, unread: new Set(["a"]) }))[0]).toMatchObject({ state: "unread" });
   });
 });
+
+it("keeps required-response rows hint-free in today's order and before inferred rows", () => {
+  const hint = { turnId: "turn", at: ago(0), model: "fast", likelyNeedsYou: true, kind: "review" as const, urgency: "high" as const };
+  const sessions = [session("declared-old", { modified: ago(30), response: { kind: "needs-response", reason: "reply" } }), session("declared-new", { modified: ago(20), response: { kind: "needs-response", reason: "reply" } }), session("dialog", { modified: ago(10) }), session("hint-new", { modified: ago(1) }), session("hint-high", { modified: ago(5) })];
+  const statuses = { "declared-new": { ...idle, attentionHint: { ...hint, urgency: "low" as const } }, "declared-old": { ...idle, attentionHint: hint }, dialog: { ...idle, blocked: true, attentionHint: hint }, "hint-new": { ...idle, attentionHint: { ...hint, urgency: "normal" as const } }, "hint-high": { ...idle, attentionHint: hint } };
+  const all = rows(input({ sessions, statuses, unread: new Set(sessions.map(s => s.id)) }));
+  for (const row of all.filter(row => !row.session.id.startsWith("hint-"))) {
+    expect(row).not.toHaveProperty("attentionKind"); expect(row).not.toHaveProperty("urgency"); expect(row).not.toHaveProperty("likelyNeedsYou");
+  }
+  expect(sections(all, { grouping: "state", showArchived: false, now: NOW }).flatMap(section => section.rows).map(row => row.session.id)).toEqual(["dialog", "declared-new", "declared-old", "hint-high", "hint-new"]);
+});

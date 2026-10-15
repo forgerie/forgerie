@@ -1,23 +1,12 @@
-import { randomUUID } from "node:crypto";
 import type { JsonValue } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { ATTENTION_HINT_CUSTOM_TYPE } from "../decisions/attentionHints.js";
-import { ExtensionEntries } from "./durableParentDocuments.js";
+import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 
-export async function readAttentionHint(handle: DurableSessionHandle): Promise<unknown> {
-  const stored = await handle.harness.snapshot(ExtensionEntries, handle.conversation.id, ATTENTION_HINT_CUSTOM_TYPE, context);
-  return stored?.entries[stored.entries.length - 1]?.data;
+/** Volatile sidecar only. Never submit optional information to Durable's commit line. */
+export function readAttentionHint(handle: DurableSessionHandle): Promise<unknown> {
+  return Promise.resolve(decisionAnnotations(handle.harness).read(String(handle.conversation.id), ATTENTION_HINT_CUSTOM_TYPE));
 }
-
-/** Same rewindable metadata family as the response. Optional writes must not poison
- * ParentState's SDK intent queue and make a later end_turn declaration fail.
- */
-export async function appendAttentionHint(handle: DurableSessionHandle, data: JsonValue): Promise<void> {
-  await handle.conversation.commit(async (tx) => {
-    const id = randomUUID();
-    const marker = await tx.appendEntry(handle.conversation.id, { kind: "forgerie.app-state", data: { sdkEntryId: id, change: "custom-entry", customType: ATTENTION_HINT_CUSTOM_TYPE } });
-    const stored = await tx.doc(ExtensionEntries, handle.conversation.id, ATTENTION_HINT_CUSTOM_TYPE, null);
-    stored.entries.push({ id, nativeEntryId: marker.id, timestamp: new Date().toISOString(), data });
-  }, context);
+export function appendAttentionHint(handle: DurableSessionHandle, data: JsonValue): Promise<void> {
+  return decisionAnnotations(handle.harness).write(String(handle.conversation.id), ATTENTION_HINT_CUSTOM_TYPE, data);
 }

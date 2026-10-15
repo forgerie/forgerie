@@ -111,4 +111,28 @@ describe("attention hints", () => {
     expect(f.requests[0]?.state).toEqual({ reply: "", awaiting: "nothing" });
   });
 
+  it.each(["enabled", "attention", "baseUrl"] as const)("writes no tombstone when %s is disabled or unconfigured", async setting => {
+    const f = fixture(); const writes = vi.spyOn(f.session, "persist");
+    f.hints.settled(f.session); f.resolve(answers());
+    await vi.waitFor(() => { expect(f.published).toHaveBeenCalledOnce(); });
+    if (setting === "baseUrl") f.settings.baseUrl = ""; else f.settings[setting] = false;
+    f.hints.invalidate(f.session); f.hints.started(f.session);
+    expect(writes).toHaveBeenCalledOnce(); expect(f.hints.read(f.session)).toBeUndefined();
+  });
+  it("redacts credentials from attention text without changing the visible reply", () => {
+    const f = fixture();
+    const text = 'API_KEY=local-api-key Authorization: Bearer local-bearer\ncurl -u user:short-pass -H "X-Api-Key: local-header" -H "Cookie: sid=local-cookie" https://api.test';
+    f.session.messages = () => [{ role: "assistant", content: [{ type: "text", text }] }];
+    f.hints.settled(f.session);
+    expect(f.requests[0]?.state).toEqual({ reply: 'API_KEY=[redacted] Authorization: Bearer [redacted]\ncurl -u [redacted] -H "X-Api-Key: [redacted]" -H "Cookie: [redacted]" https://api.test', awaiting: "nothing" });
+    expect(JSON.stringify(f.session.messages())).toContain("local-api-key");
+  });
+  it("scrubs complete credentials before truncating a reply", () => {
+    const f = fixture();
+    f.session.messages = () => [{ role: "assistant", content: [{ type: "text", text: "Public note. ".repeat(620) + 'API_KEY="must-stay-local ' + "x".repeat(6000) + '"' }] }];
+    f.hints.settled(f.session);
+    const state = f.requests[0]?.state;
+    expect(state).toEqual({ reply: "Public note. ".repeat(620) + 'API_KEY="[redacted]"', awaiting: "nothing" });
+  });
+
 });

@@ -107,9 +107,9 @@ const TERMINAL = <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" w
 const KIND_WORDS: Record<NonNullable<Row["attentionKind"]>, string> = {
   decision: "Decision", review: "Review", blocked: "Blocked", failed: "Failed", done: "Done", fyi: "FYI",
 };
-/** The hint's tag: a row the hint moved to Needs your response, or an unread or waiting row with a confident kind. */
+/** Required-response rows never show an inferred tag. */
 function attentionTag(row: Row): ReactNode {
-  if (row.state !== "blocked" && row.state !== "unread") return null;
+  if (row.state !== "unread" && !(row.state === "blocked" && row.likelyNeedsYou === true)) return null;
   const kind = row.attentionKind === undefined ? undefined : KIND_WORDS[row.attentionKind];
   if (row.likelyNeedsYou !== true && kind === undefined) return null;
   const high = row.urgency === "high";

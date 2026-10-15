@@ -1,3 +1,4 @@
+import { decisionAnnotations, withRiskAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { z } from "zod";
 import type { Static } from "typebox";
 import { copyJson } from "@earendil-works/chord";
@@ -197,7 +198,7 @@ export class DurableParentReadModel {
       }
       cursor = page.next;
     } while (cursor !== undefined);
-    return messages;
+    return withRiskAnnotations(this.options.handle.harness, this.options.handle.conversation.id, messages);
   }
 
   async history(page: MessagePageRequest | undefined, context: Context): Promise<DurableBrowserSnapshot["history"]> {
@@ -252,9 +253,15 @@ export class DurableParentReadModel {
       return line;
     };
     const isStopped = () => stopped;
+    const offLabels = decisionAnnotations(this.options.handle.harness).subscribe((scope, key) => {
+      if (scope === String(this.options.handle.conversation.id) && key.startsWith("tool:")) {
+        void publish().catch((error: unknown) => finish({ reason: "listener_error", error: error instanceof Error ? error : new Error(String(error)) }));
+      }
+    });
     let stopping: Promise<void> | undefined;
     const stop = () => {
       stopped = true;
+      offLabels();
       stopping ??= Promise.all([watch.stop(), appWatch?.stop()]).then(() => undefined);
       return stopping;
     };
@@ -318,7 +325,7 @@ export class DurableParentReadModel {
     });
     return durableBrowserSnapshotSchema.parse({
       type: "session.snapshot", epoch, revision, ...(app === undefined ? {} : { app }),
-      history: this.page(value.entries.flatMap((entry) => this.entryMessages(entry))),
+      history: this.page(withRiskAnnotations(this.options.handle.harness, this.options.handle.conversation.id, value.entries.flatMap((entry) => this.entryMessages(entry)))),
       partial: partial === undefined ? null : durableBrowserMessageSchema.parse(projectBrowserMessage(partial)),
       tools: (live.tools ?? []).filter((slot) => projectBrowserSessionEvent({ type: "tool.start", toolName: slot.name, toolCallId: slot.callId, summary: "" }).type === "tool.start").map((slot) => ({ toolCallId: slot.callId, toolName: slot.name, status: slot.status, output: slot.output ?? "" })),
       queuedMessages, isStreaming: live.run !== undefined, isCompacting: (live.compactions?.length ?? 0) > 0,

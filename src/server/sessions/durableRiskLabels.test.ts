@@ -1,3 +1,4 @@
+import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { createDurableChildHost } from "./durableChildHost.js";
 import { createServer, type Server } from "node:http";
 import { mkdtemp, mkdir, rm, readFile } from "node:fs/promises";
@@ -70,7 +71,7 @@ it("bash has off-equivalence and executes before a hanging gateway times out", a
   }, {timeoutMs: 3000});
 });
 
-it.each([false, true])("delivers a late bash label live and through persisted history (nested=%s)", async nested => {
+it.each([false, true])("delivers a late bash label live and through volatile history (nested=%s)", async nested => {
   let answer: ((value: DecisionAnswers) => void) | undefined; let asks = 0; let request: DecisionRequest | undefined;
   const f = await fixture({client: {ask: value => {asks++; request = value; return new Promise(resolve => {answer = resolve;});}}, readSettings: () => settings, status: () => ({keyPresent: false})});
   await f.run(nested);
@@ -80,16 +81,17 @@ it.each([false, true])("delivers a late bash label live and through persisted hi
   answer?.(opinion);
   await vi.waitFor(() => {expect(f.errors).toEqual([]); expect(JSON.stringify(f.events)).toContain(RISK_LABEL_ENTRY_KIND);});
   await f.session.refreshDurableReads();
-  const entry = (await f.session.journal.conversation.context(context)).entries.find(value => value.kind === RISK_LABEL_ENTRY_KIND);
-  expect(entry?.data).toMatchObject({target: "tool", id: nested ? "bash-call/1" : "bash-call", label: {model: "actual-risk-model", risk: "low", risk_score: 0.4}});
-  expect(entry?.model).toBeUndefined(); // The annotation is not extra model input.
+  const entry = f.session.messages.find(value => value.role === "custom" && value.customType === RISK_LABEL_ENTRY_KIND);
+  expect(entry).toMatchObject({details: {target: "tool", id: nested ? "bash-call/1" : "bash-call", label: {model: "actual-risk-model", risk: "low", risk_score: 0.4}}});
+  expect((await f.session.journal.conversation.context(context)).entries.some(value => value.kind === RISK_LABEL_ENTRY_KIND)).toBe(false);
+  expect(JSON.stringify(await f.session.parentReadModel.messages(context))).toContain("actual-risk-model");
   expect(f.errors).toEqual([]);
   const file = f.manager.getSessionFile(); if (file === undefined) throw new Error("Missing transcript");
   await f.session.close();
   const services = await f.createServices();
   services.settingsManager.applyOverrides({defaultTools: ["bash", "+codemode"], compaction: {enabled: false}});
   const reopened = await DurableAgentSession.open({services, sessionManager: SessionManager.open(file), initialModel: f.model}); sessions.push(reopened);
-  expect(JSON.stringify(reopened.messages)).toContain("actual-risk-model");
+  expect(JSON.stringify(reopened.messages)).not.toContain("actual-risk-model");
 });
 
 it("redacts the real HTTP gateway payload while a real bash command keeps its original arguments", async () => {
@@ -136,4 +138,20 @@ it("records a native child bash label by the child call id after that call ends"
     details: {target: "tool", id: "child-bash", label: {model: "actual-risk-model"}}});
   expect(f.errors).toEqual([]); expect(await readFile(join(f.root, "child-effect"), "utf8")).toBe("CHILD");
   expect(JSON.stringify(f.session.messages)).not.toContain("actual-risk-model");
+});
+
+it.each(["sdk", "nested", "child"] as const)("a rejected %s bash-label write cannot poison later declarations, execution intent or results", async source => {
+  let answer: ((value: DecisionAnswers) => void) | undefined;
+  const f = await fixture({ client: { ask: () => new Promise(resolve => { answer = resolve; }) }, readSettings: () => settings, status: () => ({ keyPresent: false }) });
+  if (source === "child") await f.runChild(); else await f.run(source === "nested");
+  vi.spyOn(decisionAnnotations(f.session.journal.harness), "write").mockRejectedValueOnce(new Error("bash label write rejected"));
+  answer?.(opinion);
+  await vi.waitFor(() => { expect(f.errors).toHaveLength(1); });
+  expect(f.errors[0]).toContain("bash label write rejected");
+  await f.session.parentState.declareResponse("reply", context);
+  expect(await f.session.parentState.response(context)).toEqual({ kind: "needs-response", reason: "reply" });
+  await f.run(false, "printf LATER > effect");
+  expect(await readFile(join(f.root, "effect"), "utf8")).toBe("LATER");
+  expect(f.session.messages.some(message => message.role === "toolResult" && message.isError)).toBe(false);
+  expect((await f.session.journal.conversation.context(context)).entries.some(entry => entry.kind === RISK_LABEL_ENTRY_KIND)).toBe(false);
 });

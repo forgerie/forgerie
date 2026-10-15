@@ -191,6 +191,7 @@ export function rows(input: BoardInput): Row[] {
   return input.sessions.filter((session) => session.agentSpawned !== true).map((session) => {
     const status = input.statuses[session.id];
     const activity = input.activities[session.id];
+    const baseline = rowState(session, status === undefined ? undefined : { ...status, attentionHint: undefined }, activity, input.unread.has(session.id));
     const state = rowState(session, status, activity, input.unread.has(session.id));
     const group: GroupKind = state === "archived" ? "archived" : session.pinned === true ? "pinned" : state;
     const working = state === "working";
@@ -199,8 +200,8 @@ export function rows(input: BoardInput): Row[] {
     const location = input.locate(session.cwd);
     return {
       session, state, group, working, busy,
-      ...(status?.attentionHint === undefined || working || state === "archived" || state === "errored" ? {} : {
-        likelyNeedsYou: state === "blocked" && rowState(session, { ...status, attentionHint: undefined }, activity, input.unread.has(session.id)) === "unread",
+      ...(status?.attentionHint === undefined || baseline !== "unread" ? {} : {
+        likelyNeedsYou: state === "blocked",
         attentionKind: status.attentionHint.kind, urgency: status.attentionHint.urgency,
       }),
       // A session worktree's folder is a generated name; its branch is what a person reads.
@@ -218,8 +219,10 @@ const byPinnedThenRecency = (a: Row, b: Row) =>
   Number(b.session.pinned === true) - Number(a.session.pinned === true)
   || Date.parse(b.session.modified) - Date.parse(a.session.modified);
 
-const byUrgencyThenRecency = (a: Row, b: Row) =>
-  urgencyRank(b.urgency) - urgencyRank(a.urgency) || byPinnedThenRecency(a, b);
+const byRequiredThenInferred = (a: Row, b: Row) =>
+  Number(a.likelyNeedsYou === true) - Number(b.likelyNeedsYou === true)
+  || (a.likelyNeedsYou === true && b.likelyNeedsYou === true ? urgencyRank(b.urgency) - urgencyRank(a.urgency) : 0)
+  || byPinnedThenRecency(a, b);
 
 /**
  * The list in drawn order. Empty groups are omitted. In state mode the Open
@@ -258,7 +261,7 @@ export function sections(all: readonly Row[], options: { grouping: Grouping; sho
   }
   const out: Section[] = [];
   for (const group of GROUPS) {
-    const groupRows = visible.filter((row) => row.group === group.kind).sort(group.kind === "blocked" ? byUrgencyThenRecency : byPinnedThenRecency);
+    const groupRows = visible.filter((row) => row.group === group.kind).sort(group.kind === "blocked" ? byRequiredThenInferred : byPinnedThenRecency);
     if (groupRows.length === 0) continue;
     if (group.kind === "pinned" && options.allPinned !== true) {
       const capped = capPinned(groupRows, options.selectedId);

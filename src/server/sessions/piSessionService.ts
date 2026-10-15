@@ -2,6 +2,7 @@ import type { TaskActivity } from "../../shared/durableTaskActivity.js";
 import { durableBrowserMessageSchema } from "../../shared/durableBrowserSnapshot.js";
 import { z } from "zod";
 import { assertHistoryIdentity, PresentationHistoryIdentity, SessionOpenError, type SessionOpenPageRequest, type SessionOpenResult, type SessionOpenMessage, type SessionOpenHistoryPage } from "./sessionOpen.js";
+import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { appendAttentionHint, readAttentionHint } from "./durableAttentionHints.js";
 import { AttentionHints, ATTENTION_HINT_CUSTOM_TYPE, type AttentionSession } from "../decisions/attentionHints.js";
 import type { DecisionHints } from "../decisions/decisionHints.js";
@@ -5509,8 +5510,7 @@ export class PiSessionService implements SessionRouteService {
         persist: async (data) => {
           if (session instanceof DurableAgentSession) await appendAttentionHint(session.journal.handle, durableJson(data));
           else {
-            if (session.sessionManager.appendCustomEntry === undefined) throw new Error("Session runtime cannot persist attention hints");
-            session.sessionManager.appendCustomEntry(ATTENTION_HINT_CUSTOM_TYPE, data);
+            await decisionAnnotations(session.sessionManager).write(session.sessionId, ATTENTION_HINT_CUSTOM_TYPE, durableJson(data));
           }
         },
         publish: () => { this.publishStatus(session); },
