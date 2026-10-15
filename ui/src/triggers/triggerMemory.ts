@@ -14,9 +14,9 @@ export interface StoredDraft { draft: TriggerDraft; start: TriggerDraft; revisio
 
 /**
  * A workflow file's unsaved edits: the editor's text and the side panel, with the file's hash and the panel's values
- * when the edit began. A save sends that hash, so a file changed elsewhere in the meantime is refused, not overwritten.
+ * and the original text when the edit began. A save sends that hash, so a file changed elsewhere in the meantime is refused, not overwritten.
  */
-export interface StoredFileDraft { text: string; baseSha256: string; settings: ScheduleDraft; start: ScheduleDraft }
+export interface StoredFileDraft { text: string; startText: string; baseSha256: string; settings: ScheduleDraft; start: ScheduleDraft }
 
 export interface TriggerMemory {
   /** By `draftKey`. */

@@ -28,9 +28,11 @@ let store: MemoryStore;
 let place: TriggerPlace = { view: "trigger", id: maintenance.id };
 const moves: (TriggerPlace | undefined)[] = [];
 let memory: TriggerMemory;
+const changes = new Set<() => void>();
+const subscribe = (listener: () => void) => { changes.add(listener); return () => { changes.delete(listener); }; };
 
 function Harness() {
-  const list = useTriggerList(store.api);
+  const list = useTriggerList(store.api, subscribe);
   return <TriggersScreen list={list} api={store.api} directory={memoryDirectory} memory={memory} now={() => NOW} zone={HOST_ZONE} locale="en-US"
     args={{ place, onPlace: (next) => { moves.push(next); if (next) place = next; }, onOpenSession: () => undefined, sessionName: () => undefined }} />;
 }
@@ -70,6 +72,7 @@ beforeEach(() => {
   root = createRoot(document.body.appendChild(document.createElement("div")));
   memory = createTriggerMemory();
   moves.length = 0;
+  changes.clear();
   markdownView.write("rich");
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); localStorage.clear(); });
@@ -216,6 +219,28 @@ describe("a trigger whose settings live in a workflow file", () => {
     await press("Reload");
     expect(code().state.doc.toString()).toBe(outside);
     expect(unsaved()).toBe(false);
+  });
+
+  it("keeps text-only drafts and leave/reload guards after an outside file deletion", async () => {
+    markdownView.write("source"); await open(); await typeCode("\nMy unsaved text.\n");
+    expect(unsaved()).toBe(true);
+    await act(async () => {
+      store.setFile(maintenance.id, {}); store.set([unscheduledMaintenance]);
+      for (const listener of changes) listener();
+    });
+    await flush();
+    expect(text()).toContain("The file is gone");
+    expect(memory.files.get(maintenance.id)?.text).toContain("My unsaved text.");
+    expect(unsaved()).toBe(true);
+    await act(async () => root.unmount()); document.body.replaceChildren();
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => root.render(<Harness />)); await flush(); expect(unsaved()).toBe(true);
+    const reload = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(reload);
+    expect(reload.defaultPrevented).toBe(true);
+    await press("Triggers"); expect(moves).toEqual([]); expect(text()).toContain("Discard");
+    await press(/^Discard/); expect(moves).toEqual([{ view: "list" }]); expect(memory.files.size).toBe(0);
+    const cleanReload = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(cleanReload);
+    expect(cleanReload.defaultPrevented).toBe(false);
   });
 
   it("lists each trigger with its file name, a broken file under Needs a look, and New trigger keeps the create page", async () => {

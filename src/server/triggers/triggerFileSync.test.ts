@@ -2,7 +2,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, Harness } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -280,4 +280,58 @@ it("does not let an unchanged legacy file force scans for another file's inline 
   const probe = probes.mock.results[0]; if (probe?.type !== "return") throw new Error("No hash probe"); await probe.value;
   await host.triggers.close(); expect(host.scans).not.toHaveBeenCalled();
   expect(await readdir(join(root, "triggers", "versions", "own"))).toHaveLength(2);
+});
+
+it("starts and keeps valid versions when a prior archive contains partial JSON", async () => {
+  await writeFile(file(), scheduled()); const first = await open();
+  const original = (await first.versions("night")).versions; await first.close();
+  const corrupt = join(root, "triggers", "versions", "night", "corrupt.json"); await writeFile(corrupt, '{"id":');
+  const reopened = await open();
+  expect((await reopened.get("night")).state.kind).toBe("active");
+  expect((await reopened.versions("night")).versions).toEqual(original);
+  expect(errors.map(String).join("\n")).toContain("corrupt.json");
+  expect((await reopened.version("night", original[0]?.id ?? "")).text).toBe(scheduled());
+  await expect(reopened.version("night", "corrupt")).rejects.toMatchObject({ status: 404 });
+});
+
+it("pauses broken YAML durably until a valid file is restored", async () => {
+  await writeFile(file(), scheduled()); let triggers = await open();
+  const broken = prose.replace("workflow:", "workflow: [broken\nignored:");
+  await writeFile(file(), broken); await triggers.syncFiles();
+  expect((await triggers.pause("night")).state.kind).toBe("paused");
+  await triggers.syncFiles(); expect((await triggers.get("night")).state.kind).toBe("paused");
+  expect((await triggers.get("night")).file?.problem?.message).toContain("until the file is fixed");
+  expect(await readFile(file(), "utf8")).toBe(broken);
+  await triggers.close(); triggers = await open();
+  expect((await triggers.get("night")).state.kind).toBe("paused");
+  expect((await triggers.resume("night")).state.kind).toBe("active");
+  await triggers.syncFiles(); expect((await triggers.get("night")).state.kind).toBe("active");
+  await triggers.pause("night"); await writeFile(file(), scheduled()); await triggers.syncFiles();
+  expect(await triggers.get("night")).toMatchObject({ state: { kind: "active" }, file: { status: "ok" } });
+});
+it("keeps a durable pause when a linked file cannot be rewritten", async () => {
+  await writeFile(file(), scheduled()); let triggers = await open();
+  const target = join(root, "linked.md"); await rename(file(), target); await symlink(target, file());
+  expect((await triggers.pause("night")).state.kind).toBe("paused");
+  await triggers.syncFiles(); expect((await triggers.get("night")).state.kind).toBe("paused");
+  expect((await triggers.get("night")).file?.problem?.message).toContain("may still say active");
+  await triggers.pause("night"); await triggers.syncFiles(); expect((await triggers.get("night")).state.kind).toBe("paused");
+  await triggers.close(); triggers = await open(); expect((await triggers.get("night")).state.kind).toBe("paused");
+  await unlink(file()); await writeFile(file(), scheduled().replace("Review.", "Fixed.")); await triggers.syncFiles();
+  expect((await triggers.get("night")).state.kind).toBe("active");
+});
+
+it("isolates an oversized model to its file instead of disabling trigger startup or saving it", async () => {
+  await writeFile(file(), scheduled()); const first = await open(); await first.close();
+  const oversized = `p/${"m".repeat(127)}`;
+  await writeFile(file(), scheduled(`at: "03:00", projects: [Repo], model: ${oversized}`));
+  await writeFile(join(agent, "prompts", "healthy.md"), scheduled());
+  const triggers = await open();
+  expect((await triggers.get("night")).file?.status).toBe("invalid");
+  expect((await triggers.get("night")).action.model).toBeUndefined();
+  expect((await triggers.get("healthy")).file?.status).toBe("ok");
+  const document = await triggers.file("healthy");
+  await expect(triggers.saveFile("healthy", { text: document.text, baseSha256: document.sha256, schedule: { at: "03:00", projects: ["Repo"], model: oversized } })).rejects.toMatchObject({ status: 400 });
+  expect((await triggers.file("healthy")).sha256).toBe(document.sha256);
+  expect((await triggers.list()).attentionCount).toBe(1);
 });

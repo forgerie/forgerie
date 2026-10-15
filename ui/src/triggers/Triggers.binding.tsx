@@ -112,7 +112,7 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
   const fileStart: ScheduleDraft | undefined = trigger && fileId ? storedFile?.start ?? scheduleDraftOf(trigger, fileDocument, value?.timezone ?? zone) : undefined;
   const fileSettings = storedFile?.settings ?? fileStart;
   const fileText = storedFile?.text ?? fileDocument?.text ?? "";
-  const textDirty = fileDocument !== undefined && storedFile !== undefined && storedFile.text !== fileDocument.text;
+  const textDirty = storedFile !== undefined && storedFile.text !== storedFile.startText;
   const settingsDirty = fileSettings !== undefined && fileStart !== undefined && settingsChanged(fileSettings, fileStart);
   const fileDirty = textDirty || settingsDirty;
   // Edits made against an older read: the file changed on disk since they began.
@@ -315,8 +315,9 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
   const setFile = (change: { text?: string; settings?: ScheduleDraft }) => {
     if (!fileId || !fileDocument || !fileStart || !fileSettings || inFlight.current) return;
     const next = { text: change.text ?? fileText, settings: change.settings ?? fileSettings };
-    if (next.text === fileDocument.text && !settingsChanged(next.settings, fileStart)) memory.files.delete(fileId);
-    else memory.files.set(fileId, { ...next, start: fileStart, baseSha256: storedFile?.baseSha256 ?? fileDocument.sha256 });
+    const startText = storedFile?.startText ?? fileDocument.text;
+    if (next.text === startText && !settingsChanged(next.settings, fileStart)) memory.files.delete(fileId);
+    else memory.files.set(fileId, { ...next, startText, start: fileStart, baseSha256: storedFile?.baseSha256 ?? fileDocument.sha256 });
     setFileSave(undefined);
     touch();
   };

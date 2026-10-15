@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { TriggerFileDocumentSchema, TriggerFileStateSchema } from "./triggerFiles.js";
+import { TRIGGER_MODEL_MAX_LENGTH, TriggerFileDocumentSchema, TriggerFileStateSchema } from "./triggerFiles.js";
 import { KNOWN_THINKING_LEVELS } from "./thinkingLevels.js";
 import { TriggerScheduleSchema } from "./triggerSchedules.js";
 import { WorkflowInputSchema, WorkflowInputsSchema } from "./workflowRuns.js";
@@ -20,7 +20,7 @@ export const TriggerActionSchema = Type.Object({
   workflow: Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }),
   inputs: WorkflowInputsSchema,
   /** Strict `provider/model-id`, the same form as `POST /sessions` `modelSpec`. Absent: the new-session default. */
-  model: Type.Optional(Type.String({ minLength: 3, maxLength: 128, pattern: "^[^/\\s]+/\\S+$" })),
+  model: Type.Optional(Type.String({ minLength: 3, maxLength: TRIGGER_MODEL_MAX_LENGTH, pattern: "^[^/\\s]+/\\S+$" })),
   thinkingLevel: Type.Optional(Type.Union([
     Type.Literal(KNOWN_THINKING_LEVELS[0]), Type.Literal(KNOWN_THINKING_LEVELS[1]),
     Type.Literal(KNOWN_THINKING_LEVELS[2]), Type.Literal(KNOWN_THINKING_LEVELS[3]),

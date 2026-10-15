@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { Check } from "typebox/value";
 import { TriggerIdSchema } from "../../shared/triggers.js";
@@ -11,7 +11,7 @@ import { TriggerError } from "./durableTriggers.js";
 
 /** File IO and version retention. Callers serialize saves and scans through the service's file queue. */
 export class TriggerFiles {
-  constructor(readonly directory: string, private readonly versionsDirectory: string, private readonly timezone: string, private readonly now: () => number) {}
+  constructor(readonly directory: string, private readonly versionsDirectory: string, private readonly timezone: string, private readonly now: () => number, private readonly onError: (error: unknown) => void) {}
   path(id: string): string {
     if (!Check(TriggerIdSchema, id)) throw new TriggerError("Invalid trigger file name", 400, "id");
     return join(this.directory, `${id}.md`);
@@ -63,7 +63,13 @@ export class TriggerFiles {
     const version: TriggerFileVersionText = { id: `${String(savedAt)}-${randomUUID()}`, savedAt, source, sha256, text };
     const directory = join(this.versionsDirectory, id);
     await mkdir(directory, { recursive: true });
-    await writeFile(join(directory, `${version.id}.json`), JSON.stringify(version), { flag: "wx", mode: 0o600 });
+    const temporary = join(directory, `.${version.id}.tmp`);
+    try {
+      const handle = await open(temporary, "wx", 0o600);
+      try { await handle.writeFile(JSON.stringify(version), "utf8"); await handle.sync(); }
+      finally { await handle.close(); }
+      await rename(temporary, join(directory, `${version.id}.json`));
+    } finally { await rm(temporary, { force: true }); }
     for (const old of versions.slice(TRIGGER_FILE_VERSION_LIMIT - 1)) await rm(join(directory, `${old.id}.json`));
   }
   async versions(id: string): Promise<TriggerFileVersionsResponse> {
@@ -73,20 +79,25 @@ export class TriggerFiles {
     this.path(id);
     const directory = join(this.versionsDirectory, id);
     const names = await readdir(directory).catch((error: unknown) => { if (isMissingResource(error)) return []; throw error; });
-    const versions = await Promise.all(names.filter((name) => name.endsWith(".json")).map(async (name) => {
-      const value: unknown = JSON.parse(await readFile(join(directory, name), "utf8"));
-      if (!Check(TriggerFileVersionTextSchema, value)) throw new Error(`Invalid trigger file version ${name}`);
-      return { id: value.id, savedAt: value.savedAt, source: value.source, sha256: value.sha256 };
-    }));
-    return versions.sort((a, b) => b.savedAt - a.savedAt || b.id.localeCompare(a.id));
+    const versions = await Promise.all(names.filter((name) => name.endsWith(".json")).map((name) => this.readVersion(id, name.slice(0, -5))));
+    return versions.filter((version) => version !== undefined).map((version) => ({ id: version.id, savedAt: version.savedAt, source: version.source, sha256: version.sha256 })).sort((a, b) => b.savedAt - a.savedAt || b.id.localeCompare(a.id));
+  }
+  private async readVersion(id: string, versionId: string): Promise<TriggerFileVersionText | undefined> {
+    const path = join(this.versionsDirectory, id, `${versionId}.json`);
+    try {
+      const value: unknown = JSON.parse(await readFile(path, "utf8"));
+      if (!Check(TriggerFileVersionTextSchema, value) || value.id !== versionId || value.sha256 !== resourceHash(value.text)) throw new Error("Invalid trigger file version");
+      return value;
+    } catch (error) {
+      if (!isMissingResource(error)) this.onError(new Error(`Skipping unreadable trigger version ${path}: ${error instanceof Error ? error.message : String(error)}`, { cause: error }));
+      return undefined;
+    }
   }
   async version(id: string, versionId: string): Promise<TriggerFileVersionText> {
     this.path(id);
     if (!/^[a-zA-Z0-9-]{1,80}$/u.test(versionId)) throw new TriggerError("Invalid version ID", 400);
-    try {
-      const value: unknown = JSON.parse(await readFile(join(this.versionsDirectory, id, `${versionId}.json`), "utf8"));
-      if (!Check(TriggerFileVersionTextSchema, value)) throw new Error("Invalid trigger file version");
-      return value;
-    } catch (error) { if (isMissingResource(error)) throw new TriggerError("File version not found", 404); throw error; }
+    const version = await this.readVersion(id, versionId);
+    if (version === undefined) throw new TriggerError("File version not found or unreadable", 404);
+    return version;
   }
 }
