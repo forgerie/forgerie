@@ -4,7 +4,8 @@
     "src/cli.ts",
     "src/server/workspaces/workspaceServicesRunner.ts",
     "extensions/forgerie.ts",
-    "scripts/*.mjs"
+    "scripts/*.mjs",
+    "src/shared/triggerFiles.ts"
   ],
   "project": [
     "src/**/*.ts",
