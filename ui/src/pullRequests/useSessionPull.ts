@@ -27,8 +27,13 @@ export interface SessionPulls {
 }
 
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
+const pullKey = (link: PullLink) => `${link.repo.toLowerCase()}#${String(link.number)}`;
 /** What makes a link worth reading again: a new watch state or a new wake. */
-export const linkKey = (link: PullLink) => `${link.repo.toLowerCase()}#${String(link.number)}:${link.watch.kind}:${link.watch.kind === "watching" ? String(link.watch.wakes) : ""}`;
+export const linkKey = (link: PullLink) => `${pullKey(link)}:${link.watch.kind}:${link.watch.kind === "watching" ? String(link.watch.wakes) : ""}`;
+const seenFromLinks = (links: readonly PullLink[]): Map<string, string> =>
+  new Map(links.map(link => [pullKey(link), linkKey(link)]));
+const changedSinceRead = (link: PullLink, seen: ReadonlyMap<string, string>): boolean =>
+  seen.get(pullKey(link)) !== linkKey(link);
 const upsert = (items: readonly PullItem[], next: PullItem) =>
   items.some((item) => sameLink(item.link, next.link)) ? items.map((item) => sameLink(item.link, next.link) ? next : item) : [...items, next];
 
@@ -65,7 +70,7 @@ export function useSessionPulls(api: PullRequestApi, ref: PullSessionRef | undef
   useEffect(() => {
     if (!id || !cwd || !visible) return;
     const key = JSON.stringify([id, cwd, generation, revision]);
-    const changedCatalog = catalogLinks.some(link => seen.current.get(`${link.repo.toLowerCase()}#${String(link.number)}`) !== linkKey(link))
+    const changedCatalog = catalogLinks.some(link => changedSinceRead(link, seen.current))
       || seen.current.size !== catalogLinks.length;
     const hiddenEvent = suspended.current && changedCatalog;
     const versionChanged = completedVersion.current !== revision;
@@ -85,7 +90,7 @@ export function useSessionPulls(api: PullRequestApi, ref: PullSessionRef | undef
       try {
         const items = await api.list({ id, cwd }, signal);
         if (signal.aborted) return;
-        seen.current = new Map(latestCatalog.current.map(link => [`${link.repo.toLowerCase()}#${String(link.number)}`, linkKey(link)]));
+        seen.current = seenFromLinks(latestCatalog.current);
         setLoad({ type: "ready", items });
       } catch (error) { if (!signal.aborted) setLoad({ type: "failed", message: messageOf(error) }); }
       finally { readingFull.current = false; }
@@ -101,12 +106,12 @@ export function useSessionPulls(api: PullRequestApi, ref: PullSessionRef | undef
   useEffect(() => {
     if (!id || !cwd || !loaded || !visible || readingFull.current) return;
     const links = latestCatalog.current;
-    const now = new Map(links.map((link) => [`${link.repo.toLowerCase()}#${String(link.number)}`, linkKey(link)]));
-    const changed = links.filter((link) => seen.current.get(`${link.repo.toLowerCase()}#${String(link.number)}`) !== linkKey(link));
+    const now = seenFromLinks(links);
+    const changed = links.filter((link) => changedSinceRead(link, seen.current));
     const gone = [...seen.current.keys()].filter((key) => !now.has(key));
     seen.current = now;
     if (gone.length > 0) setLoad((current) => current.type !== "ready" ? current
-      : { type: "ready", items: current.items.filter((item) => !gone.includes(`${item.link.repo.toLowerCase()}#${String(item.link.number)}`)) });
+      : { type: "ready", items: current.items.filter((item) => !gone.includes(pullKey(item.link))) });
     if (changed.length === 0) return;
     const controller = new AbortController();
     const signal = lifetime ? AbortSignal.any([lifetime, controller.signal]) : controller.signal;
