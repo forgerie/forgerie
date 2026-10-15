@@ -48,8 +48,9 @@ await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvide
 const git = (...args: string[]) => execFileSync("git", args, { cwd, env: sanitizedGitEnv(), encoding: "utf8" });
 git("init", "-b", "main"); git("config", "user.email", "acceptance@example.invalid"); git("config", "user.name", "Trigger acceptance");
 await writeFile(join(cwd, "README.md"), "Trigger acceptance workspace\n"); git("add", "README.md"); git("commit", "-qm", "Initial workspace");
-await mkdir(join(cwd, ".pi", "prompts"), { recursive: true });
-await writeFile(join(cwd, ".pi", "prompts", "nightly.md"), "---\ndescription: Real scheduled trigger acceptance\nworkflow:\n  version: 1\n  stages:\n    - { id: prepare, name: Prepare, does: 'State a one-sentence acceptance result.' }\n    - { id: land, name: Land, stop: land }\n---\nDo not write files, run shell commands, spawn children, or call workflow_finish. This acceptance needs no code changes. State one sentence confirming the scheduled workflow started. Then call workflow_stop for stage land with the runId from this prompt, summary TRIGGERS-REAL. End your turn and wait for the user.\n");
+// Only a global workflow file can hold a schedule (ADR 0009), so the workflow lives in the temporary profile.
+await mkdir(join(agentDir, "prompts"), { recursive: true });
+await writeFile(join(agentDir, "prompts", "nightly.md"), "---\ndescription: Real scheduled trigger acceptance\nworkflow:\n  version: 1\n  stages:\n    - { id: prepare, name: Prepare, does: 'State a one-sentence acceptance result.' }\n    - { id: land, name: Land, stop: land }\n---\nDo not write files, run shell commands, spawn children, or call workflow_finish. This acceptance needs no code changes. State one sentence confirming the scheduled workflow started. Then call workflow_stop for stage land with the runId from this prompt, summary TRIGGERS-REAL. End your turn and wait for the user.\n");
 const projects = new ProjectService(new ProjectStore(join(root, "projects.json"))); await projects.add({ path: cwd });
 const workspaces = new RegisteredProjectWorkspaceCwds({ projects, workspaces: new WorkspaceService() });
 const library = new WorkflowLibrary(agentDir);
@@ -87,16 +88,21 @@ try {
   current = await daemon(true);
   shift = occurrence - 4_000 - Date.now();
   const time = new Date(occurrence).toISOString().slice(11, 16);
-  const response = await fetch(`${current.address}/triggers`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "night", name: "Nightly acceptance", schedule: { kind: "daily", at: time, timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [cwd] }, workflow: "nightly", inputs: {}, model: `trigger-acceptance/${model}`, thinkingLevel: "off" } }) });
-  assert.equal(response.status, 201, await response.text());
+  const response = await fetch(`${current.address}/triggers`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Nightly acceptance", schedule: { kind: "daily", at: time, timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [cwd] }, workflow: "nightly", inputs: {}, model: `trigger-acceptance/${model}`, thinkingLevel: "off" } }) });
+  const created: unknown = await response.json();
+  assert.equal(response.status, 201, JSON.stringify(created));
+  assert.ok(Check(TriggerSchema, created));
+  // The file name is the trigger ID.
+  assert.equal(created.id, "nightly");
+  const id = created.id;
   const deadline = Date.now() + 300_000;
   while (!interrupted) { if (Date.now() > deadline) throw new Error("No scheduled launch before deadline"); await sleep(100); }
-  const running: unknown = await (await fetch(`${current.address}/triggers/night`)).json();
+  const running: unknown = await (await fetch(`${current.address}/triggers/${id}`)).json();
   assert.ok(Check(TriggerSchema, running)); assert.equal(running.history[0]?.outcome.kind, "running");
   await current.close(); current = undefined;
   current = await daemon(false);
   for (;;) {
-    const trigger = await current.triggers.get("night");
+    const trigger = await current.triggers.get(id);
     const fire = trigger.history[0];
     if (fire?.outcome.kind === "failed") throw new Error(fire.outcome.error);
     if (fire?.outcome.kind === "started") {
