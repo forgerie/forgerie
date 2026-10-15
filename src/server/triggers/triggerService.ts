@@ -287,6 +287,9 @@ export class TriggerService {
     if (scope !== undefined && !this.inScope(action, scope)) throw new TriggerError("Triggers are limited to the calling session's project", 400, "action.targets");
     return this.fileSync.transaction(async () => {
       const id = action.workflow;
+      const existing = (await listTriggers(this.opened().harness, context)).find((record) => record.id === id);
+      // A missing block does not erase the record's scope or make its kept history public.
+      if (existing !== undefined && scope !== undefined && !this.inScope(existing.action, scope)) throw new TriggerError("Triggers are limited to the calling session's project", 400, "action.targets");
       let document;
       try { document = await this.files.document(id); }
       catch (error) { if (error instanceof TriggerError && error.status === 404) throw new TriggerError(`Create needs a global workflow file named "${id}" with no schedule yet`, 400, "action.workflow"); throw error; }

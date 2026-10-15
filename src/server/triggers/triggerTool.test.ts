@@ -17,9 +17,10 @@ import { RegisteredProjectWorkspaceCwds } from "../workspaces/projectWorkspaceCw
 import { WorkspaceService } from "../workspaces/workspaceService.js";
 import { WorkflowLibrary, workflowInputs } from "../resources/workflowLibrary.js";
 import { workflowTriggerFire } from "./triggerFire.js";
+import { editScheduleBlock } from "./triggerFileFormat.js";
 import { TriggerService } from "./triggerService.js";
 
-it.each([["scope", "inline"], ["lifecycle", "inline"], ["scope", "watch"], ["lifecycle", "watch"]] as const)("hosts workflow_schedule %s through a real calling agent (%s delivery)", async (scenario, delivery) => {
+it.each([["scope", "inline"], ["lifecycle", "inline"], ["scope", "watch"], ["lifecycle", "watch"], ["reclaim All-projects history", "inline"]] as const)("hosts workflow_schedule %s through a real calling agent (%s delivery)", async (scenario, delivery) => {
   const root = await mkdtemp(join(tmpdir(), "forgerie-trigger-tools-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
@@ -89,6 +90,18 @@ it.each([["scope", "inline"], ["lifecycle", "inline"], ["scope", "watch"], ["lif
       expect(await invoke({ action: "create", trigger: { name: "Foreign create", schedule: { kind: "daily", at: "03:00" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [otherCwd] }, workflow: "agent-night", inputs: {} } } })).toContain("calling session's project");
       expect(await invoke({ action: "update", id: "agent-night", changes: { baseRevision: 1, action: { kind: "workflow", targets: { kind: "projects", cwds: [otherCwd] }, workflow: "agent-night", inputs: {} } } })).toContain("calling session's project");
       expect(await triggers.get(foreign.id)).toEqual(foreign);
+    }
+    if (scenario === "reclaim All-projects history") {
+      await triggers.run(all.id, { requestId: "private-all-history" });
+      await vi.waitFor(async () => { expect((await triggers.get(all.id)).history[0]?.outcome.kind).toBe("started"); });
+      const document = await triggers.file(all.id); const unscheduled = editScheduleBlock(document.text, null);
+      await writeFile(document.path, unscheduled); await triggers.syncFiles();
+      const before = await triggers.get(all.id); expect(before.action.targets.kind).toBe("all"); expect(before.history).toHaveLength(1);
+      const answer = await invoke({ action: "create", trigger: { name: "Claimed", schedule: { kind: "daily", at: "03:00" }, action: { kind: "workflow", workflow: all.id, inputs: {} } } });
+      expect(answer).toContain("calling session's project");
+      expect(answer).not.toContain(before.history[0]?.requestId ?? "private-all-history");
+      expect(await triggers.get(all.id)).toEqual(before);
+      expect(await readFile(document.path, "utf8")).toBe(unscheduled);
     }
     const created = await triggers.get("agent-night");
     expect(created).toMatchObject({ createdBy: { kind: "agent", sessionId: caller.id, cwd }, action: { targets: { kind: "projects", cwds: [cwd] } }, schedule: { timezone: triggers.timezone } });
