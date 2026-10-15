@@ -825,6 +825,8 @@ describe("temporary workflow proposals through Durable sessions and HTTP", () =>
       expect(text).toContain("Do not start or message child agents");
       expect(text).toContain("At each stop (Contract, Land), ask the user in your reply");
       expect(text).toContain("WORKFLOW-STAGED");
+      // The route carries the order and each stage's own instructions.
+      expect(text).toContain("Route (stages in order):\n1. Contract (id contract) [stop: the user approves]\n2. Build (id build) Workers: alpha (agent nobody-checks-this, model faux/faux-declared).\n3. Land (id land) [stop: the user lands the branches]");
       expect(await service.workflowRuns(ref)).toEqual([]);
     } finally { await server.close(); }
   });

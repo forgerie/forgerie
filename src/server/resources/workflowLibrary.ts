@@ -89,11 +89,16 @@ export function workflowInputs(definition: WorkflowDefinition, supplied: Workflo
 export function workflowPrompt(runId: string, workflow: ProseWorkflow, inputs: WorkflowInputs): string {
   // Do not interpolate arbitrary user values into instructions or expand slash commands a second time.
   const stages = workflow.definition.stages ?? [];
-  const route = stages.length === 0 ? "" : `\n\nRoute (stages in order):\n${stages.map(stageLine).join("\n")}\n\n${STOP_RULES.replaceAll("RUN_ID", runId)}`;
+  const route = stages.length === 0 ? "" : `\n\n${workflowRouteText(stages)}\n\n${STOP_RULES.replaceAll("RUN_ID", runId)}`;
   return `Workflow run ${runId}\n\n${workflow.body}${route}\n\nWorkflow inputs (JSON):\n${JSON.stringify(inputs)}\n\nCoordinate this workflow in this conversation. Use child_agent for tracked delegation; legacy subagent runs are not part of this record. ${stages.length === 0 ? "Its sequence, models, reviews, and human involvement come from the prose above." : "The prose above guides how you run each stage."} When all associated child work and reports settle, call workflow_finish with runId "${runId}", outcome (completed, failed, or stopped), and a final result. Idle pauses do not finish the run.`;
 }
 
 const STOP_RULES = `A stage marked "stop" is the user's. Forgerie holds the run there: when the work for that stop is ready, call workflow_stop with runId "RUN_ID", the stage id, and a short summary of what the user decides on, then end your turn. The user's decision arrives as a new message. Until the user approves a stop, child_agent refuses work that belongs after it. At a land stop, Forgerie lands the children's branches itself when the user chooses to; do not land, merge, or push them yourself. Name each child after its declared worker so its work joins the right stage; Forgerie then applies the worker's declared model itself.`;
+
+/** The route as the agent reads it: each stage in order, with its stop, what it does, and its workers. */
+export function workflowRouteText(stages: NonNullable<WorkflowDefinition["stages"]>): string {
+  return `Route (stages in order):\n${stages.map(stageLine).join("\n")}`;
+}
 
 function stageLine(stage: NonNullable<WorkflowDefinition["stages"]>[number], index: number): string {
   const kind = stage.stop === "approve" ? " [stop: the user approves]" : stage.stop === "land" ? " [stop: the user lands the branches]" : "";

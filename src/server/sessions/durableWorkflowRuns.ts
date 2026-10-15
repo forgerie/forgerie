@@ -6,7 +6,7 @@ import { Check } from "typebox/value";
 import { WorkflowOutcomeSchema, WorkflowModelSchema, WorkflowModelsSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowChildDelivery, type WorkflowInputs, type WorkflowModels, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
 import { WorkflowProposalSchema, WorkflowProposalToolSchema, type WorkflowProposal, type WorkflowProposalTool } from "../../shared/workflowProposals.js";
 import { admitChild, completionProblem, declaredWorker, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
-import { assertProseOnly, parseWorkflow, WorkflowError, workflowInputs, workflowPrompt, type ProseWorkflow, type WorkflowInventory, type WorkflowLibrary } from "../resources/workflowLibrary.js";
+import { assertProseOnly, parseWorkflow, WorkflowError, workflowInputs, workflowPrompt, workflowRouteText, type ProseWorkflow, type WorkflowInventory, type WorkflowLibrary } from "../resources/workflowLibrary.js";
 
 export const WORKFLOW_DOC_KIND = "forgerie.workflow-runs";
 export const WorkflowActiveSchema = Type.Object({ active: Type.Union([Type.String(), Type.Null()]) });
@@ -314,13 +314,16 @@ export async function decideWorkflowProposal(harness: Harness, parent: Conversat
 
 /** The agent's instruction when the user has it follow a proposal itself. Stops become questions in the chat. */
 function hereWorkflowPrompt(proposal: Pick<WorkflowProposal, "name">, workflow: ProseWorkflow, inputs: WorkflowInputs): string {
-  const stops = (workflow.definition.stages ?? []).filter((stage) => stage.stop !== undefined).map((stage) => stage.name);
+  const stages = workflow.definition.stages ?? [];
+  const stops = stages.filter((stage) => stage.stop !== undefined).map((stage) => stage.name);
   return [
     `[workflow ${proposal.name}] The user chose to do this plan here, without child agents.`,
     "Do the work yourself in this session, stage by stage, as the plan below says. Do not start or message child agents; where the plan gives work to a worker, do that work yourself.",
     stops.length === 0 ? "There is no workflow run, so do not call workflow_stop or workflow_finish."
       : `There is no workflow run, so do not call workflow_stop or workflow_finish. At each stop (${stops.join(", ")}), ask the user in your reply and end your turn.`,
     `\nWorkflow inputs (JSON):\n${JSON.stringify(inputs)}\n\n${workflow.body}`,
+    // The route carries the stage order and each stage's own instructions, which the prose may not repeat.
+    ...(stages.length === 0 ? [] : [`\n\n${workflowRouteText(stages)}`]),
   ].join(" ");
 }
 
