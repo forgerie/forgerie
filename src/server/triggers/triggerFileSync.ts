@@ -17,6 +17,8 @@ interface FileSyncStore {
   update(id: string, input: TriggerUpdate): Promise<Trigger>;
   pause(id: string): Promise<Trigger>;
   resume(id: string): Promise<Trigger>;
+  controls(): Promise<NonNullable<StoredTriggers["fileControls"]>>;
+  clearControl(id: string): Promise<void>;
   migration(): Promise<NonNullable<StoredTriggers["fileMigration"]>>;
   plan(id: string, target: string): Promise<void>;
   rekey(id: string, target: string): Promise<void>;
@@ -173,17 +175,20 @@ export class TriggerFileSync {
     const before = JSON.stringify([...this.states]);
     const hashes = new Map<string, string>();
     const records = await this.options.store.list();
+    const controls = await this.options.store.controls();
     this.skipped = new Set((await this.options.store.migration()).skipped);
     const names = new Set([...await this.options.files.names(), ...records.filter((record) => this.managed(record.id)).map((record) => record.id)]);
     for (const id of names) {
       if (!Check(TriggerIdSchema, id)) { this.options.onError(new TriggerError(`Cannot schedule workflow "${String(id)}": invalid trigger file name`)); continue; }
       if (!this.managed(id)) continue;
       const current = records.find((record) => record.id === id);
+      const control = controls[id];
+      const controlState = control === undefined ? undefined : current?.state.kind;
       let document;
       try { document = await this.options.files.document(id); }
       catch (error) {
         if (error instanceof TriggerError && error.status === 404) { await this.missing(id, current); continue; }
-        this.invalid(id, error, current === undefined); continue;
+        this.invalid(id, error, current === undefined, controlState); continue;
       }
       hashes.set(id, document.sha256);
       await this.options.files.observe(id, document.text, "outside");
@@ -191,8 +196,13 @@ export class TriggerFileSync {
       try {
         if (parseScheduledWorkflow(id, document.path, document.text, this.options.timezone) === undefined) { await this.missing(id, current); continue; }
         parsed = await this.validate(id, document.text);
-      } catch (error) { this.invalid(id, error, current === undefined); continue; }
+      } catch (error) { this.invalid(id, error, current === undefined, controlState); continue; }
       const { input, block } = parsed;
+      if (control !== undefined && !control.invalid && control.sha256 === document.sha256 && (block.paused === true) !== (current?.state.kind === "paused")) {
+        this.invalid(id, new TriggerError("The schedule's paused flag could not be written."), false, controlState);
+        continue;
+      }
+      if (control !== undefined) await this.options.store.clearControl(id);
       let record = current;
       if (record === undefined) record = await this.options.store.create(input, created?.id === id ? created.creator : undefined);
       else {
@@ -227,9 +237,10 @@ export class TriggerFileSync {
     this.syncedHashes = hashes;
     if (before !== JSON.stringify([...this.states])) this.options.publish();
   }
-  private invalid(id: string, error: unknown, diagnose: boolean): void {
+  private invalid(id: string, error: unknown, diagnose: boolean, controlled?: "paused" | "active"): void {
     const lastGoodAt = this.states.get(id)?.lastGoodAt;
-    this.states.set(id, { path: this.options.files.path(id), status: "invalid", problem: { message: error instanceof Error ? error.message : String(error), ...(error instanceof TriggerError && error.line !== undefined ? { line: error.line } : {}) }, ...(lastGoodAt === undefined ? {} : { lastGoodAt }) });
+    const note = controlled === undefined ? "" : controlled === "paused" ? " Paused in Forgerie until the file is fixed. The file was not rewritten and may still say active." : " Resumed with the last good settings until the file is fixed. The file was not rewritten and may still say paused.";
+    this.states.set(id, { path: this.options.files.path(id), status: "invalid", problem: { message: `${error instanceof Error ? error.message : String(error)}${note}`, ...(error instanceof TriggerError && error.line !== undefined ? { line: error.line } : {}) }, ...(lastGoodAt === undefined ? {} : { lastGoodAt }) });
     // A newly invalid file has no stored record to carry its diagnostic yet.
     if (diagnose) this.options.onError(error);
   }

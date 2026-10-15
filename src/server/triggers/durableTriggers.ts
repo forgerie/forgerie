@@ -17,6 +17,7 @@ export const TRIGGER_TASK_KIND = "forgerie.trigger";
 
 /** Session-scoped: one document holds every trigger of the storage that hosts them. */
 type StoredTrigger = Trigger & { readonly incarnation: string };
+type FileControl = NonNullable<StoredTriggers["fileControls"]>[string];
 const Triggers = defineDoc<StoredTriggers>({
   kind: TRIGGERS_DOC_KIND, version: 2, scope: "session", initial: () => ({ records: {}, nextGeneration: 1, manualRequests: {} }),
   migrate: migrateTriggerStore,
@@ -262,6 +263,14 @@ export function durableTriggers(options: DurableTriggerOptions) {
     extension: defineExtension({ name: "forgerie.triggers", tasks: [task, manualTask] }),
     initialize: (harness: Harness, context: Context): Promise<void> => harness.commit(async (tx) => { await tx.doc(Triggers); }, context),
 
+    fileControls: async (harness: Harness, context: Context) => (await harness.snapshot(Triggers, context))?.fileControls ?? {},
+    clearFileControl: (harness: Harness, id: string, context: Context): Promise<void> => harness.commit(async (tx) => {
+      const doc = await tx.doc(Triggers);
+      if (doc.fileControls !== undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Controls are keyed by trigger ID.
+        delete doc.fileControls[id];
+      }
+    }, context),
     fileMigration: async (harness: Harness, context: Context) => (await harness.snapshot(Triggers, context))?.fileMigration ?? { done: false, pending: {}, migrated: [], skipped: [] },
     planFileMigration: (harness: Harness, id: string, target: string, context: Context): Promise<void> => harness.commit(async (tx) => {
       const doc = await tx.doc(Triggers);
@@ -289,6 +298,11 @@ export function durableTriggers(options: DurableTriggerOptions) {
       }
       doc.fileMigration ??= { done: false, pending: {}, migrated: [], skipped: [] };
       const migration = doc.fileMigration;
+      if (doc.fileControls?.[id] !== undefined && id !== target) {
+        doc.fileControls[target] = doc.fileControls[id];
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Move control receipts with the record.
+        delete doc.fileControls[id];
+      }
       migration.migrated.push(target);
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Completed migration intent.
       delete migration.pending[id];
@@ -322,19 +336,23 @@ export function durableTriggers(options: DurableTriggerOptions) {
     },
 
     /** Stop future fires. A fire already in progress finishes and is recorded. */
-    pause: (harness: Harness, id: string, context: Context, scope?: readonly string[]): Promise<Trigger> => harness.commit(async (tx) => {
-      const record = recordAt((await tx.doc(Triggers)).records, id);
+    pause: (harness: Harness, id: string, context: Context, scope?: readonly string[], fileControl?: FileControl): Promise<Trigger> => harness.commit(async (tx) => {
+      const doc = await tx.doc(Triggers);
+      const record = recordAt(doc.records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
       assertProject(record.action, scope);
+      if (fileControl !== undefined) { doc.fileControls ??= {}; doc.fileControls[id] = fileControl; }
       if (record.state.kind === "active") { record.state = { kind: "paused", pausedAt: now() }; record.revision += 1; }
       return publicTrigger(record);
     }, context),
 
     /** Arm a paused trigger from the current time. Occurrences that passed while it was paused do not fire. */
-    resume: (harness: Harness, anchor: ConversationId, id: string, context: Context, scope?: readonly string[]): Promise<Trigger> => harness.commit(async (tx) => {
-      const record = recordAt((await tx.doc(Triggers)).records, id);
+    resume: (harness: Harness, anchor: ConversationId, id: string, context: Context, scope?: readonly string[], fileControl?: FileControl): Promise<Trigger> => harness.commit(async (tx) => {
+      const doc = await tx.doc(Triggers);
+      const record = recordAt(doc.records, id);
       if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
       assertProject(record.action, scope);
+      if (fileControl !== undefined) { doc.fileControls ??= {}; doc.fileControls[id] = fileControl; }
       if (record.state.kind === "paused") { await arm(tx, anchor, record, now()); record.revision += 1; }
       return publicTrigger(record);
     }, context),
@@ -385,6 +403,10 @@ export function durableTriggers(options: DurableTriggerOptions) {
       assertProject(record.action, scope);
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Records are keyed by trigger ID.
       delete doc.records[id];
+      if (doc.fileControls !== undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Controls end with their trigger.
+        delete doc.fileControls[id];
+      }
       if (doc.fileMigration !== undefined) doc.fileMigration.skipped = doc.fileMigration.skipped.filter((skipped) => skipped !== id);
       for (const [requestId, receipt] of Object.entries(doc.manualRequests)) if (receipt.triggerId === id && receipt.incarnation === record.incarnation) {
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Receipts are keyed by request ID.

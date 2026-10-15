@@ -97,6 +97,8 @@ export class TriggerService {
         update: (id, input) => { const { harness, anchor } = this.opened(); return this.core.update(harness, anchor, id, input, context); },
         pause: (id) => this.core.pause(this.opened().harness, id, context),
         resume: (id) => { const { harness, anchor } = this.opened(); return this.core.resume(harness, anchor, id, context); },
+        controls: () => this.core.fileControls(this.opened().harness, context),
+        clearControl: (id) => this.core.clearFileControl(this.opened().harness, id, context),
         migration: () => this.core.fileMigration(this.opened().harness, context),
         plan: (id, target) => this.core.planFileMigration(this.opened().harness, id, target, context),
         rekey: (id, target) => this.core.rekey(this.opened().harness, id, target, context),
@@ -322,18 +324,32 @@ export class TriggerService {
     try { parseTriggerSchedule(value); } catch (error) { throw new TriggerError(error instanceof Error ? error.message : String(error), 400, "schedule.timezone"); }
   }
   private async setPaused(id: string, paused: boolean, actorCwd?: string): Promise<Trigger> {
-    const current = await this.get(id, actorCwd);
-    if (!this.fileSync.managed(id)) {
-      const { harness, anchor } = this.opened();
-      return paused ? this.core.pause(harness, id, context, await this.projectScope(actorCwd)) : this.core.resume(harness, anchor, id, context, await this.projectScope(actorCwd));
-    }
     return this.fileSync.transaction(async () => {
       await this.fileSync.scan();
-      await this.get(id, actorCwd);
-      const document = await this.files.document(id);
-      const existing = document.schedule;
-      const block = existing ?? await this.fileSync.block(current);
-      await this.files.save(id, { text: document.text, baseSha256: document.sha256, schedule: { ...block, paused } }, async (text) => { await this.fileSync.validate(id, text); });
+      const current = await this.get(id, actorCwd);
+      const scope = await this.projectScope(actorCwd);
+      const { harness, anchor } = this.opened();
+      if (!this.fileSync.managed(id)) return paused ? this.core.pause(harness, id, context, scope) : this.core.resume(harness, anchor, id, context, scope);
+      if (!paused && current.file?.status === "missing") throw new TriggerError("Restore the workflow file and its schedule before resuming", 400);
+      let document;
+      try { document = await this.files.document(id); }
+      catch (error) { if (current.file?.status !== "invalid" && current.file?.status !== "missing") throw error; }
+      let parsed;
+      if (document !== undefined) {
+        try { parsed = await this.fileSync.validate(id, document.text); }
+        catch (error) { if (!(error instanceof TriggerError) || error.status !== 400) this.options.onError(error); }
+      }
+      const control = { sha256: document?.sha256 ?? null, invalid: parsed === undefined };
+      // Persist control before attempting a file write. A failed write or restart cannot undo it.
+      if (paused) await this.core.pause(harness, id, context, scope, control);
+      else await this.core.resume(harness, anchor, id, context, scope, control);
+      if (document !== undefined && parsed !== undefined) {
+        try {
+          await this.files.save(id, { text: document.text, baseSha256: document.sha256, schedule: { ...parsed.block, paused } }, async (text) => { await this.fileSync.validate(id, text); });
+        } catch (error) {
+          if (!(error instanceof TriggerError) || (error.status !== 400 && error.status !== 404 && error.status !== 409)) this.options.onError(error);
+        }
+      }
       await this.fileSync.scan();
       return this.get(id, actorCwd);
     });
