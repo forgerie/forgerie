@@ -2,7 +2,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, Harness } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -11,6 +11,8 @@ import { ProjectStore } from "../storage/projectStore.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
 import { RegisteredProjectWorkspaceCwds } from "../workspaces/projectWorkspaceCwds.js";
 import { WorkspaceService } from "../workspaces/workspaceService.js";
+import { TriggerFileSync } from "./triggerFileSync.js";
+import { TriggerFiles } from "./triggerFiles.js";
 import { TriggerService } from "./triggerService.js";
 import { durableTriggers, type ProjectTriggerFireRequest } from "./durableTriggers.js";
 
@@ -38,7 +40,7 @@ beforeEach(async () => {
   projects = new ProjectService(new ProjectStore(join(root, "projects.json"))); await projects.add({ path: cwd, name: "Repo" });
   errors = []; requests = [];
 });
-afterEach(async () => { await service?.close(); await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { try { await service?.close(); } finally { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }); } });
 it("scans at start and applies edits, pauses and re-arms through the durable core", async () => {
   await writeFile(file(), scheduled()); const triggers = await open();
   const initial = await triggers.get("night"); expect(initial).toMatchObject({ id: "night", file: { status: "ok" }, action: { targets: { cwds: [cwd] }, inputs: { scope: "ready" } } });
@@ -173,4 +175,109 @@ it("attributes only the agent's own file when create also discovers an outside s
   const own = await triggers.create({ name: "Own", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", workflow: "night", targets: { kind: "projects", cwds: [cwd] }, inputs: {} } }, creator, cwd);
   expect(own.createdBy).toEqual(creator);
   expect((await triggers.get("outside")).createdBy).toEqual({ kind: "user" });
+});
+
+async function watchedHost() {
+  const scans = vi.spyOn(TriggerFileSync.prototype, "scan");
+  const delayed = new Set<() => void>();
+  let changed: () => void = () => { throw new Error("Watcher is not open"); };
+  let tick: () => void = () => { throw new Error("Fallback is not open"); };
+  await writeFile(file(), scheduled());
+  const triggers = await open({ fileSync: {
+    watch: (_directory, callback) => { changed = callback; return { close: () => undefined }; },
+    interval: (callback, milliseconds) => { expect(milliseconds).toBe(60_000); tick = callback; return () => undefined; },
+    timeout: (callback: () => void, milliseconds: number) => { expect(milliseconds).toBe(150); delayed.add(callback); return () => { delayed.delete(callback); }; },
+  } });
+  scans.mockClear();
+  return { triggers, scans, delayed, tick: () => { tick(); }, changed: () => { changed(); }, flush: () => { const callbacks = [...delayed]; delayed.clear(); for (const callback of callbacks) callback(); } };
+}
+async function outsideSave(text: string) {
+  const temporary = join(agent, "prompts", ".atomic-save.tmp");
+  await writeFile(temporary, text); await rename(temporary, file());
+}
+it("coalesces ten watch events for one atomic save into one scan and one new version", async () => {
+  const host = await watchedHost();
+  await outsideSave(scheduled('at: "04:00", projects: [Repo]'));
+  for (let i = 0; i < 10; i++) host.changed();
+  expect(host.delayed.size).toBe(1); host.flush();
+  await vi.waitFor(async () => { expect((await host.triggers.get("night")).schedule.at).toBe("04:00"); });
+  expect((await host.triggers.versions("night")).versions).toHaveLength(2);
+  await host.triggers.close();
+  expect(host.scans).toHaveBeenCalledTimes(1);
+  expect(await readdir(join(root, "triggers", "versions", "night"))).toHaveLength(2);
+});
+it("ignores a Forgerie save's watch echo when its bytes were already synced inline", async () => {
+  const host = await watchedHost(); const document = await host.triggers.file("night");
+  await host.triggers.saveFile("night", { text: document.text, baseSha256: document.sha256, schedule: { at: "04:00", projects: ["Repo"] } });
+  const before = await host.triggers.get("night"); host.scans.mockClear();
+  const probes = vi.spyOn(TriggerFiles.prototype, "hashes");
+  for (let i = 0; i < 10; i++) host.changed();
+  host.flush();
+  await vi.waitFor(() => { expect(probes).toHaveBeenCalledTimes(1); });
+  const probe = probes.mock.results[0]; if (probe?.type !== "return") throw new Error("No hash probe"); await probe.value;
+  expect(await host.triggers.get("night")).toEqual(before);
+  await host.triggers.close();
+  expect(host.scans).not.toHaveBeenCalled();
+  expect(await readdir(join(root, "triggers", "versions", "night"))).toHaveLength(2);
+});
+it("runs exactly one follow-up for a burst received during a scan, without losing the later edit", async () => {
+  const host = await watchedHost();
+  let entered!: () => void; let release!: () => void;
+  const entering = new Promise<void>((resolve) => { entered = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const listProjects = projects.list.bind(projects);
+  vi.spyOn(projects, "list").mockImplementationOnce(async () => { entered(); await held; return listProjects(); });
+  await outsideSave(scheduled('at: "04:00", projects: [Repo]')); host.changed(); host.flush();
+  try {
+    await entering;
+    await outsideSave(scheduled('at: "05:00", projects: [Repo]'));
+    for (let i = 0; i < 10; i++) host.changed();
+    expect(host.delayed.size).toBe(0);
+  } finally { release(); }
+  await vi.waitFor(async () => { expect((await host.triggers.get("night")).schedule.at).toBe("05:00"); });
+  await host.triggers.close();
+  expect(host.scans).toHaveBeenCalledTimes(2);
+  expect(await readdir(join(root, "triggers", "versions", "night"))).toHaveLength(3);
+});
+
+it("cancels a pending debounce on close and ignores late watch delivery", async () => {
+  const host = await watchedHost(); host.changed();
+  expect(host.delayed.size).toBe(1); await host.triggers.close();
+  expect(host.delayed.size).toBe(0); host.changed(); host.flush();
+  expect(host.scans).not.toHaveBeenCalled();
+  expect(await readdir(join(root, "triggers", "versions", "night"))).toHaveLength(1);
+});
+it("the fallback revalidates unchanged file bytes when registered project names change", async () => {
+  let tick: () => void = () => undefined;
+  const host = await watchedHost(); await host.triggers.close();
+  const triggers = await open({ fileSync: { watch: quietWatch, interval: (callback) => { tick = callback; return () => undefined; } } });
+  const other = join(root, "another"); await mkdir(other); const duplicate = await projects.add({ path: other, name: "Repo" });
+  tick(); await vi.waitFor(async () => { expect((await triggers.get("night")).file?.status).toBe("invalid"); });
+  await projects.close(duplicate.id); tick();
+  await vi.waitFor(async () => { expect((await triggers.get("night")).file?.status).toBe("ok"); });
+  expect((await triggers.versions("night")).versions).toHaveLength(1);
+});
+
+it("does not let repeated watch events postpone the fallback beyond its interval", async () => {
+  const host = await watchedHost();
+  await outsideSave(scheduled('at: "04:00", projects: [Repo]'));
+  for (let i = 0; i < 10; i++) host.changed();
+  expect(host.delayed.size).toBe(1); host.tick();
+  expect(host.delayed.size).toBe(0);
+  await vi.waitFor(async () => { expect((await host.triggers.get("night")).schedule.at).toBe("04:00"); });
+  await host.triggers.close(); expect(host.scans).toHaveBeenCalledTimes(1);
+  expect(await readdir(join(root, "triggers", "versions", "night"))).toHaveLength(2);
+});
+
+it("does not let an unchanged legacy file force scans for another file's inline save", async () => {
+  await seedStored([{ id: "night", workflow: "night", paused: true }]);
+  await writeFile(join(agent, "prompts", "own.md"), prose);
+  const host = await watchedHost();
+  await host.triggers.create({ name: "Own", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", workflow: "own", targets: { kind: "projects", cwds: [cwd] }, inputs: {} } });
+  host.scans.mockClear(); const probes = vi.spyOn(TriggerFiles.prototype, "hashes");
+  for (let i = 0; i < 10; i++) host.changed(); host.flush();
+  await vi.waitFor(() => { expect(probes).toHaveBeenCalledTimes(1); });
+  const probe = probes.mock.results[0]; if (probe?.type !== "return") throw new Error("No hash probe"); await probe.value;
+  await host.triggers.close(); expect(host.scans).not.toHaveBeenCalled();
+  expect(await readdir(join(root, "triggers", "versions", "own"))).toHaveLength(2);
 });

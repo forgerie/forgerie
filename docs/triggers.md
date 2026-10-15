@@ -47,7 +47,7 @@ Unknown schedule keys are errors. A workflow has at most one schedule. To run it
 
 ## File sync, errors and versions
 
-Sessiond scans global prompt files at start, before resuming durable tasks. It watches the folder with `fs.watch` and rescans every 60 seconds as a fallback. Browser and agent edits write the global file, then sync it through the same durable scheduling operations. A changed schedule or action re-arms an active trigger. A prose-only edit does not re-arm it.
+Sessiond scans global prompt files at start, before resuming durable tasks. It watches the folder with `fs.watch`, combines event bursts after 150 ms of quiet, and rescans every 60 seconds as a fallback. One background scan can run with at most one follow-up pending. Watch echoes whose file hashes already match the inline sync do not cause another full scan. Browser and agent edits write the global file, then sync it through the same durable scheduling operations. A changed schedule or action re-arms an active trigger. A prose-only edit does not re-arm it.
 
 Each file-backed trigger response adds `file: {path,status,problem?,lastGoodAt?}`. This field is computed on read, not stored with the trigger. `problem` contains `message` and, when known, a one-based `line`.
 
