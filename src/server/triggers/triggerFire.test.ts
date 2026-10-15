@@ -51,10 +51,11 @@ it.each(["header", "session", "workflow", "legacy-session", "legacy-workflow"])(
   const cwd = join(root, "workspace");
   const children: ChildProcess[] = [];
   try {
-    await mkdir(agentDir);
+    await mkdir(join(agentDir, "prompts"), { recursive: true });
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "faux", defaultModel: "faux-1", packages: [], compaction: { enabled: false } }));
     await mkdir(join(cwd, ".pi", "prompts"), { recursive: true });
     await writeFile(join(cwd, ".pi", "prompts", "nightly.md"), "---\nworkflow:\n  version: 1\n  stages:\n    - { id: land, name: Land, stop: land }\n---\nStop at the land stage.\n");
+    await writeFile(join(agentDir, "prompts", "nightly.md"), await readFile(join(cwd, ".pi", "prompts", "nightly.md"), "utf8"));
     const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
     await projects.add({ path: cwd });
     const first = child(root, checkpoint); children.push(first.process);

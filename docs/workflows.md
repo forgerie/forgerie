@@ -119,6 +119,23 @@ Forgerie appends resolved inputs as JSON data. It does not substitute placeholde
 
 Optional fenced `js workflow` and `javascript workflow` blocks can be saved and copied. Launch refuses these files. Script execution requires a separate runtime decision; it is not silently skipped.
 
+## Schedule a global workflow
+
+A global workflow file can also be its trigger. Add one `schedule:` block beside `workflow:` in `<agentDir>/prompts/<name>.md`:
+
+```yaml
+schedule:
+  at: "03:00"
+  projects: all
+  late: 6h
+  inputs:
+    task: Review ready work
+```
+
+The trigger ID is the file name. The schedule's `inputs` override this workflow's defaults for scheduled runs, not manual launches. The block also accepts weekdays, time zone, coordinator model and thinking level, and `paused: true`. Only global files schedule. A schedule in a project's `.pi/prompts` copy is ignored and diagnosed; the copy can still replace the workflow at launch.
+
+Sessiond reads changes at start, watches the folder, and rescans every 60 seconds. Invalid files retain the last good schedule settings and show a line diagnostic. A removed file or block pauses future runs and keeps history. Forgerie retains the newest 30 observed versions. See [Scheduled workflows](triggers.md) for the complete format, file-save API, versions and migration from stored schedules.
+
 ## Explicit completion
 
 An idle parent does not finish a workflow. The coordinator calls this general tool after associated work and reports settle:

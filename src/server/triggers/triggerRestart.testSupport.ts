@@ -59,13 +59,13 @@ const triggers = await TriggerService.open({ env: { PI_WEB_DATA_DIR: root }, wor
 });
 try {
   if ((await triggers.list()).triggers.length === 0) {
-    await triggers.create({ id: "night", name: "Nightly refinement", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [cwd] }, workflow: "nightly", inputs: {}, model: "faux/faux-selected", thinkingLevel: "high" } });
-    await triggers.pause("night");
-    await triggers.run("night", { requestId: "restart" });
+    await triggers.create({ id: "nightly", name: "Nightly refinement", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [cwd] }, workflow: "nightly", inputs: {}, model: "faux/faux-selected", thinkingLevel: "high" } });
+    await triggers.pause("nightly");
+    await triggers.run("nightly", { requestId: "restart" });
   }
   const deadline = Date.now() + 30_000;
   for (;;) {
-    const trigger = await triggers.get("night");
+    const trigger = await triggers.get("nightly");
     const fire = trigger.history[0];
     if (fire?.outcome.kind === "failed") throw new Error(fire.outcome.error);
     if (fire?.outcome.kind === "started") {

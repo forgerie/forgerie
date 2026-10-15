@@ -336,7 +336,7 @@ async function createSessionDaemonRuntime() {
       },
     }),
     publish: () => { eventHub.publishGlobal({ type: "triggers.changed" }); },
-    onError: (error) => { app.log.error({ err: error }, "trigger store unavailable"); },
+    onError: (error) => { app.log.error({ err: error }, "trigger service diagnostic"); },
   });
   const promptResources = new PromptResourceCatalogService({ agentDir: activeAgentProfile.dir });
   const promptLibrary = new AgentDirPromptLibrary(activeAgentProfile.dir);

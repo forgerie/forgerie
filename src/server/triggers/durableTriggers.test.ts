@@ -666,3 +666,28 @@ it("records a missed project timestamp on the same clock as attention", async ()
   expect(outcome.missedAt).toBe(fire?.recordedAt);
   expect(outcome.missedAt).toBe(record?.attention?.since);
 });
+
+it.each(["schedule", "manual"])("re-keying an admitted %s fire preserves its captured request and completes it once after restart", async (cause) => {
+  const clock = shiftedClock(JUST_BEFORE_THREE);
+  const held = recordingFire({ kind: "hold-until-cancelled" });
+  const first = await openHost(clock, held.fire); clock.set(JUST_BEFORE_THREE);
+  const created = await first.triggers.create(first.harness, first.anchor, nightly, context);
+  if (cause === "manual") {
+    await first.triggers.pause(first.harness, nightly.id, context);
+    await first.triggers.run(first.harness, first.anchor, nightly.id, "admitted", context);
+  }
+  await vi.waitFor(() => { expect(held.requests).toHaveLength(1); });
+  const requestId = held.requests[0]?.requestId;
+  await first.triggers.planFileMigration(first.harness, nightly.id, "nightly-refine", context);
+  await first.triggers.rekey(first.harness, nightly.id, "nightly-refine", context);
+  const moved = (await listTriggers(first.harness, context))[0];
+  expect(moved?.generation).toBe(created.generation);
+  if (cause === "manual") expect((await first.triggers.run(first.harness, first.anchor, "nightly-refine", "admitted", context)).requestId).toBe(requestId);
+  await closeHost(first.harness);
+  const host = recordingFire({ kind: "start" }); const second = await openHost(clock, host.fire);
+  const [completed] = await until(second.harness, fired(1));
+  expect(host.requests).toHaveLength(1); expect(host.requests[0]?.requestId).toBe(requestId);
+  expect(completed?.id).toBe("nightly-refine"); expect(completed?.history).toHaveLength(1);
+  expect(completed?.history[0]).toMatchObject({ requestId, outcome: { kind: "started" } });
+  if (cause === "schedule") expect(completed?.state).toEqual({ kind: "active", nextFireAt: at("2026-10-14T03:00:00Z") });
+});

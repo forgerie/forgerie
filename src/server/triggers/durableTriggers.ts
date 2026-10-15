@@ -23,7 +23,7 @@ const Triggers = defineDoc<StoredTriggers>({
 });
 
 export class TriggerError extends Error {
-  constructor(message: string, readonly status: 400 | 404 | 409 | 503 = 400, readonly field?: string) { super(message); }
+  constructor(message: string, readonly status: 400 | 404 | 409 | 503 = 400, readonly field?: string, readonly line?: number) { super(message); }
 }
 
 /**
@@ -86,6 +86,13 @@ function recordAt(records: Readonly<Record<string, StoredTrigger>>, id: string):
   return Object.hasOwn(records, id) ? records[id] : undefined;
 }
 
+// Re-keying a file-backed trigger never replaces its tasks. Captured requests retain their identity,
+// while the incarnation locates the moved record, even if the old name is later reused.
+function taskRecord(records: Readonly<Record<string, StoredTrigger>>, id: string, incarnation: string): StoredTrigger | undefined {
+  const direct = recordAt(records, id);
+  return direct?.incarnation === incarnation ? direct : Object.values(records).find((record) => record.incarnation === incarnation);
+}
+
 // Doc drafts are transaction overlays. Materialize them before the commit settles, and check the stored shape.
 function publicTrigger(record: Readonly<StoredTrigger>): Trigger {
   const plain: unknown = JSON.parse(JSON.stringify({ ...record, incarnation: undefined }));
@@ -130,7 +137,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
     const progress = { projects: persistedAdmission.projects ?? (request.cwds ?? []).map((cwd): TriggerProjectFire => ({ cwd, outcome: { kind: "running", startedAt: now() } })) };
     const admission = { accepted: false };
     await runtime.commit(async (tx) => {
-      const record = recordAt((await tx.doc(Triggers)).records, request.triggerId);
+      const record = taskRecord((await tx.doc(Triggers)).records, request.triggerId, incarnation);
       if (record?.incarnation !== incarnation) return stop;
       if (persistedAdmission.state === true) {
         admission.accepted = true;
@@ -159,7 +166,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
         const at = now();
         if (project.outcome.kind === "failed") project = { ...project, outcome: { ...project.outcome, failedAt: at } };
         progress.projects = progress.projects.map((previous) => previous.cwd === project.cwd ? project : previous);
-        const record = recordAt((await tx.doc(Triggers)).records, request.triggerId);
+        const record = taskRecord((await tx.doc(Triggers)).records, request.triggerId, incarnation);
         if (record?.incarnation === incarnation) {
           const entry = record.history.find((entry) => entry.requestId === request.requestId);
           if (entry !== undefined) { entry.projects = progress.projects; record.revision += 1; }
@@ -184,7 +191,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
       const outcome = await executeFire(runtime, request, incarnation, "manual", 0, context, { state: running.state.checkpoint.admitted, ...(running.state.checkpoint.projects === undefined ? {} : { projects: running.state.checkpoint.projects }), checkpoint: (request, projects) => ({ ...running.state.checkpoint, admitted: true, request, projects }) });
       if (outcome === undefined) return;
       await runtime.commit(async (tx) => {
-        const record = recordAt((await tx.doc(Triggers)).records, request.triggerId);
+        const record = taskRecord((await tx.doc(Triggers)).records, request.triggerId, incarnation);
         if (record?.incarnation === incarnation) recordFire(record, { occurrence: request.occurrence, requestId: request.requestId, cause: "manual", skippedBefore: 0, recordedAt: now(), ...outcome }, "preserve");
         return stop;
       }, context);
@@ -203,7 +210,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
       wait: async (running, runtime, context) => {
         await runtime.sleep(running.state.checkpoint.occurrence, context);
         await runtime.commit(async (tx) => {
-          const record = recordAt((await tx.doc(Triggers)).records, running.input.triggerId);
+          const record = taskRecord((await tx.doc(Triggers)).records, running.input.triggerId, running.input.incarnation);
           if (record === undefined || !armedFor(record, running.input)) return stop;
           const at = runtime.now();
           // Occurrences that passed while the daemon was down fold into the latest one. It fires once, or not at all.
@@ -223,11 +230,11 @@ export function durableTriggers(options: DurableTriggerOptions) {
       fire: async (running, runtime, context) => {
         const { occurrence, skippedBefore } = running.state.checkpoint;
         const { triggerId } = running.input;
-        const requestId = triggerRequestId(triggerId, occurrence);
+        const requestId = running.state.checkpoint.request.requestId;
         const outcome = await executeFire(runtime, running.state.checkpoint.request, running.input.incarnation, "schedule", skippedBefore, context, { state: running.state.checkpoint.admitted, ...(running.state.checkpoint.projects === undefined ? {} : { projects: running.state.checkpoint.projects }), checkpoint: (request, projects) => ({ ...running.state.checkpoint, admitted: true, request, projects }) }, running.input);
         if (outcome === undefined) return;
         await runtime.commit(async (tx) => {
-          const live = recordAt((await tx.doc(Triggers)).records, triggerId);
+          const live = taskRecord((await tx.doc(Triggers)).records, triggerId, running.input.incarnation);
           if (live?.incarnation !== running.input.incarnation) return stop;
           const at = runtime.now();
           recordFire(live, { occurrence, requestId, cause: "schedule", recordedAt: at, skippedBefore, ...outcome }, "preserve");
@@ -254,6 +261,42 @@ export function durableTriggers(options: DurableTriggerOptions) {
   return {
     extension: defineExtension({ name: "forgerie.triggers", tasks: [task, manualTask] }),
     initialize: (harness: Harness, context: Context): Promise<void> => harness.commit(async (tx) => { await tx.doc(Triggers); }, context),
+
+    fileMigration: async (harness: Harness, context: Context) => (await harness.snapshot(Triggers, context))?.fileMigration ?? { done: false, pending: {}, migrated: [], skipped: [] },
+    planFileMigration: (harness: Harness, id: string, target: string, context: Context): Promise<void> => harness.commit(async (tx) => {
+      const doc = await tx.doc(Triggers);
+      doc.fileMigration ??= { done: false, pending: {}, migrated: [], skipped: [] };
+      const migration = doc.fileMigration;
+      if (id !== target && recordAt(doc.records, target) !== undefined) throw new TriggerError(`Trigger "${target}" already exists`, 409);
+      migration.pending[id] = target;
+    }, context),
+    rekey: (harness: Harness, id: string, target: string, context: Context): Promise<void> => harness.commit(async (tx) => {
+      const doc = await tx.doc(Triggers);
+      const record = recordAt(doc.records, id);
+      if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist`, 404);
+      if (id !== target && recordAt(doc.records, target) !== undefined) throw new TriggerError(`Trigger "${target}" already exists`, 409);
+      // Preserve incarnation and generation: admitted fires finish under their captured request IDs,
+      // and sleeping tasks keep their pending occurrence instead of skipping it or arming a duplicate.
+      record.id = target;
+      doc.records[target] = record;
+      if (id !== target) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Migration moves the keyed record atomically.
+        delete doc.records[id];
+      }
+      for (const [key, receipt] of Object.entries(doc.manualRequests)) if (receipt.triggerId === id && receipt.incarnation === record.incarnation) {
+        receipt.requestId ??= triggerManualRequestId(id, createHash("sha256").update(key).digest("hex").slice(0, 32));
+        receipt.triggerId = target;
+      }
+      doc.fileMigration ??= { done: false, pending: {}, migrated: [], skipped: [] };
+      const migration = doc.fileMigration;
+      migration.migrated.push(target);
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Completed migration intent.
+      delete migration.pending[id];
+    }, context),
+    finishFileMigration: (harness: Harness, skipped: string[], context: Context): Promise<void> => harness.commit(async (tx) => {
+      const doc = await tx.doc(Triggers);
+      doc.fileMigration = { done: true, pending: {}, migrated: [], skipped };
+    }, context),
 
     /** Validate, store, and arm a trigger in one commit. `anchor` is the conversation that owns trigger tasks. */
     create: async (harness: Harness, anchor: ConversationId, input: unknown, context: Context, createdBy: TriggerCreator = { kind: "user" }, scope?: readonly string[]): Promise<Trigger> => {
@@ -326,7 +369,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
       assertProject(record.action, scope);
       if (cwd !== undefined && record.action.targets.kind === "projects" && !record.action.targets.cwds.includes(cwd)) throw new TriggerError("Choose one of the trigger's target projects", 400, "cwd");
       const receiptKey = JSON.stringify([record.incarnation, clientRequestId]);
-      const requestId = triggerManualRequestId(id, createHash("sha256").update(receiptKey).digest("hex").slice(0, 32));
+      const requestId = doc.manualRequests[receiptKey]?.requestId ?? triggerManualRequestId(id, createHash("sha256").update(receiptKey).digest("hex").slice(0, 32));
       if (doc.manualRequests[receiptKey] === undefined) {
         doc.manualRequests[receiptKey] = { triggerId: id, incarnation: record.incarnation };
         await tx.createTask(manualTask, { incarnation: record.incarnation, request: { triggerId: id, name: record.name, timezone: record.schedule.timezone, action: publicAction(record.action), ...(cwd === undefined ? {} : { cwds: [cwd] }), occurrence: now(), requestId } }, { ownership: { kind: "conversation" }, conversationId: anchor, background: true });
@@ -342,6 +385,7 @@ export function durableTriggers(options: DurableTriggerOptions) {
       assertProject(record.action, scope);
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Records are keyed by trigger ID.
       delete doc.records[id];
+      if (doc.fileMigration !== undefined) doc.fileMigration.skipped = doc.fileMigration.skipped.filter((skipped) => skipped !== id);
       for (const [requestId, receipt] of Object.entries(doc.manualRequests)) if (receipt.triggerId === id && receipt.incarnation === record.incarnation) {
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Receipts are keyed by request ID.
         delete doc.manualRequests[requestId];
