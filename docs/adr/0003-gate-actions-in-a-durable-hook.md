@@ -17,6 +17,8 @@ Gated by default:
 
 Not gated by default: restarting Forgerie's own units, and landing on the local main branch by rebase and fast-forward.
 
+Amended 2026-10-15: discarding files in a scratch clone under `/tmp` or in an active child worktree of the session is not gated. These approvals held workflow runs for hours and protected only throwaway files. Branch deletion still gates. See `docs/gated-actions.md#disposable-worktrees`.
+
 Prompt wording still covers what the hook cannot recognise, such as a shell script that hides a force-push. The autonomy policy decides which actions are gated, with one global default in Forgerie Settings and project or workflow overrides.
 
 ## Considered options

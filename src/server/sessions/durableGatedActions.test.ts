@@ -55,7 +55,7 @@ async function fixture(riskLabels?: RiskLabelOptions) {
   for (const extension of [...children.parent, ...children.childOnly, tools, decision]) registry.install(extension);
   const options = {manager, models, registry, env: ({cwd}: {cwd?: string}) => new NodeExecutionEnv({cwd: cwd ?? root}), agent: {cwd: root, model: {provider: "faux", modelId: "faux-1"}, extensions: [...children.parent, tools, decision]}};
   let journal = await DurableSessionJournal.open(options); journals.push(journal);
-  const gate = gatedActionsExtension({...(riskLabels === undefined ? {} : {riskLabels}), parent: journal.conversation.id, harness: () => journal.harness, policy: {read: () => Promise.resolve({...structuredClone(defaultAutonomyPolicy), gated: {...defaultAutonomyPolicy.gated, messages: state.gated}})}, reads: {git: () => Promise.resolve(""), issueLabels: () => Promise.resolve([])}});
+  const gate = gatedActionsExtension({...(riskLabels === undefined ? {} : {riskLabels}), parent: journal.conversation.id, harness: () => journal.harness, policy: {read: () => Promise.resolve({...structuredClone(defaultAutonomyPolicy), gated: {...defaultAutonomyPolicy.gated, messages: state.gated}})}, reads: {git: () => Promise.resolve(""), issueLabels: () => Promise.resolve([]), disposable: () => Promise.resolve(false)}});
   registry.install(gate); await journal.conversation.configure({extensions: {add: [gate]}}, context);
   const reopen = async () => { await journal.close(); journal = await DurableSessionJournal.open(options); journals.push(journal); return journal; };
   return {root, state, get journal() {return journal;}, reopen};

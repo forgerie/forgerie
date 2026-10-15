@@ -39,6 +39,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { routeDurableChildExtensions, type DurableChildExtensions, answerChildQuestion, CHILD_QUESTIONS_DOC_KIND, openChildQuestions, childMessages, reviewChildWorktree, continueChild, childWorkIsLive, childWorktreeAction, workingChildCount, listChildren, messageChild, stopChild } from "./durableChildAgents.js";
 import type { DurableChildHost } from "./durableChildHost.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
+import { disposableWorktree, SCRATCH_ROOT } from "./disposableWorktrees.js";
 import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { decisionExtension, decisions, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
@@ -473,7 +474,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error, DECISION_HINT_ERROR_EVENT); }}}),
       ...(this.options.autonomyPolicy === undefined ? {} : {policy: this.options.autonomyPolicy}),
       reads: {git: async (cwd, args) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8", maxBuffer: 4 * 1024 * 1024})).stdout,
-        issueLabels: this.options.gatedIssueLabels ?? (() => Promise.reject(new Error("GitHub labels unavailable")))},
+        issueLabels: this.options.gatedIssueLabels ?? (() => Promise.reject(new Error("GitHub labels unavailable"))),
+        // Child worktrees are read at call time: they start after the gate and change as children spawn and land.
+        disposable: disposableWorktree({scratchRoot: SCRATCH_ROOT, childWorktrees: async () => await this.childWorktrees?.activePaths() ?? []})},
     };
     const extension = gatedActionsExtension(this.gateOptions);
     const {tasks, ...selected} = extension;

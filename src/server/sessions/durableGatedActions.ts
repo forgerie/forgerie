@@ -14,7 +14,7 @@ import { logDecision } from "./durableDecisions.js";
 import { WorkflowError } from "../resources/workflowLibrary.js";
 
 export const GATED_ACTIONS_DOC_KIND = "forgerie.gated-actions";
-export const GATED_ACTION_GUIDANCE = "Irreversible actions and actions outside the project in the user's name are gated. While approval waits, keep working on parts that do not depend on it. Do not retry the blocked call; its result will arrive as a message.";
+export const GATED_ACTION_GUIDANCE = "Irreversible actions and actions outside the project in the user's name are gated. While approval waits, keep working on parts that do not depend on it. Do not retry the blocked call; its result will arrive as a message. Discarding files in a scratch clone under /tmp or in a child worktree is not gated: run the Git command from that tree, or name it with git -C <path>. A cd joined to the command with && or | still gates.";
 /* eslint-disable @typescript-eslint/consistent-type-definitions */
 type GateRecord = { id: string; conversationId: ConversationId; by: string; tool: string; args: JsonObject; category: GatedCategory; description: string; requestedAt: number;
   state: {kind: "waiting" | "approved" | "refused"} | {kind: "ran"; result: JsonValue; at: number} | {kind: "failed"; error: string; at: number} };

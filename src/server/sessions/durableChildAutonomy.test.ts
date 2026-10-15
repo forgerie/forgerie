@@ -106,7 +106,7 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     await submission.wait(context);
     return journal.conversation.context(context);
   }
-  return { root, runStore, children, spawn, parentInputs, calls: () => childCalls, journal: () => journal,
+  return { root, runStore, children, spawn, parentInputs, calls: () => childCalls, journal: () => journal, worktrees,
     restart: async (at: number, corruptRecords = false) => { await recorder?.close(); await journal.close(); now = at; journal = await open(corruptRecords); },
     advanceClock: (ms: number) => { now += ms; },
     recordPath, recordErrors, runtimeErrors,
@@ -179,6 +179,8 @@ it("defaults writers and general helpers to worktrees, readers to shared, and ho
   }
   const children = await run.children();
   expect(children.filter((child) => child.worktree !== undefined).map((child) => child.name)).toEqual(["writer", "helper", "isolated"]);
+  // The gate treats exactly these active child worktrees as disposable.
+  expect((await run.worktrees.activePaths()).sort()).toEqual(children.flatMap((child) => child.worktree === undefined ? [] : [child.worktree.path]).sort());
 });
 it("refuses a second busy shared writer and names the first child", async () => {
   const run = await fixture();
