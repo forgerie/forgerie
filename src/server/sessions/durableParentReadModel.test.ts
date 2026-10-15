@@ -201,12 +201,14 @@ describe("native Durable parent reads", () => {
 it("overlays volatile labels in history and live replacements without writing or adding model input", async () => {
   const { reader, harness, conversation, user } = await fixture();
   await user("Run command");
-  await conversation.commit(tx => tx.appendEntry(AssistantEntry, conversation.id, { model: [fauxAssistantMessage([fauxToolCall("bash", { command: "true" }, { id: "call" })], { stopReason: "toolUse" })] }), context);
+  const source = await conversation.commit(tx => tx.appendEntry(AssistantEntry, conversation.id, { model: [fauxAssistantMessage([fauxToolCall("bash", { command: "true" }, { id: "call" })], { stopReason: "toolUse" })] }), context);
+  decisionAnnotations(harness).setRiskVisibility(() => true);
+  const invocationId = JSON.stringify([conversation.id, source.id, "call", 0]);
   const frames: DurableBrowserSnapshot[] = []; const errors: Error[] = []; const publications: unknown[] = [];
   const off = harness.subscribeCommits(publication => { publications.push(publication); });
   const attachment = await reader.attach(snapshot => { frames.push(snapshot); return Promise.resolve(); }, error => { errors.push(error); }, context);
   try {
-    await decisionAnnotations(harness).write(String(conversation.id), "tool:call", { target: "tool", id: "call", label: { model: "opinion-model", deletes_data: 0, outside_worktree: 0, acts_as_user: 0, risk: "low", risk_score: 0 } });
+    await decisionAnnotations(harness).write(String(conversation.id), `tool:${invocationId}`, { target: "tool", id: "call", invocationId, sourceInvocationId: invocationId, label: { model: "opinion-model", deletes_data: 0, outside_worktree: 0, acts_as_user: 0, risk: "low", risk_score: 0 } });
     await vi.waitFor(() => { expect(JSON.stringify(frames.at(-1))).toContain("opinion-model"); });
     expect(publications).toEqual([]); expect(errors).toEqual([]);
     expect(JSON.stringify(await reader.history(undefined, context))).toContain("opinion-model");
@@ -214,4 +216,87 @@ it("overlays volatile labels in history and live replacements without writing or
     await user("Required input after annotation");
     expect((await reader.messages(context)).at(-1)?.content).toBe("Required input after annotation");
   } finally { off(); await attachment.stop(); }
+});
+
+
+it.each([499, 500])("annotations cannot change pages or snapshots at the %s-message boundary", async count => {
+  const {reader, harness, conversation, user} = await fixture();
+  await user("One indivisible tool round");
+  const entries = await conversation.commit(async tx => {
+    const entries: EntryRecord[] = [];
+    for (let index = 1; index < count; index++) entries.push(await tx.appendEntry(AssistantEntry, conversation.id,
+      {model: [fauxAssistantMessage([fauxToolCall("bash", {command: `printf ${String(index)}`}, {id: "repeated"})])]}));
+    return entries;
+  }, context);
+  const baseline = await reader.history({limit: 100}, context);
+  const baselineEarlier = await reader.history({before: count - 1, limit: 20}, context);
+  const view = await conversation.viewState(context);
+  try {
+    const baselineSnapshot = reader.snapshot(view.value, "epoch", 0).history;
+    const store = decisionAnnotations(harness);
+    store.setRiskVisibility(() => true);
+    for (const entry of entries) {
+      const invocationId = JSON.stringify([conversation.id, entry.id, "repeated", 0]);
+      await store.write(String(conversation.id), `tool:${invocationId}`, {target: "tool", id: "repeated", invocationId, sourceInvocationId: invocationId,
+        label: {model: "opinion", deletes_data: 0, outside_worktree: 0, acts_as_user: 0, risk: "low", risk_score: 0}});
+    }
+    const strip = (history: typeof baseline) => ({...history, messages: history.messages.map(({decisionAnnotations: _annotations, ...message}) => {void _annotations; return message;})});
+    const annotated = await reader.history({limit: 100}, context);
+    expect(annotated.messages).toHaveLength(count);
+    expect(strip(annotated)).toEqual(baseline);
+    expect(strip(await reader.history({before: count - 1, limit: 20}, context))).toEqual(baselineEarlier);
+    expect(strip(reader.snapshot(view.value, "epoch", 0).history)).toEqual(baselineSnapshot);
+    expect((await reader.messages(context)).length).toBe(count);
+    expect(JSON.stringify(annotated)).toContain("opinion");
+  } finally {view.dispose();}
+});
+
+it("keeps every paginated cursor, position and required message identical with many annotations", async () => {
+  const {reader, harness, conversation} = await fixture();
+  const entries = await conversation.commit(async tx => {
+    const sources: EntryRecord[] = [];
+    for (let turn = 0; turn < 105; turn++) {
+      await tx.appendEntry(UserEntry, conversation.id, {model: [{role: "user", content: `turn ${String(turn)}`, timestamp: turn}]});
+      sources.push(await tx.appendEntry(AssistantEntry, conversation.id, {model: [fauxAssistantMessage([fauxToolCall("bash", {}, {id: "repeated"})])]}));
+      await tx.appendEntry(AssistantEntry, conversation.id, {model: [fauxAssistantMessage("required reply")]});
+    }
+    return sources;
+  }, context);
+  const pages = async () => {
+    const pages: Awaited<ReturnType<typeof reader.history>>[] = [];
+    let before: number | undefined;
+    do {const page = await reader.history({limit: 50, ...(before === undefined ? {} : {before})}, context); pages.push(page); before = page.start;} while (before > 0);
+    return pages;
+  };
+  const baseline = await pages(); const stats = await reader.statistics(context);
+  const store = decisionAnnotations(harness); store.setRiskVisibility(() => true);
+  for (const source of entries) {
+    const invocationId = JSON.stringify([conversation.id, source.id, "repeated", 0]);
+    await store.write(String(conversation.id), `tool:${invocationId}`, {target: "tool", id: "repeated", invocationId, sourceInvocationId: invocationId,
+      label: {model: "opinion", deletes_data: 0, outside_worktree: 0, acts_as_user: 0, risk: "low", risk_score: 0}});
+  }
+  expect((await pages()).map(page => ({...page, messages: page.messages.map(({decisionAnnotations: _annotations, ...required}) => {void _annotations; return required;})}))).toEqual(baseline);
+  expect(await reader.statistics(context)).toEqual(stats);
+});
+
+it("removes stored label metadata from live replacements when settings turn off", async () => {
+  const {reader, harness, conversation, user} = await fixture();
+  await user("required input");
+  const source = await conversation.commit(tx => tx.appendEntry(AssistantEntry, conversation.id,
+    {model: [fauxAssistantMessage([fauxToolCall("bash", {}, {id: "call"})])]}), context);
+  const live = {enabled: true, risk_labels: true};
+  const store = decisionAnnotations(harness); store.setRiskVisibility(() => live.enabled && live.risk_labels);
+  const frames: DurableBrowserSnapshot[] = []; const errors: Error[] = [];
+  const attachment = await reader.attach(frame => {frames.push(frame); return Promise.resolve();}, error => {errors.push(error);}, context);
+  try {
+    const invocationId = JSON.stringify([conversation.id, source.id, "call", 0]);
+    await store.write(String(conversation.id), `tool:${invocationId}`, {target: "tool", id: "call", invocationId, sourceInvocationId: invocationId,
+      label: {model: "opinion", deletes_data: 0, outside_worktree: 0, acts_as_user: 0, risk: "low", risk_score: 0}});
+    await vi.waitFor(() => {expect(JSON.stringify(frames.at(-1))).toContain("opinion");});
+    live.enabled = false;
+    await user("next required input");
+    await vi.waitFor(() => {expect(frames.at(-1)?.history.total).toBe(3);});
+    expect(JSON.stringify(frames.at(-1))).not.toContain("opinion"); expect(errors).toEqual([]);
+    expect(store.values(String(conversation.id))).toHaveLength(1);
+  } finally {await attachment.stop();}
 });

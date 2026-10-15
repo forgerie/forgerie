@@ -1,3 +1,5 @@
+import { RiskLabelEntrySchema } from "../../shared/riskLabels.js";
+import { Check } from "typebox/value";
 import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { createDurableChildHost } from "./durableChildHost.js";
 import { createServer, type Server } from "node:http";
@@ -44,19 +46,21 @@ async function fixture(hints?: DecisionHints) {
     provider.setResponses([fauxAssistantMessage([fauxToolCall(nested ? "codemode" : "bash", nested ? {code: `return await tools.bash(${JSON.stringify({command})});`} : {command}, {id: "bash-call"})], {stopReason: "toolUse"}), fauxAssistantMessage("Finished")]);
     await session.prompt("Run command");
   };
-  const runChild = async () => {
+  const childState = {command: "printf CHILD > child-effect"};
+  const runChild = async (marker = "CHILD") => {
+    childState.command = `printf ${marker} > child-effect`;
     provider.setResponses(Array.from({length: 40}, () => request => {
       const last = request.messages.at(-1);
-      if (last?.role === "user" && last.content === "CHILD") return fauxAssistantMessage([fauxToolCall("bash", {command: "printf CHILD > child-effect"}, {id: "child-bash"})], {stopReason: "toolUse"});
+      if (last?.role === "user" && last.content === "CHILD") return fauxAssistantMessage([fauxToolCall("bash", {command: childState.command}, {id: "child-bash"})], {stopReason: "toolUse"});
       if (last?.role === "user" && last.content === "SPAWN") return fauxAssistantMessage([fauxToolCall("child_agent", {action: "spawn", name: "helper", message: "CHILD", isolation: "shared"})], {stopReason: "toolUse"});
       return fauxAssistantMessage("Finished");
     }));
     await session.prompt("SPAWN");
-    await vi.waitFor(async () => {expect(await readFile(join(root, "child-effect"), "utf8")).toBe("CHILD"); expect((await session.durableChildren())[0]?.busy).toBe(false);});
+    await vi.waitFor(async () => {expect(await readFile(join(root, "child-effect"), "utf8")).toBe(marker); expect((await session.durableChildren())[0]?.busy).toBe(false);});
     const child = (await session.durableChildren())[0]; if (child === undefined) throw new Error("Missing child");
     return child;
   };
-  return {root, session, services, manager, model, events, errors, run, createServices, runChild};
+  return {root, session, services, manager, model, events, errors, run, createServices, runChild, childState};
 }
 
 it("bash has off-equivalence and executes before a hanging gateway times out", async () => {
@@ -81,8 +85,8 @@ it.each([false, true])("delivers a late bash label live and through volatile his
   answer?.(opinion);
   await vi.waitFor(() => {expect(f.errors).toEqual([]); expect(JSON.stringify(f.events)).toContain(RISK_LABEL_ENTRY_KIND);});
   await f.session.refreshDurableReads();
-  const entry = f.session.messages.find(value => value.role === "custom" && value.customType === RISK_LABEL_ENTRY_KIND);
-  expect(entry).toMatchObject({details: {target: "tool", id: nested ? "bash-call/1" : "bash-call", label: {model: "actual-risk-model", risk: "low", risk_score: 0.4}}});
+  const entry = f.session.messages.flatMap(message => message.decisionAnnotations ?? []).find(value => value.target === "tool");
+  expect(entry).toMatchObject({target: "tool", id: nested ? "bash-call/1" : "bash-call", label: {model: "actual-risk-model", risk: "low", risk_score: 0.4}});
   expect((await f.session.journal.conversation.context(context)).entries.some(value => value.kind === RISK_LABEL_ENTRY_KIND)).toBe(false);
   expect(JSON.stringify(await f.session.parentReadModel.messages(context))).toContain("actual-risk-model");
   expect(f.errors).toEqual([]);
@@ -134,8 +138,7 @@ it("records a native child bash label by the child call id after that call ends"
   answer?.(opinion);
   await vi.waitFor(async () => {expect(JSON.stringify(await f.session.durableChildMessages(child.conversationId))).toContain("actual-risk-model");});
   const transcript = await f.session.durableChildMessages(child.conversationId);
-  expect(transcript.messages.find(message => message.role === "custom")).toMatchObject({customType: RISK_LABEL_ENTRY_KIND,
-    details: {target: "tool", id: "child-bash", label: {model: "actual-risk-model"}}});
+  expect(transcript.messages.flatMap(message => message.decisionAnnotations ?? [])[0]).toMatchObject({target: "tool", id: "child-bash", label: {model: "actual-risk-model"}});
   expect(f.errors).toEqual([]); expect(await readFile(join(f.root, "child-effect"), "utf8")).toBe("CHILD");
   expect(JSON.stringify(f.session.messages)).not.toContain("actual-risk-model");
 });
@@ -154,4 +157,73 @@ it.each(["sdk", "nested", "child"] as const)("a rejected %s bash-label write can
   expect(await readFile(join(f.root, "effect"), "utf8")).toBe("LATER");
   expect(f.session.messages.some(message => message.role === "toolResult" && message.isError)).toBe(false);
   expect((await f.session.journal.conversation.context(context)).entries.some(entry => entry.kind === RISK_LABEL_ENTRY_KIND)).toBe(false);
+});
+
+it.each([false, true])("repeated SDK call ids keep both invocation labels, even when the older answer arrives last (nested=%s)", async nested => {
+  const answers: ((value: DecisionAnswers) => void)[] = [];
+  const f = await fixture({client: {ask: () => new Promise(resolve => {answers.push(resolve);})}, readSettings: () => settings, status: () => ({keyPresent: false})});
+  await f.run(nested, "printf FIRST"); await f.run(nested, "printf SECOND");
+  expect(answers).toHaveLength(2);
+  answers[1]?.({...opinion, model: "SECOND-model"});
+  await vi.waitFor(() => {expect(JSON.stringify(f.session.messages)).toContain("SECOND-model");});
+  answers[0]?.({...opinion, model: "FIRST-model"});
+  await vi.waitFor(() => {expect(JSON.stringify(f.session.messages)).toContain("FIRST-model");});
+  const sources = f.session.messages.filter(message => message.role === "assistant" && message.toolInvocations?.["bash-call"] !== undefined);
+  expect(sources).toHaveLength(2);
+  expect(sources.map(message => message.decisionAnnotations?.[0]?.label.model)).toEqual(["FIRST-model", "SECOND-model"]);
+  expect(new Set(sources.map(message => message.toolInvocations?.["bash-call"])).size).toBe(2);
+  expect(sources.flatMap(message => message.decisionAnnotations ?? []).every(entry => entry.target === "tool" && (nested ? entry.invocationId !== entry.sourceInvocationId : entry.invocationId === entry.sourceInvocationId))).toBe(true);
+  const page = await f.session.parentReadModel.history({limit: 100}, context);
+  const labels = page.messages.flatMap(message => message.decisionAnnotations ?? []).filter(value => Check(RiskLabelEntrySchema, value));
+  expect(labels.map(entry => entry.label.model)).toEqual(["FIRST-model", "SECOND-model"]);
+  expect(f.errors).toEqual([]);
+});
+
+it("native child repeated ids never reuse a prior label or let a late prior answer label the next turn", async () => {
+  const answers: ((value: DecisionAnswers) => void)[] = [];
+  const live = {...settings};
+  const f = await fixture({client: {ask: () => new Promise(resolve => {answers.push(resolve);})}, readSettings: () => live, status: () => ({keyPresent: false})});
+  const child = await f.runChild("FIRST");
+  f.childState.command = "printf SECOND > child-effect";
+  await f.session.messageDurableChild(child.conversationId, "CHILD");
+  await vi.waitFor(async () => {expect(await readFile(join(f.root, "child-effect"), "utf8")).toBe("SECOND"); expect((await f.session.durableChildMessages(child.conversationId)).busy).toBe(false);});
+  expect(answers).toHaveLength(2);
+  answers[1]?.({...opinion, model: "SECOND-model"}); answers[0]?.({...opinion, model: "FIRST-model"});
+  await vi.waitFor(async () => {expect(JSON.stringify(await f.session.durableChildMessages(child.conversationId))).toContain("FIRST-model");});
+  const sources = (await f.session.durableChildMessages(child.conversationId)).messages.filter(message => message.role === "assistant" && message.toolInvocations?.["child-bash"] !== undefined);
+  expect(sources).toHaveLength(2);
+  expect(sources.map(message => message.decisionAnnotations?.[0]?.label.model)).toEqual(["FIRST-model", "SECOND-model"]);
+  live.risk_labels = false;
+  expect(JSON.stringify(await f.session.durableChildMessages(child.conversationId))).not.toContain("FIRST-model");
+  live.risk_labels = true; live.enabled = false;
+  expect(JSON.stringify(await f.session.durableChildMessages(child.conversationId))).not.toContain("SECOND-model");
+  expect(f.errors).toEqual([]);
+});
+
+it.each(["enabled", "risk_labels"] as const)("parent overlays hide existing labels when the live %s switch is off", async key => {
+  const live = {...settings};
+  const f = await fixture({client: {ask: () => Promise.resolve(opinion)}, readSettings: () => live, status: () => ({keyPresent: false})});
+  await f.run();
+  await vi.waitFor(() => {expect(JSON.stringify(f.session.messages)).toContain("actual-risk-model");});
+  const before = await f.session.parentReadModel.history({limit: 100}, context);
+  live[key] = false;
+  expect(JSON.stringify(f.session.messages)).not.toContain("actual-risk-model");
+  const after = await f.session.parentReadModel.history({limit: 100}, context);
+  expect(JSON.stringify(after)).not.toContain("actual-risk-model");
+  expect({start: after.start, total: after.total, count: after.messages.length}).toEqual({start: before.start, total: before.total, count: before.messages.length});
+});
+
+it("whole-family close clears existing annotations and discards a late gateway answer", async () => {
+  const answers: ((value: DecisionAnswers) => void)[] = [];
+  const f = await fixture({client: {ask: () => new Promise(resolve => {answers.push(resolve);})}, readSettings: () => settings, status: () => ({keyPresent: false})});
+  await f.run(); answers[0]?.(opinion);
+  await vi.waitFor(() => {expect(JSON.stringify(f.session.messages)).toContain("actual-risk-model");});
+  await f.run(false, "printf SECOND");
+  expect(answers).toHaveLength(2);
+  const owner = f.session.journal.harness; const scope = String(f.session.journal.conversation.id);
+  const store = decisionAnnotations(owner); expect(store.values(scope)).toHaveLength(1);
+  await f.session.close(); expect(store.values(scope)).toEqual([]);
+  answers[1]?.({...opinion, model: "too-late"});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(store.values(scope)).toEqual([]); expect(decisionAnnotations(owner)).toBe(store); expect(f.errors).toEqual([]);
 });

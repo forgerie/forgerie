@@ -22,6 +22,8 @@ export const thinkingLevelsResponseSchema = z.object({ levels: z.array(z.string(
 export const piMessageSchema = z.object({
   id: z.string().optional(),
   role: z.string(),
+  toolInvocations: z.record(z.string(), z.string()).optional().catch(undefined),
+  decisionAnnotations: z.array(z.unknown()).optional().catch(undefined),
   content: z.union([z.string(), z.array(z.unknown())]).optional(),
   timestamp: z.number().optional(),
   stopReason: z.string().optional(),

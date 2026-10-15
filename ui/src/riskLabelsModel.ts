@@ -7,7 +7,16 @@ export const riskLabelSchema = z.strictObject({
   model: z.string().min(1), deletes_data: z.number().min(0).max(1), outside_worktree: z.number().min(0).max(1),
   acts_as_user: z.number().min(0).max(1), risk: z.enum(["low", "check", "danger"]), risk_score: z.number().min(0).max(2),
 });
-const entrySchema = z.object({ target: z.enum(["gate", "tool"]), id: z.string().min(1), label: riskLabelSchema });
+const entrySchema = z.discriminatedUnion("target", [
+  z.object({target: z.literal("gate"), id: z.string().min(1), label: riskLabelSchema}),
+  z.object({target: z.literal("tool"), id: z.string().min(1), invocationId: z.string().min(1), sourceInvocationId: z.string().min(1), label: riskLabelSchema}),
+]);
+export function messageRiskLabels(message: PiMessage) {
+  return (message.decisionAnnotations ?? []).flatMap(value => {
+    const parsed = entrySchema.safeParse(value);
+    return parsed.success && parsed.data.target === "tool" ? [parsed.data] : [];
+  });
+}
 /** Host entries contain SDK stamps too. Only the annotation fields enter the transcript. */
 export function riskLabelEntryOf(message: PiMessage) {
   if (message.role !== "custom" || message.customType !== RISK_LABEL_ENTRY_KIND) return undefined;

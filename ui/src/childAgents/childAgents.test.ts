@@ -100,3 +100,15 @@ describe("the child agents store", () => {
     store.dispose();
   });
 });
+
+it("child labels follow invocation identity rather than a repeated model call id", () => {
+  const label = {model: "FIRST", deletes_data: 0, outside_worktree: 0, acts_as_user: 0, risk: "low", risk_score: 0};
+  const first = {role: "assistant", toolInvocations: {same: "child-first"}, content: [{type: "toolCall", id: "same", name: "bash", arguments: {command: "printf FIRST"}}]};
+  const second = {role: "assistant", toolInvocations: {same: "child-second"}, content: [{type: "toolCall", id: "same", name: "bash", arguments: {command: "printf SECOND"}}]};
+  const late = {role: "custom", customType: "forgerie.risk-label", details: {target: "tool", id: "same", invocationId: "child-first", sourceInvocationId: "child-first", label}};
+  const lines = childLines({messages: [first, second, late], busy: false});
+  expect(lines).toHaveLength(2); expect(lines[0]).toMatchObject({summary: "printf FIRST", riskLabel: label});
+  expect(lines[1]).toMatchObject({summary: "printf SECOND"}); expect(lines[1]).not.toHaveProperty("riskLabel");
+  const current = {...second, decisionAnnotations: [{target: "tool", id: "same", invocationId: "child-second", sourceInvocationId: "child-second", label: {...label, model: "SECOND"}}]};
+  expect(childLines({messages: [first, current, late], busy: false})).toMatchObject([{riskLabel: {model: "FIRST"}}, {riskLabel: {model: "SECOND"}}]);
+});

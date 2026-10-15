@@ -1,4 +1,4 @@
-import { decisionAnnotations, withRiskAnnotations } from "../decisions/optionalDecisionAnnotations.js";
+import { decisionAnnotations, withRiskAnnotations, withToolInvocationIds } from "../decisions/optionalDecisionAnnotations.js";
 import { z } from "zod";
 import type { Static } from "typebox";
 import { copyJson } from "@earendil-works/chord";
@@ -187,6 +187,10 @@ export class DurableParentReadModel {
 
   /** Fork-aware complete history, not ConversationView's compacted context range. */
   async messages(context: Context): Promise<DurableBrowserMessage[]> {
+    return withRiskAnnotations(this.options.handle.harness, this.options.handle.conversation.id, await this.requiredMessages(context));
+  }
+
+  private async requiredMessages(context: Context): Promise<DurableBrowserMessage[]> {
     const messages: DurableBrowserMessage[] = [];
     let cursor: Cursor | undefined;
     do {
@@ -198,11 +202,11 @@ export class DurableParentReadModel {
       }
       cursor = page.next;
     } while (cursor !== undefined);
-    return withRiskAnnotations(this.options.handle.harness, this.options.handle.conversation.id, messages);
+    return messages;
   }
 
   async history(page: MessagePageRequest | undefined, context: Context): Promise<DurableBrowserSnapshot["history"]> {
-    return this.page(await this.messages(context), page);
+    return this.annotate(this.page(await this.requiredMessages(context), page));
   }
 
   async statistics(context: Context): Promise<{ totalMessages: number; userMessages: number; assistantMessages: number; toolCalls: number; tokens: SessionStatus["tokens"]; cost: number }> {
@@ -325,7 +329,7 @@ export class DurableParentReadModel {
     });
     return durableBrowserSnapshotSchema.parse({
       type: "session.snapshot", epoch, revision, ...(app === undefined ? {} : { app }),
-      history: this.page(withRiskAnnotations(this.options.handle.harness, this.options.handle.conversation.id, value.entries.flatMap((entry) => this.entryMessages(entry)))),
+      history: this.annotate(this.page(value.entries.flatMap((entry) => this.entryMessages(entry)))),
       partial: partial === undefined ? null : durableBrowserMessageSchema.parse(projectBrowserMessage(partial)),
       tools: (live.tools ?? []).filter((slot) => projectBrowserSessionEvent({ type: "tool.start", toolName: slot.name, toolCallId: slot.callId, summary: "" }).type === "tool.start").map((slot) => ({ toolCallId: slot.callId, toolName: slot.name, status: slot.status, output: slot.output ?? "" })),
       queuedMessages, isStreaming: live.run !== undefined, isCompacting: (live.compactions?.length ?? 0) > 0,
@@ -336,6 +340,10 @@ export class DurableParentReadModel {
     const usage = value.docs["pi.usage"] ?? { models: {}, tools: {} };
     if (!Check(ChildRunUsageStateSchema, usage)) throw new Error("Invalid native parent usage ledger");
     return usage;
+  }
+
+  private annotate(history: DurableBrowserSnapshot["history"]): DurableBrowserSnapshot["history"] {
+    return {...history, messages: withRiskAnnotations(this.options.handle.harness, this.options.handle.conversation.id, history.messages)};
   }
 
   private page(messages: DurableBrowserMessage[], request?: MessagePageRequest): DurableBrowserSnapshot["history"] {
@@ -352,7 +360,9 @@ export class DurableParentReadModel {
     });
     // Reuse tool visibility as well as thinking-signature filtering for every read path.
     const visible = projectBrowserMessageResponse({ messages, start: 0, total: messages.length });
-    return visible.messages.map((message) => (opening ? openMessageSchema : durableBrowserMessageSchema).parse(message));
+    // Preserve the native open schema as well as stable invocation identity.
+    return withToolInvocationIds(this.options.handle.conversation.id,
+      visible.messages.map((message) => (opening ? openMessageSchema : durableBrowserMessageSchema).parse(message)), entry.id);
   }
 }
 

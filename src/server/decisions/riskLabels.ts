@@ -13,7 +13,7 @@ interface RiskLabelInput {
 }
 export interface RiskLabelOptions { hints: RiskLabelHints; onError: (error: unknown) => void }
 type RiskLabelHints = Pick<DecisionHints, "client" | "readSettings">;
-const enabled = (hints: RiskLabelHints) => {
+export const enabledRiskLabelSettings = (hints: Pick<DecisionHints, "readSettings">) => {
   const settings = hints.readSettings();
   return settings.enabled && settings.risk_labels && settings.baseUrl.trim() !== "" ? settings : undefined;
 };
@@ -32,7 +32,7 @@ export function launchRiskLabel(hints: RiskLabelHints | undefined, input: RiskLa
   publish: (label: RiskLabel) => void | Promise<void>, onError: (error: unknown) => void): void {
   if (hints === undefined) return;
   void Promise.resolve().then(async () => {
-    const settings = enabled(hints);
+    const settings = enabledRiskLabelSettings(hints);
     if (settings === undefined) return;
     const cwd = redactDecisionText(input.cwd);
     const request: DecisionRequest = { model: settings.model,
@@ -46,7 +46,7 @@ export function launchRiskLabel(hints: RiskLabelHints | undefined, input: RiskLa
       },
     };
     const result = await hints.client.ask(request);
-    if (result === undefined || enabled(hints) === undefined) return;
+    if (result === undefined || enabledRiskLabelSettings(hints) === undefined) return;
     const label = labelOf(result);
     if (label !== undefined) await publish(label);
   }).catch(onError);

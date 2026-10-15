@@ -1,3 +1,4 @@
+import { closeDecisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
@@ -182,6 +183,7 @@ export class DurableJournalPool {
     });
   }
   private async closeFamily(path: string, family: Family, context: Context): Promise<void> {
+    closeDecisionAnnotations(family.harness);
     try { await family.harness.close(context); }
     finally { this.families.delete(path); await family.ownership?.release(); }
   }

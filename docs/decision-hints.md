@@ -93,18 +93,38 @@ Sensitivity does not alter risk labels.
 Gate responses add optional `riskLabel` to the gate read model. The shape is
 `{model, deletes_data, outside_worktree, acts_as_user, risk, risk_score}`.
 Labels live in an independent in-memory store, keyed by session family,
-conversation and gate or tool-call ID. They never change the gate document or
-append an entry to its required journal. An independent notification refreshes
-the gate read without recounting Needs your response.
+conversation and gate ID. They never update the gate document, decisions,
+execution intent, tasks or Needs your response.
 
-Bash responses add display-only `forgerie.risk-label` messages with
-`{target:"tool", id, label}` to browser history and the live message stream. The
-transcript folds them into the source call's `riskLabel`. Native child transcript
-polls use the same in-memory store. Neither model context nor the required
-journal contains these annotations. Browser reload recovers labels while the
-session family remains open. Closing that family or restarting sessiond loses
-all labels. Nested SDK call rows are themselves live-only, so their labels can
-be retained in memory without a corresponding nested row after browser reload.
+Bash labels use a stable invocation identity: conversation ID, source assistant
+entry ID, model call ID and nested-call ordinal. Repeated model call IDs in later
+turns cannot reuse or overwrite another invocation's label. Parent and child
+projections carry a `toolInvocations` map plus optional `decisionAnnotations`
+metadata on their existing assistant messages. Each tool annotation contains
+`{target:"tool", id, invocationId, sourceInvocationId, label}`. The source identity
+places a nested label on its originating turn; the full identity distinguishes
+nested calls. The UI matches the full identity, never the model call ID alone.
+
+History pagination and validation run on required messages first. Only then are
+annotations added as metadata. Labels add no messages and change no counts,
+cursors, page boundaries or the 500-message safety limit. The SDK event path can
+send a transient `forgerie.risk-label` notification; it is not a history row or
+model input. Native child transcript polls use the same count-preserving overlay.
+Nested SDK call rows remain live-only, so their metadata can exist without a
+corresponding nested row after browser reload.
+
+The shared attention/risk cache retains at most **2048 records** and approximately
+**2 MiB per family**. The byte estimate counts UTF-8 serialized values, scope/key
+text and 64 bytes per record. The cache evicts oldest insertions first across all
+conversations; replacing a record does not refresh its age. A single oversized
+result is dropped without clearing existing records. These bounds can remove an
+older opinion, never required history or state.
+
+Browser reload recovers retained labels while the family stays open. Releasing
+one sibling lease does not clear them. The last lease or pool shutdown closes the
+whole family: it clears records and listeners before closing the harness, seals
+the store, and discards queued or late results. A reopened family starts empty.
+Restarting sessiond also loses all annotations.
 
 The gate card and the bash line draw the label (see
 [What you see](#what-you-see)). Child call rows in a child's exchange log keep
@@ -113,7 +133,9 @@ recommendation is added.
 
 No call awaits a gateway response. A disabled feature, empty address, invalid
 answer, timeout, or gateway failure adds nothing. Turning either switch off
-before an answer arrives discards that late answer. Annotations already in memory remain history until the family closes.
+before an answer arrives discards that late answer. Turning either switch off
+also hides already stored labels on subsequent history, snapshot, gate and child
+reads. Re-enabling can show retained labels until eviction or family close.
 Annotation errors are reported through the session's extension error channel.
 They cannot poison Durable because no optional write calls its harness or storage.
 

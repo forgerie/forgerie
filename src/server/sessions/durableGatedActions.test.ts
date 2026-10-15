@@ -353,3 +353,14 @@ it.each(["approved", "refused"] as const)("a rejected gate-label write cannot po
   expect(f.state.runs).toBe(choice === "approved" ? 1 : 0);
   expect((await f.journal.conversation.context(context)).entries.some(entry => entry.kind === RISK_LABEL_ENTRY_KIND)).toBe(false);
 });
+
+it.each(["enabled", "risk_labels"] as const)("gate overlays hide existing labels when the live %s switch is off", async key => {
+  const live = {...labelSettings};
+  const f = await fixture({hints: {client: {ask: () => Promise.resolve(labelAnswers)}, readSettings: () => live}, onError: error => {throw error;} });
+  await blocked(f);
+  await vi.waitFor(async () => {expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context))[0]?.riskLabel?.model).toBe("risk-model");});
+  live[key] = false;
+  const gates = await gatedActions(f.journal.harness, f.journal.conversation.id, context);
+  expect(gates[0]?.riskLabel).toBeUndefined(); expect(gates[0]?.state.kind).toBe("waiting"); expect(f.state.runs).toBe(0);
+  expect(await waitingGatedActions(f.journal.harness, f.journal.conversation.id, context)).toBe(1);
+});

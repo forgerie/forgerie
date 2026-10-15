@@ -4,6 +4,8 @@ import { z } from "zod";
 export const durableBrowserMessageSchema = z.object({
   id: z.string().min(1).optional(),
   role: z.string(),
+  toolInvocations: z.record(z.string(), z.string()).optional().catch(undefined),
+  decisionAnnotations: z.array(z.unknown()).optional().catch(undefined),
   content: z.union([z.string(), z.array(z.discriminatedUnion("type", [
     z.object({ type: z.literal("text"), text: z.string() }),
     z.object({ type: z.literal("thinking"), thinking: z.string() }),

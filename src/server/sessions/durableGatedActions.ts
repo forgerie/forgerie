@@ -1,5 +1,5 @@
 import { decisionAnnotations, riskAnnotations } from "../decisions/optionalDecisionAnnotations.js";
-import { launchRiskLabel, type RiskLabelOptions } from "../decisions/riskLabels.js";
+import { launchRiskLabel, enabledRiskLabelSettings, type RiskLabelOptions } from "../decisions/riskLabels.js";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { AgentDoc, LiveDoc, ToolTask, UsageDoc, defineDoc, defineExtension, defineTask, hook, section, type JsonObject, type CommitPublication, type Conversation, type ConversationId, type Harness, type HookApi, type ToolDiagnostic, type ToolExecutionApi, type Tx, type TaskRuntime } from "@earendil-works/pi-durable";
 import type { Usage } from "@earendil-works/pi-ai";
@@ -120,6 +120,8 @@ export interface GatedActionsExtensionOptions {
   name?: string;
 }
 export function gatedActionsExtension(options: GatedActionsExtensionOptions) {
+  const labels = options.riskLabels;
+  if (labels !== undefined) decisionAnnotations(options.harness()).setRiskVisibility(() => enabledRiskLabelSettings(labels.hints) !== undefined);
   return defineExtension({name: options.name ?? "forgerie.gated-actions", tasks: [Run, Delivery], sections: [section("gated-actions", () => GATED_ACTION_GUIDANCE)], hooks: [hook(ToolTask, {
     beforeTool: async (call, api, context) => {
       const block = await gateToolCall(options, call, api, context);

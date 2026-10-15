@@ -11,7 +11,17 @@ export const RiskLabelSchema = Type.Object({
 }, { additionalProperties: false });
 export type RiskLabel = Static<typeof RiskLabelSchema>;
 export const RISK_LABEL_ENTRY_KIND = "forgerie.risk-label";
-export const RiskLabelEntrySchema = Type.Object({
-  target: Type.Union([Type.Literal("gate"), Type.Literal("tool")]), id: Type.String({ minLength: 1 }), label: RiskLabelSchema,
-}, { additionalProperties: false });
+export const RiskLabelEntrySchema = Type.Union([
+  Type.Object({target: Type.Literal("gate"), id: Type.String({minLength: 1}), label: RiskLabelSchema}, {additionalProperties: false}),
+  Type.Object({target: Type.Literal("tool"), id: Type.String({minLength: 1}), invocationId: Type.String({minLength: 1}),
+    sourceInvocationId: Type.String({minLength: 1}), label: RiskLabelSchema}, {additionalProperties: false}),
+]);
 export type RiskLabelEntry = Static<typeof RiskLabelEntrySchema>;
+export type RiskToolIdentity = Pick<Extract<RiskLabelEntry, {target: "tool"}>, "invocationId" | "sourceInvocationId">;
+
+/** A source entry and call identify one invocation across turns, replays and sibling conversations.
+ * The ordinal distinguishes nested SDK calls without changing model-generated ids.
+ */
+export function riskToolIdentity(conversation: number, assistant: number, callId: string, ordinal = 0): RiskToolIdentity {
+  return {invocationId: JSON.stringify([conversation, assistant, callId, ordinal]), sourceInvocationId: JSON.stringify([conversation, assistant, callId, 0])};
+}

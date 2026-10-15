@@ -1,6 +1,7 @@
-import { withRiskAnnotations } from "../decisions/optionalDecisionAnnotations.js";
+import { readToolRiskIdentity } from "./toolRiskIdentity.js";
+import { withRiskAnnotations, withToolInvocationIds } from "../decisions/optionalDecisionAnnotations.js";
 import { RISK_LABEL_ENTRY_KIND, RiskLabelEntrySchema, type RiskLabelEntry } from "../../shared/riskLabels.js";
-import { launchRiskLabel } from "../decisions/riskLabels.js";
+import { launchRiskLabel, enabledRiskLabelSettings } from "../decisions/riskLabels.js";
 /**
  * Durable-native child agents inside a Forgerie session.
  *
@@ -414,9 +415,10 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
           // errors, abort signal and replay declaration without inserting an awaited hook.
           void Promise.resolve().then(async () => {
             const labels = (await resolve(api.conversationId, context)).riskLabels;
-            if (labels === undefined) return;
+            if (labels === undefined || enabledRiskLabelSettings(labels.hints) === undefined) return;
+            const identity = await readToolRiskIdentity(api, context);
             launchRiskLabel(labels.hints, {tool: "bash", args, cwd: api.env?.cwd ?? "."},
-              label => labels.record(api.conversationId, api.callId, label), labels.onError);
+              label => identity === undefined ? undefined : labels.record(api.conversationId, api.callId, label, identity), labels.onError);
           }).catch((error: unknown) => { options.riskLabels?.onError(error); });
           return tool.execute(args, api, context);
         },
@@ -666,7 +668,7 @@ export async function childMessages(harness: Harness, parent: ConversationId, co
     messages: withRiskAnnotations(harness, child.id, view.entries.flatMap<Message | {role: "custom"; customType: string; content: string; details: RiskLabelEntry}>(entry =>
       entry.kind === RISK_LABEL_ENTRY_KIND && Check(RiskLabelEntrySchema, entry.data)
         ? [{role: "custom", customType: RISK_LABEL_ENTRY_KIND, content: "Risk opinion (not approval)", details: entry.data}]
-        : entry.model ?? []).filter(message => message.role !== "system")),
+        : withToolInvocationIds(child.id, entry.model ?? [], entry.id)).filter(message => message.role !== "system")),
     busy: live?.run !== undefined,
     ...(partial === undefined ? {} : { partial }),
   };

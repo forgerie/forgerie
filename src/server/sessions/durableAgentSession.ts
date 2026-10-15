@@ -1,7 +1,8 @@
 import { readTaskActivity, watchTaskActivity } from "./durableTaskActivity.js";
-import { decisionAnnotations, riskAnnotationMessages, withRiskAnnotations } from "../decisions/optionalDecisionAnnotations.js";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { decisionAnnotations, riskAnnotationMessages, withRiskAnnotations, withToolInvocationIds } from "../decisions/optionalDecisionAnnotations.js";
 import { durableJson } from "./durableJson.js";
-import type { RiskLabel } from "../../shared/riskLabels.js";
+import type { RiskLabel, RiskToolIdentity, RiskLabelEntry } from "../../shared/riskLabels.js";
 import type { DecisionHints } from "../decisions/decisionHints.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { acceptProcessEvents, processEventsExtension } from "./durableProcessEvents.js";
@@ -183,7 +184,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     })]];
     this.tools = new DurableSdkTools({ cwd: services.cwd, settings: this.settingsManager, runner: this.extensionRunner, customTools: this.customTools,
       ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error); },
-        record: (conversation: ConversationId, id: string, label: RiskLabel) => this.recordToolRiskLabel(conversation, id, label)}}),
+        record: (conversation: ConversationId, id: string, label: RiskLabel, identity: RiskToolIdentity) => this.recordToolRiskLabel(conversation, id, label, identity)}}),
       beforeCall: () => this.journal.project(), gateNested: (call, api, index, ctx) => {
         if (this.gateOptions === undefined) throw new Error("Nested gated actions are not bound");
         return gateToolCall(this.gateOptions, call, api, ctx, {index, cwd: this.options.services.cwd, extension: `forgerie.sdk-tools:${this.sessionId}:nested`});
@@ -250,7 +251,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   get sessionId(): string { return this.sessionManager.getSessionId(); }
   get sessionFile(): string | undefined { return this.sessionManager.getSessionFile(); }
   get sessionName(): string | undefined { return this.sessionManager.getSessionName(); }
-  get messages() {
+  get messages(): (AgentMessage & {toolInvocations?: Record<string, string>; decisionAnnotations?: RiskLabelEntry[]})[] {
     const messages = this.sessionManager.buildSessionContext().messages;
     return this.journalValue === undefined ? messages : withRiskAnnotations(this.journal.harness, this.journal.conversation.id, messages);
   }
@@ -459,8 +460,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     return extensions;
   }
 
-  private async recordToolRiskLabel(conversation: ConversationId, id: string, label: RiskLabel): Promise<void> {
-    await decisionAnnotations(this.journal.harness).write(String(conversation), `tool:${id}`, durableJson({target: "tool", id, label}));
+  private async recordToolRiskLabel(conversation: ConversationId, id: string, label: RiskLabel, identity: RiskToolIdentity): Promise<void> {
+    await decisionAnnotations(this.journal.harness).write(String(conversation), `tool:${identity.invocationId}`, durableJson({target: "tool", id, ...identity, label}));
   }
 
   private async startGatedActions(): Promise<void> {
@@ -490,7 +491,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       if (scope !== String(parent)) return;
       if (key.startsWith("gate:")) this.emit({type: "workflow_runs_changed"});
       if (key.startsWith("tool:")) {
-        const message = riskAnnotationMessages(this.journal.harness, parent).find(item => `tool:${item.details.id}` === key);
+        const message = riskAnnotationMessages(this.journal.harness, parent).find(item => `tool:${item.details.invocationId}` === key);
         if (message !== undefined) { this.emit({type: "message_start", message}); this.emit({type: "message_end", message}); }
       }
     });
@@ -528,7 +529,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     const source = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext, sessionSkills, sessionTools: () => this.tools,
       commit: (change, ctx) => this.journal.harness.commit(change, ctx),
       ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error); },
-        record: (conversation: ConversationId, id: string, label: RiskLabel) => this.recordToolRiskLabel(conversation, id, label)}}),
+        record: (conversation: ConversationId, id: string, label: RiskLabel, identity: RiskToolIdentity) => this.recordToolRiskLabel(conversation, id, label, identity)}}),
       ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
       ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
     const workflow = workflowExtension({ library: new WorkflowLibrary(this.options.services.agentDir), cwd: this.options.services.cwd });
@@ -950,7 +951,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.runner = runner;
     this.tools = new DurableSdkTools({ cwd: this.options.services.cwd, settings: this.settingsManager, runner, customTools: this.customTools,
       ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error); },
-        record: (conversation: ConversationId, id: string, label: RiskLabel) => this.recordToolRiskLabel(conversation, id, label)}}),
+        record: (conversation: ConversationId, id: string, label: RiskLabel, identity: RiskToolIdentity) => this.recordToolRiskLabel(conversation, id, label, identity)}}),
       beforeCall: () => this.journal.project(), gateNested: (call, api, index, ctx) => {
         if (this.gateOptions === undefined) throw new Error("Nested gated actions are not bound");
         return gateToolCall(this.gateOptions, call, api, ctx, {index, cwd: this.options.services.cwd, extension: `forgerie.sdk-tools:${this.sessionId}:nested`});
@@ -1041,7 +1042,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       case "message_end":
         // A model copy, such as a custom message's user form, already showed in its own form. Live must match the projection.
         if (!this.journal.isTranscriptEntry(event.entry)) break;
-        for (const message of event.entry.model ?? []) this.emit({ type: "message_end", message });
+        for (const message of withRiskAnnotations(this.journal.harness, this.journal.conversation.id,
+          withToolInvocationIds(this.journal.conversation.id, event.entry.model ?? [], event.entry.id))) this.emit({ type: "message_end", message });
         this.partial = undefined;
         break;
       case "tool_execution_start": this.emit(event); break;

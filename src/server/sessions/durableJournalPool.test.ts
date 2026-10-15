@@ -1,3 +1,4 @@
+import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,10 +32,16 @@ it("shares one owner across logical sessions, releases leases independently, and
     const forkProvider = await sibling.harness.snapshot(ProviderDoc, sibling.conversation.id, context);
     expect(forkProvider?.sessionId).not.toBe(parentProvider?.sessionId);
     expect(await sibling.harness.snapshot(UsageDoc, sibling.conversation.id, context)).toEqual({ models: {}, tools: {} });
+    const annotations = decisionAnnotations(parent.harness);
+    await annotations.write(String(sibling.conversation.id), "optional", "sibling label");
     await parent.release(context);
     await parent.release(context);
+    expect(annotations.read(String(sibling.conversation.id), "optional")).toBe("sibling label");
     await sibling.conversation.commit((tx) => tx.appendEntry(sibling.conversation.id, { kind: "test.note", data: "still open" }), context);
     await sibling.release(context);
+    expect(annotations.values(String(sibling.conversation.id))).toEqual([]);
+    await annotations.write(String(sibling.conversation.id), "late", "must not reopen");
+    expect(annotations.values(String(sibling.conversation.id))).toEqual([]);
     const reopenedParent = await pool.acquire(parent.address, options, context);
     const reopenedSibling = await pool.acquire(sibling.address, options, context);
     expect(reopenedParent.harness).toBe(reopenedSibling.harness);

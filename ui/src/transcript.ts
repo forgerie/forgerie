@@ -1,5 +1,5 @@
 import { RISK_LABEL_ENTRY_KIND, type RiskLabel } from "@shared/riskLabels";
-import { riskLabelEntryOf, riskWords, type RiskWords } from "./riskLabelsModel";
+import { riskLabelEntryOf, messageRiskLabels, riskWords, type RiskWords } from "./riskLabelsModel";
 import type { CompleteAttachment, ThreadMessageLike } from "@assistant-ui/react";
 import { outputOf, partsOf, textOf, type PiMessage, type SessionEvent } from "./contracts";
 import { imageSource } from "./images";
@@ -30,7 +30,7 @@ export type TranscriptPart =
   | { type: "thinking"; text: string }
   /** An image the assistant itself produced. User images are attachments. */
   | { type: "image"; src: string }
-  | { type: "tool"; id: string; name: string; args: unknown; state: ToolState; riskLabel?: RiskLabel }
+  | { type: "tool"; id: string; invocationId?: string; name: string; args: unknown; state: ToolState; riskLabel?: RiskLabel }
   /** A `!` command the user ran. It is the only part of a `shell` message. */
   | { type: "shell"; run: ShellRun };
 /** The skill a user message invoked. Its typed argument stays in the message's text. */
@@ -94,7 +94,12 @@ function toParts(message: PiMessage): TranscriptPart[] {
     switch (part.type) {
       case "text": return part.text === "" ? [] : [{ type: "text", text: part.text }];
       case "thinking": return part.thinking.trim() === "" ? [] : [{ type: "thinking", text: part.thinking }];
-      case "toolCall": return [{ type: "tool", id: part.id, name: part.name, args: part.arguments, state: { type: "pending" } }];
+      case "toolCall": {
+        const invocationId = message.toolInvocations?.[part.id];
+        const riskLabel = invocationId === undefined ? undefined : messageRiskLabels(message).find(entry => entry.invocationId === invocationId)?.label;
+        return [{ type: "tool", id: part.id, ...(invocationId === undefined ? {} : {invocationId}), name: part.name, args: part.arguments,
+          state: {type: "pending"}, ...(riskLabel === undefined ? {} : {riskLabel}) }];
+      }
       case "image": {
         const src = message.role === "assistant" ? imageSource(part) : undefined;
         return src ? [{ type: "image", src }] : [];
@@ -167,13 +172,13 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
 
 function toolIds(messages: readonly TranscriptMessage[], except?: string): Set<string> {
   return new Set(messages.flatMap((message) => message.id === except ? []
-    : message.parts.flatMap((part) => part.type === "tool" ? [part.id] : [])));
+    : message.parts.flatMap((part) => part.type === "tool" ? [part.invocationId ?? part.id] : [])));
 }
 function mapTool(messages: readonly TranscriptMessage[], id: string,
-  update: (part: ToolPart) => ToolPart): readonly TranscriptMessage[] | undefined {
+  update: (part: ToolPart) => ToolPart, byInvocation = false): readonly TranscriptMessage[] | undefined {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]!;
-    const partIndex = message.parts.findIndex((part) => part.type === "tool" && part.id === id);
+    const partIndex = message.parts.findIndex((part) => part.type === "tool" && (byInvocation ? part.invocationId === id : part.id === id));
     if (partIndex < 0) continue;
     const parts = message.parts.map((part, i) => i === partIndex && part.type === "tool" ? update(part) : part);
     return messages.map((current, i) => i === index ? { ...message, parts } : current);
@@ -210,11 +215,11 @@ function isOpenTool(part: TranscriptPart): part is ToolPart {
  */
 function reconcileTools(message: TranscriptMessage, messages: readonly TranscriptMessage[], replaced?: TranscriptMessage): TranscriptMessage {
   const elsewhere = toolIds(messages, replaced?.id);
-  const current = new Map(replaced?.parts.flatMap((part) => part.type === "tool" ? [[part.id, part] as const] : []));
+  const current = new Map(replaced?.parts.flatMap((part) => part.type === "tool" ? [[part.invocationId ?? part.id, part] as const] : []));
   const parts = message.parts.flatMap((part): TranscriptPart[] => {
     if (part.type !== "tool") return [part];
-    if (elsewhere.has(part.id)) return [];
-    const existing = current.get(part.id);
+    if (elsewhere.has(part.invocationId ?? part.id)) return [];
+    const existing = current.get(part.invocationId ?? part.id) ?? [...current.values()].find(previous => previous.invocationId === undefined && previous.id === part.id);
     return [existing ? { ...part, state: existing.state, ...(existing.riskLabel ? {riskLabel: existing.riskLabel} : {}) } : part];
   });
   return { ...message, parts };
@@ -291,7 +296,7 @@ function foldRiskLabel(state: Transcript, raw: PiMessage): Transcript | undefine
   if (raw.role !== "custom" || raw.customType !== RISK_LABEL_ENTRY_KIND) return undefined;
   const entry = riskLabelEntryOf(raw);
   if (entry === undefined) return state;
-  const messages = entry.target === "tool" ? mapTool(state.messages, entry.id, part => ({...part, riskLabel: entry.label}))
+  const messages = entry.target === "tool" ? mapTool(state.messages, entry.invocationId, part => ({...part, riskLabel: entry.label}), true)
     : state.messages.map(message => message.gatedAction?.id === entry.id
       ? {...message, gatedAction: {...message.gatedAction, riskLabel: entry.label}} : message);
   return messages === undefined ? state : {...state, messages};
@@ -602,7 +607,7 @@ function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
         case "thinking": return [{ type: "reasoning", text: part.text, ...parent }];
         case "image": return [{ type: "image", image: part.src }];
         case "tool": return [{
-          type: "tool-call", toolCallId: part.id, toolName: part.name,
+          type: "tool-call", toolCallId: part.invocationId ?? part.id, toolName: part.name,
           args: isArgs(part.args) ? part.args : {},
           artifact: { ...toolArtifact(part.state), ...(part.riskLabel ? {riskLabel: part.riskLabel, risk: riskWords(part.riskLabel)} : {}) },
           ...toolResult(part.state),

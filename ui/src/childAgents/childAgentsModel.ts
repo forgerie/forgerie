@@ -1,5 +1,5 @@
 import type { RiskLabel } from "@shared/riskLabels";
-import { riskLabelEntryOf } from "../riskLabelsModel";
+import { riskLabelEntryOf, messageRiskLabels } from "../riskLabelsModel";
 // Child agents a session runs in its own Durable storage. The server side is
 // src/server/sessions/durableChildAgents.ts; the routes are durableChildRoutes.ts.
 import { z } from "zod";
@@ -119,7 +119,7 @@ export function childLines(transcript: ChildTranscript): ChildLine[] {
   const lines: ChildLine[] = [];
   const labels = new Map(transcript.messages.flatMap(message => {
     const entry = riskLabelEntryOf(message);
-    return entry?.target === "tool" ? [[entry.id, entry.label] as const] : [];
+    return entry?.target === "tool" ? [[entry.invocationId, entry.label] as const] : [];
   }));
   const add = (message: PiMessage, index: number, streaming = false) => {
     const key = `${String(index)}`;
@@ -132,7 +132,9 @@ export function childLines(transcript: ChildTranscript): ChildLine[] {
     partsOf(message).forEach((part, partIndex) => {
       if (part.type === "text" && part.text.trim() !== "") lines.push({ kind: "said", who: "child", text: part.text, key: `${key}.${String(partIndex)}`, ...(streaming ? { streaming } : {}) });
       if (part.type === "toolCall") {
-        const riskLabel = labels.get(part.id);
+        const invocationId = message.toolInvocations?.[part.id];
+        const riskLabel = invocationId === undefined ? undefined
+          : messageRiskLabels(message).find(entry => entry.invocationId === invocationId)?.label ?? labels.get(invocationId);
         lines.push({ kind: "tool", name: part.name, summary: summarize(part.arguments), key: `${key}.${String(partIndex)}`,
           ...(riskLabel === undefined ? {} : {riskLabel}) });
       }

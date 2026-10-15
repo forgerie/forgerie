@@ -14,9 +14,9 @@ import { ExchangeLog } from "./ui/ExchangeLog";
 import { exchangeLines } from "./childAgents/childExchange";
 
 const label: RiskLabel = {model: "answering-model", deletes_data: 0.8, outside_worktree: 0.2, acts_as_user: 0.4, risk: "check", risk_score: 1.3};
-const call: PiMessage = {role: "assistant", content: [{type: "toolCall", id: "bash-1", name: "bash", arguments: {command: "rm data"}}]};
+const call: PiMessage = {role: "assistant", toolInvocations: {"bash-1": "first-invocation"}, content: [{type: "toolCall", id: "bash-1", name: "bash", arguments: {command: "rm data"}}]};
 const annotation = (target: "gate" | "tool", id: string): PiMessage => ({role: "custom", customType: RISK_LABEL_ENTRY_KIND,
-  details: {target, id, label}, content: "Risk opinion (not approval)"});
+  details: {target, id, label, ...(target === "tool" ? {invocationId: "first-invocation", sourceInvocationId: "first-invocation"} : {})}, content: "Risk opinion (not approval)"});
 
 let root: Root;
 beforeEach(() => {vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); root = createRoot(document.body.appendChild(document.createElement("div")));});
@@ -36,7 +36,7 @@ it("folds the live and reloaded label into the same tool without changing its ex
   const history = fromHistory([call, annotation("tool", "bash-1")], true);
   expect(history.messages).toEqual(live.messages);
   const converted = convertMessage(live.messages[0]!);
-  expect(converted.content[0]).toMatchObject({type: "tool-call", toolCallId: "bash-1", artifact: {state: "pending", riskLabel: label}});
+  expect(converted.content[0]).toMatchObject({type: "tool-call", toolCallId: "first-invocation", artifact: {state: "pending", riskLabel: label}});
   await act(async () => root.render(<ToolCall toolCallId="bash-1" toolName="bash" args={{command: "rm data"}} artifact={{state: "pending", riskLabel: label}} />));
   expect(JSON.parse(document.querySelector(".tool-call")?.getAttribute("data-risk-label") ?? "null")).toEqual(label);
   expect(document.body.textContent).not.toContain("safe");
@@ -65,4 +65,21 @@ it("attaches a native child label by the child's call id to its existing bash ro
 it("ignores invalid labels rather than changing tool state", () => {
   const initial = fromHistory([call]);
   expect(reduceEvent(initial, {type: "message.end", message: {...annotation("tool", "bash-1"), details: {target: "tool", id: "bash-1", label: {...label, risk: "safe to approve"}}}})).toBe(initial);
+});
+
+it("matches late labels by invocation identity when parent tool-call ids repeat across turns", () => {
+  const first: PiMessage = {...call, toolInvocations: {"bash-1": "first"}, decisionAnnotations: [{target: "tool", id: "bash-1", invocationId: "first", sourceInvocationId: "first", label: {...label, model: "FIRST"}}]};
+  const second: PiMessage = {...call, toolInvocations: {"bash-1": "second"}, content: [{type: "toolCall", id: "bash-1", name: "bash", arguments: {command: "printf SECOND"}}]};
+  const initial = fromHistory([first, {role: "user", content: "next turn"}, second]);
+  const latest: PiMessage = {role: "custom", customType: RISK_LABEL_ENTRY_KIND, details: {target: "tool", id: "bash-1", invocationId: "second", sourceInvocationId: "second", label: {...label, model: "SECOND"}}};
+  const late: PiMessage = {...latest, details: {target: "tool", id: "bash-1", invocationId: "first", sourceInvocationId: "first", label: {...label, model: "late-FIRST"}}};
+  const annotated = reduceEvent(reduceEvent(initial, {type: "message.end", message: latest}), {type: "message.end", message: late});
+  const tools = annotated.messages.flatMap(message => message.parts).filter(part => part.type === "tool");
+  expect(tools).toHaveLength(2); expect(tools.map(part => part.riskLabel?.model)).toEqual(["late-FIRST", "SECOND"]);
+  expect(annotated.messages).toHaveLength(initial.messages.length);
+  expect(annotated.messages.filter(message => message.role === "assistant").map(message => convertMessage(message).content[0])).toMatchObject([
+    {toolCallId: "first"}, {toolCallId: "second"},
+  ]);
+  const off = fromHistory([{...first, decisionAnnotations: undefined}, {role: "user", content: "next turn"}, second]);
+  expect(off.messages.flatMap(message => message.parts).filter(part => part.type === "tool").every(part => part.riskLabel === undefined)).toBe(true);
 });
