@@ -368,7 +368,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     }
     // Clear only errors before the committed run start, not before the replacement's
     // watermark. That replacement may arrive after an error from its own new run.
-    if (previous.transcript.error !== undefined && !errorBeforeRun(previous.transcript.error, open)) transcript = { ...transcript, error: previous.transcript.error };
+    if (open.readPath === "native" && previous.transcript.error !== undefined && !errorBeforeRun(previous.transcript.error, open)) transcript = { ...transcript, error: previous.transcript.error };
     // Host output is already reconstructed. Apply operation output before carry/dedup.
     let next = withStatus({ ...previous, session: open.session, transcript, ask: resyncAsk(previous.ask, open.status.pendingAsk),
       earlier: { type: start === 0 ? "complete" : "available" } }, open.status);
@@ -380,7 +380,9 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       const currentRunError = open.readPath === "native" && event.type === "session.error" && (event.seq ?? Infinity) >= (open.runStartSeq ?? 0);
       if ((event.seq ?? Infinity) > open.seq || currentRunError) next = applyEvent(next, event);
     }
-    next = { ...next, transcript: reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)) };
+    next = { ...next, transcript: { ...reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)),
+      // Classic cuts retain their original post-replay carry. Only native cuts use run fences.
+      ...(open.readPath === "classic" && previous.transcript.error !== undefined ? { error: previous.transcript.error } : {}) } };
     page = { start, end: open.page.start + open.page.messages.length, total: open.page.total, historyId: open.historyId, epoch: open.epoch, seq: open.seq };
     if (open.receipt !== null) pendingReceipt = { ...open.receipt, session: open.session };
     return next;

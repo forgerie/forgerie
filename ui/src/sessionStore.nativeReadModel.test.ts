@@ -160,6 +160,20 @@ describe("native browser replacement", () => {
     expect(shells.every(message => message.parts[0]?.type === "shell" && message.parts[0].run.result.type === "done")).toBe(true);
   });
 
+  it.each([undefined, "classic"] as const)("preserves classic reconnect error reconciliation with a buffered agent.start (cut=%s)", async cut => {
+    const f = await fixture("classic"); await join(f);
+    f.emit({ type: "session.error", message: "previous classic failure", seq: 1 });
+    await waitFor(f.store, () => f.store.getSnapshot().transcript.error === "previous classic failure");
+    f.close();
+    await vi.waitFor(() => { expect(f.connections()).toBe(2); });
+    f.emit({ type: "agent.start", seq: 20 });
+    f.publishOpen({ ...openFixture({ session: { id: "native", cwd: "/temporary" }, readPath: "classic", epoch: "one",
+      snapshot: { seq: 10, partial: null }, page: { start: 0, total: 0, messages: [] },
+      status: { isStreaming: true, isCompacting: false, isBashRunning: false } }), ...(cut === undefined ? {} : { cut }) });
+    await waitFor(f.store, () => f.store.getSnapshot().connection.type === "ready");
+    expect(f.store.getSnapshot().transcript.error).toBe("previous classic failure");
+  });
+
   it.each([[true, false], [false, false], [true, true]] as const)("keeps a current-run error across a real tool handOver and clears it only on a real new run (observe before run=%s, steer=%s)", async (observeBeforeRun, steer) => {
     const f = await fixture();
     let seq = 0;
