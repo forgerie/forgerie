@@ -3,7 +3,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { decisionAnnotations, riskAnnotationMessages, withRiskAnnotations, withToolInvocationIds } from "../decisions/optionalDecisionAnnotations.js";
 import { durableJson } from "./durableJson.js";
 import type { RiskLabel, RiskToolIdentity, RiskLabelEntry } from "../../shared/riskLabels.js";
-import type { DecisionHints } from "../decisions/decisionHints.js";
+import { DECISION_HINT_ERROR_EVENT, type DecisionHints } from "../decisions/decisionHints.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { acceptProcessEvents, processEventsExtension } from "./durableProcessEvents.js";
 import { execFile } from "node:child_process";
@@ -184,7 +184,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       return { ...caller, child };
     })]];
     this.tools = new DurableSdkTools({ cwd: services.cwd, settings: this.settingsManager, runner: this.extensionRunner, customTools: this.customTools,
-      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error); },
+      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error, DECISION_HINT_ERROR_EVENT); },
         record: (conversation: ConversationId, id: string, label: RiskLabel, identity: RiskToolIdentity) => this.recordToolRiskLabel(conversation, id, label, identity)}}),
       beforeCall: () => this.journal.project(), gateNested: (call, api, index, ctx) => {
         if (this.gateOptions === undefined) throw new Error("Nested gated actions are not bound");
@@ -470,7 +470,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     const parent = this.journal.conversation.id;
     this.gateOptions = {name: `forgerie.gated-actions:${String(parent)}`, parent,
       harness: () => this.journal.harness,
-      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error); }}}),
+      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error, DECISION_HINT_ERROR_EVENT); }}}),
       ...(this.options.autonomyPolicy === undefined ? {} : {policy: this.options.autonomyPolicy}),
       reads: {git: async (cwd, args) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8", maxBuffer: 4 * 1024 * 1024})).stdout,
         issueLabels: this.options.gatedIssueLabels ?? (() => Promise.reject(new Error("GitHub labels unavailable")))},
@@ -489,11 +489,11 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     await recount();
     let pending = Promise.resolve();
     const offLabels = decisionAnnotations(this.journal.harness).subscribe((scope, key) => {
-      if (scope !== String(parent)) return;
-      if (key.startsWith("gate:")) this.emit({type: "workflow_runs_changed"});
+      if (this.closed || scope !== String(parent)) return;
+      if (key.startsWith("gate:")) this.emit({type: "workflow_runs_changed", decisionHint: true});
       if (key.startsWith("tool:")) {
         const message = riskAnnotationMessages(this.journal.harness, parent).find(item => `tool:${item.details.invocationId}` === key);
-        if (message !== undefined) { this.emit({type: "message_start", message}); this.emit({type: "message_end", message}); }
+        if (message !== undefined) { this.emit({type: "message_start", message, decisionHint: true}); this.emit({type: "message_end", message, decisionHint: true}); }
       }
     });
     const offCommits = this.journal.harness.subscribeCommits(publication => {
@@ -529,7 +529,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       .map((skill) => ({ name: skill.name, description: skill.description, path: skill.filePath }));
     const source = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext, sessionSkills, sessionTools: () => this.tools,
       commit: (change, ctx) => this.journal.harness.commit(change, ctx),
-      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error); },
+      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error, DECISION_HINT_ERROR_EVENT); },
         record: (conversation: ConversationId, id: string, label: RiskLabel, identity: RiskToolIdentity) => this.recordToolRiskLabel(conversation, id, label, identity)}}),
       ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
       ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
@@ -612,7 +612,6 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   }
 
   subscribe(listener: (event: unknown) => void): () => void {
-    if (this.closed) return () => undefined;
     this.listeners.add(listener);
     if (this.bound) void this.resumeFamily().catch((error: unknown) => { this.report(error); });
     return () => { this.listeners.delete(listener); };
@@ -676,7 +675,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     });
   }
 
-  private report(error: unknown): void { this.extensionRunner.emitError({ extensionPath: "<durable>", event: "extension_action", error: String(error) }); }
+  private report(error: unknown, event = "extension_action"): void { this.extensionRunner.emitError({ extensionPath: "<durable>", event, error: String(error) }); }
 
   private promptOptions(): BuildSystemPromptOptions {
     const customPrompt = this.resourceLoader.getSystemPrompt();
@@ -952,7 +951,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (this.errorListener !== undefined) runner.onError(this.errorListener);
     this.runner = runner;
     this.tools = new DurableSdkTools({ cwd: this.options.services.cwd, settings: this.settingsManager, runner, customTools: this.customTools,
-      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error); },
+      ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error, DECISION_HINT_ERROR_EVENT); },
         record: (conversation: ConversationId, id: string, label: RiskLabel, identity: RiskToolIdentity) => this.recordToolRiskLabel(conversation, id, label, identity)}}),
       beforeCall: () => this.journal.project(), gateNested: (call, api, index, ctx) => {
         if (this.gateOptions === undefined) throw new Error("Nested gated actions are not bound");
@@ -977,9 +976,6 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (this.closed) return;
     this.closed = true;
     this.emit({ type: "session_retired" });
-    // Pending gate recounts, child watches and risk-label notifications can finish
-    // during the async close. None may call observers of the retired runtime.
-    this.listeners.clear();
     await this.detachProcessEvents?.();
     this.bashController?.abort();
     this.branchSummaryController?.abort();

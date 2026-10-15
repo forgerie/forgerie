@@ -14,7 +14,7 @@ import { CapturingSessionEventHub, emptyArchiveStore } from "./piSessionService.
 import { createDecisionClient, type DecisionAnswers } from "../decisions/decisionClient.js";
 import { readDecisionHintsSettings } from "../decisions/decisionHintsSettings.js";
 import { assertDecisionHintOffEquivalence } from "../decisions/decisionHintsOffEquivalence.testSupport.js";
-import type { DecisionHints } from "../decisions/decisionHints.js";
+import { DECISION_HINT_ERROR_EVENT, type DecisionHints } from "../decisions/decisionHints.js";
 
 async function fixture(decisionHints?: DecisionHints, replyText = "Please approve the result.") {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-attention-"));
@@ -135,9 +135,10 @@ it.each(["closed family", "sealed store", "master switched off", "attention swit
     const beforeSession = f.hub().sessionEvents.length; const beforeGlobal = f.hub().globalEvents.length;
     answers[0]?.(oldTurnAnswer);
     await new Promise<void>(resolve => { setImmediate(resolve); });
-    // Simulate callbacks already queued before unsubscribe: labels, gate refresh
-    // and child polling must not re-publish from the old object either.
-    for (const callback of old.callbacks) for (const type of ["workflow_runs_changed", "durable_children_changed", "message_end"]) callback({ type });
+    // Only feature-added notifications are filtered. Legacy gate/child events
+    // retain their base publication semantics, including already-queued work.
+    for (const callback of old.callbacks) for (const type of ["workflow_runs_changed", "message_start", "message_end"]) callback({ type, decisionHint: true });
+    old.session.extensionRunner.emitError({ extensionPath: "<durable>", event: DECISION_HINT_ERROR_EVENT, error: "retired optional error" });
     expect(f.hub().sessionEvents.slice(beforeSession)).toEqual([]);
     expect(f.hub().globalEvents.slice(beforeGlobal).filter(event => event.type === "status.update")).toEqual([]);
     expect(await f.service().status(f.ref)).toMatchObject({ response: { kind: "needs-response", reason: "reply" } });

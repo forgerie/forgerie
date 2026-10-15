@@ -203,10 +203,13 @@ Raw probabilities stay on the server. Turning either switch off suppresses hints
 on the next status read or publication. A late answer re-checks live settings and
 turn identity before storage and publication. Closing, replacing or disposing a
 runtime retires its pending attention request. A closed, oversized or otherwise
-discarded cache write is not a publication success. Status publication also
-checks the active session object, so an old runtime cannot overwrite a reopened
-runtime's response. Gate, child-watch and risk-label notifications use the same
-active-runtime publication boundary. No gateway result changes the
+discarded cache write is not a publication success. Hint-result publication
+checks the active session object, so an old hint cannot overwrite a reopened
+runtime's response. Only attention and the optional risk-label observer use this
+stricter publication boundary. Existing startup dialogs, PR watches, managed
+processes, compaction, gate changes and child-status notifications keep their
+original publication behavior. In particular, a startup dialog must publish
+Needs your response before its runtime becomes active. No gateway result changes the
 session response, admits a command, or delays the turn end.
 
 Hints use the same independent in-memory annotation store as risk labels, not

@@ -3,6 +3,9 @@ import type { DecisionHintsStatus } from "../../shared/decisionHints.js";
 import { createDecisionClient, type DecisionClient } from "./decisionClient.js";
 import { createDecisionHintsSettingsReader, type DecisionHintsSettings } from "./decisionHintsSettings.js";
 
+/** Distinguish optional annotation errors from pre-existing extension errors. */
+export const DECISION_HINT_ERROR_EVENT = "forgerie.decision-hint";
+
 /** Inject this collaborator into background hint consumers. It has no authority over gates or turns. */
 export interface DecisionHints {
   client: DecisionClient;

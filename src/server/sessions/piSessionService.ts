@@ -5,7 +5,7 @@ import { assertHistoryIdentity, PresentationHistoryIdentity, SessionOpenError, t
 import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { appendAttentionHint, readAttentionHint } from "./durableAttentionHints.js";
 import { AttentionHints, ATTENTION_HINT_CUSTOM_TYPE, type AttentionSession } from "../decisions/attentionHints.js";
-import type { DecisionHints } from "../decisions/decisionHints.js";
+import { DECISION_HINT_ERROR_EVENT, type DecisionHints } from "../decisions/decisionHints.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { ManagedProcessRegistry, type ManagedProcessRegistryOptions } from "../processes/managedProcessRegistry.js";
 import type { ManagedProcesses } from "../processes/managedProcesses.js";
@@ -3184,7 +3184,7 @@ export class PiSessionService implements SessionRouteService {
       // created after the original input, so check its identity first.
       const hadAttentionHint = this.attentionHints.read(this.attentionSession(session)) !== undefined;
       this.attentionHints.invalidate(this.attentionSession(session));
-      if (hadAttentionHint) this.publishStatus(session);
+      if (hadAttentionHint) this.publishDecisionHintStatus(session);
       await this.voidOpenAskForUserMessage(session);
       const waitsForCompaction = session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
       const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : undefined;
@@ -4451,14 +4451,20 @@ export class PiSessionService implements SessionRouteService {
     return archived;
   }
 
-  private isCurrentSessionContext(session: PiAgentSession): boolean {
-    return !this.stopping && !(session instanceof DurableAgentSession && session.isClosed)
-      && (this.isCurrentActiveSession(session) || this.startupSessions.get(session.sessionId) === session);
+  private isCurrentActiveSession(session: PiAgentSession): boolean {
+    return this.active.get(session.sessionId)?.runtime.session === session;
   }
 
-  private isCurrentActiveSession(session: PiAgentSession): boolean {
-    return !this.stopping && !(session instanceof DurableAgentSession && session.isClosed)
-      && this.active.get(session.sessionId)?.runtime.session === session;
+  /** Only Decision hints publications require this stronger runtime ownership check.
+   * Legacy publishers also serve startup sessions that are not active yet.
+   */
+  private isCurrentDecisionHintSession(session: PiAgentSession): boolean {
+    return !this.stopping && !(session instanceof DurableAgentSession && session.isClosed) && this.isCurrentActiveSession(session);
+  }
+
+  private publishDecisionHintStatus(session: PiAgentSession): void {
+    const current = this.active.get(session.sessionId)?.runtime.session;
+    if (current === session && this.isCurrentDecisionHintSession(current)) this.publishStatus(current);
   }
 
   /**
@@ -4694,7 +4700,7 @@ export class PiSessionService implements SessionRouteService {
         uiContext,
         mode: "rpc",
         onError: (error) => {
-          if (!this.isCurrentSessionContext(session)) return;
+          if (error.extensionPath === "<durable>" && error.event === DECISION_HINT_ERROR_EVENT && !this.isCurrentDecisionHintSession(session)) return;
           const message = `${error.extensionPath}: ${error.error}`;
           this.publishActivity(session, "extension error", "error", message);
           this.events.publish(session.sessionId, { type: "session.error", message });
@@ -4920,7 +4926,7 @@ export class PiSessionService implements SessionRouteService {
     }
     const panel = new ManagedProcessPanel(() => this.getManagedProcesses(session.sessionId),
       session instanceof DurableAgentSession ? session.processTools : undefined,
-      (event) => { if (!this.isCurrentActiveSession(session)) return; this.events.publish(session.sessionId, event); if (event.type === "processes.update") this.publishStatus(session); },
+      (event) => { this.events.publish(session.sessionId, event); if (event.type === "processes.update") this.publishStatus(session); },
       () => { this.logger.info({ sessionId: session.sessionId }, "managed process panel refresh failed"); });
     this.processPanels.set(session.sessionId, panel);
     panel.watch();
@@ -4957,11 +4963,11 @@ export class PiSessionService implements SessionRouteService {
     }
     active.unsubscribe = session.subscribe((event) => {
       if (getString(event, "type") === "session_retired") { this.retireAttentionSession(session); return; }
-      if (!this.isCurrentActiveSession(session)) return;
-      if (getString(event, "type") === "agent_start") {
-        this.attentionHints.started(this.attentionSession(session));
-        this.appendResponseEvent(session, { version: 1, kind: "started" });
-      }
+      // The marker belongs only to the optional annotation observer. Do not
+      // filter pre-existing lifecycle, dialog, process or child-status events.
+      if (getBoolean(event, "decisionHint") === true && !this.isCurrentDecisionHintSession(session)) return;
+      if (getString(event, "type") === "agent_start") this.attentionHints.started(this.attentionSession(session));
+      if (getString(event, "type") === "agent_start") this.appendResponseEvent(session, { version: 1, kind: "started" });
       this.events.publish(session.sessionId, toClientEvent(event, session.thinkingLevel));
       this.publishActivityForEvent(session, event);
       const eventType = getString(event, "type");
@@ -5439,7 +5445,6 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private publishActivity(session: PiAgentSession, label: string, phase: "active" | "idle" | "error", detail?: string): void {
-    if (!this.isCurrentSessionContext(session)) return;
     const at = new Date().toISOString();
     const previous = this.activities.get(session.sessionId);
     // SDK tool/message completion events can briefly say idle while the turn is
@@ -5464,9 +5469,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private publishStatus(session: PiAgentSession): void {
-    const current = this.active.get(session.sessionId)?.runtime.session;
-    if (current !== session || !this.isCurrentActiveSession(current)) return;
-    const status = this.statusFromSession(current);
+    const status = this.statusFromSession(session);
     // Attachment can start with a running snapshot and no agent_start event. Seed activity now,
     // rather than waiting for a provider update or the first heartbeat after daemon startup.
     const runStartedAt = session instanceof DurableAgentSession ? session.getActiveRunStartedAt() : undefined;
@@ -5532,11 +5535,11 @@ export class PiSessionService implements SessionRouteService {
         branch: () => session.sessionManager.getBranch(), messages: () => session.messages,
         awaiting: () => { const response = this.responseProjection(session).response; return response.kind === "none" ? "nothing" : response.reason === "undeclared" ? "undeclared" : "reply"; },
         persist: (data) => {
-          if (!this.isCurrentActiveSession(session)) return Promise.resolve("discarded");
+          if (!this.isCurrentDecisionHintSession(session)) return Promise.resolve("discarded");
           return session instanceof DurableAgentSession ? appendAttentionHint(session.journal.handle, durableJson(data))
             : decisionAnnotations(session.sessionManager).write(session.sessionId, ATTENTION_HINT_CUSTOM_TYPE, durableJson(data));
         },
-        publish: () => { if (this.isCurrentActiveSession(session)) this.publishStatus(session); },
+        publish: () => { this.publishDecisionHintStatus(session); },
       };
       this.attentionSessions.set(session, attention);
     }

@@ -1,41 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { PendingExtensionDialog, SessionUiEvent } from "../../shared/apiTypes.js";
-import { PiSessionService, type PiAgentSession } from "./piSessionService.js";
-import { PendingExtensionDialogStore, PendingExtensionDialogValidationError } from "./pendingExtensionDialogStore.js";
-import { CapturingSessionEventHub, emptyArchiveStore, fakeRuntime, runtimeCreator, sessionGateway, sessionRecord, sessionRef, testModelRuntime } from "./piSessionService.testSupport.js";
+import type { PiSessionService, PiAgentSession } from "./piSessionService.js";
+import { type PendingExtensionDialogStore, PendingExtensionDialogValidationError } from "./pendingExtensionDialogStore.js";
+import { CapturingSessionEventHub, fakeRuntime, sessionRef } from "./piSessionService.testSupport.js";
 
-const TEST_AGENT_DIR = "/tmp/pi-web-test-agent";
-const ACTIVE_SESSION_ID = "session-1";
-
-/**
- * Service over a clocked store with sequential dialog ids, so dialogs are named
- * `dialog-1`, `dialog-2`, … and timestamps are fixed. The daemon default
- * timeout is `0` (wait forever) unless a test says otherwise, so parked waits
- * arm no real timers.
- */
-function dialogService(options: { extensionDialogsTimeoutMs?: number } = {}) {
-  const store = new PendingExtensionDialogStore({
-    now: () => new Date("2026-02-01T10:00:00.000Z"),
-    createDialogId: (() => {
-      let next = 0;
-      return () => { next += 1; return `dialog-${next.toString()}`; };
-    })(),
-  });
-  const fake = fakeRuntime(ACTIVE_SESSION_ID);
-  const events = new CapturingSessionEventHub();
-  const service = new PiSessionService(events, {
-    agentDir: TEST_AGENT_DIR,
-    modelRuntime: testModelRuntime,
-    sessionManager: sessionGateway([sessionRecord(ACTIVE_SESSION_ID)]),
-    archiveStore: emptyArchiveStore(),
-    createAgentRuntime: runtimeCreator(fake.runtime),
-    pendingExtensionDialogStore: store,
-    extensionDialogsTimeoutMs: options.extensionDialogsTimeoutMs ?? 0,
-    heartbeatIntervalMs: 60_000,
-  });
-  return { service, store, events, fake };
-}
+import { dialogService, startupDialogService, ACTIVE_SESSION_ID } from "./piSessionService.extensionDialogs.testSupport.js";
+import { readDecisionHintsSettings } from "../decisions/decisionHintsSettings.js";
 
 /** Start the session and return the UI context its extensions were bound with. */
 async function boundUiContext(service: PiSessionService, fake: ReturnType<typeof fakeRuntime>): Promise<ExtensionUIContext> {
@@ -543,7 +514,8 @@ describe("PiSessionService extension dialog status projection", () => {
   });
 });
 
-describe("PiSessionService session_start dialog startup reachability", () => {
+describe.each(["absent", "present"] as const)("PiSessionService session_start dialog startup reachability (hints %s)", mode => {
+  const hints = mode === "absent" ? undefined : { client: { ask: () => Promise.resolve(undefined) }, readSettings: () => ({ ...readDecisionHintsSettings({}), enabled: true, baseUrl: "http://gateway.invalid" }), status: () => ({ keyPresent: false }) };
   /**
    * A `session_start` dialog parks session construction before the session
    * ever becomes active: the bind below models the issue's probe by awaiting
@@ -551,44 +523,36 @@ describe("PiSessionService session_start dialog startup reachability", () => {
    * statusable and answerable — in that window, or startup could never be
    * unblocked from the browser.
    */
-  function startupDialogService() {
-    const harness = dialogService();
-    const confirmAnswers: (boolean | string | undefined)[] = [];
-    harness.fake.session.bindExtensions = (bindings) => {
-      harness.fake.calls.bindExtensions.push(bindings);
-      if (bindings.uiContext === undefined) return Promise.resolve();
-      return bindings.uiContext.confirm("Proceed at startup?", "Really?").then((answer) => {
-        confirmAnswers.push(answer);
-      });
-    };
-    return { ...harness, confirmAnswers };
-  }
-
-  async function parkOnStartupDialog(store: PendingExtensionDialogStore): Promise<void> {
+  async function parkOnStartupDialog(store: PendingExtensionDialogStore, events: CapturingSessionEventHub): Promise<void> {
     await vi.waitFor(() => {
       expect(store.pendingDialogs(ACTIVE_SESSION_ID)).toHaveLength(1);
     });
+    const published = events.globalEvents.filter(event => event.type === "status.update");
+    expect(published).toHaveLength(1);
+    expect(published[0]?.status.pendingDialogs).toEqual([expect.objectContaining({ dialogId: "dialog-1", kind: "confirm" })]);
+    expect(events.sessionEvents.filter(({ event }) => event.type === "status.update")).toHaveLength(1);
   }
 
   it("serves status for a session still parked on a session_start dialog", async () => {
-    const { service, store } = startupDialogService();
+    const { service, store, events } = startupDialogService(hints);
     const started = service.start("/workspace");
-    await parkOnStartupDialog(store);
+    try {
+      await parkOnStartupDialog(store, events);
 
-    const status = await service.status(sessionRef(ACTIVE_SESSION_ID));
+      const status = await service.status(sessionRef(ACTIVE_SESSION_ID));
 
-    expect(status.pendingDialogs).toEqual([
-      expect.objectContaining({ dialogId: "dialog-1", kind: "confirm", title: "Proceed at startup?", runScoped: false }),
-    ]);
-    await service.answerDialog(sessionRef(ACTIVE_SESSION_ID), "dialog-1", true);
-    await started;
-    await service.dispose();
+      expect(status.pendingDialogs).toEqual([
+        expect.objectContaining({ dialogId: "dialog-1", kind: "confirm", title: "Proceed at startup?", runScoped: false }),
+      ]);
+      await service.answerDialog(sessionRef(ACTIVE_SESSION_ID), "dialog-1", true);
+      await started;
+    } finally { await service.dispose(); await Promise.allSettled([started]); }
   });
 
   it("answers a session_start dialog mid-startup so creation can finish", async () => {
-    const { service, store, confirmAnswers } = startupDialogService();
+    const { service, store, events, confirmAnswers } = startupDialogService(hints);
     const started = service.start("/workspace");
-    await parkOnStartupDialog(store);
+    await parkOnStartupDialog(store, events);
 
     const response = await service.answerDialog(sessionRef(ACTIVE_SESSION_ID), "dialog-1", true);
 
@@ -607,9 +571,9 @@ describe("PiSessionService session_start dialog startup reachability", () => {
   });
 
   it("cancels a session_start dialog mid-startup with the kind's cancel value", async () => {
-    const { service, store, confirmAnswers } = startupDialogService();
+    const { service, store, events, confirmAnswers } = startupDialogService(hints);
     const started = service.start("/workspace");
-    await parkOnStartupDialog(store);
+    await parkOnStartupDialog(store, events);
 
     const response = await service.cancelDialog(sessionRef(ACTIVE_SESSION_ID), "dialog-1");
 
@@ -621,11 +585,11 @@ describe("PiSessionService session_start dialog startup reachability", () => {
   });
 
   it("dispose settles a startup-parked dialog instead of blocking behind its timeout", async () => {
-    const { service, store, events, confirmAnswers } = startupDialogService();
+    const { service, store, events, confirmAnswers } = startupDialogService(hints);
     // The status open flow registers in pendingSessionOpens, which dispose awaits:
     // without settling the dialog first, disposal would ride its timeout.
     const opening = service.status(sessionRef(ACTIVE_SESSION_ID));
-    await parkOnStartupDialog(store);
+    await parkOnStartupDialog(store, events);
 
     await service.dispose();
 
@@ -639,9 +603,9 @@ describe("PiSessionService session_start dialog startup reachability", () => {
   });
 
   it("closing a session whose open is parked on a session_start dialog settles the dialog first", async () => {
-    const { service, store, events, confirmAnswers } = startupDialogService();
+    const { service, store, events, confirmAnswers } = startupDialogService(hints);
     const opening = service.status(sessionRef(ACTIVE_SESSION_ID));
-    await parkOnStartupDialog(store);
+    await parkOnStartupDialog(store, events);
 
     await service.stop(sessionRef(ACTIVE_SESSION_ID));
 
