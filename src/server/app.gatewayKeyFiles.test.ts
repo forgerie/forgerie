@@ -62,7 +62,11 @@ describe("browser file access excludes the active gateway credential", () => {
     const status = await ctx.app.inject(`${f.base}/git/status`);
     expect(status.body).not.toContain("HARD-ALIAS.JSON");
     await writeFile(f.key, JSON.stringify({ apiKey: `${secret}-changed` }));
+    git("add", "HARD-ALIAS.JSON");
     expect((await ctx.app.inject(`${f.base}/git/status`)).json()).toEqual(status.json());
+    await writeFile(join(ctx.projectDir, "ordinary.json"), "public changed"); git("add", "ordinary.json");
+    const changed = (await ctx.app.inject(`${f.base}/git/status`)).json<{ hash: string }>();
+    expect(changed.hash).not.toBe(status.json<{ hash: string }>().hash);
     const file = await ctx.app.inject(`${f.base}/file?path=ordinary.json`);
     expect(file.statusCode).toBe(200); expect(file.body).toContain("public");
   });

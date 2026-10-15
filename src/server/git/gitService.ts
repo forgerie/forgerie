@@ -49,8 +49,20 @@ export async function gitStatus(cwd: string, access?: BrowserFileAccess): Promis
   })))).filter(row => row.readable).map(row => row.file);
   // Raw porcelain contains index object ids. Hash only the public projection.
   const submodules = status.submodules.filter(path => files.some(file => file.path === path || file.path.startsWith(`${path}/`)));
-  const visible = { ...status, hash: undefined, files, submodules };
+  const publicIndex = await Promise.all([
+    publicIndexEntries(cwd, files.filter(file => !submodules.some(path => file.path.startsWith(`${path}/`))).map(file => file.path)),
+    ...submodules.map(path => publicIndexEntries(join(cwd, path), files.filter(file => file.path.startsWith(`${path}/`)).map(file => file.path.slice(path.length + 1)))),
+  ]);
+  const visible = { ...status, hash: undefined, files, submodules, publicIndex };
   return { ...status, files, submodules, hash: hash(JSON.stringify(visible)) };
+}
+
+/** Preserve staged-content change detection, without hashing private index object ids. */
+async function publicIndexEntries(cwd: string, paths: string[]): Promise<string> {
+  if (paths.length === 0) return "";
+  const result = await runGit(cwd, ["ls-files", "--stage", "-z", "--", ...paths.map(path => `:(literal)${path}`)]);
+  if (result.code !== 0 || result.truncated) throw new Error("Cannot read public Git index");
+  return result.stdout;
 }
 
 /**
