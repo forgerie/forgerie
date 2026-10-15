@@ -3,13 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { ManagedProcesses } from "./managedProcesses.js";
-import type { ManagedProcessLauncher, ManagedProcessRecord } from "./managedProcessTypes.js";
+import type { ManagedProcessLauncher, ManagedProcessRecord, ManagedProcessResult } from "./managedProcessTypes.js";
 import { ManagedProcessTools } from "./processTool.js";
 import type { ProcessEventSummary } from "./processWatchState.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-async function fixture(attached = false) {
+async function fixture(attached = false, now?: () => number) {
   const root = await mkdtemp(join(tmpdir(), "forgerie-process-tool-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const live = new Map<string, ManagedProcessRecord>();
@@ -26,14 +26,15 @@ async function fixture(attached = false) {
     core = new ManagedProcesses({ stateDirectory: root, sessionId: "test", launcher, environment: { SECRET_TOKEN: "private-value", PATH: process.env["PATH"] } });
     await core.initialize();
     cleanups.push(() => core.dispose());
-    const tool = new ManagedProcessTools({ sessionId: "test", cwd: root, stateFile: join(root, "watches.json"), getManagedProcesses: () => Promise.resolve(core) });
+    const tool = new ManagedProcessTools({ sessionId: "test", cwd: root, stateFile: join(root, "watches.json"), ...(now === undefined ? {} : { now }), getManagedProcesses: () => Promise.resolve(core) });
     await tool.initialize((summary) => { summaries.push(summary); return Promise.resolve(); });
     return tool;
   }
   const tool = await open();
   return { tool, open, summaries, live, core: () => core, root,
     log: (id: string, text: string) => appendFile(join(root, "managed-processes/test", id, "output.log"), text),
-    end: (id: string) => writeFile(join(root, "managed-processes/test", id, "result"), "success\nexited\n0\n") };
+    end: (id: string, result: ManagedProcessResult = { result: "success", code: "exited", status: "0" }) =>
+      writeFile(join(root, "managed-processes/test", id, "result"), `${result.result}\n${result.code}\n${result.status}\n`) };
 }
 
 it("projects tool actions without private records and browsing never consumes watch output", async () => {
@@ -189,4 +190,84 @@ it("bounds and coalesces 40 passive dispatches, preserving exact counts after re
     expect(summaries[0]?.events.find(event => event.attention === "context")?.samples).toHaveLength(20);
     expect(summaries[0]?.overflow?.samples).toBe(780);
   } finally { await tool.dispose(); }
+});
+
+it("samples live repeat cooldown once across batches, expires at 15000ms, and bypasses it for missed matches", async () => {
+  let now = 100_000;
+  let clockReads = 0;
+  const f = await fixture(false, () => { clockReads++; return now; });
+  const started = await f.tool.execute({ action: "start", name: "cooldown", command: "cat", notify: { logMatches: [
+    { pattern: "hit", repeat: true, on: "context" },
+    { pattern: "hit", on: "turn" },
+    { pattern: "hit", repeat: true, on: "ignore" },
+  ] } });
+  const id = started.process?.id;
+  if (id === undefined) throw new Error("No ID");
+  const lines = Array.from({ length: 2100 }, (_, index) => `hit ${String(index + 1)}${index === 0 ? "x".repeat(2100) : ""}`);
+  const append = () => f.log(id, `${lines.join("\n")}\n`);
+  await append(); await f.tool.dispatch(false);
+  expect(clockReads).toBe(1);
+  expect(f.summaries[0]?.events.map(({ attention, count, totalCount, line }) => ({ attention, count, totalCount, line }))).toEqual([
+    { attention: "context", count: 2100, totalCount: 2100, line: 2100 },
+    { attention: "turn", count: 1, totalCount: 1, line: 1 },
+    { attention: "ignore", count: 2100, totalCount: 2100, line: 2100 },
+  ]);
+  expect(f.summaries[0]?.events[0]?.samples).toEqual(lines.slice(0, 20).map((text, index) => ({ number: index + 1, text: text.slice(0, 2000) })));
+  expect(f.summaries[0]?.events[2]?.samples).toEqual([]);
+
+  now = 114_999;
+  await append(); await f.tool.dispatch(false);
+  expect(clockReads).toBe(2);
+  expect(f.summaries).toHaveLength(1);
+  expect((await f.core().readOutput(id)).lines).toEqual([]);
+  expect((await f.tool.execute({ action: "list" })).processes?.[0]?.watches.map(watch => watch.line)).toEqual([4200, 1, 4200]);
+
+  now = 115_000;
+  await append(); await f.tool.dispatch(false);
+  expect(clockReads).toBe(3);
+  expect(f.summaries[1]?.events.map(({ attention, count, totalCount, line }) => ({ attention, count, totalCount, line }))).toEqual([
+    { attention: "context", count: 2100, totalCount: 4200, line: 6300 },
+    { attention: "ignore", count: 2100, totalCount: 4200, line: 6300 },
+  ]);
+  expect(f.summaries[1]?.events[0]?.samples.map(sample => sample.number)).toEqual(Array.from({ length: 20 }, (_, index) => 4201 + index));
+
+  now = 115_001;
+  await append(); await f.tool.dispatch(true);
+  expect(clockReads).toBe(4);
+  expect(f.summaries[2]).toMatchObject({ missed: true, events: [
+    { attention: "context", count: 2100, totalCount: 6300, line: 8400 },
+    { attention: "ignore", count: 2100, totalCount: 6300, line: 8400, samples: [] },
+  ] });
+  expect(f.summaries).toHaveLength(3);
+});
+
+it.each([
+  { result: "success", code: "exited", status: "0", attention: "context", publicStatus: "exited" },
+  { result: "exit-code", code: "exited", status: "1", attention: "turn", publicStatus: "exited" },
+  { result: "timeout", code: "exited", status: "1", attention: "turn", publicStatus: "terminate_timeout" },
+  { result: "signal", code: "killed", status: "TERM", attention: "ignore", publicStatus: "killed" },
+  { result: "core-dump", code: "dumped", status: "ABRT", attention: "ignore", publicStatus: "killed" },
+  { result: "timeout", code: "killed", status: "KILL", attention: "turn", publicStatus: "terminate_timeout" },
+  { result: "timeout", code: "exited", status: "0", attention: "context", publicStatus: "terminate_timeout" },
+])("delivers $result/$code/$status exit attention once without changing public status precedence", async ({ result, code, status, attention, publicStatus }) => {
+  const f = await fixture(true);
+  const started = await f.tool.execute({ action: "start", name: "terminal", command: "cat", notify: {
+    onSuccess: "context", onFailure: "turn", onKilled: "ignore", logMatches: [{ pattern: "ready" }],
+  } });
+  const id = started.process?.id;
+  if (id === undefined) throw new Error("No ID");
+  await f.log(id, "ready\nfinal tail");
+  await f.end(id, { result, code, status });
+  await f.tool.dispatch(false);
+  expect(f.summaries).toHaveLength(1);
+  expect(f.summaries[0]?.events).toEqual([
+    expect.objectContaining({ kind: "match", processId: id, line: 1, count: 1 }),
+    expect.objectContaining({ kind: "exit", processId: id, watchId: "exit", result, code, status, attention, line: 3, count: 1, samples: [],
+      notice: "Attached process: ends when Forgerie restarts." }),
+  ]);
+  expect((await f.tool.execute({ action: "list" })).processes?.[0]?.status).toBe(publicStatus);
+  await f.tool.dispatch(false);
+  expect(f.summaries).toHaveLength(1);
+  await f.tool.dispose(); await f.core().dispose(); await f.open();
+  expect(f.summaries).toHaveLength(1);
 });

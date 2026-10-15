@@ -10,6 +10,7 @@ import { ManagedProcessLaunchError, type ManagedProcessInputResult, type Managed
 import type { ManagedProcessLogBatch, ManagedProcessLogCursor } from "./managedProcessLog.js";
 import { processToolParameters, ProcessToolInputError, type ProcessToolArguments } from "./processToolSchema.js";
 import { publicProcess, selectProcesses, type PublicProcess } from "./processToolProjection.js";
+import { beginProcessWatchEvaluation } from "./processWatchEvaluation.js";
 import { matchPattern, newProcessWatch, processWatchStateSchema, updateProcessWatch, type ProcessEventSummary, type ProcessWatch, type ProcessWatchEvent, type ProcessWatchState } from "./processWatchState.js";
 
 interface ProcessToolOptions {
@@ -242,49 +243,19 @@ export class ManagedProcessTools {
     try {
       for (const snapshot of await core.list()) {
         const watch = this.metadata(snapshot);
-        if (snapshot.state.kind !== "running" && watch.exitDelivered) continue;
-        const notice = publicProcess(snapshot, watch).notice;
-        const matches = new Map<string, ProcessWatchEvent>();
-        const now = this.options.now?.() ?? Date.now();
-        // Keep the compatible 15-second repeat cooldown. Offline log lines have no event timestamps;
-        // resume coalesces all their matches into the single missed-event summary instead.
-        const predicates = new Map(watch.watches.map(item => [item.id,
-          !missed && item.repeat && item.fired && now - item.lastNotifiedAt < 15_000 ? () => false : matchPattern(item.pattern, item.mode)]));
+        const evaluation = beginProcessWatchEvaluation(snapshot, watch, {
+          missed, now: () => this.options.now?.() ?? Date.now(), notice: publicProcess(snapshot, watch).notice,
+        });
+        if (evaluation === undefined) continue;
         let cursor: ManagedProcessLogCursor | undefined = pending?.cursors[snapshot.id];
         for (;;) {
           const batch = await core.readOutput(snapshot.id, cursor === undefined ? {} : { cursor });
-          for (const item of watch.watches) {
-            for (const line of batch.lines) {
-              if (line.number <= item.line || (item.fired && !item.repeat)) continue;
-              item.line = line.number;
-              if (predicates.get(item.id)?.(line.text) !== true) continue;
-              item.fired = true; item.lastNotifiedAt = now; item.matched++;
-              let event = matches.get(item.id);
-              if (event === undefined) {
-                event = { processId: snapshot.id, name: watch.name, watchId: item.id, kind: "match", attention: item.on, line: line.number, count: 0, samples: [], ...(notice === undefined ? {} : { notice }) };
-                matches.set(item.id, event);
-              }
-              event.line = line.number; event.count++; event.totalCount = item.matched;
-              if (item.on !== "ignore" && event.samples.length < 20) event.samples.push({ number: line.number, text: line.text.slice(0, 2000) });
-            }
-          }
+          evaluation.accept(batch.lines);
           if (batch.lines.length > 0 || batch.droppedLines > 0) cursors[snapshot.id] = batch.cursor;
           if (batch.lines.length < 1000) break;
           cursor = batch.cursor;
         }
-        events.push(...matches.values());
-        // Reinspect after draining: a final unterminated tail is read on the next dispatch if it exited during the read.
-        if (snapshot.state.kind !== "running" && !watch.exitDelivered) {
-          watch.exitDelivered = true;
-          if (!watch.stopped) {
-            const result = snapshot.state.kind === "ended" ? snapshot.state.result : undefined;
-            const attention = result?.code === "exited" && result.status === "0" ? watch.onSuccess
-              : result?.result === "timeout" ? watch.onFailure : result?.code === "killed" || result?.code === "dumped" ? watch.onKilled : watch.onFailure;
-            events.push({ processId: snapshot.id, name: watch.name, watchId: "exit", kind: "exit", attention, line: cursors[snapshot.id]?.line ?? 0,
-              count: 1, samples: [], ...(snapshot.state.kind === "lost" ? { reason: "supervisor lost" } : { result: result?.result, code: result?.code, status: result?.status }),
-              ...(notice === undefined ? {} : { notice }) });
-          }
-        }
+        events.push(...evaluation.finish(cursors[snapshot.id]?.line ?? 0));
       }
       if (events.length === 0 && Object.keys(cursors).length === 0) {
         if (JSON.stringify(this.state) !== JSON.stringify(previous)) await this.save();
