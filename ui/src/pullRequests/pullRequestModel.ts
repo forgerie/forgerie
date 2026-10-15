@@ -36,7 +36,7 @@ export function verdict(pr: PullRequest): Verdict {
   if (changes.length > 0) return { tone: "blocked", sentence: `${names(changes.map((review) => review.reviewer))} asked for changes.` };
   const running = runningChecks(pr).length;
   if (running > 0) return { tone: "waiting", sentence: `Waiting on ${plural(running, "check", "checks")}.` };
-  if (pr.state === "draft") return { tone: "draft", sentence: "Draft. Mark it ready for review on GitHub." };
+  if (pr.state === "draft") return { tone: "draft", sentence: "Draft, so reviewers and most review bots wait until it is marked ready." };
   if (pr.mergeability === "unknown") return { tone: "waiting", sentence: `GitHub is still checking whether it merges cleanly into ${pr.base}.` };
   if (pr.checks.length === 0) return { tone: "blocked", sentence: "No checks ran on this commit, so it cannot merge here." };
   if (!pr.complete) return { tone: "blocked", sentence: "Forgerie could not read all of it. Read it again, or check it on GitHub." };

@@ -29,6 +29,10 @@ describe("verdict", () => {
       .toBe("a, b and c asked for changes.");
     expect(verdict(pr({ checks: [check("1", "queued"), check("2", "running")] }))).toEqual({ tone: "waiting", sentence: "Waiting on 2 checks." });
   });
+  it("says a draft holds reviewers and most review bots until it is marked ready", () => {
+    expect(verdict(pr({ state: "draft" }))).toEqual({ tone: "draft", sentence: "Draft, so reviewers and most review bots wait until it is marked ready." });
+    expect(verdict(pr({ state: "draft", checks: [check("1", "running")] })).tone).toBe("waiting");
+  });
   it("names approvers when the server allows a merge", () => {
     expect(verdict(pr({ reviews: [review("jordan", "approved")] })).sentence).toBe("Ready to merge. All 2 checks passed, approved by jordan.");
   });
