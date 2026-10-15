@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// node ui/scripts/fast-chat-open-acceptance.mjs <out.json> <page-url> [fixture-control-url]
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -6,12 +7,20 @@ import { dirname } from "node:path";
 import { CDP, evaluate, sleep } from "../../scripts/lib/cdp.mjs";
 const output = process.argv[2] ?? "/tmp/fast-chat-open-acceptance.json";
 const url = process.argv[3] ?? "http://127.0.0.1:18650/";
+// A Vite page proxies /api, not fixture controls. A built fixture server serves both.
+const fixtureUrl = process.argv[4] ?? url;
+async function streamingControl(action) {
+  const response = await fetch(new URL(`/__fixtures/streaming/${action}`, fixtureUrl), { method: "POST" });
+  assert.ok(response.ok, `fixture ${action}: HTTP ${response.status}`);
+  const result = await response.json();
+  assert.equal(result[action === "reset" ? "reset" : "completed"], true);
+}
 const session = `fast-acceptance-${process.pid}`;
 const browser = (...args) => execFileSync("agent-browser", ["--session", session, ...args], { encoding: "utf8", timeout: 120000 });
 let cdp;
 const result = { url, viewport: "1440x900 DPR1", prefetchSuppressedBySaveData: true, requests: [], opens: [], heapsMiB: [] };
 try {
-  await fetch(new URL("/__fixtures/streaming/reset", url), { method: "POST" });
+  await streamingControl("reset");
   browser("open", url);
   const port = new URL(browser("get", "cdp-url").trim()).port;
   const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
@@ -36,7 +45,7 @@ try {
     result.heapsMiB.push({ label, heap: usage.usedSize / 1048576, embedder: (usage.embedderHeapUsedSize ?? 0) / 1048576 });
   }
   await heap("empty");
-  async function open(id, kept = false, marker = "Readable last turn 1500.", finalMayFollow = false) {
+  async function open(id, kept = false, marker = "Readable last turn 1500.") {
     const startIndex = result.requests.length;
     const measurement = await evaluate(cdp, `new Promise((resolve,reject)=>{
       const id=${JSON.stringify(id)}, kept=${kept}, markerText=${JSON.stringify(marker)};
@@ -62,10 +71,15 @@ try {
     measurement.throughFirstFrame = measurement.requests.filter(request => request.at <= measurement.firstFrameAt);
     measurement.postPaintRequests = measurement.requests.filter(request => request.at > measurement.paintAt);
     result.opens.push(measurement);
+    if (id === "streaming" && kept) result.hiddenCompletion = {
+      firstFrameMs: measurement.firstFrameAt - measurement.at, finalFrame: measurement.frames,
+      finalReadableMs: measurement.readableMs, firstFrameHadFinal: measurement.firstFrameVisible,
+      postPaintRequests: measurement.postPaintRequests,
+    };
     process.stdout.write(`${id} kept=${kept} frames=${measurement.frames} readable=${measurement.readableMs.toFixed(1)}ms requestsThroughFirstFrame=${measurement.throughFirstFrame.length}\n`);
     if (kept) {
       assert.equal(measurement.firstFrameCachedVisible, true, "cached transcript must be visible on first frame");
-      if (!finalMayFollow) assert.equal(measurement.firstFrameVisible, true, "idle kept final content must be readable on first frame");
+      assert.equal(measurement.firstFrameVisible, true, "kept final content must be readable on first frame");
       assert.deepEqual(measurement.throughFirstFrame, [], "kept selection must start zero requests through first paint");
     } else {
       assert.equal(measurement.requests.filter(request => /\/(open|messages|status|stream-snapshot)$/u.test(request.path)).length, 1, "cold open must use exactly one transcript HTTP read");
@@ -108,11 +122,11 @@ try {
   await evaluate(cdp, `(()=>{const v=[...document.querySelectorAll('.transcript')].find(node=>node.getBoundingClientRect().width>0);v.scrollTop=v.scrollHeight;return true;})()`);
   await open("streaming", false, "Readable streaming last turn.");
   await open("huge-2", true);
-  await fetch(new URL("/__fixtures/streaming/complete", url), { method: "POST" });
+  await streamingControl("complete");
   await sleep(100);
-  await open("streaming", true, "Final reply completed while hidden.", true);
-  const finalReturn=result.opens.at(-1);
-  result.hiddenCompletion={firstFrameMs:finalReturn.firstFrameAt-finalReturn.at,finalFrame:finalReturn.frames,finalReadableMs:finalReturn.readableMs,firstFrameHadFinal:finalReturn.firstFrameVisible,postPaintRequests:finalReturn.postPaintRequests};
+  await open("streaming", true, "Final reply completed while hidden.");
+  assert.equal(result.hiddenCompletion.firstFrameHadFinal, true, "hidden completion must be final on the first frame");
+  assert.equal(result.hiddenCompletion.finalFrame, 1, "hidden completion must not need a repair frame");
   result.finalReplyCount=await evaluate(cdp, `[...document.querySelectorAll('.transcript')].find(node=>node.getBoundingClientRect().width>0).textContent.split('Final reply completed while hidden.').length-1`);
   assert.equal(result.finalReplyCount,1,"hidden completion must be final and not duplicated");
   const screenshot = await cdp.send("Page.captureScreenshot", { format: "png" });

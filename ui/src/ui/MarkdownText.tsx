@@ -2,7 +2,7 @@
 import { StreamdownTextPrimitive,
   type CodeHeaderProps, type SyntaxHighlighterProps, type StreamdownTextComponents } from "@assistant-ui/react-streamdown";
 import { useAuiState } from "@assistant-ui/react";
-import { memo, useMemo } from "react";
+import { memo, useCallback, useDeferredValue, useMemo } from "react";
 import { CodeSheetHead } from "./CodeSheetHead";
 import { CodeSheetBody } from "./CodeSheetBody";
 import { fragmentRehypePlugins, markdownElements } from "./markdown/markdownPolicy";
@@ -36,6 +36,13 @@ const componentsByLanguage = { ...richBlocksByLanguage, ...blockFences };
 /** `fileLinks` makes each file in a `files` block that exists open on a tap. Keep it stable: a new object re-renders every block. */
 export const MarkdownText = memo(function MarkdownText({ fileLinks }: { fileLinks?: FileLinks | undefined }) {
   const { origin } = useMarkdownLinkScope();
+  const streaming = useAuiState((s) => s.part.status.type === "running");
+  const text = useAuiState((s) => s.part.type === "text" || s.part.type === "reasoning" ? s.part.text : "");
+  const deferredText = useDeferredValue(text);
+  // Only live text may lag. Streamdown's `defer` also defers completed text on
+  // Activity reveal; toggling it remounts rich blocks and loses open details.
+  // Its preprocess seam lets the body keep its identity across completion.
+  const preprocess = useCallback((current: string) => streaming ? deferredText : current, [streaming, deferredText]);
   // Resolve before hardening; only the final plugin can mark a callout.
   const rehypePlugins = useMemo(() => [...fragmentRehypePlugins(origin), rehypeCallouts], [origin]);
   const byLanguage = useMemo(() => fileLinks ? { ...componentsByLanguage,
@@ -43,5 +50,5 @@ export const MarkdownText = memo(function MarkdownText({ fileLinks }: { fileLink
     : componentsByLanguage, [fileLinks]);
   return <StreamdownTextPrimitive key={origin} containerClassName="markdown" className="markdown-content" components={components} controls={false}
     componentsByLanguage={byLanguage} rehypePlugins={rehypePlugins}
-    remend={remend} linkSafety={linkSafety} skipHtml smooth={false} defer />;
+    remend={remend} linkSafety={linkSafety} skipHtml smooth={false} preprocess={preprocess} />;
 });

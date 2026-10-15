@@ -47,6 +47,6 @@ export async function createOpenServer(respond: (url: URL) => unknown | Promise<
   const address = server.address(); if (!address || typeof address === "string") throw new Error("No test port");
   const origin = `http://127.0.0.1:${String(address.port)}`;
   const transport: SessionTransport = { request: (path, init) => fetch(origin + path, init), connect: path => new WebSocket(origin.replace("http:", "ws:") + path) };
-  return { transport, requests, sockets, emit: (value: unknown) => { for (const socket of sockets.clients) socket.send(JSON.stringify(value)); },
+  return { origin, transport, requests, sockets, emit: (value: unknown) => { for (const socket of sockets.clients) socket.send(JSON.stringify(value)); },
     close: async () => { for (const socket of sockets.clients) socket.terminate(); sockets.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
 }
