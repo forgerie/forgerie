@@ -6,6 +6,7 @@ import websocket from "@fastify/websocket";
 import { Check } from "typebox/value";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TriggerSchema, TriggerListResponseSchema, TriggerWorkflowsResponseSchema, TriggerErrorResponseSchema, TriggerRunResponseSchema, type Trigger } from "../../shared/triggers.js";
+import { TriggerFileDocumentSchema, TriggerFileVersionsResponseSchema, TriggerFileVersionTextSchema } from "../../shared/triggerFiles.js";
 import { parseTriggerSchedule } from "../../shared/triggerSchedules.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
 import { ProjectService } from "../projects/projectService.js";
@@ -35,6 +36,8 @@ beforeEach(async () => {
   await writeFile(join(cwd, ".pi", "prompts", "nightly.md"), prose);
   await writeFile(join(cwd, ".pi", "prompts", "script.md"), prose + "\n```js workflow\nreturn 1\n```\n");
   await writeFile(join(cwd, ".pi", "prompts", "broken.md"), "---\nworkflow: nope\n---\nBad\n");
+  await mkdir(join(root, "agent", "prompts"), { recursive: true });
+  await writeFile(join(root, "agent", "prompts", "nightly.md"), prose);
   const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
   await projects.add({ path: cwd });
   changes = 0; fires = 0;
@@ -77,7 +80,7 @@ it("lists workflows without any session, including scripts, inputs, land stops a
 
 it("creates, detects revision conflicts, re-arms edits, pauses, resumes, acknowledges and deletes", async () => {
   const trigger = await created();
-  expect(trigger).toMatchObject({ id: "nightly-refinement", revision: 1, createdBy: { kind: "user" }, attention: null });
+  expect(trigger).toMatchObject({ id: "nightly", revision: 1, createdBy: { kind: "user" }, attention: null });
   const update = await http("PATCH", `/${trigger.id}`, { baseRevision: 1, name: "Updated", schedule: { kind: "daily", at: "04:00", timezone: "UTC" } });
   expect(update).toMatchObject({ status: 200, value: { name: "Updated", revision: 2 } });
   const conflict = await http("PATCH", `/${trigger.id}`, { baseRevision: 1, name: "stale" });
@@ -113,7 +116,7 @@ it("refuses extra fields, invalid operations, duplicate IDs and malformed JSON",
   expect(await http("POST", "", { ...create(), extra: true })).toMatchObject({ status: 400 });
   expect(await http("POST", "/constructor/pause", {})).toMatchObject({ status: 404 });
   const trigger = await created();
-  expect(await http("POST", "", { ...create(), id: trigger.id })).toMatchObject({ status: 409 });
+  expect(await http("POST", "", { ...create(), id: trigger.id })).toMatchObject({ status: 400 });
   expect(await http("PATCH", `/${trigger.id}`, { name: "no revision" })).toMatchObject({ status: 400, value: { field: "baseRevision" } });
   expect(await http("DELETE", `/${trigger.id}`, { extra: true })).toMatchObject({ status: 400, value: { field: "extra" } });
   for (const operation of ["pause", "resume", "acknowledge", "run"]) expect(await http("POST", `/${trigger.id}/${operation}`, { extra: true })).toMatchObject({ status: 400 });
@@ -136,7 +139,7 @@ it("deduplicates manual requests while paused without moving the next fire and b
     expect(result.status).toBe(202);
     if (!Check(TriggerRunResponseSchema, result.value)) throw new Error("Invalid run response");
     const requestId = result.value.requestId;
-    await vi.waitFor(async () => { const record = await service.get(trigger.id); expect(record.history.filter((entry) => entry.outcome.kind === "started")).toHaveLength(Math.min(index + 2, 50)); expect(record.history[0]?.requestId).toBe(requestId); expect(record.history[0]?.outcome.kind).toBe("started"); });
+    await vi.waitFor(async () => { const record = await service.get(trigger.id); expect(record.history.filter((entry) => entry.outcome.kind === "started")).toHaveLength(Math.min(index + 2, 50)); expect(record.history[0]?.requestId).toBe(requestId); expect(record.history[0]?.outcome.kind).toBe("started"); }, { interval: 10 });
   }
   await http("POST", `/${trigger.id}/run`, { requestId: "0" });
   expect(fires).toBe(56);
@@ -171,6 +174,7 @@ it.each([
     create: (value: unknown) => service.create(value), update: (id: string, value: unknown) => service.update(id, value),
     pause: (id: string) => service.pause(id), resume: (id: string) => service.resume(id), acknowledge: (id: string) => service.acknowledge(id),
     run: (id: string, value: unknown) => service.run(id, value), remove: (id: string) => service.remove(id),
+    file: (id: string) => service.file(id), saveFile: (id: string, body: unknown) => service.saveFile(id, body), versions: (id: string) => service.versions(id), version: (id: string, versionId: string) => service.version(id, versionId),
     [operation]: () => Promise.resolve({ unexpected: "payload" }),
   };
   registerTriggerRoutes(server, adapted);
@@ -190,6 +194,7 @@ it("does not send an invalid error envelope", async () => {
   const error = new TriggerError("Invalid field", 400, "action.cwd");
   Object.defineProperty(error, "field", { value: 42 });
   const adapted = {
+    file: (id: string) => service.file(id), saveFile: (id: string, body: unknown) => service.saveFile(id, body), versions: (id: string) => service.versions(id), version: (id: string, versionId: string) => service.version(id, versionId),
     list: () => Promise.reject(error), get: (id: string) => service.get(id), commonWorkflows: (targets: Parameters<TriggerService["commonWorkflows"]>[0]) => service.commonWorkflows(targets), workflows: (path: string) => service.workflows(path),
     create: (value: unknown) => service.create(value), update: (id: string, value: unknown) => service.update(id, value),
     pause: (id: string) => service.pause(id), resume: (id: string) => service.resume(id), acknowledge: (id: string) => service.acknowledge(id),
@@ -271,4 +276,32 @@ it("common-workflow diagnostics compare available copies when the first target l
     expect(problem?.cwds).toEqual([third]);
     expect(problem?.path).toBe(join(third, ".pi", "prompts", "nightly.md"));
   }
+});
+
+it("reads, saves and restores version text through the real browser proxy with hash conflicts and line errors", async () => {
+  const trigger = await created();
+  const original = await http("GET", `/${trigger.id}/file`);
+  if (!Check(TriggerFileDocumentSchema, original.value)) throw new Error("Invalid file response");
+  const text = original.value.text.replace("description:", "# Keep this comment\ncustom: keep\ndescription:");
+  const saved = await http("PUT", `/${trigger.id}/file`, { text, baseSha256: original.value.sha256, schedule: { at: "04:00", projects: [cwd], timezone: "UTC" } });
+  expect(saved.status).toBe(200);
+  if (!Check(TriggerFileDocumentSchema, saved.value)) throw new Error("Invalid saved file response");
+  expect(saved.value.text).toContain("# Keep this comment"); expect(saved.value.text).toContain("custom: keep");
+  expect(saved.value.text.indexOf("custom:")).toBeLessThan(saved.value.text.indexOf("description:"));
+  expect(saved.value.text.indexOf("description:")).toBeLessThan(saved.value.text.indexOf("workflow:"));
+  expect(saved.value.body).toBe(original.value.body);
+  expect(await http("PUT", `/${trigger.id}/file`, { text, baseSha256: original.value.sha256 })).toMatchObject({ status: 409 });
+  const invalid = await http("PUT", `/${trigger.id}/file`, { text: saved.value.text.replace('04:00', '25:00'), baseSha256: saved.value.sha256 });
+  expect(invalid).toMatchObject({ status: 400, value: { field: "schedule.at" } });
+  if (!Check(TriggerErrorResponseSchema, invalid.value)) throw new Error("Invalid file error");
+  expect(invalid.value.line).toBeGreaterThan(0);
+  expect(await http("GET", `/${trigger.id}/file`)).toMatchObject({ value: { sha256: saved.value.sha256 } });
+  const versions = await http("GET", `/${trigger.id}/versions`);
+  if (!Check(TriggerFileVersionsResponseSchema, versions.value)) throw new Error("Invalid versions response");
+  expect(versions.value.versions.length).toBeGreaterThanOrEqual(3);
+  const previous = versions.value.versions[1]; if (previous === undefined) throw new Error("Missing previous version");
+  const version = await http("GET", `/${trigger.id}/versions/${previous.id}`);
+  if (!Check(TriggerFileVersionTextSchema, version.value)) throw new Error("Invalid version text");
+  expect(version.value.text).toBe(original.value.text);
+  expect(await http("PUT", `/${trigger.id}/file`, { text: version.value.text, baseSha256: saved.value.sha256 })).toMatchObject({ status: 200, value: { schedule: { at: "03:00" } } });
 });

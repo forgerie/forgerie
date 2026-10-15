@@ -25,6 +25,7 @@ export interface ProjectWorkspaceCwdsDeps {
  * moments ago is included.
  */
 export interface ProjectWorkspaceCwds {
+  registeredProjects?(): Promise<Pick<Project, "name" | "path">[]>;
   /** One registered root per project, including roots that are currently unavailable. */
   registeredCwds?(): Promise<string[]>;
   /**
@@ -38,6 +39,8 @@ export interface ProjectWorkspaceCwds {
 
 export class RegisteredProjectWorkspaceCwds implements ProjectWorkspaceCwds {
   constructor(private readonly deps: ProjectWorkspaceCwdsDeps) {}
+
+  registeredProjects(): Promise<Project[]> { return this.deps.projects.list(); }
 
   async registeredCwds(): Promise<string[]> {
     return [...new Set((await this.deps.projects.list()).map((project) => project.path))];

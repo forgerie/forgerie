@@ -19,11 +19,12 @@ import { WorkflowLibrary, workflowInputs } from "../resources/workflowLibrary.js
 import { workflowTriggerFire } from "./triggerFire.js";
 import { TriggerService } from "./triggerService.js";
 
-it("hosts all seven tool operations, defaults cwd and zone, and records the calling agent", async () => {
+it.each(["scope", "lifecycle"] as const)("hosts workflow_schedule %s through a real calling agent", async (scenario) => {
   const root = await mkdtemp(join(tmpdir(), "forgerie-trigger-tools-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
-  await mkdir(agentDir);
+  await mkdir(join(agentDir, "prompts"), { recursive: true });
+  for (const name of ["agent-night", "foreign-night", "multi-night", "all-night"]) await writeFile(join(agentDir, "prompts", `${name}.md`), "---\nworkflow: { version: 1 }\n---\nReview the task.\n");
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: [], defaultProvider: "faux", defaultModel: "faux-1" }));
   await mkdir(join(cwd, ".pi", "prompts"), { recursive: true });
   await writeFile(join(cwd, ".pi", "prompts", "nightly.md"), "---\nworkflow: { version: 1 }\n---\nReview the task.\n");
@@ -48,9 +49,9 @@ it("hosts all seven tool operations, defaults cwd and zone, and records the call
     await mkdir(join(otherCwd, ".pi", "prompts"), { recursive: true });
     await writeFile(join(otherCwd, ".pi", "prompts", "nightly.md"), "---\nworkflow: { version: 1 }\n---\nOther project task.\n");
     await projects.add({ path: otherCwd });
-    const foreign = await triggers.create({ id: "foreign-night", name: "Foreign night", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [otherCwd] }, workflow: "nightly", inputs: {} } });
-    const multi = await triggers.create({ id: "multi-night", name: "Multi night", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [cwd, otherCwd] }, workflow: "nightly", inputs: {} } });
-    const all = await triggers.create({ id: "all-night", name: "All night", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "all" }, workflow: "nightly", inputs: {} } });
+    const foreign = await triggers.create({ id: "foreign-night", name: "Foreign night", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [otherCwd] }, workflow: "foreign-night", inputs: {} } });
+    const multi = await triggers.create({ id: "multi-night", name: "Multi night", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [cwd, otherCwd] }, workflow: "multi-night", inputs: {} } });
+    const all = await triggers.create({ id: "all-night", name: "All night", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "all" }, workflow: "all-night", inputs: {} } });
     const caller = await sessions.start(cwd);
     await sessions.nameTriggerSession(caller, "Calling session");
     let request = 0;
@@ -59,42 +60,46 @@ it("hosts all seven tool operations, defaults cwd and zone, and records the call
       const previous = await readFile(caller.path, "utf8").catch(() => "");
       const count = provider.state.callCount;
       await sessions.prompt(caller, "Schedule operation", undefined, undefined, { requestId: `tool-${String(request++)}` });
-      await vi.waitFor(async () => { expect(provider.state.callCount).toBeGreaterThan(count); expect((await sessions.status(caller)).isStreaming).toBe(false); }, { timeout: 5000 });
+      await vi.waitFor(async () => { expect(provider.state.callCount).toBeGreaterThan(count); expect((await sessions.status(caller)).isStreaming).toBe(false); }, { timeout: 5000, interval: 10 });
       return (await readFile(caller.path, "utf8")).slice(previous.length);
     };
-    await invoke({ action: "create", trigger: { name: "Agent night", schedule: { kind: "daily", at: "03:00" }, action: { kind: "workflow", workflow: "nightly", inputs: {} } } });
-    expect(await invoke({ action: "list" })).not.toContain(foreign.id);
-    for (const record of [multi, all]) {
-      expect(await invoke({ action: "list" })).not.toContain(record.id);
-      for (const action of ["pause", "resume", "delete", "run"]) expect(await invoke({ action, id: record.id })).toContain("calling session's project");
-      expect(await invoke({ action: "update", id: record.id, changes: { baseRevision: 1, name: "Hijacked" } })).toContain("calling session's project");
-      expect(await invoke({ action: "create", trigger: { name: "Forbidden", schedule: { kind: "daily", at: "03:00" }, action: record.action } })).toContain("calling session's project");
+    await invoke({ action: "create", trigger: { name: "Agent night", schedule: { kind: "daily", at: "03:00" }, action: { kind: "workflow", workflow: "agent-night", inputs: {} } } });
+    if (scenario === "scope") {
+      expect(await invoke({ action: "list" })).not.toContain(foreign.id);
+      for (const record of [multi, all]) {
+        expect(await invoke({ action: "list" })).not.toContain(record.id);
+        for (const action of ["pause", "resume", "delete", "run"]) expect(await invoke({ action, id: record.id })).toContain("calling session's project");
+        expect(await invoke({ action: "update", id: record.id, changes: { baseRevision: 1, name: "Hijacked" } })).toContain("calling session's project");
+        expect(await invoke({ action: "create", trigger: { name: "Forbidden", schedule: { kind: "daily", at: "03:00" }, action: record.action } })).toContain("calling session's project");
+      }
+      for (const action of ["pause", "resume", "delete", "run"]) {
+        expect(await invoke({ action, id: foreign.id })).toContain("calling session's project");
+      }
+      expect(await invoke({ action: "update", id: foreign.id, changes: { baseRevision: 1, name: "Hijacked" } })).toContain("calling session's project");
+      expect(await invoke({ action: "create", trigger: { name: "Foreign create", schedule: { kind: "daily", at: "03:00" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [otherCwd] }, workflow: "agent-night", inputs: {} } } })).toContain("calling session's project");
+      expect(await invoke({ action: "update", id: "agent-night", changes: { baseRevision: 1, action: { kind: "workflow", targets: { kind: "projects", cwds: [otherCwd] }, workflow: "agent-night", inputs: {} } } })).toContain("calling session's project");
+      expect(await triggers.get(foreign.id)).toEqual(foreign);
     }
-    for (const action of ["pause", "resume", "delete", "run"]) {
-      expect(await invoke({ action, id: foreign.id })).toContain("calling session's project");
-    }
-    expect(await invoke({ action: "update", id: foreign.id, changes: { baseRevision: 1, name: "Hijacked" } })).toContain("calling session's project");
-    expect(await invoke({ action: "create", trigger: { name: "Foreign create", schedule: { kind: "daily", at: "03:00" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [otherCwd] }, workflow: "nightly", inputs: {} } } })).toContain("calling session's project");
-    expect(await invoke({ action: "update", id: "agent-night", changes: { baseRevision: 1, action: { kind: "workflow", targets: { kind: "projects", cwds: [otherCwd] }, workflow: "nightly", inputs: {} } } })).toContain("calling session's project");
-    expect(await triggers.get(foreign.id)).toEqual(foreign);
     const created = await triggers.get("agent-night");
     expect(created).toMatchObject({ createdBy: { kind: "agent", sessionId: caller.id, cwd }, action: { targets: { kind: "projects", cwds: [cwd] } }, schedule: { timezone: triggers.timezone } });
     const transcript = await readFile(caller.path, "utf8");
     expect(transcript).toContain("Next run");
     if (created.state.kind !== "active") throw new Error("Expected active");
     expect(transcript).toContain(new Date(created.state.nextFireAt).toISOString());
-    await invoke({ action: "list" });
-    await invoke({ action: "pause", id: created.id });
-    expect((await triggers.get(created.id)).state.kind).toBe("paused");
-    await invoke({ action: "update", id: created.id, changes: { baseRevision: (await triggers.get(created.id)).revision, name: "Agent updated" } });
-    expect((await triggers.get(created.id)).name).toBe("Agent updated");
-    await invoke({ action: "run", id: created.id, requestId: "manual" });
-    await vi.waitFor(async () => { expect((await triggers.get(created.id)).history[0]?.outcome.kind).toBe("started"); });
-    await invoke({ action: "resume", id: created.id });
-    expect((await triggers.get(created.id)).state.kind).toBe("active");
-    await invoke({ action: "delete", id: created.id });
-    expect((await triggers.list()).triggers).toEqual([foreign, multi, all]);
-    expect(hub.globalEvents.filter((event) => event.type === "triggers.changed").length).toBeGreaterThan(6);
+    if (scenario === "lifecycle") {
+      await invoke({ action: "list" });
+      await invoke({ action: "pause", id: created.id });
+      expect((await triggers.get(created.id)).state.kind).toBe("paused");
+      await invoke({ action: "update", id: created.id, changes: { baseRevision: (await triggers.get(created.id)).revision, name: "Agent updated" } });
+      expect((await triggers.get(created.id)).name).toBe("Agent updated");
+      await invoke({ action: "run", id: created.id, requestId: "manual" });
+      await vi.waitFor(async () => { expect((await triggers.get(created.id)).history[0]?.outcome.kind).toBe("started"); });
+      await invoke({ action: "resume", id: created.id });
+      expect((await triggers.get(created.id)).state.kind).toBe("active");
+      await invoke({ action: "delete", id: created.id });
+      expect((await triggers.list()).triggers).toEqual([foreign, multi, all]);
+      expect(hub.globalEvents.filter((event) => event.type === "triggers.changed").length).toBeGreaterThan(6);
+    }
   } finally { await triggers.close(); await sessions.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -165,12 +170,12 @@ it("keeps the existing session identity when restart workspace validation fails"
   let triggers = await TriggerService.open(options);
   try {
     await triggers.create({ id: "night", name: "Night", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds: [cwd] }, workflow: "nightly", inputs: {} } });
-    await triggers.run("night", { requestId: "retry" }); await entered;
+    await triggers.run("nightly", { requestId: "retry" }); await entered;
     const [session] = await sessions.list(cwd); if (session === undefined) throw new Error("Session was not created");
     await triggers.close(); hold = false; await rm(cwd, { recursive: true });
     triggers = await TriggerService.open(options);
-    await vi.waitFor(async () => { expect((await triggers.get("night")).history[0]?.outcome.kind).toBe("failed"); });
-    expect((await triggers.get("night")).history[0]?.outcome).toMatchObject({ kind: "failed", sessionId: session.id, cwd });
+    await vi.waitFor(async () => { expect((await triggers.get("nightly")).history[0]?.outcome.kind).toBe("failed"); });
+    expect((await triggers.get("nightly")).history[0]?.outcome).toMatchObject({ kind: "failed", sessionId: session.id, cwd });
     expect(await readFile(session.path, "utf8")).toContain('"customType":"forgerie:trigger"');
     expect(provider.state.callCount).toBe(0);
   } finally { await triggers.close(); await sessions.dispose(); await rm(root, { recursive: true, force: true }); }
@@ -195,9 +200,9 @@ it("starts real sessions in two projects with distinct identities and the same w
   });
   try {
     await triggers.create({ name: "Multi", schedule: { kind: "daily", at: "03:00", timezone: "UTC" }, action: { kind: "workflow", targets: { kind: "projects", cwds }, workflow: "nightly", inputs: {}, model: "faux/faux-selected", thinkingLevel: "high" } });
-    await triggers.pause("multi"); await triggers.run("multi", { requestId: "two-projects" });
-    await vi.waitFor(async () => { const record = await triggers.get("multi"); expect(record.history[0]?.outcome.kind, JSON.stringify(record.history[0])).toBe("started"); }, { timeout: 5000 });
-    const fire = (await triggers.get("multi")).history[0];
+    await triggers.pause("nightly"); await triggers.run("nightly", { requestId: "two-projects" });
+    await vi.waitFor(async () => { const record = await triggers.get("nightly"); expect(record.history[0]?.outcome.kind, JSON.stringify(record.history[0])).toBe("started"); }, { timeout: 5000 });
+    const fire = (await triggers.get("nightly")).history[0];
     expect(fire?.projects).toHaveLength(2);
     const ids: string[] = [];
     for (const project of fire?.projects ?? []) {
@@ -208,7 +213,7 @@ it("starts real sessions in two projects with distinct identities and the same w
       expect(await sessions.list(project.cwd)).toHaveLength(1);
     }
     expect(new Set(ids).size).toBe(2);
-    await triggers.run("multi", { requestId: "two-projects" });
+    await triggers.run("nightly", { requestId: "two-projects" });
     for (const cwd of cwds) expect(await sessions.list(cwd)).toHaveLength(1);
   } finally { await triggers.close(); await sessions.dispose(); await rm(root, { recursive: true, force: true }); }
 });

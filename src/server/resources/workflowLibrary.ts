@@ -21,6 +21,7 @@ export interface WorkflowInventory { workflows: ProseWorkflow[]; diagnostics: { 
 /** Saved workflows use prompt files. Invalid project overrides never fall back to a profile file. */
 export class WorkflowLibrary {
   constructor(private readonly agentDir: string) {}
+  get globalDirectory(): string { return join(this.agentDir, "prompts"); }
   async list(cwd: string): Promise<WorkflowInventory> {
     const result: WorkflowInventory = { workflows: [], diagnostics: [] };
     const seen = new Set<string>();
@@ -35,6 +36,7 @@ export class WorkflowLibrary {
         try {
           const { text } = await readResourceFile(path);
           const parsed = parseFrontmatter(text);
+          if (dir !== this.globalDirectory && parsed.frontmatter["schedule"] !== undefined) result.diagnostics.push({ name, path, error: "A schedule in a project workflow is ignored. Only global workflow files can schedule." });
           if (parsed.frontmatter["workflow"] === undefined) continue;
           result.workflows.push(parseWorkflow(name, path, text));
         } catch (error) { result.diagnostics.push({ name, path, error: error instanceof Error ? error.message : String(error) }); }

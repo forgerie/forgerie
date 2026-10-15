@@ -7,9 +7,13 @@ import { createRegistry, Harness, type ConversationId } from "@earendil-works/pi
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { Check, Errors } from "typebox/value";
 import type { TSchema, Static } from "typebox";
+import { TriggerFileSaveRequestSchema, type TriggerFileSaveRequest } from "../../shared/triggerFiles.js";
+import { TriggerFiles } from "./triggerFiles.js";
+import { TriggerFileSync, type TriggerFileSyncRuntime } from "./triggerFileSync.js";
+import { editScheduleBlock, parseScheduledWorkflow } from "./triggerFileFormat.js";
 import { piWebDataDir } from "../../config.js";
 import { parseTriggerSchedule } from "../../shared/triggerSchedules.js";
-import { TRIGGER_LIST_HISTORY, TriggerCreateSchema, TriggerUpdateSchema, TriggerRunRequestSchema, type Trigger, type TriggerCreate, type TriggerUpdate, type TriggerWorkflow, type TriggerAction, type TriggerCreator, type TriggerListResponse, type TriggerRunResponse, type TriggerWorkflowsResponse, type TriggerTargets } from "../../shared/triggers.js";
+import { DEFAULT_MISSED_GRACE_MINUTES, TRIGGER_LIST_HISTORY, TriggerCreateSchema, TriggerUpdateSchema, TriggerRunRequestSchema, type Trigger, type TriggerCreate, type TriggerUpdate, type TriggerWorkflow, type TriggerAction, type TriggerCreator, type TriggerListResponse, type TriggerRunResponse, type TriggerWorkflowsResponse, type TriggerTargets } from "../../shared/triggers.js";
 import { assertProseOnly, workflowInputs, type WorkflowLibrary } from "../resources/workflowLibrary.js";
 import { acquireDurableOwnership, type DurableOwnership } from "../sessions/durableOwnership.js";
 import type { ProjectWorkspaceCwds } from "../workspaces/projectWorkspaceCwds.js";
@@ -40,6 +44,7 @@ interface TriggerServiceDependencies {
   publish: () => void;
   onError: (error: unknown) => void;
   now?: () => number;
+  fileSync?: TriggerFileSyncRuntime;
 }
 type TriggerServiceOptions = TriggerServiceDependencies & (
   | { fire: FireTrigger; fireFactory?: never }
@@ -51,6 +56,8 @@ type TriggerStore = { kind: "open"; harness: Harness; anchor: ConversationId; ow
 export class TriggerService {
   private store: TriggerStore = { kind: "unavailable", error: "Trigger store is not open" };
   private readonly core: ReturnType<typeof durableTriggers>;
+  private readonly files: TriggerFiles;
+  private readonly fileSync: TriggerFileSync;
   readonly timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   readonly timezones = [...new Set([...Intl.supportedValuesOf("timeZone"), "UTC"])].sort();
   private constructor(private readonly options: TriggerServiceOptions) {
@@ -75,6 +82,27 @@ export class TriggerService {
       }
       return configured(request, signal);
     }, resolveProjects: (action) => this.targetCwds(action.targets), now: options.now ?? Date.now });
+    this.files = new TriggerFiles(options.workflows.globalDirectory, join(piWebDataDir(options.env), "triggers", "versions"), this.timezone, options.now ?? Date.now);
+    this.fileSync = new TriggerFileSync({ files: this.files, timezone: this.timezone, now: options.now ?? Date.now, workspaces: options.workspaces,
+      requireWorkspace: (path) => this.requireWorkspace(path),
+      requireGlobalWorkflow: async (record) => {
+        for (const cwd of await this.targetCwds(record.action.targets)) {
+          const workflow = await options.workflows.read(cwd, record.action.workflow);
+          if (workflow.path !== this.files.path(record.action.workflow)) throw new TriggerError(`Workflow resolves to a project copy in ${cwd}, not the global file`);
+        }
+      }, publish: options.publish, onError: options.onError, ...(options.fileSync === undefined ? {} : { runtime: options.fileSync }),
+      store: {
+        list: () => listTriggers(this.opened().harness, context),
+        create: (input, creator) => { const { harness, anchor } = this.opened(); return this.core.create(harness, anchor, input, context, creator); },
+        update: (id, input) => { const { harness, anchor } = this.opened(); return this.core.update(harness, anchor, id, input, context); },
+        pause: (id) => this.core.pause(this.opened().harness, id, context),
+        resume: (id) => { const { harness, anchor } = this.opened(); return this.core.resume(harness, anchor, id, context); },
+        migration: () => this.core.fileMigration(this.opened().harness, context),
+        plan: (id, target) => this.core.planFileMigration(this.opened().harness, id, target, context),
+        rekey: (id, target) => this.core.rekey(this.opened().harness, id, target, context),
+        finish: (skipped) => this.core.finishFileMigration(this.opened().harness, skipped, context),
+      },
+    });
   }
   static async open(options: TriggerServiceOptions): Promise<TriggerService> {
     const service = new TriggerService(options);
@@ -91,8 +119,10 @@ export class TriggerService {
         if (publication.changes.some((change) => change.type === "document" && change.record.kind === TRIGGERS_DOC_KIND)) options.publish();
       });
       service.store = { kind: "open", harness, anchor, ownership, unsubscribe };
+      await service.fileSync.start();
       harness.resume();
     } catch (error) {
+      await service.fileSync.close();
       await harness?.close(context);
       await ownership?.release();
       service.store = { kind: "unavailable", error: error instanceof Error ? error.message : String(error) };
@@ -107,22 +137,46 @@ export class TriggerService {
   }
   async close(): Promise<void> {
     if (this.store.kind !== "open") return;
+    await this.fileSync.close();
     const store = this.store;
     this.store = { kind: "unavailable", error: "Trigger store is closed" };
     store.unsubscribe();
     try { await store.harness.close(context); } finally { await store.ownership.release(); }
   }
+  private withFile(record: Trigger): Trigger {
+    const file = this.fileSync.state(record.id);
+    return file === undefined ? record : { ...record, file };
+  }
+  async syncFiles(): Promise<void> { this.opened(); await this.fileSync.transaction(() => this.fileSync.scan()); }
+  async file(id: string) { await this.get(id); return this.files.document(id); }
+  async saveFile(id: string, value: unknown) {
+    const request: TriggerFileSaveRequest = triggerBody(TriggerFileSaveRequestSchema, value);
+    return this.fileSync.transaction(async () => {
+      await this.get(id);
+      if (!this.fileSync.managed(id)) throw new TriggerError("This legacy trigger has no workflow schedule file", 400);
+      let normalized = request;
+      if (request.schedule !== undefined) {
+        const parsed = await this.fileSync.validate(id, editScheduleBlock(request.text, request.schedule));
+        normalized = { ...request, schedule: { ...request.schedule, projects: await this.fileSync.projectNames(parsed.input.action.targets) } };
+      }
+      const saved = await this.files.save(id, normalized, async (text) => { await this.fileSync.validate(id, text); });
+      await this.fileSync.scan();
+      return saved;
+    });
+  }
+  async versions(id: string) { await this.get(id); return this.files.versions(id); }
+  async version(id: string, versionId: string) { await this.get(id); return this.files.version(id, versionId); }
   async list(actorCwd?: string): Promise<TriggerListResponse> {
     const scope = await this.projectScope(actorCwd);
     const records =  (await listTriggers(this.opened().harness, context)).filter((record) => scope === undefined || this.inScope(record.action, scope));
-    return { triggers: records.map((record) => ({ ...record, history: record.history.slice(0, TRIGGER_LIST_HISTORY) })), attentionCount: records.filter((record) => record.attention !== null).length, timezone: this.timezone, timezones: this.timezones };
+    return { triggers: records.map((record) => ({ ...this.withFile(record), history: record.history.slice(0, TRIGGER_LIST_HISTORY) })), attentionCount: records.filter((record) => record.attention !== null || this.fileSync.state(record.id)?.status === "invalid").length, timezone: this.timezone, timezones: this.timezones };
   }
   async get(id: string, actorCwd?: string): Promise<Trigger> {
     const scope = await this.projectScope(actorCwd);
     const record = (await listTriggers(this.opened().harness, context)).find((record) => record.id === id);
     if (record === undefined) throw new TriggerError(`Trigger "${id}" does not exist.`, 404);
     if (scope !== undefined && !this.inScope(record.action, scope)) throw new TriggerError("Triggers are limited to the calling session's project", 400, "action.targets.cwds");
-    return record;
+    return this.withFile(record);
   }
   async workflows(cwd: string): Promise<TriggerWorkflowsResponse> {
     this.opened();
@@ -221,14 +275,25 @@ export class TriggerService {
     return Promise.all(paths.map((path) => this.requireWorkspace(path)));
   }
   async create(value: unknown, creator: TriggerCreator = { kind: "user" }, actorCwd?: string): Promise<Trigger> {
-    const { harness, anchor } = this.opened();
+    this.opened();
     const input: TriggerCreate = triggerBody(TriggerCreateSchema, value);
     if (input.name.trim() === "") throw new TriggerError("Give the trigger a name", 400, "name");
     this.schedule(input.schedule);
     const scope = await this.projectScope(actorCwd);
     this.assertAgentTargets(input.action, scope);
     const action = await this.validateAction(input.action);
-    return this.core.create(harness, anchor, { ...input, action }, context, creator, scope);
+    if (scope !== undefined && !this.inScope(action, scope)) throw new TriggerError("Triggers are limited to the calling session's project", 400, "action.targets");
+    return this.fileSync.transaction(async () => {
+      const id = action.workflow;
+      let document;
+      try { document = await this.files.document(id); }
+      catch (error) { if (error instanceof TriggerError && error.status === 404) throw new TriggerError(`Create needs a global workflow file named "${id}" with no schedule yet`, 400, "action.workflow"); throw error; }
+      if (parseScheduledWorkflow(id, document.path, document.text, this.timezone) !== undefined) throw new TriggerError(`Global workflow "${id}" already has a schedule`, 400, "action.workflow");
+      const block = await this.fileSync.block({ ...input, action: { ...action, inputs: input.action.inputs }, missedGraceMinutes: input.missedGraceMinutes ?? DEFAULT_MISSED_GRACE_MINUTES, state: { kind: "active", nextFireAt: 0 } });
+      await this.files.save(id, { text: document.text, baseSha256: document.sha256, schedule: block }, async (text) => { await this.fileSync.validate(id, text); });
+      await this.fileSync.scan(creator);
+      return this.get(id, actorCwd);
+    });
   }
   async update(id: string, value: unknown, actorCwd?: string): Promise<Trigger> {
     const { harness, anchor } = this.opened();
@@ -239,15 +304,57 @@ export class TriggerService {
     const scope = await this.projectScope(actorCwd);
     this.assertAgentTargets(input.action ?? current.action, scope);
     const action = await this.validateAction(input.action ?? current.action);
-    return this.core.update(harness, anchor, id, { ...input, ...(input.action === undefined && isDeepStrictEqual(action.targets, current.action.targets) ? {} : { action }) }, context, scope);
+    if (scope !== undefined && !this.inScope(action, scope)) throw new TriggerError("Triggers are limited to the calling session's project", 400, "action.targets");
+    if (!this.fileSync.managed(id)) return this.core.update(harness, anchor, id, { ...input, action }, context, scope);
+    if (action.workflow !== id) throw new TriggerError("A file-backed trigger cannot change its workflow name", 400, "action.workflow");
+    return this.fileSync.transaction(async () => {
+      await this.fileSync.scan();
+      const latest = await this.get(id, actorCwd);
+      if (latest.revision !== input.baseRevision) throw new TriggerError(`Trigger revision is ${String(latest.revision)}; read it again before editing.`, 409, "baseRevision");
+      const document = await this.files.document(id);
+      const block = await this.fileSync.block({ ...latest, ...input, action: { ...action, inputs: input.action?.inputs ?? document.schedule?.inputs ?? {} } });
+      await this.files.save(id, { text: document.text, baseSha256: document.sha256, schedule: block }, async (text) => { await this.fileSync.validate(id, text); });
+      await this.fileSync.scan();
+      return this.get(id, actorCwd);
+    });
   }
   private schedule(value: unknown): void {
     try { parseTriggerSchedule(value); } catch (error) { throw new TriggerError(error instanceof Error ? error.message : String(error), 400, "schedule.timezone"); }
   }
-  async pause(id: string, actorCwd?: string): Promise<Trigger> { return this.core.pause(this.opened().harness, id, context, await this.projectScope(actorCwd)); }
-  async resume(id: string, actorCwd?: string): Promise<Trigger> { const { harness, anchor } = this.opened(); return this.core.resume(harness, anchor, id, context, await this.projectScope(actorCwd)); }
-  async acknowledge(id: string, actorCwd?: string): Promise<Trigger> { return this.core.acknowledge(this.opened().harness, id, context, await this.projectScope(actorCwd)); }
-  async remove(id: string, actorCwd?: string): Promise<void> { return this.core.remove(this.opened().harness, id, context, await this.projectScope(actorCwd)); }
+  private async setPaused(id: string, paused: boolean, actorCwd?: string): Promise<Trigger> {
+    const current = await this.get(id, actorCwd);
+    if (!this.fileSync.managed(id)) {
+      const { harness, anchor } = this.opened();
+      return paused ? this.core.pause(harness, id, context, await this.projectScope(actorCwd)) : this.core.resume(harness, anchor, id, context, await this.projectScope(actorCwd));
+    }
+    return this.fileSync.transaction(async () => {
+      await this.fileSync.scan();
+      await this.get(id, actorCwd);
+      const document = await this.files.document(id);
+      const existing = document.schedule;
+      const block = existing ?? await this.fileSync.block(current);
+      await this.files.save(id, { text: document.text, baseSha256: document.sha256, schedule: { ...block, paused } }, async (text) => { await this.fileSync.validate(id, text); });
+      await this.fileSync.scan();
+      return this.get(id, actorCwd);
+    });
+  }
+  async pause(id: string, actorCwd?: string): Promise<Trigger> { return this.setPaused(id, true, actorCwd); }
+  async resume(id: string, actorCwd?: string): Promise<Trigger> { return this.setPaused(id, false, actorCwd); }
+  async acknowledge(id: string, actorCwd?: string): Promise<Trigger> { await this.core.acknowledge(this.opened().harness, id, context, await this.projectScope(actorCwd)); return this.get(id, actorCwd); }
+  async remove(id: string, actorCwd?: string): Promise<void> {
+    await this.fileSync.transaction(async () => {
+      await this.fileSync.scan();
+      await this.get(id, actorCwd);
+      if (this.fileSync.managed(id)) {
+        try {
+          const document = await this.files.document(id);
+          await this.files.save(id, { text: editScheduleBlock(document.text, null), baseSha256: document.sha256 }, () => Promise.resolve());
+        } catch (error) { if (!(error instanceof TriggerError && error.status === 404)) throw error; }
+      }
+      await this.core.remove(this.opened().harness, id, context, await this.projectScope(actorCwd));
+      await this.fileSync.scan();
+    });
+  }
   async run(id: string, value: unknown, actorCwd?: string): Promise<TriggerRunResponse> {
     const { harness, anchor } = this.opened();
     const input = triggerBody(TriggerRunRequestSchema, value);

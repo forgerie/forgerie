@@ -1,10 +1,11 @@
 import { Type, type Static } from "typebox";
+import { TriggerFileStateSchema } from "./triggerFiles.js";
 import { KNOWN_THINKING_LEVELS } from "./thinkingLevels.js";
 import { TriggerScheduleSchema } from "./triggerSchedules.js";
 import { WorkflowInputSchema, WorkflowInputsSchema } from "./workflowRuns.js";
 
 /** Trigger IDs become part of workflow request IDs, which allow only letters, digits, and hyphens. */
-export const TriggerIdSchema = Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,47}$" });
+export const TriggerIdSchema = Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,63}$" });
 
 export const TriggerTargetsSchema = Type.Union([
   Type.Object({ kind: Type.Literal("projects"), cwds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }) }, { additionalProperties: false }),
@@ -39,7 +40,7 @@ export type TriggerCreator = Static<typeof TriggerCreatorSchema>;
 const MissedGraceSchema = Type.Integer({ minimum: 0, maximum: 10_080 });
 
 export const TriggerCreateSchema = Type.Object({
-  /** Optional. Without it the server derives one from `name`, adding a numeric suffix when the slug is taken. */
+  /** Legacy optional ID. File-backed creation always uses the workflow file name. */
   id: Type.Optional(TriggerIdSchema),
   name: Type.String({ minLength: 1, maxLength: 120 }),
   schedule: TriggerScheduleSchema,
@@ -101,6 +102,7 @@ export const TriggerStateSchema = Type.Union([
 ]);
 
 export const TriggerSchema = Type.Object({
+  file: Type.Optional(TriggerFileStateSchema),
   id: TriggerIdSchema,
   name: TriggerCreateSchema.properties.name,
   schedule: TriggerScheduleSchema,
@@ -162,7 +164,7 @@ export const TriggerRunResponseSchema = Type.Object({ requestId: Type.String() }
 export type TriggerRunResponse = Static<typeof TriggerRunResponseSchema>;
 
 /** Every trigger route error. `field` names the request field at fault, as a dotted path, when one is known. */
-export const TriggerErrorResponseSchema = Type.Object({ error: Type.String(), field: Type.Optional(Type.String()) }, { additionalProperties: false });
+export const TriggerErrorResponseSchema = Type.Object({ error: Type.String(), field: Type.Optional(Type.String()), line: Type.Optional(Type.Integer({ minimum: 1 })) }, { additionalProperties: false });
 export type TriggerErrorResponse = Static<typeof TriggerErrorResponseSchema>;
 
 /** Published on the global session event stream after every change to the trigger document. Read the list again. */
