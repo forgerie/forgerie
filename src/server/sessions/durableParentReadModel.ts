@@ -40,7 +40,7 @@ const HISTORY_LIMIT = 500;
 
 export interface DurableHostState {
   /** Only state owned by the host. Runtime transcript, ask, queue and compaction state stay native. */
-  status?: Pick<Partial<SessionStatus>, "readOnly" | "worktree" | "workingAgents" | "runningProcesses" | "watchingPullRequest" | "waitingOnYou" | "flaggedDecisions" | "warnings" | "pendingDialogs" | "doubleEscapeAction">;
+  status?: Pick<Partial<SessionStatus>, "readOnly" | "worktree" | "workingAgents" | "runningProcesses" | "watchingPullRequest" | "waitingOnYou" | "flaggedDecisions" | "warnings" | "pendingDialogs" | "doubleEscapeAction" | "contextUsage">;
   compaction?: { isRunning: boolean; queuedMessages: SessionStatus["queuedMessages"] };
 }
 

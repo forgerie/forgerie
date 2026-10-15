@@ -980,6 +980,7 @@ it("combines native state with the host compaction boundary and following prompt
   const reply = new Promise<void>(resolve => { releaseReply = resolve; });
   const preparation = new Promise<void>(resolve => { releaseCompaction = resolve; });
   vi.spyOn(session, "compact").mockImplementation(async () => { await preparation; throw new Error("Configured preparation failure"); });
+  const contextUsage = vi.spyOn(session, "getContextUsage").mockReturnValue({ tokens: 123, contextWindow: 1000, percent: 12.3, estimate: "prepared-request" });
   let prompting: Promise<void> | undefined;
   try {
     await service.start(directory);
@@ -993,7 +994,12 @@ it("combines native state with the host compaction boundary and following prompt
     expect(queued.readPath).toBe("native");
     expect(queued.status.queuedMessages).toEqual([{ kind: "followUp", text: "/compact host instructions" }, { kind: "followUp", text: "after compaction" }]);
     expect(queued.status.pendingMessageCount).toBe(2);
+    expect(queued.status.contextUsage).toEqual({ tokens: 123, contextWindow: 1000, percent: 12.3, estimate: "prepared-request" });
     expect(session.getFollowUpMessages()).toEqual([]);
+    contextUsage.mockClear();
+    const nativeAttachment = await service.attachOpenBrowser(ref, () => Promise.resolve(), error => { throw error; });
+    expect(contextUsage).not.toHaveBeenCalled();
+    await nativeAttachment?.stop();
     vi.spyOn(session, "getFollowUpMessages").mockReturnValue(["stale SDK queue"]);
     expect((await service.open(ref, { limit: 50 })).status.queuedMessages).toEqual(queued.status.queuedMessages);
     releaseReply(); await prompting;

@@ -1102,6 +1102,8 @@ export class PiSessionService implements SessionRouteService {
   private readonly claimedSessionTitleIntents = new WeakSet<PiAgentSession>();
   private readonly sessionTitleGenerationControllers = new WeakMap<PiAgentSession, AbortController>();
   private readonly compactionQueue = new SessionCompactionQueue();
+  /** Last SDK status context estimate. Native hints must not rescan SDK history. */
+  private readonly contextUsageBySession = new WeakMap<PiAgentSession, NonNullable<ClientSessionStatus["contextUsage"]>>();
   private readonly pendingPromptRequests = new WeakMap<PiAgentSession, Map<string, Promise<void>>>();
   private readonly compactionDrains = new WeakSet<PiAgentSession>();
   private readonly compactionDrainTimers = new Map<string, NodeJS.Timeout>();
@@ -5452,7 +5454,9 @@ export class PiSessionService implements SessionRouteService {
   private nativeHostState(session: PiAgentSession | undefined): DurableHostState {
     if (session === undefined) return {};
     const warnings = this.warningsForSession(session);
+    const contextUsage = this.contextUsageBySession.get(session);
     return { status: { ...this.liveWorkCounts(session),
+      ...(contextUsage === undefined ? {} : { contextUsage }),
       doubleEscapeAction: session.settingsManager.getDoubleEscapeAction?.() ?? "tree",
       ...(warnings.length === 0 ? {} : { warnings }),
       pendingDialogs: this.pendingExtensionDialogStore.pendingDialogs(session.sessionId) },
@@ -5464,6 +5468,8 @@ export class PiSessionService implements SessionRouteService {
     const stats = session.getSessionStats();
     const model = session.model === undefined ? undefined : modelToClientModel(session.model);
     const contextUsage = session.getContextUsage();
+    if (contextUsage === undefined) this.contextUsageBySession.delete(session);
+    else this.contextUsageBySession.set(session, contextUsage);
     const warnings = this.warningsForSession(session);
     const pendingAsk = session instanceof DurableAgentSession ? session.parentResponseProjection.pendingAsk : this.sessionAsks.pendingAsk(session.sessionId);
     const pendingDialogs = this.pendingExtensionDialogStore.pendingDialogs(session.sessionId);
