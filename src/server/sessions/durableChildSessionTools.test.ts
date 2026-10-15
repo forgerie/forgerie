@@ -9,6 +9,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { DurableAgentSession } from "./durableAgentSession.js";
 import { DurableSdkTools } from "./durableSdkTools.js";
 import { createDurableChildHost } from "./durableChildHost.js";
+import { CHILD_CHECKS } from "./durableChildAgents.js";
 
 const roots: string[] = [];
 const sessions: DurableAgentSession[] = [];
@@ -150,6 +151,7 @@ it.each(["child_agent", "ask_user", "end_turn", "spawn_session", "handoff_sessio
   expect(probe.calls).toEqual([]);
   expect(probe.instructions[0]).toContain(`Not available here: ${name}`);
   expect(probe.instructions[0]).toContain("Do not file issues. Suggest issues in your report; the parent files them.");
+  expect(probe.instructions[0]).toContain(CHILD_CHECKS);
   expect(JSON.stringify(probe.session.messages)).toContain(`Not available to it here: tools ${name}`);
 });
 

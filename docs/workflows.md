@@ -107,6 +107,8 @@ At an approve stop, the card offers **Approve** and **Ask for changes**. Asking 
 
 Forgerie draws agent stages from their children, so the drawing can drift from what the agent did. Forgerie does not stop the agent from landing, merging, or pushing with its own shell tools. The launch prompt tells it not to.
 
+The launch prompt also sets where the full checks run (`FULL_CHECK_RULE` in `src/server/resources/workflowLibrary.ts`). Workers run focused checks only. Each stage runs the project's full test suite or full verification once, on its combined result: the parent tells the stage's reviewer to run it, or runs it before the next stop. After the last fix of the stage, it runs once more. The proposal guidance asks the agent to name, in each stage, who runs it. Nothing enforces this; a worker can still run the full suite. See [child agents](child-agents.md#agent-files) for the child side.
+
 ## File and input rules
 
 Workflow discovery reads `<cwd>/.pi/prompts/*.md`, then `<agentDir>/prompts/*.md`. The first file with a name wins. On this host, `agentDir` is `~/.local/share/forgerie/agent`. An invalid project override blocks the profile file rather than falling back silently. Package-contributed and extra configured prompt folders are not workflow sources in this first path.
