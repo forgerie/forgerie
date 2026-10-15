@@ -57,7 +57,8 @@ reading host files.
 The plugin form has no secret field. The existing status endpoint
 `GET /api/pi-web/runtime` reports only
 `components.sessiond.decisionHints.keyPresent`. This reports presence, not whether
-the gateway accepts the key. The interface stage can display this status.
+the gateway accepts the key. Settings shows it as the Gateway key row (see
+[What you see](#what-you-see)).
 
 ## Risk labels
 
@@ -93,9 +94,10 @@ reload. Nested SDK bash labels are live when their nested call row exists;
 those nested call rows are not themselves persisted by the SDK adapter, so a
 reload can retain the annotation without showing a nested row.
 
-The initial UI adds only `data-risk-label` JSON attributes on existing gate,
-bash, and child call markup. Visual labels remain a later design stage. No
-new row, scroll, choice, or approval recommendation is added.
+The gate card and the bash line draw the label (see
+[What you see](#what-you-see)). Child call rows in a child's exchange log keep
+only the `data-risk-label` JSON attribute. No new row, choice, or approval
+recommendation is added.
 
 No call awaits a gateway response. A disabled feature, empty address, invalid
 answer, timeout, or gateway failure adds nothing. Turning either switch off
@@ -177,5 +179,74 @@ Browser reload retains live-session hints. After a daemon restart, persisted
 hints return when that session's runtime opens (for example, on a status request
 or selecting the session). The cold catalog does not open all inactive journals
 just to read hints. This limits restart discovery but avoids per-session database
-reads for a large picker. The current UI exposes data attributes only; a later
-design stage will add the inferred-attention mark and label.
+reads for a large picker. See [What you see](#what-you-see) for the picker's
+mark and label.
+
+## What you see
+
+With the plugin off, or with no hint or label yet, every surface looks as it
+did before. Hints and labels only add.
+
+### Session list
+
+A row that a hint moved to **Needs your response** has a hollow square mark. A
+session whose agent asked for a response keeps the filled square. The hint is
+a guess; the filled square is a request.
+
+The row's second line adds a short muted word after the project:
+
+| Row | Word | Screen readers and hover |
+| --- | --- | --- |
+| Moved by a hint, with a kind | `Decision`, `Review`, `Blocked`, `Failed`, `Done` or `FYI` | "Likely needs you: review" |
+| Moved by a hint, without a kind | `Likely needs you` | "Likely needs you" |
+| Unread or waiting, not moved, with a kind | The kind | "Hint: done" |
+
+High urgency draws the word in full ink and weight with a small double-chevron
+mark, and adds "high urgency" to the spoken text. It uses no signal colour.
+Low and normal urgency look the same. A read row (Open) shows no word, even if
+its last hint had a kind. In a narrow list the project name and the word both
+shrink to an ellipsis; the hover text and the spoken text keep the whole
+statement.
+
+### Gate card and bash line
+
+A risk label is an opinion, never permission. Its three levels:
+
+| Level | Word | Look |
+| --- | --- | --- |
+| `low` | Low risk | Muted ink, an info icon. No green and no check mark. |
+| `check` | Check first | Warn ink and an alert-circle icon. |
+| `danger` | High risk | Destructive ink and a warning-triangle icon. |
+
+The words name the raised signals: "deletes data", "outside the working
+directory", and "acts as you". A signal counts as raised at a probability of
+0.5 or above. The label ends with "Opinion from" and the answering model.
+
+On a gate card the label is one sentence right above Refuse and Approve and
+run, for example "High risk: deletes data, outside the working directory.
+Opinion from fast." It stays on the card after the decision. When the card is
+pinned in a short pane, the choices sit beside the title and the label follows
+them.
+
+On a bash line, the line ends with the icon and word. The signals and the
+model are in the hover text and the line's spoken name. Opening the line shows
+the full sentence above Input and Output.
+
+A label usually arrives after the card or line. It fades in. On a bash line it
+takes width from the command text, never height. On a gate card the choices
+stay where they were: a pinned card's list grows upward, and a card in a
+scrolling thread scrolls by the label's height. With reduced motion the label
+appears without the fade.
+
+### Settings
+
+Settings > Plugins > Decision hints shows a **Gateway key** row under the
+gateway address. It reads `GET /api/pi-web/runtime` each time the page opens:
+
+| Value | Hint |
+| --- | --- |
+| Present | Sessiond has it. Forgerie never shows the key. |
+| Not set | Set `DECISION_GATEWAY_API_KEY` in sessiond's environment, then restart sessiond. |
+| Unknown | Sessiond did not report it. Check that sessiond is running. |
+
+The page never receives the key itself.

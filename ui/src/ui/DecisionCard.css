@@ -12,6 +12,10 @@
 .decision-card-body { display: grid; gap: var(--space-2); min-inline-size: 0; overflow-wrap: anywhere; }
 /* The body's gap and the detail's gap space their paragraphs, so a plain paragraph keeps no margin of its own. */
 :is(.decision-card-body, .decision-card-detail) > p { margin: 0; }
+/* A late fact: in the flow right above the choices, fading in so it does not jump. */
+.decision-card-annotation { min-inline-size: 0; animation: decision-card-arrive 200ms ease-out; }
+@keyframes decision-card-arrive { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .decision-card-annotation { animation: none; } }
 /* A failed choice: said in the failure ink right above the choices, so the retry sits under its reason. */
 .decision-card-problem { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0; color: var(--ink-bad); overflow-wrap: anywhere; }
 .decision-card-problem-mark { flex: none; inline-size: 1rem; block-size: 1lh; }
@@ -47,6 +51,6 @@
     padding-block: var(--space-2) var(--space-3); }
   .decision-card[data-open][data-pin-choices] > .decision-card-head { flex: 1 1 12rem; }
   .decision-card[data-open][data-pin-choices] > .decision-card-foot { flex: 0 1 auto; order: 1; }
-  .decision-card[data-open][data-pin-choices] > .decision-card-problem { flex: 1 1 100%; order: 2; }
+  .decision-card[data-open][data-pin-choices] > :is(.decision-card-annotation, .decision-card-problem) { flex: 1 1 100%; order: 2; }
   .decision-card[data-open][data-pin-choices] > .decision-card-body { flex: 1 1 100%; order: 3; }
 }

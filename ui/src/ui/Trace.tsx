@@ -10,6 +10,7 @@ import type { TallyTone } from "./TallyRow";
 import { clipOutput, formatToolArgs, summarizeToolArgs } from "../toolSummary";
 import { skillLoadOf } from "../skills";
 import { ImageGallery, useReplyImages } from "./ImageGallery";
+import { RiskBadge } from "./RiskBadge";
 
 function TraceText({ live, label, detail }: { live: boolean; label: string; detail?: string }) {
   return <span className="trace-text" data-live={live || undefined}>
@@ -33,9 +34,11 @@ export function WorkingLine() {
 }
 
 /** A trace entry that opens. The body renders only while open. */
-function Disclosure({ live, label, detail, tone, className, children, riskLabel }: {
+function Disclosure({ live, label, detail, tone, className, children, riskLabel, end }: {
   live: boolean; label: string; detail?: string; tone?: "error";
   riskLabel?: RiskLabel; className?: string; children: (open: boolean) => ReactNode;
+  /** A short mark at the end of the line, such as a late risk opinion. The line keeps one row. */
+  end?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   return <details className={`trace${className ? ` ${className}` : ""}`} data-tone={tone} data-risk-label={riskLabel === undefined ? undefined : JSON.stringify(riskLabel)}
@@ -43,6 +46,7 @@ function Disclosure({ live, label, detail, tone, className, children, riskLabel 
     <summary className="trace-line">
       <span className="trace-marker" aria-hidden>{">"}</span>
       <TraceText live={live} label={label} {...(detail ? { detail } : {})} />
+      {end}
     </summary>
     <div className="trace-body">{children(open)}</div>
   </details>;
@@ -69,9 +73,13 @@ export function ToolCall({ toolCallId, toolName, args, result, isError, artifact
   Pick<ToolCallMessagePartProps, "toolCallId" | "toolName" | "args" | "result" | "isError" | "artifact">) {
   const view = toolView({ artifact, result, isError });
   const summary = summarizeToolArgs(args);
+  // A risk opinion arrives after the call: its word ends the line, and the open body says it in full.
+  const risk = isToolArtifact(artifact) ? artifact.risk : undefined;
   return <Disclosure live={isLive(view)} label={toolLabels[view]} detail={summary ? `${toolName} ${summary}` : toolName}
-    className="tool-call" {...(isToolArtifact(artifact) && artifact.riskLabel ? {riskLabel: artifact.riskLabel} : {})} {...(view === "failed" ? { tone: "error" as const } : {})}>
-    {(open) => open ? <ToolBody view={view} input={formatToolArgs(args)} output={outputText(result)}>
+    className="tool-call" {...(isToolArtifact(artifact) && artifact.riskLabel ? {riskLabel: artifact.riskLabel} : {})} {...(view === "failed" ? { tone: "error" as const } : {})}
+    {...(risk ? { end: <RiskBadge size="inline" {...risk} /> } : {})}>
+    {(open) => open ? <ToolBody view={view} input={formatToolArgs(args)} output={outputText(result)}
+      {...(risk ? { risk: <RiskBadge size="block" {...risk} /> } : {})}>
       <ToolImages toolCallId={toolCallId} />
     </ToolBody> : null}
   </Disclosure>;
@@ -85,13 +93,14 @@ function ToolImages({ toolCallId }: { toolCallId: string }) {
     label={`${images.length} ${images.length === 1 ? "image" : "images"} from this tool`} /> : null;
 }
 
-function ToolBody({ view, input, output, labels = { input: "Input", output: "Output" }, children }:
-  { view: ToolView; input: string; output: string; labels?: { input: string; output: string }; children?: ReactNode }) {
+function ToolBody({ view, input, output, labels = { input: "Input", output: "Output" }, risk, children }:
+  { view: ToolView; input: string; output: string; labels?: { input: string; output: string }; risk?: ReactNode; children?: ReactNode }) {
   const clipped = clipOutput(output);
   const empty = view === "interrupted" ? "No result. The run ended before this tool finished."
     : isLive(view) ? "Waiting for output." : "No output.";
   const outputLabel = view === "failed" ? "Error" : labels.output;
   return <>
+    {risk ? <section className="trace-section" aria-label="Risk opinion">{risk}</section> : null}
     {input ? <section className="trace-section" aria-label={labels.input}>
       <h4 className="trace-heading">{labels.input}</h4>
       <pre className="trace-pre" tabIndex={0}>{input}</pre>

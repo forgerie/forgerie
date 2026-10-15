@@ -1,0 +1,9 @@
+/* A readout, not a signal: muted ink, the reader's face, the row's meta size. It may shrink to an ellipsis
+   beside its neighbours but keeps its first letters. */
+.guess-tag { display: inline-flex; flex: 0 1 auto; min-inline-size: 3ch; max-inline-size: 100%; color: var(--muted-foreground);
+  font-family: var(--body-font); font-size: var(--meta-text); font-weight: 500; line-height: 1rem; white-space: nowrap; }
+.guess-tag[data-tone="raised"] { color: var(--foreground); font-weight: 600; }
+.guess-tag-face { display: inline-flex; align-items: center; gap: var(--space-1); min-inline-size: 0; }
+.guess-tag-face svg { flex: none; inline-size: 0.75rem; block-size: 0.75rem; }
+.guess-tag-text { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.guess-tag-said { position: absolute; inline-size: var(--hairline); block-size: var(--hairline); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

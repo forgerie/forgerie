@@ -2,6 +2,8 @@ import { ActionFooter } from "../ui/ActionFooter";
 import { CommandBlock } from "../ui/CommandBlock";
 import { DecisionCard } from "../ui/DecisionCard";
 import { Disclosure } from "../ui/Disclosure";
+import { RiskBadge } from "../ui/RiskBadge";
+import { riskWords } from "../riskLabelsModel";
 import {
   argumentsText, consequenceOf, errorText, gatedIsWaiting, gatedMeta, gatedOutcome, resultText, saysMore, shownCall, unknownOutcome,
   type GatedAction, type GatedChoice, type GatedActionEntry,
@@ -13,8 +15,9 @@ import {
  * call's short form, with every argument a step away), its category, and who
  * asked. Approve and run is the one filled choice, and the note above it says
  * what cannot be undone. In a short container the choices move up beside the
- * title. Once decided it closes to one line: running, ran (with what it
- * printed), failed (with the error), outcome unknown (a run a restart cut off,
+ * title. An outside risk opinion, when one arrives, sits right above the
+ * choices and stays once the card closes. Once decided it closes to one
+ * line: running, ran (with what it printed), failed (with the error), outcome unknown (a run a restart cut off,
  * which may have happened and never runs again), or refused. Without the choices, as in a
  * read-only transcript, it only says what became of the call.
  */
@@ -32,8 +35,9 @@ export function GatedActionCard({ entry, record, read, deciding, problem, onAppr
   onApprove?: (() => void) | undefined;
   onRefuse?: (() => void) | undefined;
 }) {
+  // An outside opinion that may arrive after the card: right above the choices, never in place of them.
   const riskLabel = record?.riskLabel ?? entry.riskLabel;
-  const meta = <span data-risk-label={riskLabel === undefined ? undefined : JSON.stringify(riskLabel)}>{gatedMeta(entry)}</span>;
+  const risk = riskLabel === undefined ? undefined : <div data-risk-label={JSON.stringify(riskLabel)}><RiskBadge size="block" {...riskWords(riskLabel)} /></div>;
   const waiting = gatedIsWaiting(record, read);
   const open = waiting && onApprove !== undefined && onRefuse !== undefined;
   const call = shownCall(entry, record);
@@ -46,8 +50,8 @@ export function GatedActionCard({ entry, record, read, deciding, problem, onAppr
   const output = printed.trim() !== "" ? <CommandBlock code={printed} label="Result" copyLabel="Copy result" lines={3} moreLabel="Show full result" />
     : unknown !== undefined && unknown.rest !== "" ? <p>{unknown.rest}</p>
     : saysMore(error) ? <CommandBlock code={error} label="Error" copyLabel="Copy error" lines={3} moreLabel="Show full error" /> : undefined;
-  return <DecisionCard title={entry.description.trim() === "" ? entry.tool : entry.description} meta={meta}
-    open={open} pinChoices problem={problem}
+  return <DecisionCard title={entry.description.trim() === "" ? entry.tool : entry.description} meta={gatedMeta(entry)}
+    open={open} annotation={risk} pinChoices problem={problem}
     closed={waiting ? "Waiting for a decision." : gatedOutcome(record)} closedTone={state?.kind === "failed" ? "bad" : undefined} closedDetail={output}
     footer={open && <ActionFooter note={deciding === "approve" ? "Approving…" : deciding === "refuse" ? "Refusing…" : undefined} actions={[
       { label: "Refuse", onPress: onRefuse, disabled: deciding !== undefined },

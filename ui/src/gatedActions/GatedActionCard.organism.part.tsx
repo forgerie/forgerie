@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GatedActionCard } from "./GatedActionCard";
 import { PinnedDock } from "../ui/PinnedDock";
 import type { GatedAction, GatedChoice, GatedActionEntry } from "./gatedActionsModel";
 import {
   PUSH, PUSH_ENTRY, PUSH_FAILED, PUSH_RAN, PUSH_REFUSED, PUSH_RUNNING, PUSH_UNKNOWN, REPLY, REPLY_ENTRY, RESET, RESET_ENTRY,
+  RISK_CHECK, RISK_DANGER, RISK_LOW,
 } from "./fixtures/gatedActions";
 
 export const name = "Gated action card";
@@ -47,4 +48,25 @@ export function Pinned() {
 /** A long command pinned: in a short container the choices still show first. */
 export function PinnedLongCommand() {
   return <PinnedDock label="1 waiting for you"><Deciding entry={RESET_ENTRY} record={RESET} /></PinnedDock>;
+}
+/** A risk opinion of low: muted and neutral, never a clearance. */
+export function RiskLow() { return <Deciding entry={PUSH_ENTRY} record={{ ...PUSH, riskLabel: RISK_LOW }} />; }
+/** A risk opinion that draws the eye, with the signal that was raised. */
+export function RiskCheck() { return <Deciding entry={REPLY_ENTRY} record={{ ...REPLY, riskLabel: RISK_CHECK }} />; }
+/** A risk opinion that warns, with every raised signal named. */
+export function RiskDanger() { return <Deciding entry={RESET_ENTRY} record={{ ...RESET, riskLabel: RISK_DANGER }} />; }
+/** The opinion arrives a moment after the card, as it does from the gateway: it fades in above the choices, which keep their place. */
+export function RiskArrives() {
+  const [record, setRecord] = useState(RESET);
+  useEffect(() => { const timer = setTimeout(() => setRecord((current) => ({ ...current, riskLabel: RISK_DANGER })), 1500); return () => clearTimeout(timer); }, []);
+  return <GatedActionCard entry={RESET_ENTRY} record={record} read
+    onApprove={() => setRecord({ ...record, state: { kind: "approved" } })} onRefuse={() => setRecord({ ...record, state: { kind: "refused" } })} />;
+}
+/** Pinned in a short container: the opinion follows the choices, so its arrival never moves them. */
+export function PinnedRiskDanger() {
+  return <PinnedDock label="1 waiting for you"><Deciding entry={RESET_ENTRY} record={{ ...RESET, riskLabel: RISK_DANGER }} /></PinnedDock>;
+}
+/** Decided: the opinion stays with the record of what happened. */
+export function RefusedWithRisk() {
+  return <GatedActionCard entry={PUSH_ENTRY} record={{ ...PUSH_REFUSED, riskLabel: RISK_CHECK }} read onApprove={() => {}} onRefuse={() => {}} />;
 }

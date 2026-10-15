@@ -1,4 +1,4 @@
-import { ArchiveIcon, ArrowLeftIcon, CalendarClockIcon, FlagIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, HashIcon, PinIcon, PinOffIcon, SearchIcon, Trash2Icon, XIcon,
+import { ArchiveIcon, ArrowLeftIcon, CalendarClockIcon, ChevronsUpIcon, FlagIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, HashIcon, PinIcon, PinOffIcon, SearchIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -13,6 +13,7 @@ import { WorktreeRowMark } from "./WorktreeChip";
 import { PullRequestRowMark } from "./PullRequestReview";
 import { FilterChip } from "./FilterChip";
 import { IconCount } from "./IconCount";
+import { GuessTag } from "./GuessTag";
 import { footerPlan, FOOTER_ALL_LABELS, FOOTER_ICONS_ONLY } from "./pickerFooter";
 
 /** What the picker draws. Built by the binding; the view does no I/O. */
@@ -102,6 +103,21 @@ const COMMAND_ICONS: Record<RowCommandKind, LucideIcon> = {
 // Same drawings as the Lit client's tabIcons.ts, so one concept has one picture.
 const AGENTS = <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2.5" /><circle cx="19" cy="6" r="2.5" /><circle cx="19" cy="18" r="2.5" /><path d="M7.5 11 16.5 6.8" /><path d="M7.5 13 16.5 17.2" /></svg>;
 const TERMINAL = <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m7 10 3 3-3 3" /><path d="M12 16h5" /></svg>;
+// What a reply seems to be, as an attention hint guessed it. Shown only while the reader has not looked.
+const KIND_WORDS: Record<NonNullable<Row["attentionKind"]>, string> = {
+  decision: "Decision", review: "Review", blocked: "Blocked", failed: "Failed", done: "Done", fyi: "FYI",
+};
+/** The hint's tag: a row the hint moved to Needs your response, or an unread or waiting row with a confident kind. */
+function attentionTag(row: Row): ReactNode {
+  if (row.state !== "blocked" && row.state !== "unread") return null;
+  const kind = row.attentionKind === undefined ? undefined : KIND_WORDS[row.attentionKind];
+  if (row.likelyNeedsYou !== true && kind === undefined) return null;
+  const high = row.urgency === "high";
+  const lead = row.likelyNeedsYou === true ? "Likely needs you" : "Hint";
+  const said = [kind === "FYI" ? kind : kind?.toLowerCase(), high ? "high urgency" : undefined].filter(Boolean).join(", ");
+  return <GuessTag text={kind ?? "Likely needs you"} label={said ? `${lead}: ${said}` : lead}
+    tone={high ? "raised" : "quiet"} icon={high ? <ChevronsUpIcon aria-hidden /> : undefined} />;
+}
 const count = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
 const menuId = (id: string) => `picker-menu-${id}`;
 
@@ -174,6 +190,7 @@ function PickerRow({ row, selected, pending, held, showPin, menuOpen, onSelect, 
     <span className="picker-time" data-live={row.working || undefined}>{row.time}</span>
     <span className="picker-sub">
       <span className="picker-where" title={session.cwd}>{location.project}{location.branch ? <> · <span className="picker-branch">{location.branch}</span></> : null}</span>
+      {attentionTag(row)}
       {session.worktree ? <WorktreeRowMark info={session.worktree} /> : null}
       {session.pullRequests?.length ? <PullRequestRowMark links={session.pullRequests} /> : null}
       {held ? <span className="picker-from-backlog" title="Holds a backlog item" aria-label="Holds a backlog item"><ListTodoIcon aria-hidden /></span> : null}

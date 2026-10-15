@@ -1,5 +1,5 @@
 import { RISK_LABEL_ENTRY_KIND, type RiskLabel } from "@shared/riskLabels";
-import { riskLabelEntryOf } from "./riskLabelsModel";
+import { riskLabelEntryOf, riskWords, type RiskWords } from "./riskLabelsModel";
 import type { CompleteAttachment, ThreadMessageLike } from "@assistant-ui/react";
 import { outputOf, partsOf, textOf, type PiMessage, type SessionEvent } from "./contracts";
 import { imageSource } from "./images";
@@ -504,8 +504,8 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
   return state.isRunning ? state : { ...state, messages: interruptOpenTools(state.messages) };
 }
 
-/** UI-only state of a tool call, carried as the part's artifact. */
-export type ToolArtifact = { state: ToolState["type"]; riskLabel?: RiskLabel; images?: readonly string[]; door?: HandoffDoor; issue?: IssueOutcome };
+/** UI-only state of a tool call, carried as the part's artifact. `risk` is a risk label in words, so the shared trace can draw it. */
+export type ToolArtifact = { state: ToolState["type"]; riskLabel?: RiskLabel; risk?: RiskWords; images?: readonly string[]; door?: HandoffDoor; issue?: IssueOutcome };
 /** The session a converted tool call created, read back from its artifact. */
 export function artifactDoor(artifact: unknown): HandoffDoor | undefined {
   if (typeof artifact !== "object" || artifact === null || !("door" in artifact)) return undefined;
@@ -604,7 +604,7 @@ function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
         case "tool": return [{
           type: "tool-call", toolCallId: part.id, toolName: part.name,
           args: isArgs(part.args) ? part.args : {},
-          artifact: { ...toolArtifact(part.state), ...(part.riskLabel ? {riskLabel: part.riskLabel} : {}) },
+          artifact: { ...toolArtifact(part.state), ...(part.riskLabel ? {riskLabel: part.riskLabel, risk: riskWords(part.riskLabel)} : {}) },
           ...toolResult(part.state),
           ...parent,
         }];

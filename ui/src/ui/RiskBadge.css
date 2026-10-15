@@ -1,0 +1,26 @@
+/* An outside opinion, not a verdict. No wash and no pill: the ink, the weight and the icon carry the level.
+   Low stays in the muted ink, so it never reads as a pass. */
+.risk-badge { --risk-ink: var(--muted-foreground); --risk-text: var(--muted-foreground);
+  color: var(--risk-text); animation: risk-badge-arrive 200ms ease-out; }
+.risk-badge[data-level="check"] { --risk-ink: var(--ink-warn); --risk-text: var(--foreground); }
+.risk-badge[data-level="danger"] { --risk-ink: var(--destructive); --risk-text: var(--foreground); }
+.risk-badge-icon { flex: none; color: var(--risk-ink); }
+.risk-badge-word { color: var(--risk-ink); font-weight: 600; }
+.risk-badge[data-level="low"] .risk-badge-word { font-weight: 500; }
+
+/* A sentence: icon on the first line, words wrapping beside it. */
+.risk-badge[data-size="block"] { display: flex; align-items: flex-start; gap: var(--space-2); min-inline-size: 0; margin: 0;
+  font-size: var(--small-text); line-height: 1.45; overflow-wrap: anywhere; }
+.risk-badge[data-size="block"] .risk-badge-icon { inline-size: 1rem; block-size: 1lh; }
+.risk-badge-text { min-inline-size: 0; }
+.risk-badge-source { display: inline-block; max-inline-size: 100%; color: var(--muted-foreground); font-size: var(--label-text); }
+
+/* The end of a one-line row: never wraps, never pushes the row taller. */
+.risk-badge[data-size="inline"] { display: inline-flex; flex: none; align-items: center; gap: var(--space-1);
+  font-family: var(--body-font); font-size: var(--label-text); line-height: 1; white-space: nowrap; }
+.risk-badge[data-size="inline"][data-level="low"] { --risk-ink: var(--faint-foreground); }
+.risk-badge[data-size="inline"] .risk-badge-icon { inline-size: 0.875rem; block-size: 0.875rem; }
+.risk-badge-said { position: absolute; inline-size: var(--hairline); block-size: var(--hairline); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@keyframes risk-badge-arrive { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .risk-badge { animation: none; } }

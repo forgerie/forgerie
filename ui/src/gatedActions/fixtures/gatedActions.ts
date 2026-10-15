@@ -1,3 +1,4 @@
+import type { RiskLabel } from "@shared/riskLabels";
 import type { GatedAction, GatedActionEntry } from "../gatedActionsModel";
 
 /** The fixtures' clock. */
@@ -89,3 +90,8 @@ export const REPLY: GatedAction = {
   id: "g:34:12", conversationId: 34, by: "child listings", tool: "ebay_seller_message_reply", args: REPLY_ARGS,
   category: "messages", description: REPLY_ENTRY.description, requestedAt: GATED_NOW - 9 * MIN, state: { kind: "waiting" },
 };
+
+/** Risk opinions as the gateway answers them. Low is an opinion, not a clearance. */
+export const RISK_LOW: RiskLabel = { model: "fast", deletes_data: 0.05, outside_worktree: 0.1, acts_as_user: 0.2, risk: "low", risk_score: 0.2 };
+export const RISK_CHECK: RiskLabel = { model: "fast", deletes_data: 0.1, outside_worktree: 0.3, acts_as_user: 0.8, risk: "check", risk_score: 1.1 };
+export const RISK_DANGER: RiskLabel = { model: "fast", deletes_data: 0.95, outside_worktree: 0.7, acts_as_user: 0.1, risk: "danger", risk_score: 1.8 };

@@ -540,3 +540,43 @@ it("exposes attention data for the design stage without adding a visual mark", (
   expect(element?.getAttribute("data-attention-kind")).toBe("review");
   expect(element?.getAttribute("data-attention-urgency")).toBe("high");
 });
+
+describe("attention hints in the list", () => {
+  const hint = { turnId: "turn-1", model: "fast", at: ago(0), likelyNeedsYou: true } as const;
+  const hinted = (statuses: Record<string, PickerStatus>, unread: string[]) => {
+    const all = rows({ sessions: Object.keys(statuses).map((id) => S(id)), statuses, activities: {}, unread: new Set(unread), locate, now: NOW });
+    render({ ...view([]), sections: sections(all, { grouping: "state", showArchived: false, now: NOW }) });
+  };
+  const row = (id: string) => host.querySelector<HTMLElement>(`[data-session="${id}"]`)!;
+  it("adds nothing to a row without hint data", () => {
+    hinted({ plain: idle, asked: { ...idle, needsResponse: true } }, ["plain"]);
+    expect(host.querySelector(".guess-tag")).toBeNull();
+    expect(host.querySelector("[data-likely-needs-you], [data-attention-kind], [data-attention-urgency]")).toBeNull();
+    expect([...host.querySelectorAll(".picker-sub")].map((sub) => sub.textContent)).toEqual(["forgerie", "forgerie"]);
+  });
+  it("marks a promoted row as a guess, apart from a row the agent marked as waiting", () => {
+    hinted({ guessed: { ...idle, attentionHint: { ...hint, kind: "review", urgency: "high" } }, bare: { ...idle, attentionHint: hint },
+      asked: { ...idle, needsResponse: true } }, ["guessed", "bare"]);
+    expect(row("guessed").dataset["state"]).toBe("blocked");
+    expect(row("guessed").hasAttribute("data-likely-needs-you")).toBe(true);
+    expect(row("asked").hasAttribute("data-likely-needs-you")).toBe(false);
+    expect(row("asked").querySelector(".guess-tag")).toBeNull();
+    const tag = row("guessed").querySelector<HTMLElement>(".guess-tag")!;
+    expect(tag.querySelector(".guess-tag-face")?.textContent).toBe("Review");
+    expect(tag.querySelector(".guess-tag-said")?.textContent).toBe("Likely needs you: review, high urgency");
+    expect(tag.getAttribute("title")).toBe("Likely needs you: review, high urgency");
+    expect(tag.dataset["tone"]).toBe("raised");
+    // The row's accessible text carries the statement once, not the shown word again.
+    expect(tag.querySelector(".guess-tag-face")?.getAttribute("aria-hidden")).toBe("true");
+    const bare = row("bare").querySelector<HTMLElement>(".guess-tag")!;
+    expect(bare.querySelector(".guess-tag-face")?.textContent).toBe("Likely needs you");
+    expect(bare.dataset["tone"]).toBe("quiet");
+  });
+  it("names a confident kind on an unread row, and drops it once the reply was read", () => {
+    hinted({ fresh: { ...idle, attentionHint: { ...hint, likelyNeedsYou: false, kind: "fyi" } },
+      seen: { ...idle, attentionHint: { ...hint, likelyNeedsYou: false, kind: "done" } } }, ["fresh"]);
+    expect(row("fresh").querySelector(".guess-tag-said")?.textContent).toBe("Hint: FYI");
+    expect(row("fresh").querySelector(".guess-tag-face")?.textContent).toBe("FYI");
+    expect(row("seen").querySelector(".guess-tag")).toBeNull();
+  });
+});

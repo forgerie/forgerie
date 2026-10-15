@@ -1,7 +1,7 @@
 import { SettingsInput } from "./SettingsInput";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ChevronLeftIcon, EllipsisIcon, PlusIcon, RefreshCwIcon, RotateCwIcon, Trash2Icon, XIcon } from "lucide-react";
-import { createPluginsApi, type PluginsApi } from "../../plugins/pluginsApi";
+import { createPluginsApi, createRuntimeApi, GATEWAY_KEY_PLUGIN, type GatewayKey, type PluginsApi, type RuntimeApi } from "../../plugins/pluginsApi";
 import type { ManagedPlugin, PluginCatalog, PluginChange } from "@shared/pluginsContract";
 import type { AppSettingDef, AppSettings } from "@shared/appPlugins";
 import { SettingsFrame } from "./SettingsFrame";
@@ -15,6 +15,14 @@ import "./settings.css";
 import "./plugins.css";
 
 const liveApi = createPluginsApi((path, init) => fetch(path, init));
+const liveRuntime = createRuntimeApi((path, init) => fetch(path, init));
+/** The gateway key's presence in words. The key itself never reaches the browser. */
+const KEY_WORDS: Record<GatewayKey | "checking", { value: string; hint?: ReactNode }> = {
+  checking: { value: "Checking…" },
+  present: { value: "Present", hint: "Sessiond has it. Forgerie never shows the key." },
+  missing: { value: "Not set", hint: <>Set <code>DECISION_GATEWAY_API_KEY</code> in sessiond's environment, then restart sessiond.</> },
+  unknown: { value: "Unknown", hint: "Sessiond did not report it. Check that sessiond is running." },
+};
 type Load = { type: "loading" } | { type: "ready"; value: PluginCatalog } | { type: "failed"; message: string };
 /** Progress and outcome words for the header, e.g. "Installing…" then "Installed". */
 type Phase = { type: "idle" } | { type: "busy"; label: string } | { type: "done"; label: string } | { type: "failed"; message: string };
@@ -34,8 +42,10 @@ function origin(plugin: ManagedPlugin, home: string): string {
 }
 
 /** Binding: one data edge for the list, selected plugin, mutations, and confirmations. */
-export function PluginsView({ selected, onOpen, onBack, onClose, onCatalog, api = liveApi }: {
+export function PluginsView({ selected, onOpen, onBack, onClose, onCatalog, api = liveApi, runtime = liveRuntime }: {
   selected?: string | undefined; onOpen: (id: string | undefined) => void; onBack: () => void; onClose?: (() => void) | undefined; api?: PluginsApi;
+  /** Reads whether sessiond has a plugin's gateway key, for the plugin that needs one. */
+  runtime?: RuntimeApi;
   /** Every catalog this page reads or saves, so the app's own plugins follow a change at once. */
   onCatalog?: ((catalog: PluginCatalog) => void) | undefined;
 }) {
@@ -74,6 +84,19 @@ export function PluginsView({ selected, onOpen, onBack, onClose, onCatalog, api 
       .catch((error: unknown) => { if (!controller.signal.aborted) setReadme({ id: readmeId, load: { type: "failed", message: errorText(error) } }); });
     return () => controller.abort();
   }, [api, readmeId]);
+  // Whether sessiond has the gateway key, read each time its plugin opens. Only presence is read.
+  const keyed = plugin?.id === GATEWAY_KEY_PLUGIN;
+  const [gatewayKey, setGatewayKey] = useState<GatewayKey | "checking">("checking");
+  useEffect(() => {
+    if (!keyed) return;
+    const controller = new AbortController();
+    setGatewayKey("checking");
+    runtime.gatewayKey(controller.signal).then((value) => { if (!controller.signal.aborted) setGatewayKey(value); })
+      .catch(() => { if (!controller.signal.aborted) setGatewayKey("unknown"); });
+    return () => controller.abort();
+  }, [runtime, keyed]);
+  const keyField = keyed ? <SettingsField key="gateway-key" label="Gateway key" hint={KEY_WORDS[gatewayKey].hint}>
+    <span className="plugin-value">{KEY_WORDS[gatewayKey].value}</span></SettingsField> : null;
   const { setOpen: setMenuOpen } = menu;
   useEffect(() => { setMenuOpen(false); setRemoving(false); setTyped({}); }, [selected, setMenuOpen]);
   const busy = phase.type === "busy";
@@ -158,8 +181,11 @@ export function PluginsView({ selected, onOpen, onBack, onClose, onCatalog, api 
       onToggle={(enabled) => void change({ type: "toggle", id: plugin.id, enabled })}>
       {fields && fields.length > 0 && appValues ? <form id="app-plugin-settings" className="plugin-settings" onSubmit={(event) => { event.preventDefault(); save(); }}>
         <h2 className="agent-section">Settings</h2>
-        <div className="agent-properties plugin-fields">{fields.map((def) => fieldOf(def, appValues, typed, busy, setSwitch,
-          (id, text) => setTyped((current) => ({ ...current, [id]: text }))))}</div>
+        <div className="agent-properties plugin-fields">{fields.flatMap((def) => {
+          const field = fieldOf(def, appValues, typed, busy, setSwitch, (id, text) => setTyped((current) => ({ ...current, [id]: text })));
+          // The key's presence sits under the gateway address it goes with.
+          return def.type === "url" && keyField ? [field, keyField] : [field];
+        })}</div>
       </form> : null}
       {readmeId && readme?.id === readmeId ? <PluginReadme load={readme.load} name={plainName(plugin)} packageName={plugin.name} /> : null}
     </PluginDetail> : null}

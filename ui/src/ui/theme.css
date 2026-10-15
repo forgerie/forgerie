@@ -946,6 +946,8 @@ summary.trace-line:hover { color: var(--foreground); }
 .picker-row[data-state="errored"] .picker-mark i { display: block; background: var(--destructive); }
 .picker-row[data-state="working"] .picker-mark i { display: block; border: 1.5px solid var(--live); animation: picker-pulse 1.6s ease-in-out infinite; }
 .picker-row[data-state="unread"] .picker-mark i { display: block; background: var(--foreground); }
+/* Moved here by an attention hint, not asked by the agent: the same square, hollow. A guess never looks like a request. */
+.picker-row[data-likely-needs-you] .picker-mark i { border: calc(var(--hairline) * 1.5) solid var(--foreground); background: transparent; }
 @keyframes picker-pulse { 50% { opacity: 0.35; } }
 /* The homepage keeps titles muted until active, which works for one-line rows.
    With a muted second line under each, a muted title left every row two grey

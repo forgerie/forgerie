@@ -23,9 +23,14 @@ import "./DecisionCard.css";
  * the choices move up beside the title, a failed choice's reason
  * follows them, and the body comes after, so a short dock shows the choices
  * first and scrolls to the rest.
+ *
+ * An `annotation` is a late fact about the subject, such as an outside opinion
+ * that arrives after the card is shown. It sits right above the choices (after
+ * them while they are pinned beside the title) and fades in. Its arrival moves
+ * the scroll as a failed choice's reason does, so the choices stay where they were.
  */
 export function DecisionCard({ title, meta, open, closed, closedTone, closedHref, closedDetail, problem, focusClosed = false, pinChoices = false,
-  children, footer, action }: {
+  children, footer, action, annotation }: {
   title: string;
   /** A short fact about the subject, such as the file it concerns: at the end of the title line, or under the title when they do not fit together. */
   meta?: ReactNode;
@@ -53,6 +58,8 @@ export function DecisionCard({ title, meta, open, closed, closedTone, closedHref
   footer?: ReactNode;
   /** The card's one action while open, which opens where the decision is made. It stays in view in a short container. */
   action?: { label: string; onPress: () => void } | undefined;
+  /** A fact that may arrive late, such as an outside opinion. Absent, the card draws nothing for it. */
+  annotation?: ReactNode;
 }) {
   const card = useRef<HTMLElement>(null);
   const choices = useRef<HTMLDivElement>(null);
@@ -66,6 +73,7 @@ export function DecisionCard({ title, meta, open, closed, closedTone, closedHref
     wasOpen.current = open;
   }, [open, focusClosed]);
   const shown = open ? problem : undefined;
+  const annotated = annotation !== undefined && annotation !== null && annotation !== false;
   useLayoutEffect(() => {
     const frame = card.current;
     const element = choices.current;
@@ -88,13 +96,14 @@ export function DecisionCard({ title, meta, open, closed, closedTone, closedHref
     const observer = new ResizeObserver(() => { choicesAt.current = at(); });
     observer.observe(frame);
     return () => { observer.disconnect(); };
-  }, [shown]);
+  }, [shown, annotated]);
   return <section className="decision-card" ref={card} data-open={open || undefined} data-pin-choices={pinChoices || undefined} aria-label={title}>
     <header className="decision-card-head">
       <span className="decision-card-title">{title}</span>
       {meta !== undefined && <span className="decision-card-meta">{meta}</span>}
     </header>
     {children !== undefined && <div className="decision-card-body">{children}</div>}
+    {annotated && <div className="decision-card-annotation">{annotation}</div>}
     {shown !== undefined && <p className="decision-card-problem" role="alert">
       <CircleAlertIcon className="decision-card-problem-mark" aria-hidden />{shown}
     </p>}

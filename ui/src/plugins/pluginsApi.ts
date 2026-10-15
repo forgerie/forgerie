@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Fetch } from "../newSession";
 import { catalogSchema, readmeSchema, type PluginCatalog, type PluginChange, type PluginReadme } from "@shared/pluginsContract";
+import { parsePiWebRuntimeResponse } from "@shared/piWebStatusParsing";
 
 export interface RestartWait {
   /** How long to wait for Forgerie to stop, then to answer again. */
@@ -54,3 +55,20 @@ export function createPluginsApi(fetchFn: Fetch, wait: RestartWait = restartWait
   };
 }
 export type PluginsApi = ReturnType<typeof createPluginsApi>;
+
+/** The plugin whose gateway key lives in sessiond's environment. Settings shows whether the key is present, never the key. */
+export const GATEWAY_KEY_PLUGIN = "app:decision-hints";
+/** Whether sessiond has a gateway key: `present`, `missing`, or `unknown` when sessiond is down or does not say. */
+export type GatewayKey = "present" | "missing" | "unknown";
+export function createRuntimeApi(fetchFn: Fetch) {
+  return {
+    async gatewayKey(signal?: AbortSignal): Promise<GatewayKey> {
+      const response = await fetchFn("/api/pi-web/runtime", { cache: "no-store", ...(signal ? { signal } : {}) });
+      if (!response.ok) return "unknown";
+      const sessiond = parsePiWebRuntimeResponse(await response.json())?.components.sessiond;
+      const hints = sessiond?.available === true ? sessiond.decisionHints : undefined;
+      return hints === undefined ? "unknown" : hints.keyPresent ? "present" : "missing";
+    },
+  };
+}
+export type RuntimeApi = ReturnType<typeof createRuntimeApi>;

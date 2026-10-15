@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginsView, plainName, tildify } from "./PluginsView";
-import type { PluginsApi } from "../../plugins/pluginsApi";
+import { createRuntimeApi, type GatewayKey, type PluginsApi, type RuntimeApi } from "../../plugins/pluginsApi";
 import type { PluginCatalog, PluginChange, PluginReadme } from "@shared/pluginsContract";
 import { resolveAppSettings } from "@shared/appPlugins";
 import { accountMetersManifest, decisionHintsManifest } from "@shared/appPluginManifests";
@@ -16,11 +16,15 @@ let selected: string | undefined;
 let api: PluginsApi;
 let readme: PluginReadme;
 let readmeReads: string[];
+let gatewayKey: GatewayKey;
+let runtimeFails = false;
+let keyReads: number;
+const runtime: RuntimeApi = { gatewayKey: async () => { keyReads += 1; if (runtimeFails) throw new Error("sessiond is unavailable"); return gatewayKey; } };
 const settle = () => act(async () => { for (let index = 0; index < 6; index++) await new Promise((resolve) => setTimeout(resolve, 0)); });
 const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent?.trim() === text || node.getAttribute("aria-label") === text)!;
 const click = async (text: string) => { const node = button(text); expect(node, text).toBeDefined(); await act(async () => node.click()); await settle(); };
 const command = async (text: string) => { await click("Plugin commands"); await click(text); };
-async function render() { await act(async () => root.render(<PluginsView selected={selected} api={api} onOpen={(id) => { selected = id; }} onBack={() => {}} />)); await settle(); }
+async function render() { await act(async () => root.render(<PluginsView selected={selected} api={api} runtime={runtime} onOpen={(id) => { selected = id; }} onBack={() => {}} />)); await settle(); }
 async function type(selector: string, text: string) {
   const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!;
   const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -52,6 +56,7 @@ beforeEach(() => {
   };
   readmeReads = [];
   readme = { text: null, truncated: false };
+  gatewayKey = "present"; keyReads = 0; runtimeFails = false;
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
@@ -184,7 +189,7 @@ describe("Plugins settings", () => {
   it("draws an app plugin's settings as a form: switches save at once, an address waits for Save", async () => {
     const seen: PluginCatalog[] = [];
     selected = "app:cliproxyapi-quota";
-    await act(async () => root.render(<PluginsView selected={selected} api={api} onOpen={() => {}} onBack={() => {}} onCatalog={(value) => seen.push(value)} />)); await settle();
+    await act(async () => root.render(<PluginsView selected={selected} api={api} runtime={runtime} onOpen={() => {}} onBack={() => {}} onCatalog={(value) => seen.push(value)} />)); await settle();
     expect(document.querySelector("h2.agent-name")!.textContent).toBe("Account meters");
     expect(button("Five-hour window").getAttribute("aria-checked")).toBe("false");
     await click("Seven-day window");
@@ -223,5 +228,48 @@ describe("Plugins settings", () => {
     api = { ...api, list: async () => { if (fail) throw new Error("sessiond is unavailable"); return catalog; } };
     await render(); expect(document.body.textContent).toContain("sessiond is unavailable");
     fail = false; await click("Retry"); expect(document.body.textContent).toContain("Pi packages");
+  });
+});
+
+describe("the gateway key's presence", () => {
+  const hints = () => ({ id: "app:decision-hints", kind: "app" as const, name: "Decision hints", source: "Forgerie", description: decisionHintsManifest.description,
+    enabled: true, settings: resolveAppSettings(decisionHintsManifest, undefined), fields: [...decisionHintsManifest.settings] });
+  const field = () => [...document.querySelectorAll(".agent-field")].find((node) => node.querySelector(".agent-field-label")?.textContent === "Gateway key");
+  it("shows nothing new for a plugin without a gateway key, and reads nothing", async () => {
+    selected = "app:cliproxyapi-quota"; await render();
+    expect(field()).toBeUndefined();
+    expect(document.body.textContent).not.toContain("DECISION_GATEWAY_API_KEY");
+    expect(keyReads).toBe(0);
+  });
+  it("says the key is present under the gateway address, never the key", async () => {
+    catalog.plugins.push(hints()); selected = "app:decision-hints"; await render();
+    expect(field()?.querySelector(".agent-field-value")?.textContent).toBe("Present");
+    expect(field()?.previousElementSibling?.querySelector(".agent-field-label")?.textContent).toBe("Gateway address");
+    expect(field()?.textContent).not.toContain("DECISION_GATEWAY_API_KEY");
+    expect(document.querySelector("input[type=password]")).toBeNull();
+  });
+  it("says how to set a missing key for sessiond, in one line", async () => {
+    gatewayKey = "missing"; catalog.plugins.push(hints()); selected = "app:decision-hints"; await render();
+    expect(field()?.querySelector(".agent-field-value")?.textContent).toBe("Not set");
+    expect(field()?.querySelector(".agent-field-hint")?.textContent).toBe("Set DECISION_GATEWAY_API_KEY in sessiond's environment, then restart sessiond.");
+    expect(field()?.querySelector(".agent-field-hint code")?.textContent).toBe("DECISION_GATEWAY_API_KEY");
+  });
+  it("says unknown when sessiond does not answer", async () => {
+    runtimeFails = true; catalog.plugins.push(hints()); selected = "app:decision-hints"; await render();
+    expect(field()?.querySelector(".agent-field-value")?.textContent).toBe("Unknown");
+  });
+});
+
+describe("the runtime read", () => {
+  const sessiond = (extra: object) => ({ component: "sessiond", label: "Session daemon", available: true, capabilities: [], ...extra });
+  const response = (body: unknown, ok = true) => async () => new Response(JSON.stringify(body), { status: ok ? 200 : 503 });
+  const runtimeOf = (decisionHints?: object, available = true) => ({ packageName: "forgerie", generatedAt: "2026-10-14T12:00:00Z", capabilities: [],
+    components: { web: { component: "web", label: "Web/UI", available: true, capabilities: [] }, sessiond: sessiond({ available, ...(decisionHints ? { decisionHints } : {}) }) } });
+  it("reads only the key's presence from sessiond's status", async () => {
+    expect(await createRuntimeApi(response(runtimeOf({ keyPresent: true }))).gatewayKey()).toBe("present");
+    expect(await createRuntimeApi(response(runtimeOf({ keyPresent: false }))).gatewayKey()).toBe("missing");
+    expect(await createRuntimeApi(response(runtimeOf())).gatewayKey()).toBe("unknown");
+    expect(await createRuntimeApi(response(runtimeOf({ keyPresent: true }, false))).gatewayKey()).toBe("unknown");
+    expect(await createRuntimeApi(response({ error: "down" }, false)).gatewayKey()).toBe("unknown");
   });
 });
