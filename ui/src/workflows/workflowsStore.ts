@@ -133,6 +133,8 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
     /** Closes a proposal with what the reader wants changed; the agent proposes again. */
     askProposalChanges: (id: string, note: string) => decideProposal(id, "changes", { note }, workflowProposalSchema, withProposal),
     dismissProposal: (id: string) => decideProposal(id, "dismiss", {}, workflowProposalSchema, withProposal),
+    /** Has the agent follow the plan itself in this session, with the reader's inputs and no workers. */
+    doProposalHere: (id: string, inputs: WorkflowInputs) => decideProposal(id, "here", { inputs }, workflowProposalSchema, withProposal),
     async readSaved() {
       const session = ref();
       if (!session) return;
@@ -188,7 +190,7 @@ export function createWorkflowsStore(request: Request, ref: () => SessionRef | u
       }
     },
     /**
-     * Moves one worker of a running workflow to another model, or to the session's with null. It applies from the
+     * Moves one worker of a running workflow to another model, or back to its default with null: the agent file's model, else the session's. It applies from the
      * worker's next spawn or next message, never to a turn in progress. Resolves true once the server stored it.
      */
     async setWorkerModel(runId: string, worker: string, model: string | null): Promise<boolean> {

@@ -74,6 +74,7 @@ let modelWork: (() => Promise<void>) | undefined;
 const modelRequests: { name: string; model: string; phase: string }[] = [];
 let proposalInputs: Record<string, string | boolean | number> = {};
 let proposalName = "task-plan";
+let proposalBasis: JsonObject = { kind: "new", reason: "No saved workflow fits." };
 let proposalSummary = "Build and review this task.";
 const proposalErrors: string[] = [];
 const errors: unknown[] = [];
@@ -112,8 +113,9 @@ const route: FauxResponseFactory = (context, options, _state, model) => {
   const isStaged = textOf(workflow?.content).includes("WORKFLOW-STAGED");
   if (last?.role === "user" && (said === "PROPOSE" || said.includes("asked for changes to the proposal"))) {
     if (said.includes("asked for changes to the proposal")) proposalChanges++;
-    return call("propose_workflow", { name: proposalName, summary: proposalSummary, text: proposalText, inputs: proposalInputs });
+    return call("propose_workflow", { name: proposalName, summary: proposalSummary, text: proposalText, inputs: proposalInputs, basis: proposalBasis });
   }
+  if (last?.role === "user" && said.startsWith("LIST-SAVED")) return call("saved_workflows", said === "LIST-SAVED" ? {} : { name: said.slice("LIST-SAVED ".length) });
   if (last?.role === "user" && said === "BUSY") return call("bash", { command: "sleep 1" });
   if (last?.role === "toolResult" && last.isError && context.messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content) === "PROPOSE")) proposalErrors.push(said);
   const commits = context.messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content).startsWith("CHILD-COMMIT"));
@@ -165,7 +167,7 @@ function runBody(value: unknown): WorkflowRun {
   return value;
 }
 beforeEach(async () => {
-  proposalText = staged; proposalChanges = 0; proposalErrors.length = 0; proposalInputs = {}; proposalName = "task-plan"; proposalSummary = "Build and review this task.";
+  proposalText = staged; proposalChanges = 0; proposalErrors.length = 0; proposalInputs = {}; proposalName = "task-plan"; proposalSummary = "Build and review this task."; proposalBasis = { kind: "new", reason: "No saved workflow fits." };
   modelAgent = undefined; modelArgument = "faux/faux-1"; modelThinking.length = 0; modelWork = undefined; modelRequests.length = 0;
   errors.length = 0; started = 0; sequence = 0; autoComplete = false; worktrees = undefined; isolate = false;
   root = await mkdtemp(join(tmpdir(), "forgerie-workflow-runs-"));
@@ -274,7 +276,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       }
       await until(async () => (await service.workflowRuns(ref))[0]?.stops?.["contract"]?.state === "waiting" && !(await service.status(ref)).isStreaming);
       const messages = (await service.messages(ref)).messages;
-      expect(messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content).includes(`model ${model ?? "session default"}`))).toBe(true);
+      expect(messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content).includes(`model ${model ?? "from its agent file"}`))).toBe(true);
       const modelUrl = `/sessions/${ref.id}/workflow-runs/${run.id}/workers/alpha/model`;
       for (const model of ["bad", "provider/", "provider/id:", "provider/id:bogus", "provider/id:HIGH", 1, {}]) {
         expect((await server.inject({ method: "POST", url: modelUrl, payload: { cwd: root, model } })).statusCode).toBe(400);
@@ -299,7 +301,8 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     } finally { await server.close(); }
   });
 
-  it.each(["session", "agent file"] as const)("applies runtime models at the next spawn/send, preserves a busy turn, and resets to the session with a %s profile", async (fallback) => {
+  it.each(["session", "agent file"] as const)("applies runtime models at the next spawn/send, preserves a busy turn, and resets to the agent file's model, else the session's, with a %s profile", async (fallback) => {
+    const reset = fallback === "agent file" ? { model: "faux-declared", thinking: "high" } : { model: "faux-1", thinking: "low" };
     if (fallback === "agent file") {
       await mkdir(join(agentDir, "agents"));
       await writeFile(join(agentDir, "agents/model-agent.md"), "---\nname: model-agent\ndescription: Model test\ntools: work\nmodel: faux/faux-declared\nthinking: high\n---\nDo the task.");
@@ -349,16 +352,16 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       await change("alpha", null);
       await ask("MODEL-SEND-alpha");
       await until(() => Promise.resolve(started === 3));
-      expect(modelRequests.at(-1)).toMatchObject({ name: "alpha", model: "faux-1", phase: "user" });
-      expect(modelThinking.at(-1)).toBe("low");
+      expect(modelRequests.at(-1)).toMatchObject({ name: "alpha", model: reset.model, phase: "user" });
+      expect(modelThinking.at(-1)).toBe(reset.thinking);
       releaseWork?.();
       await settled(3);
       // Null at spawn ignores the coordinating agent's explicit model argument too.
       await change("beta", null);
       await ask("MODEL-SPAWN-beta");
       await until(() => Promise.resolve(started === 4));
-      expect(modelRequests.at(-1)).toMatchObject({ name: "beta", model: "faux-1" });
-      expect(modelThinking.at(-1)).toBe("low");
+      expect(modelRequests.at(-1)).toMatchObject({ name: "beta", model: reset.model });
+      expect(modelThinking.at(-1)).toBe(reset.thinking);
       releaseWork?.();
       await settled(4);
       if (fallback === "agent file") {
@@ -429,8 +432,9 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       await change(null);
       await message("MODEL-TURN-alpha");
       await until(() => Promise.resolve(started === 5));
-      expect(modelRequests.at(-1)?.model).toBe("faux-1");
-      expect(modelThinking.at(-1)).toBe("low");
+      // Null restores the agent file's model, else the session's.
+      expect(modelRequests.at(-1)?.model).toBe(agentFile ? "faux-declared" : "faux-1");
+      expect(modelThinking.at(-1)).toBe(agentFile ? "high" : "low");
       releaseWork?.(); await idle();
     } finally { releaseWork?.(); await server.close(); }
   }, 20000);
@@ -799,6 +803,54 @@ describe("temporary workflow proposals through Durable sessions and HTTP", () =>
       expect(proposalChanges).toBe(1);
       expect((await server.inject({ method: "POST", url: `/sessions/${ref.id}/workflow-proposals/${second.id}/dismiss`, payload: { cwd: root } })).statusCode).toBe(409);
     } finally { await server.close(); }
+  });
+
+  it("has the agent do an open proposal here once, with the plan and inputs, and without a run", async () => {
+    const server = app();
+    try {
+      const ref = { id: (await service.start(root)).id, cwd: root };
+      const first = await propose(ref);
+      const url = `/sessions/${ref.id}/workflow-proposals/${first.id}/here`;
+      expect((await server.inject({ method: "POST", url, payload: { cwd: root } })).statusCode).toBe(400);
+      expect((await server.inject({ method: "POST", url, payload: { cwd: root, inputs: { extra: 1 } } })).statusCode).toBe(400);
+      const response = await server.inject({ method: "POST", url, payload: { cwd: root, inputs: {} } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ id: first.id, state: { kind: "here" } });
+      expect((await server.inject({ method: "POST", url, payload: { cwd: root, inputs: {} } })).statusCode).toBe(409);
+      await until(async () => !(await service.status(ref)).isStreaming && ((await service.status(ref)).waitingOnYou ?? 0) === 0);
+      const delivered = (await service.messages(ref)).messages.flatMap((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message)
+        && textOf(message.content).includes("chose to do this plan here") ? [textOf(message.content)] : []);
+      expect(delivered).toHaveLength(1);
+      const text = delivered[0] ?? "";
+      expect(text).toContain("Do not start or message child agents");
+      expect(text).toContain("At each stop (Contract, Land), ask the user in your reply");
+      expect(text).toContain("WORKFLOW-STAGED");
+      expect(await service.workflowRuns(ref)).toEqual([]);
+    } finally { await server.close(); }
+  });
+
+  it("shows the agent the saved workflows and refuses a basis that names none of them", async () => {
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+    const results = async () => (await service.messages(ref)).messages.filter((message) => Check(Type.Object({ role: Type.Literal("toolResult"), toolName: Type.Literal("saved_workflows"), content: Type.Unknown() }), message));
+    const toolText = async (prompt: string) => {
+      const before = (await results()).length;
+      await service.prompt(ref, prompt);
+      await until(async () => (await results()).length > before && !(await service.status(ref)).isStreaming);
+      return textOf((await results()).at(-1)?.content);
+    };
+    const listing = await toolText("LIST-SAVED");
+    expect(listing).toContain("- staged: A staged experiment");
+    expect(listing).toContain("Route: Contract [stop: approve] -> Build (alpha: nobody-checks-this) -> Land [stop: land]");
+    expect(await toolText("LIST-SAVED staged")).toContain("WORKFLOW-STAGED");
+    proposalBasis = { kind: "saved", name: "missing", changes: "None" };
+    await service.prompt(ref, "PROPOSE");
+    await until(async () => !(await service.status(ref)).isStreaming && proposalErrors.length > 0);
+    expect(proposalErrors).toContainEqual(expect.stringContaining("No saved workflow named missing. Saved: staged."));
+    expect(await service.workflowProposals(ref)).toEqual([]);
+    proposalBasis = { kind: "saved", name: "staged", changes: "Adds this task's instructions." };
+    const proposal = await propose(ref);
+    expect(proposal.basis).toEqual({ kind: "saved", name: "staged", changes: "Adds this task's instructions." });
   });
 
   it("lists no proposals for a session without Durable workflow hosting while POST still refuses", async () => {

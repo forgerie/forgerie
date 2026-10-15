@@ -86,11 +86,14 @@ function transientChildError(detail: string): boolean {
   return !PERMANENT_CHILD_ERROR.test(detail) && TRANSIENT_CHILD_ERROR.test(detail);
 }
 
-/** Workflow declaration > requested > agent file. Null ignores both; a thinking suffix overrides agent-file thinking. */
-function workflowWorkerModelChoice(declared: string | null | undefined, requested?: string, profile?: ChildAgentProfile): {
+/**
+ * Workflow declaration > requested > agent file > the session's. Null is the user's choice of the default: the agent
+ * file's model, and the agent's request is ignored. A thinking suffix overrides agent-file thinking.
+ */
+function workflowWorkerModelChoice(declared: string | null | undefined, requested?: string, profile?: Pick<ChildAgentProfile, "model" | "thinkingLevel">): {
   spec: string | undefined; choice: { model: { provider: string; modelId: string } | undefined; thinkingLevel: ThinkingLevel | undefined } | null;
 } {
-  if (declared === null) return { spec: undefined, choice: { model: undefined, thinkingLevel: undefined } };
+  if (declared === null) return { spec: undefined, choice: { model: profile?.model, thinkingLevel: profile?.thinkingLevel } };
   const spec = declared ?? requested;
   const parsed = spec === undefined ? undefined : modelChoice(spec);
   return { spec, choice: parsed === null ? null : {
@@ -104,7 +107,7 @@ async function applyWorkflowWorkerModel(tx: Tx, parentId: ConversationId, childI
   const declared = await workflowWorkerModel(tx, parentId, name);
   if (declared === undefined) return undefined;
   const record = (await tx.doc(Children, parentId)).agents[name];
-  const profile = declared === null || record?.agent == null ? undefined : await catalog?.find(record.agent);
+  const profile = record?.agent == null ? undefined : await catalog?.find(record.agent);
   const { choice } = workflowWorkerModelChoice(declared, undefined, profile);
   if (choice === null) throw new WorkflowError(400, `Invalid workflow model for ${name}: ${declared ?? "default"}`);
   const parent = await tx.doc(AgentDoc, parentId);
@@ -421,7 +424,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         agent: Type.Optional(Type.String({ description: "Agent file name for spawn." })),
         isolation: Type.Optional(Type.Union([Type.Literal("shared"), Type.Literal("worktree")], { description: "Working directory for spawn. Default worktree for writers and general helpers, shared for read-only agents." })),
         allowMissingTools: Type.Optional(Type.Boolean({ description: "Spawn despite unavailable tools named by the agent file. Default false." })),
-        model: Type.Optional(Type.String({ description: "Model for spawn as provider/model-id, optionally with :thinking-level. Overrides the agent file." })),
+        model: Type.Optional(Type.String({ description: "Model for spawn as provider/model-id, optionally with :thinking-level. Omit it: the child then runs on its agent file's model. Set it only when the user asks for a model, or after the agent file's model failed. It overrides the agent file." })),
       }),
       Type.Object({ action: Type.Literal("answer"), name: Type.String({ minLength: 1 }), questionId: Type.String({ minLength: 1 }), answer: Type.String({ minLength: 1, maxLength: 65536 }), reason: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
       Type.Object({ action: Type.Literal("escalate"), questionId: Type.String({ minLength: 1 }), kind: Type.Union([Type.Literal("irreversible"), Type.Literal("external"), Type.Literal("contradicts"), Type.Literal("stuck")]), guess: Type.String({ minLength: 1, maxLength: 65536 }), why: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),

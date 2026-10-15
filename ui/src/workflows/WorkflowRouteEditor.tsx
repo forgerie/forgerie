@@ -56,7 +56,7 @@ export function WorkflowRouteEditor({ original, stages, onChange, editable, edit
           key: worker.name, name: worker.name, kind: worker.agent ?? HELPER, tones: ["faint"], blocksLabel: "Not started", added: proposed === undefined,
           edited: proposed !== undefined && proposed.model !== worker.model,
           remove: edit ? { label: `Remove worker ${worker.name}`, onPress: () => onChange(removeWorker(stages, stage.id, worker.name)) } : undefined,
-          control: <WorkerModelPicker worker={worker.name} model={worker.model} models={models} disabled={disabled}
+          control: <WorkerModelPicker worker={worker.name} agent={worker.agent} model={worker.model} models={models} disabled={disabled}
             reset={proposed === undefined ? undefined : { to: proposed.model, label: resetLabel }}
             onChange={(model) => onChange(setWorkerModel(stages, worker.name, model))} />,
         };

@@ -58,7 +58,7 @@ export function WorkflowRunView({ run, looks, record, models, deciding = false, 
   onSteer: (conversationId: number, text: string) => Promise<void>;
   onStopWorker: (conversationId: number) => void;
   onDismissRecordError: () => void;
-  /** Resolves true once the server stored the model. Null: the session's model. */
+  /** Resolves true once the server stored the model. Null: the default, its agent file's model, else the session's. */
   onModel: (worker: string, model: string | null) => Promise<boolean>;
   onClose: () => void;
 }) {

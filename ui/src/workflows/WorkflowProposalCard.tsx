@@ -1,7 +1,7 @@
 import { ActionFooter } from "../ui/ActionFooter";
 import { DecisionCard } from "../ui/DecisionCard";
 import { MarkdownFragment } from "../ui/MarkdownFragment";
-import { proposalGlance, proposalIsOpen, proposalOutcome, type ProposalEntry, type WorkflowProposal } from "./workflowsModel";
+import { proposalGlance, proposalIsOpen, proposalKicker, proposalOutcome, type ProposalEntry, type WorkflowProposal } from "./workflowsModel";
 
 /**
  * Shape: a workflow the agent proposes for the current task, in the thread.
@@ -22,7 +22,7 @@ export function WorkflowProposalCard({ entry, proposal, read, onReview }: {
 }) {
   const waiting = proposalIsOpen(proposal, read);
   const open = waiting && onReview !== undefined;
-  return <DecisionCard title={entry.name} meta="Proposed workflow" open={open}
+  return <DecisionCard title={entry.name} meta={proposalKicker(proposal?.basis ?? entry.basis)} open={open}
     closed={waiting ? "Waiting for a decision." : proposalOutcome(proposal)}
     // Review is the card's one action: in a short container the card compacts to its title line and Review, and the sheet keeps the rest.
     action={open ? { label: "Review", onPress: onReview } : undefined}

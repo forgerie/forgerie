@@ -8,7 +8,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { AssistantEntry, createRegistry, defineExtension, ToolTask, wrapTool, type TaskId } from "@earendil-works/pi-durable";
+import { AssistantEntry, createRegistry, defineExtension, ToolTask, wrapTool, type JsonObject, type TaskId } from "@earendil-works/pi-durable";
 import { afterEach, expect, it, vi } from "vitest";
 import { SessionWorktreeStore } from "../workspaces/sessionWorktreeStore.js";
 import { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
@@ -55,7 +55,7 @@ async function fixture(withWorktrees = false) {
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
-async function call(journal: DurableSessionJournal, name: string, args: Record<string, string>, callId = "crashed-call") {
+async function call(journal: DurableSessionJournal, name: string, args: JsonObject, callId = "crashed-call") {
   return journal.conversation.commit(async tx => {
     const entry = await tx.appendEntry(AssistantEntry, journal.conversation.id, {
       model: [fauxAssistantMessage([fauxToolCall(name, args, { id: callId })], { stopReason: "toolUse" })],
@@ -65,7 +65,7 @@ async function call(journal: DurableSessionJournal, name: string, args: Record<s
 }
 
 /** Pause after the real tool commits its effect, then close without settling its ToolTask. */
-async function replay<T>(f: Fixture, name: string, args: Record<string, string>, observe: (journal: DurableSessionJournal) => Promise<T>,
+async function replay<T>(f: Fixture, name: string, args: JsonObject, observe: (journal: DurableSessionJournal) => Promise<T>,
   beforeResume?: (journal: DurableSessionJournal) => Promise<void>, pauseAt: "receipt" | "worktree" = "receipt") {
   const tool = (await f.journal.conversation.agent(context)).tools.find(candidate => candidate.name === name);
   if (tool === undefined) throw new Error(`Missing tool ${name}`);
@@ -125,7 +125,7 @@ async function childEffects(f: Fixture, journal: DurableSessionJournal) {
 }
 async function run(f: Fixture, withStop = false) {
   const text = withStop ? "---\nworkflow:\n  version: 1\n  stages:\n    - {id: review, name: Review, stop: approve}\n---\nWait for review.\n" : "---\nworkflow: {version: 1}\n---\nFinish the work.\n";
-  const proposal = await f.journal.conversation.commit(tx => proposeWorkflow(tx, f.journal.conversation.id, "setup-proposal", { name: "one-task", summary: "Do the task.", text }), context);
+  const proposal = await f.journal.conversation.commit(tx => proposeWorkflow(tx, f.journal.conversation.id, "setup-proposal", { name: "one-task", summary: "Do the task.", text, basis: { kind: "new" as const, reason: "No saved workflow fits." } }), context);
   const launched = await startWorkflowProposal(f.journal.harness, f.journal.conversation, f.directory, f.options.manager.getSessionId(), proposal.id, {}, "setup-launch", context);
   const tasks = await f.journal.harness.commit(tx => tx.scanTasks({ conversationId: f.journal.conversation.id, kind: "forgerie.workflow-launch" }, 100), context);
   for (const task of tasks.items) await f.journal.harness.waitForTask(task.id, context);
@@ -170,7 +170,7 @@ it("replays child_agent send without allocating another reporter or delivering t
 
 it("replays propose_workflow by its task-keyed proposal ID without another card", async () => {
   const f = await fixture();
-  const result = await replay(f, "propose_workflow", { name: "one-task", summary: "Do the task.", text: "---\nworkflow: {version: 1}\n---\nDo the work.\n" },
+  const result = await replay(f, "propose_workflow", { name: "one-task", summary: "Do the task.", text: "---\nworkflow: {version: 1}\n---\nDo the work.\n", basis: { kind: "new", reason: "No saved workflow fits." } },
     async journal => ({ proposals: await workflowProposals(journal.harness, journal.conversation.id, context), cards: await cards(journal, WORKFLOW_PROPOSAL_KIND) }));
   expect(result.before.proposals).toHaveLength(1);
   expect(result.before.proposals[0]?.id).toBe(`p:${String(result.taskId)}`);

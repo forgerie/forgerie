@@ -55,9 +55,11 @@ export const checks = {
 } satisfies StateChecks;
 
 /** Real handlers on local state: each action decides at once, and the sheet shows the closed proposal. */
-function Proposal({ proposal: initial, entry = RICH_ENTRY, readError, blocked, pending, error, route, editing, changing }: {
+function Proposal({ proposal: initial, entry = RICH_ENTRY, readError, blocked, pending, error, route, editing, changing, here = true }: {
   proposal: WorkflowProposal | undefined; entry?: typeof RICH_ENTRY; readError?: string; blocked?: string; pending?: ProposalAction; error?: string;
   route?: WorkflowStage[]; editing?: boolean; changing?: boolean;
+  /** Offers Do it here, as a session that hosts the agent does. */
+  here?: boolean;
 }) {
   const [proposal, setProposal] = useState(initial);
   const [failure, setFailure] = useState(readError);
@@ -66,7 +68,8 @@ function Proposal({ proposal: initial, entry = RICH_ENTRY, readError, blocked, p
     onRetry={() => { setFailure(undefined); setProposal(RICH_PROPOSAL); }}
     onStart={() => setProposal(RICH_STARTED)}
     onChanges={async (text) => { setProposal({ ...RICH_PROPOSAL, state: { kind: "changes", note: text, decidedAt: DECIDED_AT } }); return true; }}
-    onDismiss={() => setProposal(RICH_DISMISSED)} onClose={() => {}} />;
+    onDismiss={() => setProposal(RICH_DISMISSED)}
+    onHere={here ? () => setProposal({ ...RICH_PROPOSAL, state: { kind: "here", decidedAt: DECIDED_AT } }) : undefined} onClose={() => {}} />;
 }
 
 /** Real handlers: Start says Starting… and stays there. */
@@ -104,6 +107,15 @@ export function SavedProseOnly() { return <Saved workflow={{ ...SAVED[1]!, text:
 
 // Proposal mode
 export function ProposalReview() { return <Proposal proposal={RICH_PROPOSAL} />; }
+export function BasedOnSaved() {
+  return <Proposal proposal={{ ...RICH_PROPOSAL, basis: { kind: "saved", name: "design-build-review",
+    changes: "Keeps the contract, build, review, and land stages. Drops the design worker, because this task has no new screens, and adds the settings store's port instructions." } }} />;
+}
+export function NewPlan() {
+  return <Proposal proposal={{ ...RICH_PROPOSAL, basis: { kind: "new", reason: "I considered design-build-review and review. Neither ports data between stores." } }} />;
+}
+export function HandingToAgent() { return <Proposal proposal={RICH_PROPOSAL} pending="here" />; }
+export function DoneHere() { return <Proposal proposal={{ ...RICH_PROPOSAL, state: { kind: "here", decidedAt: DECIDED_AT } }} />; }
 export function Reading() { return <Proposal proposal={undefined} />; }
 export function ReadFailed() { return <Proposal proposal={undefined} readError={READ_FAILED} />; }
 export function Blocked() { return <Proposal proposal={RICH_PROPOSAL} blocked="Another workflow is running." />; }

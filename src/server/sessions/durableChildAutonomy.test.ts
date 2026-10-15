@@ -112,7 +112,7 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     recordPath, recordErrors, runtimeErrors,
     activeChildRun: async (id: number) => { await recorder?.flush(); return recorder?.activeChildRun(id); },
     startWorkflow: async () => {
-      const proposal = await journal.conversation.commit((tx) => proposeWorkflow(tx, journal.conversation.id, "p:autonomy", { name: "autonomy", summary: "Autonomy check", text: "---\nworkflow: {version: 1}\n---\nWait." }), context);
+      const proposal = await journal.conversation.commit((tx) => proposeWorkflow(tx, journal.conversation.id, "p:autonomy", { name: "autonomy", summary: "Autonomy check", text: "---\nworkflow: {version: 1}\n---\nWait.", basis: { kind: "new" as const, reason: "No saved workflow fits." } }), context);
       await startWorkflowProposal(journal.harness, journal.conversation, root, "parent", proposal.id, {}, "start", context);
       await vi.waitFor(() => { expect(parentInputs.some((text) => text.includes("Workflow run "))).toBe(true); });
       await vi.waitFor(async () => { expect((await journal.harness.snapshot(LiveDoc, journal.conversation.id, context))?.run).toBeUndefined(); });

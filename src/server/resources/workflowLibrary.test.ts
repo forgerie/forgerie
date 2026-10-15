@@ -81,7 +81,7 @@ describe("prose workflows in the prompt library", () => {
     const text = "---\nworkflow:\n  version: 1\n  stages:\n    - id: build\n      name: Build\n      workers: [{ name: build, model: anthropic/opus:high }, { name: review, model: null }]\n---\nBuild and review.\n";
     const workflow = parseWorkflow("models", "models.md", text);
     const prompt = workflowPrompt("run-1", workflow, {});
-    expect(prompt).toContain("Workers: build (model anthropic/opus:high), review (model session default).");
+    expect(prompt).toContain("Workers: build (model anthropic/opus:high), review (model from its agent file).");
   });
 
   it("reads a declared route, rejects one it cannot enforce, and tells the agent how stops work", () => {

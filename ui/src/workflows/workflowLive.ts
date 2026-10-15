@@ -13,7 +13,7 @@ export interface LiveWorker {
   key: string;
   name: string;
   agent?: string | undefined;
-  /** The model it runs on now, with the reader's override. Undefined: the session's model. */
+  /** The model it runs on now, with the reader's override. Undefined: its agent file's model, else the session's. */
   model?: string | undefined;
   /** Declared in the route, so its model can change. A child the agent added is not. */
   declared: boolean;

@@ -7,10 +7,10 @@ import type { StageStripSegment } from "../ui/StageStrip";
 import type { ChildRetry } from "../childAgents/childAgentsModel";
 
 const valueSchema = z.union([z.string(), z.boolean(), z.number()]);
-/** A declared worker. Without a model it runs on the session's. */
+/** A declared worker. Without a model it runs on its agent file's model, else the session's. */
 interface DeclaredWorker { name: string; agent?: string | undefined; model?: string }
 /**
- * The server writes `model: null` for a worker the reader put on the session's model, at start or during a run. The
+ * The server writes `model: null` for a worker the reader put back on its default model, at start or during a run. The
  * browser has one form for that: no model.
  */
 const workerSchema = z.object({ name: z.string(), agent: z.string().optional(), model: z.string().nullable().optional() })
@@ -59,6 +59,12 @@ export const workflowInventorySchema = z.object({
     text: z.string().optional(), body: z.string().optional() })),
   diagnostics: z.array(z.object({ name: z.string(), path: z.string(), error: z.string() })),
 });
+/** Where a proposal comes from: a saved workflow it adapts, with what changed, or a new plan, with why none fit. */
+const basisSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("saved"), name: z.string(), changes: z.string() }),
+  z.object({ kind: z.literal("new"), reason: z.string() }),
+]);
+export type ProposalBasis = z.infer<typeof basisSchema>;
 /** A workflow the agent wrote for the current task. It lives in the session's records, never in the repository. */
 export const workflowProposalSchema = z.object({
   id: z.string(), name: z.string(), summary: z.string(), text: z.string(), sha256: z.string(), createdAt: z.number(),
@@ -71,7 +77,10 @@ export const workflowProposalSchema = z.object({
     z.object({ kind: z.literal("changes"), note: z.string(), decidedAt: z.number() }),
     z.object({ kind: z.literal("dismissed"), decidedAt: z.number() }),
     z.object({ kind: z.literal("replaced"), by: z.string(), decidedAt: z.number() }),
+    z.object({ kind: z.literal("here"), decidedAt: z.number() }),
   ]),
+  /** Absent on proposals made before the agent had to consider saved workflows. */
+  basis: basisSchema.optional(),
 });
 /** Newest first, as the server lists them. */
 export const workflowProposalsSchema = z.array(workflowProposalSchema);
@@ -83,7 +92,7 @@ export type WorkflowProposal = z.infer<typeof workflowProposalSchema>;
 export type WorkflowInputs = Record<string, string | boolean | number>;
 export type StopDecision = "approve" | "changes" | "land";
 /** What the reader can do with an open proposal. */
-export type ProposalAction = "start" | "changes" | "dismiss";
+export type ProposalAction = "start" | "changes" | "dismiss" | "here";
 
 /** The server's event when any workflow record of this session changes. */
 export const WORKFLOW_RUNS_CHANGED_EVENT = "workflow_runs_changed";
@@ -97,10 +106,11 @@ export type WorkflowEntry =
   | { kind: "started"; runId: string; text: string }
   | { kind: "stop"; runId: string; stage: string; stageName: string; stop: "approve" | "land"; summary: string; workflow: string; round: number }
   | { kind: "decided"; workflow: string; text: string }
-  | { kind: "proposal"; proposalId: string; name: string; summary: string; stages: WorkflowStage[] };
+  | { kind: "proposal"; proposalId: string; name: string; summary: string; stages: WorkflowStage[]; basis?: ProposalBasis | undefined };
 export type StopEntry = Extract<WorkflowEntry, { kind: "stop" }>;
 export type ProposalEntry = Extract<WorkflowEntry, { kind: "proposal" }>;
-const proposalDetailsSchema = z.object({ proposalId: z.string().min(1), name: z.string(), summary: z.string().catch(""), stages: z.array(stageSchema).catch([]) });
+const proposalDetailsSchema = z.object({ proposalId: z.string().min(1), name: z.string(), summary: z.string().catch(""), stages: z.array(stageSchema).catch([]),
+  basis: basisSchema.optional().catch(undefined) });
 
 const str = (record: Record<string, unknown>, key: string) => typeof record[key] === "string" ? record[key] : "";
 const recordOf = (value: unknown): Record<string, unknown> => typeof value === "object" && value !== null ? Object.fromEntries(Object.entries(value)) : {};
@@ -286,7 +296,13 @@ export function proposalOutcome(proposal: WorkflowProposal | undefined): string 
     case "changes": return `You asked for changes: ${proposal.state.note}`;
     case "dismissed": return "Dismissed";
     case "replaced": return "Replaced by a newer proposal";
+    case "here": return "Done here, without workers";
   }
+}
+
+/** Where a proposal comes from, as the card's kicker: the saved workflow it adapts, or a new plan. */
+export function proposalKicker(basis: ProposalBasis | undefined): string {
+  return basis === undefined ? "Proposed workflow" : basis.kind === "saved" ? `Based on ${basis.name}` : "New workflow";
 }
 
 /**

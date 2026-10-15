@@ -99,7 +99,7 @@ function stageLine(stage: NonNullable<WorkflowDefinition["stages"]>[number], ind
   const kind = stage.stop === "approve" ? " [stop: the user approves]" : stage.stop === "land" ? " [stop: the user lands the branches]" : "";
   const workers = (stage.workers ?? []).map((worker) => {
     const choices = [worker.agent === undefined ? undefined : `agent ${worker.agent}`,
-      worker.model === undefined ? undefined : `model ${worker.model ?? "session default"}`].filter((choice) => choice !== undefined);
+      worker.model === undefined ? undefined : `model ${worker.model ?? "from its agent file"}`].filter((choice) => choice !== undefined);
     return `${worker.name}${choices.length === 0 ? "" : ` (${choices.join(", ")})`}`;
   });
   return `${String(index + 1)}. ${stage.name} (id ${stage.id})${kind}${stage.does === undefined ? "" : `: ${stage.does}`}${workers.length === 0 ? "" : ` Workers: ${workers.join(", ")}.`}`;

@@ -24,7 +24,7 @@ export type StartSource =
   | { kind: "saved"; workflow: SavedWorkflow; initialTask?: string | undefined }
   | { kind: "proposal"; entry: ProposalEntry; proposal?: WorkflowProposal | undefined; readError?: string | undefined };
 
-const PENDING: Record<ProposalAction, string> = { start: "Starting…", changes: "Sending…", dismiss: "Dismissing…" };
+const PENDING: Record<ProposalAction, string> = { start: "Starting…", changes: "Sending…", dismiss: "Dismissing…", here: "Handing the plan to the agent…" };
 const NO_STAGES: readonly WorkflowStage[] = [];
 
 const count = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
@@ -35,9 +35,11 @@ const count = (n: number, one: string, many: string) => `${String(n)} ${n === 1 
  * inputs; the foot holds the actions. A saved workflow starts as its file says, with the models the reader picks. A
  * proposal can also change shape: Edit stages adds and removes stages and workers, and then Update the plan takes
  * Start's place and sends the changes to the agent as a note. A model change alone keeps Start, and the start sends it.
+ * Do it here has the agent follow a proposal itself, in this chat, without workers. The rail first says where a
+ * proposal comes from: the saved workflow it adapts and what changed, or why it is a new plan.
  * Until the proposal's record arrives the sheet shows what its card knows; a failed read offers Retry.
  */
-export function WorkflowStartView({ source, blocked, pending, error, models, agents = [], initial = {}, onStart, onChanges, onDismiss, onRetry, onBack, onClose }: {
+export function WorkflowStartView({ source, blocked, pending, error, models, agents = [], initial = {}, onStart, onChanges, onDismiss, onHere, onRetry, onBack, onClose }: {
   source: StartSource;
   /** Why it cannot start now, such as another run in progress. */
   blocked?: string | undefined;
@@ -54,6 +56,8 @@ export function WorkflowStartView({ source, blocked, pending, error, models, age
   /** Resolves true once the server took the note. A proposal only. */
   onChanges?: ((note: string) => Promise<boolean>) | undefined;
   onDismiss?: (() => void) | undefined;
+  /** Has the agent do the plan itself, in this chat, without workers. A proposal only. */
+  onHere?: ((inputs: WorkflowInputs) => void) | undefined;
   onRetry?: (() => void) | undefined;
   /** Back to the list the sheet was opened from. */
   onBack?: (() => void) | undefined;
@@ -95,14 +99,16 @@ export function WorkflowStartView({ source, blocked, pending, error, models, age
     setEdited(new Set([...edited].filter((key) => key !== name)));
     setProblem(undefined);
   };
-  const start = () => {
-    if (fields === undefined) return;
+  const inputsToSend = (): WorkflowInputs | undefined => {
+    if (fields === undefined) return undefined;
     const result = saved !== undefined ? launchInputs(saved, values)
       : proposalLaunchInputs(fields.inputs, values, new Set([...Object.keys(proposal?.inputs ?? {}), ...edited]));
-    if ("problem" in result) { setProblem(result.problem); return; }
+    if ("problem" in result) { setProblem(result.problem); return undefined; }
     setProblem(undefined);
-    onStart(result.inputs, modelChoices(changes));
+    return result.inputs;
   };
+  const start = () => { const inputs = inputsToSend(); if (inputs !== undefined) onStart(inputs, modelChoices(changes)); };
+  const doHere = () => { const inputs = inputsToSend(); if (inputs !== undefined) onHere?.(inputs); };
   const openChanges = () => { setNote(stale ? changesNote(changes, stages, models.known) : ""); setChanging(true); };
   const jump = (stage: string) => { setHere(stage); setTarget({ stage, at: (target?.at ?? 0) + 1 }); };
 
@@ -119,12 +125,18 @@ export function WorkflowStartView({ source, blocked, pending, error, models, age
       : "The agent reads your note and proposes again."
       : stale ? "You changed the route. Update the plan, then start the new one."
       : modelCount > 0 ? `${count(modelCount, "model", "models")} changed. The run uses ${modelCount === 1 ? "it" : "them"}; the plan stays as it is.`
-      : saved !== undefined ? "It runs in this chat. You can keep talking while it works." : "It runs in this chat. Nothing is saved to the repository."));
+      : saved !== undefined ? "It runs in this chat. You can keep talking while it works."
+        : onHere === undefined ? "It runs in this chat. Nothing is saved to the repository."
+          : "Start runs it with workers. Do it here has this agent do the work itself, without workers. Nothing is saved to the repository."));
   const startAction: FooterAction = { label: "Start workflow", tone: stale ? undefined : "primary", onPress: start,
     disabled: busy || !ready || blocked !== undefined || stale || closed !== undefined };
+  // Do it here follows the plan as written, so a changed route must reach the agent first.
+  const hereAction: FooterAction[] = onHere === undefined ? [] : [{ label: "Do it here", onPress: doHere,
+    disabled: busy || !ready || blocked !== undefined || stale || closed !== undefined }];
   const actions: FooterAction[] = closed !== undefined ? [] : saved !== undefined ? [startAction] : [
     { label: "Dismiss", onPress: () => onDismiss?.(), disabled: busy },
     stale ? startAction : { label: "Ask for changes", onPress: openChanges, disabled: busy || !ready },
+    ...hereAction,
     stale ? { label: "Update the plan", tone: "primary", onPress: openChanges, disabled: busy } : startAction,
   ];
   const foot = <ActionFooter stack note={footNote} problem={closed === undefined ? problem ?? error : undefined} actions={actions}
@@ -152,7 +164,11 @@ export function WorkflowStartView({ source, blocked, pending, error, models, age
       return { key: line, text: line, undo: { label: "Undo this change", onPress: () => setRoute(undoChange(original, stages, change)) } };
     })}
     note="Update the plan to send these to the agent. It rewrites the plan to match, and you start the new one." /> : undefined;
+  const basis = proposal?.basis ?? (source.kind === "proposal" ? source.entry.basis : undefined);
   const rail = <>
+    {basis !== undefined && <PageSection title={basis.kind === "saved" ? `Based on ${basis.name}` : "A new plan"}>
+      <Lede>{basis.kind === "saved" ? basis.changes : basis.reason}</Lede>
+    </PageSection>}
     {(original.length > 0 || stages.length > 0 || editable && ready && closed === undefined) && <WorkflowRouteEditor original={original} stages={stages}
       onChange={setRoute} editable={editable} editing={editing} onEditing={setEditing}
       disabled={!ready || busy || closed !== undefined} here={here} onJump={plan === undefined ? undefined : jump} models={models}

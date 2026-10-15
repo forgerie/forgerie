@@ -7,7 +7,7 @@ import { ReplyBox } from "../ui/ReplyBox";
 import { TextButton } from "../ui/TextButton";
 import { exchangeLines } from "../childAgents/childExchange";
 import { retryCount, retryWait, type ChildTranscript } from "../childAgents/childAgentsModel";
-import { WorkerModelPicker, type WorkerModels } from "./WorkerModelPicker";
+import { defaultModelLabel, WorkerModelPicker, type WorkerModels } from "./WorkerModelPicker";
 import { modelTiming, type LiveWorker } from "./workflowLive";
 
 /** A worker's live record as the session's child agents store holds it. */
@@ -54,8 +54,8 @@ export function WorkflowWorkerPane({ worker, record, models, modelEditable, now,
     actions={worker.busy ? <TextButton label="Stop" tone="danger" title={`Stop ${worker.name}`} onPress={onStop} /> : undefined}
     bar={worker.declared ? <>
       <span>Model</span>
-      <WorkerModelPicker worker={worker.name} model={worker.model} models={models} disabled={!modelEditable}
-        reset={worker.model === undefined ? undefined : { to: undefined, label: "Use the session's model" }} onChange={onModel} />
+      <WorkerModelPicker worker={worker.name} agent={worker.agent} model={worker.model} models={models} disabled={!modelEditable}
+        reset={worker.model === undefined ? undefined : { to: undefined, label: `Use ${defaultModelLabel(worker.agent).replace(/^Session/u, "the session")}` }} onChange={onModel} />
       {modelEditable && <span>{modelTiming(worker)}</span>}
     </> : <span>The agent chose this worker's model.</span>}
     foot={worker.started ? <>

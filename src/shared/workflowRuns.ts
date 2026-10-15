@@ -10,7 +10,7 @@ export const WorkflowInputSchema = Type.Object({
   choices: Type.Optional(Type.Array(WorkflowValueSchema, { minItems: 1 })),
   default: Type.Optional(WorkflowValueSchema),
 }, { additionalProperties: false });
-/** Wire format for a worker model override. Null restores the session default. */
+/** Wire format for a worker model override. Null restores the default: the agent file's model, else the session's. */
 export const WorkflowModelSchema = Type.Union([Type.String({ minLength: 1, maxLength: 128,
   pattern: `^[^\\s/:]+/[^\\s/:]+(?:/[^\\s/:]+)*(?::(?:${KNOWN_THINKING_LEVELS.join("|")}))?$` }), Type.Null()]);
 export const WorkflowModelsSchema = Type.Record(Type.String({ pattern: "^[a-z][a-z0-9-]{0,31}$" }), WorkflowModelSchema);

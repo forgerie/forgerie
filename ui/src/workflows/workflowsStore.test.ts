@@ -95,6 +95,16 @@ describe("a session's workflow proposals", () => {
     expect(calls.find((call) => call.path.endsWith("/dismiss"))?.body).toEqual({ cwd: "/srv/app" });
   });
 
+  it("has the agent do a proposal here with the reader's inputs, and closes it", async () => {
+    const here = { ...PROPOSAL, state: { kind: "here" as const, decidedAt: 1 } };
+    const { calls, store } = routes((path) => path.endsWith("/here") ? json(200, here) : path.includes("workflow-proposals") ? json(200, [PROPOSAL]) : json(200, []));
+    store.refresh();
+    await settle();
+    expect(await store.doProposalHere(PROPOSAL.id, { task: "Port it." })).toBe(true);
+    expect(calls.find((call) => call.path.endsWith("/here"))?.body).toEqual({ cwd: "/srv/app", inputs: { task: "Port it." } });
+    expect(store.getSnapshot().proposals?.[0]?.state).toEqual({ kind: "here", decidedAt: 1 });
+  });
+
   it("keeps a refused action's reason for the reader, and sends one decision at a time", async () => {
     let answerStart: (response: Response) => void = () => {};
     const request: Request = (path) => path.endsWith("/start") ? new Promise((resolve) => { answerStart = resolve; }) : Promise.resolve(json(200, []));

@@ -8,7 +8,7 @@ import type { WorkflowStage } from "./workflowsModel";
 export type Worker = NonNullable<WorkflowStage["workers"]>[number];
 
 /**
- * The models a start or a launch sends, by worker name: `"provider/id[:level]"`, or null for the session's model.
+ * The models a start or a launch sends, by worker name: `"provider/id[:level]"`, or null for the default: the agent file's model, else the session's.
  * The server refuses an unknown worker or a malformed model.
  */
 export type ModelChoices = Record<string, string | null>;
@@ -30,10 +30,10 @@ export function modelOf(spec: string | undefined, known: readonly SessionModel[]
   return known.find((model) => model.provider === parsed.provider && model.id === parsed.id) ?? { provider: parsed.provider, id: parsed.id };
 }
 
-/** "Claude Sonnet 5", or "the session's model" for none. */
+/** "Claude Sonnet 5", or "its default model" for none: the agent file's, else the session's. */
 export function modelName(spec: string | undefined, known: readonly SessionModel[] = []): string {
   const model = modelOf(spec, known);
-  return model === undefined ? "the session's model" : model.name ?? model.id ?? spec ?? "";
+  return model === undefined ? "its default model" : model.name ?? model.id ?? spec ?? "";
 }
 
 /** A stage with these workers; with none, the stage has no workers field. */
@@ -43,7 +43,7 @@ export function withWorkers(stage: WorkflowStage, workers: readonly Worker[]): W
   return copy;
 }
 
-/** A worker on this model; without one, it runs on the session's model. */
+/** A worker on this model; without one, it runs on its agent file's model, else the session's. */
 export function withModel(worker: Worker, model: string | undefined): Worker {
   const copy = { ...worker };
   if (model === undefined) delete copy.model; else copy.model = model;

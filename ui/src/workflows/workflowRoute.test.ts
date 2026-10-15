@@ -15,7 +15,7 @@ describe("a worker's model", () => {
     expect(parseModel("not a model")).toBeUndefined();
     expect(modelName(OPUS, MODELS)).toBe("Claude Opus 4.5");
     expect(modelName("acme/unlisted", MODELS)).toBe("unlisted");
-    expect(modelName(undefined, MODELS)).toBe("the session's model");
+    expect(modelName(undefined, MODELS)).toBe("its default model");
   });
 });
 
@@ -42,7 +42,7 @@ describe("the reader's route edits", () => {
     expect(changesNote(changes, edited)).toBe(["Change the route:", "- Removed stage Shape.", "- Removed worker `page` from Port the API and the page.",
       "- New worker `reviewer` (reviewer) in Review.", "- New stage Docs, after Review."].join("\n"));
     expect(changeLine({ kind: "model", stage: "port", worker: "api", from: undefined, to: OPUS }, edited, MODELS))
-      .toBe("`api` in Port the API and the page runs on Claude Opus 4.5, not the session's model.");
+      .toBe("`api` in Port the API and the page runs on Claude Opus 4.5, not its default model.");
   });
 
   it("takes back one change and keeps the rest", () => {

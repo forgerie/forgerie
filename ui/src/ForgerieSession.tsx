@@ -595,6 +595,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
           onStart={(inputs, models) => { void workflows.startProposal(id, inputs, models).then((done) => { if (done) closeProposal(id); }); }}
           onChanges={async (note) => { const done = await workflows.askProposalChanges(id, note); if (done) closeProposal(id); return done; }}
           onDismiss={() => { void workflows.dismissProposal(id).then((done) => { if (done) closeProposal(id); }); }}
+          onHere={(inputs) => { void workflows.doProposalHere(id, inputs).then((done) => { if (done) closeProposal(id); }); }}
           onClose={() => { workflows.dismissError(); setWorkflowSheet(undefined); }} />;
       })()}
       {visible && sheetRun !== undefined && <WorkflowSheet mode="run" key={sheetRun.id} run={sheetRun}

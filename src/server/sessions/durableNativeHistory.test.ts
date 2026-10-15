@@ -80,7 +80,7 @@ it("retains real child and workflow ownership and terminal tasks through fork an
     });
     const originalChildren = await listChildren(parent.harness, parent.conversation.id, context);
     const proposal = await parent.conversation.commit((tx) => proposeWorkflow(tx, parent.conversation.id, "proposal:once", {
-      name: "one-task", summary: "Keep this workflow record", text: "---\nworkflow: {version: 1}\n---\nWait for review.\n",
+      name: "one-task", summary: "Keep this workflow record", text: "---\nworkflow: {version: 1}\n---\nWait for review.\n", basis: { kind: "new" as const, reason: "No saved workflow fits." },
     }), context);
     const workflow = await startWorkflowProposal(parent.harness, parent.conversation, directory, "parent", proposal.id, {}, "launch-once", context);
     await vi.waitFor(async () => { expect((await parent.harness.inspect(context)).tasks).toHaveLength(0); });

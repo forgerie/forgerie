@@ -8,7 +8,7 @@ import { durableJson } from "./durableJson.js";
 import { isChildNativeTool } from "./durableChildRuntime.js";
 
 // These tools act on the parent session or its approval surfaces, not a child conversation.
-const PARENT_ONLY = new Set(["child_agent", "file_issue", "record_decision", "ask_user", "end_turn", "spawn_session", "handoff_session", "workflow_finish", "workflow_stop", "propose_workflow", "subagent", "bg_wait", "web_enable"]);
+const PARENT_ONLY = new Set(["child_agent", "file_issue", "record_decision", "ask_user", "end_turn", "spawn_session", "handoff_session", "workflow_finish", "workflow_stop", "propose_workflow", "saved_workflows", "subagent", "bg_wait", "web_enable"]);
 // Agent files translate these to child-native bash; never share the parent's implementations.
 const CHILD_TRANSLATED = new Set(["grep", "find", "ls"]);
 function shareWithChild(tool: ToolDefinition, deny: readonly string[]): boolean {

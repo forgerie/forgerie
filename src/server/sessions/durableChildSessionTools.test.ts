@@ -143,7 +143,7 @@ it.each(["deferred", "codemode"] as const)("offers named %s session tools direct
   expect(probe.calls).toHaveLength(1);
 });
 
-it.each(["child_agent", "ask_user", "end_turn", "spawn_session", "handoff_session", "workflow_finish", "workflow_stop", "propose_workflow", "file_issue", "propose_future", "subagent", "bg_wait", "web_enable"])("never offers parent-only %s even if registered and named", async (name) => {
+it.each(["child_agent", "ask_user", "end_turn", "spawn_session", "handoff_session", "workflow_finish", "workflow_stop", "propose_workflow", "saved_workflows", "file_issue", "propose_future", "subagent", "bg_wait", "web_enable"])("never offers parent-only %s even if registered and named", async (name) => {
   const probe = await fixture([name], [{ name }]);
   await probe.spawn();
   expect(probe.offered[0]).toEqual(["ask_human"]);

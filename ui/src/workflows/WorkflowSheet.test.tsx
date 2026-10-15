@@ -64,7 +64,7 @@ describe("a saved workflow's sheet", () => {
     // The plan uses the chat's blocks.
     expect(pane("Plan")?.querySelector(".callout")).not.toBeNull();
     expect([...sheet().querySelectorAll(".route-list-who-line code")].map((node) => node.textContent)).toEqual(["api", "page", "review"]);
-    expect([...sheet().querySelectorAll(".model-trigger-name")].map((node) => node.textContent)).toEqual(["Claude Sonnet 5", "Session's model", "Session's model"]);
+    expect([...sheet().querySelectorAll(".model-trigger-name")].map((node) => node.textContent)).toEqual(["Claude Sonnet 5", "design-engineer's model", "reviewer's model"]);
     // Saved files are not edited here.
     expect(button("Edit stages")).toBeUndefined();
     expect(field("Task")?.value).toBe("Port it.");
@@ -210,6 +210,32 @@ describe("a proposal's sheet", () => {
     expect(button("Start workflow")?.disabled).toBe(false);
   });
 
+  it("does it here with the reader's inputs, says what that means, and holds it for a changed route", async () => {
+    const onHere = vi.fn();
+    const { element } = proposal({ onHere });
+    await act(async () => root.render(element));
+    expect(note()).toBe("Start runs it with workers. Do it here has this agent do the work itself, without workers. Nothing is saved to the repository.");
+    expect(["Dismiss", "Ask for changes", "Do it here", "Start workflow"].map((name) => button(name)?.disabled)).toEqual([false, false, false, false]);
+    await press("Do it here");
+    expect(onHere).toHaveBeenCalledWith({ task: RICH_PROPOSAL.inputs["task"], rounds: 2 });
+    // The agent follows the plan as written, so a changed route goes to the agent first.
+    await act(async () => root.render(<div key="changed">{proposal({ onHere, initial: { route: PROPOSAL_STAGES.filter((stage) => stage.id !== "review") } }).element}</div>));
+    expect(button("Do it here")?.disabled).toBe(true);
+    await act(async () => root.render(proposal({ onHere, pending: "here" }).element));
+    expect(note()).toBe("Handing the plan to the agent…");
+  });
+
+  it("says which saved workflow a proposal adapts and what changed, or why it is a new plan", async () => {
+    const saved = { ...RICH_PROPOSAL, basis: { kind: "saved" as const, name: "design-build-review", changes: "Drops the design worker: this task has no interface." } };
+    await act(async () => root.render(proposal({ source: { kind: "proposal", entry: RICH_ENTRY, proposal: saved } }).element));
+    const section = [...sheet().querySelectorAll(".page-section")].find((node) => node.querySelector("h2")?.textContent === "Based on design-build-review");
+    expect(section?.textContent).toContain("Drops the design worker: this task has no interface.");
+    // Before the record arrives, the card's entry says it.
+    await act(async () => root.render(proposal({ source: { kind: "proposal", entry: { ...RICH_ENTRY, basis: { kind: "new", reason: "None of the 3 saved workflows ports data." } } } }).element));
+    expect(text()).toContain("A new plan");
+    expect(text()).toContain("None of the 3 saved workflows ports data.");
+  });
+
   it("goes quiet once decided: one line, no actions", async () => {
     const { element, handlers } = proposal({ source: { kind: "proposal", entry: RICH_ENTRY, proposal: { ...REPLACED_PROPOSAL, text: RICH_PROPOSAL.text } } });
     await act(async () => root.render(element));
@@ -287,7 +313,7 @@ describe("a run's sheet", () => {
     expect([...sheet().querySelectorAll(".numbered-sections-section")].map((node) => node.getAttribute("data-mark"))).toEqual(["done", "current", null, null]);
     expect([...sheet().querySelectorAll(".numbered-sections-said")].map((node) => node.textContent)).toEqual(["Step 1, done: ", "Step 2, at work: ", "Step 3: ", "Step 4: "]);
     expect(worker("api")?.textContent).toBe("apifull-stack-engineerWorkingClaude Sonnet 5");
-    expect(worker("page")?.textContent).toBe("pagedesign-engineerDoneSession's model");
+    expect(worker("page")?.textContent).toBe("pagedesign-engineerDonedesign-engineer's model");
     expect(sheet().querySelector(".route-list-meta")?.textContent).toBe("1 of 4 done");
     expect(note()).toBe("Started 23 min ago. The next stop for you is Land.");
   });
@@ -329,11 +355,11 @@ describe("a run's sheet", () => {
     expect(handlers.onStopWorker).toHaveBeenCalledWith(42);
   });
 
-  it("changes a worker's model on the run, and back to the session's", async () => {
+  it("changes a worker's model on the run, and back to its agent file's", async () => {
     const { element, handlers } = running({ run: { ...RUN_WORKING, stages: setWorkerModel(PROPOSAL_STAGES, "page", "openai/gpt-5") }, initialWorker: "port/page" });
     await act(async () => root.render(element));
     expect(sheet().querySelector(".detail-pane-bar")?.textContent).toContain("From its next turn.");
-    await press("Use the session's model");
+    await press("Use design-engineer's model");
     expect(handlers.onModel).toHaveBeenCalledWith("page", null);
   });
 

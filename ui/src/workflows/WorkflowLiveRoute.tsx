@@ -2,6 +2,7 @@ import { useState } from "react";
 import { RouteList, type RouteLine, type RouteListItem } from "../ui/RouteList";
 import type { SessionModel } from "../contracts";
 import { modelName } from "./workflowRoute";
+import { defaultModelLabel } from "./WorkerModelPicker";
 import type { LiveStage, LiveWorker } from "./workflowLive";
 
 const runsLabel = (tones: readonly string[]) => {
@@ -12,7 +13,7 @@ const runsLabel = (tones: readonly string[]) => {
 function item(worker: LiveWorker, selected: string | undefined, known: readonly SessionModel[], onWorker: (key: string) => void): RouteListItem {
   const lines: RouteLine[] = [
     { key: "status", text: worker.status, tone: worker.retry !== undefined ? "warn" : worker.tones.at(-1) === "needs" ? "live" : undefined },
-    ...worker.declared ? [{ key: "model", text: worker.model === undefined ? "Session's model" : modelName(worker.model, known) }] : [],
+    ...worker.declared ? [{ key: "model", text: worker.model === undefined ? defaultModelLabel(worker.agent) : modelName(worker.model, known) }] : [],
     ...worker.note === undefined ? [] : [{ key: "note", text: worker.note }],
     ...worker.problem === undefined ? [] : [{ key: "problem", text: worker.problem, tone: "bad" as const }],
   ];

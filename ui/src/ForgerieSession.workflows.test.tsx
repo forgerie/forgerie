@@ -131,7 +131,7 @@ describe("a running workflow's sheet", () => {
     return { posts };
   }
 
-  it("opens from the strip, opens a worker's live record, and moves the worker to the session's model on the run", async () => {
+  it("opens from the strip, opens a worker's live record, and moves the worker back to its agent file's model on the run", async () => {
     const api = await sessionWithRun();
     await act(async () => { document.querySelector<HTMLButtonElement>(".stage-strip")?.click(); });
     await until(() => document.querySelector("dialog[open] .route-list") !== null);
@@ -139,7 +139,7 @@ describe("a running workflow's sheet", () => {
     await act(async () => { worker?.click(); });
     await until(() => document.querySelector("dialog[open]")?.textContent?.includes("The shape lists 14 settings.") === true);
     expect(document.querySelector("dialog[open] .detail-pane-bar")?.textContent).toContain("From its next turn.");
-    await act(async () => { button("Use the session's model")?.click(); });
+    await act(async () => { button("Use full-stack-engineer's model")?.click(); });
     await until(() => api.posts.some((post) => post.path.endsWith("/model")));
     expect(api.posts.find((post) => post.path.endsWith("/model"))).toEqual({ path: `/api/sessions/test/workflow-runs/${RUN_WORKING.id}/workers/api/model`,
       body: { cwd: "/work", model: null } });

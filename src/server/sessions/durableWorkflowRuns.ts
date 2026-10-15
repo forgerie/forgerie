@@ -6,7 +6,7 @@ import { Check } from "typebox/value";
 import { WorkflowOutcomeSchema, WorkflowModelSchema, WorkflowModelsSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowChildDelivery, type WorkflowInputs, type WorkflowModels, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
 import { WorkflowProposalSchema, WorkflowProposalToolSchema, type WorkflowProposal, type WorkflowProposalTool } from "../../shared/workflowProposals.js";
 import { admitChild, completionProblem, declaredWorker, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
-import { assertProseOnly, parseWorkflow, WorkflowError, workflowInputs, workflowPrompt, type ProseWorkflow, type WorkflowLibrary } from "../resources/workflowLibrary.js";
+import { assertProseOnly, parseWorkflow, WorkflowError, workflowInputs, workflowPrompt, type ProseWorkflow, type WorkflowInventory, type WorkflowLibrary } from "../resources/workflowLibrary.js";
 
 export const WORKFLOW_DOC_KIND = "forgerie.workflow-runs";
 export const WorkflowActiveSchema = Type.Object({ active: Type.Union([Type.String(), Type.Null()]) });
@@ -110,15 +110,58 @@ async function asTool(action: () => Promise<string>) {
   }
 }
 
-export function workflowExtension() {
+const PROPOSE_WORKFLOW_GUIDANCE = [
+  "Propose a plan for a task that is too large or too risky for you alone in this session, then end your turn. If you can do the task well yourself, do it instead of proposing.",
+  "Call saved_workflows first and read any saved workflow that could fit. Adapt the closest one: keep its stages and agents, write this task's own instructions into its prose, and change its shape only when the task needs it. Say what you changed in basis. Write a new plan only when no saved workflow fits, and name the ones you considered in basis.",
+  "Plan for the user's time. Use the fewest workers that do the job. Run independent work in parallel. Put a stage after another only when it needs the other's output. Do not set a worker's model unless the user asked for one: a worker without a model uses its agent file's model.",
+  "Never write a workflow file into the repository. Supply complete prompt-format text with workflow version 1 frontmatter and prose, and pre-fill its inputs. A worker sees nothing of this chat, so the prose must carry the task's instructions. The user reads the prose beside the route and inputs; agents then follow it. Use the reply guide's rich blocks, including status checklists, steps and details where useful. Frontmatter description is a plain title of at most 90 characters; omit a duplicate H1. Give each input a short description as its label. Open with the outcome in two or three sentences. Use one H2 per stage, named exactly as the stage, in route order. State each stage's actions and acceptance checks; call out conditions that stop or roll back work. Put supporting instructions in details. Refer to input names, not copies of their values. Add no approve stops unless the user asked to check something. Only irreversible steps need a stop.",
+  "Only the user decides: they start the plan with workers, have you do it here without workers, ask for changes, or dismiss it.",
+].join(" ");
+
+/** The user's saved workflows, for the agent: a list with routes, or one file in full. */
+function savedWorkflowsText(inventory: WorkflowInventory, name?: string): string {
+  if (name !== undefined) {
+    const workflow = inventory.workflows.find((candidate) => candidate.name === name);
+    if (workflow === undefined) throw new WorkflowError(404, `No saved workflow named ${name}. Saved: ${inventory.workflows.map((candidate) => candidate.name).join(", ") || "none"}.`);
+    return `Saved workflow ${workflow.name} (${workflow.path}):\n\n${workflow.text}`;
+  }
+  if (inventory.workflows.length === 0) return "The user has no saved workflows. Write a new plan, and say so in basis.";
+  const lines = inventory.workflows.map((workflow) => {
+    const route = (workflow.definition.stages ?? []).map((stage) => {
+      const workers = (stage.workers ?? []).map((worker) => worker.agent === undefined ? worker.name : `${worker.name}: ${worker.agent}`);
+      return `${stage.name}${stage.stop === undefined ? "" : ` [stop: ${stage.stop}]`}${workers.length === 0 ? "" : ` (${workers.join(", ")})`}`;
+    }).join(" -> ");
+    return `- ${workflow.name}: ${workflow.description ?? "no description"}${route === "" ? "" : `\n  Route: ${route}`}`;
+  });
+  return `Saved workflows. Read one in full with saved_workflows and its name before you adapt it.\n${lines.join("\n")}`;
+}
+
+export function workflowExtension(options: { library?: WorkflowLibrary; cwd?: string } = {}) {
+  const inventory = async (): Promise<WorkflowInventory> => options.library === undefined || options.cwd === undefined
+    ? { workflows: [], diagnostics: [] } : options.library.list(options.cwd);
   return defineExtension({ name: "forgerie.workflows", tasks: [Launch, Cancel], tools: [defineTool({
+    name: "saved_workflows",
+    description: "List the user's saved workflows with their descriptions and routes, or read one in full by name. Call it before propose_workflow.",
+    parameters: Type.Object({ name: Type.Optional(Type.String({ description: "A saved workflow to read in full." })) }, { additionalProperties: false }),
+    // A read of the user's files. It changes nothing.
+    replay: "safe", executionMode: "parallel",
+    execute: async (args) => asTool(async () => savedWorkflowsText(await inventory(), args.name)),
+  }), defineTool({
     name: "propose_workflow",
-    description: "When you understand a task that needs several workers, a review, or the user's check, design a workflow for this task, call propose_workflow, then end your turn. Not for small tasks. Never write a workflow file into the repository for a one-off workflow. Supply complete prompt-format text with workflow version 1 frontmatter and prose, and pre-fill its inputs. The user reads the prose beside the route and inputs; agents then follow it. Use the reply guide's rich blocks, including status checklists, steps and details where useful. Frontmatter description is a plain title of at most 90 characters; omit a duplicate H1. Give each input a short description as its label. Open with the outcome in two or three sentences. Use one H2 per stage, named exactly as the stage, in route order. State each stage's actions and acceptance checks; call out conditions that stop or roll back work. Put supporting instructions in details. Refer to input names, not copies of their values. Add no approve stops unless the user asked to check something. Only irreversible steps need a stop. Only the user can start the proposal, ask for changes, or dismiss it.",
+    description: PROPOSE_WORKFLOW_GUIDANCE,
     parameters: WorkflowProposalToolSchema,
     // The task-keyed proposal ID reuses the committed proposal and its card.
     replay: "safe", executionMode: "sequential",
     execute: (args, api, context) => asTool(async () => {
       const id = `p:${String(api.taskId)}`;
+      const recorded = (await api.snapshot(Proposals, api.conversationId, context))?.records[id] !== undefined;
+      const basis = args.basis;
+      if (!recorded && basis.kind === "saved") {
+        const { workflows } = await inventory();
+        if (!workflows.some((workflow) => workflow.name === basis.name)) {
+          throw new WorkflowError(404, `No saved workflow named ${basis.name}. Saved: ${workflows.map((workflow) => workflow.name).join(", ") || "none"}.`);
+        }
+      }
       await api.commit((tx) => proposeWorkflow(tx, api.conversationId, id, args), context);
       return `Proposed workflow "${args.name}". End your turn now. The user starts it, asks for changes, or dismisses it; do not start it yourself or write a workflow file.`;
     }),
@@ -234,10 +277,10 @@ export async function proposeWorkflow(tx: Tx, parent: ConversationId, id: string
   const inputs = workflowInputs(resolved.definition, args.inputs ?? {});
   const createdAt = Date.now();
   const proposal: WorkflowProposal = { id, name: args.name, summary: args.summary.trim(), text: resolved.text, sha256: resolved.sha256,
-    createdAt, definition: resolved.definition, inputs, state: { kind: "open" } };
+    createdAt, definition: resolved.definition, inputs, state: { kind: "open" }, basis: args.basis };
   for (const earlier of Object.values(doc.records)) if (earlier.state.kind === "open") earlier.state = { kind: "replaced", by: id, decidedAt: createdAt };
   doc.records[id] = proposal;
-  await tx.appendEntry(parent, { kind: WORKFLOW_PROPOSAL_KIND, data: { proposalId: id, name: proposal.name, summary: proposal.summary, stages: proposal.definition.stages ?? [] } });
+  await tx.appendEntry(parent, { kind: WORKFLOW_PROPOSAL_KIND, data: { proposalId: id, name: proposal.name, summary: proposal.summary, stages: proposal.definition.stages ?? [], basis: args.basis } });
   return proposal;
 }
 
@@ -266,6 +309,36 @@ export async function decideWorkflowProposal(harness: Harness, parent: Conversat
     return publicProposal(record);
   }, context);
   if (decision === "changes") harness.resume();
+  return proposal;
+}
+
+/** The agent's instruction when the user has it follow a proposal itself. Stops become questions in the chat. */
+function hereWorkflowPrompt(proposal: Pick<WorkflowProposal, "name">, workflow: ProseWorkflow, inputs: WorkflowInputs): string {
+  const stops = (workflow.definition.stages ?? []).filter((stage) => stage.stop !== undefined).map((stage) => stage.name);
+  return [
+    `[workflow ${proposal.name}] The user chose to do this plan here, without child agents.`,
+    "Do the work yourself in this session, stage by stage, as the plan below says. Do not start or message child agents; where the plan gives work to a worker, do that work yourself.",
+    stops.length === 0 ? "There is no workflow run, so do not call workflow_stop or workflow_finish."
+      : `There is no workflow run, so do not call workflow_stop or workflow_finish. At each stop (${stops.join(", ")}), ask the user in your reply and end your turn.`,
+    `\nWorkflow inputs (JSON):\n${JSON.stringify(inputs)}\n\n${workflow.body}`,
+  ].join(" ");
+}
+
+/** The user has the agent follow an open proposal itself: one commit closes the card and queues the instruction. */
+export async function doWorkflowProposalHere(harness: Harness, parent: Conversation, id: string, supplied: WorkflowInputs, context: Context): Promise<WorkflowProposal> {
+  const proposal = await parent.commit(async (tx) => {
+    const doc = await tx.doc(Proposals, parent.id);
+    const record = requireOpenProposal(doc.records[id]);
+    if ((await tx.doc(Runs, parent.id)).active !== null) throw new WorkflowError(409, "Finish the active workflow before doing another plan here");
+    // This is a storage read, never a library or filesystem read, as for Start.
+    const workflow = parseWorkflow(record.name, `proposal:${id}`, record.text);
+    const inputs = workflowInputs(workflow.definition, supplied);
+    record.state = { kind: "here", decidedAt: Date.now() };
+    await tx.createTask(Launch, { runId: id, prompt: hereWorkflowPrompt(record, workflow, inputs), requestId: `workflow-proposal:${id}:here` },
+      { ownership: { kind: "conversation" }, background: true });
+    return publicProposal(record);
+  }, context);
+  harness.resume();
   return proposal;
 }
 
@@ -409,7 +482,7 @@ export async function workflowChildRefusal(tx: Tx, parent: ConversationId, name:
   return admission.kind === "refused" ? admission.reason : undefined;
 }
 
-/** The active workflow's model choice. Spawns and sends enforce it; null restores the session default. */
+/** The active workflow's model choice. Spawns and sends enforce it; null restores the agent file's model, else the session's. */
 export async function workflowWorkerModel(tx: Tx, parent: ConversationId, name: string): Promise<string | null | undefined> {
   const doc = await tx.doc(Runs, parent);
   const run = doc.active === null ? undefined : doc.records[doc.active];

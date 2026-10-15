@@ -38,7 +38,7 @@ import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { decisionExtension, decisions, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops, workflowProposals, startWorkflowProposal, decideWorkflowProposal, openWorkflowProposals } from "./durableWorkflowRuns.js";
+import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import { applySdkCommit } from "./durableMessageChanges.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
@@ -383,6 +383,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   dismissWorkflowProposal(id: string) {
     return decideWorkflowProposal(this.journal.harness, this.journal.conversation, id, "dismissed", undefined, context);
   }
+  doWorkflowProposalHere(id: string, inputs: WorkflowInputs) {
+    return doWorkflowProposalHere(this.journal.harness, this.journal.conversation, id, inputs, context);
+  }
   workflowRuns() { return workflowRuns(this.journal.harness, this.journal.conversation.id, context); }
   cancelWorkflow(runId: string) {
     return cancelWorkflow(this.journal.harness, this.journal.conversation, runId, context);
@@ -502,7 +505,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       commit: (change, ctx) => this.journal.harness.commit(change, ctx),
       ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
       ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
-    const workflow = workflowExtension();
+    const workflow = workflowExtension({ library: new WorkflowLibrary(this.options.services.agentDir), cwd: this.options.services.cwd });
     this.registry.install(workflow);
     const decision = decisionExtension();
     this.registry.install(decision);

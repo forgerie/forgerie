@@ -40,11 +40,21 @@ describe("a proposed workflow in the thread", () => {
     [CHANGES_PROPOSAL, "You asked for changes: Split the review in two"],
     [DISMISSED_PROPOSAL, "Dismissed"],
     [REPLACED_PROPOSAL, "Replaced by a newer proposal"],
+    [{ ...PROPOSAL, state: { kind: "here" as const, decidedAt: 1 } }, "Done here, without workers"],
     [undefined, "no longer in the session's records"],
   ])("closes to one line once decided", async (proposal, line) => {
     await act(async () => root.render(<WorkflowProposalCard entry={PROPOSAL_ENTRY} proposal={proposal} read onReview={() => {}} />));
     expect(button("Review")).toBeUndefined();
     expect(document.querySelector(".decision-card-closed")?.textContent).toContain(line);
+  });
+
+  it.each([
+    [{ kind: "saved" as const, name: "design-build-review", changes: "None" }, "Based on design-build-review"],
+    [{ kind: "new" as const, reason: "None fits." }, "New workflow"],
+  ])("names where the proposal comes from", async (basis, kicker) => {
+    await act(async () => root.render(<WorkflowProposalCard entry={{ ...PROPOSAL_ENTRY, basis }} read={false} onReview={() => {}} />));
+    expect(text()).toContain(kicker);
+    expect(text()).not.toContain("Proposed workflow");
   });
 
   it("offers no actions in a read-only transcript", async () => {

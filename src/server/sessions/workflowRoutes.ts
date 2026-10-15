@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { WorkflowCancelSchema, WorkflowLaunchSchema, WorkflowWorkerModelSchema, type WorkflowModels, WorkflowFinishSchema, WorkflowStopDecisionSchema, type WorkflowInputs, type WorkflowOutcome, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
-import { WorkflowProposalStartSchema, WorkflowProposalChangesSchema, WorkflowProposalDismissSchema, type WorkflowProposal } from "../../shared/workflowProposals.js";
+import { WorkflowProposalStartSchema, WorkflowProposalChangesSchema, WorkflowProposalDismissSchema, WorkflowProposalHereSchema, type WorkflowProposal } from "../../shared/workflowProposals.js";
 import type { WorkflowRun } from "../../shared/workflowRuns.js";
 import type { SessionRouteRef } from "./sessionService.js";
 import { normalizeRequestCwd } from "../workingDirectory.js";
@@ -15,6 +15,7 @@ export interface WorkflowRouteService {
   startWorkflowProposal(ref: SessionRouteRef, id: string, inputs: WorkflowInputs, requestId: string, models?: WorkflowModels): Promise<WorkflowRun>;
   changeWorkflowProposal(ref: SessionRouteRef, id: string, note: string): Promise<WorkflowProposal>;
   dismissWorkflowProposal(ref: SessionRouteRef, id: string): Promise<WorkflowProposal>;
+  doWorkflowProposalHere(ref: SessionRouteRef, id: string, inputs: WorkflowInputs): Promise<WorkflowProposal>;
   runWorkflow(ref: SessionRouteRef, name: string, inputs: WorkflowInputs, requestId: string, models?: WorkflowModels): Promise<unknown>;
   setWorkflowWorkerModel(ref: SessionRouteRef, runId: string, worker: string, model: string | null): Promise<WorkflowRun>;
   cancelWorkflow(ref: SessionRouteRef, runId: string): Promise<WorkflowRun>;
@@ -42,6 +43,10 @@ export function registerWorkflowRoutes(app: FastifyInstance, service: WorkflowRo
   app.post<{ Params: { sessionId: string; proposalId: string }; Body: unknown }>(`${prefix}/sessions/:sessionId/workflow-proposals/:proposalId/dismiss`, (request, reply) => run(reply, () => {
     if (!Check(WorkflowProposalDismissSchema, request.body)) throw new WorkflowError(400, "Invalid workflow proposal dismiss body");
     return service.dismissWorkflowProposal({ id: request.params.sessionId, cwd: normalizeRequestCwd(request.body.cwd) }, request.params.proposalId);
+  }));
+  app.post<{ Params: { sessionId: string; proposalId: string }; Body: unknown }>(`${prefix}/sessions/:sessionId/workflow-proposals/:proposalId/here`, (request, reply) => run(reply, () => {
+    if (!Check(WorkflowProposalHereSchema, request.body)) throw new WorkflowError(400, "Invalid workflow proposal here body");
+    return service.doWorkflowProposalHere({ id: request.params.sessionId, cwd: normalizeRequestCwd(request.body.cwd) }, request.params.proposalId, request.body.inputs);
   }));
   app.post<{ Params: { sessionId: string }; Body: unknown }>(`${prefix}/sessions/:sessionId/workflow-runs`, (request, reply) => run(reply, () => {
     if (!Check(WorkflowLaunchSchema, request.body)) throw new WorkflowError(400, "Invalid workflow launch body");

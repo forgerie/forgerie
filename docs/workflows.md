@@ -56,13 +56,18 @@ While the run is active, a strip above the composer shows its stages as bars. Pa
 
 ## Temporary workflow proposals
 
-For a task that needs several workers, a review, or your check, the agent can call `propose_workflow({name, summary, text, inputs?})`, then end its turn. Small tasks do not need a proposal. A one-off workflow must not become a file in the repository. The tool guidance says: “Add no approve stops unless the user asked to check something. Only irreversible steps need a stop.”
+For a task too large or too risky for the agent alone, the agent can call `propose_workflow({name, summary, text, inputs?, basis})`, then end its turn. A task the agent can do well by itself does not need a proposal. A one-off workflow must not become a file in the repository.
 
-The **Proposed workflow** card shows the name, overview, stages, workers, and stops. An open proposal counts as **Needs your response**. The plan uses the chat's Markdown blocks, including checklists, steps, callouts and expandable details. New proposals receive this writing guidance; existing proposal text is not rewritten. Inputs use their descriptions as labels, with readable names as a fallback. Number inputs have step buttons. Changed inputs show **Edited** and **Use the agent's** to restore the proposed value. Review it and change the pre-filled inputs before choosing:
+Before it proposes, the agent calls `saved_workflows` to list your saved workflows with their routes, and reads any that could fit. It adapts the closest one: it keeps the stages and agents, writes the task's own instructions into the prose, and changes the shape only when the task needs it. `basis` is required. It is `{kind: "saved", name, changes}` for an adapted saved workflow, or `{kind: "new", reason}` with the workflows the agent considered and why none fits. A `saved` basis must name a workflow that `saved_workflows` lists. The saved file does not change.
+
+The tool guidance asks the agent to plan for your time. It uses the fewest workers that do the job, runs independent work in parallel, and puts a stage after another only when it needs that stage's output. It does not set a worker's model unless you asked for one. It adds no approve stops unless you asked to check something; only irreversible steps need a stop.
+
+The card's kicker says where the plan comes from: **Based on** a saved workflow's name, or **New workflow**. Proposals made before `basis` existed say **Proposed workflow**. The card shows the name, overview, stages, workers, and stops. The sheet's rail opens with the same source and the agent's note on what it changed, or why the plan is new. An open proposal counts as **Needs your response**. The plan uses the chat's Markdown blocks, including checklists, steps, callouts and expandable details. New proposals receive this writing guidance; existing proposal text is not rewritten. Inputs use their descriptions as labels, with readable names as a fallback. Number inputs have step buttons. Changed inputs show **Edited** and **Use the agent's** to restore the proposed value. Review it and change the pre-filled inputs before choosing:
 
 | Action | Result |
 | --- | --- |
 | **Start workflow** | Starts from the proposal's frozen instructions and your inputs. The proposal closes as **Started**. Another active workflow or a busy parent blocks Start with a reason. |
+| **Do it here** | The agent follows the plan itself, in this chat, without workers. Forgerie delivers the plan's prose and your inputs once, and the proposal closes as **Done here, without workers**. No run starts, so there is no run strip, decision log run, or land stop. At a stop, the agent asks you in its reply. Nothing enforces the order of the stages or stops spawning children; the instruction asks the agent not to. A changed route disables Do it here until the agent rewrites the plan. |
 | **Ask for changes** | Requires a note. Closes the proposal and delivers the note to the agent once. The agent revises and proposes again. |
 | **Dismiss** | Closes the proposal without waking the agent. |
 
@@ -90,7 +95,7 @@ workflow:
     - { id: land, name: Land, stop: land }
 ```
 
-A stage with `stop` names you as its actor. `approve` asks you to approve what the agent prepared. `land` lands the run's child branches. A stop stage declares no workers. A land stage must be the last stage. Stage ids and worker names use lowercase letters, digits, and dashes. A worker name appears in one stage only. A worker's `model` is `provider/model-id`, optionally with `:thinking-level`. When the agent spawns a child with a declared worker's name, Forgerie uses that model, whatever model the agent asked for and whatever the agent file says. Without a declared model, the agent file's model applies. `child_agent` also accepts `model` for one spawn of an undeclared child.
+A stage with `stop` names you as its actor. `approve` asks you to approve what the agent prepared. `land` lands the run's child branches. A stop stage declares no workers. A land stage must be the last stage. Stage ids and worker names use lowercase letters, digits, and dashes. A worker name appears in one stage only. A worker's `model` is `provider/model-id`, optionally with `:thinking-level`. When the agent spawns a child with a declared worker's name, Forgerie uses that model, whatever model the agent asked for and whatever the agent file says. Without a declared model, the agent file's model applies. A worker the reader puts back on its default (`model: null` on the wire) also runs on its agent file's model; only a worker without an agent file, or with a file that names no model, runs on the session's model. The model picker names that default, for example **reviewer's model**. `child_agent` also accepts `model` for one spawn of an undeclared child. Its guidance tells the agent to omit it unless you asked for a model or the agent file's model failed.
 
 Forgerie enforces three rules:
 
@@ -177,6 +182,7 @@ Browser URLs use `/api` before these paths. Requests identify the parent's `cwd`
 | `POST /sessions/:id/workflow-proposals/:pid/start` | Exactly `{cwd, inputs, requestId}`. | A `WorkflowRun` with the proposal's exact text and SHA-256 hash. |
 | `POST /sessions/:id/workflow-proposals/:pid/changes` | Exactly `{cwd, note}`. A nonblank note, at most 8000 characters. | The closed `WorkflowProposal`; one Durable task delivers the note. |
 | `POST /sessions/:id/workflow-proposals/:pid/dismiss` | Exactly `{cwd}`. | The closed `WorkflowProposal`; no agent input is delivered. |
+| `POST /sessions/:id/workflow-proposals/:pid/here` | Exactly `{cwd, inputs}`. | The `WorkflowProposal` in state `here`; one Durable task delivers the plan to the agent. 409 while a workflow runs. |
 
 `WorkflowProposal` is defined in `src/shared/workflowProposals.ts`. Its summary contains at most 280 characters. Decisions on a closed proposal return 409, except an identical Start retry. Foreign proposal IDs return 404. Invalid bodies and inputs return 400. A proposal document change emits `workflow_runs_changed`, like a run document change; clients read both lists again.
 

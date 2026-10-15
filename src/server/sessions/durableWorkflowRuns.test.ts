@@ -23,7 +23,7 @@ it("replays a proposal without another entry and commits Start's run and decisio
   registry.install(workflowExtension());
   const journal = await DurableSessionJournal.open({ manager, models, registry, agent: { model: { provider: "faux", modelId: "faux-1" } } });
   try {
-    const args = { name: "one-task", summary: "Plan this task.", text: "---\nworkflow: {version: 1}\n---\nWait for review.\n" };
+    const args = { name: "one-task", summary: "Plan this task.", text: "---\nworkflow: {version: 1}\n---\nWait for review.\n", basis: { kind: "new" as const, reason: "No saved workflow fits." } };
     const propose = () => journal.conversation.commit((tx) => proposeWorkflow(tx, journal.conversation.id, "p:receipt", args), context);
     const first = await propose();
     expect(await propose()).toEqual(first);

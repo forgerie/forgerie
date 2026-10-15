@@ -36,7 +36,8 @@ The audit checked the installed source, not descriptions alone.
 | `spawn_session` | unsafe | Creates a session and delivers its first prompt. |
 | `handoff_session` | unsafe | Creates a continuation session and ends the source run. |
 | `child_agent` | safe | `durableChildAgents.ts`: `reporters[taskId]` reuses spawn/send. `createForChild(parent, taskId)` reuses an isolated worktree even if the call stops before the child receipt commits. |
-| `propose_workflow` | safe | `durableWorkflowRuns.ts`: the proposal ID `p:${taskId}` reuses the proposal and its card atomically. |
+| `propose_workflow` | safe | `durableWorkflowRuns.ts`: the proposal ID `p:${taskId}` reuses the proposal and its card atomically. A replay skips the saved-workflow check once the proposal is recorded. |
+| `saved_workflows` | safe | `durableWorkflowRuns.ts`: reads the prompt library. It changes nothing. |
 | `workflow_finish` | safe | The stored finished outcome/result is the receipt. Replaying the same result returns without changing state or its timestamp. A different result is refused. |
 | `workflow_stop` | safe | `stopReceipts[taskId]` commits with the stop/card. Replay returns its receipt even if the user approved or reopened the stop meanwhile. |
 | `codemode` | unsafe | SDK `extensions/codemode/tool.js`: scripts can call effectful tools, model APIs, and append entries. Safe nested reads do not make the script safe. |
