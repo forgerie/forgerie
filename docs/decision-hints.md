@@ -102,7 +102,7 @@ not a content scanner for copies an agent made or old committed copies. Existing
 `auth.json` and `cliproxyapi.json` browser exposure is unchanged by this exclusion.
 
 Key-bearing web-to-sessiond requests never follow redirects. Every 3xx response
-fails with fixed text, without reading or forwarding the redirect body.
+fails with fixed text, without parsing or forwarding the redirect body.
 
 ## Risk labels
 
