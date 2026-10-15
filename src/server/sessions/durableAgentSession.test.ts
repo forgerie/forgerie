@@ -930,7 +930,7 @@ it("returns an active native owner-close error instead of reopening a family or 
 });
 
 
-it("keeps an inactive classic route when the Durable session activates during preparation, then routes the next read natively", async () => {
+it.each(["dialog", "streaming"] as const)("retries an inactive open when %s starts after activation during preparation", async kind => {
   const { session, provider, services, directory } = await fixture();
   provider.setResponses([fauxAssistantMessage("saved answer")]); await session.prompt("saved input");
   const hub = new SessionEventHub();
@@ -939,17 +939,31 @@ it("keeps an inactive classic route when the Durable session activates during pr
   const service = new PiSessionService(hub, { agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime, durableReader: reader, sessionManager: gateway, archiveStore: emptyArchiveStore(),
     createAgentRuntime: () => Promise.resolve({ session, cwd: directory, setRebindSession: () => { /* This test retains its original facade. */ }, fork: () => Promise.reject(new Error("Not exercised")), dispose: () => Promise.resolve() }), heartbeatIntervalMs: 60_000 });
   const catalog = service.unreadCatalog.bind(service);
-  vi.spyOn(service, "unreadCatalog").mockImplementationOnce(async () => { await service.start(directory); return catalog(); });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let prompting: Promise<void> | undefined;
+  vi.spyOn(service, "unreadCatalog").mockImplementationOnce(async () => {
+    await service.start(directory);
+    if (kind === "dialog") void session.extensionRunner.getUIContext().confirm("Activated dialog", "Do not lose this dialog");
+    else {
+      provider.setResponses([async () => { await gate; return fauxAssistantMessage("new live answer"); }]);
+      prompting = session.prompt("new live input");
+      await vi.waitFor(() => { expect(session.isStreaming).toBe(true); });
+    }
+    return catalog();
+  });
   const acquireRead = vi.spyOn(DurableSessionJournal.pool, "acquireRead");
   try {
     const ref = { id: session.sessionId, cwd: directory };
-    const classic = await service.open(ref, { limit: 50 });
-    expect(classic).toMatchObject({ readPath: "classic", cut: "classic" });
-    expect(classic.page.messages.map(message => message.role)).toEqual(["user", "assistant"]);
+    await expect(service.open(ref, { limit: 50 })).rejects.toMatchObject({ status: 409, code: "READ_PATH_CHANGED" });
     expect(acquireRead).not.toHaveBeenCalled();
     const native = await service.open(ref, { limit: 50 });
     expect(native).toMatchObject({ readPath: "native", cut: "native" });
+    if (kind === "dialog") expect(native.status.pendingDialogs).toMatchObject([{ title: "Activated dialog" }]);
+    else {
+      expect(native.status.isStreaming).toBe(true);
+      expect(native.page.messages.at(-1)).toMatchObject({ role: "user", content: "new live input" });
+    }
     expect(acquireRead).toHaveBeenCalledTimes(1);
-    expect(native.page.messages.map(message => message.role)).toEqual(["user", "assistant"]);
-  } finally { await service.dispose(); }
+  } finally { release(); await prompting; await service.dispose(); }
 });

@@ -12,7 +12,7 @@ Production native admission is active-only. `sessiond` composes the reader with 
 
 The native transaction and replacement stream deliberately exclude pending SDK transcript/status callbacks. They do not require the private AgentEventStream to drain. Messages, native tree reads and replacements use the same committed journal. Host-only status changes cause another native cut; shell/command output, errors and Pi/process notifications keep their side channel. A later host event must not hide an earlier native transcript checkpoint on the client.
 
-Admission freezes before preparation. An inactive-to-active change keeps that request classic; the next read reroutes. A native execution owner that closes before lease acquisition produces an error, never a silent fallback. An acquired read lease retains the family until release.
+Admission freezes before preparation. An inactive-to-active change returns retryable 409 before publishing a file-only watermark; the next read reroutes and includes the owner's live state. A native execution owner that closes before lease acquisition produces an error, never a silent fallback. An acquired read lease retains the family until release.
 
 Older pages use an exclusive position cursor tied to the append-only history identity. Prepend preserves message identity and lets assistant-ui own viewport compensation. Branch movement invalidates the identity. Search resolves an unloaded position before reveal. The old sessionStorage reading-position policy stays removed; retained DOM preserves current reading position only while kept.
 

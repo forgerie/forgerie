@@ -2853,6 +2853,9 @@ export class PiSessionService implements SessionRouteService {
         const status: ClientSessionStatus = { sessionId: id, ...(readonly === undefined && archived === undefined ? {} : { readOnly: true }), persisted: true, isStreaming: false, isCompacting: false,
           isBashRunning: false, pendingMessageCount: 0, queuedMessages: [], messageCount: messages.length, ...savedTranscriptUsage(messages),
           ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) };
+        // A file-only seed cannot cover the activated owner's partial, queues or dialogs.
+        // Do not stamp its new event watermark onto an envelope that omits that state.
+        if (inactiveClassic && this.activeForRef(ref) !== undefined) throw new SessionOpenError("Session activated during open; retry admission", 409, "READ_PATH_CHANGED");
         return this.classicOpenCut(id, cwd, messages, null, status, page, receiptFor(id, cwd));
       }
       throw new SessionOpenError("Saved history changed during open", 503, "OPEN_UNAVAILABLE");
