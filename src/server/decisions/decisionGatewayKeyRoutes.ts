@@ -9,10 +9,9 @@ export function registerDecisionGatewayKeyRoutes(app: FastifyInstance, store: De
   app.register((scope, _options, done) => {
     // Fastify's default JSON error may quote the invalid body. Never send or log it.
     scope.setErrorHandler((_error, _request, reply) => reply.code(400).send({ code: "invalid", error: decisionGatewayKeyErrors.invalid.error }));
-    scope.get("/decision-hints/gateway-key", (_request, reply) => {
+    scope.get("/decision-hints/gateway-key", async (_request, reply) => {
       reply.header("cache-control", "no-store");
-      try { return store.status(); }
-      catch { return reply.code(500).send({ code: "storage", error: decisionGatewayKeyErrors.storage.error }); }
+      return store.status();
     });
     for (const clear of [false, true]) scope.post(`/decision-hints/gateway-key${clear ? "/clear" : ""}`, { bodyLimit: 32_768 }, async (request, reply) => {
       reply.header("cache-control", "no-store");
@@ -22,7 +21,7 @@ export function registerDecisionGatewayKeyRoutes(app: FastifyInstance, store: De
       try {
         if ("apiKey" in parsed.data && typeof parsed.data.apiKey === "string") await store.set(parsed.data.apiKey);
         else await store.clear();
-        return store.status();
+        return await store.status();
       } catch (error) {
         const code = error instanceof DecisionGatewayKeyError && error.status === 409 ? "environment" : "storage";
         const failure = decisionGatewayKeyErrors[code];

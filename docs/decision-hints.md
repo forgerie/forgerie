@@ -57,11 +57,15 @@ change an environment value. Changing a service environment still requires a
 sessiond restart to give the process the new value.
 
 File changes need **no restart**. Sessiond reads the effective key on each gateway
-request and caches the file by mtime, size and inode. Set, replace and clear apply
+request asynchronously and caches the file by mtime, size and inode. Credential
+I/O runs inside the detached ask, not on the turn or tool stack. Set, replace and clear apply
 to the next request; a request already sent keeps its original authorization.
 The gateway receives the key as a Bearer token. With no key, Forgerie sends requests
 without `Authorization`, so gateways without authentication still work. A damaged
 or unreadable key file stops the optional ask instead of sending it without auth.
+Settings shows **Saved key file is unreadable**, keeps the input empty, and allows
+Replace with a new key or Remove. Empty files, malformed JSON and empty `apiKey`
+values all use this repairable state.
 
 **Security cost:** agent `bash` runs as the same Unix user as Forgerie. It can read
 the profile key file despite mode `0600`. This is already true of `auth.json` and
@@ -72,7 +76,9 @@ start. This environment isolation is not a sandbox against host file access.
 
 Do not put a key in plugin settings, the gateway URL, or browser storage. Read
 routes report only `{ keyPresent, source }`, where source is `environment`,
-`settings` or `none`. They never return the key, a prefix, hash or length. Presence
+`settings` or `none`. An invalid file reports
+`{ keyPresent: false, source: "settings", invalid: true }`. They never return the
+key, a prefix, hash or length. Presence
 does not mean the gateway accepts the key. The write-only Settings routes are:
 
 - `GET /aui/plugins/decision-hints/gateway-key`: public status only.
@@ -86,6 +92,17 @@ replaces the value without reading it; simultaneous key writes are last-writer
 wins. Values are trimmed, non-empty, at most 4096 characters, and cannot contain
 control characters. The runtime endpoint also includes public status at
 `components.sessiond.decisionHints`.
+
+Browser file APIs exclude the active profile's key file and private temporary
+writes, even when allowed roots include the profile. Checks use canonical paths
+and device/inode identity, including symlinks and hard links. File reads, previews,
+tree/search results, resource content, process output and Git patches must not
+expose those files or their content fingerprints. This is a file-identity boundary,
+not a content scanner for copies an agent made or old committed copies. Existing
+`auth.json` and `cliproxyapi.json` browser exposure is unchanged by this exclusion.
+
+Key-bearing web-to-sessiond requests never follow redirects. Every 3xx response
+fails with fixed text, without reading or forwarding the redirect body.
 
 ## Risk labels
 

@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { BrowserFileAccess } from "../browserFileAccess.js";
+import { join, resolve } from "node:path";
 import { DefaultResourceLoader, type PromptTemplate, type ResourceDiagnostic, type Skill } from "@earendil-works/pi-coding-agent";
 import { buildPromptResourceCatalogFromResources, type CanonicalSkillResourceInput } from "../sessions/commandCatalog.js";
 import { canonicalPromptResourceOrigin } from "../sessions/promptResourceOrigin.js";
@@ -159,7 +160,9 @@ export class PromptResourceCatalogService {
     try {
       const resources = await this.loader.loadResources({ cwd, agentDir: this.agentDir, signal });
       throwIfAborted(signal);
-      const prompts = resources.prompts.map((prompt) => {
+      const browserFiles = new BrowserFileAccess(this.agentDir);
+      const readablePrompts = (await Promise.all(resources.prompts.map(async prompt => ({ prompt, readable: await browserFiles.isReadable(prompt.filePath) })))).filter(row => row.readable).map(row => row.prompt);
+      const prompts = readablePrompts.map((prompt) => {
         assertBoundedPromptResourceContent(prompt.content, this.limits.maxSerializedBytes);
         return {
           name: prompt.name,
@@ -170,10 +173,11 @@ export class PromptResourceCatalogService {
       });
       const skills: CanonicalSkillResourceInput[] = [];
       for (const skill of resources.skills) {
+        if (!await browserFiles.isReadable(skill.filePath)) continue;
         skills.push({
           name: skill.name,
           description: skill.description,
-          content: await readBoundedPromptResourceFile(skill.filePath, this.limits.maxSerializedBytes, signal),
+          content: await readBoundedPromptResourceFile(skill.filePath, this.limits.maxSerializedBytes, signal, browserFiles),
           origin: canonicalPromptResourceOrigin("skill", skill.filePath, skill.sourceInfo),
           baseDir: skill.baseDir,
           filePath: skill.filePath,
@@ -183,7 +187,7 @@ export class PromptResourceCatalogService {
         builtins: BUILTIN_COMMANDS.map((command) => ({ name: command.name, source: "builtin" as const, ...(command.description === undefined ? {} : { description: command.description }) })),
         prompts,
         skills,
-        diagnostics: resources.diagnostics.map(safeDiagnostic),
+        diagnostics: (await Promise.all(resources.diagnostics.map(async diagnostic => ({ diagnostic, readable: (await Promise.all([diagnostic.path, diagnostic.collision?.winnerPath, diagnostic.collision?.loserPath].filter(path => path !== undefined).map(path => browserFiles.isReadable(path)))).every(Boolean) })))).filter(row => row.readable).map(row => safeDiagnostic(row.diagnostic)),
       });
       return enforcePromptResourceCatalogLimits(catalog, this.limits);
     } catch (error) {
@@ -198,6 +202,10 @@ export class PromptResourceCatalogService {
 export function createDefaultPromptResourceLoader(): PromptResourceLoader {
   return {
     async loadResources({ cwd, agentDir, signal }) {
+      throwIfAborted(signal);
+      const browserFiles = new BrowserFileAccess(agentDir);
+      await browserFiles.assertReadable(join(agentDir, "settings.json"));
+      await browserFiles.assertReadable(join(cwd, ".pi", "settings.json"));
       throwIfAborted(signal);
       const loader = new DefaultResourceLoader({
         cwd,

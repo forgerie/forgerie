@@ -51,6 +51,16 @@ describe("Gateway key settings", () => {
     expect(document.body.textContent).toContain("Not set");
     expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
   });
+  it("keeps an invalid saved file repairable with Replace and Remove", async () => {
+    value = { keyPresent: false, source: "settings", invalid: true }; await render();
+    expect(document.body.textContent).toContain("Saved key file is unreadable");
+    expect(input().value).toBe(""); expect(input().disabled).toBe(false);
+    expect(button("Remove gateway key").disabled).toBe(false);
+    await type("repaired-key"); expect(button("Replace gateway key").disabled).toBe(false);
+    await click("Replace gateway key"); expect(document.body.textContent).toContain("Set here");
+    expect(input().value).toBe("");
+    await click("Remove gateway key"); expect(document.body.textContent).toContain("Not set");
+  });
   it("disables environment-owned keys with a one-line reason and never prefills them", async () => {
     value = { keyPresent: true, source: "environment" }; await render();
     expect(input().value).toBe(""); expect(input().disabled).toBe(true);

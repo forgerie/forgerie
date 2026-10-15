@@ -42,7 +42,7 @@ export class SessionDaemonClient {
   }
 
   private async requestUrl(method: string, path: string, payload?: string, signal?: AbortSignal) {
-    const init: RequestInit = { method, ...(signal === undefined ? {} : { signal }) };
+    const init: RequestInit = { method, redirect: "manual", ...(signal === undefined ? {} : { signal }) };
     if (payload !== undefined && payload !== "") {
       init.headers = { "content-type": "application/json" };
       init.body = payload;

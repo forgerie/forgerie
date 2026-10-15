@@ -1,5 +1,6 @@
+import { openBrowserFile, type BrowserFileAccess } from "../browserFileAccess.js";
 import { execFile } from "node:child_process";
-import { open, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -25,7 +26,7 @@ export interface ManagedProcessLogBatch {
 
 /** The session owner serializes read, maintenance and acknowledgement calls. */
 export class ManagedProcessLog {
-  constructor(private readonly directory: string, private readonly capBytes = 64 * 1024 * 1024) {
+  constructor(private readonly directory: string, private readonly capBytes = 64 * 1024 * 1024, private readonly browserFiles?: BrowserFileAccess) {
     if (!Number.isSafeInteger(capBytes) || capBytes < 1) throw new Error("Invalid managed process log cap");
   }
   async read(ended: boolean, options: ManagedProcessLogReadOptions = {}): Promise<ManagedProcessLogBatch> {
@@ -33,7 +34,7 @@ export class ManagedProcessLog {
     if (!Number.isSafeInteger(maxLines) || maxLines < 1 || maxLines > 10_000) throw new Error("Invalid managed process log batch size");
     const state = await this.maintain();
     const position = options.cursor === undefined ? state.read : positionSchema.parse(options.cursor);
-    const file = await open(join(this.directory, "output.log"), "r");
+    const file = await openBrowserFile(join(this.directory, "output.log"), this.browserFiles);
     try {
       const size = Math.min((await file.stat()).size, state.base.offset + this.capBytes);
       if (position.offset > size) throw new Error("Managed process log cursor is beyond output");
@@ -79,7 +80,7 @@ export class ManagedProcessLog {
   async acknowledge(cursor: ManagedProcessLogCursor): Promise<void> {
     positionSchema.parse(cursor);
     const state = await this.load();
-    const file = await open(join(this.directory, "output.log"), "r");
+    const file = await openBrowserFile(join(this.directory, "output.log"), this.browserFiles);
     try {
       if (cursor.offset > (await file.stat()).size || cursor.offset < state.read.offset || cursor.line < state.read.line) throw new Error("Invalid managed process log acknowledgement");
     } finally { await file.close(); }
@@ -89,7 +90,7 @@ export class ManagedProcessLog {
   async maintain(): Promise<LogState> {
     const state = await this.load();
     const path = join(this.directory, "output.log");
-    const file = await open(path, "r");
+    const file = await openBrowserFile(path, this.browserFiles);
     try {
       const size = (await file.stat()).size;
       if (size < state.base.offset || size < state.read.offset) throw new Error("Managed process log was externally truncated");

@@ -1,3 +1,4 @@
+import type { BrowserFileAccess } from "../browserFileAccess.js";
 import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep, win32 } from "node:path";
@@ -13,7 +14,10 @@ export interface AllowedPathRoot {
   realPath: string;
 }
 
+export interface WorkspacePathAccess extends PiWebPathAccessConfig { browserFiles?: BrowserFileAccess }
+
 export interface PathAccessPolicy {
+  browserFiles?: BrowserFileAccess | undefined;
   workspaceRoot: string;
   allowedRoots: AllowedPathRoot[];
 }
@@ -34,18 +38,19 @@ export interface PathAccessPolicyOptions {
   homeDir?: string;
 }
 
-export async function createPathAccessPolicy(workspaceRootPath: string, pathAccess: PiWebPathAccessConfig | undefined, options: PathAccessPolicyOptions = {}): Promise<PathAccessPolicy> {
+export async function createPathAccessPolicy(workspaceRootPath: string, pathAccess: WorkspacePathAccess | undefined, options: PathAccessPolicyOptions = {}): Promise<PathAccessPolicy> {
   return {
+    browserFiles: pathAccess?.browserFiles,
     workspaceRoot: await canonicalDirectory(workspaceRootPath, "Workspace path"),
     allowedRoots: await resolveAllowedRoots(pathAccess?.allowedPaths ?? [], options),
   };
 }
 
-export async function resolveWorkspacePathAccessTarget(rootPath: string, requestedPath: string | undefined, pathAccess?: PiWebPathAccessConfig, options: PathAccessPolicyOptions = {}): Promise<ResolvedPathAccessTarget> {
+export async function resolveWorkspacePathAccessTarget(rootPath: string, requestedPath: string | undefined, pathAccess?: WorkspacePathAccess, options: PathAccessPolicyOptions = {}): Promise<ResolvedPathAccessTarget> {
   const request = requestedPath ?? "";
   const workspaceRoot = await canonicalDirectory(rootPath, "Workspace path");
   const allowedRoots = isAbsoluteishPath(request) ? await resolveAllowedRoots(pathAccess?.allowedPaths ?? [], options) : [];
-  return resolvePathAccessTarget({ workspaceRoot, allowedRoots }, requestedPath, options);
+  return resolvePathAccessTarget({ workspaceRoot, allowedRoots, browserFiles: pathAccess?.browserFiles }, requestedPath, options);
 }
 
 export async function resolvePathAccessTarget(policy: PathAccessPolicy, requestedPath: string | undefined, options: PathAccessPolicyOptions = {}): Promise<ResolvedPathAccessTarget> {
@@ -55,6 +60,7 @@ export async function resolvePathAccessTarget(policy: PathAccessPolicy, requeste
   const displayPath = normalizeRelativePath(request);
   const target = await canonicalExistingPath(resolve(policy.workspaceRoot, displayPath));
   ensureInside(policy.workspaceRoot, target, "Path escapes workspace");
+  await policy.browserFiles?.assertReadable(target);
   return { kind: "workspace", root: policy.workspaceRoot, target, displayPath };
 }
 
@@ -80,6 +86,7 @@ async function resolveAllowedTarget(policy: PathAccessPolicy, request: string, o
   const target = await canonicalExistingPath(displayPath);
   const root = policy.allowedRoots.find((allowedRoot) => isInsideOrSame(allowedRoot.realPath, target));
   if (root === undefined) throw new Error("Path is outside allowed paths");
+  await policy.browserFiles?.assertReadable(target);
   return { kind: "allowed", root: root.realPath, target, displayPath };
 }
 

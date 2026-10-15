@@ -1,10 +1,10 @@
+import type { WorkspacePathAccess } from "./pathAccessPolicy.js";
 import { execFile, spawn } from "node:child_process";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep, win32 } from "node:path";
 import { promisify } from "node:util";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
-import type { PiWebPathAccessConfig } from "../../shared/apiTypes.js";
 import type { ClientFileSuggestion } from "../types.js";
 import { createPathAccessPolicy, isAbsoluteishPath, resolvePathAccessTarget, type PathAccessPolicy } from "./pathAccessPolicy.js";
 
@@ -38,7 +38,7 @@ export type FileSuggestionScope = "tracked" | "all";
 export interface FileSuggestionOptions {
   kind?: ClientFileSuggestion["kind"] | undefined;
   scope?: FileSuggestionScope | undefined;
-  pathAccess?: PiWebPathAccessConfig | undefined;
+  pathAccess?: WorkspacePathAccess | undefined;
 }
 
 export interface FileSuggestionDependencies {
@@ -60,7 +60,8 @@ export async function listFileSuggestions(cwd: string, query = "", options: File
 
   const normalizedQuery = normalizeFileQuery(query);
   const command = deps.execFile ?? runCommand;
-  const files = await listFilesForScope(cwd, options.scope, command);
+  const gathered = await listFilesForScope(cwd, options.scope, command);
+  const files = (await Promise.all(gathered.map(async file => ({ file, readable: await options.pathAccess?.browserFiles?.isReadable(join(cwd, file.path)) ?? true })))).filter(row => row.readable).map(row => row.file);
   return (await rankFileSuggestionsWithOptionalFzf(
     cwd,
     files.filter((file) => options.kind === undefined || file.kind === options.kind),
@@ -69,7 +70,7 @@ export async function listFileSuggestions(cwd: string, query = "", options: File
   )).slice(0, maxFileSuggestions);
 }
 
-export async function listPathSuggestions(cwd: string, prefix = "", pathAccess?: PiWebPathAccessConfig, deps: FileSuggestionDependencies = {}): Promise<ClientFileSuggestion[]> {
+export async function listPathSuggestions(cwd: string, prefix = "", pathAccess?: WorkspacePathAccess, deps: FileSuggestionDependencies = {}): Promise<ClientFileSuggestion[]> {
   const query = fileQueryText(prefix);
   const fzf = fzfRunnerForDependencies(deps);
   if (isAbsoluteishPath(query)) return listAllowedPathSuggestions(cwd, query, pathAccess, fzf);
@@ -77,7 +78,7 @@ export async function listPathSuggestions(cwd: string, prefix = "", pathAccess?:
   const normalizedPrefix = query.replace(/\\/g, "/");
   const directoryPrefix = normalizedPrefix.endsWith("/") ? normalizedPrefix : dirname(normalizedPrefix) === "." ? "" : `${dirname(normalizedPrefix)}/`;
   const searchPrefix = normalizedPrefix.endsWith("/") ? "" : basename(normalizedPrefix);
-  const candidates = await listDirectoryEntrySuggestions(cwd, directoryPrefix);
+  const candidates = await listDirectoryEntrySuggestions(cwd, directoryPrefix, pathAccess);
   return (await rankPathSuggestionsWithOptionalFzf(
     cwd,
     candidates,
@@ -87,8 +88,8 @@ export async function listPathSuggestions(cwd: string, prefix = "", pathAccess?:
   )).slice(0, maxFileSuggestions);
 }
 
-async function listDirectoryEntrySuggestions(cwd: string, directoryPrefix: string): Promise<ClientFileSuggestion[]> {
-  const policy = await createPathAccessPolicy(cwd, undefined);
+async function listDirectoryEntrySuggestions(cwd: string, directoryPrefix: string, pathAccess?: WorkspacePathAccess): Promise<ClientFileSuggestion[]> {
+  const policy = await createPathAccessPolicy(cwd, pathAccess);
   const resolved = await resolveWorkspaceSuggestionDirectory(policy, directoryPrefix);
   if (resolved === undefined) return [];
 
@@ -96,6 +97,7 @@ async function listDirectoryEntrySuggestions(cwd: string, directoryPrefix: strin
   const suggestions: ClientFileSuggestion[] = [];
   for (const entry of entries.sort(compareDirectoryEntries)) {
     const childPath = appendRequestPath(resolved.displayPath, entry.name);
+    if (policy.browserFiles !== undefined && !await policy.browserFiles.isReadable(join(resolved.target, entry.name))) continue;
     const isDirectory = await suggestionEntryIsDirectory(policy, childPath, entry);
     if (isDirectory === undefined) continue;
     suggestions.push({ path: `${childPath}${isDirectory ? "/" : ""}`, kind: "other" });
@@ -113,7 +115,7 @@ async function resolveWorkspaceSuggestionDirectory(policy: PathAccessPolicy, dir
   }
 }
 
-async function listAllowedPathSuggestions(cwd: string, query: string, pathAccess: PiWebPathAccessConfig | undefined, fzf: CommandRunner | undefined): Promise<ClientFileSuggestion[]> {
+async function listAllowedPathSuggestions(cwd: string, query: string, pathAccess: WorkspacePathAccess | undefined, fzf: CommandRunner | undefined): Promise<ClientFileSuggestion[]> {
   const policy = await createPathAccessPolicy(cwd, pathAccess);
   if (policy.allowedRoots.length === 0) throw new Error("Absolute paths are not allowed");
   const rootCandidates = allowedRootSuggestionCandidates(policy, query);
@@ -166,6 +168,7 @@ async function listAllowedDirectoryEntryCandidates(policy: PathAccessPolicy, que
   const suggestions: ClientFileSuggestion[] = [];
   for (const entry of entries.sort(compareDirectoryEntries)) {
     const childPath = appendRequestPath(directoryPrefix, entry.name);
+    if (policy.browserFiles !== undefined && !await policy.browserFiles.isReadable(join(resolved.target, entry.name))) continue;
     const isDirectory = await suggestionEntryIsDirectory(policy, childPath, entry);
     if (isDirectory === undefined) continue;
     suggestions.push({ path: `${childPath}${isDirectory ? "/" : ""}`, kind: "other" });

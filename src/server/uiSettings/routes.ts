@@ -1,9 +1,10 @@
+import { BrowserFileAccess } from "../browserFileAccess.js";
 import { SessionDaemonClient, type SessionDaemonRequestClient } from "../../sessiond/sessionDaemonClient.js";
 import { decisionGatewayKeyMiddleware } from "./decisionGatewayKeyRoutes.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { FastifyInstance } from "fastify";
 import { agentFilesMiddleware, defaultAgentDirs, type AgentDirs } from "./agentFiles.js";
-import { inProcessGateway, type Gateway } from "./forgerieProfile.js";
+import { activeForgerieProfile, inProcessGateway, type Gateway } from "./forgerieProfile.js";
 import { defaultPrefsPaths, modelPrefsMiddleware, type ModelPrefsPaths } from "./modelPrefsFiles.js";
 import { pluginMiddleware } from "./pluginRoutes.js";
 import { PluginService, type PluginServices } from "./pluginService.js";
@@ -14,6 +15,7 @@ export type Middleware = (request: IncomingMessage, response: ServerResponse, ne
 export const UI_SETTINGS_PREFIX = "/aui/";
 
 export interface UiSettingsOptions {
+  fileAccess?: (() => Promise<BrowserFileAccess>) | undefined;
   agentDirs?: (gateway: Gateway) => Promise<AgentDirs>;
   modelPrefsPaths?: (gateway: Gateway) => Promise<ModelPrefsPaths>;
   pluginServices?: PluginServices;
@@ -27,11 +29,12 @@ export interface UiSettingsOptions {
 export async function registerUiSettingsRoutes(app: FastifyInstance, options: UiSettingsOptions = {}, daemon: SessionDaemonRequestClient = new SessionDaemonClient()): Promise<void> {
   const gateway = inProcessGateway(app);
   const plugins = new PluginService({ gateway, ...(options.pluginServices === undefined ? {} : { services: options.pluginServices }) });
+  const fileAccess = options.fileAccess ?? (async () => new BrowserFileAccess((await activeForgerieProfile(gateway)).dir));
   const handlers: Middleware[] = [
     decisionGatewayKeyMiddleware(plugins, daemon),
-    agentFilesMiddleware(() => (options.agentDirs ?? defaultAgentDirs)(gateway)),
+    agentFilesMiddleware(() => (options.agentDirs ?? defaultAgentDirs)(gateway), fileAccess),
     pluginMiddleware(plugins),
-    modelPrefsMiddleware(() => (options.modelPrefsPaths ?? defaultPrefsPaths)(gateway)),
+    modelPrefsMiddleware(() => (options.modelPrefsPaths ?? defaultPrefsPaths)(gateway), fileAccess),
   ];
   await app.register((scope, _options, done) => {
     scope.removeAllContentTypeParsers();

@@ -130,7 +130,7 @@ const api: PluginsApi = {
   restart: async () => catalog,
   readme: async () => ({ text: null, truncated: false }),
 };
-let key: GatewayKey = scenario === "settings-missing" ? { keyPresent: false, source: "none" } : scenario === "settings-unknown" ? "unknown"
+let key: GatewayKey = scenario === "settings-missing" ? { keyPresent: false, source: "none" } : scenario === "settings-invalid" ? { keyPresent: false, source: "settings", invalid: true } : scenario === "settings-unknown" ? "unknown"
   : scenario === "settings-environment" ? { keyPresent: true, source: "environment" } : { keyPresent: true, source: "settings" };
 const runtime: RuntimeApi = {
   gatewayKey: async () => key,

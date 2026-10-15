@@ -59,12 +59,14 @@ function matchesQuestions(response: DecisionAnswers, request: DecisionRequest): 
  */
 export function createDecisionClient(options: {
   readConfig: () => DecisionClientConfig;
-  readApiKey?: () => string | undefined;
+  readApiKey?: () => Promise<string | undefined>;
   timeoutMs?: number;
   fetch?: typeof fetch;
 }): DecisionClient {
   return { async ask(request) {
     try {
+      // Detach even configuration/credential callbacks from the caller's turn or tool stack.
+      await Promise.resolve();
       const config = options.readConfig();
       if (!config.enabled || config.baseUrl === undefined || config.baseUrl.trim() === "") return undefined;
       const url = new URL(config.baseUrl);
@@ -72,7 +74,7 @@ export function createDecisionClient(options: {
       url.pathname = `${url.pathname.replace(/\/+$/u, "")}/v1/systemone`;
       const parsedRequest = requestSchema.safeParse(request);
       if (!parsedRequest.success) return undefined;
-      const apiKey = options.readApiKey?.();
+      const apiKey = await options.readApiKey?.();
       const response = await (options.fetch ?? fetch)(url, {
         method: "POST", redirect: "error", signal: AbortSignal.timeout(options.timeoutMs ?? 2000),
         headers: { "content-type": "application/json", ...(apiKey === undefined || apiKey.trim() === "" ? {} : { authorization: `Bearer ${apiKey}` }) },

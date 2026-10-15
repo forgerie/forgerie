@@ -1,3 +1,4 @@
+import type { BrowserFileAccess } from "../browserFileAccess.js";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -37,11 +38,19 @@ interface ParsedStatus {
   submodules: SubmoduleRecord[];
 }
 
-export async function gitStatus(cwd: string): Promise<GitStatusResponse> {
+export async function gitStatus(cwd: string, access?: BrowserFileAccess): Promise<GitStatusResponse> {
   const result = await runGit(cwd, ["status", "--porcelain=v2", "--branch", "--untracked-files=all", "-z"]);
   if (result.code !== 0) return { isGitRepo: false, hash: hash(result.stdout + result.stderr), files: [], submodules: [] };
   const parsed = parseStatus(result.stdout, { deferSubmodules: true });
-  return expandSubmodules(cwd, parsed, result.stdout);
+  const status = await expandSubmodules(cwd, parsed, result.stdout);
+  if (access === undefined) return status;
+  const files = (await Promise.all(status.files.map(async file => ({ file,
+    readable: await access.isReadable(join(cwd, file.path)) && (file.oldPath === undefined || await access.isReadable(join(cwd, file.oldPath))),
+  })))).filter(row => row.readable).map(row => row.file);
+  // Raw porcelain contains index object ids. Hash only the public projection.
+  const submodules = status.submodules.filter(path => files.some(file => file.path === path || file.path.startsWith(`${path}/`)));
+  const visible = { ...status, hash: undefined, files, submodules };
+  return { ...status, files, submodules, hash: hash(JSON.stringify(visible)) };
 }
 
 /**
@@ -122,25 +131,30 @@ async function resolveSubmoduleToCommit(cwd: string, sub: SubmoduleRecord): Prom
  * `fullContext` asks git for every unchanged line of the file as context, so a
  * viewer can show the whole file around its changes. Git's output cap still applies.
  */
-export async function gitDiff(cwd: string, options: { path?: string; staged?: boolean; fullContext?: boolean }): Promise<GitDiffResponse> {
+export async function gitDiff(cwd: string, options: { path?: string; staged?: boolean; fullContext?: boolean; fileAccess?: BrowserFileAccess }): Promise<GitDiffResponse> {
   const staged = options.staged === true;
   const context = options.fullContext === true ? [FULL_CONTEXT] : [];
   let path: string | undefined;
   if (options.path !== undefined && options.path !== "") path = normalizeRelativePath(options.path);
 
   if (path !== undefined) {
+    await options.fileAccess?.assertReadable(join(cwd, path));
     const owner = await submoduleForPath(cwd, path);
-    if (owner !== undefined) return submoduleDiff(cwd, owner, path, staged, context);
+    if (owner !== undefined) return submoduleDiff(cwd, owner, path, staged, context, options.fileAccess);
   }
 
-  const args = ["diff", "--no-ext-diff", "--color=never", ...context];
+  const args = ["diff", "--no-ext-diff", "--no-textconv", "--color=never", ...context];
   if (staged) args.push("--cached");
-  if (path !== undefined) args.push("--", path);
+  if (options.fileAccess !== undefined) {
+    const paths = await readableGitPaths(cwd, options.fileAccess, path);
+    if (paths.length === 0) return { ...(path === undefined ? {} : { path }), staged, hash: hash(""), diff: "", truncated: false };
+    args.push("--", ...paths.map(file => `:(literal)${file}`));
+  } else if (path !== undefined) args.push("--", path);
 
   const result = await runGit(cwd, args);
   if (result.code !== 0) throw new Error(result.stderr.trim() || "git diff failed");
   if (!staged && path !== undefined && result.stdout === "" && await isUntracked(cwd, path)) {
-    const untracked = await runGit(cwd, ["diff", "--no-ext-diff", "--color=never", "--no-index", "/dev/null", "--", path]);
+    const untracked = await runGit(cwd, ["diff", "--no-ext-diff", "--no-textconv", "--color=never", "--no-index", "/dev/null", "--", path]);
     if (untracked.code !== 0 && untracked.code !== 1) throw new Error(untracked.stderr.trim() || "git diff failed");
     return { path, staged, hash: hash(untracked.stdout), diff: untracked.stdout, truncated: untracked.truncated };
   }
@@ -153,22 +167,33 @@ export async function gitDiff(cwd: string, options: { path?: string; staged?: bo
  * The response path stays the full superproject-relative path so the viewer and
  * the selected row line up.
  */
-async function submoduleDiff(cwd: string, owner: string, path: string, staged: boolean, context: string[]): Promise<GitDiffResponse> {
+async function submoduleDiff(cwd: string, owner: string, path: string, staged: boolean, context: string[], access?: BrowserFileAccess): Promise<GitDiffResponse> {
   const subCwd = join(cwd, owner);
   const rel = normalizeRelativePath(path.slice(owner.length + 1));
 
-  const args = ["diff", "--no-ext-diff", "--color=never", ...context];
+  const args = ["diff", "--no-ext-diff", "--no-textconv", "--color=never", ...context];
   if (staged) args.push("--cached");
-  args.push("--", rel);
+  if (access !== undefined) {
+    const paths = await readableGitPaths(subCwd, access, rel);
+    if (paths.length === 0) return { path, staged, hash: hash(""), diff: "", truncated: false };
+    args.push("--", ...paths.map(file => `:(literal)${file}`));
+  } else args.push("--", rel);
 
   const result = await runGit(subCwd, args);
   if (result.code !== 0) throw new Error(result.stderr.trim() || "git diff failed");
   if (!staged && result.stdout === "" && await isUntracked(subCwd, rel)) {
-    const untracked = await runGit(subCwd, ["diff", "--no-ext-diff", "--color=never", "--no-index", "/dev/null", "--", rel]);
+    const untracked = await runGit(subCwd, ["diff", "--no-ext-diff", "--no-textconv", "--color=never", "--no-index", "/dev/null", "--", rel]);
     if (untracked.code !== 0 && untracked.code !== 1) throw new Error(untracked.stderr.trim() || "git diff failed");
     return { path, staged, hash: hash(untracked.stdout), diff: untracked.stdout, truncated: untracked.truncated };
   }
   return { path, staged, hash: hash(result.stdout), diff: result.stdout, truncated: result.truncated };
+}
+
+async function readableGitPaths(cwd: string, access: BrowserFileAccess, requested?: string): Promise<string[]> {
+  const listings = await Promise.all([["ls-files", "--cached", "--others", "--exclude-standard", "-z"], ["diff", "--name-only", "--no-renames", "-z"], ["diff", "--cached", "--name-only", "--no-renames", "-z"]].map(args => runGit(cwd, args)));
+  if (listings.some(listed => listed.code !== 0)) throw new Error("Cannot list readable git paths");
+  const candidates = [...new Set(listings.flatMap(listed => listed.stdout.split("\0")).filter(path => path !== "" && (requested === undefined || path === requested || path.startsWith(`${requested}/`))))];
+  return (await Promise.all(candidates.map(async path => ({ path, readable: await access.isReadable(join(cwd, path)) })))).filter(row => row.readable).map(row => row.path);
 }
 
 async function isUntracked(cwd: string, path: string): Promise<boolean> {

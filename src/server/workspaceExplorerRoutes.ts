@@ -1,3 +1,8 @@
+import { join } from "node:path";
+import { PROJECT_PI_WEB_CONFIG_PATH } from "./workspaces/projectPiWebConfig.js";
+import type { BrowserFileAccess } from "./browserFileAccess.js";
+import type { WorkspacePathAccess } from "./workspaces/pathAccessPolicy.js";
+import type { WorkspaceContext } from "./workspaces/workspaceContext.js";
 import type { FastifyInstance } from "fastify";
 import type { WorkspaceFileConflictResponse, WriteWorkspaceFileOptions } from "../shared/apiTypes.js";
 import type { PiWebConfigService } from "./configRoutes.js";
@@ -15,16 +20,22 @@ import type { WorkspaceService } from "./workspaces/workspaceService.js";
 const arbitraryFileContentType = /^([a-z]+\/[a-z0-9.+-]+)$/u;
 
 export interface WorkspaceExplorerRouteOptions {
+  fileAccess?: (() => Promise<BrowserFileAccess>) | undefined;
   config?: Pick<PiWebConfigService, "read">;
 }
 
 export function registerWorkspaceExplorerRoutes(app: FastifyInstance, projects: ProjectService, workspaces: WorkspaceService, prefix = "/api", options: WorkspaceExplorerRouteOptions = {}): void {
   registerWorkspaceFileContentParsers(app);
+  const accessFor = async (context: WorkspaceContext): Promise<WorkspacePathAccess> => {
+    const browserFiles = await options.fileAccess?.();
+    await browserFiles?.assertReadable(join(context.project.path, PROJECT_PI_WEB_CONFIG_PATH));
+    return { ...await pathAccessForWorkspaceContext(context, options.config), ...browserFiles === undefined ? {} : { browserFiles } };
+  };
 
   app.get<{ Params: { projectId: string; workspaceId: string }; Querystring: { path?: string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/tree`, async (request, reply) => {
     try {
       const context = await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
-      return await listWorkspaceTree(context.root, request.query.path, await pathAccessForWorkspaceContext(context, options.config));
+      return await listWorkspaceTree(context.root, request.query.path, await accessFor(context));
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
@@ -33,7 +44,7 @@ export function registerWorkspaceExplorerRoutes(app: FastifyInstance, projects: 
   app.get<{ Params: { projectId: string; workspaceId: string }; Querystring: { path?: string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/file`, async (request, reply) => {
     try {
       const context = await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
-      return await readWorkspaceFile(context.root, request.query.path, await pathAccessForWorkspaceContext(context, options.config));
+      return await readWorkspaceFile(context.root, request.query.path, await accessFor(context));
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
@@ -47,7 +58,7 @@ export function registerWorkspaceExplorerRoutes(app: FastifyInstance, projects: 
         overwrite: request.query.overwrite !== "false",
         ...request.query.expectedVersion === undefined ? {} : { expectedVersion: request.query.expectedVersion },
       };
-      return await writeWorkspaceFile(context.root, request.query.path, request.body, writeOptions);
+      return await writeWorkspaceFile(context.root, request.query.path, request.body, writeOptions, await options.fileAccess?.());
     } catch (error) {
       if (error instanceof WorkspaceFileConflictError) {
         const conflict: WorkspaceFileConflictResponse = { error: error.message, code: "conflict", ...error.version === undefined ? {} : { version: error.version } };
@@ -60,7 +71,7 @@ export function registerWorkspaceExplorerRoutes(app: FastifyInstance, projects: 
   app.delete<{ Params: { projectId: string; workspaceId: string }; Querystring: { path?: string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/file`, async (request, reply) => {
     try {
       const context = await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
-      return await deleteWorkspaceFile(context.root, request.query.path);
+      return await deleteWorkspaceFile(context.root, request.query.path, await options.fileAccess?.());
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
@@ -72,7 +83,7 @@ export function registerWorkspaceExplorerRoutes(app: FastifyInstance, projects: 
       return await moveWorkspaceFile(context.root, request.query.fromPath, request.query.toPath, {
         createDirs: request.query.createDirs !== "false",
         overwrite: request.query.overwrite === "true",
-      });
+      }, await options.fileAccess?.());
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
@@ -81,7 +92,7 @@ export function registerWorkspaceExplorerRoutes(app: FastifyInstance, projects: 
   app.get<{ Params: { projectId: string; workspaceId: string }; Querystring: { path?: string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/file/preview`, async (request, reply) => {
     try {
       const context = await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
-      const preview = await readWorkspaceImagePreview(context.root, request.query.path, await pathAccessForWorkspaceContext(context, options.config));
+      const preview = await readWorkspaceImagePreview(context.root, request.query.path, await accessFor(context));
       return await reply
         .type(preview.mimeType)
         .header("Cache-Control", "private, max-age=3600")
@@ -103,7 +114,7 @@ export function registerWorkspaceExplorerRoutes(app: FastifyInstance, projects: 
   app.get<{ Params: { projectId: string; workspaceId: string; "*": string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/preview/*`, async (request, reply) => {
     try {
       const context = await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
-      const preview = await readWorkspaceDocumentPreview(context.root, request.params["*"], await pathAccessForWorkspaceContext(context, options.config));
+      const preview = await readWorkspaceDocumentPreview(context.root, request.params["*"], await accessFor(context));
       if (preview.mimeType === "text/html") void reply.header("Content-Security-Policy", `sandbox ${DOCUMENT_PREVIEW_SANDBOX}`);
       return await reply
         .type(preview.mimeType)
@@ -121,7 +132,7 @@ export function registerWorkspaceExplorerRoutes(app: FastifyInstance, projects: 
     try {
       const context = await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
       const query = request.query.q ?? "";
-      const pathAccess = isAbsoluteishFileSuggestionQuery(query) ? await pathAccessForWorkspaceContext(context, options.config) : undefined;
+      const pathAccess = isAbsoluteishFileSuggestionQuery(query) ? await accessFor(context) : { ...options.fileAccess === undefined ? {} : { browserFiles: await options.fileAccess() } };
       if (request.query.mode === "path") return await listPathSuggestions(context.root, query, pathAccess);
       return await listFileSuggestions(context.root, query, { kind: request.query.kind, scope: request.query.scope, pathAccess });
     } catch (error) {

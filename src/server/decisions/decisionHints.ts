@@ -1,4 +1,3 @@
-import { decisionGatewayKeyErrors } from "../../shared/decisionHints.js";
 import type { PiWebRuntimeComponent } from "../../shared/apiTypes.js";
 import { DecisionGatewayKeyStore } from "./decisionGatewayKey.js";
 import type { LoadOptions } from "../../config.js";
@@ -13,7 +12,7 @@ export const DECISION_HINT_ERROR_EVENT = "forgerie.decision-hint";
 export interface DecisionHints {
   client: DecisionClient;
   readSettings: () => DecisionHintsSettings;
-  status: () => DecisionHintsStatus;
+  status: () => DecisionHintsStatus | Promise<DecisionHintsStatus>;
 }
 
 export function createDecisionHints(options: LoadOptions & {
@@ -32,10 +31,7 @@ export function createDecisionHints(options: LoadOptions & {
   };
 }
 
-/** Credential read failures must not make the daemon's active profile disappear.
- * Keep the profile usable for repair/clear, but never claim the key is absent.
- */
-export function decisionHintsRuntimeStatus(hints: Pick<DecisionHints, "status">): Pick<PiWebRuntimeComponent, "decisionHints" | "error"> {
-  try { return { decisionHints: hints.status() }; }
-  catch { return { error: decisionGatewayKeyErrors.storage.error }; }
+/** Runtime always reports a repairable public status, including invalid files. */
+export async function decisionHintsRuntimeStatus(hints: Pick<DecisionHints, "status">): Promise<Pick<PiWebRuntimeComponent, "decisionHints">> {
+  return { decisionHints: await hints.status() };
 }

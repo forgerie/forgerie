@@ -92,8 +92,8 @@ export type RuntimeApi = ReturnType<typeof createRuntimeApi>;
 export function gatewayKeyView(status: GatewayKey | undefined) {
   const known = typeof status === "object" ? status : undefined;
   return {
-    present: known?.keyPresent === true, editable: known !== undefined && known.source !== "environment",
-    value: (status === undefined || status === "unknown") ? "Unknown" : known?.source === "environment" ? "Set by DECISION_GATEWAY_API_KEY" : known?.keyPresent ? "Set here" : "Not set",
+    present: known?.source === "settings" || known?.keyPresent === true, editable: known !== undefined && known.source !== "environment",
+    value: (status === undefined || status === "unknown") ? "Unknown" : known?.source === "environment" ? "Set by DECISION_GATEWAY_API_KEY" : known?.source === "settings" && "invalid" in known ? "Saved key file is unreadable" : known?.keyPresent ? "Set here" : "Not set",
     hint: known?.source === "environment" ? "Settings cannot replace or remove an environment key."
       : !known ? "Sessiond did not report it. Check that sessiond is running."
       : "Forgerie never shows the saved key. Changes apply to the next gateway request.",

@@ -26,8 +26,9 @@ describe("decision hint credentials and runtime wiring", () => {
       expect(env).toEqual({ PATH: "/usr/bin" });
       expect(await hints.client.ask({ model: hints.readSettings().model, state: "reply", questions: { attention: { type: "noul", instructions: "Needs attention?" } } })).toMatchObject({ model: "answering-model" });
       expect(authorization).toBe("Bearer private-test-key");
+      const hintsStatus = await hints.status();
       const runtime = await getPiWebRuntime({ request: () => Promise.resolve({ statusCode: 200, body: JSON.stringify({
-        component: "sessiond", label: "Session daemon", available: true, capabilities: [], decisionHints: { ...hints.status(), apiKey: "must-be-dropped" },
+        component: "sessiond", label: "Session daemon", available: true, capabilities: [], decisionHints: { ...hintsStatus, apiKey: "must-be-dropped" },
       }) }) });
       expect(runtime.components.sessiond.decisionHints).toEqual({ keyPresent: true, source: "environment" });
       expect(JSON.stringify(runtime)).not.toMatch(/private-test-key|must-be-dropped|apiKey/);
@@ -35,7 +36,7 @@ describe("decision hint credentials and runtime wiring", () => {
       expect(await hints.client.ask({ model: "fast", state: "reply", questions: { attention: { type: "noul", instructions: "Needs attention?" } } })).toBeUndefined();
     } finally { await rm(root, { recursive: true, force: true }); }
   });
-  it.each([undefined, "", "  "])("reports no key for %j", (value) => {
-    expect(createDecisionHints({ agentDir: join(tmpdir(), randomUUID()), env: value === undefined ? {} : { DECISION_GATEWAY_API_KEY: value } }).status()).toEqual({ keyPresent: false, source: "none" });
+  it.each([undefined, "", "  "])("reports no key for %j", async (value) => {
+    expect(await createDecisionHints({ agentDir: join(tmpdir(), randomUUID()), env: value === undefined ? {} : { DECISION_GATEWAY_API_KEY: value } }).status()).toEqual({ keyPresent: false, source: "none" });
   });
 });

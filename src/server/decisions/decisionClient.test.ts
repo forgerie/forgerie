@@ -21,7 +21,7 @@ async function gateway(handler: RequestListener) {
   if (address === null || typeof address === "string") throw new Error("No test gateway address");
   return `http://127.0.0.1:${String(address.port)}`;
 }
-const clientAt = (baseUrl: string, timeoutMs = 2000) => createDecisionClient({ readConfig: () => ({ enabled: true, baseUrl }), readApiKey: () => "test-key", timeoutMs });
+const clientAt = (baseUrl: string, timeoutMs = 2000) => createDecisionClient({ readConfig: () => ({ enabled: true, baseUrl }), readApiKey: () => Promise.resolve("test-key"), timeoutMs });
 
 describe("decision gateway client", () => {
   it("posts the contract with server-only authorization and returns the answering model", async () => {

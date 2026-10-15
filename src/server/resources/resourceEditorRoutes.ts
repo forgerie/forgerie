@@ -1,3 +1,4 @@
+import { BrowserFileAccessError } from "../browserFileAccess.js";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { Check } from "typebox/value";
 import { RESOURCE_EDITOR_BODY_LIMIT, ResourceEditorDeleteRequestSchema, ResourceEditorDeleteSchema, ResourceEditorSaveRequestSchema, type ResourceEditorErrorResponse } from "../../shared/resourceEditor.js";
@@ -45,7 +46,7 @@ function rejectQuery(query: Record<string, unknown>): void {
 async function respond(reply: FastifyReply, operation: () => Promise<unknown>): Promise<unknown> {
   try { return await operation(); }
   catch (error) {
-    const failure = error instanceof ResourceEditorError ? error : new ResourceEditorError("io-error", error instanceof Error ? error.message : String(error));
+    const failure = error instanceof BrowserFileAccessError ? new ResourceEditorError("read-only", error.message) : error instanceof ResourceEditorError ? error : new ResourceEditorError("io-error", error instanceof Error ? error.message : String(error));
     if (failure.kind === "io-error") reply.log.error({ err: error }, "resource editor operation failed");
     if (failure.kind === "busy") reply.header("retry-after", "1");
     return reply.code(ERROR_STATUS[failure.kind]).send({ error: { kind: failure.kind, message: failure.message, savedToDisk: failure.savedToDisk } } satisfies ResourceEditorErrorResponse);

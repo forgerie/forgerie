@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -236,4 +236,11 @@ describe("plugins bundled with the browser app", () => {
     await expect(service.change(catalog.revision, { type: "remove", id: "app:quota" })).rejects.toMatchObject({ status: 400 });
     expect(await readFile(profile.configPath, "utf8")).toBe(before);
   });
+});
+
+
+it("never returns a private gateway key hard-linked as a plugin README", async () => {
+  const key = join(profile.dir, "decision-gateway.json"); await json(key, { apiKey: "DISTINCTIVE-private-readme-key" });
+  await link(key, join(packagePath, "README.md"));
+  await expect(service.readme(`package:${packagePath}`)).resolves.toEqual({ text: null, truncated: false });
 });

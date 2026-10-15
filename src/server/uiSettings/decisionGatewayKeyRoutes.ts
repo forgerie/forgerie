@@ -27,6 +27,7 @@ export function decisionGatewayKeyMiddleware(plugins: PluginService, daemon: Ses
         throw new SettingsHttpError(405, "Use GET for status or POST to change the gateway key.");
       }
       const upstream = await daemon.request(request.method ?? "GET", `/decision-hints/gateway-key${path.endsWith("/clear") ? "/clear" : ""}`, body);
+      if (upstream.statusCode >= 300 && upstream.statusCode < 400) throw new SettingsHttpError(502, "Session daemon redirects are not allowed for gateway key requests.");
       const value: unknown = JSON.parse(upstream.body);
       if (upstream.statusCode !== 200) {
         const parsed = upstreamError.safeParse(value);

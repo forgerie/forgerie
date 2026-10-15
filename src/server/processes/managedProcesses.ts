@@ -1,3 +1,4 @@
+import type { BrowserFileAccess } from "../browserFileAccess.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
@@ -14,6 +15,7 @@ import {
 } from "./managedProcessTypes.js";
 
 export interface ManagedProcessesOptions {
+  browserFiles?: BrowserFileAccess;
   stateDirectory: string;
   sessionId: string;
   launcher: ManagedProcessLauncher;
@@ -151,7 +153,7 @@ export class ManagedProcesses {
     for (const { record } of removed) await rm(record.directory, { recursive: true, force: true });
     return removed.map(({ record }) => record.id);
   }
-  private log(record: ManagedProcessRecord): ManagedProcessLog { return new ManagedProcessLog(record.directory, this.options.logCapBytes); }
+  private log(record: ManagedProcessRecord): ManagedProcessLog { return new ManagedProcessLog(record.directory, this.options.logCapBytes, this.options.browserFiles); }
   private async record(id: string): Promise<ManagedProcessRecord> {
     managedProcessRecordSchema.shape.id.parse(id);
     const directory = join(this.directory, id);

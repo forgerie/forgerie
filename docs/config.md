@@ -214,7 +214,12 @@ Settings reports the source and refuses changes while this override is active.
 File edits apply to the next gateway request without a restart. Service environment
 changes still need a sessiond restart, since a running process cannot acquire them.
 With neither source set, requests have no `Authorization` header. Status exposes
-only presence and source, never the saved key or a fingerprint.
+only presence and source, never the saved key or a fingerprint. A damaged file
+adds `invalid: true`, prevents requests without auth, and stays repairable through
+Replace or Remove in Settings. Credential reads use asynchronous I/O in the
+background ask. Browser file access excludes this file and its aliases even when
+the profile is inside an allowed root. This does not change browser access to
+`auth.json` or `cliproxyapi.json`.
 
 Agent bash runs as the same Unix user and can read profile credential files.
 Use the scrubbed environment variable instead, and remove the key file, if agents

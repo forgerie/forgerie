@@ -28,7 +28,7 @@ afterEach(async () => {
 const secret = "DISTINCTIVE-private-gateway-October15";
 const replacement = "REPLACEMENT-private-gateway-October15";
 const path = "/aui/plugins/decision-hints/gateway-key";
-async function fixture(environmentKey?: string, answers: DecisionAnswers["answers"] = { attention: { type: "noul", noul: 0.8 } }) {
+async function fixture(environmentKey?: string, answers: DecisionAnswers["answers"] = { attention: { type: "noul", noul: 0.8 } }, redirectTo?: string, redirectStatus = 307) {
   const root = await mkdtemp(join(tmpdir(), "gateway-settings-http-")); roots.push(root);
   const configPath = join(root, "config.json"); const dir = join(root, "active-profile");
   const headers: (string | undefined)[] = [];
@@ -45,8 +45,12 @@ async function fixture(environmentKey?: string, answers: DecisionAnswers["answer
   const logs: string[] = [];
   const logger = { level: "info", stream: { write: (line: string) => { logs.push(line); } } };
   const daemon = Fastify({ logger }); apps.push(daemon);
+  if (redirectTo !== undefined) daemon.addHook("onRequest", (request, reply, done) => {
+    if (request.method === "POST" && request.url === "/decision-hints/gateway-key") void reply.redirect(redirectTo, redirectStatus);
+    else done();
+  });
   registerDecisionGatewayKeyRoutes(daemon, hints.gatewayKey, profile.revision);
-  daemon.get("/runtime", () => ({ component: "sessiond", label: "Session daemon", available: true, capabilities: [], activeAgentProfile: profile, ...decisionHintsRuntimeStatus(hints) }));
+  daemon.get("/runtime", async () => ({ component: "sessiond", label: "Session daemon", available: true, capabilities: [], activeAgentProfile: profile, ...await decisionHintsRuntimeStatus(hints) }));
   const daemonUrl = await daemon.listen({ host: "127.0.0.1", port: 0 }); vi.stubEnv("PI_WEB_SESSIOND_URL", daemonUrl);
   const web = await buildApp({ clientDist: false, logger, sessionDaemon: new SessionDaemonClient(), config: createFilePiWebConfigService({ env }),
     projects: new ProjectService(new ProjectStore(join(root, "projects.json"))),
@@ -77,17 +81,29 @@ describe("write-only gateway settings HTTP path", () => {
     const status = await f.web.inject(path); replies.push({ body: status.body });
     expect(status.json()).toEqual({ keyPresent: true, source: "settings" });
     replies.push(await f.change()); await f.ask(); expect(f.headers.at(-1)).toBeUndefined();
-    expect(f.hints.status()).toEqual({ keyPresent: false, source: "none" });
+    expect(await f.hints.status()).toEqual({ keyPresent: false, source: "none" });
     expect(await readFile(join(f.root, "config.json"), "utf8")).not.toMatch(/DISTINCTIVE|REPLACEMENT|apiKey/);
     const visible = JSON.stringify([replies, f.logs]);
     expect(visible).not.toContain(secret); expect(visible).not.toContain(replacement);
+  });
+  it.each([300, 301, 302, 303, 304, 305, 307, 308, 399])("refuses a key-bearing %s redirect before a second origin receives anything", async redirectStatus => {
+    const received: string[] = [];
+    const target = createServer((request, response) => { received.push(request.url ?? ""); request.resume(); response.end(JSON.stringify({ keyPresent: true, source: "settings" })); });
+    servers.push(target);
+    await new Promise<void>(resolve => target.listen(0, "127.0.0.1", resolve));
+    const address = target.address(); if (address === null || typeof address === "string") throw new Error("No target port");
+    const f = await fixture(undefined, undefined, `http://127.0.0.1:${String(address.port)}/stolen`, redirectStatus);
+    const result = await f.change(secret);
+    expect(received).toEqual([]); expect(result.status).toBe(502);
+    expect(result.body).toBe(JSON.stringify({ error: "Session daemon redirects are not allowed for gateway key requests." }));
+    expect(JSON.stringify(f.logs)).not.toContain(secret);
   });
   it("reports environment precedence and refuses save and remove without echoing credentials", async () => {
     const f = await fixture(secret);
     for (const result of [await f.change(replacement), await f.change()]) {
       expect(result.status).toBe(409); expect(result.body).toContain("DECISION_GATEWAY_API_KEY"); expect(result.body).not.toContain(secret); expect(result.body).not.toContain(replacement);
     }
-    expect(f.hints.status()).toEqual({ keyPresent: true, source: "environment" });
+    expect(await f.hints.status()).toEqual({ keyPresent: true, source: "environment" });
     await f.ask(); expect(f.headers.at(-1)).toBe(`Bearer ${secret}`);
     expect(JSON.stringify(f.logs)).not.toContain(secret);
   });
@@ -122,15 +138,21 @@ describe("write-only gateway settings HTTP path", () => {
       expect(JSON.stringify([events, errors, store.values("session"), f.logs])).not.toContain(secret);
     } finally { attention.dispose(); store.close(); }
   });
-  it("does not echo damaged credential files in routes, logs, or optional ask errors", async () => {
+  it.each(["", "{broken", JSON.stringify({ apiKey: "" }), `{"apiKey":"${secret}`])("reports invalid files without content and permits replace/remove: %s", async contents => {
     const f = await fixture(); await f.change(secret);
-    await writeFile(join(f.dir, "decision-gateway.json"), `{"apiKey":"${secret}`);
+    await writeFile(join(f.dir, "decision-gateway.json"), contents);
     const replies = [await f.web.inject(path), await f.daemon.inject("/decision-hints/gateway-key"), await f.web.inject("/api/pi-web/runtime")];
-    expect(replies[0]?.statusCode).toBe(500); expect(replies[1]?.statusCode).toBe(500);
+    const invalid = { keyPresent: false, source: "settings", invalid: true };
+    expect(replies[0]?.statusCode).toBe(200); expect(replies[0]?.json()).toEqual(invalid);
+    expect(replies[1]?.statusCode).toBe(200); expect(replies[1]?.json()).toEqual(invalid);
+    expect(replies[2]?.statusCode).toBe(200); expect(z.object({ components: z.object({ sessiond: z.object({ decisionHints: z.unknown() }) }) }).parse(replies[2]?.json()).components.sessiond.decisionHints).toEqual(invalid);
     expect(JSON.stringify(replies.map(reply => reply.body))).not.toContain(secret);
     await expect(f.ask()).resolves.toBeUndefined(); expect(f.headers).toEqual([]);
     expect(JSON.stringify(f.logs)).not.toContain(secret);
+    expect((await f.change(replacement)).status).toBe(200); await f.ask(); expect(f.headers.at(-1)).toBe(`Bearer ${replacement}`);
+    await writeFile(join(f.dir, "decision-gateway.json"), contents);
     expect((await f.change()).status).toBe(200);
+    await f.ask(); expect(f.headers.at(-1)).toBeUndefined();
   });
   it("validates bodies, same-origin writes and both revision boundaries with safe failures", async () => {
     const f = await fixture();
@@ -146,7 +168,7 @@ describe("write-only gateway settings HTTP path", () => {
       const result = await f.daemon.inject({ method: "POST", url: "/decision-hints/gateway-key", headers: { "content-type": "application/json" }, payload });
       expect([400, 409]).toContain(result.statusCode); expect(result.body).not.toContain(secret);
     }
-    expect(f.hints.status()).toEqual({ keyPresent: false, source: "none" });
+    expect(await f.hints.status()).toEqual({ keyPresent: false, source: "none" });
     expect(JSON.stringify(f.logs)).not.toContain(secret);
   });
 });

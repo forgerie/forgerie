@@ -1,3 +1,4 @@
+import { BrowserFileAccess } from "../browserFileAccess.js";
 import { lock } from "proper-lockfile";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { ResourceEditorDelete, ResourceEditorDeleteRequest, ResourceEditorEntry, ResourceEditorFile, ResourceEditorInventory, ResourceEditorSave, ResourceEditorSaveRequest, ResourceEditorScope } from "../../shared/resourceEditor.js";
@@ -15,9 +16,10 @@ type SaveMutation = ResourceEditorSaveRequest & { kind: "save" };
 type DeleteMutation = ResourceEditorDeleteRequest & { kind: "delete" };
 
 export class ResourceEditorService {
+  private readonly browserFiles: BrowserFileAccess;
   private readonly discovery: ResourceEditorDiscovery;
   private activeReads = 0;
-  constructor(private readonly options: ResourceEditorOptions) { this.discovery = new ResourceEditorDiscovery(options); }
+  constructor(private readonly options: ResourceEditorOptions) { this.discovery = new ResourceEditorDiscovery(options); this.browserFiles = new BrowserFileAccess(options.agentDir); }
 
   async inventory(sessionId?: string): Promise<ResourceEditorInventory> {
     return this.bounded(async () => {
@@ -31,7 +33,7 @@ export class ResourceEditorService {
     return this.bounded(async () => {
       const context = await this.context(sessionId);
       const resource = await this.find(id, context);
-      const content = await readResourceFile(resource.entry.path);
+      const content = await readResourceFile(resource.entry.path, this.browserFiles);
       return { resource: await this.entry(resource, context), text: content.text, revision: content.revision };
     });
   }
@@ -72,7 +74,7 @@ export class ResourceEditorService {
           const currentEntry = await this.entry(currentResource, currentContext);
           if (currentEntry.edit.kind !== "writable") throw new ResourceEditorError("read-only", currentEntry.edit.reason);
           if (currentContext.scope.kind === "session" && context.scope.kind === "session" && currentContext.scope.cwd !== context.scope.cwd) throw new ResourceEditorError("conflict", "The session's checkout changed. Read the inventory again.");
-          const current = await readResourceFile(currentEntry.path);
+          const current = await readResourceFile(currentEntry.path, this.browserFiles);
           if (input.kind === "delete" && currentEntry.kind !== "prompt") throw new ResourceEditorError("invalid-request", "Only prompt files, including prose workflows, support deletion.");
           if (current.revision !== input.baseRevision) throw new ResourceEditorError("conflict", "This file changed on disk. Read it again before changing it.");
           if (input.kind === "save" && current.text === input.text) return { file: { resource: currentEntry, text: current.text, revision: current.revision }, effect: { kind: "unchanged" }, reload: "explicit-session-reload" };
@@ -84,7 +86,7 @@ export class ResourceEditorService {
           const commit = commitBase === undefined || currentContext.checkout === undefined ? undefined : await commitResource(currentContext.checkout, commitBase, input.kind === "delete" ? "deleted" : "saved");
           const effect: ResourceEditorDelete["effect"] = commit === undefined ? { kind: currentEntry.edit.saveEffect === "uncommitted" ? "uncommitted" : "file-only" } : { kind: "committed", ...commit };
           if (input.kind === "delete") return { resourceId: currentEntry.id, effect, reload: "explicit-session-reload" };
-          const after = await readResourceFile(currentEntry.path);
+          const after = await readResourceFile(currentEntry.path, this.browserFiles);
           const refreshed = await this.find(id, currentContext);
           return { file: { resource: await this.entry(refreshed, currentContext), text: after.text, revision: after.revision },
             effect, reload: "explicit-session-reload" };

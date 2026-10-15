@@ -1,3 +1,4 @@
+import { openBrowserFile, type BrowserFileAccess } from "../browserFileAccess.js";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, realpath } from "node:fs/promises";
@@ -28,7 +29,7 @@ interface WorktreeEvents {
 /** All git lifecycle mutations are serialized per main checkout. Git's own locks protect external writers. */
 export class SessionWorktrees {
   private readonly queues = new Map<string, Promise<void>>();
-  constructor(readonly store: SessionWorktreeStore, private readonly events: WorktreeEvents = { publish: () => undefined }) {}
+  constructor(readonly store: SessionWorktreeStore, private readonly events: WorktreeEvents = { publish: () => undefined }, private readonly browserFiles?: BrowserFileAccess) {}
 
   /** Reconcile a branch rename interrupted between git and the ownership write. */
   async initialize(): Promise<void> {
@@ -159,7 +160,7 @@ export class SessionWorktrees {
     const record = await this.store.require(id);
     if (record.state.kind !== "active") throw new Error("This worktree is no longer writable or available for review");
     await assertOwnedCheckout(record);
-    return readWorktreeReview(record.path, record.defaultBranch);
+    return readWorktreeReview(record.path, record.defaultBranch, this.browserFiles);
   }
 
   async renameFromTitle(sessionId: string, title: string): Promise<void> {
@@ -242,8 +243,8 @@ export class SessionWorktrees {
       const split = line.indexOf("\0");
       return { sha: line.slice(0, split), subject: line.slice(split + 1) };
     });
-    const files = await dirtyFiles(record.path);
-    return { worktreeId: id, branch: record.branch, defaultBranch: record.defaultBranch, commits, dirtyFiles: files, confirmationToken: await discardFingerprint(record, files) };
+    const files = (await Promise.all((await dirtyFiles(record.path)).map(async file => ({ file, readable: await this.browserFiles?.isReadable(join(record.path, file)) ?? true })))).filter(row => row.readable).map(row => row.file);
+    return { worktreeId: id, branch: record.branch, defaultBranch: record.defaultBranch, commits, dirtyFiles: files, confirmationToken: await discardFingerprint(record, files, this.browserFiles) };
   }
   async discard(id: string, token: string, sessions: readonly SessionFile[], actorId?: string): Promise<WorktreeActionResult> {
     const record = await this.store.require(id);
@@ -441,13 +442,16 @@ async function mainDirtyOverlap(record: SessionWorktreeRecord): Promise<string[]
   const paths = touched.split("\0").filter(Boolean);
   return dirty.filter((file) => paths.some((path) => path === file || pathInside(file, path) || pathInside(path, file)));
 }
-async function discardFingerprint(record: SessionWorktreeRecord, files: string[]): Promise<string> {
+async function discardFingerprint(record: SessionWorktreeRecord, files: string[], browserFiles?: BrowserFileAccess): Promise<string> {
   const hash = createHash("sha256");
   hash.update(record.id).update(record.branch).update(await git(record.path, "rev-parse", "HEAD", record.defaultBranch));
-  hash.update(await git(record.path, "diff", "HEAD", "--binary"));
+  if (files.length > 0) hash.update(await git(record.path, "diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv", "--", ...files.map(file => `:(literal)${file}`)));
   for (const file of files) {
     hash.update(file);
-    try { hash.update(await readFile(join(record.path, file))); }
+    try {
+      const handle = await openBrowserFile(join(record.path, file), browserFiles);
+      try { hash.update(await handle.readFile()); } finally { await handle.close(); }
+    }
     catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; hash.update("deleted"); }
   }
   return hash.digest("hex");

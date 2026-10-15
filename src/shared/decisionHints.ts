@@ -1,9 +1,10 @@
 import { z } from "zod";
 
 /** Public status is an allowlist. Never project the gateway credential or its fingerprint. */
-export const decisionHintsStatusSchema = z.discriminatedUnion("source", [
+export const decisionHintsStatusSchema = z.union([
   z.object({ keyPresent: z.literal(true), source: z.literal("environment") }),
   z.object({ keyPresent: z.literal(true), source: z.literal("settings") }),
+  z.object({ keyPresent: z.literal(false), source: z.literal("settings"), invalid: z.literal(true) }),
   z.object({ keyPresent: z.literal(false), source: z.literal("none") }),
 ]);
 export type DecisionHintsStatus = z.infer<typeof decisionHintsStatusSchema>;

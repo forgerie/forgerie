@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { BrowserFileAccess } from "./browserFileAccess.js";
 import { registerDecisionGatewayKeyRoutes } from "./decisions/decisionGatewayKeyRoutes.js";
 import { registerDurableTaskRoutes } from "./sessions/durableTaskRoutes.js";
 import { createDecisionHints, decisionHintsRuntimeStatus } from "./decisions/decisionHints.js";
@@ -31,7 +32,7 @@ import { BacklogClaimStore } from "./backlog/backlogClaimStore.js";
 import { BacklogService } from "./backlog/backlogService.js";
 import { registerBacklogRoutes } from "./backlog/backlogRoutes.js";
 import { withBacklogClaimRelease } from "./backlog/backlogArchive.js";
-import { markdownBacklogProvider } from "./backlog/markdownBacklog.js";
+import { createMarkdownBacklogProvider } from "./backlog/markdownBacklog.js";
 import { createGitHubBacklogProvider } from "./backlog/githubBacklog.js";
 import { createAzureDevopsBacklogProvider } from "./backlog/azureDevopsBacklog.js";
 import { AzureDevopsClient } from "./azureDevops/azureDevopsClient.js";
@@ -221,7 +222,7 @@ async function createSessionDaemonRuntime() {
       const affected = await sessions.prepareWorktreeRemoval(record.path);
       return affected;
     },
-  });
+  }, new BrowserFileAccess(activeAgentProfile.dir));
   await sessionWorktrees.initialize();
   const groups = new ProjectGroups(join(piWebDataDir(daemonEnvironment), "project-groups.json"), projectWorkspaceDeps.projects);
   const relatedWork = new ProjectWorkspaces({ ...projectWorkspaceDeps, groups, worktrees: sessionWorktrees, agentDir: activeAgentProfile.dir,
@@ -230,6 +231,7 @@ async function createSessionDaemonRuntime() {
   await childRuns.list();
   const liveChildren = config.durableChildren ? new LiveChildSessionIndex(join(piWebDataDir(daemonEnvironment), "durable-children-live.json")) : undefined;
   const sessionSearch = new SessionSearchService({
+    agentDir: activeAgentProfile.dir,
     filePath: join(piWebDataDir(daemonEnvironment), "session-search.sqlite"),
     sessionsDir: join(activeAgentProfile.dir, "sessions"),
     catalog: async () => (await sessions.machineListing()).sessions,
@@ -243,7 +245,7 @@ async function createSessionDaemonRuntime() {
     modelRuntime: modelRuntime,
     durableReader: createActiveDurableSessionReader(ref => sessions.activeDurableRead(ref)),
     agentDir: activeAgentProfile.dir,
-    managedProcesses: { stateDirectory: piWebDataDir(daemonEnvironment), environment: daemonEnvironment },
+    managedProcesses: { browserFiles: new BrowserFileAccess(activeAgentProfile.dir), stateDirectory: piWebDataDir(daemonEnvironment), environment: daemonEnvironment },
     sessionSearch,
     archiveStore: withBacklogClaimRelease(archiveStore, backlogClaims),
     pinStore,
@@ -362,7 +364,7 @@ async function createSessionDaemonRuntime() {
   });
   const azureItems = new AzureDevopsClient({ credentials: azureCredentials, fetch });
   const backlog = new BacklogService({ settings: backlogSettings, projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
-    providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues })], sourceProvider: createAzureDevopsBacklogProvider(azureItems) });
+    providers: [createMarkdownBacklogProvider(new BrowserFileAccess(activeAgentProfile.dir)), createGitHubBacklogProvider({ issues: githubIssues })], sourceProvider: createAzureDevopsBacklogProvider(azureItems) });
   return { decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 
@@ -404,7 +406,7 @@ function registerSessionDaemonRoutes({ decisionHints, triggers, eventHub, worksp
     },
   }));
 
-  app.get("/runtime", () => ({ ...runtimeComponent, ...decisionHintsRuntimeStatus(decisionHints) }));
+  app.get("/runtime", async () => ({ ...runtimeComponent, ...await decisionHintsRuntimeStatus(decisionHints) }));
 }
 
 async function listenSessionDaemon({ triggers, sessions, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): Promise<void> {

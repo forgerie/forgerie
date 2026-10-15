@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { openBrowserFile, BrowserFileAccessError, type BrowserFileAccess } from "../browserFileAccess.js";
+import { mkdir, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -80,16 +81,22 @@ function summary(text: string): Record<string, string> {
   return fields;
 }
 
-async function list(dirs: AgentDirs) {
-  const read = async (scope: AgentScope, dir: string | undefined) => dir !== undefined && dir !== "" ? Promise.all((await walk(dir, scope !== "home")).map(async (path) => {
-    const [text, info] = await Promise.all([readFile(path, "utf8"), stat(path)]);
+async function readAgentFile(path: string, browserFiles?: BrowserFileAccess) {
+  const file = await openBrowserFile(path, browserFiles);
+  try { return { text: await file.readFile("utf8"), info: await file.stat() }; }
+  finally { await file.close(); }
+}
+
+async function list(dirs: AgentDirs, browserFiles?: BrowserFileAccess) {
+  const read = async (scope: AgentScope, dir: string | undefined) => dir !== undefined && dir !== "" ? Promise.all((await walk(dir, scope !== "home")).map(async path => ({ path, readable: await browserFiles?.isReadable(path) ?? true }))).then(rows => Promise.all(rows.filter(row => row.readable).map(async ({ path }) => {
+    const { text, info } = await readAgentFile(path, browserFiles);
     const fields = summary(text);
     const file = relative(dir, path).slice(0, -".md".length).split(sep).join("/");
     return { scope, file, name: fields["name"] === undefined || fields["name"] === "" ? file : fields["name"], description: fields["description"] ?? "", model: fields["model"], thinking: fields["thinking"],
       advertise: fields["advertise"] === "true", disabled: fields["disabled"] === "true", mtimeMs: info.mtimeMs,
       // pi-subagents refuses the whole file when it lists fallbacks.
       ...(fields["fallbackModels"] !== undefined ? { broken: "Lists fallbacks, so sessions cannot use it" } : {}) };
-  })) : [];
+  }))) : [];
   const [home, user, builtin] = await Promise.all([read("home", dirs.home), read("user", dirs.user), read("builtin", dirs.builtin)]);
   const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
   return { home: homedir(), ...(dirs.home === undefined ? {} : { homeDir: dirs.home }), userDir: dirs.user,
@@ -105,13 +112,13 @@ async function mtimeOf(path: string): Promise<number | undefined> {
   }
 }
 
-async function handle(dirs: AgentDirs, request: IncomingMessage, response: ServerResponse) {
+async function handle(dirs: AgentDirs, request: IncomingMessage, response: ServerResponse, browserFiles?: BrowserFileAccess) {
   const url = new URL(request.url ?? "/", "http://local");
   const rest = url.pathname.slice(AGENTS_PREFIX.length).replace(/^\/+/, "");
   const send = (status: number, value: unknown) => { sendJson(response, status, value); };
   if (rest === "") {
     if (request.method !== "GET") throw new HttpError(405, "Use GET.");
-    send(200, await list(dirs));
+    send(200, await list(dirs, browserFiles));
     return;
   }
   const slash = rest.indexOf("/");
@@ -122,10 +129,11 @@ async function handle(dirs: AgentDirs, request: IncomingMessage, response: Serve
   if (dir === undefined) throw new HttpError(404, scope === "home" ? "The home agents folder is not available on this server." : "Built-in agents are not available on this server.");
   if (scope === "home" && id.includes("/")) throw new HttpError(400, "Agent files in ~/.agents sit at its top level. Use a name without a slash.");
   const path = filePath(dir, id);
+  await browserFiles?.assertReadable(path);
   if (request.method === "GET") {
     const mtimeMs = await mtimeOf(path);
     if (mtimeMs === undefined) throw new HttpError(404, `There is no agent file "${id}".`);
-    send(200, { scope, file: id, text: await readFile(path, "utf8"), mtimeMs });
+    send(200, { scope, file: id, text: (await readAgentFile(path, browserFiles)).text, mtimeMs });
     return;
   }
   if (!WRITABLE.has(scope)) throw new HttpError(403, "Built-in agents are read-only. Customize one to make your own copy.");
@@ -155,11 +163,11 @@ async function handle(dirs: AgentDirs, request: IncomingMessage, response: Serve
   throw new HttpError(405, "Use GET, PUT, or DELETE.");
 }
 
-export function agentFilesMiddleware(dirs: () => Promise<AgentDirs>): Middleware {
+export function agentFilesMiddleware(dirs: () => Promise<AgentDirs>, fileAccess?: () => Promise<BrowserFileAccess>): Middleware {
   return (request, response, next) => {
     if (request.url?.startsWith(AGENTS_PREFIX) !== true) { next(); return; }
-    dirs().then((current) => handle(current, request, response)).catch((error: unknown) => {
-      sendJson(response, error instanceof HttpError ? error.status : 500, { error: errorMessage(error) });
+    dirs().then(async current => handle(current, request, response, await fileAccess?.())).catch((error: unknown) => {
+      sendJson(response, error instanceof BrowserFileAccessError ? 403 : error instanceof HttpError ? error.status : 500, { error: errorMessage(error) });
     });
   };
 }

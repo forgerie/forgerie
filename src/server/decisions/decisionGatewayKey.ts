@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
-import { mkdir, open, rename, rm } from "node:fs/promises";
+import type { BigIntStats } from "node:fs";
+import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { decisionGatewayApiKeySchema, type DecisionHintsStatus } from "../../shared/decisionHints.js";
 
+export const DECISION_GATEWAY_KEY_FILE_NAME = "decision-gateway.json";
 const fileSchema = z.object({ apiKey: decisionGatewayApiKeySchema });
 export class DecisionGatewayKeyError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -19,19 +20,19 @@ export class DecisionGatewayKeyStore {
   private readonly path: string;
   private readonly environmentKey: string | undefined;
   private cached: { stamp: string; apiKey: string } | undefined;
-  constructor(private readonly options: { agentDir: string; env: NodeJS.ProcessEnv }) {
-    this.path = join(options.agentDir, "decision-gateway.json");
+  constructor(private readonly options: { agentDir: string; env: NodeJS.ProcessEnv; stat?: (path: string) => Promise<BigIntStats> }) {
+    this.path = join(options.agentDir, DECISION_GATEWAY_KEY_FILE_NAME);
     const environmentKey = options.env["DECISION_GATEWAY_API_KEY"]?.trim();
     this.environmentKey = environmentKey === "" ? undefined : environmentKey;
   }
-  readApiKey(): string | undefined {
+  async readApiKey(): Promise<string | undefined> {
     if (this.environmentKey !== undefined) return this.environmentKey;
     try {
-      const info = statSync(this.path, { bigint: true });
+      const info = await (this.options.stat?.(this.path) ?? stat(this.path, { bigint: true }));
       if (!info.isFile() || info.size > 32_768n) throw unreadable();
       const stamp = `${String(info.mtimeNs)}:${String(info.size)}:${String(info.ino)}`;
       if (this.cached?.stamp === stamp) return this.cached.apiKey;
-      const parsed = fileSchema.safeParse(JSON.parse(readFileSync(this.path, "utf8")));
+      const parsed = fileSchema.safeParse(JSON.parse(await readFile(this.path, "utf8")));
       if (!parsed.success) throw unreadable();
       this.cached = { stamp, apiKey: parsed.data.apiKey };
       return parsed.data.apiKey;
@@ -41,9 +42,10 @@ export class DecisionGatewayKeyStore {
       throw unreadable();
     }
   }
-  status(): DecisionHintsStatus {
+  async status(): Promise<DecisionHintsStatus> {
     if (this.environmentKey !== undefined) return { keyPresent: true, source: "environment" };
-    return this.readApiKey() === undefined ? { keyPresent: false, source: "none" } : { keyPresent: true, source: "settings" };
+    try { return await this.readApiKey() === undefined ? { keyPresent: false, source: "none" } : { keyPresent: true, source: "settings" }; }
+    catch { return { keyPresent: false, source: "settings", invalid: true }; }
   }
   private requireEditable(): void {
     if (this.environmentKey !== undefined) throw new DecisionGatewayKeyError(409, "The key is set by DECISION_GATEWAY_API_KEY in sessiond's environment. Settings cannot replace or remove it.");
