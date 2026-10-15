@@ -137,7 +137,7 @@ The same project GitHub settings work in a saved override or in the repo file:
 | --- | --- |
 | `backlog.github.repo` | Optional `owner/name`; otherwise use the GitHub origin remote. |
 | `backlog.github.authors` | `"trusted"` (default) accepts owners, members, collaborators, authors with write access, Forgerie's own app, and listed trusted bots. `"all"` accepts everyone. |
-| `backlog.github.trustedBots` | Optional list of at most 20 unique bot logins. Each must match `^[A-Za-z0-9][A-Za-z0-9-]{0,38}\[bot\]$`. Matching logins is case-insensitive. |
+| `backlog.github.trustedBots` | Optional list of at most 20 bot logins, unique case-insensitively. Each must match `^[A-Za-z0-9][A-Za-z0-9-]{0,38}\[bot\]$`. Matching logins is case-insensitive. |
 
 With **Trusted authors only** on, listed bots' issue, PR, comment, and review
 text reaches agents in `github_read`, GitHub backlog launches, and `github_watch`

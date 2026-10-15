@@ -91,6 +91,10 @@ export function parseBacklogConfig(value: unknown, path: string): BacklogConfig 
   if (!Check(BacklogConfigSchema, value)) {
     throw new Error(`backlog must be an object with optional dir, providers ("markdown", "github", "azure-devops"), github { repo: "owner/name", authors: "trusted" | "all" }, and azureDevops { organization, project, areaPath? }: ${path}`);
   }
+  const trustedBots = value.github?.trustedBots;
+  if (trustedBots !== undefined && new Set(trustedBots.map(login => login.toLowerCase())).size !== trustedBots.length) {
+    throw new Error(`backlog.github.trustedBots must contain unique bot logins (case-insensitive): ${path}`);
+  }
   return value;
 }
 

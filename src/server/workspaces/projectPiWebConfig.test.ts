@@ -41,6 +41,21 @@ describe("project Forgerie config", () => {
     expect((await loadProjectPiWebConfig(projectPath)).config).toEqual({ version: 1, backlog: { dir: "work/items/" }, uploads: { defaultFolder: "uploads" } });
   });
 
+  it("rejects trusted bot logins that differ only by case without rejecting other project settings", async () => {
+    await writeProjectConfig({ backlog: { github: { trustedBots: ["coderabbitai[bot]", "CodeRabbitAI[bot]"] } }, uploads: { defaultFolder: "uploads" } });
+    const loaded = await loadProjectPiWebConfig(projectPath);
+    expect(loaded.config).toEqual({ uploads: { defaultFolder: "uploads" } });
+    expect(loaded.backlogError).toBe(`backlog.github.trustedBots must contain unique bot logins (case-insensitive): ${join(projectPath, PROJECT_PI_WEB_CONFIG_PATH)}`);
+  });
+
+  it("preserves distinct trusted bot logins and their original case", async () => {
+    const backlog = { github: { trustedBots: ["CodeRabbitAI[bot]", "dependabot[bot]"] } };
+    await writeProjectConfig({ backlog });
+    const loaded = await loadProjectPiWebConfig(projectPath);
+    expect(loaded.backlogError).toBeUndefined();
+    expect(loaded.config.backlog).toEqual(backlog);
+  });
+
   it.each(["", " ", "/outside", "../outside", "work/../../outside", "work\\\\items", "work\u0000items"])("rejects unsafe backlog directory %s", async (dir) => {
     await writeProjectConfig({ backlog: { dir } });
     const loaded = await loadProjectPiWebConfig(projectPath);

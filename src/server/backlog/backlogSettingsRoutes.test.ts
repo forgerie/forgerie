@@ -1,6 +1,6 @@
 import type { BacklogSettingsResponse } from "../../shared/backlogSettings.js";
 import Fastify from "fastify";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -31,6 +31,24 @@ it("validates settings routes, guards revisions, shows origins, and restores the
     expect((await app.inject({ method: "PUT", url: "/backlog/settings/github-login", payload: { githubLogin: "a--b" } })).statusCode).toBe(400);
     expect((await app.inject({ method: "PUT", url: "/backlog/settings/github-login", payload: { githubLogin: null } })).statusCode).toBe(200);
     expect((await get()).json()).not.toHaveProperty("githubLogin");
+  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it("rejects case-insensitive trusted bot duplicates with a clear 400 and leaves saved settings unchanged", async () => {
+  const root = await mkdtemp(join(tmpdir(), "settings-bot-duplicates-")); const app = Fastify();
+  try {
+    const project = { id: "p", name: "Project", path: root, createdAt: "today" };
+    const path = join(root, "settings.json");
+    const store = new BacklogSettingsStore(path);
+    const backlog = { providers: ["github" as const], github: { trustedBots: ["CodeRabbitAI[bot]", "dependabot[bot]"] } };
+    await store.save("p", backlog, 0);
+    const before = await readFile(path, "utf8");
+    registerBacklogSettingsRoutes(app, store, { list: () => Promise.resolve([project]), requireProject: () => Promise.resolve(project) });
+    const rejected = await app.inject({ method: "PUT", url: "/backlog/settings/projects/p", payload: { backlog: { providers: ["github"], github: { trustedBots: ["coderabbitai[bot]", "CodeRabbitAI[bot]"] } }, baseRevision: 1 } });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json()).toEqual({ error: "backlog.github.trustedBots must contain unique bot logins (case-insensitive): Backlog settings" });
+    expect(await readFile(path, "utf8")).toBe(before);
+    expect((await app.inject({ method: "GET", url: "/backlog/settings" })).json()).toMatchObject({ projects: [{ backlog, revision: 1 }] });
   } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
 });
 
