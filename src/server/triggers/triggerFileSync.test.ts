@@ -164,9 +164,9 @@ it("does not re-arm prose edits, updates lastGoodAt only for changed valid bytes
   now += 1_000; await triggers.syncFiles(); expect((await triggers.get("night")).file?.lastGoodAt).toBe(changed.file?.lastGoodAt);
   const document = await triggers.file("night");
   const saved = await triggers.saveFile("night", { text: document.text, baseSha256: document.sha256, schedule: { at: "03:00", projects: [cwd] } });
-  expect(saved.schedule?.projects).toEqual(["Repo"]);
+  expect(saved.document.schedule?.projects).toEqual(["Repo"]);
   await rm(file()); await triggers.syncFiles();
-  await expect(triggers.saveFile("night", { text: document.text, baseSha256: saved.sha256 })).rejects.toMatchObject({ status: 404 });
+  await expect(triggers.saveFile("night", { text: document.text, baseSha256: saved.document.sha256 })).rejects.toMatchObject({ status: 404 });
 });
 it("attributes only the agent's own file when create also discovers an outside schedule", async () => {
   await writeFile(file(), prose); const triggers = await open();

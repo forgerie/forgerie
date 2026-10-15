@@ -78,6 +78,7 @@ export type TriggerFileDocument = Static<typeof TriggerFileDocumentSchema>;
  * file's `schedule:` block with it before saving, keeping other front matter, key order and comments. The server
  * validates the result as a workflow and a schedule and refuses it (400, with `line` when known) rather than save a
  * file that would not run. A `baseSha256` that no longer matches the file is refused with 409.
+ * Success returns `{trigger, document}`; `TriggerFileSavedSchema` is in `triggers.ts` to avoid a schema import cycle.
  */
 export const TriggerFileSaveRequestSchema = Type.Object({
   text: Type.String({ maxLength: 512 * 1024 }),

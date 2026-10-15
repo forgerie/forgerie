@@ -5,7 +5,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
 import { Check } from "typebox/value";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { TriggerSchema, TriggerListResponseSchema, TriggerWorkflowsResponseSchema, TriggerErrorResponseSchema, TriggerRunResponseSchema, type Trigger } from "../../shared/triggers.js";
+import { TriggerSchema, TriggerFileSavedSchema, TriggerListResponseSchema, TriggerWorkflowsResponseSchema, TriggerErrorResponseSchema, TriggerRunResponseSchema, type Trigger } from "../../shared/triggers.js";
 import { TriggerFileDocumentSchema, TriggerFileVersionsResponseSchema, TriggerFileVersionTextSchema } from "../../shared/triggerFiles.js";
 import { parseTriggerSchedule } from "../../shared/triggerSchedules.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
@@ -166,7 +166,7 @@ it("fails only trigger calls with 503 when another daemon owns the store", async
 it.each([
   ["GET", "", "list"], ["GET", "/night", "get"], ["GET", "/workflows?cwd=/workspace", "workflows"],
   ["POST", "", "create"], ["PATCH", "/night", "update"], ["POST", "/night/pause", "pause"],
-  ["POST", "/night/resume", "resume"], ["POST", "/night/acknowledge", "acknowledge"], ["POST", "/night/run", "run"],
+  ["POST", "/night/resume", "resume"], ["PUT", "/night/file", "saveFile"], ["POST", "/night/acknowledge", "acknowledge"], ["POST", "/night/run", "run"],
 ])("refuses a malformed %s %s response before sending", async (method, path, operation) => {
   const server = Fastify();
   const adapted = {
@@ -285,17 +285,19 @@ it("reads, saves and restores version text through the real browser proxy with h
   const text = original.value.text.replace("description:", "# Keep this comment\ncustom: keep\ndescription:");
   const saved = await http("PUT", `/${trigger.id}/file`, { text, baseSha256: original.value.sha256, schedule: { at: "04:00", projects: [cwd], timezone: "UTC" } });
   expect(saved.status).toBe(200);
-  if (!Check(TriggerFileDocumentSchema, saved.value)) throw new Error("Invalid saved file response");
-  expect(saved.value.text).toContain("# Keep this comment"); expect(saved.value.text).toContain("custom: keep");
-  expect(saved.value.text.indexOf("custom:")).toBeLessThan(saved.value.text.indexOf("description:"));
-  expect(saved.value.text.indexOf("description:")).toBeLessThan(saved.value.text.indexOf("workflow:"));
-  expect(saved.value.body).toBe(original.value.body);
+  expect(saved.value).toMatchObject({ trigger: { file: { status: "ok" }, schedule: { at: "04:00", timezone: "UTC" } }, document: { schedule: { at: "04:00" } } });
+  if (!Check(TriggerFileSavedSchema, saved.value)) throw new Error("Invalid saved file response");
+  const document = saved.value.document;
+  expect(document.text).toContain("# Keep this comment"); expect(document.text).toContain("custom: keep");
+  expect(document.text.indexOf("custom:")).toBeLessThan(document.text.indexOf("description:"));
+  expect(document.text.indexOf("description:")).toBeLessThan(document.text.indexOf("workflow:"));
+  expect(document.body).toBe(original.value.body);
   expect(await http("PUT", `/${trigger.id}/file`, { text, baseSha256: original.value.sha256 })).toMatchObject({ status: 409 });
-  const invalid = await http("PUT", `/${trigger.id}/file`, { text: saved.value.text.replace('04:00', '25:00'), baseSha256: saved.value.sha256 });
+  const invalid = await http("PUT", `/${trigger.id}/file`, { text: document.text.replace('04:00', '25:00'), baseSha256: document.sha256 });
   expect(invalid).toMatchObject({ status: 400, value: { field: "schedule.at" } });
   if (!Check(TriggerErrorResponseSchema, invalid.value)) throw new Error("Invalid file error");
   expect(invalid.value.line).toBeGreaterThan(0);
-  expect(await http("GET", `/${trigger.id}/file`)).toMatchObject({ value: { sha256: saved.value.sha256 } });
+  expect(await http("GET", `/${trigger.id}/file`)).toMatchObject({ value: { sha256: document.sha256 } });
   const versions = await http("GET", `/${trigger.id}/versions`);
   if (!Check(TriggerFileVersionsResponseSchema, versions.value)) throw new Error("Invalid versions response");
   expect(versions.value.versions.length).toBeGreaterThanOrEqual(3);
@@ -303,5 +305,20 @@ it("reads, saves and restores version text through the real browser proxy with h
   const version = await http("GET", `/${trigger.id}/versions/${previous.id}`);
   if (!Check(TriggerFileVersionTextSchema, version.value)) throw new Error("Invalid version text");
   expect(version.value.text).toBe(original.value.text);
-  expect(await http("PUT", `/${trigger.id}/file`, { text: version.value.text, baseSha256: saved.value.sha256 })).toMatchObject({ status: 200, value: { schedule: { at: "03:00" } } });
+  expect(await http("PUT", `/${trigger.id}/file`, { text: version.value.text, baseSha256: document.sha256 })).toMatchObject({ status: 200, value: { trigger: { schedule: { at: "03:00" }, file: { status: "ok" } }, document: { schedule: { at: "03:00" } } } });
+});
+
+it.each([false, true])("returns the synced trigger state and document after saving paused=%s", async (paused) => {
+  const trigger = await created(); const file = await http("GET", `/${trigger.id}/file`);
+  if (!Check(TriggerFileDocumentSchema, file.value)) throw new Error("Invalid file response");
+  const saved = await http("PUT", `/${trigger.id}/file`, { text: file.value.text, baseSha256: file.value.sha256, schedule: { at: "05:00", timezone: "UTC", projects: [cwd], paused } });
+  expect(saved.status).toBe(200);
+  if (!Check(TriggerFileSavedSchema, saved.value)) throw new Error("Invalid saved file response");
+  expect(saved.value.document.schedule).toMatchObject({ at: "05:00", timezone: "UTC", paused });
+  expect(saved.value.trigger.file?.status).toBe("ok");
+  expect(saved.value.trigger.schedule).toEqual({ kind: "daily", at: "05:00", timezone: "UTC" });
+  expect(saved.value.trigger.state.kind).toBe(paused ? "paused" : "active");
+  expect(saved.value.trigger.revision).toBeGreaterThan(trigger.revision);
+  if (saved.value.trigger.state.kind === "active" && trigger.state.kind === "active") expect(saved.value.trigger.state.nextFireAt).not.toBe(trigger.state.nextFireAt);
+  expect(await http("GET", `/${trigger.id}`)).toMatchObject({ status: 200, value: saved.value.trigger });
 });

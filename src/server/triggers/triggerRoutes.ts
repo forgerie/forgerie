@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { Type, type TSchema } from "typebox";
-import { TriggerTargetsSchema, TriggerSchema, TriggerListResponseSchema, TriggerWorkflowsResponseSchema, TriggerRunResponseSchema, TriggerErrorResponseSchema, type TriggerErrorResponse, type TriggerRunRequest } from "../../shared/triggers.js";
+import { TriggerTargetsSchema, TriggerSchema, TriggerFileSavedSchema, TriggerListResponseSchema, TriggerWorkflowsResponseSchema, TriggerRunResponseSchema, TriggerErrorResponseSchema, type TriggerErrorResponse, type TriggerRunRequest } from "../../shared/triggers.js";
 import { TriggerFileDocumentSchema, TriggerFileVersionsResponseSchema, TriggerFileVersionTextSchema } from "../../shared/triggerFiles.js";
 import { Check } from "typebox/value";
 import { TriggerError } from "./durableTriggers.js";
@@ -21,7 +21,7 @@ export function registerTriggerRoutes(app: FastifyInstance, service: TriggerRout
     routes.post<{ Body: unknown }>(`${prefix}/triggers/workflows/common`, (request, reply) => run(reply, TriggerWorkflowsResponseSchema, () => service.commonWorkflows(triggerBody(TriggerTargetsSchema, request.body))));
     routes.get<{ Params: { id: string } }>(`${prefix}/triggers/:id`, (request, reply) => run(reply, TriggerSchema, () => service.get(request.params.id)));
     routes.get<{ Params: { id: string } }>(`${prefix}/triggers/:id/file`, (request, reply) => run(reply, TriggerFileDocumentSchema, () => service.file(request.params.id)));
-    routes.put<{ Params: { id: string }; Body: unknown }>(`${prefix}/triggers/:id/file`, (request, reply) => run(reply, TriggerFileDocumentSchema, () => service.saveFile(request.params.id, request.body)));
+    routes.put<{ Params: { id: string }; Body: unknown }>(`${prefix}/triggers/:id/file`, (request, reply) => run(reply, TriggerFileSavedSchema, () => service.saveFile(request.params.id, request.body)));
     routes.get<{ Params: { id: string } }>(`${prefix}/triggers/:id/versions`, (request, reply) => run(reply, TriggerFileVersionsResponseSchema, () => service.versions(request.params.id)));
     routes.get<{ Params: { id: string; versionId: string } }>(`${prefix}/triggers/:id/versions/:versionId`, (request, reply) => run(reply, TriggerFileVersionTextSchema, () => service.version(request.params.id, request.params.versionId)));
     routes.post<{ Body: unknown }>(`${prefix}/triggers`, (request, reply) => run(reply, TriggerSchema, () => service.create(request.body), 201));

@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { TriggerFileStateSchema } from "./triggerFiles.js";
+import { TriggerFileDocumentSchema, TriggerFileStateSchema } from "./triggerFiles.js";
 import { KNOWN_THINKING_LEVELS } from "./thinkingLevels.js";
 import { TriggerScheduleSchema } from "./triggerSchedules.js";
 import { WorkflowInputSchema, WorkflowInputsSchema } from "./workflowRuns.js";
@@ -124,6 +124,10 @@ export const TriggerSchema = Type.Object({
   history: Type.Array(TriggerFireSchema),
 }, { additionalProperties: false });
 export type Trigger = Static<typeof TriggerSchema>;
+
+/** PUT /triggers/:id/file returns the saved bytes and the trigger after file sync. */
+export const TriggerFileSavedSchema = Type.Object({ trigger: TriggerSchema, document: TriggerFileDocumentSchema }, { additionalProperties: false });
+export type TriggerFileSaved = Static<typeof TriggerFileSavedSchema>;
 
 export const TriggerListResponseSchema = Type.Object({
   triggers: Type.Array(TriggerSchema),

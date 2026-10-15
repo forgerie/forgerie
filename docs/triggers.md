@@ -98,7 +98,7 @@ Browser requests use `/api`. Direct sessiond requests omit that prefix. JSON bod
 | `POST /api/triggers/workflows/common` | `{kind:"projects",cwds:[...]}` or `{kind:"all"}` | `{workflows,diagnostics}`. Only common prose workflows, sorted by name. No session is created. Invalid fixed cwds return 400; unavailable All roots appear in diagnostics. |
 | `GET /api/triggers/:id` | None | Trigger with up to 50 runs, newest first. |
 | `GET /api/triggers/:id/file` | None | `{path,text,sha256,modifiedAt,schedule,definition,body}`. Invalid blocks read as null; text remains available for repair. |
-| `PUT /api/triggers/:id/file` | `{text,baseSha256,schedule?}` | Updated file document. Optional `schedule` replaces the block while retaining other keys, order and comments. Refuses invalid workflow or schedule with 400 and `line` when known. Stale hash: 409. |
+| `PUT /api/triggers/:id/file` | `{text,baseSha256,schedule?}` | `{trigger,document}` with the updated trigger after sync and the saved file document. Optional `schedule` replaces the block while retaining other keys, order and comments. Refuses invalid workflow or schedule with 400 and `line` when known. Stale hash: 409. |
 | `GET /api/triggers/:id/versions` | None | `{versions:[{id,savedAt,source,sha256}]}`, newest first, at most 30. |
 | `GET /api/triggers/:id/versions/:versionId` | None | Version metadata plus `text`. |
 | `POST /api/triggers` | Create object | 201 with the trigger. Needs an existing global workflow with no schedule. Its file name is the ID; a supplied legacy `id` does not rename it. |
@@ -108,6 +108,8 @@ Browser requests use `/api`. Direct sessiond requests omit that prefix. JSON bod
 | `POST /api/triggers/:id/run` | `{requestId,cwd?}` | 202 `{requestId}` with the durable request ID. Works while paused and leaves the next scheduled fire unchanged. |
 | `POST /api/triggers/:id/acknowledge` | `{}` | Trigger with attention cleared. |
 | `DELETE /api/triggers/:id` | None | `{ok:true}`. Removes the schedule block and deletes the record and history, not the workflow prose, versions or sessions. |
+
+**Server side:** `PUT /triggers/:id/file` syncs the saved file before returning `{trigger,document}`. The trigger includes the updated schedule, next run or paused state, and computed `file.status`. Its response schema is `TriggerFileSavedSchema` in `src/shared/triggers.ts`; the file schemas stay in `src/shared/triggerFiles.ts` to avoid an import cycle. `GET /triggers/:id/file` still returns the document alone.
 
 Create example:
 

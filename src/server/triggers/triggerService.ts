@@ -13,7 +13,7 @@ import { TriggerFileSync, type TriggerFileSyncRuntime } from "./triggerFileSync.
 import { editScheduleBlock, parseScheduledWorkflow } from "./triggerFileFormat.js";
 import { piWebDataDir } from "../../config.js";
 import { parseTriggerSchedule } from "../../shared/triggerSchedules.js";
-import { DEFAULT_MISSED_GRACE_MINUTES, TRIGGER_LIST_HISTORY, TriggerCreateSchema, TriggerUpdateSchema, TriggerRunRequestSchema, type Trigger, type TriggerCreate, type TriggerUpdate, type TriggerWorkflow, type TriggerAction, type TriggerCreator, type TriggerListResponse, type TriggerRunResponse, type TriggerWorkflowsResponse, type TriggerTargets } from "../../shared/triggers.js";
+import { DEFAULT_MISSED_GRACE_MINUTES, TRIGGER_LIST_HISTORY, TriggerCreateSchema, TriggerUpdateSchema, TriggerRunRequestSchema, type Trigger, type TriggerFileSaved, type TriggerCreate, type TriggerUpdate, type TriggerWorkflow, type TriggerAction, type TriggerCreator, type TriggerListResponse, type TriggerRunResponse, type TriggerWorkflowsResponse, type TriggerTargets } from "../../shared/triggers.js";
 import { assertProseOnly, workflowInputs, type WorkflowLibrary } from "../resources/workflowLibrary.js";
 import { acquireDurableOwnership, type DurableOwnership } from "../sessions/durableOwnership.js";
 import type { ProjectWorkspaceCwds } from "../workspaces/projectWorkspaceCwds.js";
@@ -149,7 +149,7 @@ export class TriggerService {
   }
   async syncFiles(): Promise<void> { this.opened(); await this.fileSync.transaction(() => this.fileSync.scan()); }
   async file(id: string) { await this.get(id); return this.files.document(id); }
-  async saveFile(id: string, value: unknown) {
+  async saveFile(id: string, value: unknown): Promise<TriggerFileSaved> {
     const request: TriggerFileSaveRequest = triggerBody(TriggerFileSaveRequestSchema, value);
     return this.fileSync.transaction(async () => {
       await this.get(id);
@@ -159,9 +159,9 @@ export class TriggerService {
         const parsed = await this.fileSync.validate(id, editScheduleBlock(request.text, request.schedule));
         normalized = { ...request, schedule: { ...request.schedule, projects: await this.fileSync.projectNames(parsed.input.action.targets) } };
       }
-      const saved = await this.files.save(id, normalized, async (text) => { await this.fileSync.validate(id, text); });
+      const document = await this.files.save(id, normalized, async (text) => { await this.fileSync.validate(id, text); });
       await this.fileSync.scan();
-      return saved;
+      return { trigger: await this.get(id), document };
     });
   }
   async versions(id: string) { await this.get(id); return this.files.versions(id); }
