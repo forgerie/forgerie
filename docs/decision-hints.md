@@ -212,7 +212,11 @@ original publication behavior. In particular, a startup dialog must publish
 Needs your response before its runtime becomes active. No gateway result changes the
 session response, admits a command, or delays the turn end.
 
-Native open cuts apply risk annotations after required paging and validation.
+Native open cuts cache required data only. HTTP responses and each subscriber
+delivery attach risk annotations after required paging and validation, with a
+fresh check of the live switches. This includes new attachments and queued
+replacements. Source-entry provenance stays outside the cut in weak metadata;
+no cached cut contains `decisionAnnotations`, `toolInvocations` or switch state.
 A late annotation refreshes only a live native publisher and advances its
 transport sequence, not its history identity. It writes no Durable entry.
 

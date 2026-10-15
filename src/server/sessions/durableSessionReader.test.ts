@@ -28,7 +28,7 @@ import { registerSessionRoutes } from "./sessionRoutes.js";
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 
-async function fixture(hub = new SessionEventHub()) {
+async function fixture(hub = new SessionEventHub(), acquiredCut?: (cut: SessionOpenResult) => void) {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-native-routes-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const databasePath = join(directory, "state.sqlite");
@@ -52,7 +52,14 @@ async function fixture(hub = new SessionEventHub()) {
       const handle: DurableSessionHandle = { address, harness, conversation, release() { if (!released) { released = true; leased--; } return Promise.resolve(); } };
       return Promise.resolve(handle);
     },
-    readModel: (handle) => new DurableParentReadModel({ handle, messageId }),
+    readModel: (handle) => {
+      const model = new DurableParentReadModel({ handle, messageId });
+      if (acquiredCut !== undefined) {
+        const open = model.open.bind(model);
+        model.open = async (...args) => { const cut = await open(...args); acquiredCut(cut); return cut; };
+      }
+      return model;
+    },
     history() { throw new Error("Tree factory must be supplied by native-fork #45"); },
   };
   let reader = new DurableSessionReader(readerOptions);
@@ -648,4 +655,79 @@ it("keeps optional labels in native open cuts and replacements without commits, 
     await new Promise<void>(resolve => { setImmediate(resolve); });
     expect(frames).toHaveLength(count); expect(f.hub.currentSeq(ref.id)).toBe(seq);
   } finally { off(); await attachment.stop(); await f.reader.close(); }
+});
+
+
+it.each(["enabled", "risk_labels"] as const)("projects cached native cuts with the live %s switch for each attachment", async switchName => {
+  const acquired: SessionOpenResult[] = [];
+  const f = await fixture(new SessionEventHub(), cut => { acquired.push(cut); });
+  await f.conversation().commit(tx => initializeParentDocuments(tx, { id: f.conversation().id }), context);
+  const input = await f.user("Run bash");
+  const answer = { ...fauxAssistantMessage([fauxToolCall("bash", { command: "true" }, { id: "call" })]),
+    toolInvocations: { call: "obsolete-identity" }, decisionAnnotations: [{ label: { model: "obsolete-opinion" } }] };
+  const entry = await f.conversation().commit(tx => tx.appendEntry(AssistantEntry, f.conversation().id, { model: [answer] }), context);
+  const switches = { enabled: true, risk_labels: true };
+  const store = decisionAnnotations(f.harness()); store.setRiskVisibility(() => switches.enabled && switches.risk_labels);
+  const invocationId = JSON.stringify([f.conversation().id, entry.id, "call", 0]);
+  const annotation = { target: "tool", id: "call", invocationId, sourceInvocationId: invocationId,
+    label: { model: "retained-opinion", deletes_data: 0, outside_worktree: 0, acts_as_user: 0, risk: "low", risk_score: 0 } };
+  await store.write(String(f.conversation().id), `tool:${invocationId}`, annotation);
+  const ref = { id: "logical", cwd: f.directory };
+  const frames: SessionOpenResult[][] = [[], []], failures: Error[] = [], commits: unknown[] = [];
+  let pauseFirst = false, release!: () => void;
+  const transportGate = new Promise<void>(resolve => { release = resolve; });
+  const attach = (index: number) => f.reader.attachOpen(ref, f.hub, async cut => {
+    frames[index]?.push(cut);
+    if (index === 0 && pauseFirst) await transportGate;
+  }, error => { failures.push(error); });
+  const off = f.harness().subscribeCommits(commit => { commits.push(commit); });
+  try {
+    await attach(0);
+    expect(JSON.stringify(frames[0]?.at(-1))).toContain("retained-opinion");
+    expect(acquired).toHaveLength(1);
+    const cached = acquired[0]; if (cached === undefined) throw new Error("Missing cached acquisition");
+    switches[switchName] = false;
+    const base = await f.start();
+    const http = await fetch(`${base}/sessions/logical/open?${new URLSearchParams({ cwd: f.directory, limit: "50" })}`);
+    expect(http.status).toBe(200);
+    expect(JSON.stringify(await http.json())).not.toContain("retained-opinion");
+    const second = await attach(1);
+    expect(JSON.stringify(frames[1]?.at(-1))).not.toContain("retained-opinion");
+    // Attaching never reacquires or invalidates the cached required cut.
+    expect(acquired).toHaveLength(2);
+    await second?.stop();
+    switches[switchName] = true;
+    await attach(1);
+    expect(JSON.stringify(frames[1]?.at(-1))).toContain("retained-opinion");
+    expect(acquired).toHaveLength(2);
+    const visibleHttp = await fetch(`${base}/sessions/logical/open?${new URLSearchParams({ cwd: f.directory, limit: "50" })}`);
+    expect(visibleHttp.status).toBe(200);
+    expect(JSON.stringify(await visibleHttp.json())).toContain("retained-opinion");
+    expect(cached.page).toStrictEqual({ start: 0, total: 2, messages: [
+      { id: `entry:${String(f.conversation().id)}:${String(input.id)}:0`, role: "user", content: "Run bash", timestamp: 1 },
+      { id: `entry:${String(f.conversation().id)}:${String(entry.id)}:0`, role: "assistant", content: answer.content, timestamp: answer.timestamp, stopReason: answer.stopReason },
+    ] });
+    expect(JSON.stringify(cached)).not.toMatch(/decisionAnnotations|toolInvocations|retained-opinion/);
+    expect(Object.isFrozen(cached)).toBe(true);
+    for (const delivered of [...(frames[0] ?? []), ...(frames[1] ?? [])]) {
+      const required = { ...delivered, page: { ...delivered.page, messages: delivered.page.messages.map(({ decisionAnnotations: _labels, toolInvocations: _ids, ...message }) => { void _labels; void _ids; return message; }) } };
+      expect(required).toEqual(cached);
+    }
+    // A transport can hold a send while a newer required cut waits in its bounded slot.
+    // The queued cut must read switches when that subscriber actually receives it.
+    pauseFirst = true;
+    await store.write(String(f.conversation().id), `tool:${invocationId}`, { ...annotation, label: { ...annotation.label, model: "busy-opinion" } });
+    await vi.waitFor(() => { expect(JSON.stringify(frames[1]?.at(-1))).toContain("busy-opinion"); });
+    await store.write(String(f.conversation().id), `tool:${invocationId}`, { ...annotation, label: { ...annotation.label, model: "queued-opinion" } });
+    await vi.waitFor(() => { expect(JSON.stringify(frames[1]?.at(-1))).toContain("queued-opinion"); });
+    switches[switchName] = false;
+    release();
+    await vi.waitFor(() => { expect(frames[0]?.at(-1)?.seq).toBe(frames[1]?.at(-1)?.seq); });
+    expect(JSON.stringify(frames[0]?.at(-1))).not.toMatch(/decisionAnnotations|queued-opinion/);
+    const queued = acquired.at(-1);
+    expect(JSON.stringify(queued)).not.toMatch(/decisionAnnotations|toolInvocations|opinion/);
+    expect(queued?.historyId).toBe(cached.historyId); expect(queued?.status).toEqual(cached.status);
+    expect(queued?.page).toEqual(cached.page);
+    expect(commits).toEqual([]); expect(failures).toEqual([]); expect(await f.scheduling()).toBe("paused");
+  } finally { release(); off(); await f.reader.close(); }
 });

@@ -63,6 +63,9 @@ export interface DurableBrowserAttachment {
 /** Committed parent reads. No read, attachment, or replacement resumes the scheduler. */
 export class DurableParentReadModel {
   private liveHistory: DurableLiveHistory | undefined;
+  // Opaque browser IDs cannot recover source entries. Keep only derived provenance
+  // beside required messages, never opinions or switches inside a cached cut.
+  private readonly openSourceEntryIds = new WeakMap<DurableBrowserMessage, EntryRecord["id"]>();
   constructor(private readonly options: DurableParentReadModelOptions) {}
 
   /** A publisher owns this subscription. Ordinary HTTP readers never retain a history cache. */
@@ -172,15 +175,34 @@ export class DurableParentReadModel {
           if (cached === undefined) this.liveHistory?.seed(entries, envelopes, messages, bound);
           const historyId = hub.nativeHistoryId(handle.address.journalId, handle.harness, id);
           assertHistoryIdentity(historyId, request.historyId);
-          return structuredClone({ session: { id: handle.address.sessionId, cwd, ...(name.name === undefined ? {} : { name: name.name }) }, readPath: "native" as const, cut: "native" as const,
-            epoch: hub.epoch, seq, historyId, runStartSeq: hub.nativeRunStartSeq(handle.address.sessionId, handle.harness, id, live.run?.inputs[0]),
-            page: this.annotate(this.page(messages, { ...request, completeTurns: true })),
-            snapshot: { seq, partial: partial === undefined ? null : durableBrowserMessageSchema.parse(projectBrowserMessage(partial)), tools, transientEvents: hub.transientEvents(handle.address.sessionId) }, status, receipt: null });
+          const runStartSeq = hub.nativeRunStartSeq(handle.address.sessionId, handle.harness, id, live.run?.inputs[0]);
+          const page = this.page(messages, { ...request, completeTurns: true });
+          const cut = structuredClone({ session: { id: handle.address.sessionId, cwd, ...(name.name === undefined ? {} : { name: name.name }) }, readPath: "native" as const, cut: "native" as const,
+            epoch: hub.epoch, seq, historyId, runStartSeq,
+            page,
+            snapshot: { seq, partial: partial === undefined ? null : requiredMessageSchema.parse(projectBrowserMessage(partial)), tools, transientEvents: hub.transientEvents(handle.address.sessionId) }, status, receipt: null });
+          page.messages.forEach((message, index) => {
+            const source = this.openSourceEntryIds.get(message), detached = cut.page.messages[index];
+            if (source !== undefined && detached !== undefined) this.openSourceEntryIds.set(detached, source);
+          });
+          return cut;
         }, context);
         if (cut !== undefined) return cut;
       }
       throw new Error("Native open could not acquire a consistent checkpoint after three attempts");
     } finally { stop(); unobserve(); }
+  }
+
+  /** Project only at delivery: the shared required cut never owns optional data. */
+  annotateOpen(cut: SessionOpenResult): SessionOpenResult {
+    const { harness, conversation } = this.options.handle;
+    const identified = cut.page.messages.map(message => {
+      const source = this.openSourceEntryIds.get(message);
+      return source === undefined ? message : withToolInvocationIds(conversation.id, [message], source)[0] ?? message;
+    });
+    const messages = withRiskAnnotations(harness, conversation.id, identified);
+    return messages.every((message, index) => message === cut.page.messages[index]) ? cut
+      : { ...cut, page: { ...cut.page, messages } };
   }
 
   context(context: Context): Promise<ContextView> { return this.options.handle.conversation.context(context); }
@@ -360,9 +382,12 @@ export class DurableParentReadModel {
     });
     // Reuse tool visibility as well as thinking-signature filtering for every read path.
     const visible = projectBrowserMessageResponse({ messages, start: 0, total: messages.length });
-    // Preserve the native open schema as well as stable invocation identity.
-    return withToolInvocationIds(this.options.handle.conversation.id,
-      visible.messages.map((message) => (opening ? openMessageSchema : durableBrowserMessageSchema).parse(message)), entry.id);
+    const validated = visible.messages.map((message) => (opening ? openMessageSchema : durableBrowserMessageSchema).parse(message));
+    if (opening) {
+      for (const message of validated) if (message.role === "assistant") this.openSourceEntryIds.set(message, entry.id);
+      return validated;
+    }
+    return withToolInvocationIds(this.options.handle.conversation.id, validated, entry.id);
   }
 }
 
@@ -410,4 +435,5 @@ function nativePresentation(entry: EntryRecord, envelope: Static<typeof Presenta
   return [{ role: "bashExecution", ...envelope, output, ...(first === undefined ? {} : { timestamp: first.timestamp }) }];
 }
 
-const openMessageSchema = durableBrowserMessageSchema.extend({ fullOutputPath: z.string().optional() });
+const requiredMessageSchema = durableBrowserMessageSchema.omit({ toolInvocations: true, decisionAnnotations: true });
+const openMessageSchema = requiredMessageSchema.extend({ fullOutputPath: z.string().optional() });

@@ -91,7 +91,9 @@ export class DurableOpenPublisher {
     const pump = async () => {
       while (!subscriber.stopped && subscriber.pending !== undefined) {
         const next = subscriber.pending; subscriber.pending = undefined;
-        await subscriber.send(next);
+        const delivered = this.model.annotateOpen(next);
+        freezeCut(delivered);
+        await subscriber.send(delivered);
       }
     };
     subscriber.line = pump().catch((error: unknown) => { subscriber.finish({ reason: "listener_error", error: asError(error) }); })
@@ -114,7 +116,7 @@ export class DurableOpenPublisher {
     this.dirty = false;
     this.line = this.model.open(this.cwd, { limit: 50 }, this.hub, this.context, this.hostState).then(cut => {
       if (this.stopped || this.latest !== undefined && cut.seq <= this.latest.seq) return;
-      // The detached cut is immutable and shared; fanout must not allocate another tail per attachment.
+      // Required data stays immutable and shared. Optional metadata is projected only at delivery.
       freezeCut(cut);
       this.latest = cut;
       for (const subscriber of this.subscribers) this.deliver(subscriber, cut);

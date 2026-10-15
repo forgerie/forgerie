@@ -45,14 +45,20 @@ export class DurableSessionReader {
   locate(ref: SessionRef): Promise<DurableSessionAddress | undefined> { return this.options.locate(ref); }
 
   open(ref: SessionRef, page: SessionOpenPageRequest, hub: SessionEventHub, hostStatus?: () => DurableHostState): Promise<SessionOpenResult | undefined> {
-    return this.read(ref, handle => this.options.readModel(handle).open(ref.cwd, page, hub, context, hostStatus));
+    return this.read(ref, async handle => {
+      const model = this.options.readModel(handle);
+      return model.annotateOpen(await model.open(ref.cwd, page, hub, context, hostStatus));
+    });
   }
 
   async openAddress(ref: SessionRef, address: DurableSessionAddress, page: SessionOpenPageRequest, hub: SessionEventHub,
     hostStatus?: () => DurableHostState): Promise<SessionOpenResult> {
     if (this.stopped) throw new Error("Durable session reader is closed");
     const handle = await this.options.acquire(address);
-    try { return await this.options.readModel(handle).open(ref.cwd, page, hub, context, hostStatus); }
+    try {
+      const model = this.options.readModel(handle);
+      return model.annotateOpen(await model.open(ref.cwd, page, hub, context, hostStatus));
+    }
     finally { await handle.release(context); }
   }
 
