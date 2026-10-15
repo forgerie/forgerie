@@ -156,7 +156,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   let readRefreshRequested = false;
   let catalogVersion = 0;
   let refreshPaint: AbortSignal | undefined;
-  let page: { start: number; total: number; historyId: string; epoch: string } | undefined;
+  let page: { start: number; end: number; total: number; historyId: string; epoch: string } | undefined;
   let earlierRead: Promise<void> | undefined;
   let pendingReceipt: ReadReceipt | undefined;
   let activation = new AbortController();
@@ -323,10 +323,16 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         if (isAskEvent(event) && (event.seq ?? Infinity) > open.seq) next = applyEvent(next, event);
         if (isOperationEvent(event) && (event.seq ?? Infinity) > (open.statusSeq ?? open.seq)) next = applyEvent(next, event);
       }
-      page = { start: open.page.start, total: open.page.total, historyId: open.historyId, epoch: open.epoch };
+      page = { start: open.page.start, end: open.page.start + open.page.messages.length, total: open.page.total, historyId: open.historyId, epoch: open.epoch };
       if (open.receipt !== null) pendingReceipt = { ...open.receipt, session: open.session };
       return { ...next, transcript: reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)) };
     }
+    // A native tail replacement cannot trim a selected reader's loaded, contiguous older turns.
+    // Complete-turn boundaries let us keep that immutable prefix without keeping a second raw history.
+    const prefix = open.readPath === "native" && page?.historyId === open.historyId && page.epoch === open.epoch
+      && page.start < open.page.start && page.end >= open.page.start
+      ? previous.transcript.messages.filter(message => message.position !== undefined && message.position < open.page.start) : [];
+    const start = prefix.length > 0 ? page?.start ?? open.page.start : open.page.start;
     // Absolute IDs/positions are assigned before any transient or live events are replayed.
     const raw = fromHistory(open.page.messages, running, open.page.start);
     const initial = open.readPath !== "native" ? raw : { ...raw, messages: raw.messages.map(message => {
@@ -335,7 +341,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     }) };
     const seededPartial = seedTranscript([], open.snapshot.partial, open.seq, running, hostShell, bashRunningAtSeed);
     let transcript: Transcript = { ...initial, nextId: initial.nextId + seededPartial.nextId,
-      messages: [...initial.messages, ...seededPartial.messages.map(message => ({ ...message, id: `partial-${String(open.seq)}-${message.id}` }))],
+      messages: [...prefix, ...initial.messages, ...seededPartial.messages.map(message => ({ ...message, id: `partial-${String(open.seq)}-${message.id}` }))],
       liveId: seededPartial.liveId === undefined ? undefined : `partial-${String(open.seq)}-${seededPartial.liveId}` };
     for (const tool of open.snapshot.tools) {
       if (tool.status === "done") continue;
@@ -344,12 +350,12 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     }
     // Host output is already reconstructed. Apply operation output before carry/dedup.
     let next = withStatus({ ...previous, session: open.session, transcript, ask: resyncAsk(previous.ask, open.status.pendingAsk),
-      earlier: { type: open.page.start === 0 ? "complete" : "available" } }, open.status);
+      earlier: { type: start === 0 ? "complete" : "available" } }, open.status);
     for (const event of open.snapshot.transientEvents) if (isOperationEvent(event)) next = applyEvent(next, event);
     next = { ...next, transcript: { ...reconcileTranscriptIdentity(previous.transcript, carryUnsavedShellRows(previous.transcript, next.transcript)),
       ...(previous.transcript.error === undefined ? {} : { error: previous.transcript.error }) } };
     for (const event of buffered) if ((event.seq ?? Infinity) > open.seq) next = applyEvent(next, event);
-    page = { start: open.page.start, total: open.page.total, historyId: open.historyId, epoch: open.epoch };
+    page = { start, end: open.page.start + open.page.messages.length, total: open.page.total, historyId: open.historyId, epoch: open.epoch };
     if (open.receipt !== null) pendingReceipt = { ...open.receipt, session: open.session };
     return next;
   }
@@ -755,11 +761,12 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       try {
         const older = await request(`${readPath("messages", session)}&${new URLSearchParams({ before: String(window.start), limit: "50", historyId: window.historyId })}`,
           sessionHistoryPageSchema, {}, attempt.controller.signal);
-        if (!current(attempt) || page !== window) return;
+        const currentWindow = page;
+        if (!current(attempt) || currentWindow?.historyId !== window.historyId || currentWindow.epoch !== window.epoch || currentWindow.start !== window.start) return;
         if (older.historyId !== window.historyId || older.epoch !== window.epoch) throw new ReadFailure("Session history changed", 409);
         if (older.start + older.messages.length !== window.start || older.start >= window.start) throw new Error("Older page is not contiguous with the current history.");
         const previous = fromHistory(older.messages, false, older.start);
-        page = { ...window, start: older.start, total: older.total };
+        page = { ...currentWindow, start: older.start, total: Math.max(currentWindow.total, older.total) };
         update({ ...state, transcript: { ...state.transcript, messages: [...previous.messages, ...state.transcript.messages] }, earlier: { type: older.start === 0 ? "complete" : "available" } });
       } catch (error) {
         if (current(attempt)) {

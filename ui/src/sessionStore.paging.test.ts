@@ -90,3 +90,50 @@ it("replaces the authoritative window after a 409 for before=150 when a 200-mess
   await store.loadEarlier();
   expect(server.requests.filter(url => url.pathname.endsWith("/messages"))).toHaveLength(1);
 });
+
+
+it("keeps loaded native earlier turns and their identities when the live replacement tail advances", async () => {
+  const all = Array.from({ length: 14 }, (_, index) => ({ id: `m${String(index)}`, role: index % 2 === 0 ? "user" : "assistant", content: `message ${String(index)}` }));
+  const server = await createOpenServer(url => {
+    if (url.pathname.endsWith("/open")) return openFixture({ readPath: "native", page: { messages: all.slice(8, 12), start: 8, total: 12 } });
+    if (url.pathname.endsWith("/messages")) {
+      const before = Number(url.searchParams.get("before"));
+      return { messages: all.slice(Math.max(0, before - 4), before), start: Math.max(0, before - 4), total: 14, historyId: "test-history", epoch: "test-daemon", seq: 0 };
+    }
+    return [];
+  }); cleanup.push(server.close);
+  const store = createSessionStore("known", { ...server.transport, nativeReadModel: true }, {}, { id: "known", cwd: "/workspace" }); cleanup.push(store.dispose);
+  await store.start(); await store.loadEarlier();
+  const older = store.getSnapshot().transcript.messages[0];
+  expect(older?.position).toBe(4);
+  server.emit({ type: "session.open", open: openFixture({ readPath: "native", snapshot: { seq: 1, partial: null }, page: { messages: all.slice(10), start: 10, total: 14 } }) });
+  await vi.waitFor(() => expect(store.getSnapshot().transcript.messages.at(-1)?.position).toBe(13));
+  expect(store.getSnapshot().transcript.messages.map(message => message.position)).toEqual(Array.from({ length: 10 }, (_, index) => index + 4));
+  expect(store.getSnapshot().transcript.messages[0]).toBe(older);
+  await store.loadEarlier();
+  expect(server.requests.filter(url => url.pathname.endsWith("/messages")).map(url => url.searchParams.get("before"))).toEqual(["8", "4"]);
+  expect(store.getSnapshot().transcript.messages.map(message => message.position)).toEqual(Array.from({ length: 14 }, (_, index) => index));
+  server.emit({ type: "session.open", open: openFixture({ readPath: "native", historyId: "new-branch", snapshot: { seq: 2, partial: null }, page: { messages: [{ id: "new", role: "user", content: "replacement branch" }], start: 0, total: 1 } }) });
+  await vi.waitFor(() => expect(store.getSnapshot().transcript.messages.map(message => message.id)).toEqual(["new"]));
+});
+
+
+it("finishes an in-flight native prepend after a same-history live checkpoint advances the tail", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; }); cleanup.push(() => { release(); });
+  const server = await createOpenServer(async url => {
+    if (url.pathname.endsWith("/open")) return openFixture({ readPath: "native", page: { messages: messages.slice(8), start: 8, total: 12 } });
+    if (url.pathname.endsWith("/messages")) { await gate; return { messages: messages.slice(4, 8), start: 4, total: 12, historyId: "test-history", epoch: "test-daemon", seq: 0 }; }
+    return [];
+  }); cleanup.push(server.close);
+  const store = createSessionStore("known", { ...server.transport, nativeReadModel: true }, {}, { id: "known", cwd: "/workspace" }); cleanup.push(store.dispose);
+  await store.start(); const tail = store.getSnapshot().transcript.messages[0];
+  const earlier = store.loadEarlier();
+  const next = [...messages.slice(10), { id: "m12", role: "user", content: "next input" }, { id: "m13", role: "assistant", content: "next answer" }];
+  server.emit({ type: "session.open", open: openFixture({ readPath: "native", snapshot: { seq: 1, partial: null }, page: { messages: next, start: 10, total: 14 } }) });
+  await vi.waitFor(() => expect(store.getSnapshot().transcript.messages.at(-1)?.position).toBe(13));
+  release(); await earlier;
+  expect(store.getSnapshot().transcript.messages.map(message => message.position)).toEqual(Array.from({ length: 10 }, (_, index) => index + 4));
+  expect(store.getSnapshot().transcript.messages.find(message => message.position === 8)).toBe(tail);
+  await store.ensurePosition(13);
+});
