@@ -39,7 +39,7 @@ async function baseBuildFixture() {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-base-journal-"));
   directories.push(directory);
   const execute = promisify(execFile);
-  const source = (await execute("git", ["show", "cf34a0b1:src/server/sessions/durableSessionJournal.ts"])).stdout;
+  const source = (await execute("git", ["show", "f4929197:src/server/sessions/durableSessionJournal.ts"])).stdout;
   const base = source.replace(/from "(\.[^"]+)\.js"/g, (_match: string, relative: string) => `from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, relative + ".ts")).href)}`);
   await symlink(join(process.cwd(), "node_modules"), join(directory, "node_modules"), "dir");
   await writeFile(join(directory, "baseJournal.mts"), base);
