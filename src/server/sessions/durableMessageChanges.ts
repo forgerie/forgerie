@@ -5,13 +5,46 @@ type Block = AssistantMessage["content"][number];
 type StreamedBlock = Extract<Block, { type: "text" | "thinking" }>;
 
 /**
+ * Applies one Durable commit to the in-flight message and reports each change
+ * as SDK readers expect it, with the message after that change. The restated
+ * deltas carry only text, so the commit's own change is applied with the last
+ * of them: it keeps metadata such as signatures and the response ID. Returns
+ * the message after the commit.
+ */
+export function applySdkCommit(partial: AssistantMessage | undefined, changes: readonly MessageChange[],
+  report: (change: MessageChange, partial: AssistantMessage | undefined) => void): AssistantMessage | undefined {
+  let current = partial;
+  for (const coalesced of byContentIndex(changes)) {
+    const restated = sdkMessageChanges(current, coalesced);
+    restated.forEach((change, index) => {
+      current = applyMessageChange(current, change);
+      if (change !== coalesced && index === restated.length - 1) current = applyMessageChange(current, coalesced);
+      report(change, current);
+    });
+  }
+  return current;
+}
+
+/** One change applied to the in-flight message. A delta changes the message in place; a whole message replaces it. */
+export function applyMessageChange(partial: AssistantMessage | undefined, change: MessageChange): AssistantMessage | undefined {
+  if (change.type === "message") return structuredClone(change.message);
+  if (partial === undefined) return undefined;
+  if ("block" in change) { partial.content[change.contentIndex] = structuredClone(change.block); return partial; }
+  const block = partial.content[change.contentIndex];
+  if (change.type === "text_delta" && block?.type === "text") block.text += change.delta;
+  if (change.type === "thinking_delta" && block?.type === "thinking") block.thinking += change.delta;
+  return partial;
+}
+
+/**
  * Durable commits the in-flight message at most every 100 ms, so one change
  * can carry text that the SDK streams as deltas: a block that starts with
  * text, or a whole block or message that replaces an earlier one. Readers that
  * follow only deltas, such as the browser, would never see that text. This
  * restates such a change as SDK-shaped starts and deltas, relative to the
  * message `before` it. A replacement that does not only extend earlier text
- * cannot be a delta; it stays as Durable sent it.
+ * cannot be a delta, and one that adds no text has nothing to restate; both
+ * stay as Durable sent them.
  */
 export function sdkMessageChanges(before: AssistantMessage | undefined, change: MessageChange): MessageChange[] {
   switch (change.type) {
@@ -20,7 +53,7 @@ export function sdkMessageChanges(before: AssistantMessage | undefined, change: 
     case "block": {
       const previous = before?.content[change.contentIndex];
       const restated = previous === undefined ? started(change.contentIndex, change.block) : extended(change.contentIndex, previous, change.block);
-      return restated ?? [change];
+      return restated === undefined || restated.length === 0 ? [change] : restated;
     }
     case "message": {
       if (before === undefined) return [change];
@@ -31,7 +64,7 @@ export function sdkMessageChanges(before: AssistantMessage | undefined, change: 
         if (next === undefined) return [change];
         restated.push(...next);
       }
-      return change.message.content.length < before.content.length ? [change] : restated;
+      return change.message.content.length < before.content.length || restated.length === 0 ? [change] : restated;
     }
     // Deltas need no restating. A tool call start stays as Durable sent it.
     case "toolcall_start":

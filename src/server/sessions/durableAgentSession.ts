@@ -40,7 +40,7 @@ import { decisionExtension, decisions, overturnDecision, flaggedDecisions, decis
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
 import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowStops, workflowProposals, startWorkflowProposal, decideWorkflowProposal, openWorkflowProposals } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
-import { byContentIndex, sdkMessageChanges } from "./durableMessageChanges.js";
+import { applySdkCommit } from "./durableMessageChanges.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
 import type { WorkflowModels, WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 
@@ -1002,7 +1002,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
         // The first commit can already hold text. As in the SDK, the start is empty and that text follows as deltas.
         this.partial = { ...structuredClone(event.message), content: [] };
         this.emit({ type: "message_start", message: structuredClone(this.partial) });
-        this.emitChanges([{ type: "message", message: event.message }]);
+        if (event.message.content.length > 0) this.emitChanges([{ type: "message", message: event.message }]);
         break;
       case "message_update":
         this.emitChanges(event.changes);
@@ -1061,20 +1061,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
 
   /** SDK readers follow starts and deltas, so text that Durable coalesced into one commit is restated as deltas. */
   private emitChanges(changes: readonly MessageChange[]): void {
-    for (const coalesced of byContentIndex(changes)) {
-      for (const change of sdkMessageChanges(this.partial, coalesced)) {
-        this.applyChange(change);
-        this.emit({ type: "message_update", message: this.partial, assistantMessageEvent: { ...change, partial: this.partial } });
-      }
-    }
-  }
-
-  private applyChange(change: MessageChange): void {
-    if (change.type === "message") { this.partial = structuredClone(change.message); return; }
-    if (this.partial === undefined) return;
-    if ("block" in change) { this.partial.content[change.contentIndex] = structuredClone(change.block); return; }
-    const block = this.partial.content[change.contentIndex];
-    if (change.type === "text_delta" && block?.type === "text") block.text += change.delta;
-    if (change.type === "thinking_delta" && block?.type === "thinking") block.thinking += change.delta;
+    this.partial = applySdkCommit(this.partial, changes, (change, partial) => {
+      this.partial = partial;
+      this.emit({ type: "message_update", message: partial, assistantMessageEvent: { ...change, partial } });
+    });
   }
 }
