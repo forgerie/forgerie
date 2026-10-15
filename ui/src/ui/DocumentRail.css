@@ -1,0 +1,15 @@
+/* A document and its side panel. Layout is a function of this element's width (container "document-rail"):
+   - BESIDE  inline-size >= 46rem: head and document in a reading column, the panel beside them.
+   - STACKED below that: head, then the panel between two rules, then the document.
+   The threshold is a guess until measured: at 46rem the reading column keeps about 26rem beside a 16rem panel. */
+.document-rail { container: document-rail / inline-size; }
+.document-rail-grid { display: grid; grid-template: "head" auto "panel" auto "main" auto / minmax(0, 1fr); }
+.document-rail-head { grid-area: head; min-inline-size: 0; padding-block-end: var(--space-5); }
+.document-rail-notices { display: flex; flex-direction: column; gap: var(--space-2); margin-block-start: var(--space-4); }
+.document-rail-panel { grid-area: panel; min-inline-size: 0; margin-block-end: var(--space-5); padding-block: var(--space-4); border-block: var(--hairline) solid var(--line); }
+.document-rail-main { grid-area: main; min-inline-size: 0; }
+@container document-rail (min-width: 46rem) {
+  .document-rail-grid { grid-template: "head panel" auto "main panel" 1fr / minmax(0, 1fr) clamp(16rem, 30cqi, 20rem); column-gap: clamp(1.5rem, 4cqi, 3rem); }
+  .document-rail-head, .document-rail-main { justify-self: center; inline-size: 100%; max-inline-size: 42rem; }
+  .document-rail-panel { align-self: start; margin: 0; padding: 0 0 var(--space-6) clamp(1rem, 2.5cqi, 1.5rem); border-block: 0; border-inline-start: var(--hairline) solid var(--line); }
+}

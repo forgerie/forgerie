@@ -4,6 +4,12 @@
 // a runtime import of @shared/triggers would bring its schema library along.
 import type { ReactNode } from "react";
 import type { Trigger, TriggerFire, TriggerListResponse, TriggerProjectFire } from "@shared/triggers";
+import type { TriggerFileState } from "@shared/triggerFiles";
+
+/** The trigger's workflow file cannot be read as a schedule: the last good settings run, and it needs a look. */
+export const fileInvalid = (trigger: Trigger) => (trigger as Trigger & { file?: TriggerFileState }).file?.status === "invalid";
+/** Something about the trigger waits on the reader: a failed or missed run, or a file with an error. */
+export const needsLook = (trigger: Trigger) => trigger.attention !== null || fileInvalid(trigger);
 
 /** `?triggers` is the list, `?triggers&create` the create page, `?triggers=<id>` one trigger. */
 export type TriggerPlace = { view: "list" } | { view: "create" } | { view: "trigger"; id: string };
@@ -78,9 +84,9 @@ export function problemsSince(trigger: Trigger): TriggerFire[] {
     .filter(({ at }) => at >= since).sort((a, b) => b.at - a.at).map(({ fire }) => fire);
 }
 
-/** Bad when the newest problem failed, warn when it was missed. A trigger without attention has no tone. */
+/** Bad when the newest problem failed, warn when it was missed or the file has an error. A trigger that needs no look has no tone. */
 export function attentionTone(trigger: Trigger): "bad" | "warn" | undefined {
-  if (trigger.attention === null) return undefined;
+  if (trigger.attention === null) return fileInvalid(trigger) ? "warn" : undefined;
   const latest = problemsSince(trigger)[0];
   const project = latest && projectProblemsSince(latest, trigger.attention.since)[0];
   return project?.outcome.kind === "missed" ? "warn" : "bad";
@@ -92,7 +98,7 @@ export function triggerEntry(load: TriggerListLoad): TriggerEntry {
   const list = listOf(load);
   const count = list?.attentionCount ?? 0;
   if (!list || count <= 0) return { title: "Triggers", attention: false };
-  const flagged = list.triggers.filter((trigger) => trigger.attention !== null);
+  const flagged = list.triggers.filter(needsLook);
   const tone = flagged.length === 0 || flagged.some((trigger) => attentionTone(trigger) === "bad") ? "bad" : "warn";
   return { chip: { text: String(count), tone }, title: `Triggers: ${String(count)} ${count === 1 ? "needs" : "need"} a look`, attention: true };
 }
@@ -101,15 +107,15 @@ export type TriggerGroupKey = "attention" | "active" | "paused";
 export interface TriggerGroup { key: TriggerGroupKey; label: string; triggers: Trigger[] }
 
 /**
- * Needs a look (newest attention first), Active (soonest next run first), then
- * Paused (by name). An empty group is not returned.
+ * Needs a look (newest attention first, then files with an error), Active
+ * (soonest next run first), then Paused (by name). An empty group is not returned.
  */
 export function groupTriggers(triggers: readonly Trigger[]): TriggerGroup[] {
-  const attention = triggers.filter((trigger) => trigger.attention !== null)
+  const attention = triggers.filter(needsLook)
     .sort((a, b) => (b.attention?.since ?? 0) - (a.attention?.since ?? 0) || a.name.localeCompare(b.name));
-  const active = triggers.filter((trigger) => trigger.attention === null && trigger.state.kind === "active")
+  const active = triggers.filter((trigger) => !needsLook(trigger) && trigger.state.kind === "active")
     .sort((a, b) => nextFire(a) - nextFire(b) || a.name.localeCompare(b.name));
-  const paused = triggers.filter((trigger) => trigger.attention === null && trigger.state.kind === "paused")
+  const paused = triggers.filter((trigger) => !needsLook(trigger) && trigger.state.kind === "paused")
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
   const groups: TriggerGroup[] = [
     { key: "attention", label: "Needs a look", triggers: attention },
@@ -146,11 +152,15 @@ const REM = 16;
 export const ROW_WIDE = 34 * REM;
 export const ROW_NARROW = 24 * REM;
 export const HEADER_TIGHT = 20 * REM;
+/** A workflow file's header holds Run now… beside Save from this width; below it, Run now… moves into ⋯ first. */
+export const HEADER_ROOMY = 30 * REM;
 export const SHORT_BODY = 22 * REM;
 export type RowTier = "wide" | "medium" | "narrow";
 export interface TriggersPlan {
   row: { tier: RowTier; marks: number; stateAction: "inline" | "menu" };
   primary: "header" | "menu";
+  /** A second header action, such as Run now… beside Save. It moves into ⋯ before the primary does. */
+  secondary: "header" | "menu";
   errorLines: 2 | 4;
   /** A short scroll region spends less on spacing: a smaller top margin and less room between groups. */
   density: "roomy" | "compact";
@@ -160,6 +170,7 @@ export function triggersPlan(column: number, header: number, body: number): Trig
   return {
     row: { tier, marks: tier === "narrow" ? 5 : 7, stateAction: tier === "wide" ? "inline" : "menu" },
     primary: header >= HEADER_TIGHT ? "header" : "menu",
+    secondary: header >= HEADER_ROOMY ? "header" : "menu",
     errorLines: body < SHORT_BODY ? 2 : 4,
     density: body < SHORT_BODY ? "compact" : "roomy",
   };

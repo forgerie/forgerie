@@ -3,6 +3,7 @@
 import { destinationLabel } from "../../newSession";
 import type { TriggerRowActions } from "../TriggerRow";
 import type { TriggerPageActions } from "../TriggerPage";
+import type { TriggerFilePageActions } from "../TriggerFilePage";
 import type { WordClock } from "../triggerWords";
 import type { WorkflowsLoad } from "../TriggerForm";
 import { draftProblems, type DraftProblems, type TriggerDraft } from "../triggerDraft";
@@ -31,3 +32,7 @@ export function draftScenario(draft: TriggerDraft): { workflows: WorkflowsLoad; 
   const workflow = common.workflows.find((item) => item.name === draft.workflow);
   return { workflows: { type: "ready", ...common }, problems: draftProblems(draft, workflow, workflowGap(draft.workflow, common, projectLabel)) };
 }
+export const fileActions: TriggerFilePageActions = {
+  onText: nothing, onSettings: nothing, onSave: nothing, onDiscard: nothing, onRestore: nothing, onBack: nothing, onClose: nothing, onReload: nothing,
+  onRunNow: nothing, onPause: nothing, onResume: nothing, onAcknowledge: nothing, onDelete: nothing, onCopyId: nothing, onOpenSession: nothing,
+};

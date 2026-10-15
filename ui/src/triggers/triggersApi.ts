@@ -4,16 +4,28 @@
 import type {
   Trigger, TriggerCreate, TriggerListResponse, TriggerRunRequest, TriggerRunResponse, TriggerTargets, TriggerUpdate, TriggerWorkflowsResponse,
 } from "@shared/triggers";
+import type {
+  TriggerFileDocument, TriggerFileSaveRequest, TriggerFileState, TriggerFileVersion, TriggerFileVersionsResponse, TriggerFileVersionText,
+} from "@shared/triggerFiles";
 import type { Fetch } from "../newSession";
+
+/**
+ * A trigger as the server returns it once schedules live in workflow files: `file` says which file holds its settings
+ * and whether the file can be read. A trigger without `file` predates the file model and keeps the settings form.
+ */
+export type FileTrigger = Trigger & { file?: TriggerFileState | undefined };
+/** The answer to a file save: the trigger as it now runs, and the file as saved. */
+export interface TriggerFileSaved { trigger: FileTrigger; document: TriggerFileDocument }
 
 /**
  * A non-success answer from a trigger route or its proxy. This alone does not
  * prove the request was refused: a proxy can lose the answer after admission.
  * `status` is the HTTP status. `field` names the request field at fault, as a
- * dotted path such as `schedule.at`, when the server knows it.
+ * dotted path such as `schedule.at`, when the server knows it. `line` is the
+ * 1-based line of a workflow file that would not run, when the server knows it.
  */
 export class TriggerRefusal extends Error {
-  constructor(message: string, readonly status: number, readonly field?: string) { super(message); }
+  constructor(message: string, readonly status: number, readonly field?: string, readonly line?: number) { super(message); }
 }
 
 /**
@@ -46,9 +58,30 @@ function readList(value: unknown): TriggerListResponse {
   const attentionCount = typeof value["attentionCount"] === "number" ? value["attentionCount"] : triggers.filter((trigger) => trigger.attention !== null).length;
   return { triggers, attentionCount, timezone, timezones };
 }
-function readTrigger(value: unknown): Trigger {
+function readTrigger(value: unknown): FileTrigger {
   if (!looksLikeTrigger(value)) throw new Error("Forgerie sent a trigger this app cannot read.");
   return value;
+}
+function readDocument(value: unknown): TriggerFileDocument {
+  if (!isRecord(value) || typeof value["path"] !== "string" || typeof value["text"] !== "string" || typeof value["sha256"] !== "string"
+    || typeof value["body"] !== "string" || !("schedule" in value) || !("definition" in value)) throw new Error("Forgerie sent a workflow file this app cannot read.");
+  return value as unknown as TriggerFileDocument;
+}
+function readSaved(value: unknown): TriggerFileSaved {
+  if (!isRecord(value)) throw new Error("Forgerie sent a save answer this app cannot read.");
+  return { trigger: readTrigger(value["trigger"]), document: readDocument(value["document"]) };
+}
+const looksLikeVersion = (value: unknown): value is TriggerFileVersion => isRecord(value) && typeof value["id"] === "string"
+  && typeof value["savedAt"] === "number" && typeof value["sha256"] === "string"
+  && (value["source"] === "forgerie" || value["source"] === "outside" || value["source"] === "migration");
+/** Newest first, as the server sends them. A malformed entry drops out, not the list. */
+function readVersions(value: unknown): TriggerFileVersionsResponse {
+  if (!isRecord(value) || !Array.isArray(value["versions"])) throw new Error("Forgerie sent a version list this app cannot read.");
+  return { versions: value["versions"].filter(looksLikeVersion) };
+}
+function readVersion(value: unknown): TriggerFileVersionText {
+  if (!isRecord(value) || !looksLikeVersion(value) || typeof (value as Record<string, unknown>)["text"] !== "string") throw new Error("Forgerie sent a version this app cannot read.");
+  return value as TriggerFileVersionText;
 }
 /**
  * The 202 answer to Run now. Its `requestId` is the ID the run's history entry carries, in a form the browser cannot
@@ -76,7 +109,8 @@ export function createTriggersApi(fetchFn: Fetch) {
       const body: unknown = await response.json().catch(() => undefined);
       const error = isRecord(body) && typeof body["error"] === "string" ? body["error"] : `Request failed: HTTP ${String(response.status)}`;
       const field = isRecord(body) && typeof body["field"] === "string" ? body["field"] : undefined;
-      throw new TriggerRefusal(error, response.status, field);
+      const line = isRecord(body) && typeof body["line"] === "number" && Number.isInteger(body["line"]) && body["line"] >= 1 ? body["line"] : undefined;
+      throw new TriggerRefusal(error, response.status, field, line);
     }
     return read(await response.json());
   }
@@ -105,6 +139,17 @@ export function createTriggersApi(fetchFn: Fetch) {
     run: (id: string, requestId: string, cwd?: string) => call(`${at(id)}/run`, readRun,
       send("POST", { requestId, ...(cwd ? { cwd } : {}) } satisfies TriggerRunRequest)),
     remove: (id: string) => call(at(id), () => ({ ok: true as const }), { method: "DELETE" }),
+    /** The workflow file that holds the trigger's settings, and what the server read from it. */
+    file: (id: string, signal?: AbortSignal) => call(`${at(id)}/file`, readDocument, signal ? { signal } : {}),
+    /**
+     * Write the whole file. With `schedule`, the server writes that block into the file first. Refused with 400 (and
+     * `line`) for a file that would not run, and with 409 when `baseSha256` is no longer the file's hash.
+     */
+    saveFile: (id: string, body: TriggerFileSaveRequest) => call(`${at(id)}/file`, readSaved, send("PUT", body)),
+    /** The copies of the file Forgerie kept, newest first. */
+    versions: (id: string, signal?: AbortSignal) => call(`${at(id)}/versions`, readVersions, signal ? { signal } : {}),
+    version: (id: string, versionId: string, signal?: AbortSignal) =>
+      call(`${at(id)}/versions/${encodeURIComponent(versionId)}`, readVersion, signal ? { signal } : {}),
   };
 }
 export type TriggersApi = ReturnType<typeof createTriggersApi>;

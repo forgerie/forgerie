@@ -14,6 +14,11 @@ import type { RunScope, TriggerQuestion } from "./TriggerDialog";
 import type { TriggerPageLoad, TriggerSave } from "./TriggerPage";
 import type { ProjectsLoad, WorkflowsLoad } from "./TriggerForm";
 import { fixedCwds, hasTargets, isSpread, targetsKey, workflowGap } from "./triggerTargets";
+import { dayTimeWords, fileOf, saveRequestOf, scheduleDraftOf, settingsChanged, type ScheduleDraft } from "./triggerFile";
+import type { TriggerFileSave } from "./TriggerFilePage";
+import { useTriggerFile } from "./useTriggerFile";
+import { markdownView } from "../ui/markdownView";
+import type { MarkdownView } from "../ui/useMarkdownView";
 
 /** Registered projects and models, as the new-session dialog reads them. */
 export interface TriggerDirectory {
@@ -98,6 +103,25 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
     : listed ? { type: "ready", trigger: listed } : fromDetail ?? { type: "loading" };
   const trigger = pageLoad.type === "ready" ? pageLoad.trigger : undefined;
 
+  // A trigger whose settings live in a workflow file is that file's page. One the server reports without a file keeps the form.
+  const fileState = place.view === "trigger" && trigger ? fileOf(trigger) : undefined;
+  const fileId = fileState && trigger ? trigger.id : undefined;
+  const files = useTriggerFile(api, fileId, list.load);
+  const fileDocument = files.file.type === "ready" ? files.file.document : undefined;
+  const storedFile = fileId ? memory.files.get(fileId) : undefined;
+  const fileStart: ScheduleDraft | undefined = trigger && fileId ? storedFile?.start ?? scheduleDraftOf(trigger, fileDocument, value?.timezone ?? zone) : undefined;
+  const fileSettings = storedFile?.settings ?? fileStart;
+  const fileText = storedFile?.text ?? fileDocument?.text ?? "";
+  const textDirty = fileDocument !== undefined && storedFile !== undefined && storedFile.text !== fileDocument.text;
+  const settingsDirty = fileSettings !== undefined && fileStart !== undefined && settingsChanged(fileSettings, fileStart);
+  const fileDirty = textDirty || settingsDirty;
+  // Edits made against an older read: the file changed on disk since they began.
+  const fileConflict = Boolean(storedFile && fileDocument && storedFile.baseSha256 !== fileDocument.sha256);
+  const [restores, setRestores] = useState(0);
+  // Rich or Source: the device's choice for every Markdown file, as in Skills and prompts.
+  const [fileView, setFileView] = useState<MarkdownView>(() => markdownView.read());
+  const [fileSave, setFileSave] = useState<{ id: string; state: TriggerFileSave }>();
+
   // Run now: starting until the history carries the request.
   for (const [id, pending] of pendingRuns) {
     const known = (trigger?.id === id ? trigger : undefined) ?? value?.triggers.find((item) => item.id === id);
@@ -113,7 +137,7 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
   const raw = stored?.draft ?? start;
   // Until the reader picks a zone, a new trigger follows the host's zone once the list says what it is.
   const draft = !trigger && !raw.zoneChosen && host && raw.timezone !== host ? { ...raw, timezone: host } : raw;
-  const dirty = place.view === "create" ? isDirty(draft, emptyDraft(draft.timezone)) : trigger ? isDirty(draft, start) : false;
+  const dirty = fileId ? fileDirty : place.view === "create" ? isDirty(draft, emptyDraft(draft.timezone)) : trigger ? isDirty(draft, start) : false;
   // A change elsewhere to what this form edits is a conflict. A pause, a mark as seen, or a recorded run also raises
   // the revision, but it leaves the form's fields alone, so the draft moves onto the newer revision without a word.
   // A refused save stays a conflict until the newer trigger has been read.
@@ -202,7 +226,11 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
 
   async function confirm() {
     if (!question) return;
-    if (question.kind === "leave") { const action = leave.current; leave.current = undefined; dropDraft(); setQuestion(undefined); action?.(); return; }
+    if (question.kind === "leave") {
+      const action = leave.current; leave.current = undefined;
+      if (fileId) memory.files.delete(fileId);
+      dropDraft(); setQuestion(undefined); action?.(); return;
+    }
     const target = question.trigger;
     setQuestion({ ...question, busy: true, error: undefined });
     if (question.kind === "run") {
@@ -283,14 +311,93 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
     } finally { inFlight.current = false; }
   }
 
+  // The file's edits: kept while they differ from the file as read, against the hash they began from.
+  const setFile = (change: { text?: string; settings?: ScheduleDraft }) => {
+    if (!fileId || !fileDocument || !fileStart || !fileSettings || inFlight.current) return;
+    const next = { text: change.text ?? fileText, settings: change.settings ?? fileSettings };
+    if (next.text === fileDocument.text && !settingsChanged(next.settings, fileStart)) memory.files.delete(fileId);
+    else memory.files.set(fileId, { ...next, start: fileStart, baseSha256: storedFile?.baseSha256 ?? fileDocument.sha256 });
+    setFileSave(undefined);
+    touch();
+  };
+  const dropFile = () => { if (fileId) memory.files.delete(fileId); setFileSave(undefined); touch(); };
+  async function saveFile() {
+    if (!fileId || !trigger || !fileDocument || !fileStart || !fileSettings || inFlight.current || !fileDirty) return;
+    inFlight.current = true;
+    const id = fileId;
+    const text = fileText;
+    setFileSave({ id, state: { type: "saving" } });
+    try {
+      const answer = await api.saveFile(id, saveRequestOf({ trigger, document: fileDocument, start: fileStart, draft: fileSettings, projects, text,
+        baseSha256: storedFile?.baseSha256 ?? fileDocument.sha256 }));
+      memory.files.delete(id);
+      files.saved(id, answer.document);
+      setDetail({ id, load: { type: "ready", trigger: answer.trigger } });
+      setFileSave({ id, state: { type: "saved" } });
+      refresh();
+    } catch (error) {
+      const refusal = error instanceof TriggerRefusal ? error : undefined;
+      if (refusal?.status === 409) {
+        // The file changed on disk first. The edits stay; reading the file again shows the conflict and Reload.
+        setFileSave(undefined);
+        files.reread();
+        return;
+      }
+      setFileSave({ id, state: { type: "refused", message: messageOf(error), line: refusal?.line, off: refusal?.status === 503 } });
+    } finally { inFlight.current = false; touch(); }
+  }
+  async function restore(versionId: string) {
+    if (!fileId || !fileDocument) return;
+    const id = fileId;
+    try {
+      const version = await api.version(id, versionId);
+      setFile({ text: version.text });
+      setRestores((count) => count + 1);
+      setNote({ text: `The version from ${dayTimeWords(version.savedAt, clock)} is in the editor. Save writes it.` });
+    } catch (error) { setFailure(`Could not read that version: ${messageOf(error)}`); }
+  }
+
   const sharedRow = {
     onOpen: (target: Trigger) => go({ view: "trigger", id: target.id }),
     onEdit: (target: Trigger) => { onPlace({ view: "trigger", id: target.id }); setFocusName(true); },
     onOpenSession, ...actions,
   };
+  const pageCommands = {
+    onBack: () => guarded(() => go({ view: "list" })), onClose: () => guarded(() => go(undefined)),
+    onRunNow: () => { if (trigger) actions.onRunNow(trigger); },
+    onPause: () => { if (trigger) actions.onPause(trigger); },
+    onResume: () => { if (trigger) actions.onResume(trigger); },
+    onAcknowledge: () => { if (trigger) actions.onAcknowledge(trigger); },
+    onDelete: () => { if (trigger) actions.onDelete(trigger); },
+    onCopyId: () => {
+      if (!trigger) return;
+      void writeClipboardText(trigger.id).then((copied) => setNote(copied ? { text: "Trigger ID copied" } : { text: `Could not copy the trigger ID. It is ${trigger.id}.`, tone: "alert" }));
+    },
+    onOpenSession,
+  };
+  const creatorName = trigger?.createdBy.kind === "agent" ? sessionName(trigger.createdBy.sessionId) : undefined;
+  const fileSaveState = fileSave && fileSave.id === fileId ? fileSave.state : { type: "idle" as const };
   const screen: TriggerScreen = place.view === "list"
     ? { view: "list", list: { load: list.load, clock, projectLabel, starting, failure, onDismissFailure: () => setFailure(undefined),
       onRefresh: refresh, onNew: () => go({ view: "create" }), onClose: () => go(undefined), actions: sharedRow } }
+    : trigger && fileId && fileSettings && fileStart ? { view: "file", page: {
+      trigger, file: files.file, text: fileText, editorKey: `${fileId}:${fileDocument?.sha256 ?? ""}:${String(restores)}`,
+      settings: fileSettings, settingsStart: fileStart, textDirty, settingsDirty, versions: files.versions, save: fileSaveState,
+      conflict: fileConflict, failure, clock, starting: starting.has(trigger.id), creatorName, projectName: projectLabel, projects: projectsLoad,
+      timezones: value?.timezones ?? [clock.hostZone],
+      view: fileView, onView: (next) => { markdownView.write(next); setFileView(next); },
+      listModels: async (signal) => {
+        const cwd = fixedCwds(fileSettings.targets)[0] ?? projects[0]?.path;
+        return cwd ? (await directory.models(cwd, signal)).models : [];
+      },
+      actions: {
+        ...pageCommands,
+        onText: (text) => setFile({ text }), onSettings: (settings) => setFile({ settings }),
+        onSave: () => void saveFile(), onDiscard: () => { dropFile(); setRestores((count) => count + 1); },
+        onRestore: (versionId) => void restore(versionId),
+        onReload: () => { dropFile(); setRestores((count) => count + 1); files.reread(); },
+      },
+    } }
     : { view: "page", page: {
       load: pageLoad, draft, dirty, problems, save: saveState, conflict, failure, clock, focusName,
       starting: trigger ? starting.has(trigger.id) : false,

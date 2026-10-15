@@ -59,3 +59,7 @@ export function Empty() {
   return <RouteList label="Route" empty="No stages. The agent follows the plan's prose." steps={steps}
     gap={(after) => after === undefined ? <TextButton label="Add a stage here" onPress={() => setSteps([{ key: "first", number: 1, name: "Recon", added: true }])} /> : null} />;
 }
+/** Under a heading that already names it: the steps alone. */
+export function HeadHidden() {
+  return <RouteList label="Route" head="hidden" steps={[{ key: "measure", number: 1, name: "Measure bedtime" }, { key: "approve", number: 2, name: "Approve landing", detail: "You approve" }]} />;
+}

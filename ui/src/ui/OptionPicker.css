@@ -10,3 +10,9 @@
 .option-picker-trigger[data-empty] { color: var(--muted-foreground); }
 .option-picker-trigger svg { flex: none; color: var(--muted-foreground); }
 .option-picker-value { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* As a header control: the icon alone, muted until hovered, washed while its panel is open. */
+.option-picker[data-look="icon"] { flex: none; max-inline-size: none; margin-inline-start: 0; }
+.option-picker[data-look="icon"] .option-picker-trigger { justify-content: center; inline-size: 2rem; padding: 0; color: var(--muted-foreground); }
+.option-picker[data-look="icon"] .option-picker-trigger:not(:disabled):hover { color: var(--foreground); }
+.option-picker[data-look="icon"] .option-picker-trigger[aria-expanded="true"] { background: var(--active-surface); color: var(--foreground); }
+.option-picker[data-look="icon"] .option-picker-trigger svg { inline-size: 1rem; block-size: 1rem; color: inherit; }

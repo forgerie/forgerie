@@ -14,9 +14,12 @@ const PANEL_MIN_REM = 20;
  * Molecule: one choice shown as a chip that opens its options at window
  * level, so a narrow pane never clips them. The options can be searched, and
  * a blocked one shows why it cannot be chosen. The chip says the choice in
- * effect, or a prompt when there is none.
+ * effect, or a prompt when there is none. `look="icon"` draws the chip as an
+ * icon-only header control named by `label`, for a list that is a command
+ * rather than a setting, such as earlier versions to restore; `heading` then
+ * names the list in the panel.
  */
-export function OptionPicker({ label, value, placeholder, icon, options, search, status, disabled, onChoose }: {
+export function OptionPicker({ label, value, placeholder, icon, options, search, status, disabled, look = "chip", heading, initiallyOpen = false, onChoose }: {
   /** The chip's accessible name before its value, such as "Workflow". */
   label: string;
   value?: string | undefined;
@@ -29,9 +32,14 @@ export function OptionPicker({ label, value, placeholder, icon, options, search,
   /** One line about the options, such as an empty list or a failed read. */
   status?: OptionStatus | undefined;
   disabled?: boolean | undefined;
+  look?: "chip" | "icon" | undefined;
+  /** Words above the options. */
+  heading?: string | undefined;
+  /** Opens with the panel shown, such as for a preview of the open list. */
+  initiallyOpen?: boolean | undefined;
   onChoose: (id: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initiallyOpen);
   const [query, setQuery] = useState("");
   const layer = usePortalTarget();
   const anchor = useRef<HTMLSpanElement>(null);
@@ -71,14 +79,15 @@ export function OptionPicker({ label, value, placeholder, icon, options, search,
   const needle = query.trim().toLowerCase();
   const shown = needle ? options.filter((option) => [option.name, option.variant ?? ""].some((text) => text.toLowerCase().includes(needle))) : options;
   const line: OptionStatus | undefined = status ?? (shown.length === 0 && needle ? { tone: "status", text: `Nothing matches “${query.trim()}”.` } : undefined);
-  return <span ref={anchor} className="option-picker">
-    <button ref={trigger} type="button" className="option-picker-trigger" disabled={disabled} data-empty={value ? undefined : ""}
-      aria-haspopup="dialog" aria-expanded={visible} aria-controls={visible ? panelId : undefined} aria-label={`${label}: ${value ?? placeholder}`}
-      title={value ?? placeholder} onClick={() => { if (open) close(false); else setOpen(true); }}>
-      {icon}<span className="option-picker-value">{value ?? placeholder}</span><ChevronDownIcon aria-hidden size={14} />
+  const iconOnly = look === "icon";
+  return <span ref={anchor} className="option-picker" data-look={iconOnly ? look : undefined}>
+    <button ref={trigger} type="button" className="option-picker-trigger" disabled={disabled} data-empty={value || iconOnly ? undefined : ""}
+      aria-haspopup="dialog" aria-expanded={visible} aria-controls={visible ? panelId : undefined} aria-label={iconOnly ? label : `${label}: ${value ?? placeholder}`}
+      title={iconOnly ? label : value ?? placeholder} onClick={() => { if (open) close(false); else setOpen(true); }}>
+      {iconOnly ? icon : <>{icon}<span className="option-picker-value">{value ?? placeholder}</span><ChevronDownIcon aria-hidden size={14} /></>}
     </button>
     {visible ? createPortal(<FloatingPanel ref={panel} id={panelId} role="dialog" tabIndex={-1} aria-label={label} onBlur={onBlur} onKeyDown={onKeyDown}>
-      <OptionList ref={list} label={label} groups={[{ key: "options", options: shown }]} status={line}
+      <OptionList ref={list} label={label} groups={[{ key: "options", label: heading, options: shown }]} status={line}
         search={search ? { value: query, onChange: setQuery, label: search, placeholder: search } : undefined}
         input={{ type: "focus", onChoose: (choice) => { if (disabled || options.find((option) => option.id === choice)?.blocked) return; onChoose(choice); close(true); } }} />
     </FloatingPanel>, layer) : null}

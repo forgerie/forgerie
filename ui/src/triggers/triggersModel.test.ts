@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Trigger, TriggerFire } from "@shared/triggers";
 import {
   attentionTone, groupTriggers, HEADER_TIGHT, matchesFilter, problemsSince, readTriggersPlace, ROW_NARROW, ROW_WIDE, SHORT_BODY, totalWords, triggerEntry,
-  triggersPlan, writeTriggersPlace,
+  triggersPlan, writeTriggersPlace, HEADER_ROOMY,
 } from "./triggersModel";
 import { audit, docs, manyList, mixedList, nightly, notes, triage } from "./fixtures/triggers";
 
@@ -140,6 +140,11 @@ describe("the size plan", () => {
     expect(triggersPlan(672, HEADER_TIGHT - 1, 800).primary).toBe("menu");
     expect(triggersPlan(672, 800, SHORT_BODY).errorLines).toBe(4);
     expect(triggersPlan(672, 800, SHORT_BODY - 1).errorLines).toBe(2);
+  });
+  it("moves a second header action into ⋯ below a 30rem header, before the primary", () => {
+    expect(triggersPlan(672, HEADER_ROOMY, 800).secondary).toBe("header");
+    expect(triggersPlan(672, HEADER_ROOMY - 1, 800)).toMatchObject({ secondary: "menu", primary: "header" });
+    expect(triggersPlan(672, HEADER_TIGHT - 1, 800)).toMatchObject({ secondary: "menu", primary: "menu" });
   });
   it("spends less on spacing below a 22rem body", () => {
     expect(triggersPlan(672, 800, SHORT_BODY).density).toBe("roomy");

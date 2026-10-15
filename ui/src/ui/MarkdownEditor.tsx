@@ -19,13 +19,14 @@ const holdLink = (_view: unknown, event: MouseEvent) => {
 /**
  * Organism: a Markdown file, formatted the way a reply in the transcript is,
  * and editable in place. YAML front matter sits above the body as a code
- * block the reader can read and copy but not change. The text is read once
+ * block the reader can read and copy but not change, unless the host shows it
+ * elsewhere and hides it here; it is kept either way. The text is read once
  * when the editor mounts; the caller keys it by document and view, so a
  * switch remounts it from the current text and the file changes only when
  * the reader types.
  */
 export function MarkdownEditor({ label, text, readOnly = false, notice, placeholder = "Empty file. Start writing.",
-  emptyReadOnly = "Empty file.", frontMatterLabel = "Front matter", onChange, onSave }: {
+  emptyReadOnly = "Empty file.", frontMatterLabel = "Front matter", frontMatter = "shown", onChange, onSave }: {
   /** The editor's accessible name. */
   label: string;
   /** The whole file, front matter included. Later changes are ignored: the editor owns the document from then on. */
@@ -40,6 +41,8 @@ export function MarkdownEditor({ label, text, readOnly = false, notice, placehol
   emptyReadOnly?: string;
   /** Names the front matter block. */
   frontMatterLabel?: string;
+  /** `hidden`: the host shows the front matter in another form, such as controls beside the text. Saving keeps it. */
+  frontMatter?: "shown" | "hidden" | undefined;
   onChange: (text: string) => void;
   /** Control or Command with S. */
   onSave: () => void;
@@ -108,7 +111,7 @@ export function MarkdownEditor({ label, text, readOnly = false, notice, placehol
       <p className="markdown-editor-notice-text">{notice.message}</p>
       {notice.action ? <button type="button" className="markdown-editor-notice-action" onClick={notice.action.onPress}>{notice.action.label}</button> : null}
     </div> : null}
-    {opened.frontMatter !== null ? <figure className="markdown-editor-front">
+    {opened.frontMatter !== null && frontMatter === "shown" ? <figure className="markdown-editor-front">
       <figcaption className="markdown-editor-front-label"><FileLockIcon aria-hidden size={14} />{frontMatterLabel}</figcaption>
       <pre className="markdown-editor-front-code"><code>{opened.frontMatter.replace(/\r?\n$/u, "")}</code></pre>
     </figure> : null}

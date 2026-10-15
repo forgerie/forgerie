@@ -4,6 +4,7 @@ import { RecordRow } from "../ui/RecordRow";
 import { MarkStrip } from "../ui/MarkStrip";
 import { MenuButton, type MenuCommand } from "../ui/MenuButton";
 import { attentionTone, type TriggersPlan } from "./triggersModel";
+import { fileName, fileOf } from "./triggerFile";
 import { outcomeWords, relativeShort, rowLabel, scheduleWords, stripMarks, type WordClock } from "./triggerWords";
 import { targetChip, targetNames, targetSummary, type ProjectName } from "./triggerTargets";
 
@@ -22,7 +23,8 @@ export interface TriggerRowActions {
 /**
  * Shape: one trigger in the list. A press opens its page. The marks show its
  * last runs; the line beside them says how the last one went. Its meta names
- * the target projects: one by name, several by count, or All projects. Its
+ * the target projects: one by name, several by count, or All projects, and
+ * the workflow file that holds the trigger, with its trouble when it has one. Its
  * state action (Mark as seen, Resume) is inline while the row is wide and first
  * in ⋯ when not.
  */
@@ -52,13 +54,16 @@ export function TriggerRow({ trigger, clock, projectName, plan, starting, action
     { label: "Delete trigger…", icon: <Trash2Icon aria-hidden />, tone: "danger", onSelect: () => actions.onDelete(trigger) },
   ];
   const schedule = scheduleWords(trigger.schedule, clock.hostZone, clock.locale);
+  const file = fileOf(trigger);
+  const fileTrouble = file?.status === "invalid" ? "File has an error" : file?.status === "missing" ? "File missing" : undefined;
   return <RecordRow layout={plan.tier} dimmed={paused} mark={attentionTone(trigger)}
-    label={`${rowLabel(trigger, clock)} Runs in ${targetChip(trigger.action.targets, projectName) ?? "no project"}.${showStarting ? " A run is starting." : ""}${byAgent ? " Made by an agent." : ""}`}
+    label={`${rowLabel(trigger, clock)}${fileTrouble ? ` ${fileTrouble}.` : ""} Runs in ${targetChip(trigger.action.targets, projectName) ?? "no project"}.${showStarting ? " A run is starting." : ""}${byAgent ? " Made by an agent." : ""}`}
     title={trigger.name} time={trigger.state.kind === "active" ? relativeShort(trigger.state.nextFireAt, clock.now) : "Paused"}
     meta={[
       { key: "schedule", text: schedule },
       { key: "project", text: targetSummary(trigger.action.targets, projectName), title: targetNames(trigger.action.targets, projectName) },
-      { key: "workflow", text: trigger.action.workflow },
+      file ? { key: "file", text: fileName(file.path), title: file.path } : { key: "workflow", text: trigger.action.workflow },
+      ...fileTrouble ? [{ key: "trouble", text: fileTrouble }] : [],
       ...byAgent ? [{ key: "agent", text: "Made by an agent" }] : [],
     ]}
     strip={<MarkStrip marks={stripMarks(trigger.history, showStarting)} limit={plan.marks} quiet={paused} />}

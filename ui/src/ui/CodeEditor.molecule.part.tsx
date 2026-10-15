@@ -24,3 +24,8 @@ export function ReadOnly() {
 export function PlainText() {
   return <CodeEditor label="Edit notes.unknown" fileName="notes.unknown" text={"A file type with no known language stays plain.\n"} onChange={() => {}} onSave={() => {}} />;
 }
+const FRONT = "---\nschedule:\n  name: Nightly maintenance\n  at: 1am\n  timezone: America/Denver\n---\n\n# Nightly maintenance\n";
+/** A line a parser refused, marked, with the caret on it. */
+export function MarkedLine() {
+  return <CodeEditor label="Edit nightly-maintenance.md" fileName="nightly-maintenance.md" text={FRONT} markLine={4} goToLine={4} onChange={() => {}} onSave={() => {}} />;
+}

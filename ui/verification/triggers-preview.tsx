@@ -2,6 +2,7 @@
 // store in the HTTP client's place. No request leaves the page and nothing is intercepted.
 //   ?state=list|calm|empty|off|failed-read|loading|many|failed|missed|paused|starting|create|unknown|conflict|edited|long
 //          |days-problem|input-problem|create-in-project|several|everywhere|not-shared
+//          |file|file-list|file-invalid|file-missing|file-gone: a trigger whose settings live in a workflow file
 //   &sheet=open shows the session list and its footer. &view=session shows a session in the thread's place instead of
 //   the triggers, with the list closed: the opener's dot is then the only sign of a trigger problem.
 import { useMemo, useState } from "react";
@@ -19,6 +20,9 @@ import {
   audit, calmList, digest, docs, emptyList, everywhere, FORGERIE, HOST_ZONE, manyList, mixedList, NOW, nightly, PI_MONO, projects, spreadNotes, triage,
 } from "../src/triggers/fixtures/triggers";
 import { draftOf, emptyDraft, type TriggerDraft } from "../src/triggers/triggerDraft";
+import {
+  brokenDocument, brokenMaintenance, maintenance, maintenanceDocument, maintenanceVersions, unscheduledDocument, unscheduledMaintenance,
+} from "../src/triggers/fixtures/triggerFiles";
 import type { Trigger } from "@shared/triggers";
 import { SessionFrame } from "../src/ui/SessionFrame";
 import "../src/ui/theme.css";
@@ -34,14 +38,26 @@ const long: Trigger = { ...nightly, history: Array.from({ length: 50 }, (_, inde
 const FIXTURES = { list: mixedList, calm: calmList, empty: emptyList, many: manyList, off: mixedList, "failed-read": calmList,
   long: { ...mixedList, triggers: [long, triage] } };
 const lists: Record<string, typeof mixedList> = FIXTURES;
+/** The workflow-file states: which trigger the store holds and what its file says. */
+const FILE_STATES: Record<string, { trigger: Trigger; document?: typeof maintenanceDocument }> = {
+  file: { trigger: maintenance, document: maintenanceDocument }, "file-list": { trigger: maintenance, document: maintenanceDocument },
+  "file-invalid": { trigger: brokenMaintenance, document: brokenDocument }, "file-missing": { trigger: unscheduledMaintenance, document: unscheduledDocument },
+  "file-gone": { trigger: unscheduledMaintenance },
+};
+const fileState = FILE_STATES[state];
 const PAGES: Record<string, TriggerPlace> = {
   failed: { view: "trigger", id: nightly.id }, missed: { view: "trigger", id: audit.id }, paused: { view: "trigger", id: docs.id },
   starting: { view: "trigger", id: digest.id }, create: { view: "create" }, unknown: { view: "trigger", id: "gone" },
   conflict: { view: "trigger", id: triage.id }, edited: { view: "trigger", id: triage.id }, long: { view: "trigger", id: nightly.id },
   "days-problem": { view: "create" }, "input-problem": { view: "create" }, "create-in-project": { view: "create" },
   several: { view: "trigger", id: spreadNotes.id }, everywhere: { view: "trigger", id: everywhere.id }, "not-shared": { view: "trigger", id: nightly.id },
+  file: { view: "trigger", id: maintenance.id }, "file-invalid": { view: "trigger", id: maintenance.id },
+  "file-missing": { view: "trigger", id: maintenance.id }, "file-gone": { view: "trigger", id: maintenance.id },
 };
-const store = memoryApi((lists[state] ?? mixedList).triggers, { now: NOW, off: state === "off" ? "Could not open the trigger store: database is locked" : undefined });
+const store = memoryApi(fileState ? [fileState.trigger, ...calmList.triggers] : (lists[state] ?? mixedList).triggers, {
+  now: NOW, off: state === "off" ? "Could not open the trigger store: database is locked" : undefined,
+  files: fileState ? { [maintenance.id]: { document: fileState.document, versions: maintenanceVersions } } : undefined,
+});
 if (state === "failed-read") store.failNext("list", new Error("Request failed: HTTP 500"));
 // The first read never answers, so the list stays at "Reading triggers…".
 const api = state === "loading" ? { ...store.api, list: () => new Promise<never>(() => undefined) } : store.api;

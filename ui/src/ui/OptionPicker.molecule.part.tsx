@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { StateChecks } from "@simonwjackson/caliper/checks";
+import { HistoryIcon } from "lucide-react";
 import { OptionPicker } from "./OptionPicker";
 
 export const name = "Option picker";
@@ -28,4 +29,14 @@ export default function Chosen() {
 export function Empty() {
   return <OptionPicker label="Workflow" placeholder="Choose a workflow" options={[]}
     status={{ tone: "status", text: "This project has no saved workflows." }} onChoose={() => undefined} />;
+}
+/** As a header control: an icon that opens a named list of commands, here earlier versions to restore. */
+export function IconOpen() {
+  return <OptionPicker label="Versions" look="icon" icon={<HistoryIcon aria-hidden />} placeholder="Versions" heading="Versions of nightly-maintenance.md"
+    initiallyOpen status={{ tone: "status", text: "Restore puts that version's text in the editor. Save writes it." }}
+    options={[
+      { id: "now", name: "Now, not saved", details: ["Time, one paragraph"], current: true, blocked: true },
+      { id: "v2", name: "Today, 9:41 AM", details: ["Saved here"] },
+      { id: "v1", name: "Today, 9:20 AM", details: ["Changed outside Forgerie"] },
+    ]} onChoose={() => undefined} />;
 }
