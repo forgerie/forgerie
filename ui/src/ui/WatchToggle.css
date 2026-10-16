@@ -1,0 +1,17 @@
+/* A quiet outlined chip at rest; on, the live wash and a live eye say that something keeps an eye on it. */
+.watch-toggle { position: relative; flex: none; display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: 2rem;
+  padding-inline: var(--space-2) var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-pill);
+  background: transparent; color: var(--foreground); font-size: var(--label-text); font-weight: 500; white-space: nowrap;
+  transition: background-color 150ms, border-color 150ms; }
+.watch-toggle::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
+.watch-toggle-icon { flex: none; inline-size: 0.9375rem; block-size: 0.9375rem; color: var(--muted-foreground); }
+.watch-toggle:not(:disabled):hover { border-color: var(--line-focus); background: var(--hover-surface); }
+.watch-toggle:not(:disabled):active { background: var(--active-surface); }
+.watch-toggle[aria-pressed="true"] { border-color: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--live-edge); background: var(--live-wash); color: var(--ink-live); }
+.watch-toggle[aria-pressed="true"] .watch-toggle-icon { color: var(--live); }
+.watch-toggle[aria-pressed="true"]:not(:disabled):hover { background: var(--offer-wash-hover); }
+.watch-toggle:disabled { color: var(--muted-foreground); opacity: 0.6; cursor: not-allowed; }
+.watch-toggle-count { min-inline-size: 1rem; padding-inline: 0.25rem; border-radius: var(--radius-pill); background: var(--ink-live); color: var(--primary-foreground);
+  font-size: var(--meta-text); font-weight: 600; line-height: 1rem; text-align: center; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .watch-toggle { transition: none; } }
+.watch-toggle-hidden { position: absolute; inline-size: var(--hairline); block-size: var(--hairline); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

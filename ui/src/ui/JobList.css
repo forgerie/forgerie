@@ -1,0 +1,36 @@
+.job-list { margin: 0; padding: 0; list-style: none; }
+.job-list-item { --job-list-tone: var(--muted-foreground); }
+.job-list-item[data-state="failed"] { --job-list-tone: var(--tone-bad); }
+.job-list-item[data-state="passed"] { --job-list-tone: var(--tone-good); }
+.job-list-item[data-state="running"] { --job-list-tone: var(--live); }
+.job-list-item[data-state="waiting"] { --job-list-tone: var(--tone-warn); }
+.job-list-item + .job-list-item { border-block-start: var(--hairline) solid var(--line); }
+
+/* The ribbon: a hairline under the row, as long as the job's share of the longest one. */
+.job-list-line { position: relative; display: flex; align-items: center; gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size);
+  padding: var(--space-1); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--foreground);
+  font: inherit; font-size: var(--small-text); text-align: start; text-decoration: none; cursor: pointer; }
+.job-list-line::after { content: ""; position: absolute; inset-block-end: var(--space-1); inset-inline-start: calc(1rem + var(--space-3));
+  inline-size: calc((100% - 1rem - var(--space-3) - var(--space-1)) * var(--job-list-share, 0)); block-size: var(--lane-marker);
+  border-radius: var(--radius-pill); background: var(--job-list-tone); opacity: 0.55; pointer-events: none; }
+.job-list-line:hover { background: var(--hover-surface); }
+.job-list-line:active { background: var(--active-surface); }
+.job-list-name { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-list-hidden { position: absolute; inline-size: var(--hairline); block-size: var(--hairline); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.job-list-time { flex: none; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
+.job-list-go { flex: none; inline-size: 0.875rem; block-size: 0.875rem; color: var(--muted-foreground); transition: rotate 150ms; }
+.job-list-line[aria-expanded="true"] .job-list-go { rotate: 90deg; }
+.job-list-fold { color: var(--muted-foreground); }
+.job-list-fold::after { content: none; }
+
+.job-list-log { margin: 0 0 var(--space-3) calc(1rem + var(--space-3)); border: var(--hairline) solid var(--line); border-radius: var(--radius-document);
+  background: var(--code-surface); overflow: hidden; }
+.job-list-log pre { margin: 0; max-block-size: min(14rem, 35dvh); padding: var(--space-3); overflow: auto; font-family: var(--code-font);
+  font-size: var(--code-size); line-height: 1.55; white-space: pre; }
+.job-list-log pre:focus-visible { outline-offset: -2px; }
+.job-list-log a { display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: var(--control-size); padding-inline: var(--space-3);
+  color: var(--quiet-foreground); font-size: var(--label-text); text-decoration: none; }
+.job-list-log a svg { inline-size: 0.8125rem; block-size: 0.8125rem; }
+.job-list-log a:hover { color: var(--foreground); }
+.job-list-empty { margin: 0; padding-block: var(--space-2); color: var(--muted-foreground); font-size: var(--small-text); }
+@media (prefers-reduced-motion: reduce) { .job-list-go { transition: none; } }

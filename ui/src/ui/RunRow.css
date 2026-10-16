@@ -1,0 +1,41 @@
+/* The row wraps: text first, controls after it. Without room beside the text, the controls drop under it, at the end. */
+.run-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); min-inline-size: 0; padding-inline-end: var(--space-1);
+  border-radius: var(--radius-control); }
+.run-row-main { flex: 1 1 17rem; min-inline-size: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "mark head age go" ". facts facts facts"; align-items: center; gap: var(--space-1) var(--space-2);
+  min-block-size: var(--control-size); padding: var(--space-2) var(--space-1); border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--foreground); font: inherit; font-size: var(--small-text); text-align: start; text-decoration: none; cursor: pointer; }
+.run-row-main:hover { background: var(--hover-surface); }
+.run-row-main:active { background: var(--active-surface); }
+.run-row-mark { grid-area: mark; display: flex; }
+.run-row[aria-busy="true"] .run-row-mark { opacity: 0.45; }
+
+/* The name holds; the title gives way first, and both are whole on hover and in the detail. */
+.run-row-head { grid-area: head; display: flex; align-items: baseline; gap: var(--space-2); min-inline-size: 0; overflow: hidden; white-space: nowrap; }
+.run-row-name { flex: 0 1 auto; min-inline-size: 0; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.run-row-title { flex: 1 100 0; min-inline-size: 3rem; overflow: hidden; text-overflow: ellipsis; color: var(--quiet-foreground); }
+.run-row-age { grid-area: age; color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
+.run-row-go { grid-area: go; inline-size: 0.875rem; block-size: 0.875rem; color: var(--muted-foreground); }
+
+.run-row-facts { grid-area: facts; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); min-inline-size: 0;
+  color: var(--muted-foreground); font-size: var(--label-text); }
+.run-row-state { flex: none; font-weight: 500; color: var(--muted-foreground); }
+.run-row[data-state="failed"] .run-row-state { color: var(--ink-bad); }
+.run-row[data-state="passed"] .run-row-state { color: var(--ink-good); }
+.run-row[data-state="running"] .run-row-state { color: var(--ink-live); }
+.run-row[data-state="waiting"] .run-row-state, .run-row[data-state="unknown"] .run-row-state { color: var(--ink-warn); }
+/* A branch with no break points truncates inside the row; its full name is the fact's hover text. */
+.run-row-fact { min-inline-size: 0; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-row-fact[data-face="code"] { font-family: var(--code-font); font-size: var(--meta-text); font-variant-ligatures: none; }
+
+.run-row-controls { flex: none; display: flex; align-items: center; gap: var(--space-1); margin-inline-start: auto; padding-block: var(--space-1); }
+/* Note and problem hang from the text, not the mark. */
+.run-row-note, .run-row-problem { flex: 1 0 calc(100% - 1rem - var(--space-3)); margin: 0 0 var(--space-2) calc(1rem + var(--space-3)); min-inline-size: 0;
+  font-size: var(--label-text); line-height: 1.45; overflow-wrap: anywhere; }
+.run-row-note { margin-block-start: calc(-1 * var(--space-1)); color: var(--muted-foreground); }
+.run-row-problem { padding: var(--space-2) var(--space-3); border-inline-start: 0.125rem solid var(--tone-bad); border-start-end-radius: var(--radius-document);
+  border-end-end-radius: var(--radius-document); background: var(--destructive-wash); color: var(--foreground); }
+.run-row-problem[data-tone="warn"] { border-inline-start-color: var(--tone-warn); background: var(--warn-wash); }
+.run-row-problem p { margin: 0; }
+.run-row-problem p + p { margin-block-start: var(--space-1); }
+.run-row-problem a { color: inherit; font-weight: 500; text-underline-offset: 0.2em; }
