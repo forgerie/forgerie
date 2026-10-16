@@ -11,7 +11,7 @@ export const checks = {
     "Looks right clears the flag and leaves the guess overturnable": async ({ canvas, within, input, expect, waitFor }) => {
       const record = () => {
         const matches: readonly HTMLElement[] = canvas.getAllByText(GUESS.question, { exact: true });
-        const row = matches.map((node) => node.closest(".decision-record")).find((node) => node !== null);
+        const row = matches.map((node) => node.closest<HTMLElement>(".decision-record")).find((node) => node !== null);
         if (!row) throw new Error("Expected the confirmed decision record");
         return within(row);
       };
