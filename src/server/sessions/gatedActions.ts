@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { GatedCategory } from "../../shared/autonomyPolicy.js";
 
@@ -33,8 +34,25 @@ export async function gatedAction(name: string, args: Record<string, unknown>, c
   return shellAction(args["command"], cwd, reads, 0);
 }
 
-async function shellAction(command: string, cwd: string, reads: GatedActionReads, depth: number): Promise<GatedActionMatch | undefined> {
-  let folder = cwd; let uncertainCwd = false;
+/**
+ * A script that starts with `cd <path> &&` runs the rest in that folder or not at all, so its folder is certain.
+ * Later `cd` commands stay uncertain when the script has pipes, subshells or other control operators.
+ */
+const LEADING_CD = /^\s*cd\s+(?:"([^"$`\\]+)"|'([^']+)'|([^\s;&|()<>"'$`\\]+))\s*&&/u;
+export function leadingDirectory(command: string, cwd: string, home: string): {cwd: string; rest: string} {
+  let folder = cwd; let rest = command;
+  for (let found = LEADING_CD.exec(rest); found !== null; found = LEADING_CD.exec(rest)) {
+    folder = resolve(folder, expandHome(found[1] ?? found[2] ?? found[3] ?? ".", home));
+    rest = rest.slice(found[0].length);
+  }
+  return {cwd: folder, rest};
+}
+const expandHome = (path: string, home: string) => path === "~" ? home : path.startsWith("~/") ? `${home}${path.slice(1)}` : path;
+
+async function shellAction(script: string, cwd: string, reads: GatedActionReads, depth: number): Promise<GatedActionMatch | undefined> {
+  const lead = leadingDirectory(script, cwd, homedir());
+  const command = lead.rest;
+  let folder = lead.cwd; let uncertainCwd = false;
   for (const words of shellCommands(command)) {
     const normalized = normalizeCommand(words, folder);
     if (normalized === undefined) continue;
@@ -44,7 +62,7 @@ async function shellAction(command: string, cwd: string, reads: GatedActionReads
     const executable = tokens.shift()?.split("/").at(-1);
     if (executable === "cd") {
       uncertainCwd ||= tokens[0] === undefined || normalized.unknownGitState || /[|&()`]/u.test(command);
-      if (tokens[0] !== undefined) folder = resolve(commandCwd, tokens[0]);
+      if (tokens[0] !== undefined) folder = resolve(commandCwd, expandHome(tokens[0], homedir()));
       continue;
     }
     if ((executable === "bash" || executable === "sh") && depth === 0) {

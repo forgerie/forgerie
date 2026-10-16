@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -51,6 +51,37 @@ it("treats scratch clones and the session's child worktrees as disposable, and n
   expect(await disposable(join(scratch, "link"))).toBe(false);
   const failing = disposableWorktree({ scratchRoot: scratch, childWorktrees: () => Promise.reject(new Error("store unavailable")) });
   expect(await failing(child)).toBe(false);
+});
+
+it("backs up a project worktree before it counts as disposable, and never accepts Forgerie-managed or main checkouts", async () => {
+  const backups = join(base, "backups");
+  const disposable = disposableWorktree({ scratchRoot: scratch, childWorktrees: () => Promise.resolve([]),
+    projectBackup: { git, directory: backups, now: () => new Date("2026-10-16T12:00:00Z") } });
+  const agent = join(project, ".worktree", "agent-fix");
+  const managed = join(project, ".worktree", "s-0a6d74c8");
+  const nested = join(project, "elsewhere", "other");
+  for (const [path, branch] of [[agent, "agent-fix"], [managed, "session"], [nested, "other"]] as const) await git(project, ["worktree", "add", "-q", "-b", branch, path]);
+  await writeFile(join(agent, "tracked.txt"), "one");
+  await git(agent, ["add", "tracked.txt"]);
+  await writeFile(join(agent, "notes.md"), "untracked");
+
+  expect(await disposable(agent)).toBe(true);
+  const [folder] = await readdir(backups);
+  expect(folder).toBe("agent-fix-2026-10-16T12-00-00-000Z");
+  expect(await readFile(join(backups, folder ?? "", "untracked", "notes.md"), "utf8")).toBe("untracked");
+  expect(await readFile(join(backups, folder ?? "", "tracked.patch"), "utf8")).toContain("+one");
+  expect(JSON.parse(await readFile(join(backups, folder ?? "", "worktree.json"), "utf8"))).toMatchObject({ branch: "agent-fix" });
+
+  expect(await disposable(managed)).toBe(false);
+  expect(await disposable(nested)).toBe(false);
+  expect(await disposable(project)).toBe(false);
+  // Without a backup target, project worktrees still wait for the user.
+  expect(await disposableWorktree({ scratchRoot: scratch, childWorktrees: () => Promise.resolve([]) })(agent)).toBe(false);
+  // A failed backup is not permission.
+  const failing = disposableWorktree({ scratchRoot: scratch, childWorktrees: () => Promise.resolve([]),
+    projectBackup: { git, directory: join(project, "base.txt", "cannot-create"), now: () => new Date() } });
+  await writeFile(join(project, "base.txt"), "file");
+  expect(await failing(agent)).toBe(false);
 });
 
 it("lets real destroy-local commands run in scratch clones and child worktrees, but gates the project", async () => {

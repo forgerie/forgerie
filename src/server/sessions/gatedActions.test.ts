@@ -69,7 +69,11 @@ const cases: [string, string | undefined, RepositoryState?][] = [
   ["npm --registry https://registry.npmjs.org --access=public publish --dry-run", "publish"],
   ["npm --cache /tmp/cache --loglevel silent publish", "publish"],
   ["npm --access public view publish", undefined], ["npm -wpackage view publish", undefined],
-  ["cd x && git push origin feature", "force-push"], ["(cd x); git push origin feature", "force-push"],
+  ["cd x && git push origin feature", undefined], ["cd x && git push origin feature 2>&1 | tail -3", undefined],
+  ["cd ~/x && cd y && git push -q origin feature", undefined], ["cd x && git push origin main", "force-push"],
+  ["cd x || true && git push origin feature", "force-push"], ["cd x | cat && git push origin feature", "force-push"],
+  ["cd \"$X\" && git push origin feature", "force-push"], ["true && cd x && git push origin feature", "force-push"],
+  ["(cd x); git push origin feature", "force-push"],
   ["(git push --force)", "force-push"], ["{ git push --force; }", "force-push"],
   ["git \\\npush --force", "force-push"], ["gi\\\nt push --force", "force-push"],
   ['echo "$(git push --force)"', "force-push"], ["echo $(git push --force)", "force-push"],
@@ -192,8 +196,11 @@ it("discards files in a disposable worktree without approval, and reads the root
   }
   expect(await classify("git -C /tmp/clone reset --hard")).toBeUndefined();
   expect(await classify("cd /tmp/clone; git clean -fd")).toBeUndefined();
-  // A conditional cd stays unknown, as before: the parser cannot tell && from || or a pipe.
-  expect(await classify("cd /tmp/clone && git clean -fd")).toBe("destroy-local");
+  // A leading `cd <path> &&` is certain: the rest runs there or not at all.
+  expect(await classify("cd /tmp/clone && git clean -fd")).toBeUndefined();
+  expect(await classify("cd /tmp/clone && git worktree remove --force /tmp/baseline && echo ok")).toBeUndefined();
+  // Any other conditional cd stays unknown: the parser cannot tell && from || or a pipe.
+  expect(await classify("echo start && cd /tmp/clone && git clean -fd")).toBe("destroy-local");
   // The removed worktree decides, not the cwd.
   expect(await classify("git worktree remove --force /tmp/baseline")).toBeUndefined();
   expect(await classify("git worktree remove --force ../../repo/copy", "/tmp/clone")).toBe("destroy-local");

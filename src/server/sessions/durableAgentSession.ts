@@ -8,6 +8,8 @@ import type { ManagedProcessTools } from "../processes/processTool.js";
 import { acceptProcessEvents, processEventsExtension } from "./durableProcessEvents.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { join } from "node:path";
+import { piWebDataDir } from "../../config.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
 import { gatedActionsExtension, gateToolCall, type GatedActionsExtensionOptions, gatedActions, decideGatedAction, waitingGatedActions, gatedActionsChanged } from "./durableGatedActions.js";
 import type { GatedActionReads } from "./gatedActions.js";
@@ -53,6 +55,8 @@ import type { WorkflowModels, WorkflowInputs, WorkflowOutcome, WorkflowRun, Work
 export interface DurableAgentSessionOptions {
   processTools?: ManagedProcessTools;
   gatedIssueLabels?: GatedActionReads["issueLabels"];
+  /** Where uncommitted work from project worktrees is copied before an agent discards it. Default: `<app data>/worktree-backups`. */
+  worktreeBackupDirectory?: string;
   autonomyPolicy?: AutonomyPolicySource;
   decisionHints?: DecisionHints;
   handle?: DurableSessionHandle;
@@ -469,15 +473,17 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
 
   private async startGatedActions(): Promise<void> {
     this.gateUnsubscribe?.();
+    const gitRead = async (cwd: string, args: readonly string[]) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8", maxBuffer: 64 * 1024 * 1024})).stdout;
     const parent = this.journal.conversation.id;
     this.gateOptions = {name: `forgerie.gated-actions:${String(parent)}`, parent,
       harness: () => this.journal.harness,
       ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error, DECISION_HINT_ERROR_EVENT); }}}),
       ...(this.options.autonomyPolicy === undefined ? {} : {policy: this.options.autonomyPolicy}),
-      reads: {git: async (cwd, args) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8", maxBuffer: 4 * 1024 * 1024})).stdout,
+      reads: {git: gitRead,
         issueLabels: this.options.gatedIssueLabels ?? (() => Promise.reject(new Error("GitHub labels unavailable"))),
         // Child worktrees are read at call time: they start after the gate and change as children spawn and land.
-        disposable: disposableWorktree({scratchRoot: SCRATCH_ROOT, childWorktrees: async () => await this.childWorktrees?.activePaths() ?? []})},
+        disposable: disposableWorktree({scratchRoot: SCRATCH_ROOT, childWorktrees: async () => await this.childWorktrees?.activePaths() ?? [],
+          projectBackup: {git: gitRead, directory: this.options.worktreeBackupDirectory ?? join(piWebDataDir(), "worktree-backups"), now: () => new Date()}})},
     };
     const extension = gatedActionsExtension(this.gateOptions);
     const {tasks, ...selected} = extension;
