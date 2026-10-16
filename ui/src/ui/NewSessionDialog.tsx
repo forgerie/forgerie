@@ -16,7 +16,8 @@ import { SlashCommands, type CommandBinding } from "./SlashCommands";
 import { useComposerKeyboard } from "./useComposerKeyboard";
 import { ComposerEditor, type ComposerInputElement } from "./ComposerEditor";
 
-export type StartPhase = { type: "ready" } | { type: "starting"; progress: string } | { type: "failed"; message: string };
+/** `progress` names the step under way. Without one, the start button's "Starting…" says it all. */
+export type StartPhase = { type: "ready" } | { type: "starting"; progress?: string | undefined } | { type: "failed"; message: string };
 
 /**
  * System organism: the new-session window, after Paperclip's new-task dialog.
@@ -163,7 +164,7 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
     </div>
     {carry?.note}
     {setup ? <div className="ns-setup">{setup}</div>
-      : phase.type === "starting" && <p className="ns-status" role="status">{phase.progress}</p>}
+      : phase.type === "starting" && phase.progress && <p className="ns-status" role="status">{phase.progress}</p>}
     {phase.type === "failed" && <p className="ns-error" role="alert">{phase.message}</p>}
     </div>
     <footer className="ns-foot">

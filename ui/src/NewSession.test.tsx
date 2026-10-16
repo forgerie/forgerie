@@ -255,7 +255,9 @@ describe("starting a new session", () => {
     await render(scriptedApi(() => new Promise((resolve) => { finish = resolve; })).api, { onClose });
     await type("Fix the build");
     await send();
-    expect(document.querySelector(".ns-status")?.textContent).toBe("Starting session…");
+    // The button says it is starting; a status line only adds the step once Pi names one.
+    expect(document.querySelector(".ns-start")?.textContent).toBe("Starting…");
+    expect(document.querySelector(".ns-status")).toBeNull();
     await act(async () => { dialog()!.dispatchEvent(new Event("cancel", { cancelable: true })); });
     expect(button("Close new session")?.disabled).toBe(true);
     expect(onClose).not.toHaveBeenCalled();

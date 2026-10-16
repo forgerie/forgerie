@@ -293,7 +293,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   const current = phase.type === "starting" ? started.find((item) => item.id === phase.id) : undefined;
   const progress = current?.state;
   const view: StartPhase = phase.type === "starting"
-    ? { type: "starting", progress: (progress?.type === "starting" ? progress.progress : undefined) ?? "Starting session…" }
+    ? { type: "starting", progress: progress?.type === "starting" ? progress.progress : undefined }
     : phase.error ? { type: "failed", message: phase.error } : { type: "ready" };
   // What the card shows: the setup of the start in progress, or a failed setup the reader is looking at.
   const failedList = failedSetups && failedSetups.repo === repo ? failedSetups.records : [];

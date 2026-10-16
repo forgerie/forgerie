@@ -83,7 +83,8 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
     if (launch?.state.type !== "starting") return;
     // Pi's progress waits while the worktree is still being set up.
     if (launch.worktree && setupProgress(launch.worktree)) return;
-    const progress = event.activity.phase === "active" ? event.activity.label : undefined;
+    // The label ("Creating session") repeats the start button; the detail names the step.
+    const progress = event.activity.phase === "active" ? event.activity.detail ?? event.activity.label : undefined;
     if (progress !== launch.state.progress) patch(launch.id, { ...launch.state, progress });
   });
   const stopWorktree = options.onWorktree?.((record) => {

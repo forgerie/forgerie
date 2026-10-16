@@ -36,6 +36,9 @@ describe("launches", () => {
     emit({ startupToken: id, activity: { phase: "active", label: "Refreshing provider models" } });
     emit({ startupToken: "someone-else", activity: { phase: "active", label: "Other" } });
     expect(store.getSnapshot()[0]!.state).toEqual({ type: "starting", sessionId: "s1", progress: "Refreshing provider models" });
+    // The detail names the step; the label only repeats that a session is being created.
+    emit({ startupToken: id, activity: { phase: "active", label: "Creating session", detail: "Loading session extensions" } });
+    expect(store.getSnapshot()[0]!.state).toEqual({ type: "starting", sessionId: "s1", progress: "Loading session extensions" });
     replies[0]!.resolve({ type: "started", session: { id: "s1", cwd: "/w" } });
     expect(await done).toEqual({ type: "started", session: { id: "s1", cwd: "/w" } });
     expect(store.getSnapshot()[0]!.state).toEqual({ type: "started", session: { id: "s1", cwd: "/w" } });
