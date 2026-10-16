@@ -24,6 +24,9 @@ const EQUIVALENT: Readonly<Record<string, { tool: string; note: string }>> = {
   contact_supervisor: { tool: "ask_human", note: "contact_supervisor is ask_human here: it asks your parent one question and waits for the answer. Only the parent can escalate it to the user." },
 };
 
+/** Tools a child gets when its agent file grants the first one and the session has the second. */
+const IMPLIED: readonly (readonly [string, string])[] = [["bash", "process"]];
+
 export interface ChildRuntimePlan {
   /** Tool names to offer; undefined offers child-native tools and host extras, not shared session tools. Always includes ask_human. */
   tools: readonly string[] | undefined;
@@ -50,6 +53,9 @@ export function planChildRuntime(profile: ChildAgentProfile | undefined, availab
     else if (PROVIDED.has(name) || availableTools.includes(name)) offered.add(name);
     else if (!unavailable.includes(name)) unavailable.push(name);
   }
+  // A child that may run shell commands also gets the managed process tool, for servers and long commands.
+  // Without it, children asked their parent to start processes for them.
+  for (const [needs, extra] of IMPLIED) if (offered.has(needs) && availableTools.includes(extra)) offered.add(extra);
   const tools = profile?.tools === undefined ? undefined : [...offered];
   const has = (name: string) => tools === undefined || tools.includes(name);
   const { skills, missing } = resolveChildSkills(profile, sessionSkills);
