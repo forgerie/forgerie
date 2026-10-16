@@ -69,6 +69,26 @@ async function typeNumber(value: string) {
 }
 
 describe("several pull requests in one session", () => {
+  it("explains invalid input without previewing or linking, and clears the error for a valid number", async () => {
+    const { api } = fakeApi([]);
+    await act(async () => root.render(<Harness api={api} />));
+    await typeNumber("not a pull request");
+    const input = document.querySelector<HTMLInputElement>(".pr-link input")!;
+    const hint = document.querySelector<HTMLElement>(".pr-link [role='alert']")!;
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")).toBe(hint.id);
+    expect(hint.textContent).toContain("number");
+    expect(button("Preview")?.disabled).toBe(true);
+    expect(api.preview).not.toHaveBeenCalled();
+    expect(api.link).not.toHaveBeenCalled();
+    await typeNumber("12");
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+    expect(input.getAttribute("aria-describedby")).toBeNull();
+    expect(document.querySelector(".pr-link [role='alert']")).toBeNull();
+    expect(api.preview).toHaveBeenCalledOnce();
+    expect(api.link).not.toHaveBeenCalled();
+  });
+
   it("lists repository PRs, previews a selection, and keeps failures explicit", async () => {
     const { api } = fakeApi([]);
     api.open.mockResolvedValueOnce({ provider: "github", repo: "o/r", items: [{ ...pull(12), state: "open" }], complete: false });

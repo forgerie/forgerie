@@ -121,7 +121,11 @@ describe("a session's decision log", () => {
     expect(button("Decisions")).toBeDefined();
     await act(async () => { button("Close the decisions")!.click(); });
     await act(async () => { button("Decisions")!.click(); });
-    await until(() => document.querySelector("dialog[open] .decision-record-status")?.textContent === "Confirmed");
+    await until(() => document.querySelector("dialog[open] .disclosure-row-status")?.textContent === "Confirmed");
+    const confirmed = [...document.querySelectorAll("dialog[open] .disclosure-row")]
+      .find((node) => node.querySelector(".disclosure-row-title")?.textContent === GUESS.question)!;
+    await act(async () => { confirmed.querySelector<HTMLButtonElement>(".disclosure-row-main")!.click(); });
+    expect(confirmed.querySelector(".decision-record-status")?.textContent).toBe("Confirmed");
     expect(button("Looks right")).toBeUndefined();
     const row = [...document.querySelectorAll(".decision-record")].find((node) => node.textContent?.includes(GUESS.question))!;
     expect(row.querySelector("button")?.textContent).toBe("Overturn");

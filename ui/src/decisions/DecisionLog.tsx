@@ -36,8 +36,8 @@ export function DecisionLog({ decisions, readError, now, target, busy = false, o
   onConfirm?: ((id: string) => Promise<boolean>) | undefined;
 }) {
   const [filter, setFilter] = useState<DecisionFilter>("all");
-  // Ids of decisions the reader opened, or chose to overturn. An overturned guess leaves the flagged section for its
-  // day's lines, and stays open there, so the reader sees their note land.
+  // Ids of decisions the reader opened or reviewed. A confirmed or overturned guess leaves the flagged section for
+  // its day's lines, and stays open there, so the reader sees its new state.
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set(target === undefined ? [] : [target]));
   useEffect(() => { if (target !== undefined) setOpened((current) => current.has(target) ? current : new Set([...current, target])); }, [target]);
   const failure = readError !== undefined && <AlertCard label="The decisions could not be read" title="The decisions could not be read"

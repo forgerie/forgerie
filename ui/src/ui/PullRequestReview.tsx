@@ -260,7 +260,7 @@ function LinkForm({ discovery, writing, first, now, onAsk, onLink, onCancel }: {
         <span className="pr-link-field" data-invalid={invalid || undefined}>
           <LinkIcon aria-hidden size={16} />
           <input id={inputId} autoComplete="off" inputMode="url" placeholder="PR number or URL" value={value} autoFocus={!first}
-            aria-describedby={hintId} aria-invalid={invalid || undefined} onChange={(event) => {
+            aria-describedby={invalid ? hintId : undefined} aria-invalid={invalid || undefined} onChange={(event) => {
               setValue(event.target.value); setRequested(undefined); setPreview({ type: "idle" });
             }} />
         </span>
