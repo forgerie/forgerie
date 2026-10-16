@@ -3,12 +3,14 @@ import { ArrowLeftIcon, XIcon } from "lucide-react";
 import "./SheetDialog.css";
 
 /** A header action. With an icon it is drawn as the icon alone, and its label is its name and hover text. */
-export interface SheetAction { label: string; onPress: () => void; disabled?: boolean | undefined; icon?: ReactNode }
+export interface SheetAction { label: string; onPress: () => void; disabled?: boolean | undefined; icon?: ReactNode; tone?: "danger" | undefined }
 
 /**
  * Organism: a modal sheet over the page. It is a card while the window has
  * room around it; as the room runs out, each axis gives up its own margin and
- * the card meets that edge, so no width or height flips the layout. A header
+ * the card meets that edge, so no width or height flips the layout. The card
+ * is as tall as its content until it meets the side edges, where it becomes
+ * the page and takes the whole height. A header
  * holds an optional back control, the title, a subtitle, text actions, and
  * close. The body scrolls on its own; the footer stays in view. On open, the
  * sheet itself takes focus, so no control wears a focus ring until the reader
@@ -50,7 +52,7 @@ export function SheetDialog({ title, subtitle, onClose, closeLabel, back, action
           {subtitle !== undefined && <span className="sheet-dialog-subtitle">{subtitle}</span>}
         </div>
         {actions.map((action) => action.icon === undefined
-          ? <button key={action.label} type="button" className="sheet-dialog-action" disabled={action.disabled} onClick={action.onPress}>{action.label}</button>
+          ? <button key={action.label} type="button" className="sheet-dialog-action" data-tone={action.tone} disabled={action.disabled} onClick={action.onPress}>{action.label}</button>
           : <button key={action.label} type="button" className="sheet-dialog-control" disabled={action.disabled} aria-label={action.label}
             title={action.label} onClick={action.onPress}>{action.icon}</button>)}
         <button type="button" className="sheet-dialog-control" aria-label={closeLabel} title={closeLabel} onClick={onClose}>

@@ -603,7 +603,6 @@
   "ui/Picker.tsx: \"No sessions yet\"",
   "ui/Picker.tsx: \"Nothing is waiting for you\"",
   "ui/PullRequestReview.tsx: \"Full log on GitHub\"",
-  "ui/PullRequestReview.tsx: \"Link an open pull request from this project's repository\"",
   "ui/PullRequestReview.tsx: \"Wake the agent when a check fails, all pass, someone else comments, or the branch conflicts. Each wake can use agent tokens.\"",
   "ui/SessionTreeNavigator.tsx: \"Becomes the current entry\"",
   "ui/SessionTreeNavigator.tsx: \"On the active path\"",

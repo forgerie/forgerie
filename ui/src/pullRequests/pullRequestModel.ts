@@ -199,5 +199,12 @@ export function pullRequestNumber(value: string): number | undefined {
 
 export const pullRequestCopy = {
   loading: "Reading pull requests…",
-  empty: "No pull request is linked to this session. Link a PR created on the repository provider.",
+  empty: "No pull request is linked to this session yet. Once one is, Forgerie follows its checks and reviews here, and says when it can merge.",
+  linkTitle: "Link this session to a pull request",
+  linkAnotherTitle: "Link another pull request",
+  linkAnother: "A session can follow several pull requests. Each keeps its own watch.",
+  linkLabel: "Pull request number or link",
+  linkPlaceholder: "59, or a GitHub or Azure DevOps link",
+  linkHint: "It must be in this project's repository.",
+  linkInvalid: "That is not a pull request number or link. Type a number such as 59, or paste the link from GitHub or Azure DevOps.",
 };

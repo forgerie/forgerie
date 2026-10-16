@@ -60,4 +60,15 @@ export function totalCost(runs: Runs): string {
   const known = runs.records.reduce((sum, run) => sum + (runCost(run) ?? 0), 0);
   return `${money(known)}${runs.records.some((run) => run.usage === null) ? " + unknown" : ""}`;
 }
+/**
+ * What one child has cost across its runs, from the run history. Undefined while no run of it is on record or any of
+ * its runs has no usage, so a row never shows a partial sum as the whole.
+ */
+export function childCost(runs: Runs | undefined, conversationId: number): number | undefined {
+  const own = runs?.records.filter((run) => run.child.conversationId === conversationId) ?? [];
+  if (own.length === 0) return undefined;
+  let sum = 0;
+  for (const run of own) { const cost = runCost(run); if (cost === undefined) return undefined; sum += cost; }
+  return sum;
+}
 export function money(value: number | undefined): string { return value === undefined ? "Unknown cost" : `$${value.toFixed(2)}`; }

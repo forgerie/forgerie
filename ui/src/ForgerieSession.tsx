@@ -504,7 +504,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
 
   return <AssistantRuntimeProvider runtime={runtime}>
     {visible && processesOpen && <ProcessesPanel state={processState} onSelect={processes.select} onStop={processes.stop} onWrite={processes.write}
-      onRefresh={processes.refresh} onClose={() => setProcessesOpen(false)} />}
+      onRefresh={processes.refresh} onClose={() => setProcessesOpen(false)} onAsk={readOnly ? undefined : appendToDraft} />}
     <DictationProvider adapter={dictation}>
     <SessionFrame name={state.session?.name ?? "Session"} status={visible ? statusChip : undefined}
       actions={<>

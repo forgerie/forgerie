@@ -33,3 +33,7 @@
 .option-row[data-details="trailing"] .option-row-details > span { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .option-row[data-details="trailing"] .option-row-details > span:first-child { flex: 1 1 auto; }
 .option-row-check { grid-area: check; }
+/* A drawn readout under the details, such as a route: its own row, under the name. */
+.option-row:has(> .option-row-below) { grid-template-areas: "name check" "details check" "below check"; }
+.option-row[data-icon]:has(> .option-row-below) { grid-template-areas: "icon name check" "icon details check" "icon below check"; }
+.option-row-below { grid-area: below; min-inline-size: 0; padding-block: var(--space-1) var(--space-1); }

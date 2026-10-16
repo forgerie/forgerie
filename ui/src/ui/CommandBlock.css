@@ -10,3 +10,6 @@
    such as a here-document, line up under the command, past the mark. */
 .command-block-code[data-shell] > .command-block-line + .command-block-line { padding-inline-start: 4ch; }
 .command-block-code[data-shell] > .command-block-line:first-child::before { content: "$ "; color: var(--muted-foreground); user-select: none; }
+/* A marked line, such as stderr in a process log: the warn wash across the whole line, so a run of them reads as one block. */
+.command-block-line[data-marked] { margin-inline: calc(-1 * var(--space-3)) calc(-1 * var(--space-1)); padding-inline-end: var(--space-1);
+  padding-inline-start: calc(2ch + var(--space-3)); background: var(--warn-wash); color: var(--ink-warn); }

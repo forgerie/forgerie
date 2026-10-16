@@ -70,4 +70,13 @@ export function Retrying() { return <Scenario initial={[RETRYING, ...CHILDREN.sl
 /** The retrying child open: the whole error at the end of its record, and Stop in the header. */
 export function ChildRetrying() { return <Scenario open={15} initial={[RETRYING, ...CHILDREN.slice(1)]} />; }
 export function Empty() { return <Scenario initial={[]} />; }
+/** The screenshot of 2026-10-16: four idle children whose worktrees Forgerie cannot read, with 64-character branches. */
+export function WorktreesUnreadable() { return <Scenario initial={UNREADABLE} />; }
+const UNREADABLE: ChildSummary[] = [["build", "full-stack-engineer", "5676552a1cf591419b83409b66ff9658d92454ce83b80b386e5d551135941a0b"],
+  ["design", "design-engineer", "ac7f20a2f86525de5b35f114f21da114770de2ca9451818e4b3cec1fd1c2cffc"],
+  ["review", "reviewer", "1d26bb61c172cdd26692639db8a5d37189ba2457f57557293103b47472225709"],
+  ["standards", "reviewer", "5f9e26ba32476929487ed386899be30898b2282cf3ec1922fd0c39c4af8fa484"]].map(([name, agent, hash], index) => ({
+  name: name!, agent: agent!, conversationId: 60 + index, busy: false, createdAt: NOW - 60_000 * (4 - index), questions: [],
+  worktree: { path: `/code/forgerie/.worktree/c-${hash!}`, branch: `c-${hash!}`, state: "active", ahead: 0, dirty: false, statusError: "The worktree folder is missing." },
+}));
 export function Failed() { return <Scenario error="Question q:40 is not open" />; }

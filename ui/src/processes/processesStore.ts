@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ManagedProcessesSnapshot, ManagedProcessWriteResult } from "@shared/apiTypes";
-import { loadProcessOutput, type Request } from "./processApi";
+import { loadProcessLines, type Request } from "./processApi";
 
 const snapshotSchema = z.object({ available: z.boolean(), writeSupported: z.boolean(), processes: z.array(z.object({
   id: z.string(), name: z.string(), pid: z.number(), command: z.string(), cwd: z.string(), startTime: z.number(), endTime: z.number().nullable(),
@@ -11,7 +11,8 @@ const snapshotSchema = z.object({ available: z.boolean(), writeSupported: z.bool
 })) }) satisfies z.ZodType<ManagedProcessesSnapshot>;
 const actionSchema = z.object({ ok: z.boolean(), reason: z.string().optional(), bytesWritten: z.number().int().nonnegative().optional() });
 export type ProcessesView = { kind: "loading" } | { kind: "failed"; error: string } | { kind: "ready"; snapshot: ManagedProcessesSnapshot };
-export interface ProcessesState { view: ProcessesView; selected?: string; output?: string; error?: string; readError?: string; pending?: boolean }
+/** `output` is the selected process's log as one text; `stderr` holds the indexes of its lines that came from stderr. */
+export interface ProcessesState { view: ProcessesView; selected?: string; output?: string; stderr?: readonly number[]; error?: string; readError?: string; pending?: boolean }
 
 /** One browser projection, refreshed on join and process events. No launch records enter this store. */
 export function createProcessesStore(request: Request, ref: () => { id: string; cwd: string } | undefined) {
@@ -32,11 +33,12 @@ export function createProcessesStore(request: Request, ref: () => { id: string; 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const snapshot = snapshotSchema.parse(await response.json());
       const selected = snapshot.processes.some(item => item.id === state.selected) ? state.selected : undefined;
-      update({ ...state, view: { kind: "ready", snapshot }, readError: undefined, selected, ...(selected === undefined ? { output: undefined } : {}) });
+      update({ ...state, view: { kind: "ready", snapshot }, readError: undefined, selected, ...(selected === undefined ? { output: undefined, stderr: undefined } : {}) });
       const version = selectionVersion;
       if (selected !== undefined) {
-        const output = await loadProcessOutput(request, session, selected, 200);
-        if (version === selectionVersion) update({ ...state, output });
+        const lines = await loadProcessLines(request, session, selected, 200);
+        if (version === selectionVersion) update({ ...state, output: lines.map((line) => line.text).join("\n"),
+          stderr: lines.flatMap((line, index) => line.type === "stderr" ? [index] : []) });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -65,7 +67,7 @@ export function createProcessesStore(request: Request, ref: () => { id: string; 
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     getSnapshot: () => state,
     refresh: () => { void refresh(); },
-    select: (id: string | undefined) => { selectionVersion++; update({ ...state, selected: id, output: undefined, error: undefined }); void refresh(); },
+    select: (id: string | undefined) => { selectionVersion++; update({ ...state, selected: id, output: undefined, stderr: undefined, error: undefined }); void refresh(); },
     stop: (id: string) => { void action(id, "kill").catch(() => undefined); },
     write: (id: string, input: string, end?: boolean) => action(id, "write", input, end),
     dispose: () => { disposed = true; listeners.clear(); },

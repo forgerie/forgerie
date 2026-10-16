@@ -1,30 +1,53 @@
-/* The dot carries the state. Rows stay neutral, including when they wait for the reader. */
-.status-row { --status-tone: var(--muted-foreground); position: relative; border-radius: var(--radius-surface); }
-.status-row[data-tone="working"] { --status-tone: var(--live); }
-.status-row[data-tone="waiting"] { --status-tone: var(--live); }
-/* Trouble that may still clear on its own: a steady dot, because nothing moves until the next try. */
+/* The mark carries the state, in the tally's tones. Rows stay neutral, including when they wait for the reader.
+   A list of rows is divided by hairlines, not drawn as cards. */
+.status-row { --status-tone: var(--meter-ink); --status-lead: 1.5rem; position: relative; }
+.status-row[data-tone="working"], .status-row[data-tone="waiting"] { --status-tone: var(--live); }
+/* Trouble that may still clear on its own: a steady mark, because nothing moves until the next try. */
 .status-row[data-tone="retrying"] { --status-tone: var(--tone-warn); }
-.status-row + .status-row { margin-block-start: var(--space-1); }
+.status-row[data-tone="failed"] { --status-tone: var(--tone-bad); }
+.status-row + .status-row { border-block-start: var(--hairline) solid var(--line); }
 .status-row-main { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); inline-size: 100%;
-  min-block-size: var(--control-size); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
-  border: 0; border-radius: inherit; background: transparent; color: inherit; font: inherit; text-align: start; }
+  min-block-size: var(--control-size); padding: var(--space-2) var(--space-2) var(--space-2) 0;
+  border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; font: inherit; text-align: start; }
 .status-row-main:hover { background: var(--hover-surface); }
-.status-row-dot { flex: none; inline-size: 0.5rem; block-size: 0.5rem; border-radius: 50%; background: var(--status-tone); }
-.status-row[data-tone="quiet"] .status-row-dot { background: transparent; border: 0.09375rem solid var(--status-tone); }
-.status-row[data-tone="working"] .status-row-dot { animation: status-row-pulse 1.6s ease-in-out infinite; }
+/* The mark sits in its own lead column, centred on the name's line, so names line up down the list. */
+.status-row-mark { flex: none; display: grid; place-items: center; inline-size: var(--status-lead); block-size: 1lh; margin-inline-end: calc(-1 * var(--space-1)); }
+.status-row-mark::before { content: ""; display: block; background: var(--status-tone); }
+.status-row[data-mark="dot"] .status-row-mark::before { inline-size: 0.5rem; block-size: 0.5rem; border-radius: 50%; }
+.status-row[data-mark="block"] .status-row-mark::before { inline-size: var(--tally-mark, 0.4375rem); block-size: var(--tally-mark, 0.4375rem); border-radius: 0.109375rem; }
+.status-row[data-tone="waiting"] .status-row-mark::before { box-shadow: 0 0 0 0.1875rem var(--live-wash); }
+.status-row[data-tone="stopped"] .status-row-mark::before { background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--line-focus); }
+.status-row[data-tone="working"][data-mark="dot"] .status-row-mark::before { animation: status-row-pulse 1.6s ease-in-out infinite; }
+.status-row[data-tone="working"][data-mark="block"] .status-row-mark::before { animation: status-row-blink 1.2s steps(1) infinite; }
 @keyframes status-row-pulse { 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) { .status-row[data-tone="working"] .status-row-dot { animation: none; } }
+@keyframes status-row-blink { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .status-row[data-tone="working"] .status-row-mark::before { animation: none; } }
 .status-row-name { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--code-font); font-size: var(--small-text); font-weight: 500; }
+  font-family: var(--code-font); font-size: var(--small-text); font-weight: 600; }
 .status-row-detail { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--muted-foreground); font-size: var(--label-text); }
-/* The status takes the rest of the line and wraps under the name when there is none left. */
-.status-row-status { flex: 1 0 auto; color: var(--muted-foreground); font-size: var(--label-text); text-align: end; }
-.status-row[data-tone="waiting"] .status-row-detail { color: var(--foreground); }
-.status-row[data-tone="waiting"] .status-row-status { font-weight: 500; }
+/* The status and its readout take the rest of the line, and wrap under the name when there is none left. */
+.status-row-trail { flex: 1 0 auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 0 var(--space-3); }
+.status-row-status { color: var(--muted-foreground); font-size: var(--small-text); }
+.status-row-meta { color: var(--muted-foreground); font-size: var(--meta-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.status-row[data-tone="waiting"] .status-row-status, .status-row[data-tone="working"] .status-row-status { color: var(--ink-live); }
+.status-row[data-tone="waiting"] .status-row-status { font-weight: 600; }
 .status-row[data-tone="retrying"] .status-row-status { color: var(--ink-warn); font-weight: 500; font-variant-numeric: tabular-nums; }
+.status-row[data-tone="failed"] .status-row-status { color: var(--ink-bad); font-weight: 500; }
 .status-row-chevron { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
-.status-row-below { padding: 0 var(--space-3) var(--space-3) calc(var(--space-3) + 0.5rem + var(--space-2)); font-size: var(--small-text); overflow-wrap: anywhere; }
+.status-row-below, .status-row-actions { padding-inline: calc(var(--status-lead) + var(--space-1)) var(--space-2); }
+.status-row-below { display: grid; gap: var(--space-1); padding-block-end: var(--space-2); margin-block-start: calc(-1 * var(--space-1));
+  color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; overflow-wrap: anywhere; }
+.status-row-below > p { margin: 0; }
+.status-row-below code { font-family: var(--code-font); font-size: var(--meta-text); font-variant-ligatures: none; color: var(--foreground); }
+.status-row[data-tone="waiting"] .status-row-below { color: var(--foreground); }
 /* A retry's note is a glance: two lines at most, quieter than a question. The open row shows the rest. */
-.status-row[data-tone="retrying"] .status-row-below { color: var(--quiet-foreground); }
 .status-row[data-tone="retrying"] .status-row-below > p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.status-row-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); padding-block-end: var(--space-3); }
+.status-row-action { position: relative; min-block-size: 2rem; padding-inline: var(--space-3); border: var(--hairline) solid var(--line-focus); border-radius: var(--radius-control);
+  background: var(--background); color: var(--foreground); font: inherit; font-size: var(--label-text); font-weight: 500; }
+/* Drawn small, pressed large. */
+.status-row-action::after { content: ""; position: absolute; inset: calc((2rem - var(--control-size)) / 2) 0; }
+.status-row-action:not(:disabled):hover { border-color: var(--foreground); }
+.status-row-action[data-tone="primary"] { border-color: transparent; background: var(--primary); color: var(--primary-foreground); }
+.status-row-action:disabled { opacity: 0.45; }

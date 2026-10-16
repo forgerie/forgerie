@@ -39,7 +39,16 @@
 .pr-row-mark[data-watch="watching"] svg { color: var(--live); }
 
 /* The modal. */
-.pr-dialog { --tree-width: 44rem; --tree-height: 52rem; }
+.pr-dialog { --tree-width: 44rem; --tree-height: 52rem;
+  /* As tall as its content, like a sheet: the link form alone is short. Once the card meets the side edges it is the
+     page, so the minimum ramps to the full height as the inline room runs out, with no breakpoint. */
+  --pr-max-block: min(var(--tree-height), 100dvh - 2 * var(--tree-room-block));
+  block-size: fit-content; max-block-size: var(--pr-max-block);
+  min-block-size: clamp(0rem, var(--pr-max-block) - var(--tree-room-inline) * 1000, var(--pr-max-block)); }
+/* A quiet text action in the header, such as the way to the runs while nothing is linked. */
+.pr-head-action { display: inline-flex; align-items: center; gap: var(--space-2); flex: none; min-block-size: var(--control-size); padding-inline: var(--space-3);
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font: inherit; font-size: var(--small-text); }
+.pr-head-action:hover { background: var(--hover-surface); color: var(--foreground); }
 .tree-head .pr-where { display: flex; align-items: baseline; gap: 0.5em; font-family: var(--code-font); font-variant-ligatures: none; }
 .pr-where b { flex: none; color: var(--foreground); font-weight: 500; }
 .pr-where-head { flex: 0 1 auto; min-inline-size: 1.5em; overflow: hidden; text-overflow: ellipsis; }
@@ -54,15 +63,22 @@
 .pr-notice[data-tone="error"] { --pr-tone: var(--pr-failed); background: color-mix(in oklab, var(--pr-tone) 10%, var(--background)); }
 .pr-notice[data-tone="done"] { --pr-tone: var(--pr-ready); background: color-mix(in oklab, var(--pr-tone) 10%, var(--background)); }
 
-/* No linked pull request: one sentence and a number field. */
-.pr-link { display: grid; gap: var(--space-2); padding: var(--space-4) var(--tree-pad); font-size: var(--small-text); line-height: 1.5; }
-.pr-link p { margin: 0 0 var(--space-2); color: var(--muted-foreground); }
-.pr-link label { font-weight: 500; }
-.pr-link-row { display: flex; align-items: center; gap: var(--space-2); max-inline-size: 20rem; }
-.pr-link-row > span { color: var(--muted-foreground); font-family: var(--code-font); }
-.pr-link-row input { flex: 1 1 4rem; min-inline-size: 0; min-block-size: 2.25rem; padding-inline: var(--space-2); border: 1px solid var(--line);
-  border-radius: var(--radius-control); background: transparent; color: var(--foreground); font: inherit; font-family: var(--code-font); }
-.pr-link-row input:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 1px; }
+/* No linked pull request: what linking does, then one field that takes a number or a link. */
+.pr-link { display: grid; gap: var(--space-2); padding: var(--space-5) var(--tree-pad) var(--space-4); font-size: var(--small-text); line-height: 1.5; }
+.pr-link-title { margin: 0; font-family: var(--display-font); font-size: 1.0625rem; font-weight: 550; letter-spacing: -0.01em; }
+.pr-link p { margin: 0; max-inline-size: 60ch; color: var(--muted-foreground); }
+.pr-link-label { margin-block-start: var(--space-2); font-weight: 500; }
+.pr-link-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.pr-link-field { flex: 1 1 14rem; display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; min-block-size: var(--control-size);
+  padding-inline: var(--space-3); border: var(--hairline) solid var(--line-focus); border-radius: var(--radius-control); color: var(--muted-foreground); }
+.pr-link-field:focus-within { border-color: var(--foreground); box-shadow: 0 0 0 0.1875rem var(--active-surface); }
+.pr-link-field[data-invalid] { border-color: var(--destructive); box-shadow: 0 0 0 0.1875rem var(--destructive-wash); }
+.pr-link-field input { flex: 1; min-inline-size: 0; min-block-size: calc(var(--control-size) - 2 * var(--hairline)); padding: 0; border: 0; outline: 0; background: transparent;
+  color: var(--foreground); font: inherit; font-family: var(--code-font); font-variant-ligatures: none; }
+.pr-link-field input::placeholder { color: var(--muted-foreground); font-family: var(--body-font); }
+.pr-link-row .pr-button { min-block-size: var(--control-size); }
+.pr-link .pr-link-hint { font-size: var(--label-text); }
+.pr-link .pr-link-hint[data-invalid] { color: var(--destructive); font-weight: 500; }
 .pr-foot code { font-family: var(--code-font); font-size: var(--meta-text); }
 
 .pr-summary { padding: var(--space-4) var(--tree-pad) var(--space-3); }

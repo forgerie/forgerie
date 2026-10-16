@@ -1,13 +1,18 @@
 /* The dialog is the page frame while open, so it sizes from the viewport. Each
-   axis keeps up to its own margin, and gives it up before the content shrinks. */
+   axis keeps up to its own margin, and gives it up before the content shrinks.
+   A card is as tall as its content, up to the room it has. Once the card meets
+   the side edges it is the page, so it takes the whole height too: the minimum
+   ramps from none to full as the inline room runs out, with no breakpoint. */
 .sheet-dialog {
   --sheet-width: 44rem; --sheet-height: 46rem;
   --sheet-room-inline: clamp(0rem, (100dvw - var(--sheet-width)) / 2, 1.5rem);
   --sheet-room-block: clamp(0rem, (100dvh - var(--sheet-height)) / 2, 1.5rem);
+  --sheet-max-block: min(var(--sheet-height), 100dvh - 2 * var(--sheet-room-block));
   position: fixed; inset: 0; margin: auto; padding: 0;
   inline-size: min(var(--sheet-width), 100dvw - 2 * var(--sheet-room-inline));
-  block-size: min(var(--sheet-height), 100dvh - 2 * var(--sheet-room-block));
-  max-inline-size: none; max-block-size: none; overflow: hidden;
+  block-size: fit-content;
+  min-block-size: clamp(0rem, var(--sheet-max-block) - var(--sheet-room-inline) * 1000, var(--sheet-max-block));
+  max-inline-size: none; max-block-size: var(--sheet-max-block); overflow: hidden;
   border: var(--hairline) solid var(--line); border-radius: min(var(--radius-thread), var(--sheet-room-inline), var(--sheet-room-block));
   background: var(--modal-surface); color: var(--foreground); box-shadow: var(--modal-shadow); animation: modal-in var(--modal-enter);
 }
@@ -36,5 +41,11 @@
 .sheet-dialog-action { flex: none; min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control);
   background: transparent; color: var(--muted-foreground); font-size: var(--small-text); }
 .sheet-dialog-action:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
-.sheet-dialog-body { flex: 1; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4) var(--sheet-pad) var(--space-6); }
+.sheet-dialog-action[data-tone="danger"] { color: var(--destructive); }
+.sheet-dialog-action[data-tone="danger"]:not(:disabled):hover { background: var(--destructive-wash); color: var(--destructive); }
+.sheet-dialog-action:disabled { opacity: 0.45; }
+/* The bottom padding fades, so a body cut off by the sheet shows that more is below, and a body
+   that fits loses only empty padding to the fade. */
+.sheet-dialog-body { flex: 1 1 auto; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4) var(--sheet-pad) var(--space-6);
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--space-6)), transparent); }
 .sheet-dialog-foot { flex: none; padding: var(--space-2) var(--sheet-pad) var(--space-3); border-block-start: var(--hairline) solid var(--line); }

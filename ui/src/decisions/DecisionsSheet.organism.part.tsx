@@ -1,17 +1,13 @@
 import { useState } from "react";
 import { DecisionsSheet } from "./DecisionsSheet";
 import { GUESS, LOG_NOW, SESSION_DECISIONS } from "./fixtures/decisions";
-import type { DecisionLogView } from "./decisionsModel";
+import type { Decision, DecisionLogView } from "./decisionsModel";
 
 export const name = "Decisions sheet";
 export const note = "The session's decision log, from its header, with Overturn";
 export const composition = {
-  default: [{ part: "src/decisions/DecisionList.organism.part.tsx", state: "default" }],
-  Empty: [{ part: "src/decisions/DecisionList.organism.part.tsx", state: "Empty" }],
-  Loading: [{ part: "src/decisions/DecisionList.organism.part.tsx", state: "Loading" }],
-  ReadFailed: [{ part: "src/decisions/DecisionList.organism.part.tsx", state: "ReadFailed" }],
-  Overturning: [{ part: "src/decisions/DecisionList.organism.part.tsx", state: "default" }, { part: "src/decisions/OverturnFooter.molecule.part.tsx", state: "default" }],
-  OverturnFailed: [{ part: "src/decisions/DecisionList.organism.part.tsx", state: "default" }, { part: "src/decisions/OverturnFooter.molecule.part.tsx", state: "Failed" }],
+  Overturning: [{ part: "src/decisions/OverturnFooter.molecule.part.tsx", state: "default" }],
+  OverturnFailed: [{ part: "src/decisions/OverturnFooter.molecule.part.tsx", state: "Failed" }],
 } as const;
 
 /** The log as the session's store would hold it. An overturn is taken at once, or refused with `refuse`. */
@@ -33,6 +29,16 @@ export default function Ready() {
 }
 export function Empty() {
   return <Stateful initial={{ decisions: [] }} />;
+}
+const MIN = 60_000;
+const gated = (id: string, minutes: number, question: string): Decision => ({ id, at: LOG_NOW - minutes * MIN, kind: "gated", by: "user", question,
+  choice: "approved", reason: "The user approved this tool call", flagged: false, state: { kind: "standing" } });
+/** The screenshot of 2026-10-16: six gated actions, three of them the same push, beside a flagged guess. */
+const SCREENSHOT: Decision[] = [gated("g1", 1, "Delete an unmerged Git branch"), GUESS, gated("g2", 60, "Discard changes with git checkout"),
+  gated("g3", 61, "Merge pull request #59"), gated("g4", 180, "Push Git refs with unknown default branch"),
+  gated("g5", 16 * 60, "Push Git refs with unknown default branch"), gated("g6", 17 * 60, "Push Git refs with unknown default branch")];
+export function GatedActions() {
+  return <Stateful initial={{ decisions: SCREENSHOT }} />;
 }
 export function Loading() {
   return <Stateful initial={{}} />;

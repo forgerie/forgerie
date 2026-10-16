@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ActionFooter } from "../ui/ActionFooter";
 import { ChildWorkPanel } from "./ChildWorkPanel";
-import { landBlocker, resultText, totalCost, type ChildDetail, type Runs } from "./childWorkModel";
+import { childCost, landBlocker, money, resultText, totalCost, type ChildDetail, type Runs } from "./childWorkModel";
 import type { WorktreeActionResult } from "../worktrees/worktreeApi";
 import { SheetDialog } from "../ui/SheetDialog";
 import { StatusRow } from "../ui/StatusRow";
@@ -11,7 +11,7 @@ import { NoticeBar } from "../ui/NoticeBar";
 import { AlertCard } from "../ui/AlertCard";
 import { useNow } from "../ui/useNow";
 import { exchangeLines } from "./childExchange";
-import { childStatus, nextRetry, orderChildren, retryCount, retryLine, retryWait, type ChildSummary, type ChildTranscript } from "./childAgentsModel";
+import { branchState, childStatus, childTone, middleCut, nextRetry, orderChildren, retryCount, retryLine, retryWait, unreadableWorktrees, type ChildSummary, type ChildTranscript } from "./childAgentsModel";
 
 export interface ChildAgentsActions {
   onOpenChild: (conversationId: number) => void;
@@ -35,6 +35,11 @@ export interface ChildAgentsActions {
 
 /** A row is one glance: the provider's error is cut there, and read whole in the child's own view. */
 const ROW_ERROR_LENGTH = 160;
+/** Child branches can be 64 characters of hash. A row keeps both ends; its title keeps the whole name. */
+const ROW_BRANCH_LENGTH = 28;
+
+const plural = (count: number, one: string, many: string) => `${String(count)} ${count === 1 ? one : many}`;
+
 
 /**
  * Shape: a session's child agents in one sheet. The list puts questions for
@@ -79,18 +84,40 @@ export function ChildAgentsPanel({ children, openId, transcript, error, actions,
       else if (child && detail.kind === "discard") actions.onPreviewDiscard(child.conversationId); else if (child) actions.onReview(child.conversationId); else actions.onBackDetail(); }} />;
   if (!child) {
     const ordered = orderChildren(children);
-    const working = children.filter((candidate) => candidate.busy && candidate.retry === undefined).length;
+    const asking = children.filter((candidate) => candidate.questions.length > 0).length;
+    const working = children.filter((candidate) => candidate.busy && candidate.retry === undefined && candidate.questions.length === 0).length;
     const retrying = children.filter((candidate) => candidate.retry !== undefined).length;
+    const ready = children.filter((item) => landBlocker(item) === undefined).length;
+    // One failure that several children share is said once, above them, not as a grey status on every row.
+    const unread = unreadableWorktrees(children);
+    const shared = unread.length > 1;
+    const counts = [asking > 0 ? `${String(asking)} ${asking === 1 ? "asks" : "ask"} you` : "", working > 0 ? `${String(working)} working` : "",
+      retrying > 0 ? `${String(retrying)} retrying` : ""].filter(Boolean);
+    const spent = runs && runs.records.length > 0 ? ` Spent ${totalCost(runs)} on ${plural(runs.records.length, "run", "runs")}.` : "";
     return <SheetDialog title="Child agents" closeLabel="Close child agents" onClose={actions.onClose}
-      actions={[history]} footer={<ActionFooter note={`${children.filter((item) => landBlocker(item) === undefined).length} ready to land`}
-        actions={[{ label: "Worktrees", onPress: actions.onCleanup }]} />}
-      subtitle={children.length === 0 ? undefined : `${String(children.length)} in this session${working > 0 ? `, ${String(working)} working` : ""}${retrying > 0 ? `, ${String(retrying)} retrying` : ""}`}>
+      footer={<ActionFooter note={`${String(ready)} ready to land.${spent}`}
+        actions={[{ label: "Run history", onPress: actions.onRuns }, { label: "Worktrees", onPress: actions.onCleanup }]} />}
+      subtitle={children.length === 0 ? undefined : [`${String(children.length)} in this session`, ...counts].join(", ")}>
       {alert}
+      {shared && <NoticeBar tone="alert" message={`Forgerie cannot read the worktrees of ${unread.length === children.length ? `all ${String(unread.length)}` : String(unread.length)} child agents, so it cannot say what is ready to land. ${unread[0]?.worktree?.statusError ?? ""}`}
+        actions={[{ label: "Check worktrees", onPress: actions.onCleanup }]} />}
       {ordered.length === 0 ? <p>No child agents yet. When the agent starts one, it shows here, and you can open, steer, and stop it.</p>
-        : ordered.map((item) => <StatusRow key={item.conversationId} tone={item.questions.length > 0 ? "waiting" : item.retry ? "retrying" : item.busy ? "working" : "quiet"}
-          name={item.name} detail={item.agent ?? undefined} status={item.questions.length === 0 && item.retry ? retryWait(item.retry, now) : childStatus(item)} label={`Open ${item.name}`}
-          onPress={() => actions.onOpenChild(item.conversationId)}
-          below={<>{item.questions[0] && <p>{item.questions[0].question}</p>}{item.questions.length === 0 && item.retry && <p>{retryLine(item.retry, ROW_ERROR_LENGTH)}</p>}{item.worktree && <p><code>{item.worktree.branch}</code> · {item.worktree.ahead} commits ahead{item.worktree.dirty ? ", uncommitted files" : ""}</p>}</>} />)}
+        : ordered.map((item) => {
+          const cost = childCost(runs, item.conversationId);
+          const question = item.questions[0];
+          const landable = landBlocker(item) === undefined;
+          const open = () => actions.onOpenChild(item.conversationId);
+          return <StatusRow key={item.conversationId} tone={childTone(item)} mark="block"
+            name={item.name} detail={item.agent ?? undefined} meta={cost === undefined ? undefined : money(cost)}
+            status={item.questions.length === 0 && item.retry ? retryWait(item.retry, now) : childStatus(item, { worktreeNotice: shared })} label={`Open ${item.name}`}
+            onPress={open}
+            below={question || item.retry || item.worktree ? <>{question && <p>{question.question}</p>}{item.questions.length === 0 && item.retry && <p>{retryLine(item.retry, ROW_ERROR_LENGTH)}</p>}
+              {item.worktree && <p><code title={item.worktree.branch}>{middleCut(item.worktree.branch, ROW_BRANCH_LENGTH)}</code>, {branchState(item.worktree,
+                shared && item.worktree.statusError !== undefined)}</p>}</> : undefined}
+            actions={question ? [{ label: item.questions.length > 1 ? `Answer ${String(item.questions.length)} questions` : "Answer", tone: "primary", onPress: open }]
+              : landable ? [{ label: "Review changes", onPress: () => { open(); actions.onReview(item.conversationId); }, disabled: pending !== undefined },
+                { label: "Land", onPress: () => { open(); actions.onLand(item.conversationId); }, disabled: pending !== undefined }] : []} />;
+        })}
     </SheetDialog>;
   }
   // A retry waits between model calls, so the child can read as idle; it is still at work, and Stop must reach it.

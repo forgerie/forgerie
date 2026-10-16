@@ -24,9 +24,12 @@ export function OverturnFooter({ target, pending, error, onSend, onCancel, onDis
 }) {
   if (target === undefined) return <ActionFooter problem={error} actions={[{ label: "Dismiss", onPress: onDismissError }]} />;
   // A short footer leaves the list little room: the failure replaces the explanation, which the reader has already read.
+  // A gated action already ran: the note cannot undo it, so the footer says so and does not promise a redo.
+  const gated = target.kind === "gated";
   const note = pending ? "Sending your note…" : error !== undefined ? undefined
+    : gated ? `Correct “${shortChoice(target.question).replace(/\.+$/u, "")}”. The action already ran. The agent that asked for it gets your note; if it has finished, the parent agent does.`
     : `Overturn “${shortChoice(target.choice).replace(/\.+$/u, "")}”. The agent that acted on it gets your note and redoes the work; if it has finished, the parent agent does.`;
   return <ActionFooter note={note} problem={pending ? undefined : error} actions={[]} input={<ReplyBox key={target.id} label="What should be done instead?" placeholder="Say what to do instead"
-    sendLabel="Send and overturn" autoFocus disabled={pending} secondary={{ label: "Cancel", onPress: onCancel, disabled: pending }}
+    sendLabel={gated ? "Send correction" : "Send and overturn"} autoFocus disabled={pending} secondary={{ label: "Cancel", onPress: onCancel, disabled: pending }}
     onSend={async (text) => { if (!await onSend(text)) throw new Error("Not sent"); }} />} />;
 }

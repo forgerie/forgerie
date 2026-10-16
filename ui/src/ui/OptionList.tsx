@@ -14,6 +14,8 @@ export interface OptionItem {
   tone?: OptionTone | undefined;
   blocked?: boolean | undefined;
   busy?: boolean | undefined;
+  /** A drawn readout under the details, such as a route. */
+  below?: ReactNode;
 }
 /** Choices under one optional heading. Groups keep the order they are given. */
 export interface OptionGroup { key: string; label?: string | undefined; options: readonly OptionItem[] }
@@ -84,7 +86,7 @@ export const OptionList = forwardRef<OptionListHandle, {
   }
   const row = (option: OptionItem) => {
     const drawn = <OptionRow name={option.name} icon={option.icon} variant={option.variant} details={option.details}
-      detailsPlacement={option.detailsPlacement} current={option.current} tone={option.tone} blocked={option.blocked} busy={option.busy} data-option-id={option.id}
+      detailsPlacement={option.detailsPlacement} current={option.current} tone={option.tone} blocked={option.blocked} busy={option.busy} below={option.below} data-option-id={option.id}
       {...(highlight ? { tabIndex: -1, onMouseDown: (event) => event.preventDefault() } : { onClick: () => input.onChoose(option.id) })} />;
     return highlight ? input.wrap(drawn, option) : drawn;
   };

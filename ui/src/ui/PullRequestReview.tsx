@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } f
 import { createPortal } from "react-dom";
 import {
   ChevronRightIcon, CircleCheckIcon, CircleDashedIcon, CirclePlayIcon, CircleMinusIcon, CircleXIcon, ExternalLinkIcon, EyeIcon,
-  GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon, LoaderCircleIcon, MessageSquareIcon,
+  GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon, LinkIcon, LoaderCircleIcon, MessageSquareIcon,
   PlusIcon, RefreshCwIcon, TriangleAlertIcon, XIcon,
 } from "lucide-react";
 import {
@@ -138,6 +138,9 @@ function Review({ load, selected, onSelect, reading, notice, writing, now, onRef
         <span className="tree-count pr-where" title={pr ? `#${String(pr.number)} ${pr.head} → ${pr.base}` : undefined}>{pr ? <><b>#{pr.number}</b>
           <span className="pr-where-head">{pr.head}</span><span className="pr-where-base">→ {pr.base}</span></>
           : item ? <b>#{item.link.number}</b> : null}</span>
+        {/* With nothing linked there is no tab strip: the runs are one text action away, and the action leads back. */}
+        {items.length === 0 && extraView && <button type="button" className="pr-head-action" onClick={() => setExtraOpen(!extraOpen)}>
+          {extra ? "Link a pull request" : <><CirclePlayIcon aria-hidden size={16} />{extraView.label}</>}</button>}
         <button type="button" className="icon-button quiet-button" aria-label={items.length > 1 ? "Read the pull requests again" : "Read the pull request again"} title="Read again"
           disabled={!extra && load.type === "loading"} onClick={refresh}><RefreshCwIcon aria-hidden size={18} /></button>
         {pr && <a className="icon-button quiet-button" href={pr.url} target="_blank" rel="noreferrer" aria-label={`Open on ${source}`} title={`Open on ${source}`}>
@@ -145,7 +148,7 @@ function Review({ load, selected, onSelect, reading, notice, writing, now, onRef
         <button type="button" className="icon-button quiet-button" aria-label="Close pull request" title="Close" onClick={onClose}>
           <XIcon aria-hidden size={18} /></button>
       </header>
-      {(items.length > 0 || extraView) && <PullStrip items={items} current={item?.link.number} adding={adding && !extra} reading={reading}
+      {items.length > 0 && <PullStrip items={items} current={item?.link.number} adding={adding && !extra} reading={reading}
         onSelect={(number) => { setAdding(false); setExtraOpen(false); onSelect(number); }} onAdd={() => { setExtraOpen(false); setAdding(true); }}
         extra={extraView ? { label: extraView.label, title: extraView.title, tone: extraView.tone, selected: extra !== undefined, onSelect: () => { setAdding(false); setExtraOpen(true); } } : undefined} />}
       <div className="pr-body">
@@ -206,21 +209,30 @@ function UnlinkRow({ number, watching, writing, onUnlink }: { number: number; wa
     Unlink #{number} from this session</button>{watching ? " Its watch stops too." : ""}</p>;
 }
 
-/** Link an existing pull request. The agent links the ones it opens on its own. */
+/**
+ * Link an existing pull request. The agent links the ones it opens on its own. The button names the number it will
+ * link once the field holds one; text that is not a number or a pull request link says so under the field.
+ */
 function LinkForm({ writing, first, onLink, onCancel }: { writing: boolean; first: boolean; onLink: (number: number) => void; onCancel?: (() => void) | undefined }) {
   const inputId = useId();
+  const hintId = useId();
   const [value, setValue] = useState("");
   const number = pullRequestNumber(value);
+  const invalid = value.trim() !== "" && number === undefined;
   return <form className="pr-link" onSubmit={(event) => { event.preventDefault(); if (number && number > 0) onLink(number); }}>
-    {first ? <p>{pullRequestCopy.empty}</p>
-      : <p>A session can follow several pull requests. Each keeps its own watch.</p>}
-    <label htmlFor={inputId}>Link an open pull request from this project's repository</label>
+    <h3 className="pr-link-title">{first ? pullRequestCopy.linkTitle : pullRequestCopy.linkAnotherTitle}</h3>
+    <p>{first ? pullRequestCopy.empty : pullRequestCopy.linkAnother}</p>
+    <label htmlFor={inputId} className="pr-link-label">{pullRequestCopy.linkLabel}</label>
     <div className="pr-link-row">
-      <span aria-hidden>#</span>
-      <input id={inputId} autoComplete="off" placeholder="142 or Azure PR URL" value={value} autoFocus={!first} onChange={(event) => setValue(event.target.value)} />
-      <button type="submit" className="pr-button primary" disabled={!number || writing}>{writing ? "Linking…" : "Link"}</button>
+      <span className="pr-link-field" data-invalid={invalid || undefined}>
+        <LinkIcon aria-hidden size={16} />
+        <input id={inputId} autoComplete="off" inputMode="url" placeholder={pullRequestCopy.linkPlaceholder} value={value} autoFocus={!first}
+          aria-describedby={hintId} aria-invalid={invalid || undefined} onChange={(event) => setValue(event.target.value)} />
+      </span>
+      <button type="submit" className="pr-button primary" disabled={!number || writing}>{writing ? "Linking…" : number ? `Link #${String(number)}` : "Link"}</button>
       {onCancel && <button type="button" className="pr-button" onClick={onCancel}>Cancel</button>}
     </div>
+    <p id={hintId} className="pr-link-hint" data-invalid={invalid || undefined} role={invalid ? "alert" : undefined}>{invalid ? pullRequestCopy.linkInvalid : pullRequestCopy.linkHint}</p>
   </form>;
 }
 

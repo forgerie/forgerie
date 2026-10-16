@@ -151,15 +151,54 @@ export function orderChildren(children: readonly ChildSummary[]): ChildSummary[]
   return [...children].sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt);
 }
 
-export function childStatus(child: ChildSummary): string {
+/**
+ * The children whose open worktree Forgerie could not read. When more than one shares the failure, the list says it
+ * once above the rows, and each row no longer repeats it (`childStatus` with `worktreeNotice`).
+ */
+export function unreadableWorktrees(children: readonly ChildSummary[]): ChildSummary[] {
+  return children.filter((child) => child.worktree?.state === "active" && child.worktree.statusError !== undefined);
+}
+
+/** `worktreeNotice`: the list already says the worktree cannot be read, so the row says what else it knows. */
+export function childStatus(child: ChildSummary, { worktreeNotice = false }: { worktreeNotice?: boolean } = {}): string {
   if (child.questions.length > 0) return child.questions.length === 1 ? "Waiting for your answer" : `${String(child.questions.length)} questions for you`;
   if (child.retry) return retryCount(child.retry);
   if (child.busy) return "Working";
   if (child.worktree?.state === "landed") return "Landed";
   if (child.worktree?.state === "discarded") return "Discarded";
-  if (child.worktree?.statusError) return "Cannot read worktree";
+  if (child.worktree?.statusError) return worktreeNotice ? "Idle" : "Cannot read worktree";
   if (child.worktree?.dirty) return "Uncommitted changes";
   return child.worktree && child.worktree.ahead > 0 ? "Ready to land" : "Idle";
+}
+
+/** The tone of a child's mark in a list. */
+export function childTone(child: ChildSummary): "waiting" | "working" | "retrying" | "quiet" | "stopped" {
+  if (child.questions.length > 0) return "waiting";
+  if (child.retry) return "retrying";
+  if (child.busy) return "working";
+  return child.worktree?.state === "discarded" ? "stopped" : "quiet";
+}
+
+/**
+ * A long name cut in its middle, so both the start and the end that tell names apart stay: "c-5676552a…1135941a0b".
+ * The caller keeps the whole name reachable, such as in a title.
+ */
+export function middleCut(text: string, length: number): string {
+  if (text.length <= length) return text;
+  const keep = length - 1;
+  const head = Math.ceil(keep / 2);
+  return `${text.slice(0, head)}…${text.slice(text.length - (keep - head))}`;
+}
+
+/**
+ * Where a child's branch stands, after its name in a row: "3 commits ahead, uncommitted files", "no new commits", or the
+ * worktree's closed state. `unread`: the list already says the worktree cannot be read, so the row says it is unknown.
+ */
+export function branchState(worktree: NonNullable<ChildSummary["worktree"]>, unread = false): string {
+  if (unread) return "status unknown";
+  if (worktree.state !== "active") return worktree.state;
+  const ahead = worktree.ahead === 0 ? "no new commits" : `${String(worktree.ahead)} ${worktree.ahead === 1 ? "commit" : "commits"} ahead`;
+  return worktree.dirty ? `${ahead}, uncommitted files` : ahead;
 }
 
 /** "Retrying 2 of 3". */

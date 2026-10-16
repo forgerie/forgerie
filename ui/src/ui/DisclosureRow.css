@@ -1,0 +1,29 @@
+/* A line that opens in place. Lines in one list are divided by hairlines, never drawn as cards. */
+.disclosure-row { container-type: inline-size; list-style: none; }
+.disclosure-row + .disclosure-row { border-block-start: var(--hairline) solid var(--line); }
+.disclosure-row-main { display: grid; grid-template-columns: 1rem minmax(0, 1fr) auto 1rem; align-items: start; column-gap: var(--space-3); inline-size: 100%;
+  min-block-size: var(--control-size); padding: var(--space-2) var(--space-1); border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--foreground); font: inherit; font-size: var(--small-text); line-height: 1.5; text-align: start; }
+.disclosure-row-main:hover { background: var(--hover-surface); }
+.disclosure-row[data-open] > .disclosure-row-main { background: var(--active-surface); }
+.disclosure-row-icon { display: grid; place-items: center; block-size: 1lh; color: var(--muted-foreground); }
+.disclosure-row-icon svg, .disclosure-row-chevron { inline-size: 0.875rem; block-size: 0.875rem; }
+.disclosure-row-chevron { block-size: 1lh; color: var(--muted-foreground); }
+.disclosure-row-text { display: grid; min-inline-size: 0; }
+.disclosure-row-title { font-weight: 550; overflow-wrap: anywhere; }
+.disclosure-row-line { color: var(--muted-foreground); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.disclosure-row-line code { font-family: var(--code-font); font-size: var(--label-text); font-variant-ligatures: none; }
+.disclosure-row[data-struck] .disclosure-row-title { color: var(--muted-foreground); }
+.disclosure-row-trail { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 0 var(--space-3); max-inline-size: 12rem;
+  color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; text-align: end; }
+.disclosure-row-status { color: var(--foreground); font-weight: 500; }
+.disclosure-row[data-struck] .disclosure-row-status { color: var(--muted-foreground); }
+.disclosure-row-content { padding: var(--space-1) 0 var(--space-3) calc(1rem + var(--space-3)); }
+.disclosure-row-content > ul { margin: 0; padding: 0; list-style: none; }
+.disclosure-row-note { margin: var(--space-1) 0 0 var(--space-3); max-inline-size: 60ch; color: var(--muted-foreground); font-size: var(--label-text); }
+/* Narrow: the trail moves under the text, so the title keeps the width. */
+@container (max-width: 26rem) {
+  .disclosure-row-main { grid-template-columns: 1rem minmax(0, 1fr) 1rem; }
+  .disclosure-row-trail { grid-column: 2; grid-row: 2; justify-content: flex-start; max-inline-size: none; text-align: start; }
+  .disclosure-row-chevron { grid-column: 3; grid-row: 1; }
+}

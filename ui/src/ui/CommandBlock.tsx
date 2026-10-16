@@ -9,7 +9,7 @@ import "./CommandBlock.css";
  * longer than that is cut with a fade and a toggle that opens the rest. A
  * shell command shows its prompt mark, which the copy leaves out.
  */
-export function CommandBlock({ code, label, copyLabel, shell = false, lines, moreLabel }: {
+export function CommandBlock({ code, label, copyLabel, shell = false, lines, moreLabel, marked }: {
   code: string;
   /** The block's accessible name, such as "Command". */
   label: string;
@@ -20,10 +20,13 @@ export function CommandBlock({ code, label, copyLabel, shell = false, lines, mor
   lines?: number | undefined;
   /** The toggle's words while the text is cut, such as "Show full result". */
   moreLabel?: string | undefined;
+  /** Indexes of lines drawn on the warn wash, such as a process's stderr lines. */
+  marked?: readonly number[] | undefined;
 }) {
+  const tinted = new Set(marked);
   // Each line hangs on its own, so a wrapped line reads as one line and the next line starts at the margin.
   const text = <pre className="command-block-code" data-shell={shell || undefined}>
-    {code.split("\n").map((line, index) => <span className="command-block-line" key={index}>{line === "" ? " " : line}</span>)}
+    {code.split("\n").map((line, index) => <span className="command-block-line" key={index} data-marked={tinted.has(index) || undefined}>{line === "" ? " " : line}</span>)}
   </pre>;
   return <div className="command-block" role="group" aria-label={label}>
     <div className="command-block-text">

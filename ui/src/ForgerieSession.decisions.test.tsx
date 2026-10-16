@@ -98,7 +98,9 @@ describe("a session's decision log", () => {
     });
     await act(async () => { button("Send and overturn")?.click(); });
     expect(api.posts).toEqual([{ path: `/api/sessions/test/decisions/${GUESS.id}/overturn`, body: { cwd: "/work", note: "Group by stage." } }]);
-    await until(() => row.querySelector(".decision-record-status")?.textContent === "Overturned");
+    // No longer a flagged guess: it moves to its day's lines, open, with its new state.
+    await until(() => [...document.querySelectorAll("dialog[open] .disclosure-row .decision-record")]
+      .find((node) => node.textContent?.includes(GUESS.question))?.querySelector(".decision-record-status")?.textContent === "Overturned");
     expect(document.querySelector("dialog[open] .sheet-dialog-foot")).toBeNull();
     expect(button("Decisions")).toBeDefined();
     expect(button("Decisions, 1 flagged guess to look at")).toBeUndefined();
@@ -112,7 +114,7 @@ describe("a session's decision log", () => {
     expect(document.querySelector("dialog[open] .decision-record")).toBeNull();
     api.state.readFails = false;
     await act(async () => { [...document.querySelectorAll<HTMLButtonElement>("dialog[open] button")].find((node) => node.textContent === "Retry")?.click(); });
-    await until(() => document.querySelector("dialog[open] .decision-record-question")?.textContent === ANSWER.question);
+    await until(() => document.querySelector("dialog[open] .disclosure-row-title")?.textContent === ANSWER.question);
     expect(document.querySelector("dialog[open] .alert-card")).toBeNull();
     expect(button("Decisions")).toBeDefined();
   });

@@ -33,6 +33,8 @@ export interface OptionRowProps extends Omit<ButtonHTMLAttributes<HTMLButtonElem
   blocked?: boolean | undefined;
   /** A choice of this row is in progress. */
   busy?: boolean | undefined;
+  /** A drawn readout under the details, such as a workflow's route. Decorative content only: the row stays one button. */
+  below?: ReactNode;
 }
 
 /**
@@ -42,7 +44,7 @@ export interface OptionRowProps extends Omit<ButtonHTMLAttributes<HTMLButtonElem
  * a primitive can give it behaviour through `asChild`.
  */
 export const OptionRow = forwardRef<HTMLButtonElement, OptionRowProps>(function OptionRow(
-  { name, icon, variant, details = [], detailsPlacement = "under", current, tone = "plain", blocked, busy, type = "button", ...rest }, ref) {
+  { name, icon, variant, details = [], detailsPlacement = "under", current, tone = "plain", blocked, busy, below, type = "button", ...rest }, ref) {
   const trailing = detailsPlacement === "trailing";
   return <button ref={ref} type={type} className="option-row" data-tone={tone === "plain" ? undefined : tone} data-icon={icon ? "" : undefined}
     data-details={trailing ? "trailing" : undefined}
@@ -54,6 +56,7 @@ export const OptionRow = forwardRef<HTMLButtonElement, OptionRowProps>(function 
       : detail.truncate === "start"
         ? <span key={index} className="option-row-path" title={detail.text}><bdi dir="ltr">{detail.text}</bdi></span>
         : <span key={index} className="option-row-strong">{detail.text}</span>)}</span>}
+    {below !== undefined && <span className="option-row-below">{below}</span>}
     {current && <CheckIcon aria-hidden size={16} className="option-row-check" />}
   </button>;
 });
