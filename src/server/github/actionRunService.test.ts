@@ -21,6 +21,7 @@ function fixture(store = new ActionRunStore()) {
   let busy = false;
   let failure: Error | undefined;
   let hold: Promise<void> | undefined;
+  let onRead: (() => void) | undefined;
   let slug = "owner/repo";
   const notices: { id: string; text: string }[] = [];
   const events: ActionRunLink[] = [];
@@ -31,7 +32,7 @@ function fixture(store = new ActionRunStore()) {
   const service = new ActionRunService({ store, pulls, now: () => now,
     github: {
       repo: () => Promise.resolve({ slug, everyone: true }),
-      run: async (_cwd, runId) => { await hold; if (failure !== undefined) throw failure; return { ...structuredClone(run), runId }; },
+      run: async (_cwd, runId) => { onRead?.(); await hold; if (failure !== undefined) throw failure; return { ...structuredClone(run), runId }; },
       runsForHead: (_cwd, headSha) => { filters.push(headSha); return Promise.resolve([structuredClone(run)]); },
       pull: () => Promise.resolve(pullSnapshot({ headSha: "a".repeat(40) })),
       dispatch: () => Promise.resolve({ repo: slug, runId: run.runId, url: run.url }),
@@ -47,6 +48,7 @@ function fixture(store = new ActionRunStore()) {
     setRun: (extra: Partial<typeof run>) => { run = { ...run, ...extra }; },
     setState: (extra: Partial<PullSessionState>) => { state = { ...state, ...extra }; },
     busy: (value: boolean) => { busy = value; }, fail: (value?: Error) => { failure = value; },
+    onRead: (callback: () => void) => { onRead = callback; },
     hold: (value?: Promise<void>) => { hold = value; }, repo: (value: string) => { slug = value; }, advance: (ms: number) => { now += ms; },
   };
 }
@@ -121,6 +123,47 @@ describe("linked action runs", () => {
       expect(store.get(key)?.pending).toBeUndefined();
       expect(store.get(key)?.watch).toMatchObject({ kind: "stopped", reason: "Run completed (failure)." });
     } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+  it("refuses starts paused on GitHub after session Abort or Stop, without creating a link", async () => {
+    for (const reason of ["Session aborted by request.", "Session stopped by request."]) {
+      for (const alreadyLinked of [false, true]) {
+        const f = fixture();
+        try {
+          if (alreadyLinked) await f.service.link(ref, 4812);
+          let release = () => { /* Set by the read gate. */ };
+          f.hold(new Promise<void>(resolve => { release = resolve; }));
+          const reading = new Promise<void>(resolve => { f.onRead(resolve); });
+          const start = f.service.watch(ref, 4812);
+          const refused = expect(start).rejects.toThrow("stopped");
+          await reading;
+          await f.service.stop(ref.id, reason);
+          release(); await refused;
+          expect(f.service.isWatching(ref.id)).toBe(false);
+          expect(f.store.list()).toHaveLength(alreadyLinked ? 1 : 0);
+          expect(f.notices).toEqual([]);
+        } finally { f.service.dispose(); }
+      }
+    }
+  });
+  it("keeps another watch's durable news when an earlier unlinked start resumes", async () => {
+    const f = fixture();
+    try {
+      let release = () => { /* Set by the read gate. */ };
+      f.hold(new Promise<void>(resolve => { release = resolve; }));
+      const reading = new Promise<void>(resolve => { f.onRead(resolve); });
+      const earlierStart = f.service.watch(ref, 4812);
+      await reading;
+      f.hold();
+      await f.service.watch(ref, 4812);
+      f.busy(true); f.setRun({ jobs: [{ id: 10, name: "tests", state: "failed", url: "job" }] });
+      await f.service.poll();
+      const before = f.store.get(key);
+      expect(before?.watch).toMatchObject({ kind: "watching", wakes: 1 });
+      expect(before?.cursor?.failed).toEqual(["1:10"]);
+      expect(before?.pending).toBeDefined();
+      release(); await earlierStart;
+      expect(f.store.get(key)).toEqual(before);
+    } finally { f.service.dispose(); }
   });
   it("Stop and unlink invalidate in-flight reads and discard busy news", async () => {
     for (const mode of ["stop", "unlink"] as const) {

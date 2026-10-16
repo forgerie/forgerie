@@ -26,6 +26,27 @@ describe("action run persistence", () => {
       expect(recovered.list().map(record => record.runId)).toEqual([4813]);
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
+  it("atomically starts a watch or keeps the existing watch and durable news unchanged", async () => {
+    const store = new ActionRunStore();
+    const start = { since: "2026-10-01T12:00:00Z", leaf: "start", cursor: { attempt: 1, failed: [], concluded: false } };
+    expect(await store.startWatch(input, start, () => false)).toBeUndefined();
+    expect(store.list()).toEqual([]);
+    const first = await store.startWatch(input, start, () => true);
+    if (first === undefined) throw new Error("Watch did not start");
+    expect(first).toMatchObject({ revision: 0, watch: { kind: "watching", wakes: 0 } });
+    const news = await store.update(input, first.revision, record => ({ ...record, cursor: { ...start.cursor, failed: ["1:10"] },
+      watch: { kind: "watching", since: start.since, wakes: 1 }, pending: { id: "notice", text: "durable news" } }));
+    expect(await store.startWatch({ ...input, source: "pull" }, start, () => true)).toEqual(news);
+    expect(store.get(input)).toEqual(news);
+  });
+  it("does not leave a link behind when the atomic start write fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "action-start-write-"));
+    try {
+      const store = new ActionRunStore(dir);
+      await expect(store.startWatch(input, { since: "2026-10-01T12:00:00Z", leaf: null, cursor: { attempt: 1, failed: [], concluded: false } }, () => true)).rejects.toThrow();
+      expect(store.list()).toEqual([]);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
   it("refuses malformed or duplicate state and does not publish a failed atomic write", async () => {
     const dir = await mkdtemp(join(tmpdir(), "action-store-invalid-"));
     try {

@@ -15,6 +15,7 @@ const VERSION = 1;
 
 /** One session's link to one action run. Repository names compare without case, as GitHub does. */
 export interface ActionRunKey { id: string; repo: string; runId: number }
+interface LinkInput extends ActionRunKey { cwd: string; source: ActionRunLink["source"] }
 export const keyOf = (record: ActionRunRecord): ActionRunKey => ({ id: record.session.id, repo: record.repo, runId: record.runId });
 const sameKey = (record: ActionRunRecord, key: ActionRunKey) => record.session.id === key.id && record.runId === key.runId && record.repo.toLowerCase() === key.repo.toLowerCase();
 const keyText = (key: ActionRunKey) => `${key.id}\n${key.repo.toLowerCase()}\n${String(key.runId)}`;
@@ -44,7 +45,7 @@ export class ActionRunStore {
   isWatching(id: string): boolean { return this.records.some((record) => record.session.id === id && record.watch.kind === "watching"); }
 
   /** Adds a link, or returns the existing one. Never replaces another action run's link. */
-  link(input: { id: string; cwd: string; repo: string; runId: number; source: ActionRunLink["source"] }): Promise<ActionRunRecord> {
+  link(input: LinkInput): Promise<ActionRunRecord> {
     return this.exclusive(async () => {
       const cwd = canonicalizeStoredCwd(input.cwd);
       // A chat may link runs from several owned workspaces. The workspace of an
@@ -58,6 +59,29 @@ export class ActionRunStore {
       return structuredClone(next);
     });
   }
+
+  /** Link and initialize in one write. A competing watcher owns its cursor and outbox. */
+  startWatch(input: LinkInput, start: { since: string; leaf: string | null; cursor: ActionRunCursor }, stillCurrent: () => boolean): Promise<ActionRunRecord | undefined> {
+    return this.exclusive(async () => {
+      if (!stillCurrent()) return undefined;
+      const cwd = canonicalizeStoredCwd(input.cwd);
+      const current = this.get(input);
+      if (current !== undefined && current.session.cwd !== cwd) throw new Error("Session link belongs to another workspace.");
+      if (current?.watch.kind === "watching") return current;
+      const next: ActionRunRecord = {
+        ...(current ?? { provider: "github", source: input.source, session: { id: input.id, cwd }, repo: input.repo, runId: input.runId }),
+        revision: (current?.revision ?? -1) + 1,
+        watch: { kind: "watching", since: start.since, wakes: 0 },
+        cursor: start.cursor, startLeaf: start.leaf, lastReadAt: start.since,
+      };
+      delete next.pending;
+      await this.persist(current === undefined ? [...this.records, next] : this.records.map(record => sameKey(record, input) ? next : record));
+      return structuredClone(next);
+    });
+  }
+
+  /** Wait for local writes already queued, not remote reads. Stop snapshots only after these finish. */
+  async flush(): Promise<void> { await this.queue; }
 
   /** Removes a link and its watch. Returns the removed record, or undefined when it was not linked. */
   unlink(key: ActionRunKey): Promise<ActionRunRecord | undefined> {
