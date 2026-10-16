@@ -10,7 +10,7 @@ import { PiSessionService } from "./piSessionService.js";
 import { CapturingSessionEventHub, emptyArchiveStore } from "./piSessionService.testSupport.js";
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import { registerDecisionRoutes } from "./decisionRoutes.js";
-import { createDurableChildHost, LiveChildSessionIndex } from "./durableChildHost.js";
+import { createDurableChildHost } from "./durableChildHost.js";
 
 function required<T>(value: T | undefined | null): T {
   if (value === undefined || value === null) throw new Error("Expected a value");
@@ -30,7 +30,7 @@ function open(host = true) {
   hub = new CapturingSessionEventHub();
   return new PiSessionService(hub, { agentDir: join(root, "agent"), modelRuntime: models, archiveStore: emptyArchiveStore(),
     sessionManager: createPiSessionManagerGateway({ agentDir: join(root, "agent"), env: { HOME: root }, sessionDirEnvKeys: [] }),
-    ...(host ? { durableChildAgents: createDurableChildHost({ index: new LiveChildSessionIndex(join(root, "live.json")) }) } : {}) });
+    ...(host ? { durableChildAgents: createDurableChildHost() } : {}) });
 }
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "forgerie-parent-answers-")); await mkdir(join(root, "agent"));
