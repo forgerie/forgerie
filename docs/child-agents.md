@@ -20,6 +20,8 @@ Finished worktree children show Review changes, Land, Discard, and Continue work
 
 After removal, Start new task from the named default branch creates a new child in a fresh worktree. It copies the old child's agent settings, not its transcript. It never makes the old conversation writable again. Unsent drafts survive changing child views, opening history, and closing the panel. They stay in memory, not across page reloads or switching parent sessions.
 
+Each child row shows its latest recorded tool name and estimated USD cost. The tool readout contains no arguments or results. Cost comes from that child conversation's committed `pi.usage`, including model and tool usage across all runs. It is separate from parent spend and is not a sum of retained run-history records. Missing accounting displays as unknown, not zero.
+
 Run history is in the header. It shows retained runs, estimated costs, turns, tokens, and agent-file provenance. Worktrees opens the last automatic cleanup report. Refresh reads the report; it does not start cleanup.
 
 The parent model sees each steer and stop as a note, so it does not undo what you told a child. Each child's final answer reaches the parent as a new message, and the parent continues from it.
@@ -150,6 +152,8 @@ interface DurableChildSummary {
   conversationId: number;
   agent: string | null;
   busy: boolean;
+  costUsd: number | null; // Cumulative committed estimate for this conversation; null means unavailable.
+  lastTool: { name: string; at: number | null } | null; // Bounded name only; at is Unix milliseconds.
   retry?: {attempt: number; max: 3; error: string; until: number}; // Pending backoff; until is Unix milliseconds.
   createdAt: number; // Unix milliseconds.
   questions: {questionId: string; question: string; askedAt: number}[];
@@ -167,6 +171,8 @@ interface DurableChildSummary {
   };
 }
 ```
+
+Listing children or reading their saved transcripts does not open a runtime or resume work. Saved reads use Durable's public storage API under the same ownership lock as execution. Missing or foreign bindings and ownership conflicts fail explicitly.
 
 Shared children omit `worktree`. Removed worktrees report `ahead: 0` and `dirty: false`; these are terminal receipt values, not a Git status check. A failed status check on an active checkout sets `statusError`, so other children stay visible. The browser refuses to treat its zero fallback count as readiness.
 
