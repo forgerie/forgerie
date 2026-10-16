@@ -1,6 +1,6 @@
 # Pull request backend
 
-Forgerie's GitHub App reads PR data and links each PR to the session that created it. One session can link several PRs, and each has its own watch. Linking another PR never replaces an earlier one. The MVP frontend (`new-ui-mvp`) shows them; the Lit frontend has no PR panel.
+Forgerie's GitHub App reads PR data and links each PR to the session that created it. One session can link several PRs, and each has its own watch. Linking another PR never replaces an earlier one. The browser's pull request panel shows the links.
 
 See [linked GitHub Actions runs](action-runs.md) for independent run links and watches.
 
@@ -37,6 +37,12 @@ Each watch stops on its own when its PR merges or closes, on an explicit watcher
 
 Polling uses several GitHub requests per PR, including GraphQL for unresolved threads and required checks. Every wake can use agent tokens. This change does not add webhooks, auto-merge, a merge queue, or Actions job-log downloads. Failed-check output is optional bounded check annotations, labeled `logSource: "annotations"`.
 
+## Find a pull request before linking
+
+The link form lists open and draft PRs from the session's repository. Select a row, or enter a PR number or URL, to read its title, state, checks, and comments before linking. Preview does not add a link or start a watch. GitHub and Azure DevOps use the same flow. Azure DevOps PRs remain read-only after linking.
+
+Each discovery read returns at most 50 PRs. If more exist, enter another PR number to preview it. Outside contributors' GitHub titles follow the existing author-trust policy.
+
 ## HTTP contract
 
 Routes live on sessiond and pass through the existing local and machine-scoped `/api` prefixes. The daemon resolves the target repository from the session's project configuration or GitHub origin. A merge request's `repo` is a confirmation value, not a way to select another repository.
@@ -45,7 +51,9 @@ Routes live on sessiond and pass through the existing local and machine-scoped `
 | --- | --- | --- |
 | `GET /github/pulls` | None. | A `links` catalog for session badges. |
 | `GET /sessions/:id/pull-requests` | A `cwd` query. | `items`, oldest link first. Each item has `link` and `pull`; a failed read gives `pull: null` and `error`. |
-| `PUT /sessions/:id/pull-requests` | `{cwd, number}`. | Add a link to an existing PR and return `{link, pull}`. An existing link is returned unchanged. |
+| `GET /sessions/:id/pull-requests/open` | A `cwd` query. | `{provider, repo, items, complete}` with at most 50 open/draft summaries. Does not change links or watches. |
+| `GET /sessions/:id/pull-requests/:number/preview` | A `cwd` query. | `{provider, pull}` without requiring or creating a link. |
+| `PUT /sessions/:id/pull-requests` | `{cwd, number, expected?}`. Optional `expected` is `{provider, repo}` from the preview. | Add a link and return `{link, pull}`. Reject a changed repository when `expected` is supplied. An existing link is returned unchanged. |
 | `GET /sessions/:id/pull-requests/:number` | A `cwd` query. | One linked PR: `{link, pull}`. |
 | `DELETE /sessions/:id/pull-requests/:number` | A `cwd` query. | Remove the link and its watch; return the removed link. |
 | `POST /sessions/:id/pull-requests/:number/watch` | `{cwd}`. | Start or retain that PR's watch and return the link. |
@@ -68,4 +76,4 @@ Sessiond owns `pull-requests.json` in the configured Forgerie data directory. It
 
 Stop invalidates in-flight reads. A notice already accepted by Pi can still finish its agent turn after watcher Stop. Stop prevents future watcher delivery; use session Abort to stop the current agent run.
 
-Build and restart the local units after landing backend changes. A sessiond restart stops active agent runs, so check current activity before restarting. Restore the prior build and restart again to roll back; the PR state file remains on disk.
+Build and restart the local units after landing backend changes. See [deployment and Durable recovery](deployment.md#update-an-existing-checkout) for restart behavior and precautions. Restore the prior build and restart again to roll back; the PR state file remains on disk.
