@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { DecisionsSheet } from "./DecisionsSheet";
-import { GUESS, LOG_NOW, SESSION_DECISIONS } from "./fixtures/decisions";
+import { CONFIRMED, GUESS, LOG_NOW, SESSION_DECISIONS } from "./fixtures/decisions";
 import type { Decision, DecisionLogView } from "./decisionsModel";
 
 export const name = "Decisions sheet";
@@ -16,6 +16,12 @@ function Stateful({ initial, refuse, target }: { initial: DecisionLogView; refus
   return <DecisionsSheet log={log} initialTarget={target} now={() => LOG_NOW} onClose={() => {}} actions={{
     onRetry: () => setLog({ ...log, readError: undefined, decisions: SESSION_DECISIONS }),
     onDismissError: () => setLog((current) => ({ ...current, error: undefined })),
+    onConfirm: async (id) => {
+      if (refuse !== undefined) { setLog((current) => ({ ...current, error: refuse })); return false; }
+      setLog((current) => ({ ...current, decisions: current.decisions?.map((decision) => decision.id === id
+        ? { ...decision, state: { kind: "confirmed", at: LOG_NOW } } : decision) }));
+      return true;
+    },
     onOverturn: (id, note) => {
       if (refuse !== undefined) { setLog((current) => ({ ...current, error: refuse })); return Promise.resolve(false); }
       setLog((current) => ({ ...current, decisions: current.decisions?.map((decision) => decision.id === id
@@ -26,6 +32,9 @@ function Stateful({ initial, refuse, target }: { initial: DecisionLogView; refus
 }
 export default function Ready() {
   return <Stateful initial={{ decisions: SESSION_DECISIONS }} />;
+}
+export function Confirmed() {
+  return <Stateful initial={{ decisions: SESSION_DECISIONS.map((decision) => decision.id === CONFIRMED.id ? CONFIRMED : decision) }} />;
 }
 export function Empty() {
   return <Stateful initial={{ decisions: [] }} />;

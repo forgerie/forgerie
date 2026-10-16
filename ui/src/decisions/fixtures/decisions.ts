@@ -20,6 +20,8 @@ export const GUESS: Decision = {
   reason: "Grouping hides the order the reader asked to scan. The user’s note on the contract said newest first.",
   flagged: true, state: { kind: "standing" },
 };
+/** A reviewed guess keeps its original choice and can still be overturned. */
+export const CONFIRMED: Decision = { ...GUESS, state: { kind: "confirmed", at: LOG_NOW - 2 * MIN } };
 export const OVERTURNED: Decision = {
   id: "d-3", at: LOG_NOW - 70 * MIN, kind: "guess", by: "parent", runId: RUN_ID,
   question: "Export button: in the header or under the table?",

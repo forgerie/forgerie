@@ -12,7 +12,7 @@ import { shortChoice, type Decision } from "./decisionsModel";
  * dismissed.
  */
 export function OverturnFooter({ target, pending, error, onSend, onCancel, onDismissError }: {
-  /** The standing decision whose note field is open. */
+  /** The standing or confirmed decision whose note field is open. */
   target?: Decision | undefined;
   pending: boolean;
   /** Why the last overturn failed. */

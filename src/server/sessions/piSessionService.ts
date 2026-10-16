@@ -89,7 +89,7 @@ import { attachmentsToInlineImages, saveAttachmentsToWorkspace } from "./attachm
 import { parsePromptAttachments } from "../../shared/promptAttachments.js";
 import { fingerprintPromptResourceDeliveryText, parseLeadingSlashCommand, type PromptResourceCommandIdentity } from "../../shared/promptResourceCommand.js";
 import { AgentDirPromptLibrary } from "../resources/promptLibrary.js";
-import { WorkflowLibrary } from "../resources/workflowLibrary.js";
+import { WorkflowError, WorkflowLibrary } from "../resources/workflowLibrary.js";
 import type { WorkflowModels, WorkflowInputs, WorkflowOutcome, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 import { PROMPT_RESOURCE_CATALOG_LIMITS } from "../resources/promptResourceCatalog.js";
 import { assertBoundedPromptResourceContent, readBoundedPromptResourceFile } from "../resources/promptResourceContent.js";
@@ -2750,6 +2750,21 @@ export class PiSessionService implements SessionRouteService {
   async decisions(ref: PiSessionRef) {
     const session = await this.getOrOpen(ref);
     return session instanceof DurableAgentSession ? session.decisions() : [];
+  }
+  async confirmDecision(ref: PiSessionRef, id: string) {
+    await this.assertWritable(ref);
+    this.assertSessionOpenAllowed(() => false);
+    // Opening an inactive runtime resumes its family. Review alone must never do that.
+    const session = this.activeForRef(ref)?.runtime.session;
+    if (session === undefined) {
+      const startup = this.startupSessionForRef(ref);
+      if (startup !== undefined) this.assertHandoffDestinationAcceptsInput(startup);
+      if (await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader) === undefined) throw new WorkflowError(404, "Session not found");
+      throw new WorkflowError(409, "Open this session before confirming the guess.");
+    }
+    if (!(session instanceof DurableAgentSession) || !session.hostsDurableChildren) throw new WorkflowError(404, "This session does not host child agents");
+    this.assertHandoffDestinationAcceptsInput(session);
+    return this.runSessionEntryMutation(session, "confirm a decision", () => session.confirmDecision(id));
   }
   async overturnDecision(ref: PiSessionRef, id: string, note: string) {
     await this.assertWritable(ref);

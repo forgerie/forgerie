@@ -1,5 +1,5 @@
-// The browser's copy of one session's decision log, and the overturn action.
-// Routes: GET /api/sessions/:id/decisions?cwd= and POST /api/sessions/:id/decisions/:did/overturn { cwd, note }.
+// The browser's copy of one session's decision log, and its review actions.
+// Routes: GET /api/sessions/:id/decisions?cwd=; POST /:did/overturn { cwd, note } or /:did/confirm { cwd }.
 // A change fires the session's `workflow_runs_changed` event; the binding calls refresh() on it.
 import { z } from "zod";
 import { decisionSchema, decisionsSchema, OVERTURN_NOTE_MAX, sortDecisions, type Decision, type DecisionLogView } from "./decisionsModel";
@@ -10,7 +10,7 @@ export type DecisionsState = DecisionLogView;
 
 const errorSchema = z.object({ error: z.string() });
 
-/** Reads and overturns a session's decisions. Refresh is debounced, so a burst of change events costs one read. */
+/** Reads and reviews a session's decisions. Refresh is debounced, so a burst of change events costs one read. */
 export function createDecisionsStore(request: Request, ref: () => SessionRef | undefined, refreshDelayMs = 150) {
   let state: DecisionsState = {};
   const listeners = new Set<() => void>();
@@ -34,7 +34,7 @@ export function createDecisionsStore(request: Request, ref: () => SessionRef | u
   const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
   // Reads can answer out of order. Each read takes the next number, and only the newest read's answer counts.
-  // An overturn the server accepted retires every read that started before it, since those reads predate it.
+  // An accepted review retires every read that started before it, since those reads predate it.
   let generation = 0;
   async function read() {
     const session = ref();
@@ -66,7 +66,7 @@ export function createDecisionsStore(request: Request, ref: () => SessionRef | u
     async overturn(id: string, note: string): Promise<boolean> {
       const session = ref();
       const text = note.trim();
-      if (!session || state.overturning !== undefined || text === "") return false;
+      if (!session || state.overturning !== undefined || state.confirming !== undefined || text === "") return false;
       // The server refuses a longer note; say so here, and keep the note in its field to shorten.
       if (text.length > OVERTURN_NOTE_MAX) {
         update({ ...state, error: `Shorten the note to ${OVERTURN_NOTE_MAX.toLocaleString("en-US")} characters or fewer. It has ${text.length.toLocaleString("en-US")}.` });
@@ -81,6 +81,22 @@ export function createDecisionsStore(request: Request, ref: () => SessionRef | u
       } catch (error) {
         update({ ...state, overturning: undefined, error: message(error) });
         void read();
+        return false;
+      }
+    },
+    /** Settles the flag without sending a correction or any other agent input. */
+    async confirm(id: string): Promise<boolean> {
+      const session = ref();
+      if (!session || state.overturning !== undefined || state.confirming !== undefined) return false;
+      update({ ...state, confirming: id, error: undefined });
+      try {
+        const decision = await call(`${base(session)}/${encodeURIComponent(id)}/confirm`, decisionSchema, { cwd: session.cwd });
+        generation += 1;
+        update({ ...state, confirming: undefined, decisions: replace(decision) });
+        return true;
+      } catch (error) {
+        // An inactive-session refusal must not trigger a read that opens and resumes its runtime.
+        update({ ...state, confirming: undefined, error: message(error) });
         return false;
       }
     },

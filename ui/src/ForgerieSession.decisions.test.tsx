@@ -51,6 +51,11 @@ async function sessionWithDecisions(status: SessionStatus, options: { decisions?
   vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
     if (init.method === "POST") posts.push({ path, body: JSON.parse(String(init.body)) });
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
+    if (path.endsWith(`/decisions/${GUESS.id}/confirm`)) {
+      const done: Decision = { ...GUESS, state: { kind: "confirmed", at: LOG_NOW } };
+      state.decisions = state.decisions.map((decision) => decision.id === done.id ? done : decision);
+      return Response.json(done);
+    }
     if (path.endsWith(`/decisions/${GUESS.id}/overturn`)) {
       const note = (JSON.parse(String(init.body)) as { note: string }).note;
       const done: Decision = { ...GUESS, state: { kind: "overturned", note, at: LOG_NOW } };
@@ -104,6 +109,22 @@ describe("a session's decision log", () => {
     expect(document.querySelector("dialog[open] .sheet-dialog-foot")).toBeNull();
     expect(button("Decisions")).toBeDefined();
     expect(button("Decisions, 1 flagged guess to look at")).toBeUndefined();
+  });
+
+  it("confirms without a correction, clears the header count, and keeps confirmation after reopening the sheet", async () => {
+    const api = await sessionWithDecisions({ ...idle, flaggedDecisions: 1 });
+    await act(async () => { button("Decisions, 1 flagged guess to look at")!.click(); });
+    await until(() => button("Looks right") !== undefined);
+    await act(async () => { button("Looks right")!.click(); });
+    await until(() => document.querySelector("dialog[open] .decision-record-status")?.textContent === "Confirmed");
+    expect(api.posts).toEqual([{ path: `/api/sessions/test/decisions/${GUESS.id}/confirm`, body: { cwd: "/work" } }]);
+    expect(button("Decisions")).toBeDefined();
+    await act(async () => { button("Close the decisions")!.click(); });
+    await act(async () => { button("Decisions")!.click(); });
+    await until(() => document.querySelector("dialog[open] .decision-record-status")?.textContent === "Confirmed");
+    expect(button("Looks right")).toBeUndefined();
+    const row = [...document.querySelectorAll(".decision-record")].find((node) => node.textContent?.includes(GUESS.question))!;
+    expect(row.querySelector("button")?.textContent).toBe("Overturn");
   });
 
   it("offers the log after a failed first read, with no flagged guess and no run, and Retry recovers it", async () => {

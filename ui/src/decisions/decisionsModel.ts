@@ -8,6 +8,7 @@ export const DECISION_KINDS = ["child-answer", "guess", "gated", "auto-stop", "i
 export const decisionKindSchema = z.enum(DECISION_KINDS);
 export const decisionStateSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("standing") }),
+  z.strictObject({ kind: z.literal("confirmed"), at: z.number() }),
   z.strictObject({ kind: z.literal("overturned"), note: z.string(), at: z.number() }),
 ]);
 export const decisionSchema = z.strictObject({
@@ -29,6 +30,8 @@ export const decisionSchema = z.strictObject({
 export const decisionsSchema = z.array(decisionSchema);
 /** The longest correction the server takes, counted before it trims. */
 export const OVERTURN_NOTE_MAX = 8000;
+/** The confirmation route's body. */
+export const decisionConfirmSchema = z.strictObject({ cwd: z.string().min(1) });
 /** The overturn route's body. */
 export const decisionOverturnSchema = z.strictObject({ cwd: z.string().min(1), note: z.string().min(1).max(OVERTURN_NOTE_MAX) });
 export type Decision = z.infer<typeof decisionSchema>;
@@ -45,7 +48,7 @@ export function sortDecisions(decisions: readonly Decision[]): Decision[] {
 }
 
 /**
- * Flagged guesses the reader has not overturned. Overturning one settles it, so it stops counting.
+ * Flagged guesses the reader has not reviewed. Confirmation or overturn settles the flag.
  * The session status's `flaggedDecisions` is the server's count of the same thing.
  */
 export function flaggedCount(decisions: readonly Decision[]): number {
@@ -107,14 +110,18 @@ export interface DecisionLogView {
   readError?: string | undefined;
   /** The decision whose overturn is on its way. */
   overturning?: string | undefined;
-  /** Why the last overturn failed. */
+  /** The guess whose confirmation is on its way. */
+  confirming?: string | undefined;
+  /** Why the last confirmation or overturn failed. */
   error?: string | undefined;
 }
 
-/** The log's actions. Absent `onOverturn`: the log is read only, such as for a landed session. */
+/** The log's actions. Mutation actions are absent for read-only sessions. */
 export interface DecisionLogActions {
   onRetry: () => void;
   /** Resolves true once the server took the correction. */
   onOverturn?: ((id: string, note: string) => Promise<boolean>) | undefined;
+  /** Resolves true once the server confirmed the flagged guess. Sends no agent input. */
+  onConfirm?: ((id: string) => Promise<boolean>) | undefined;
   onDismissError: () => void;
 }

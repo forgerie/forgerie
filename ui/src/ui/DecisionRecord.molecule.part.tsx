@@ -13,8 +13,18 @@ export default function Standing() {
   </ul>;
 }
 export function Flagged() {
+  const [confirmed, setConfirmed] = useState(false);
   return <ul>
-    <DecisionRecord subject="parent" phrase="guessed" time="12m" flag="Flagged guess" question="The spec says both “newest first” and “group by stage”. Which wins?"
+    <DecisionRecord subject="parent" phrase="guessed" time="12m" flag={confirmed ? undefined : "Flagged guess"} status={confirmed ? "Confirmed" : undefined} question="The spec says both “newest first” and “group by stage”. Which wins?"
+      choice="Newest first, with the stage as a label on each row." reason="Grouping hides the order the reader asked to scan."
+      action={{ label: "Overturn", onPress: () => undefined }}
+      secondaryAction={confirmed ? undefined : { label: "Looks right", onPress: () => setConfirmed(true) }} />
+  </ul>;
+}
+export function Confirmed() {
+  return <ul>
+    <DecisionRecord subject="parent" phrase="guessed" time="12m" status="Confirmed"
+      question="The spec says both “newest first” and “group by stage”. Which wins?"
       choice="Newest first, with the stage as a label on each row." reason="Grouping hides the order the reader asked to scan."
       action={{ label: "Overturn", onPress: () => undefined }} />
   </ul>;

@@ -20,16 +20,21 @@ export function DecisionsSheet({ log, actions, initialTarget, now: clock = Date.
   onClose: () => void;
 }) {
   const [chosen, setChosen] = useState(initialTarget);
-  const target = log.decisions?.find((decision) => decision.id === chosen && decision.state.kind === "standing");
+  const target = log.decisions?.find((decision) => decision.id === chosen && decision.state.kind !== "overturned");
   const overturn = actions.onOverturn;
-  const pending = log.overturning !== undefined;
+  const confirm = actions.onConfirm;
+  const pending = log.overturning !== undefined || log.confirming !== undefined;
   const close = () => { setChosen(undefined); actions.onDismissError(); };
-  const footer = overturn !== undefined && (target !== undefined || log.error !== undefined) ? <OverturnFooter target={target} pending={pending} error={log.error}
-    onSend={async (note) => { if (target === undefined) return false; const done = await overturn(target.id, note); if (done) setChosen(undefined); return done; }}
+  const footer = (overturn !== undefined || confirm !== undefined) && (target !== undefined || log.error !== undefined) ? <OverturnFooter target={target} pending={pending} error={log.error}
+    onSend={async (note) => { if (target === undefined || overturn === undefined) return false; const done = await overturn(target.id, note); if (done) setChosen(undefined); return done; }}
     onCancel={close} onDismissError={close} /> : undefined;
   return <SheetDialog title="Decisions" subtitle={logSummary(log.decisions)} closeLabel="Close the decisions" onClose={onClose} footer={footer}>
     <DecisionLog decisions={log.decisions} readError={log.readError} now={clock()} target={target?.id} busy={pending}
-      onRetry={actions.onRetry} onChoose={overturn === undefined ? undefined : (id) => {
+      onRetry={actions.onRetry} onConfirm={confirm === undefined ? undefined : async (id) => {
+        const done = await confirm(id);
+        if (done) setChosen((current) => current === id ? undefined : current);
+        return done;
+      }} onChoose={overturn === undefined ? undefined : (id) => {
         actions.onDismissError();
         setChosen((current) => current === id ? undefined : id);
       }} />

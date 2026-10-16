@@ -9,7 +9,7 @@ import { createRegistry } from "@earendil-works/pi-durable";
 import { expect, it, vi } from "vitest";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { durableChildExtensions, listChildren, childMessages } from "./durableChildAgents.js";
-import { decisions, decisionExtension, logDecision, overturnDecision, DECISIONS_DOC_KIND } from "./durableDecisions.js";
+import { confirmDecision, decisions, decisionExtension, flaggedDecisions, logDecision, overturnDecision, DECISIONS_DOC_KIND } from "./durableDecisions.js";
 
 it("logs future slice kinds once and does not duplicate a placed correction after abort/reopen", async () => {
   const root = await mkdtemp(join(tmpdir(), "forgerie-decisions-replay-"));
@@ -110,4 +110,38 @@ it("replays parent question admission and a committed answer without asking or l
     const questions = (await journal.conversation.context(context)).entries.flatMap((entry) => entry.model ?? []).filter((message) => message.role === "user" && typeof message.content === "string" && message.content.startsWith("[child helper asks"));
     expect(questions).toHaveLength(1);
   } finally { await journal.close(); await rm(root, {recursive: true, force: true}); }
+});
+
+it("confirms only flagged guesses durably and idempotently without tasks or resume, and still permits overturn", async () => {
+  const root = await mkdtemp(join(tmpdir(), "forgerie-confirm-guess-"));
+  const manager = SessionManager.create(root, join(root, "sessions"));
+  const models = createModels();
+  const registry = createRegistry(); const extension = decisionExtension(); registry.install(extension);
+  const open = () => DurableSessionJournal.open({ manager, models, registry, agent: { extensions: [extension] } });
+  let journal = await open();
+  try {
+    for (const [id, kind, flagged] of [["guess", "guess", true], ["unflagged", "guess", false], ["answer", "child-answer", true], ["gate", "gated", true], ["stop", "auto-stop", true], ["issue", "issue", true]] as const) {
+      await journal.conversation.commit((tx) => logDecision(tx, journal.conversation.id, { id, kind, flagged, by: "parent", question: "Proceed?", choice: "Proceed", reason: "Task says so" }), context);
+    }
+    const before = await flaggedDecisions(journal.harness, journal.conversation.id, context);
+    const entries = (await journal.conversation.context(context)).entries;
+    const resume = vi.spyOn(journal.harness, "resume");
+    const confirm = (id: string) => confirmDecision(journal.conversation, id, context);
+    await expect(confirm("missing")).rejects.toThrow("not found");
+    for (const id of ["unflagged", "answer", "gate", "stop", "issue"]) await expect(confirm(id)).rejects.toThrow("Only flagged guesses");
+    const first = await confirm("guess");
+    expect(first).toMatchObject({ flagged: true, state: { kind: "confirmed" } });
+    expect(first.state.kind !== "standing" && first.state.at).toBeTypeOf("number");
+    expect(await confirm("guess")).toEqual(first);
+    expect(resume).not.toHaveBeenCalled(); resume.mockRestore();
+    expect(await journal.harness.commit((tx) => tx.scanTasks({ kind: "forgerie.decision-correction" }, 10), context)).toMatchObject({ items: [] });
+    expect((await journal.conversation.context(context)).entries).toEqual(entries);
+    expect(await flaggedDecisions(journal.harness, journal.conversation.id, context)).toBe(before - 1);
+    await journal.close(); journal = await open();
+    expect((await decisions(journal.harness, journal.conversation.id, context)).find((decision) => decision.id === "guess")).toEqual(first);
+    expect(await confirm("guess")).toEqual(first);
+    expect(await flaggedDecisions(journal.harness, journal.conversation.id, context)).toBe(before - 1);
+    await overturnDecision(journal.harness, journal.conversation, "guess", "Use another value", context);
+    await expect(confirm("guess")).rejects.toThrow("already overturned");
+  } finally { await journal.close(); await rm(root, { recursive: true, force: true }); }
 });

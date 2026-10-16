@@ -3,6 +3,7 @@ import { Type, type Static } from "typebox";
 export const DecisionKindSchema = Type.Union([Type.Literal("child-answer"), Type.Literal("guess"), Type.Literal("gated"), Type.Literal("auto-stop"), Type.Literal("issue")]);
 export const DecisionStateSchema = Type.Union([
   Type.Object({ kind: Type.Literal("standing") }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("confirmed"), at: Type.Number() }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("overturned"), note: Type.String(), at: Type.Number() }, { additionalProperties: false }),
 ]);
 export const DecisionSchema = Type.Object({
@@ -10,6 +11,7 @@ export const DecisionSchema = Type.Object({
   question: Type.String(), choice: Type.String(), reason: Type.String(), flagged: Type.Boolean(), state: DecisionStateSchema,
 }, { additionalProperties: false });
 export type Decision = Static<typeof DecisionSchema>;
+export const DecisionConfirmSchema = Type.Object({ cwd: Type.String({ minLength: 1 }) }, { additionalProperties: false });
 export const DecisionOverturnSchema = Type.Object({ cwd: Type.String({ minLength: 1 }), note: Type.String({ minLength: 1, maxLength: 8000 }) }, { additionalProperties: false });
 export const RecordDecisionSchema = Type.Object({
   question: Type.String({ minLength: 1, maxLength: 65536 }), choice: Type.String({ minLength: 1, maxLength: 65536 }),

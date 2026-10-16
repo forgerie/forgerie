@@ -193,3 +193,69 @@ it("returns an empty decision list without Durable hosting and validates strict 
     expect((await app.inject({method: "POST", url: `${base}/unknown/overturn`, payload: {cwd: root, note: "Correct it"}})).statusCode).toBe(404);
   } finally { await app.close(); }
 });
+
+it("confirms a flagged guess through HTTP, publishes counts, reloads, and can still overturn it", async () => {
+  const ref = { id: (await service.start(root)).id, cwd: root };
+  await service.prompt(ref, "RECORD true");
+  await vi.waitFor(async () => { expect((await service.status(ref)).flaggedDecisions).toBe(1); expect((await service.status(ref)).isStreaming).toBe(false); });
+  const guess = required((await service.decisions(ref))[0]);
+  const app = Fastify(); registerDecisionRoutes(app, service, "/api");
+  const base = `/api/sessions/${ref.id}/decisions`;
+  const url = `${base}/${encodeURIComponent(guess.id)}/confirm`;
+  try {
+    for (const payload of [{}, { cwd: "" }, { cwd: root, note: "yes" }, { cwd: root, approved: true }]) {
+      expect((await app.inject({ method: "POST", url, payload })).statusCode).toBe(400);
+    }
+    expect((await app.inject({ method: "POST", url: `${base}/missing/confirm`, payload: { cwd: root } })).statusCode).toBe(404);
+    const events = hub.sessionEvents.length;
+    const first = await app.inject({ method: "POST", url, payload: { cwd: root } });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ id: guess.id, flagged: true, state: { kind: "confirmed" } });
+    expect((await app.inject({ method: "POST", url, payload: { cwd: root } })).json()).toEqual(first.json());
+    expect((await service.status(ref)).flaggedDecisions).toBeUndefined();
+    expect(hub.sessionEvents.slice(events).some(({ event }) => JSON.stringify(event).includes("workflow_runs_changed"))).toBe(true);
+    await service.dispose(); service = open();
+    expect((await service.decisions(ref))[0]).toEqual(first.json());
+    expect((await service.status(ref)).flaggedDecisions).toBeUndefined();
+    await service.overturnDecision(ref, guess.id, "Use a different value");
+    await expect(service.confirmDecision(ref, guess.id)).rejects.toThrow("already overturned");
+  } finally { await app.close(); }
+});
+
+it("refuses confirmation of a non-guess through HTTP", async () => {
+  const ref = await start();
+  await vi.waitFor(async () => { expect(await service.decisions(ref)).toHaveLength(1); });
+  const answer = required((await service.decisions(ref))[0]);
+  const app = Fastify(); registerDecisionRoutes(app, service, "/api");
+  try {
+    const response = await app.inject({ method: "POST", url: `/api/sessions/${ref.id}/decisions/${encodeURIComponent(answer.id)}/confirm`, payload: { cwd: root } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: "Only flagged guesses can be confirmed" });
+    expect((await service.decisions(ref))[0]?.state.kind).toBe("standing");
+  } finally { await app.close(); }
+});
+
+it("requires explicit session opening before inactive confirmation and never opens or creates a runtime", async () => {
+  const ref = { id: (await service.start(root)).id, cwd: root };
+  await service.prompt(ref, "RECORD true");
+  await vi.waitFor(async () => { expect((await service.status(ref)).flaggedDecisions).toBe(1); expect((await service.status(ref)).isStreaming).toBe(false); });
+  const guess = required((await service.decisions(ref))[0]);
+  await service.dispose();
+  const gateway = createPiSessionManagerGateway({ agentDir: join(root, "agent"), env: { HOME: root }, sessionDirEnvKeys: [] });
+  const opened = vi.spyOn(gateway, "open");
+  const createAgentRuntime = vi.fn(() => Promise.reject(new Error("Confirmation must not acquire a runtime")));
+  service = new PiSessionService(new CapturingSessionEventHub(), { agentDir: join(root, "agent"), modelRuntime: models,
+    archiveStore: emptyArchiveStore(), sessionManager: gateway, createAgentRuntime, durableChildAgents: createDurableChildHost() });
+  const app = Fastify(); registerDecisionRoutes(app, service, "/api");
+  try {
+    const url = `/api/sessions/${ref.id}/decisions/${encodeURIComponent(guess.id)}/confirm`;
+    const response = await app.inject({ method: "POST", url, payload: { cwd: root } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: "Open this session before confirming the guess." });
+    expect((await app.inject({ method: "POST", url, payload: { cwd: join(root, "another-project") } })).statusCode).toBe(404);
+    expect(opened).not.toHaveBeenCalled();
+    expect(createAgentRuntime).not.toHaveBeenCalled();
+    await service.dispose(); service = open();
+    expect((await service.decisions(ref))[0]).toEqual(guess);
+  } finally { opened.mockRestore(); await app.close(); }
+});

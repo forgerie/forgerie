@@ -171,3 +171,64 @@ describe("overturning a decision", () => {
     expect(store.getSnapshot().decisions).toBeUndefined();
   });
 });
+
+describe("confirming a flagged guess", () => {
+  const confirmed: Decision = { ...GUESS, state: { kind: "confirmed", at: LOG_NOW } };
+  it("posts only cwd, clears the flag from the returned record, and survives a read", async () => {
+    let records = RUN_DECISIONS;
+    const { calls, store } = routes((_path, init) => {
+      if (init.method === "POST") { records = records.map((decision) => decision.id === GUESS.id ? confirmed : decision); return json(200, confirmed); }
+      return json(200, records);
+    });
+    await store.retry();
+    const sent = store.confirm(GUESS.id);
+    expect(store.getSnapshot().confirming).toBe(GUESS.id);
+    expect(await sent).toBe(true);
+    expect(calls.at(-1)).toEqual({ path: "/api/sessions/s%201/decisions/d-2/confirm", method: "POST", body: { cwd: SESSION.cwd } });
+    expect(store.getSnapshot().confirming).toBeUndefined();
+    expect(store.getSnapshot().decisions?.find((decision) => decision.id === GUESS.id)).toEqual(confirmed);
+    await store.retry();
+    expect(store.getSnapshot().decisions?.find((decision) => decision.id === GUESS.id)).toEqual(confirmed);
+    store.dispose();
+  });
+
+  it("retires stale reads and serializes confirmations with overturns", async () => {
+    const stale = held(); const response = held(); let reads = 0;
+    const { calls, store } = routes((_path, init) => init.method === "POST" ? response.promise : ++reads === 1 ? json(200, RUN_DECISIONS) : stale.promise);
+    await store.retry();
+    const before = store.retry();
+    const sent = store.confirm(GUESS.id);
+    expect(await store.confirm(GUESS.id)).toBe(false);
+    expect(await store.overturn(GUESS.id, "Group by stage.")).toBe(false);
+    response.release(json(200, confirmed));
+    expect(await sent).toBe(true);
+    stale.release(json(200, RUN_DECISIONS)); await before;
+    expect(store.getSnapshot().decisions?.find((decision) => decision.id === GUESS.id)).toEqual(confirmed);
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    store.dispose();
+  });
+
+  it("cannot confirm while an overturn is in flight", async () => {
+    const response = held();
+    const { calls, store } = routes(() => response.promise);
+    const sent = store.overturn(GUESS.id, "Group by stage.");
+    expect(await store.confirm(GUESS.id)).toBe(false);
+    response.release(json(200, overturned(GUESS, "Group by stage.")));
+    expect(await sent).toBe(true);
+    expect(calls).toHaveLength(1); store.dispose();
+  });
+
+  it("shows a refusal without a runtime-opening read, and permits retry", async () => {
+    let refuse = true;
+    const { calls, store } = routes((_path, init) => init.method === "POST"
+      ? refuse ? json(409, { error: "Decision already overturned" }) : json(200, confirmed) : json(200, RUN_DECISIONS));
+    await store.retry();
+    expect(await store.confirm(GUESS.id)).toBe(false);
+    expect(store.getSnapshot()).toMatchObject({ confirming: undefined, error: "Decision already overturned" });
+    await settle();
+    expect(calls.filter((call) => call.method === "GET")).toHaveLength(1);
+    refuse = false;
+    expect(await store.confirm(GUESS.id)).toBe(true);
+    expect(store.getSnapshot().error).toBeUndefined(); store.dispose();
+  });
+});

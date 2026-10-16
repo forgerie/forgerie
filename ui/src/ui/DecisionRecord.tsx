@@ -13,7 +13,7 @@ import "./DecisionRecord.css";
  * first line; pressed, it says so, and the record keeps itself in view while
  * what the action opened (such as a footer) takes room from the list.
  */
-export function DecisionRecord({ subject, phrase, time, timeTitle, status, question, choice, reason, flag, correction, action }: {
+export function DecisionRecord({ subject, phrase, time, timeTitle, status, question, choice, reason, flag, correction, action, secondaryAction }: {
   /** Who decided, in the code face. */
   subject: string;
   /** What they did, after the name. */
@@ -32,6 +32,7 @@ export function DecisionRecord({ subject, phrase, time, timeTitle, status, quest
   /** The choice no longer stands: what replaced it, who said so, and when. */
   correction?: { label: string; text: string; time?: string | undefined } | undefined;
   action?: { label: string; onPress: () => void; pressed?: boolean | undefined; disabled?: boolean | undefined } | undefined;
+  secondaryAction?: { label: string; onPress: () => void; disabled?: boolean | undefined } | undefined;
 }) {
   const struck = correction !== undefined;
   const row = useRef<HTMLLIElement>(null);
@@ -51,8 +52,9 @@ export function DecisionRecord({ subject, phrase, time, timeTitle, status, quest
       {status !== undefined && <span className="decision-record-status">{status}</span>}
       {time !== undefined && <span className="decision-record-time" title={timeTitle}>{time}</span>}
     </p>
-    {action !== undefined && <span className="decision-record-end">
-      <TextButton label={action.label} onPress={action.onPress} pressed={action.pressed} disabled={action.disabled} />
+    {(action !== undefined || secondaryAction !== undefined) && <span className="decision-record-end">
+      {action !== undefined && <TextButton label={action.label} onPress={action.onPress} pressed={action.pressed} disabled={action.disabled} />}
+      {secondaryAction !== undefined && <TextButton label={secondaryAction.label} onPress={secondaryAction.onPress} disabled={secondaryAction.disabled} />}
     </span>}
     <p className="decision-record-question">{question}</p>
     <div className="decision-record-answer">

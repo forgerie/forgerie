@@ -20,18 +20,20 @@ const KIND_ICON: Record<DecisionKind, ReactNode> = {
  * open line says a correction cannot undo it. Toggles narrow the log to one kind. Until the first read answers, the
  * log says it is reading; a failed read says why, with Retry, above what was read before.
  */
-export function DecisionLog({ decisions, readError, now, target, busy = false, onRetry, onChoose }: {
+export function DecisionLog({ decisions, readError, now, target, busy = false, onRetry, onChoose, onConfirm }: {
   /** Undefined until the first read answers. */
   decisions: readonly Decision[] | undefined;
   readError?: string | undefined;
   now: number;
   /** The decision whose note field is open. */
   target?: string | undefined;
-  /** An overturn is on its way: no other can start. */
+  /** A review action is on its way: no other can start. */
   busy?: boolean;
   onRetry: () => void;
   /** Opens or closes the note field for one decision. Absent: the log is read only. */
   onChoose?: ((id: string) => void) | undefined;
+  /** Confirms a flagged guess without asking the agent to redo work. */
+  onConfirm?: ((id: string) => Promise<boolean>) | undefined;
 }) {
   const [filter, setFilter] = useState<DecisionFilter>("all");
   // Ids of decisions the reader opened, or chose to overturn. An overturned guess leaves the flagged section for its
@@ -54,15 +56,20 @@ export function DecisionLog({ decisions, readError, now, target, busy = false, o
   // Said once, under the last section, while the log can be overturned.
   const note = onChoose === undefined ? undefined
     : "Overturning a decision sends your note to the agent that acted on it, which redoes the work. If that agent has finished, the parent agent gets the note.";
+  const confirm = async (id: string) => {
+    if (await onConfirm?.(id)) setOpened((current) => new Set([...current, id]));
+  };
   const record = (decision: Decision) => {
     const overturned = decision.state.kind === "overturned" ? decision.state : undefined;
     return <DecisionRecord key={decision.id} subject={deciderName(decision.by)} phrase={KIND_PHRASE[decision.kind]}
-      time={age(decision.at, now)} timeTitle={new Date(decision.at).toLocaleString()} status={overturned ? "Overturned" : undefined}
+      time={age(decision.at, now)} timeTitle={new Date(decision.at).toLocaleString()} status={overturned ? "Overturned" : decision.state.kind === "confirmed" ? "Confirmed" : undefined}
       question={decision.question} choice={decision.choice} reason={decision.reason}
-      flag={decision.flagged ? overturned ? "Flagged guess, overturned" : "Flagged guess" : undefined}
+      flag={decision.flagged && decision.state.kind !== "confirmed" ? overturned ? "Flagged guess, overturned" : "Flagged guess" : undefined}
       correction={overturned && { label: "you", text: overturned.note, time: age(overturned.at, now) }}
       action={overturned === undefined && onChoose !== undefined
-        ? { label: decision.kind === "gated" ? "Send a correction" : "Overturn", pressed: target === decision.id, disabled: busy, onPress: () => onChoose(decision.id) } : undefined} />;
+        ? { label: decision.kind === "gated" ? "Send a correction" : "Overturn", pressed: target === decision.id, disabled: busy, onPress: () => onChoose(decision.id) } : undefined}
+      secondaryAction={decision.kind === "guess" && decision.flagged && decision.state.kind === "standing" && onConfirm !== undefined
+        ? { label: "Looks right", disabled: busy, onPress: () => { void confirm(decision.id); } } : undefined} />;
   };
   return <>
     {failure}
@@ -78,7 +85,7 @@ export function DecisionLog({ decisions, readError, now, target, busy = false, o
         const gated = first.kind === "gated";
         return <DisclosureRow key={group.key} icon={KIND_ICON[first.kind]} iconLabel={KIND_PHRASE[first.kind]} title={first.question}
           line={gated ? undefined : <><code>{deciderName(first.by)}</code> {KIND_PHRASE[first.kind]}: {first.choice}</>}
-          status={overturned ? "Overturned" : gated ? gatedWord(first.choice) : undefined} count={group.decisions.length}
+          status={overturned ? "Overturned" : first.state.kind === "confirmed" ? "Confirmed" : gated ? gatedWord(first.choice) : undefined} count={group.decisions.length}
           time={group.decisions.map((decision) => age(decision.at, now)).join(", ")} timeTitle={new Date(first.at).toLocaleString()}
           struck={overturned} open={isOpen(group)} onToggle={() => toggle(group)}
           note={gated && !overturned && onChoose !== undefined ? "The action already ran. A correction tells the agent what to do next; it does not undo the action." : undefined}>

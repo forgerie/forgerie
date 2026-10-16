@@ -45,6 +45,19 @@ const Correction = defineTask<{ id: string; recipient: ConversationId; text: str
   }, context) },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });
+/** Confirmation settles review only. It creates no input or task and never resumes the harness. */
+export async function confirmDecision(parent: Conversation, id: string, context: Context): Promise<Decision> {
+  return parent.commit(async (tx) => {
+    const doc = await tx.doc(Decisions, parent.id);
+    const decision = Object.hasOwn(doc.records, id) ? doc.records[id] : undefined;
+    if (decision === undefined) throw new WorkflowError(404, "Decision not found in this session");
+    if (decision.kind !== "guess" || !decision.flagged) throw new WorkflowError(409, "Only flagged guesses can be confirmed");
+    if (decision.state.kind === "overturned") throw new WorkflowError(409, "Decision already overturned");
+    // Retry receipts keep the first confirmation time, including after reload.
+    if (decision.state.kind === "standing") decision.state = { kind: "confirmed", at: Date.now() };
+    return publicDecision(decision);
+  }, context);
+}
 export async function overturnDecision(harness: Harness, parent: Conversation, id: string, note: string, context: Context): Promise<Decision> {
   if (note.trim() === "" || note.length > 8000) throw new WorkflowError(400, "A nonblank correction of at most 8000 characters is required");
   const result = await parent.commit(async (tx) => {

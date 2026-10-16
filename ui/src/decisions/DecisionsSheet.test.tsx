@@ -239,3 +239,61 @@ describe("the header's way in", () => {
     expect(document.querySelector(".badge-button")?.getAttribute("aria-label")).toBe("Decisions");
   });
 });
+
+it("confirms only standing flagged guesses, clears the flag, and keeps Overturn available", async () => {
+  const onConfirm = vi.fn(async () => true);
+  const onOverturn = vi.fn(async () => true);
+  const actions = { onRetry: () => {}, onDismissError: () => {}, onConfirm, onOverturn };
+  const render = (log: DecisionLogView) => act(async () => root.render(<DecisionsSheet log={log} actions={actions} now={() => LOG_NOW} onClose={() => {}} />));
+  await render({ decisions: SESSION_DECISIONS });
+  expect([...sheet().querySelectorAll("button")].filter((node) => node.textContent === "Looks right")).toHaveLength(1);
+  await act(async () => { record(GUESS.question)!.querySelector<HTMLButtonElement>("button")!.click(); });
+  expect(footer()?.querySelector("textarea")).not.toBeNull();
+  await act(async () => { button("Looks right")!.click(); });
+  expect(footer()).toBeNull();
+  expect(onConfirm).toHaveBeenCalledWith(GUESS.id);
+  expect(onOverturn).not.toHaveBeenCalled();
+  await render({ decisions: SESSION_DECISIONS, confirming: GUESS.id });
+  expect(button("Looks right")?.disabled).toBe(true);
+  expect(record(GUESS.question)?.querySelector<HTMLButtonElement>("button")?.disabled).toBe(true);
+  const confirmed = { ...GUESS, state: { kind: "confirmed" as const, at: LOG_NOW } };
+  await render({ decisions: [confirmed] });
+  expect(sheet().querySelector(".sheet-dialog-subtitle")?.textContent).toBe("1 decision");
+  expect(record(GUESS.question)?.querySelector(".decision-record-status")?.textContent).toBe("Confirmed");
+  expect(record(GUESS.question)?.querySelector('[role="img"]')).toBeNull();
+  expect(record(GUESS.question)?.querySelector("del")).toBeNull();
+  expect(button("Looks right")).toBeUndefined();
+  await act(async () => { button("Overturn")!.click(); });
+  await type("Use a different order.");
+  await act(async () => { button("Send and overturn")!.click(); });
+  expect(onOverturn).toHaveBeenCalledWith(GUESS.id, "Use a different order.");
+});
+
+it("shows a confirmation failure without closing the sheet and offers dismissal", async () => {
+  const actions = { onRetry: () => {}, onDismissError: vi.fn(), onConfirm: vi.fn(async () => false) };
+  await act(async () => root.render(<DecisionsSheet log={{ decisions: [GUESS], error: "Storage unavailable" }} actions={actions} onClose={() => {}} />));
+  expect(sheet().open).toBe(true);
+  expect(footer()?.querySelector('[role="alert"]')?.textContent).toBe("Storage unavailable");
+  await act(async () => { button("Dismiss")!.click(); });
+  expect(actions.onDismissError).toHaveBeenCalledOnce();
+  expect(button("Looks right")?.disabled).toBe(false);
+});
+
+it("confirms from the run sheet and allows overturn of a confirmed guess", async () => {
+  const onConfirm = vi.fn(async () => true); const onOverturn = vi.fn(async () => true);
+  const actions = { onRetry: () => {}, onDismissError: () => {}, onConfirm, onOverturn };
+  await act(async () => root.render(runSheet({ log: { decisions: SESSION_DECISIONS, confirming: GUESS.id }, actions })));
+  expect(button("Looks right")?.disabled).toBe(true);
+  await act(async () => root.render(runSheet({ log: { decisions: SESSION_DECISIONS, error: "Cannot confirm" }, actions })));
+  expect(sheet().querySelector('[role="alert"]')?.textContent).toBe("Cannot confirm");
+  await act(async () => root.render(runSheet({ log: { decisions: SESSION_DECISIONS }, actions })));
+  await act(async () => { button("Looks right")!.click(); });
+  expect(onConfirm).toHaveBeenCalledWith(GUESS.id);
+  expect(onOverturn).not.toHaveBeenCalled();
+  await act(async () => root.render(runSheet({ log: { decisions: [{ ...GUESS, state: { kind: "confirmed", at: LOG_NOW } }] }, actions })));
+  expect(button("Looks right")).toBeUndefined();
+  await act(async () => { button("Overturn")!.click(); });
+  await type("Group by stage.");
+  await act(async () => { button("Send and overturn")!.click(); });
+  expect(onOverturn).toHaveBeenCalledWith(GUESS.id, "Group by stage.");
+});

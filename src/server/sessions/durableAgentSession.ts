@@ -42,7 +42,7 @@ import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { disposableWorktree, SCRATCH_ROOT } from "./disposableWorktrees.js";
 import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
-import { decisionExtension, decisions, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
+import { decisionExtension, decisions, confirmDecision, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
 import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowDecisions, acknowledgeWorkflowStall, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
@@ -381,6 +381,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   gatedActions() { return gatedActions(this.journal.harness, this.journal.conversation.id, context); }
   decideGatedAction(id: string, choice: "approved" | "refused") { return decideGatedAction(this.journal.harness, this.journal.conversation, id, choice, context); }
   decisions() { return decisions(this.journal.harness, this.journal.conversation.id, context); }
+  confirmDecision(id: string) { return confirmDecision(this.journal.conversation, id, context); }
   overturnDecision(id: string, note: string) { return overturnDecision(this.journal.harness, this.journal.conversation, id, note, context); }
   runWorkflow(name: string, inputs: WorkflowInputs, requestId: string, models?: WorkflowModels) {
     if (!this.hostsDurableChildren) throw new Error("Workflow launches require durableChildren");

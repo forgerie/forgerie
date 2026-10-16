@@ -402,6 +402,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     onRetry: () => { void decisions.retry(); }, onDismissError: decisions.dismissError,
     // A landed or discarded session has no agent left to take a correction.
     onOverturn: readOnly ? undefined : decisions.overturn,
+    onConfirm: readOnly ? undefined : decisions.confirm,
   };
   const startWorkflow = async (name: string, inputs: WorkflowInputs, task: string | undefined, models: ModelChoices | undefined) => {
     if (!await workflows.launch(name, inputs, models)) return;

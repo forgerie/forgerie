@@ -1,8 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { TSchema } from "typebox";
 import { Check } from "typebox/value";
-import { DecisionKindSchema, DecisionOverturnSchema, DecisionSchema, DecisionStateSchema, type Decision as SharedDecision } from "@shared/decisions";
-import { decisionKindSchema, decisionOverturnSchema, decisionSchema, decisionStateSchema, type Decision } from "./decisionsModel";
+import { DecisionConfirmSchema, DecisionKindSchema, DecisionOverturnSchema, DecisionSchema, DecisionStateSchema, type Decision as SharedDecision } from "@shared/decisions";
+import { decisionConfirmSchema, decisionKindSchema, decisionOverturnSchema, decisionSchema, decisionStateSchema, type Decision } from "./decisionsModel";
 import { ANSWER, OVERTURNED, SESSION_ANSWER } from "./fixtures/decisions";
 
 /** Both sides must take and refuse the same values. */
@@ -36,8 +36,15 @@ describe("the decision log mirrors the server's schema (src/shared/decisions.ts)
   it("takes and refuses the same kinds and states", () => {
     agree("kind", decisionKindSchema, DecisionKindSchema, ["child-answer", "guess", "gated", "auto-stop", "issue", "Guess", "", "auto_stop", 1, null]);
     agree("state", decisionStateSchema, DecisionStateSchema, [
+      { kind: "confirmed", at: 0 }, { kind: "confirmed" }, { kind: "confirmed", at: "now" }, { kind: "confirmed", at: 0, note: "yes" },
       { kind: "standing" }, { kind: "overturned", note: "", at: 0 }, { kind: "overturned", note: "Group by stage.", at: 1791502400000 },
       { kind: "standing", at: 1 }, { kind: "overturned", note: "x" }, { kind: "overturned", at: 1 }, { kind: "overturned", note: 1, at: 1 }, { kind: "withdrawn" }, {},
+    ]);
+  });
+
+  it("sends a confirmation body the route takes", () => {
+    agree("confirm", decisionConfirmSchema, DecisionConfirmSchema, [
+      { cwd: "/srv/app" }, { cwd: "" }, {}, { cwd: "/srv/app", note: "yes" }, null, { cwd: 1 },
     ]);
   });
 

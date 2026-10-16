@@ -97,9 +97,10 @@ export function WorkflowRunView({ run, looks, record, models, deciding = false, 
     : <WorkflowPlan plan={plan} original={stages} progress={progress} target={target} />;
   const log = decisions?.log;
   const overturn = decisions?.actions.onOverturn;
+  const confirm = decisions?.actions.onConfirm;
   const mine = log?.decisions === undefined ? undefined : decisionsOfRun(log.decisions, run.id);
-  const chosenDecision = mine?.find((decision) => decision.id === chosen && decision.state.kind === "standing");
-  const overturning = log?.overturning !== undefined;
+  const chosenDecision = mine?.find((decision) => decision.id === chosen && decision.state.kind !== "overturned");
+  const overturning = log?.overturning !== undefined || log?.confirming !== undefined;
   const closeOverturn = () => { setChosen(undefined); decisions?.actions.onDismissError(); };
   const inputs = Object.entries(run.inputs).sort(([a], [b]) => Number(b === "task") - Number(a === "task"));
   const rail = <>
@@ -110,6 +111,11 @@ export function WorkflowRunView({ run, looks, record, models, deciding = false, 
     </PageSection>}
     {decisions !== undefined && <DecisionList title="Decisions" placement="document" decisions={mine} readError={log?.readError} now={clock()}
       target={chosenDecision?.id} busy={overturning} onRetry={decisions.actions.onRetry}
+      onConfirm={confirm === undefined ? undefined : async (id) => {
+        const done = await confirm(id);
+        if (done) setChosen((current) => current === id ? undefined : current);
+        return done;
+      }}
       onChoose={overturn === undefined ? undefined : (id) => { decisions.actions.onDismissError(); setChosen((current) => current === id ? undefined : id); }} />}
   </>;
   const next = stages.find((stage) => stage.stop !== undefined && run.stops?.[stage.id]?.state !== "approved");
@@ -128,8 +134,8 @@ export function WorkflowRunView({ run, looks, record, models, deciding = false, 
     subtitle={<>{planTitle(run.definition.text, run.definition.name) !== run.definition.name && <code>{run.definition.name}</code>}<span>{runStatus(run)}</span></>}
     closeLabel="Close the run" onClose={onClose} railFirst detail={worker !== undefined}
     lead={lead} document={document} documentLabel={worker === undefined ? "Plan" : worker.name}
-    rail={rail} railLabel="The run" foot={decisions !== undefined && overturn !== undefined && (chosenDecision !== undefined || log?.error !== undefined)
+    rail={rail} railLabel="The run" foot={decisions !== undefined && (overturn !== undefined || confirm !== undefined) && (chosenDecision !== undefined || log?.error !== undefined)
       ? <OverturnFooter target={chosenDecision} pending={overturning} error={log?.error} onCancel={closeOverturn} onDismissError={closeOverturn}
-        onSend={async (text) => { if (chosenDecision === undefined) return false; const done = await overturn(chosenDecision.id, text); if (done) setChosen(undefined); return done; }} />
+        onSend={async (text) => { if (chosenDecision === undefined || overturn === undefined) return false; const done = await overturn(chosenDecision.id, text); if (done) setChosen(undefined); return done; }} />
       : <ActionFooter note={footNote} problem={error} actions={stopActions} />} />;
 }

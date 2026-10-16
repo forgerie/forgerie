@@ -43,6 +43,7 @@ describe("ordering and counts", () => {
     expect(flaggedCount(SESSION_DECISIONS)).toBe(1);
     expect(flaggedCount([GUESS, { ...GUESS, id: "d-9" }, OVERTURNED, ANSWER])).toBe(2);
     expect(flaggedCount([])).toBe(0);
+    expect(flaggedCount([{ ...GUESS, state: { kind: "confirmed", at: LOG_NOW } }, OVERTURNED, ANSWER])).toBe(0);
   });
 
   it("lists a run's own decisions, newest first", () => {
