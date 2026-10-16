@@ -6,7 +6,7 @@ import lockfile from "proper-lockfile";
 import { managedProcessEnvironment } from "./managedProcessEnvironment.js";
 import { atomicWrite, hasCode, readResult } from "./managedProcessFiles.js";
 import { prepareProcessFiles, writeProcessInput } from "./managedProcessIo.js";
-import { ManagedProcessLog, type ManagedProcessLogBatch, type ManagedProcessLogCursor, type ManagedProcessLogReadOptions } from "./managedProcessLog.js";
+import { ManagedProcessLog, type ManagedProcessLogBatch, type ManagedProcessLogCursor, type ManagedProcessLogReadOptions, type ManagedProcessLogTail } from "./managedProcessLog.js";
 import {
   managedProcessRecordSchema, managedProcessStartSchema, ManagedProcessLaunchError,
   type ManagedProcessInputResult, type ManagedProcessLauncher, type ManagedProcessRecord,
@@ -110,6 +110,10 @@ export class ManagedProcesses {
       const snapshot = await this.classify(await this.record(id));
       return this.log(snapshot).read(snapshot.state.kind !== "running", options);
     });
+  }
+  /** Read only the newest 4 KiB line suffix without consuming the event reader. */
+  lastOutput(id: string): Promise<ManagedProcessLogTail | null> {
+    return this.exclusive(async () => this.log(await this.record(id)).tail());
   }
   /** Acknowledge only after consumers durably accepted the returned batch. */
   acknowledgeOutput(id: string, cursor: ManagedProcessLogCursor): Promise<void> {

@@ -18,6 +18,19 @@ it("refreshes the session projection and output, and submits Stop and exact stdi
     expect(calls).toContainEqual({ url: "/api/sessions/session/processes/one/write", body: { cwd: "/project", input: "hello\n", end: true } });
   } finally { store.dispose(); }
 });
+it("preserves nullable and bounded tail metadata from the server projection", async () => {
+  const store = createProcessesStore(async () => Response.json({ ...snapshot, processes: [
+    { ...snapshot.processes[0], lastLogLine: { text: "latest", truncatedStart: true } },
+    { ...snapshot.processes[0], id: "empty", lastLogLine: null },
+  ] }), () => ({ id: "session", cwd: "/project" }));
+  try {
+    store.refresh();
+    await expect.poll(() => store.getSnapshot().view.kind).toBe("ready");
+    const view = store.getSnapshot().view;
+    if (view.kind !== "ready") throw new Error("Expected ready projection");
+    expect(view.snapshot.processes.map(item => item.lastLogLine)).toEqual([{ text: "latest", truncatedStart: true }, null]);
+  } finally { store.dispose(); }
+});
 it("reports partial writes with the exact byte count and does not retry writes", async () => {
   let writes = 0;
   const store = createProcessesStore(async (_url, init) => {

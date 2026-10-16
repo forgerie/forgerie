@@ -36,7 +36,9 @@ export class ManagedProcessPanel {
       ? (await (await this.core()).list()).map(snapshot => publicProcess(snapshot, newProcessWatch(snapshot.id)))
       : (await this.tools.execute({ action: "list" })).processes;
     if (processes === undefined) throw new Error("Could not read managed processes");
-    return { available: true, writeSupported: true, processes: processes.map(browserProcess) };
+    const core = await this.core();
+    const items = await Promise.all(processes.map(async process => ({ ...browserProcess(process), lastLogLine: await core.lastOutput(process.id) })));
+    return { available: true, writeSupported: true, processes: items };
   }
   watch(): void {
     const tick = async () => {

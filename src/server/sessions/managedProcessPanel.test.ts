@@ -31,7 +31,9 @@ it("projects names and lost reasons without private records, and browses without
   const id = started.process?.id;
   if (id === undefined) throw new Error("Process did not start");
   const record = await f.core.status(id);
+  expect((await f.panel.snapshot()).processes[0]?.lastLogLine).toBeNull();
   await appendFile(join(record.directory, "output.log"), "one\ntwo\n");
+  expect((await f.panel.snapshot()).processes[0]?.lastLogLine).toEqual({ text: "two", truncatedStart: false });
   await f.panel.refresh();
   expect(await f.panel.output(id, 1)).toEqual({ ok: true, lines: [{ type: "stdout", text: "two" }] });
   expect((await f.core.readOutput(id)).lines.map(line => line.text)).toEqual(["one", "two"]);
@@ -76,4 +78,23 @@ it("bounds output frames and serializes concurrent refreshes without duplicate d
     expect(frame.droppedLines).toBe(92);
   }
   expect((await f.core.readOutput(id)).lines).toHaveLength(100);
+});
+
+it("updates list snapshots on live partial output, without consuming event output", async () => {
+  const f = await fixture();
+  const started = await f.tools.execute({ action: "start", name: "live", command: "cat" });
+  const id = started.process?.id;
+  if (id === undefined) throw new Error("Process did not start");
+  const record = await f.core.status(id);
+  await f.panel.refresh();
+  f.events.length = 0;
+  await appendFile(join(record.directory, "output.log"), "partial");
+  await f.panel.refresh();
+  const update = f.events.find(event => event.type === "processes.update");
+  if (update?.type !== "processes.update") throw new Error("Expected a process snapshot update");
+  expect(update.snapshot.processes[0]).toMatchObject({ id, lastLogLine: { text: "partial", truncatedStart: false } });
+  expect((await f.core.readOutput(id)).lines).toEqual([]);
+  await appendFile(join(record.directory, "output.log"), " complete\n");
+  expect((await f.panel.snapshot()).processes[0]?.lastLogLine).toEqual({ text: "partial complete", truncatedStart: false });
+  expect((await f.core.readOutput(id)).lines.map(line => line.text)).toEqual(["partial complete"]);
 });

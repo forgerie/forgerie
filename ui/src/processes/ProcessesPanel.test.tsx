@@ -23,6 +23,17 @@ it("shows attached labels and lost reasons in the list, and opens the chosen pro
   await act(async () => button("Open Reader").click());
   expect(a.onSelect).toHaveBeenCalledWith("reader");
 });
+it("shows each process's last output with truncation made explicit", async () => {
+  await act(async () => root.render(<ProcessesPanel state={ready([
+    { ...process, lastLogLine: { text: "ready <script>not markup</script>", truncatedStart: false } },
+    { ...process, id: "long", name: "Long log", lastLogLine: { text: "tail", truncatedStart: true } },
+    { ...process, id: "empty", name: "No output", lastLogLine: null },
+  ])} {...actions()} />));
+  expect(document.querySelector('[aria-label="Last output of Reader"]')?.textContent).toBe("ready <script>not markup</script>");
+  expect(document.querySelector('[aria-label="Last output of Long log"]')?.textContent).toBe("…tail");
+  expect(document.querySelector('[aria-label="Last output of No output"]')).toBeNull();
+  expect(document.querySelector("script")).toBeNull();
+});
 it("keeps Stop, stdin and EOF available and shows merged output", async () => {
   const a = actions();
   await act(async () => root.render(<ProcessesPanel state={{ ...ready(), selected: "reader", output: "hello" }} {...a} />));

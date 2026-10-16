@@ -7,11 +7,11 @@ export const note = "Session-owned commands: attached and lost labels, output wi
 const NOW = 1_792_000_000_000;
 const minutes = (count: number) => NOW - count * 60_000;
 const base: ManagedProcessInfo = { id: "", name: "", pid: 0, command: "", cwd: "/workspace", startTime: minutes(14), endTime: null, status: "running", exitCode: null,
-  success: null, endReason: null, signal: null, errorMessage: null, supervision: "systemd" };
+  success: null, endReason: null, signal: null, errorMessage: null, lastLogLine: null, supervision: "systemd" };
 const ready = (processes: ManagedProcessInfo[]): ProcessesState => ({ view: { kind: "ready", snapshot: { available: true, writeSupported: true, processes } } });
 const state = ready([
-  { ...base, id: "attached", name: "Preview watcher", command: "npm run dev", supervision: "attached", notice: "Attached process: ends when Forgerie restarts." },
-  { ...base, id: "lost", name: "Build", command: "npm run build", status: "exited", success: false, endReason: "lost", errorMessage: "supervisor lost", endTime: minutes(60) },
+  { ...base, id: "attached", name: "Preview watcher", command: "npm run dev", supervision: "attached", notice: "Attached process: ends when Forgerie restarts.", lastLogLine: { text: "Ready at http://localhost:5173/", truncatedStart: false } },
+  { ...base, id: "lost", name: "Build", command: "npm run build", status: "exited", success: false, endReason: "lost", errorMessage: "supervisor lost", endTime: minutes(60), lastLogLine: { text: "Build stopped before completion", truncatedStart: true } },
 ]);
 const MIXED = ready([
   { ...base, id: "vite", name: "vite-dev", pid: 48211, command: "npm run dev -- --host 127.0.0.1 --port 8504" },
@@ -32,3 +32,8 @@ export function Empty() { return <ProcessesPanel state={ready([])} {...actions} 
 export function Running() { return <ProcessesPanel state={{ ...MIXED, selected: "vite", output: LOG, stderr: [6, 8, 9] }} {...actions} />; }
 export function Attached() { return <ProcessesPanel state={{ ...state, selected: "attached", output: "Ready at http://localhost:5173/\nWatching source files" }} {...actions} />; }
 export function Lost() { return <ProcessesPanel state={{ ...state, selected: "lost", output: "Building…" }} {...actions} />; }
+export function LongOutput() {
+  if (state.view.kind !== "ready") throw new Error("Expected ready process fixture");
+  const processes = state.view.snapshot.processes.map(process => ({ ...process, lastLogLine: { text: "unbroken".repeat(512), truncatedStart: true } }));
+  return <ProcessesPanel state={{ view: { kind: "ready", snapshot: { ...state.view.snapshot, processes } } }} {...actions} />;
+}

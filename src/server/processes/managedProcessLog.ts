@@ -17,6 +17,10 @@ export interface ManagedProcessLogReadOptions {
   /** Omit for the durable read position; use {offset: 0, line: 1} to browse retained output. */
   cursor?: ManagedProcessLogCursor;
 }
+export interface ManagedProcessLogTail {
+  text: string;
+  truncatedStart: boolean;
+}
 export interface ManagedProcessLogBatch {
   lines: { number: number; text: string; terminated: boolean; truncatedStart: boolean }[];
   cursor: ManagedProcessLogCursor;
@@ -74,6 +78,35 @@ export class ManagedProcessLog {
         offset = readOffset;
       }
       return { lines, cursor: { offset, line }, droppedLines: Math.max(0, state.base.line - position.line) };
+    } finally { await file.close(); }
+  }
+  /** A bounded live preview, including unfinished output. Never retains or acknowledges logs. */
+  async tail(): Promise<ManagedProcessLogTail | null> {
+    const state = await this.load();
+    const file = await open(join(this.directory, "output.log"), "r");
+    try {
+      const size = (await file.stat()).size;
+      if (size < state.base.offset || size < state.read.offset) throw new Error("Managed process log was externally truncated");
+      const base = Math.max(state.base.offset, size - this.capBytes);
+      if (size === base) return null;
+      // Allow a trailing newline and the preceding byte to identify a complete 4 KiB line.
+      const start = Math.max(base, size - 4098);
+      const buffer = Buffer.alloc(size - start);
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
+      if (bytesRead !== buffer.length) throw new Error("Managed process log shrank while reading");
+      const end = buffer[buffer.length - 1] === 10 ? buffer.length - 1 : buffer.length;
+      const newline = end === 0 ? -1 : buffer.lastIndexOf(10, end - 1);
+      let from = Math.max(newline + 1, end - 4096);
+      const truncatedStart = from > 0 ? buffer[from - 1] !== 10 : start > state.base.offset || state.partial;
+      // A suffix can start inside a code point. Skip its continuation bytes.
+      if (truncatedStart) {
+        while (from < end) {
+          const byte = buffer[from];
+          if (byte === undefined || (byte & 0xc0) !== 0x80) break;
+          from++;
+        }
+      }
+      return { text: new TextDecoder().decode(buffer.subarray(from, end), { stream: true }), truncatedStart };
     } finally { await file.close(); }
   }
   async acknowledge(cursor: ManagedProcessLogCursor): Promise<void> {

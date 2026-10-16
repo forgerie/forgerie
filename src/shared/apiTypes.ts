@@ -1204,6 +1204,8 @@ export interface ManagedProcessLogLine {
 
 /** Browser-safe managed process state; daemon log-file paths stay private. */
 export interface ManagedProcessInfo {
+  /** Newest merged output, including an unfinished line. Null means no retained output. */
+  lastLogLine?: { text: string; truncatedStart: boolean } | null;
   supervision?: "systemd" | "attached";
   notice?: string;
   id: string;

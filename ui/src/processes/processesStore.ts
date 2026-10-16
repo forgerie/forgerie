@@ -8,6 +8,7 @@ const snapshotSchema = z.object({ available: z.boolean(), writeSupported: z.bool
   endReason: z.enum(["exit", "signal", "spawn_error", "missing_pid", "kill_timeout", "lost"]).nullable(),
   signal: z.object({ name: z.string(), number: z.number().nullable(), description: z.string() }).nullable(), errorMessage: z.string().nullable(),
   supervision: z.enum(["systemd", "attached"]).optional(), notice: z.string().optional(),
+  lastLogLine: z.object({ text: z.string(), truncatedStart: z.boolean() }).nullable().optional(),
 })) }) satisfies z.ZodType<ManagedProcessesSnapshot>;
 const actionSchema = z.object({ ok: z.boolean(), reason: z.string().optional(), bytesWritten: z.number().int().nonnegative().optional() });
 export type ProcessesView = { kind: "loading" } | { kind: "failed"; error: string } | { kind: "ready"; snapshot: ManagedProcessesSnapshot };

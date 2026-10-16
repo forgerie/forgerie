@@ -25,7 +25,7 @@ Forgerie ships pinned `pi-web-access` 0.39.0 and its own `process` tool. Their h
 
 ## Managed processes
 
-The agent uses `process` for commands that continue while it works. Open **Managed processes** in the session header to read output, write stdin, close stdin, or stop a command. The panel shows the same session-owned records after reconnecting. stdout and stderr share one ordered log.
+The agent uses `process` for commands that continue while it works. Open **Managed processes** in the session header to read output, write stdin, close stdin, or stop a command. The panel shows the same session-owned records after reconnecting. Each row shows its newest output line, including output that has no newline yet. Lines longer than 4 KiB show a suffix with an ellipsis. Open the process to read more output. stdout and stderr share one ordered log.
 
 Managed processes survive Forgerie restarts on hosts with a working `systemd --user` manager. Session close (archive, delete, or worktree removal) ends them. Closing a browser does not close the session. A handoff or fork leaves them with their original session. Workspace services are separate: a worktree owns those services.
 
