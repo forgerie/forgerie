@@ -915,8 +915,8 @@ function createDefaultRuntimeFactory(
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
     const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, askUser, handoff, github, {
-      declare: async (awaiting) => {
-        await session.parentState.declareResponse(awaiting, durableContext);
+      declare: async (awaiting, reply) => {
+        await session.parentState.declareResponse(awaiting, durableContext, reply);
         await session.refreshParentAppState();
       },
     }, projectTools, workspaceServices, triggers);

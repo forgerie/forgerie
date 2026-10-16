@@ -12,6 +12,8 @@ import { createRegistry, defineDoc, UsageDoc, watchEvents } from "@earendil-work
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DurableSessionJournal, durableSessionPaths } from "./durableSessionJournal.js";
 import { LegacyMigration } from "./durableLegacyImport.js";
+import { createDurableParentState } from "./durableParentState.js";
+import { initializeParentDocuments } from "./durableParentDocuments.js";
 import { readDurableSessionLocator } from "./durableSessionLocator.js";
 
 const directories: string[] = [];
@@ -258,6 +260,32 @@ describe("Durable session journal", () => {
     expect(options.provider.state.callCount).toBe(1);
     expect(reopenedOptions.manager.getEntries().some((entry) => entry.type === "custom" && entry.customType === "forgerie:test")).toBe(true);
   });
+  it("repairs and replays a committed end_turn reply projection once without another model request", async () => {
+    const options = { ...await fixture(), initializeParentDocuments };
+    const journal = await DurableSessionJournal.open(options);
+    journals.push(journal);
+    const state = createDurableParentState(journal.handle, { resolve: () => Promise.reject(new Error("No labels in this test")) });
+    await state.declareResponse("nothing", context, "Committed reply");
+    const file = options.manager.getSessionFile();
+    if (file === undefined) throw new Error("Missing projection file");
+    // Crash boundary: native declaration committed, but its JSONL export has not run.
+    await journal.close();
+    const manager = SessionManager.open(file);
+    const reopened = await DurableSessionJournal.open({ ...options, manager });
+    journals.push(reopened);
+    await reopened.project();
+    await reopened.project();
+    const replies = () => manager.getEntries().filter(entry => entry.type === "message" && entry.message.role === "assistant" && JSON.stringify(entry.message.content).includes("Committed reply"));
+    expect(replies()).toHaveLength(1);
+    await reopened.close();
+    const finalManager = SessionManager.open(file);
+    const final = await DurableSessionJournal.open({ ...options, manager: finalManager });
+    journals.push(final);
+    await final.project();
+    expect(finalManager.getEntries().filter(entry => entry.type === "message" && entry.message.role === "assistant" && JSON.stringify(entry.message.content).includes("Committed reply"))).toHaveLength(1);
+    expect(options.provider.state.callCount).toBe(0);
+  });
+
   it("repairs a missed JSONL projection after reopening", async () => {
     const options = await fixture();
     const journal = await DurableSessionJournal.open(options);

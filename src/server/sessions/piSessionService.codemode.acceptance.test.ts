@@ -109,6 +109,42 @@ describe("Hosted response declarations", () => {
     expect((await harness.service.status(harness.ref)).response).toEqual(awaiting === "reply" ? { kind: "needs-response", reason: "reply" } : { kind: "none" });
   });
 
+  it("shows a hidden-only end_turn reply once, including read-only reopen and runtime replay", async () => {
+    const reply = "The result is ready. Which fix do you want?";
+    const harness = await hostedSession(true, (seenTools) => [recordTools(seenTools, fauxAssistantMessage([
+      { type: "thinking", thinking: "PRIVATE REASONING" },
+      fauxToolCall("end_turn", { awaiting: "reply", reply }, { id: "reply-end" }),
+    ], { stopReason: "toolUse" }))]);
+    await runPrompt(harness);
+    const answers = async (service: PiSessionService) => projectBrowserMessageResponse(await service.messages(harness.ref)).messages
+      .filter(message => typeof message === "object" && message !== null && Reflect.get(message, "role") === "assistant" && JSON.stringify(Reflect.get(message, "content")).includes('"type":"text"'));
+    expect(await answers(harness.service)).toEqual([expect.objectContaining({ content: [{ type: "text", text: reply }] })]);
+    expect(harness.seenTools).toHaveLength(1);
+    expect((await harness.service.status(harness.ref)).response).toEqual({ kind: "needs-response", reason: "reply" });
+    await harness.service.dispose();
+    const reopened = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: harness.agentDir, modelRuntime: harness.modelRuntime,
+      sessionManager: createPiSessionManagerGateway({ agentDir: harness.agentDir, env: {}, sessionDirEnvKeys: [] }),
+      askUserEnabled: true, heartbeatIntervalMs: 60_000,
+    });
+    services.push(reopened);
+    expect(await answers(reopened)).toEqual([expect.objectContaining({ content: [{ type: "text", text: reply }] })]);
+    await reopened.resumeDurableSessions([harness.ref]);
+    expect(await answers(reopened)).toEqual([expect.objectContaining({ content: [{ type: "text", text: reply }] })]);
+    expect(harness.seenTools).toHaveLength(1);
+    expect((await reopened.status(harness.ref)).response).toEqual({ kind: "needs-response", reason: "reply" });
+  });
+
+  it("keeps visible assistant text instead of duplicating an end_turn reply", async () => {
+    const harness = await hostedSession(true, () => [fauxAssistantMessage([
+      fauxText("Original answer."), fauxToolCall("end_turn", { awaiting: "nothing", reply: "Do not duplicate." }),
+    ], { stopReason: "toolUse" })]);
+    await runPrompt(harness);
+    const visible = JSON.stringify(projectBrowserMessageResponse(await harness.service.messages(harness.ref)).messages);
+    expect(visible).toContain("Original answer.");
+    expect(visible).not.toContain("Do not duplicate.");
+  });
+
   it("shows the text-only reply after a silent declaration and marks the session as needing a response", async () => {
     const harness = await hostedSession(true, () => [
       fauxAssistantMessage([fauxToolCall("end_turn", { awaiting: "reply" }, { id: "silent" })], { stopReason: "toolUse" }),
