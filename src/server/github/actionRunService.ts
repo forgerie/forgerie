@@ -30,6 +30,7 @@ export class ActionRunService {
   private timer: NodeJS.Timeout | undefined;
   private disposed = false;
   private readonly polling = new Set<string>();
+  private readonly stopGenerations = new Map<string, number>();
   constructor(private readonly deps: Dependencies) { this.now = deps.now ?? Date.now; }
   start(): void { this.timer ??= setInterval(() => { void this.poll(); }, WATCH_POLL_MS); this.timer.unref(); }
   dispose(): void { this.disposed = true; clearInterval(this.timer); this.timer = undefined; }
@@ -89,31 +90,35 @@ export class ActionRunService {
   }
 
   async watch(ref: PullSessionRef, runId: number): Promise<ActionRunLink> {
+    const generation = this.stopGenerations.get(ref.id) ?? 0;
+    const current = () => !this.disposed && generation === (this.stopGenerations.get(ref.id) ?? 0);
+    const stopped = () => new Error("The watch start was stopped before it could be saved.");
     const session = await this.requireSession(ref);
     if (!session.available) throw new Error("Only a writable, unarchived session can watch a run.");
     parseRunId(runId, "");
     const existing = this.records(ref).find(record => record.runId === runId);
     if (existing !== undefined) {
       await this.requireRepo(existing);
+      if (!current()) throw stopped();
       if (existing.watch.kind === "watching") return publicActionRunLink(existing);
     }
     const run = await this.deps.github.run(ref.cwd, runId, false);
+    if (!current()) throw stopped();
     if (run.status === "completed") throw new Error("A completed run cannot be watched.");
     if (!run.complete) throw new Error("The run read is incomplete. Try again before watching.");
     if (existing !== undefined) this.checkRun(existing, run);
     const source = existing?.source ?? (await this.belongsToPull(ref, run) ? "pull" : "manual");
-    const record = existing ?? await this.deps.store.link({ ...ref, repo: run.repo, runId, source });
-    const now = this.iso();
-    const next = await this.deps.store.update(keyOf(record), record.revision, current => {
-      delete current.pending;
-      return { ...current, watch: { kind: "watching", since: now, wakes: 0 }, startLeaf: session.leaf, lastReadAt: now, cursor: initialActionRunCursor(run.attempt) };
-    });
-    if (next === undefined) throw new Error("The link changed while starting the watch. Try again.");
+    const next = await this.deps.store.startWatch({ ...ref, repo: run.repo, runId, source },
+      { since: this.iso(), leaf: session.leaf, cursor: initialActionRunCursor(run.attempt) }, current);
+    if (next === undefined) throw stopped();
     this.publish(next);
     return publicActionRunLink(next);
   }
 
   async stop(id: string, reason = "Stopped by request."): Promise<ActionRunLink[]> {
+    this.stopGenerations.set(id, (this.stopGenerations.get(id) ?? 0) + 1);
+    // A start already committing is ordered before Stop; starts still reading are refused by generation.
+    await this.deps.store.flush();
     const result: ActionRunLink[] = [];
     for (const record of this.deps.store.forSession(id)) {
       const next = await this.stopRecord(record, reason);
