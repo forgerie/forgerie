@@ -11,7 +11,7 @@ export const session = { id: "s1", cwd: "/home/dev/forgerie" };
 export const repo = "forgerie/forgerie";
 
 const job = (id: number, name: string, state: ActionJob["state"], seconds?: number, extra: Partial<ActionJob> = {}): ActionJob => ({
-  id: String(id), name, state, url: `https://github.com/${repo}/actions/runs/18234561230/job/${String(id)}`,
+  id, name, state, url: `https://github.com/${repo}/actions/runs/18234561230/job/${String(id)}`,
   ...seconds === undefined ? {} : { seconds, startedAt: at(20), completedAt: at(20 - seconds / 60) }, ...extra });
 
 export const failureLog = [

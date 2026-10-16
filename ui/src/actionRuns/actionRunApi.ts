@@ -15,7 +15,8 @@ export type RunWatch = z.infer<typeof pullWatchSchema>;
 const jobState = z.enum(["queued", "running", "passed", "failed", "cancelled", "skipped"]);
 export type JobState = z.infer<typeof jobState>;
 export const actionJobSchema = z.object({
-  id: text, name: text, state: jobState, url: text,
+  /** GitHub's job ID, an integer on the wire. Views turn it into a string key. */
+  id: z.number().int().min(1), name: text, state: jobState, url: text,
   startedAt: date.optional(), completedAt: date.optional(), seconds: z.number().min(0).optional(),
   /** Bounded failed-job annotations, not a raw Actions log. */
   logTail: text.optional(), logSource: z.literal("annotations").optional(),
