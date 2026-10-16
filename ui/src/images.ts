@@ -16,11 +16,14 @@ const RENDERED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "im
 
 /** A data URL for a supported Pi image part, or undefined when it cannot render. */
 const INLINE_IMAGE = /^data:image\/(jpeg|png|gif|webp);base64,/;
+/** Live session frames reference image bytes on this same-origin route instead of inlining them. */
+const SESSION_IMAGE_URL = /^\/api\/sessions\/[^/?#]+\/images\?/;
+const isRenderableSource = (src: string) => INLINE_IMAGE.test(src) || SESSION_IMAGE_URL.test(src);
 
 /** The inline image an attachment carries, if any. */
 export function attachmentImage(attachment: { readonly content?: readonly { readonly type: string; readonly image?: string }[] | undefined }): string | undefined {
   const image = attachment.content?.find((part) => part.type === "image")?.image;
-  return image && INLINE_IMAGE.test(image) ? image : undefined;
+  return image && isRenderableSource(image) ? image : undefined;
 }
 
 /** A message's image attachments, as one browsable set. */
@@ -33,8 +36,9 @@ export function attachmentImages(attachments: readonly {
   });
 }
 
-export function imageSource(part: { data?: string | undefined; mimeType?: string | undefined }): string | undefined {
-  if (!part.data || !part.mimeType || !RENDERED_MIME_TYPES.has(part.mimeType)) return undefined;
+export function imageSource(part: { data?: string | undefined; url?: string | undefined; mimeType?: string | undefined }): string | undefined {
+  if (!part.mimeType || !RENDERED_MIME_TYPES.has(part.mimeType)) return undefined;
+  if (!part.data) return part.url && SESSION_IMAGE_URL.test(part.url) ? part.url : undefined;
   return `data:${part.mimeType};base64,${part.data}`;
 }
 

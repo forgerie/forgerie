@@ -14,6 +14,7 @@ import { normalizeSessionCleanupRequest } from "./sessionCleanup.js";
 import { isKnownThinkingLevel, type ThinkingLevel } from "../../shared/thinkingLevels.js";
 import { promptRequestOptionsSchema } from "../../shared/promptRequest.js";
 import { composeDiffAnnotationPrompt } from "./promptDiffAnnotations.js";
+import { withImageReferences } from "./sessionImages.js";
 
 interface SessionQuery {
   cwd?: string;
@@ -249,6 +250,22 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
       return request.query.preview === "1"
         ? projectBrowserMessagePreviewResponse(messages)
         : projectBrowserMessageResponse(messages);
+    } catch (error) {
+      return reply.code(404).send({ error: errorMessage(error) });
+    }
+  });
+
+  // Live frames reference images by message and position instead of carrying their bytes.
+  app.get<{ Params: { sessionId: string }; Querystring: SessionQuery & { message?: string; image?: string } }>(`${prefix}/sessions/:sessionId/images`, async (request, reply) => {
+    const ref = sessionRefFromQueryOr400(request.params.sessionId, request.query, reply);
+    if (ref === undefined) return reply;
+    const { message } = request.query;
+    const image = Number(request.query.image);
+    if (message === undefined || message === "" || !Number.isSafeInteger(image) || image < 0) {
+      return reply.code(400).send({ error: "message and image are required" });
+    }
+    try {
+      return await sessions.sessionImage?.(ref, message, image) ?? await reply.code(404).send({ error: "Image not found" });
     } catch (error) {
       return reply.code(404).send({ error: errorMessage(error) });
     }
@@ -610,8 +627,14 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
         // Subscribe before admission. Buffer SDK events until the read path is known.
         eventHub.add(request.params.sessionId, socket);
         const opening = request.query.open === "1"
-          ? sessions.attachOpenBrowser?.(ref, (open) => { eventHub.markDurable(socket); return eventHub.sendOpenSnapshot(socket, open); }, fail)
-          : sessions.attachDurableBrowser?.(ref, (snapshot) => { eventHub.markDurable(socket); return eventHub.sendDurableSnapshot(socket, snapshot); }, fail);
+          ? sessions.attachOpenBrowser?.(ref, (open) => {
+            eventHub.markDurable(socket);
+            return eventHub.sendOpenSnapshot(socket, { ...open, page: { ...open.page, messages: withImageReferences(ref, open.page.messages) } });
+          }, fail)
+          : sessions.attachDurableBrowser?.(ref, (snapshot) => {
+            eventHub.markDurable(socket);
+            return eventHub.sendDurableSnapshot(socket, { ...snapshot, history: { ...snapshot.history, messages: withImageReferences(ref, snapshot.history.messages) } });
+          }, fail);
         if (opening === undefined) {
           if (request.query.open !== "1") throw new Error("Consistent native events are unavailable");
           socket.send(JSON.stringify({ type: "session.checkpoint", readPath: "classic", epoch: eventHub.epoch, seq: eventHub.currentSeq(request.params.sessionId) }));

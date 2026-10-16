@@ -11,6 +11,13 @@ describe("imageSource", () => {
     expect(imageSource({ data: "", mimeType: "image/png" })).toBeUndefined();
     expect(imageSource({ mimeType: "image/png" })).toBeUndefined();
   });
+  it("uses a session image reference only on its same-origin route", () => {
+    const url = "/api/sessions/s1/images?cwd=%2Frepo&message=m1&image=0";
+    expect(imageSource({ url, mimeType: "image/png" })).toBe(url);
+    expect(imageSource({ url, mimeType: "image/svg+xml" })).toBeUndefined();
+    expect(imageSource({ url: "https://example.com/x.png", mimeType: "image/png" })).toBeUndefined();
+    expect(imageSource({ url: "/api/config?x", mimeType: "image/png" })).toBeUndefined();
+  });
 });
 
 describe("galleryPlan", () => {

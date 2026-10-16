@@ -169,6 +169,25 @@ describe("native read-model HTTP and WebSocket paths", () => {
     await vi.waitFor(() => { expect(f.leased()).toBe(0); });
   });
 
+  it("sends image references instead of image bytes and serves each referenced image by itself", async () => {
+    const f = await fixture();
+    const data = Buffer.alloc(64 * 1024, 7).toString("base64");
+    await f.conversation().commit((tx) => tx.appendEntry(UserEntry, f.conversation().id, { model: [{ role: "user", timestamp: 1,
+      content: [{ type: "text", text: "look" }, { type: "image", data, mimeType: "image/png" }] }] }), context);
+    const base = await f.start();
+    const { frames } = client(base, f.directory);
+    await vi.waitFor(() => { expect(frames).toHaveLength(1); });
+    const message = frames[0]?.history.messages[0];
+    const part = Array.isArray(message?.content) ? message.content[1] : undefined;
+    const url = part?.type === "image" ? part.url ?? "" : "";
+    expect(part).toEqual({ type: "image", mimeType: "image/png", url });
+    expect(url).toMatch(/^\/api\/sessions\/logical\/images\?/);
+    const response = await fetch(`${base}${url.replace(/^\/api/, "")}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ mimeType: "image/png", data });
+    expect((await fetch(`${base}${url.replace(/^\/api/, "").replace("image=0", "image=1")}`)).status).toBe(404);
+  });
+
   it("reattaches with a new epoch after a server and SQLite reopen, preserving committed message IDs", async () => {
     const f = await fixture();
     await f.user("before restart");

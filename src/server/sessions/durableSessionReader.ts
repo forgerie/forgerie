@@ -10,6 +10,7 @@ import type { DurableNativeHistory } from "./durableNativeHistory.js";
 import { DurableParentReadModel, type DurableBrowserAttachment, type DurableHostState } from "./durableParentReadModel.js";
 import type { DurableSessionAddress, DurableSessionHandle } from "./durableSessionAddress.js";
 import type { MessagePageRequest } from "./messagePaging.js";
+import { findSessionImage, type SessionImage } from "./sessionImages.js";
 
 export interface DurableSessionReaderOptions {
   locate(ref: SessionRef): Promise<DurableSessionAddress | undefined>;
@@ -64,6 +65,11 @@ export class DurableSessionReader {
 
   messages(ref: SessionRef, page?: MessagePageRequest): Promise<DurableBrowserSnapshot["history"] | undefined> {
     return this.read(ref, (handle) => this.options.readModel(handle).history(page, context));
+  }
+
+  /** One image a live frame referenced. Undefined when the session has no native locator. */
+  image(ref: SessionRef, messageId: string, image: number): Promise<SessionImage | null | undefined> {
+    return this.read(ref, async (handle) => findSessionImage(await this.options.readModel(handle).messages(context), messageId, image) ?? null);
   }
 
   tree(ref: SessionRef): Promise<SessionTreeSnapshot | undefined> {

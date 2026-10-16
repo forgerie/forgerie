@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { WebSocket, type RawData } from "ws";
 import { SessionDaemonClient } from "../../sessiond/sessionDaemonClient.js";
 import { RESOURCE_EDITOR_BODY_LIMIT } from "../../shared/resourceEditor.js";
+import { SESSION_IMAGE_MIME_TYPES } from "../sessions/sessionImages.js";
 
 export interface SessionProxyDaemon {
   request(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<{ statusCode: number; headers: Record<string, string>; body: string }>;
@@ -72,8 +73,29 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
   app.all(`${prefix}/backlog/*`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/github`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/github/*`, (request, reply) => proxy(request, reply));
+  // The daemon answers JSON; the browser loads this URL from an <img>, so send the bytes.
+  app.get(`${prefix}/sessions/:sessionId/images`, async (request, reply) => {
+    try {
+      const upstream = await daemon.request("GET", stripPrefix(request.url, prefix));
+      const image = upstream.statusCode === 200 ? sessionImageBody(upstream.body) : undefined;
+      if (image === undefined) return await reply.code(upstream.statusCode === 200 ? 502 : upstream.statusCode).send({ error: "Image unavailable" });
+      // The URL names a committed message, so the bytes never change.
+      return await reply.code(200).type(image.mimeType).header("cache-control", "private, max-age=31536000, immutable")
+        .header("x-content-type-options", "nosniff").send(Buffer.from(image.data, "base64"));
+    } catch (error) {
+      requestFailed(reply, error);
+      return undefined;
+    }
+  });
   app.all(`${prefix}/sessions`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/sessions/*`, (request, reply) => proxy(request, reply));
+}
+
+function sessionImageBody(body: string): { mimeType: string; data: string } | undefined {
+  const value: unknown = JSON.parse(body);
+  if (typeof value !== "object" || value === null || !("mimeType" in value) || !("data" in value)) return undefined;
+  const { mimeType, data } = value;
+  return typeof mimeType === "string" && SESSION_IMAGE_MIME_TYPES.has(mimeType) && typeof data === "string" ? { mimeType, data } : undefined;
 }
 
 function stripPrefix(url: string, prefix: string): string {
