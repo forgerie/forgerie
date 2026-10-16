@@ -15,12 +15,14 @@ import { AppShell } from "../src/ui/AppShell";
 import { ChangesOpener } from "../src/ui/ChangesReview";
 import { TreeOpener } from "../src/ui/SessionTreeNavigator";
 import { PullRequestOpener, PullRequestReview, PullRequestRowMark, type PullsLoad } from "../src/ui/PullRequestReview";
+import { pullDiscovery } from "../src/actionRuns/fixtures/pullDiscovery";
 import type { PullItem } from "../src/pullRequests/pullRequestApi";
 import { firstToShow } from "../src/pullRequests/pullRequestModel";
 import { pullNoticeOf } from "../src/pullRequests/pullNotice";
 import { fixChecksPrompt, type PullCheck, type PullLink, type PullRequest, type PullWatch } from "../src/pullRequests/pullRequestModel";
 import "../src/ui/theme.css";
 
+const discovery = pullDiscovery();
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "failed";
 
 const unitLog = [
@@ -157,7 +159,7 @@ function Preview() {
     <TreeOpener idle onOpen={() => {}} />
   </>}>
     <Thread />
-    {open && <PullRequestReview load={load} selected={selected} onSelect={setSelected} reading={new Set()} notice={notice} writing={false} now={NOW}
+    {open && <PullRequestReview discovery={discovery} load={load} selected={selected} onSelect={setSelected} reading={new Set()} notice={notice} writing={false} now={NOW}
       onRefresh={() => {}} onAsk={ask}
       onWatch={(number, on) => setWatch(number, on ? { kind: "watching", since: new Date().toISOString(), wakes: 0 } : { kind: "stopped", at: new Date().toISOString(), reason: "Stopped from the panel." })}
       onLink={async () => false} onUnlink={(number) => setItems((current) => current.filter((item) => item.link.number !== number))}

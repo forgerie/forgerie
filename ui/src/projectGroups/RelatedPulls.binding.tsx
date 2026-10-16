@@ -10,7 +10,7 @@ export function RelatedPulls({ request, target, links, onClose, onAsk }: {
   const catalog = useMemo(() => links.filter((link) => link.session.cwd === target.cwd), [links, target.cwd]);
   const pull = useSessionPulls(api, target, catalog);
   const [selected, setSelected] = useState<number>();
-  return <PullRequestReview load={pull.load} selected={selected} onSelect={setSelected} reading={pull.reading} notice={pull.notice} writing={pull.writing} now={Date.now()}
+  return <PullRequestReview discovery={pull.discovery} load={pull.load} selected={selected} onSelect={setSelected} reading={pull.reading} notice={pull.notice} writing={pull.writing} now={Date.now()}
     onRefresh={pull.refresh} onWatch={(number, enabled) => { void pull.setWatch(number, enabled); }} onLink={pull.linkNumber}
     onUnlink={(number) => { void pull.unlink(number); }} onMerge={(number) => { void pull.merge(number, "rebase"); }} onClose={onClose} onAsk={onAsk} />;
 }

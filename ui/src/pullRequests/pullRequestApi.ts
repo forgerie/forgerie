@@ -3,6 +3,11 @@
 // branch). Everything else in this client reads the types below, so a
 // contract change lands here.
 import { z } from "zod";
+import { Check } from "typebox/value";
+import { OpenPullsResponseSchema, PullPreviewResponseSchema, type OpenPullsResponse, type PullPreviewResponse, type PullRepository } from "@shared/pullRequests";
+export type { OpenPullsResponse, PullPreviewResponse } from "@shared/pullRequests";
+const openPullsSchema = z.custom<OpenPullsResponse>(value => Check(OpenPullsResponseSchema, value));
+const pullPreviewSchema = z.custom<PullPreviewResponse>(value => Check(PullPreviewResponseSchema, value));
 
 const text = z.string();
 /** Absolute timestamps. The client computes relative labels. */
@@ -91,11 +96,13 @@ export interface PullSessionRef { id: string; cwd: string }
 export type PullRequestFn = (path: string, init: RequestInit) => Promise<Response>;
 
 export interface PullRequestApi {
+  open(ref: PullSessionRef, signal?: AbortSignal): Promise<OpenPullsResponse>;
+  preview(ref: PullSessionRef, number: number, signal?: AbortSignal): Promise<PullPreviewResponse>;
   /** Every linked pull request, oldest first, each read from GitHub. */
   list(ref: PullSessionRef, signal?: AbortSignal): Promise<PullItem[]>;
   read(ref: PullSessionRef, number: number, signal?: AbortSignal): Promise<SessionPull>;
   /** Adds a link. It never replaces another pull request's link. */
-  link(ref: PullSessionRef, number: number): Promise<SessionPull>;
+  link(ref: PullSessionRef, number: number, expected?: PullRepository): Promise<SessionPull>;
   unlink(ref: PullSessionRef, number: number): Promise<PullLink>;
   watch(ref: PullSessionRef, number: number): Promise<PullLink>;
   stopWatch(ref: PullSessionRef, number: number): Promise<PullLink>;
@@ -122,9 +129,11 @@ export function createPullRequestApi(request: PullRequestFn, prefix = "/api"): P
   }
   const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   return {
+    open: (ref, signal) => call(`${path(ref, "/open")}${query(ref)}`, openPullsSchema, {}, signal),
+    preview: (ref, number, signal) => call(`${one(ref, number, "/preview")}${query(ref)}`, pullPreviewSchema, {}, signal),
     list: async (ref, signal) => (await call(`${path(ref)}${query(ref)}`, sessionPullsSchema, {}, signal)).items,
     read: (ref, number, signal) => call(`${one(ref, number)}${query(ref)}`, sessionPullSchema, {}, signal),
-    link: (ref, number) => call(path(ref), sessionPullSchema, json("PUT", { cwd: ref.cwd, number })),
+    link: (ref, number, expected) => call(path(ref), sessionPullSchema, json("PUT", { cwd: ref.cwd, number, ...(expected ? { expected } : {}) })),
     unlink: (ref, number) => call(`${one(ref, number)}${query(ref)}`, pullLinkSchema, { method: "DELETE" }),
     watch: (ref, number) => call(one(ref, number, "/watch"), pullLinkSchema, json("POST", { cwd: ref.cwd })),
     stopWatch: (ref, number) => call(`${one(ref, number, "/watch")}${query(ref)}`, pullLinkSchema, { method: "DELETE" }),

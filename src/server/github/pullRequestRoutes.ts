@@ -1,13 +1,13 @@
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { PullErrorSchema, PullLinkSchema, SessionPullResponseSchema, SessionPullsResponseSchema } from "../../shared/pullRequests.js";
+import { OpenPullsResponseSchema, PullPreviewResponseSchema, PullRepositorySchema, PullErrorSchema, PullLinkSchema, SessionPullResponseSchema, SessionPullsResponseSchema } from "../../shared/pullRequests.js";
 import { normalizeRequestCwd } from "../workingDirectory.js";
 import type { PullRequestService } from "./pullRequestService.js";
 
 const NumberSchema = Type.Integer({ minimum: 1 });
 const Cwd = Type.String({ minLength: 1, maxLength: 32768 });
-const LinkBody = Type.Object({ cwd: Cwd, number: NumberSchema }, { additionalProperties: false });
+const LinkBody = Type.Object({ cwd: Cwd, number: NumberSchema, expected: Type.Optional(PullRepositorySchema) }, { additionalProperties: false });
 const CwdBody = Type.Object({ cwd: Cwd }, { additionalProperties: false });
 const MergeBody = Type.Object({ repo: Type.String({ minLength: 3, maxLength: 512 }), cwd: Cwd, headSha: Type.String({ pattern: "^[a-f0-9]{40}$" }), method: Type.Union([Type.Literal("rebase"), Type.Literal("squash"), Type.Literal("merge")]) }, { additionalProperties: false });
 interface Params { sessionId: string }
@@ -34,10 +34,16 @@ export function registerPullRequestRoutes(app: FastifyInstance, pulls: PullReque
   app.get<{ Params: Params; Querystring: Query }>(base, { schema: { response: { 200: SessionPullsResponseSchema, ...errors } } }, async (request, reply) => {
     try { return await pulls.list(ref(request.params.sessionId, request.query.cwd)); } catch (error) { return failed(reply, error); }
   });
+  app.get<{ Params: Params; Querystring: Query }>(`${base}/open`, { schema: { response: { 200: OpenPullsResponseSchema, ...errors } } }, async (request, reply) => {
+    try { return await pulls.open(ref(request.params.sessionId, request.query.cwd)); } catch (error) { return failed(reply, error); }
+  });
+  app.get<{ Params: PullParams; Querystring: Query }>(`${base}/:number/preview`, { schema: { response: { 200: PullPreviewResponseSchema, ...errors } } }, async (request, reply) => {
+    try { return await pulls.preview(ref(request.params.sessionId, request.query.cwd), numberOf(request.params.number)); } catch (error) { return failed(reply, error); }
+  });
   app.put<{ Params: Params; Body: unknown }>(base, { schema: { response: { 200: SessionPullResponseSchema, ...errors } } }, async (request, reply) => {
     try {
       if (!Check(LinkBody, request.body)) throw new Error("Send cwd and a positive PR number.");
-      return await pulls.link(ref(request.params.sessionId, request.body.cwd), request.body.number);
+      return await pulls.link(ref(request.params.sessionId, request.body.cwd), request.body.number, request.body.expected);
     } catch (error) { return failed(reply, error); }
   });
   app.get<{ Params: PullParams; Querystring: Query }>(`${base}/:number`, { schema: { response: { 200: SessionPullResponseSchema, ...errors } } }, async (request, reply) => {

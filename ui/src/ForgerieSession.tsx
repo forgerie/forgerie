@@ -645,7 +645,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
         onModel={(worker, model) => workflows.setWorkerModel(sheetRun.id, worker, model)}
         onClose={() => { decisions.dismissError(); workflows.dismissError(); childAgents.close(); setWorkflowSheet(undefined); }} />}
       {visible && decisionsOpen && <DecisionsSheet log={log} actions={logActions} onClose={() => { decisions.dismissError(); setDecisionsOpen(false); }} />}
-      {visible && pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
+      {visible && pullOpen && <PullRequestReview discovery={pull.discovery} load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
         notice={pull.notice} writing={pull.writing} now={Date.now()}
         onRefresh={() => { pull.refresh(); actionRuns.recover(); }} onWatch={(number, on) => { void pull.setWatch(number, on); }} onLink={pull.linkNumber}
         onUnlink={(number) => { void pull.unlink(number); }}

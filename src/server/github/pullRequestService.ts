@@ -1,7 +1,9 @@
+import { Check } from "typebox/value";
+import { RepositoryOpenPullsSchema, PullPreviewResponseSchema, type OpenPullsResponse, type PullPreviewResponse } from "../../shared/pullRequests.js";
 import type { PullRequestReader } from "./pullRequestReader.js";
 import { deliverWatch, stopWatch, watchStopReason, watchReadExpired, WATCH_POLL_MS } from "./watchLifecycle.js";
 import { randomUUID } from "node:crypto";
-import type { PullLink, PullRequest, PullSessionRef } from "../../shared/pullRequests.js";
+import type { PullLink, PullRequest, PullSessionRef, PullRepository } from "../../shared/pullRequests.js";
 import type { GitHubAgent } from "./githubAgent.js";
 import { evaluateWatch, initialCursor } from "./pullRequestWatch.js";
 import { keyOf, PullRequestStore, type PullKey, type PullRecord } from "./pullRequestStore.js";
@@ -19,7 +21,7 @@ export interface PullSessionGateway {
 }
 export interface PullNote { text: string; details: { kind: "merged"; repo: string; number: number; headSha: string; method: "rebase" | "squash" | "merge"; base: string; url?: string } }
 export interface PullServiceDependencies {
-  github: Pick<GitHubAgent, "repo" | "pull" | "mergePull">;
+  github: Pick<GitHubAgent, "repo" | "pull" | "mergePull"> & Partial<Pick<GitHubAgent, "openPulls">>;
   readerFor?: (cwd: string) => Promise<PullRequestReader>;
   sessions: PullSessionGateway;
   store: PullRequestStore;
@@ -68,6 +70,32 @@ export class PullRequestService {
     return { items };
   }
 
+  /** Repository discovery never reads or writes the link store. */
+  async open(ref: PullSessionRef): Promise<OpenPullsResponse> {
+    await this.requireSession(ref);
+    const reader = await this.reader(ref.cwd);
+    const repo = await reader.repo(ref.cwd);
+    const result = await reader.openPulls(ref.cwd);
+    if (!Check(RepositoryOpenPullsSchema, result)) throw new Error("The provider returned invalid open PR data.");
+    if (result.repo.toLowerCase() !== repo.slug.toLowerCase() || result.items.some(item => item.repo.toLowerCase() !== repo.slug.toLowerCase())) throw new Error("The provider returned mismatched repository data.");
+    await this.requireDiscoveryTarget(ref, reader, repo.slug);
+    return { provider: reader.provider, ...result };
+  }
+
+  async preview(ref: PullSessionRef, number: number): Promise<PullPreviewResponse> {
+    if (!Number.isSafeInteger(number) || number < 1) throw new Error("Use a positive PR number.");
+    await this.requireSession(ref);
+    const reader = await this.reader(ref.cwd);
+    const repo = await reader.repo(ref.cwd);
+    const snapshot = await reader.pull(ref.cwd, number, true);
+    const result = { provider: reader.provider, pull: snapshot.pull };
+    if (!Check(PullPreviewResponseSchema, result)) throw new Error("The provider returned invalid PR preview data.");
+    if (snapshot.pull.number !== number || snapshot.pull.repo.toLowerCase() !== repo.slug.toLowerCase()) throw new Error("The provider returned a mismatched pull request.");
+    if (Buffer.byteLength(JSON.stringify(result)) > 8 * 1024 * 1024) throw new Error("The PR preview exceeded 8 MiB. Read it on the provider's site.");
+    await this.requireDiscoveryTarget(ref, reader, repo.slug);
+    return result;
+  }
+
   async read(ref: PullSessionRef, number: number) {
     await this.requireSession(ref);
     const record = this.resolve(ref, number);
@@ -79,11 +107,14 @@ export class PullRequestService {
   }
 
   /** Adds a pull request to the session. Linking one never replaces another. */
-  async link(ref: PullSessionRef, number: number) {
+  async link(ref: PullSessionRef, number: number, expected?: PullRepository) {
     const session = await this.requireSession(ref);
     if (!session.available) throw new Error("Only a writable, unarchived session can link a PR.");
     const reader = await this.reader(ref.cwd);
     const snapshot = await reader.pull(ref.cwd, number);
+    if (expected && snapshot.pull.number !== number) throw new Error("The provider returned a mismatched pull request.");
+    if (expected && (expected.provider !== reader.provider || expected.repo.toLowerCase() !== snapshot.pull.repo.toLowerCase())) throw new Error("The session repository changed after preview. Read the PR again before linking.");
+    if (expected) await this.requireDiscoveryTarget(ref, reader, expected.repo);
     const linked = await this.deps.store.link({ ...ref, provider: reader.provider, repo: snapshot.pull.repo, number });
     this.publish(linked);
     return { link: publicLink(linked), pull: snapshot.pull };
@@ -266,6 +297,12 @@ export class PullRequestService {
     if (others.length > 0) throw new Error(`This session has ${String(records.length)} linked PRs (${records.map((item) => `#${String(item.number)}`).join(", ")}). Give the number to watch.`);
     return record;
   }
+  private async requireDiscoveryTarget(ref: PullSessionRef, reader: PullRequestReader, repo: string): Promise<void> {
+    await this.requireSession(ref);
+    const current = await this.reader(ref.cwd);
+    if (current.provider !== reader.provider || (await current.repo(ref.cwd)).slug.toLowerCase() !== repo.toLowerCase()) throw new Error("The session repository changed during the read. Try again.");
+  }
+
   private async requireSession(ref: PullSessionRef): Promise<PullSessionState> {
     const state = await this.deps.sessions.inspect(ref);
     if (state.ref.id !== ref.id || state.ref.cwd !== ref.cwd) throw new Error("Use the full session id and its own workspace.");
@@ -277,7 +314,7 @@ export class PullRequestService {
     if (reader.provider !== record.provider || repo.slug.toLowerCase() !== record.repo.toLowerCase()) throw new Error(`The session's ${record.provider === "github" ? "GitHub" : "Azure DevOps"} repository changed. Link its PR again.`);
   }
   private reader(cwd: string): Promise<PullRequestReader> {
-    return this.deps.readerFor?.(cwd) ?? Promise.resolve({ provider: "github", repo: (target) => this.deps.github.repo(target), pull: (target, number, annotations) => this.deps.github.pull(target, number, annotations) });
+    return this.deps.readerFor?.(cwd) ?? Promise.resolve({ provider: "github", openPulls: (target) => { if (!this.deps.github.openPulls) throw new Error("Open PR discovery is unavailable."); return this.deps.github.openPulls(target); }, repo: (target) => this.deps.github.repo(target), pull: (target, number, annotations) => this.deps.github.pull(target, number, annotations) });
   }
   private isDisposed(): boolean { return this.disposed; }
   private iso(): string { return new Date(this.now()).toISOString(); }

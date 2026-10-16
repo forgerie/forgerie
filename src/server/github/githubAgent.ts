@@ -8,7 +8,7 @@ import type { BacklogConfig } from "../../shared/backlog.js";
 import { apiHeaders, GITHUB_API, type Fetch, type GitHubApp } from "./githubApp.js";
 import { originGitHubRepo } from "./githubRemote.js";
 import type { GitHubAuthor, GitHubAuthorTrust } from "./githubTrust.js";
-import { readGitHubPull, type GitHubPullSnapshot } from "./githubPullRead.js";
+import { listOpenGitHubPulls, readGitHubPull, type GitHubPullSnapshot } from "./githubPullRead.js";
 
 /** A GitHub request the agent can fix or report. The message says what happened and what to do. */
 export class GitHubToolError extends Error {}
@@ -90,6 +90,11 @@ export class GitHubAgent {
   constructor(private readonly deps: GitHubAgentDependencies) { this.resolveRepo = deps.resolveRepo ?? ((cwd) => sessionRepo(cwd, deps.backlogConfig)); }
 
   repo(cwd: string): Promise<SessionRepo> { return this.resolveRepo(cwd); }
+
+  async openPulls(cwd: string) {
+    const repo = await this.resolveRepo(cwd);
+    return listOpenGitHubPulls(repo, this.caller(repo.slug), this.deps.trust);
+  }
 
   async pull(cwd: string, number: number, annotations = false): Promise<GitHubPullSnapshot> {
     const repo = await this.resolveRepo(cwd);

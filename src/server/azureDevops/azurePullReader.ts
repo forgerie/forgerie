@@ -1,6 +1,6 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Check } from "typebox/value";
-import type { PullCheck, PullRemark, PullRequest } from "../../shared/pullRequests.js";
+import type { PullCheck, PullRemark, PullRequest, RepositoryOpenPulls } from "../../shared/pullRequests.js";
 import type { PullRequestReader, PullSnapshot } from "../github/pullRequestReader.js";
 import type { AzureCredentialSource } from "./azureDevopsCredentials.js";
 import { azureDevopsRequest } from "./azureDevopsRequest.js";
@@ -56,6 +56,18 @@ export class AzurePullReader implements PullRequestReader {
   private readonly now: () => number;
   constructor(private readonly deps: Dependencies) { this.now = deps.now ?? Date.now; }
   async repo(cwd: string): Promise<{ slug: string }> { return { slug: azureRepoKey(await this.resolve(cwd)) }; }
+  async openPulls(cwd: string): Promise<RepositoryOpenPulls> {
+    const repo = await this.resolve(cwd);
+    const query = new URLSearchParams({ "searchCriteria.status": "active", "$top": "51", "api-version": "7.1" });
+    const result = await this.read(repo, `${this.gitBase(repo)}/pullrequests?${query}`, Type.Object({ value: Type.Array(prSchema, { maxItems: 51 }) }), true);
+    const key = azureRepoKey(repo);
+    for (const pr of result.value) this.requirePullRepo(pr, repo);
+    return { repo: key, complete: !result.continued && result.value.length <= 50, items: result.value.slice(0, 50).map(pr => {
+      if (pr.status !== "active") throw new AzurePullError("Azure DevOps returned a non-active pull request.");
+      return { repo: key, number: pr.pullRequestId, title: pr.title.slice(0, 8000), url: this.pullUrl(pr, repo), state: pr.isDraft === true ? "draft" : "open",
+        head: pr.sourceRefName.replace(/^refs\/heads\//u, ""), base: pr.targetRefName.replace(/^refs\/heads\//u, ""), author: pr.createdBy.uniqueName ?? pr.createdBy.displayName, updatedAt: pr.creationDate };
+    }) };
+  }
   async activeNumber(cwd: string): Promise<number> {
     const repo = await this.resolve(cwd);
     const branch = await (this.deps.branch ?? azureSourceBranch)(cwd);
@@ -69,8 +81,9 @@ export class AzurePullReader implements PullRequestReader {
     const repo = await this.resolve(cwd);
     const base = `${this.gitBase(repo)}/pullrequests/${String(number)}`;
     const pr = await this.read(repo, `${base}?api-version=7.1`, prSchema);
-    if (pr.pullRequestId !== number || pr.repository.name.toLowerCase() !== repo.repository.toLowerCase() || pr.repository.project.name.toLowerCase() !== repo.project.toLowerCase()) throw new AzurePullError("Azure DevOps returned a mismatched pull request.");
-    const url = pr._links?.web?.href ?? `https://dev.azure.com/${encodeURIComponent(repo.organization)}/${encodeURIComponent(repo.project)}/_git/${encodeURIComponent(repo.repository)}/pullrequest/${String(number)}`;
+    this.requirePullRepo(pr, repo);
+    if (pr.pullRequestId !== number) throw new AzurePullError("Azure DevOps returned a mismatched pull request.");
+    const url = this.pullUrl(pr, repo);
     const artifact = `vstfs:///CodeReview/CodeReviewId/${pr.repository.project.id}/${String(number)}`;
     // Microsoft's Evaluations - List reference specifies 7.1-preview.1, not 7.1.
     const policies = await this.subRead(repo, `${this.projectBase(repo)}/_apis/policy/evaluations?${new URLSearchParams({ artifactId: artifact, "api-version": "7.1-preview.1" })}`, list(policySchema));
@@ -118,6 +131,12 @@ export class AzurePullReader implements PullRequestReader {
       complete: policies !== undefined && statuses !== undefined && threads !== undefined, merge: { kind: "blocked", reason: "Azure DevOps pull requests are read-only. Merge in Azure DevOps." } };
     return { pull, remarks };
   }
+  private requirePullRepo(pr: Static<typeof prSchema>, repo: AzureRepo): void {
+    if (pr.repository.name.toLowerCase() !== repo.repository.toLowerCase() || pr.repository.project.name.toLowerCase() !== repo.project.toLowerCase()) throw new AzurePullError("Azure DevOps returned a mismatched pull request.");
+  }
+  private pullUrl(pr: Static<typeof prSchema>, repo: AzureRepo): string {
+    return pr._links?.web?.href ?? `https://dev.azure.com/${encodeURIComponent(repo.organization)}/${encodeURIComponent(repo.project)}/_git/${encodeURIComponent(repo.repository)}/pullrequest/${String(pr.pullRequestId)}`;
+  }
   private async resolve(cwd: string): Promise<AzureRepo> {
     const repo = await (this.deps.resolveRepo ?? originAzureRepo)(cwd);
     if (repo === undefined) throw new AzurePullError("This session's origin is not an Azure Repos remote.");
@@ -128,7 +147,9 @@ export class AzurePullReader implements PullRequestReader {
   private async subRead<T extends TSchema>(repo: AzureRepo, url: string, schema: T): Promise<Static<T> | undefined> {
     try { return await this.read(repo, url, schema); } catch { return undefined; }
   }
-  private async read<T extends TSchema>(repo: AzureRepo, url: string, schema: T): Promise<Static<T>> {
+  private read<T extends TSchema>(repo: AzureRepo, url: string, schema: T): Promise<Static<T>>;
+  private read<T extends TSchema>(repo: AzureRepo, url: string, schema: T, continuation: true): Promise<Static<T> & { continued: boolean }>;
+  private async read<T extends TSchema>(repo: AzureRepo, url: string, schema: T, continuation = false): Promise<Static<T> | (Static<T> & { continued: boolean })> {
     const organization = repo.organization.toLowerCase();
     try {
       const until = this.limitedUntil.get(organization) ?? 0;
@@ -159,8 +180,9 @@ export class AzurePullReader implements PullRequestReader {
         }
       } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
       const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      if (!Check(schema, value) || (response.headers.get("x-ms-continuationtoken") ?? "") !== "") throw new AzurePullError("Azure DevOps returned invalid or truncated PR data.");
-      return value;
+      const continued = (response.headers.get("x-ms-continuationtoken") ?? "") !== "";
+      if (!Check(schema, value) || (!continuation && continued)) throw new AzurePullError("Azure DevOps returned invalid or truncated PR data.");
+      return continuation ? { ...value, continued } : value;
     } catch (error) {
       if (error instanceof AzurePullError) throw error;
       throw new AzurePullError("Azure DevOps PR could not be read within 30 seconds, or returned invalid data.");

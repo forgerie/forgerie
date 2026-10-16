@@ -24,6 +24,8 @@ function fakeApi(initial: PullItem[]) {
   const setLink = (next: PullLink) => { items = items.some((item) => item.link.number === next.number) ? items.map((item) => item.link.number === next.number ? { ...item, link: next } : item) : [...items, { link: next, pull: pulls.get(next.number) ?? pull(next.number) }]; return next; };
   const linkOf = (number: number) => items.find((item) => item.link.number === number)?.link ?? link(number);
   const api = {
+    open: vi.fn<PullRequestApi["open"]>(async () => ({ provider: "github", repo: "o/r", items: [], complete: true })),
+    preview: vi.fn<PullRequestApi["preview"]>(async (_ref, number) => ({ provider: "github", pull: pull(number) })),
     list: vi.fn(async () => items),
     read: vi.fn(async (_ref, number: number) => { const item = items.find((candidate) => candidate.link.number === number); if (!item?.pull) throw new Error("gone"); return { link: item.link, pull: item.pull }; }),
     link: vi.fn(async (_ref, number: number) => { const next = setLink(linkOf(number)); return { link: next, pull: pulls.get(number) ?? pull(number) }; }),
@@ -41,7 +43,7 @@ function Harness({ api, catalog = [], onAsk = () => {} }: { api: PullRequestApi;
   const [selected, setSelected] = useState<number>();
   return <>
     <PullRequestOpener pulls={items.flatMap((item) => item.pull ? [item.pull] : [])} links={state.links} onOpen={() => {}} />
-    <PullRequestReview load={state.load} selected={selected ?? firstToShow(items)} onSelect={setSelected} reading={state.reading}
+    <PullRequestReview discovery={state.discovery} load={state.load} selected={selected ?? firstToShow(items)} onSelect={setSelected} reading={state.reading}
       notice={state.notice} writing={state.writing} now={Date.parse(TIME)}
       onRefresh={state.refresh} onAsk={onAsk} onWatch={(number, on) => { void state.setWatch(number, on); }} onLink={state.linkNumber}
       onUnlink={(number) => { void state.unlink(number); }} onMerge={(number) => { void state.merge(number, "rebase"); }} onClose={() => {}} />
@@ -67,6 +69,43 @@ async function typeNumber(value: string) {
 }
 
 describe("several pull requests in one session", () => {
+  it("lists repository PRs, previews a selection, and keeps failures explicit", async () => {
+    const { api } = fakeApi([]);
+    api.open.mockResolvedValueOnce({ provider: "github", repo: "o/r", items: [{ ...pull(12), state: "open" }], complete: false });
+    await act(async () => root.render(<Harness api={api} />));
+    expect(document.querySelector('[aria-label="Repository open pull requests"]')?.textContent).toContain("Showing the first 1");
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Repository open pull requests"] .pr-check-line')!.click());
+    expect(api.preview).toHaveBeenCalledWith({ id: "s1", cwd: "/repo" }, 12, expect.any(AbortSignal));
+    expect(document.querySelector(".pr-title")?.textContent).toBe("Fix 12");
+    expect(api.link).not.toHaveBeenCalled(); expect(api.watch).not.toHaveBeenCalled();
+    api.preview.mockRejectedValueOnce(new Error("GitHub denied access."));
+    await typeNumber("13");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("GitHub denied access.");
+    expect(button("Link #12")).toBeUndefined();
+    api.open.mockRejectedValueOnce(new Error("Repository cannot be read."));
+    await act(async () => button("Read open PRs again")!.click());
+    expect(document.querySelector('[aria-label="Repository open pull requests"] [role="alert"]')?.textContent).toContain("Repository cannot be read.");
+    await typeNumber("14"); expect(button("Link #14")).toBeDefined();
+  });
+
+  it("discards an old preview when the input changes and rejects URLs for another repository", async () => {
+    const { api } = fakeApi([]);
+    let finish!: (value: Awaited<ReturnType<PullRequestApi["preview"]>>) => void;
+    api.preview.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await act(async () => root.render(<Harness api={api} />));
+    await typeNumber("12");
+    const input = document.querySelector<HTMLInputElement>(".pr-link input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "13");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => finish({ provider: "github", pull: pull(12) }));
+    expect(button("Link #12")).toBeUndefined();
+    await typeNumber("https://github.com/another/repository/pull/13");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("does not belong");
+    expect(api.link).not.toHaveBeenCalled();
+  });
+
   it("shows the worst state in the header and opens on the pull request that needs the reader", async () => {
     const { api } = fakeApi([{ link: link(9), pull: pull(9) }, { link: link(10), pull: failing(10) }, { link: link(11), pull: pull(11, { state: "merged" }) }]);
     await act(async () => root.render(<Harness api={api} catalog={[link(9), link(10), link(11)]} />));
@@ -100,7 +139,13 @@ describe("several pull requests in one session", () => {
     await act(async () => root.render(<Harness api={api} />));
     await act(async () => button("Link another")!.click());
     await typeNumber("12");
-    expect(api.link).toHaveBeenCalledWith({ id: "s1", cwd: "/repo" }, 12);
+    expect(api.preview).toHaveBeenCalledWith({ id: "s1", cwd: "/repo" }, 12, expect.any(AbortSignal));
+    expect(api.link).not.toHaveBeenCalled();
+    expect(button("Watch")).toBeUndefined();
+    expect(button("Merge")).toBeUndefined();
+    expect(document.querySelector('[aria-label="Link preview"]')?.textContent).toContain("Not linked yet");
+    await act(async () => button("Link #12")!.click());
+    expect(api.link).toHaveBeenCalledWith({ id: "s1", cwd: "/repo" }, 12, { provider: "github", repo: "o/r" });
     expect(tabs().map((tab) => tab.querySelector("b")?.textContent)).toEqual(["#9", "#12"]);
     expect(selectedTab()).toBe("#12");
   });
@@ -194,7 +239,10 @@ describe("Azure pull requests", () => {
   it("links the number from an Azure PR URL through the same API", async () => {
     const { api } = fakeApi([]);
     await act(async () => root.render(<Harness api={api} />));
+    api.preview.mockResolvedValueOnce({ provider: "azure-devops", pull: pull(12, { repo: "o/Amaze Insights/r" }) });
     await typeNumber("https://dev.azure.com/o/Amaze%20Insights/_git/r/pullrequest/12");
-    expect(api.link).toHaveBeenCalledWith({ id: "s1", cwd: "/repo" }, 12);
+    expect(api.link).not.toHaveBeenCalled();
+    await act(async () => button("Link #12")!.click());
+    expect(api.link).toHaveBeenCalledWith({ id: "s1", cwd: "/repo" }, 12, { provider: "azure-devops", repo: "o/Amaze Insights/r" });
   });
 });

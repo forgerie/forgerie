@@ -21,6 +21,36 @@ function service(reader: AzurePullReader, notices: string[] = []) {
 }
 
 describe("Azure PR reads", () => {
+  it("discovers active PR summaries and previews before linking through read-only routes", async () => {
+    const s = await azurePullServer(); const pulls = service(s.reader); const app = Fastify(); registerPullRequestRoutes(app, pulls);
+    try {
+      s.state.open.push({ ...s.state.pr, pullRequestId: 10, isDraft: true });
+      const response = await app.inject(`/sessions/${ref.id}/pull-requests/open?cwd=${ref.cwd}`);
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ provider: "azure-devops", complete: true, items: [{ number: 9, state: "open" }, { number: 10, state: "draft" }] });
+      const query = new URL(s.requests[0]?.url ?? "", "http://local").searchParams;
+      expect(query.get("searchCriteria.status")).toBe("active"); expect(query.get("$top")).toBe("51");
+      const preview = await app.inject(`/sessions/${ref.id}/pull-requests/9/preview?cwd=${ref.cwd}`);
+      expect(preview.statusCode).toBe(200); expect(preview.json()).toMatchObject({ provider: "azure-devops", pull: { number: 9 } });
+      expect(preview.json()).not.toHaveProperty("link");
+      expect(pulls.catalog()).toEqual({ links: [] });
+      expect(s.requests.every(request => request.method === "GET")).toBe(true);
+    } finally { pulls.dispose(); await app.close(); await s.close(); }
+  });
+  it("bounds discovery, marks a continuation as incomplete and rejects wrong repository rows", async () => {
+    const s = await azurePullServer();
+    try {
+      s.state.open = Array.from({ length: 51 }, (_, index) => ({ ...s.state.pr, pullRequestId: index + 1 }));
+      const result = await s.reader.openPulls(ref.cwd); expect(result.items).toHaveLength(50); expect(result.complete).toBe(false);
+      s.state.open = []; s.state.continuation = true;
+      expect(await s.reader.openPulls(ref.cwd)).toMatchObject({ items: [], complete: false });
+      s.state.continuation = false; s.state.open = [{ ...s.state.pr, repository: { ...s.state.pr.repository, name: "other" } }];
+      await expect(s.reader.openPulls(ref.cwd)).rejects.toThrow("mismatched");
+      s.state.status = 403;
+      await expect(s.reader.openPulls(ref.cwd)).rejects.toThrow("Code: Read");
+    } finally { await s.close(); }
+  });
+
   it.each([ ["active", false, "open"], ["active", true, "draft"], ["completed", false, "merged"], ["abandoned", false, "closed"] ] as const)("maps %s draft=%s", async (status, draft, expected) => {
     const s = await azurePullServer();
     try { s.state.pr.status = status; s.state.pr.isDraft = draft; const { pull } = await s.reader.pull(ref.cwd, 9);

@@ -1,6 +1,7 @@
+import type { PullRepository } from "@shared/pullRequests";
 import { afterTranscriptPaint } from "../readPaint";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { sameLink, type MergeMethod, type PullItem, type PullLink, type PullRequestApi, type PullSessionRef } from "./pullRequestApi";
+import { sameLink, type OpenPullsResponse, type PullPreviewResponse, type MergeMethod, type PullItem, type PullLink, type PullRequestApi, type PullSessionRef } from "./pullRequestApi";
 
 /** What the panel draws. `ready` with no items: the session links no pull request. */
 export type PullsLoad =
@@ -8,7 +9,12 @@ export type PullsLoad =
   | { type: "ready"; items: readonly PullItem[] }
   | { type: "failed"; message: string };
 
+export interface PullDiscovery {
+  open: (signal?: AbortSignal) => Promise<OpenPullsResponse>;
+  preview: (number: number, signal?: AbortSignal) => Promise<PullPreviewResponse>;
+}
 export interface SessionPulls {
+  discovery: PullDiscovery;
   /** The catalog's links: known before GitHub is read, so the header can show at once. */
   links: readonly PullLink[];
   load: PullsLoad;
@@ -19,7 +25,7 @@ export interface SessionPulls {
   /** A write is in flight. Writes do not overlap. */
   writing: boolean;
   refresh: () => void;
-  linkNumber: (number: number) => Promise<boolean>;
+  linkNumber: (number: number, expected?: PullRepository) => Promise<boolean>;
   unlink: (number: number) => Promise<void>;
   setWatch: (number: number, on: boolean) => Promise<void>;
   merge: (number: number, method: MergeMethod) => Promise<void>;
@@ -142,9 +148,18 @@ export function useSessionPulls(api: PullRequestApi, ref: PullSessionRef | undef
   const patch = (next: PullItem) => setLoad((current) => current.type !== "ready" ? current : { type: "ready", items: upsert(current.items, next) });
   const itemOf = (number: number) => items.find((item) => item.link.number === number);
 
+  const open = useCallback((signal?: AbortSignal) => {
+    if (!id || !cwd) return Promise.reject(new Error("Select a session workspace first."));
+    return api.open({ id, cwd }, signal);
+  }, [api, id, cwd]);
+  const preview = useCallback((number: number, signal?: AbortSignal) => {
+    if (!id || !cwd) return Promise.reject(new Error("Select a session workspace first."));
+    return api.preview({ id, cwd }, number, signal);
+  }, [api, id, cwd]);
+
   return {
-    links: catalogLinks, load, reading, notice, writing, refresh, clearNotice: () => setNotice(undefined),
-    linkNumber: (number) => write(async (target) => { patch(await api.link(target, number)); }),
+    discovery: { open, preview }, links: catalogLinks, load, reading, notice, writing, refresh, clearNotice: () => setNotice(undefined),
+    linkNumber: (number, expected) => write(async (target) => { patch(await api.link(target, number, expected)); }),
     unlink: async (number) => {
       await write(async (target) => {
         const removed = await api.unlink(target, number);

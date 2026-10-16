@@ -114,6 +114,27 @@ describe("Actions parts", () => {
     expect(document.querySelector("dialog")).not.toBeNull();
   });
 
+  it("Open PR sheet part: selection reads a preview and only Link adds a watchable tab", async () => {
+    await show(PullRunsPart.OpenPullRequests);
+    expect(document.querySelectorAll('[aria-label="Repository open pull requests"] .pr-check')).toHaveLength(2);
+    await press(document.querySelector('[aria-label="Repository open pull requests"] .pr-check-line'));
+    expect(document.querySelector(".pr-title")?.textContent).toBe("Keep preview reads separate from links");
+    expect(button(/^Watch$/)).toBeUndefined();
+    expect(text()).toContain("Not linked yet.");
+    await press(button(/^Link #151$/));
+    expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain("#151");
+    expect(button(/^Watch$/)).toBeDefined();
+  });
+
+  it.each([
+    [PullRunsPart.OpenPullRequestsEmpty, "has no open pull requests."],
+    [PullRunsPart.OpenPullRequestsLoading, "Reading open pull requests…"],
+    [PullRunsPart.OpenPullRequestsError, "Check its repository access"],
+    [PullRunsPart.OpenPullRequestsMany, "Showing the first 50 open PRs."],
+  ])("Open PR sheet part exposes its bounded load state", async (State, content) => {
+    await show(State); expect(text()).toContain(content);
+  });
+
   it("Runs under a pull request: watching one links it, and the Actions tab lists it", async () => {
     await show(PullRunsPart.UnderPullRequest);
     const codeql = [...document.querySelectorAll(".run-row")].find((row) => row.textContent?.includes("CodeQL"));

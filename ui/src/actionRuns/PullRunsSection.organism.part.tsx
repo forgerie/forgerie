@@ -4,6 +4,7 @@ import { runKey, type ActionRun } from "./actionRunApi";
 import type { ActionRunsState } from "./actionRunsStore";
 import { derived, fixtureNow, link, states } from "./fixtures/actionRuns";
 import { ActionRunsPanel } from "./ActionRunsPanel";
+import { pullDiscovery } from "./fixtures/pullDiscovery";
 import { PullPanel } from "./fixtures/pullPanel";
 
 export const name = "Pull request runs";
@@ -45,3 +46,10 @@ export function Loading() { return <Scenario initial={states.loading} />; }
 export function NoRuns() { return <Scenario initial={{ ...states.ready, load: { type: "ready", items: [], derived: [{ pull: 142, headSha: derived[0]!.headSha, runs: [] }] } }} />; }
 export function MissingPermission() { return <Scenario initial={states.broken} />; }
 export function UnderPullRequest() { return <Scenario initial={states.ready} inPanel />; }
+
+/** These reuse the same current sheet as UnderPullRequest. Each row opens a read-only preview before Link. */
+export function OpenPullRequests() { return <PullPanel actions={null} unlinked discovery={pullDiscovery()} />; }
+export function OpenPullRequestsEmpty() { return <PullPanel actions={null} unlinked discovery={pullDiscovery("empty")} />; }
+export function OpenPullRequestsLoading() { return <PullPanel actions={null} unlinked discovery={pullDiscovery("loading")} />; }
+export function OpenPullRequestsError() { return <PullPanel actions={null} unlinked discovery={pullDiscovery("error")} />; }
+export function OpenPullRequestsMany() { return <PullPanel actions={null} unlinked discovery={pullDiscovery("many")} />; }

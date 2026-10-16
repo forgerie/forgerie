@@ -34,6 +34,18 @@ describe("pull request API", () => {
     expect(calls).toEqual([{ path: "/api/sessions/s1/pull-requests?cwd=%2Frepo", method: "GET", body: undefined }]);
   });
 
+  it("discovers open PRs and previews an unlinked PR using GET only", async () => {
+    const open = { provider: "github", repo: pull.repo, items: [{ ...pull, state: "open" }], complete: false };
+    const preview = { provider: "github", pull };
+    const { calls, api } = fake({
+      "GET /api/sessions/s1/pull-requests/open?cwd=%2Frepo": { body: open },
+      "GET /api/sessions/s1/pull-requests/9/preview?cwd=%2Frepo": { body: preview },
+    });
+    await expect(api.open(ref)).resolves.toEqual(open);
+    await expect(api.preview(ref, 9)).resolves.toEqual(preview);
+    expect(calls.every(call => call.method === "GET" && call.body === undefined)).toBe(true);
+  });
+
   it("reads one pull request by number", async () => {
     const { api } = fake({ "GET /api/sessions/s1/pull-requests/9?cwd=%2Frepo": { body: { link, pull } } });
     await expect(api.read(ref, 9)).resolves.toEqual({ link, pull });
@@ -56,6 +68,12 @@ describe("pull request API", () => {
       { method: "DELETE", path: "/api/sessions/s1/pull-requests/9/watch", body: undefined },
       { method: "DELETE", path: "/api/sessions/s1/pull-requests/9", body: undefined },
     ]);
+  });
+
+  it("sends preview repository confirmation when linking without changing the legacy link body", async () => {
+    const { calls, api } = fake({ "PUT /api/sessions/s1/pull-requests": { body: { link, pull } } });
+    await api.link(ref, 9, { provider: "github", repo: pull.repo });
+    expect(calls[0]?.body).toEqual({ cwd: ref.cwd, number: 9, expected: { provider: "github", repo: pull.repo } });
   });
 
   it("binds a merge to the repository, number, and head SHA the reader saw", async () => {

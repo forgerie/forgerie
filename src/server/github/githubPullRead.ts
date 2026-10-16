@@ -1,5 +1,5 @@
 import { Type, type Static, type TSchema } from "typebox";
-import type { PullCheck, PullRemark, PullRequest } from "../../shared/pullRequests.js";
+import type { PullCheck, PullRemark, PullRequest, RepositoryOpenPulls } from "../../shared/pullRequests.js";
 import type { Caller, SessionRepo } from "./githubAgent.js";
 import type { GitHubAuthorTrust } from "./githubTrust.js";
 
@@ -126,4 +126,16 @@ async function threads(call: Caller, repo: string, number: number, sha: string) 
     if (after === null) throw new Error("GitHub returned a missing review-thread cursor.");
   }
   return { comments, required, complete: false };
+}
+
+/** One bounded page plus a sentinel item tells the client when more exist. */
+export async function listOpenGitHubPulls(repo: SessionRepo, call: Caller, trust: Pick<GitHubAuthorTrust, "judge">): Promise<RepositoryOpenPulls> {
+  const summary = Type.Object({ ...Author, number: Type.Integer({ minimum: 1 }), title: Type.String(), html_url: Type.String(), draft: Type.Boolean(),
+    head: Type.Object({ ref: Type.String() }), base: Type.Object({ ref: Type.String() }), updated_at: Type.String() });
+  const pulls = await call.get("/pulls?state=open&per_page=51&sort=updated&direction=desc", Type.Array(summary, { maxItems: 51 }), "Pull requests: read");
+  const shown = pulls.slice(0, 50);
+  const allowed = repo.everyone ? () => true : await trust.judge(repo.slug, await call.token(), shown.map(item => ({ login: item.user?.login, association: item.author_association })), repo.trustedBots);
+  return { repo: repo.slug, complete: pulls.length <= 50, items: shown.map(item => ({ repo: repo.slug, number: item.number,
+    title: allowed({ login: item.user?.login, association: item.author_association }) ? item.title.slice(0, MAX_TEXT) : "(text hidden: outside contributor)",
+    url: item.html_url, state: item.draft ? "draft" : "open", head: item.head.ref, base: item.base.ref, author: item.user?.login ?? "deleted-user", updatedAt: item.updated_at })) };
 }

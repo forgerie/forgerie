@@ -320,7 +320,7 @@ async function createSessionDaemonRuntime() {
     }),
   }));
   const pulls: PullRequestService = new PullRequestService({ github: githubAgent, store: pullStore,
-    readerFor: async (cwd) => await originAzureRepo(cwd) === undefined ? { provider: "github", repo: (target) => githubAgent.repo(target), pull: (target, number, annotations) => githubAgent.pull(target, number, annotations) } : azurePulls,
+    readerFor: async (cwd) => await originAzureRepo(cwd) === undefined ? { provider: "github", openPulls: (target) => githubAgent.openPulls(target), repo: (target) => githubAgent.repo(target), pull: (target, number, annotations) => githubAgent.pull(target, number, annotations) } : azurePulls,
     sessions: relatedPullSessions(relatedWork, {
       inspect: (ref) => sessions.inspectPullSession(ref),
       wake: (ref, notice, current) => sessions.wakePullSession(ref, notice, current),

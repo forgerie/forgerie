@@ -6,17 +6,18 @@ import {
   PlusIcon, RefreshCwIcon, TriangleAlertIcon, XIcon,
 } from "lucide-react";
 import {
-  pullRequestNumber, pullRequestCopy, ago, approvals, clock, commentsPrompt, duration, failedChecks, markOf, mergeBlock, sortedChecks, verdict, verdictAction, worstOf,
+  pullRequestTarget, pullRequestCopy, ago, approvals, clock, commentsPrompt, duration, failedChecks, markOf, mergeBlock, sortedChecks, verdict, verdictAction, worstOf,
   type CheckState, type PullCheck, type PullComment, type PullLink, type PullRequest, type PullReview, type PullTone, type PullWatch,
 } from "../pullRequests/pullRequestModel";
-import type { PullItem } from "../pullRequests/pullRequestApi";
-import type { PullsLoad, SessionPulls } from "../pullRequests/useSessionPull";
+import type { OpenPullsResponse, PullPreviewResponse, PullItem } from "../pullRequests/pullRequestApi";
+import type { PullDiscovery, PullsLoad, SessionPulls } from "../pullRequests/useSessionPull";
 import "./pullRequest.css";
 
 export type { PullsLoad } from "../pullRequests/useSessionPull";
 
 export interface PullRequestBinding {
   load: PullsLoad;
+  discovery?: PullDiscovery | undefined;
   /** The pull request on show. Undefined: none is linked, or the reader is linking another. */
   selected: number | undefined;
   onSelect: (number: number) => void;
@@ -31,7 +32,7 @@ export interface PullRequestBinding {
   onAsk: (message: string) => void;
   onWatch: (number: number, on: boolean) => void;
   /** Resolves true once the server linked it. */
-  onLink: (number: number) => Promise<boolean>;
+  onLink: SessionPulls["linkNumber"];
   onUnlink: (number: number) => void;
   onMerge: (number: number) => void;
   onClose: () => void;
@@ -102,7 +103,7 @@ export function PullRequestReview(props: PullRequestBinding) {
   return createPortal(<Review {...props} />, document.body);
 }
 
-function Review({ load, selected, onSelect, reading, notice, writing, now, onRefresh, onAsk, onWatch, onLink, onUnlink, onMerge, onClose, extraView, belowPull }: PullRequestBinding) {
+function Review({ load, discovery, selected, onSelect, reading, notice, writing, now, onRefresh, onAsk, onWatch, onLink, onUnlink, onMerge, onClose, extraView, belowPull }: PullRequestBinding) {
   const titleId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const pressedBackdrop = useRef(false);
@@ -126,7 +127,7 @@ function Review({ load, selected, onSelect, reading, notice, writing, now, onRef
   const pr = item?.pull ?? undefined;
   const source = item?.link.provider === "azure-devops" ? "Azure DevOps" : "GitHub";
   const ask = (message: string) => { onClose(); onAsk(message); };
-  const link = async (number: number) => { if (await onLink(number)) { setAdding(false); onSelect(number); } };
+  const link: SessionPulls["linkNumber"] = async (number, expected) => { if (await onLink(number, expected)) { setAdding(false); onSelect(number); return true; } return false; };
   const refresh = extra?.onRefresh ?? onRefresh;
   return <dialog ref={dialog} className="tree-dialog pr-dialog" aria-labelledby={titleId}
     onPointerDown={(event) => { pressedBackdrop.current = event.target === dialog.current; }}
@@ -157,8 +158,8 @@ function Review({ load, selected, onSelect, reading, notice, writing, now, onRef
         {!extra && load.type === "loading" && <p className="changes-message" role="status">{pullRequestCopy.loading}</p>}
         {!extra && load.type === "failed" && <div className="changes-message" role="alert"><p>{load.message}</p>
           <button type="button" onClick={onRefresh}>Try again</button></div>}
-        {!extra && load.type === "ready" && (items.length === 0 || adding) && <LinkForm writing={writing} first={items.length === 0}
-          onLink={(number) => { void link(number); }} onCancel={items.length > 0 ? () => setAdding(false) : undefined} />}
+        {!extra && load.type === "ready" && (items.length === 0 || adding) && <LinkForm discovery={discovery} now={now} onAsk={ask} writing={writing} first={items.length === 0}
+          onLink={(number, expected) => { void link(number, expected); }} onCancel={items.length > 0 ? () => setAdding(false) : undefined} />}
         {item && !item.pull && <div className="changes-message" role="alert">
           <p>Forgerie could not read pull request #{item.link.number}. {item.error ?? ""}</p>
           <button type="button" onClick={onRefresh}>Try again</button></div>}
@@ -209,34 +210,98 @@ function UnlinkRow({ number, watching, writing, onUnlink }: { number: number; wa
     Unlink #{number} from this session</button>{watching ? " Its watch stops too." : ""}</p>;
 }
 
-/**
- * Link an existing pull request. The agent links the ones it opens on its own. The button names the number it will
- * link once the field holds one; text that is not a number or a pull request link says so under the field.
- */
-function LinkForm({ writing, first, onLink, onCancel }: { writing: boolean; first: boolean; onLink: (number: number) => void; onCancel?: (() => void) | undefined }) {
+type OpenPullsLoad = { type: "loading" } | { type: "ready"; data: OpenPullsResponse } | { type: "failed"; message: string };
+type PreviewLoad = { type: "idle" } | { type: "loading"; number: number } | { type: "ready"; data: PullPreviewResponse } | { type: "failed"; message: string };
+const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+/** Binding: discovery reads are isolated from linked reads and all write handlers. */
+function LinkForm({ discovery, writing, first, now, onAsk, onLink, onCancel }: { discovery: PullDiscovery | undefined; writing: boolean; first: boolean; now: number;
+  onAsk: (message: string) => void; onLink: (number: number, expected: { provider: PullPreviewResponse["provider"]; repo: string }) => void; onCancel?: (() => void) | undefined }) {
   const inputId = useId();
   const hintId = useId();
   const [value, setValue] = useState("");
-  const number = pullRequestNumber(value);
-  const invalid = value.trim() !== "" && number === undefined;
-  return <form className="pr-link" onSubmit={(event) => { event.preventDefault(); if (number && number > 0) onLink(number); }}>
-    <h3 className="pr-link-title">{first ? pullRequestCopy.linkTitle : pullRequestCopy.linkAnotherTitle}</h3>
-    <p>{first ? pullRequestCopy.empty : pullRequestCopy.linkAnother}</p>
-    <label htmlFor={inputId} className="pr-link-label">{pullRequestCopy.linkLabel}</label>
-    <div className="pr-link-row">
-      <span className="pr-link-field" data-invalid={invalid || undefined}>
-        <LinkIcon aria-hidden size={16} />
-        <input id={inputId} autoComplete="off" inputMode="url" placeholder={pullRequestCopy.linkPlaceholder} value={value} autoFocus={!first}
-          aria-describedby={hintId} aria-invalid={invalid || undefined} onChange={(event) => setValue(event.target.value)} />
-      </span>
-      <button type="submit" className="pr-button primary" disabled={!number || writing}>{writing ? "Linking…" : number ? `Link #${String(number)}` : "Link"}</button>
-      {onCancel && <button type="button" className="pr-button" onClick={onCancel}>Cancel</button>}
-    </div>
-    <p id={hintId} className="pr-link-hint" data-invalid={invalid || undefined} role={invalid ? "alert" : undefined}>{invalid ? pullRequestCopy.linkInvalid : pullRequestCopy.linkHint}</p>
-  </form>;
+  const [open, setOpen] = useState<OpenPullsLoad>({ type: "loading" });
+  const [revision, setRevision] = useState(0);
+  const [preview, setPreview] = useState<PreviewLoad>({ type: "idle" });
+  const [requested, setRequested] = useState<{ value: string; number: number }>();
+  const target = pullRequestTarget(value);
+  const invalid = value.trim() !== "" && target === undefined;
+  const openPulls = discovery?.open, readPreview = discovery?.preview;
+  useEffect(() => {
+    const controller = new AbortController();
+    setOpen({ type: "loading" });
+    if (!openPulls) { setOpen({ type: "failed", message: "Open PR discovery is unavailable." }); return; }
+    void openPulls(controller.signal).then(
+      data => { if (!controller.signal.aborted) setOpen({ type: "ready", data }); },
+      error => { if (!controller.signal.aborted) setOpen({ type: "failed", message: messageOf(error) }); },
+    );
+    return () => controller.abort();
+  }, [openPulls, revision]);
+  useEffect(() => {
+    if (!requested) return;
+    const controller = new AbortController();
+    setPreview({ type: "loading", number: requested.number });
+    if (!readPreview) { setPreview({ type: "failed", message: "PR preview is unavailable." }); return; }
+    void readPreview(requested.number, controller.signal).then(data => {
+      if (controller.signal.aborted) return;
+      const expected = pullRequestTarget(requested.value);
+      if (data.pull.number !== requested.number || expected?.repo && (expected.provider !== data.provider || expected.repo.toLowerCase() !== data.pull.repo.toLowerCase())) {
+        setPreview({ type: "failed", message: "This PR URL does not belong to the session repository. Use a PR from this repository." });
+      } else setPreview({ type: "ready", data });
+    }, error => { if (!controller.signal.aborted) setPreview({ type: "failed", message: messageOf(error) }); });
+    return () => controller.abort();
+  }, [readPreview, requested]);
+  const read = (number: number, input: string) => { setValue(input); setPreview({ type: "idle" }); setRequested({ number, value: input }); };
+  return <>
+    <form className="pr-link" onSubmit={(event) => { event.preventDefault(); if (target) read(target.number, value); }}>
+      {first ? <p>{pullRequestCopy.empty}</p> : <p>A session can follow several pull requests. Each keeps its own watch.</p>}
+      <label htmlFor={inputId} className="pr-link-label">{pullRequestCopy.previewLabel}</label>
+      <div className="pr-link-row">
+        <span className="pr-link-field" data-invalid={invalid || undefined}>
+          <LinkIcon aria-hidden size={16} />
+          <input id={inputId} autoComplete="off" inputMode="url" placeholder="PR number or URL" value={value} autoFocus={!first}
+            aria-describedby={hintId} aria-invalid={invalid || undefined} onChange={(event) => {
+              setValue(event.target.value); setRequested(undefined); setPreview({ type: "idle" });
+            }} />
+        </span>
+        <button type="submit" className="pr-button primary" disabled={!target || writing || preview.type === "loading"}>Preview</button>
+        {onCancel && <button type="button" className="pr-button" onClick={onCancel}>Cancel</button>}
+      </div>
+      {invalid && <p id={hintId} className="pr-link-hint" data-invalid role="alert">{pullRequestCopy.linkInvalid}</p>}
+    </form>
+    {preview.type === "loading" && <p className="changes-message" role="status">Reading pull request #{preview.number}…</p>}
+    {preview.type === "failed" && <p className="changes-message" role="alert">{preview.message}</p>}
+    {preview.type === "ready" && <>
+      <section className="pr-section" aria-label="Link preview">
+        <div className="pr-section-head"><h3>Preview #{preview.data.pull.number}</h3>
+          <a className="pr-button" href={preview.data.pull.url} target="_blank" rel="noreferrer">Open on {preview.data.provider === "azure-devops" ? "Azure DevOps" : "GitHub"}</a>
+          <button type="button" className="pr-button primary" disabled={writing} onClick={() => onLink(preview.data.pull.number, { provider: preview.data.provider, repo: preview.data.pull.repo })}>
+            {writing ? "Linking…" : `Link #${String(preview.data.pull.number)}`}</button></div>
+        <p className="pr-empty">{preview.data.pull.repo}: {preview.data.pull.head} → {preview.data.pull.base}. Not linked yet.</p>
+        {!preview.data.pull.complete && <p className="pr-empty" role="status">{pullRequestCopy.previewIncomplete}</p>}
+      </section>
+      <PullBody key={`${preview.data.provider}:${preview.data.pull.repo}:${String(preview.data.pull.number)}`} pr={preview.data.pull} now={now} writing={writing}
+        source={preview.data.provider === "azure-devops" ? "Azure DevOps" : "GitHub"} onAsk={onAsk} onWatch={() => {}} />
+    </>}
+    <section className="pr-section" aria-label="Repository open pull requests">
+      <div className="pr-section-head"><h3>{pullRequestCopy.openHeading}</h3>
+        <button type="button" className="pr-button" disabled={open.type === "loading"} onClick={() => setRevision(current => current + 1)}>Read open PRs again</button></div>
+      {open.type === "loading" && <p className="pr-empty" role="status">{pullRequestCopy.openLoading}</p>}
+      {open.type === "failed" && <p className="pr-empty" role="alert">{open.message}</p>}
+      {open.type === "ready" && <>
+        <p className="pr-empty">{open.data.repo}{open.data.items.length === 0 ? " has no open pull requests." : ""}</p>
+        {!open.data.complete && <p className="pr-empty" role="status">Showing the first {open.data.items.length} open PRs. Type a number to preview another.</p>}
+        <ul className="pr-checks">{open.data.items.map(item => <li className="pr-check" key={item.number}>
+          <button type="button" className="pr-check-line" onClick={() => read(item.number, String(item.number))}>
+            <span className="pr-check-name">#{item.number} {item.title}<span className="pr-check-workflow">{item.head} → {item.base}, {ago(item.updatedAt, now)} ago</span></span>
+            <span className="pr-check-time">{STATE_WORD[item.state]}</span><span>Preview</span>
+          </button></li>)}</ul>
+      </>}
+    </section>
+  </>;
 }
 
-function PullBody({ pr, watch, now, writing, source, onAsk, onWatch }: { source: string; pr: PullRequest; watch: PullWatch; now: number; writing: boolean;
+function PullBody({ pr, watch, now, writing, source, onAsk, onWatch }: { source: string; pr: PullRequest; watch?: PullWatch; now: number; writing: boolean;
   onAsk: (message: string) => void; onWatch: (on: boolean) => void }) {
   const { tone, sentence } = verdict(pr);
   const sourceSentence = source === "Azure DevOps" ? sentence.replaceAll("GitHub", "Azure DevOps") : sentence;
@@ -253,7 +318,7 @@ function PullBody({ pr, watch, now, writing, source, onAsk, onWatch }: { source:
       <div className="pr-verdict" data-tone={tone}><p role="status"><Icon aria-hidden size={20} /><span>{sourceSentence}</span></p>
         {action && <button type="button" className="pr-button primary" onClick={() => onAsk(action.message)}>{action.label}</button>}</div>
     </section>
-    {(live || watch.kind !== "off") && <WatchRow watch={watch} live={live} now={now} writing={writing} onWatch={onWatch} />}
+    {watch && (live || watch.kind !== "off") && <WatchRow watch={watch} live={live} now={now} writing={writing} onWatch={onWatch} />}
     {/* What needs the reader comes first: failed checks, then open comments. */}
     {sectionOrder(pr).map((section) => section === "checks" ? <Checks key={section} pr={pr} />
       : section === "comments" ? <Comments key={section} pr={pr} live={live} now={now} onAsk={onAsk} />

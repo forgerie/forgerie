@@ -38,6 +38,9 @@ export const PullRequestSchema = Type.Object({
 });
 export type PullRequest = Static<typeof PullRequestSchema>;
 export const PullProviderSchema = Type.Union([Type.Literal("github"), Type.Literal("azure-devops")]);
+/** Optional link confirmation keeps a preview tied to the repository the reader saw. */
+export const PullRepositorySchema = Type.Object({ provider: PullProviderSchema, repo: Type.String({ minLength: 1, maxLength: 512 }) }, { additionalProperties: false });
+export type PullRepository = Static<typeof PullRepositorySchema>;
 export const PullLinkSchema = Type.Object({ provider: PullProviderSchema, session: PullRefSchema, repo: text, number: Type.Integer({ minimum: 1 }), watch: PullWatchSchema });
 export type PullLink = Static<typeof PullLinkSchema>;
 /** One linked pull request and its provider read. */
@@ -45,3 +48,18 @@ export const SessionPullResponseSchema = Type.Object({ link: PullLinkSchema, pul
 /** Every pull request linked to a session, oldest first. A failed read keeps its link, with `pull: null` and the reason. */
 export const SessionPullsResponseSchema = Type.Object({ items: Type.Array(Type.Object({ link: PullLinkSchema, pull: Type.Union([PullRequestSchema, Type.Null()]), error: Type.Optional(text) })) });
 export const PullErrorSchema = Type.Object({ kind: Type.Literal("pull_request_error"), error: text });
+
+/** Discovery is separate from session links. At most 50 open/draft summaries, newest first. */
+export const OpenPullSummarySchema = Type.Object({
+  repo: Type.String({ minLength: 1, maxLength: 512 }), number: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  title: Type.String({ maxLength: 8000 }), url: Type.String({ maxLength: 32768 }),
+  state: Type.Union([Type.Literal("open"), Type.Literal("draft")]),
+  head: Type.String({ maxLength: 1024 }), base: Type.String({ maxLength: 1024 }), author: Type.String({ maxLength: 1024 }), updatedAt: Type.String({ maxLength: 64, pattern: "^\\d{4}-\\d{2}-\\d{2}T" }),
+});
+export const RepositoryOpenPullsSchema = Type.Object({ repo: Type.String({ minLength: 1, maxLength: 512 }), items: Type.Array(OpenPullSummarySchema, { maxItems: 50 }), complete: Type.Boolean() });
+export type RepositoryOpenPulls = Static<typeof RepositoryOpenPullsSchema>;
+export const OpenPullsResponseSchema = Type.Object({ provider: PullProviderSchema, ...RepositoryOpenPullsSchema.properties });
+export type OpenPullsResponse = Static<typeof OpenPullsResponseSchema>;
+/** A read-only preview has no link and no watch state. */
+export const PullPreviewResponseSchema = Type.Object({ provider: PullProviderSchema, pull: PullRequestSchema });
+export type PullPreviewResponse = Static<typeof PullPreviewResponseSchema>;

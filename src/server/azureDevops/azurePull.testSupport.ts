@@ -12,7 +12,7 @@ export const azureThread = (id = 1) => ({ id, status: "active", threadContext: {
 /** In-process Azure HTTP service; the injected transport cannot reach any remote host. */
 export async function azurePullServer() {
   const app = Fastify();
-  const state = { pr: azurePr(), policies: [azurePolicy()], statuses: [azureStatus()], threads: [azureThread()], status: 200, failurePath: "", retryAfter: "120", malformed: false, continuation: false, active: [9] };
+  const state = { pr: azurePr(), policies: [azurePolicy()], statuses: [azureStatus()], threads: [azureThread()], status: 200, failurePath: "", retryAfter: "120", malformed: false, continuation: false, active: [9], open: [azurePr()] };
   const requests: { url: string; method: string }[] = [];
   app.all("/*", (request, reply) => {
     requests.push({ url: request.url, method: request.method });
@@ -24,7 +24,7 @@ export async function azurePullServer() {
     if (path.endsWith("/evaluations")) return { value: state.policies };
     if (path.endsWith("/statuses")) return { value: state.statuses };
     if (path.endsWith("/threads")) return { value: state.threads };
-    if (path.endsWith("/pullrequests")) return { value: state.active.map((pullRequestId) => ({ pullRequestId })) };
+    if (path.endsWith("/pullrequests")) return { value: new URL(request.url, "http://local").searchParams.has("$top") ? state.open : state.active.map((pullRequestId) => ({ pullRequestId })) };
     return state.pr;
   });
   const address = await app.listen({ host: "127.0.0.1", port: 0 });

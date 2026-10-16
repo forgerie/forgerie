@@ -7,7 +7,7 @@ import { PullRequestStore } from "./pullRequestStore.js";
 import { PullRequestService, type PullSessionState } from "./pullRequestService.js";
 import { registerPullRequestRoutes } from "./pullRequestRoutes.js";
 import { pullSnapshot, PR_TIME, PR_SHA } from "./pullRequest.testSupport.js";
-import type { PullLink } from "../../shared/pullRequests.js";
+import type { PullLink, RepositoryOpenPulls } from "../../shared/pullRequests.js";
 
 const ref = { id: "session-1", cwd: "/workspace" };
 const k9 = { id: ref.id, repo: "owner/repo", number: 9 };
@@ -15,6 +15,7 @@ function fixture(store = new PullRequestStore(), publishUnlinked?: (link: PullLi
   let now = Date.parse(PR_TIME);
   let state: PullSessionState = { ref, available: true, settled: false, leaf: "start" };
   let snapshot = pullSnapshot();
+  let openResult: RepositoryOpenPulls | undefined;
   const byNumber = new Map<number, ReturnType<typeof pullSnapshot>>();
   let busy = false;
   let repo = "owner/repo";
@@ -28,6 +29,7 @@ function fixture(store = new PullRequestStore(), publishUnlinked?: (link: PullLi
   const service = new PullRequestService({ store, now: () => now,
     github: {
       repo: () => Promise.resolve({ slug: repo, everyone: false }),
+      openPulls: async () => { await hold; if (failure) throw failure; return openResult ?? { repo: snapshot.pull.repo, items: [{ ...snapshot.pull, state: snapshot.pull.state === "draft" ? "draft" as const : "open" as const }], complete: true }; },
       pull: async (_cwd, number) => { await hold; if (failure !== undefined) throw failure; const value = structuredClone(byNumber.get(number) ?? snapshot); return { ...value, pull: { ...value.pull, number } }; },
       mergePull: (_cwd, _number, sha) => { merges.push(sha); return Promise.resolve({ text: "Merged" }); },
     },
@@ -38,10 +40,75 @@ function fixture(store = new PullRequestStore(), publishUnlinked?: (link: PullLi
     ...(publishUnlinked === undefined ? {} : { publishUnlinked }),
   });
   return { service, store, notices, errors, merges, notes, failNote: (error: Error) => { noteFailure = error; },
-    advance: (ms: number) => { now += ms; }, setPull: (number: number, value: typeof snapshot) => { byNumber.set(number, value); }, setSnapshot: (value: typeof snapshot) => { snapshot = value; }, setState: (value: Partial<PullSessionState>) => { state = { ...state, ...value }; }, busy: (value: boolean) => { busy = value; }, fail: (error: Error) => { failure = error; }, repo: (value: string) => { repo = value; }, hold: (value: Promise<void> | undefined) => { hold = value; } };
+    advance: (ms: number) => { now += ms; }, setOpen: (value: RepositoryOpenPulls) => { openResult = value; }, setPull: (number: number, value: typeof snapshot) => { byNumber.set(number, value); }, setSnapshot: (value: typeof snapshot) => { snapshot = value; }, setState: (value: Partial<PullSessionState>) => { state = { ...state, ...value }; }, busy: (value: boolean) => { busy = value; }, fail: (error: Error) => { failure = error; }, repo: (value: string) => { repo = value; }, hold: (value: Promise<void> | undefined) => { hold = value; } };
 }
 
 describe("PR backend public contracts", () => {
+  it("discovers only the session repository and rejects wrong sessions, changed repos and oversized results", async () => {
+    const f = fixture();
+    await f.service.link(ref, 9); await f.service.watch(ref, 9);
+    const before = structuredClone(f.store.list());
+    expect(await f.service.open(ref)).toMatchObject({ provider: "github", repo: "owner/repo", items: [{ number: 9 }], complete: true });
+    expect(f.store.list()).toEqual(before);
+    await expect(f.service.open({ ...ref, id: "other-session" })).rejects.toThrow("full session id");
+    f.setSnapshot(pullSnapshot({ repo: "other/repo" }));
+    await expect(f.service.open(ref)).rejects.toThrow("mismatched");
+    const item = { ...pullSnapshot().pull, state: "open" as const };
+    f.setOpen({ repo: "owner/repo", complete: false, items: Array.from({ length: 51 }, () => item) });
+    await expect(f.service.open(ref)).rejects.toThrow("invalid open PR data");
+    f.setOpen({ repo: "owner/repo", complete: true, items: [item] });
+    let release!: () => void; f.hold(new Promise<void>(resolve => { release = resolve; }));
+    const reading = f.service.open(ref);
+    // Let the first repository resolution finish before changing the origin.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    f.repo("changed/repo"); release();
+    await expect(reading).rejects.toThrow("repository changed during the read");
+    expect(f.store.list()).toEqual(before);
+  });
+
+  it("rejects linking when the preview repository no longer matches without replacing old links", async () => {
+    const f = fixture(); await f.service.link(ref, 9); await f.service.watch(ref, 9);
+    const before = structuredClone(f.store.list());
+    const preview = await f.service.preview(ref, 12);
+    f.setSnapshot(pullSnapshot({ repo: "other/repo" }));
+    await expect(f.service.link(ref, 12, { provider: preview.provider, repo: preview.pull.repo })).rejects.toThrow("changed after preview");
+    expect(f.store.list()).toEqual(before);
+  });
+
+  it("previews an unlinked PR without changing links, watch cursors, or publishing", async () => {
+    const f = fixture();
+    await f.service.link(ref, 9); await f.service.watch(ref, 9);
+    const before = structuredClone(f.store.list());
+    expect((await f.service.preview(ref, 12)).pull.number).toBe(12);
+    expect(f.store.list()).toEqual(before);
+    expect(f.notices).toEqual([]);
+    await expect(f.service.read(ref, 12)).rejects.toThrow("not linked");
+    f.setSnapshot(pullSnapshot({ title: "x".repeat(8 * 1024 * 1024) }));
+    await expect(f.service.preview(ref, 12)).rejects.toThrow("exceeded 8 MiB");
+    f.setSnapshot(pullSnapshot({ repo: "other/repo" }));
+    await expect(f.service.preview(ref, 12)).rejects.toThrow("mismatched");
+    f.setState({ ref: { ...ref, cwd: "/other" } });
+    await expect(f.service.preview(ref, 12)).rejects.toThrow("own workspace");
+  });
+
+  it("exposes separate read-only discovery routes and preserves the linked collection", async () => {
+    const f = fixture(); const app = Fastify(); registerPullRequestRoutes(app, f.service);
+    try {
+      const response = await app.inject(`/sessions/${ref.id}/pull-requests/12/preview?cwd=${ref.cwd}`);
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ provider: "github", pull: { number: 12 } });
+      expect(response.json()).not.toHaveProperty("link");
+      expect((await app.inject(`/sessions/${ref.id}/pull-requests?cwd=${ref.cwd}`)).json()).toEqual({ items: [] });
+      expect((await app.inject(`/sessions/${ref.id}/pull-requests/0/preview?cwd=${ref.cwd}`)).statusCode).toBe(400);
+      expect((await app.inject(`/sessions/${ref.id}/pull-requests/open`)).statusCode).toBe(400);
+      expect((await app.inject(`/sessions/${ref.id}/pull-requests/open?cwd=${ref.cwd}`)).json()).toMatchObject({ provider: "github", items: [{ number: 9 }] });
+      f.fail(new Error("Provider access denied."));
+      const failed = await app.inject(`/sessions/${ref.id}/pull-requests/open?cwd=${ref.cwd}`);
+      expect(failed.statusCode).toBe(400); expect(failed.json()).toEqual({ kind: "pull_request_error", error: "Provider access denied." });
+      expect(f.store.list()).toEqual([]);
+    } finally { await app.close(); }
+  });
+
   it("keeps equal-number PRs and watches separate for two repositories owned by one chat", async () => {
     const store = new PullRequestStore();
     const target = { id: ref.id, cwd: "/related-b" };

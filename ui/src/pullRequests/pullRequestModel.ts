@@ -3,7 +3,7 @@
  * server (`pullRequestApi.ts`). Merge permission is the server's `merge` gate;
  * this file only words it, and never calls a pull request ready on its own.
  */
-import type { CheckState, PullCheck, PullComment, PullRequest } from "./pullRequestApi";
+import type { CheckState, PullCheck, PullComment, PullLink, PullRequest } from "./pullRequestApi";
 
 export type { CheckState, PullCheck, PullComment, PullLink, PullRequest, PullReview, PullWatch } from "./pullRequestApi";
 
@@ -182,22 +182,31 @@ export function firstToShow(items: readonly { link: { number: number }; pull: Pu
 }
 
 /** URLs supply only the number; the server always selects the session's origin repository. */
-export function pullRequestNumber(value: string): number | undefined {
+export function pullRequestTarget(value: string): { number: number; provider?: PullLink["provider"]; repo?: string } | undefined {
   const text = value.trim();
-  let digits = text;
-  if (!/^[1-9]\d{0,9}$/.test(text)) {
-    let url: URL;
-    try { url = new URL(text); } catch { return undefined; }
-    if (url.protocol !== "https:" || url.port || url.username || url.password) return undefined;
-    const azure = url.hostname === "dev.azure.com" && /^\/[^/]+\/[^/]+\/_git\/[^/]+\/pullrequest\/([1-9]\d{0,9})\/?$/.exec(url.pathname);
-    const legacy = /^[a-z0-9-]+\.visualstudio\.com$/i.test(url.hostname) && /^\/(?:DefaultCollection\/)?[^/]+\/_git\/[^/]+\/pullrequest\/([1-9]\d{0,9})\/?$/.exec(url.pathname);
-    digits = (azure || legacy || undefined)?.[1] ?? "";
-  }
-  const number = Number(digits);
-  return Number.isSafeInteger(number) && number > 0 ? number : undefined;
+  if (/^[1-9]\d{0,9}$/.test(text)) return { number: Number(text) };
+  let url: URL;
+  try { url = new URL(text); } catch { return undefined; }
+  if (url.protocol !== "https:" || url.port || url.username || url.password) return undefined;
+  const github = url.hostname === "github.com" && /^\/([^/]+)\/([^/]+)\/pull\/([1-9]\d{0,9})\/?$/.exec(url.pathname);
+  const azure = url.hostname === "dev.azure.com" && /^\/([^/]+)\/([^/]+)\/_git\/([^/]+)\/pullrequest\/([1-9]\d{0,9})\/?$/.exec(url.pathname);
+  const legacy = /^([a-z0-9-]+)\.visualstudio\.com$/i.exec(url.hostname);
+  const oldPath = legacy && /^\/(?:DefaultCollection\/)?([^/]+)\/_git\/([^/]+)\/pullrequest\/([1-9]\d{0,9})\/?$/.exec(url.pathname);
+  try {
+    if (github) return { number: Number(github[3]), provider: "github", repo: `${decodeURIComponent(github[1]!)}/${decodeURIComponent(github[2]!)}` };
+    if (azure) return { number: Number(azure[4]), provider: "azure-devops", repo: azure.slice(1, 4).map(decodeURIComponent).join("/") };
+    if (legacy && oldPath) return { number: Number(oldPath[3]), provider: "azure-devops", repo: [legacy[1]!, ...oldPath.slice(1, 3)].map(decodeURIComponent).join("/") };
+  } catch { return undefined; }
+  return undefined;
 }
 
+export function pullRequestNumber(value: string): number | undefined { return pullRequestTarget(value)?.number; }
+
 export const pullRequestCopy = {
+  openHeading: "Open pull requests",
+  openLoading: "Reading open pull requests…",
+  previewLabel: "Preview a pull request from this project's repository",
+  previewIncomplete: "This PR read is incomplete. Some checks or comments are unavailable.",
   loading: "Reading pull requests…",
   empty: "No pull request is linked to this session yet. Once one is, Forgerie follows its checks and reviews here, and says when it can merge.",
   linkTitle: "Link this session to a pull request",

@@ -30,6 +30,18 @@ function fixture(onPullCreated?: (input: { id: string; cwd: string; repo: string
 }
 
 describe("structured GitHub pull reads", () => {
+  it("lists open and draft summaries with trust filtering and an explicit limit", async () => {
+    const f = fixture();
+    f.api.always(`GET ${API}/pulls`, json([restPull(), restPull({ number: 10, draft: true, title: "unsafe", user: { login: "outsider" }, author_association: "NONE" })]));
+    const result = await f.agent.openPulls("/workspace");
+    expect(result.items.map(item => [item.number, item.state, item.title])).toEqual([[9, "open", "Fix tests"], [10, "draft", "(text hidden: outside contributor)"]]);
+    expect(result.complete).toBe(true);
+    expect(new URL(f.api.requests[0]?.url ?? "").searchParams.get("per_page")).toBe("51");
+    f.api.always(`GET ${API}/pulls`, json(Array.from({ length: 51 }, (_, index) => restPull({ number: index + 1 }))));
+    const limited = await f.agent.openPulls("/workspace");
+    expect(limited.items).toHaveLength(50); expect(limited.complete).toBe(false);
+  });
+
   it("returns the wire model with required CI and unresolved threads, preserving author trust", async () => {
     const f = fixture();
     f.api.always("POST https://api.github.com/graphql", json(graph([thread(), thread(true)])));
