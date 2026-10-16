@@ -87,7 +87,7 @@ export function ProcessesPanel({ state, onSelect, onStop, onWrite, onRefresh, on
       : processes.map(item => <StatusRow key={item.id} name={item.name} status={processStatus(item)} meta={processMeta(item, now)}
         tone={processTone(item)} label={`Open ${item.name}`} onPress={() => onSelect(item.id)}
         below={<><p><code title={item.command}>{item.command}</code></p>{item.lastLogLine && <Excerpt label={`Last output of ${item.name}`} lines={2} moreLabel="Show full output line">
-          <p aria-label={`Last output of ${item.name}`}><code>{item.lastLogLine.truncatedStart ? "…" : ""}{item.lastLogLine.text}</code></p></Excerpt>}
+          <div role="group" aria-label={`Last output of ${item.name}`}><code>{item.lastLogLine.truncatedStart ? "…" : ""}{item.lastLogLine.text}</code></div></Excerpt>}
           {item.notice && <p>{item.notice}</p>}{item.errorMessage && <p>{item.errorMessage}</p>}</>} />)}
   </SheetDialog>;
 }
