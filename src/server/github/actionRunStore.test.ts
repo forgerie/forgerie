@@ -30,21 +30,51 @@ describe("action run persistence", () => {
   it("atomically starts a watch or keeps the existing watch and durable news unchanged", async () => {
     const store = new ActionRunStore();
     const start = { since: "2026-10-01T12:00:00Z", leaf: "start", cursor: { attempt: 1, failed: [], concluded: false } };
-    expect(await store.startWatch(input, start, () => false)).toBeUndefined();
+    expect(await store.startWatch(input, start, 0, () => false)).toBeUndefined();
     expect(store.list()).toEqual([]);
-    const first = await store.startWatch(input, start, () => true);
+    const first = await store.startWatch(input, start, 0, () => true);
     if (first === undefined) throw new Error("Watch did not start");
     expect(first).toMatchObject({ revision: 0, watch: { kind: "watching", wakes: 0 } });
     const news = await store.update(input, first.revision, record => ({ ...record, cursor: { ...start.cursor, failed: ["1:10"] },
       watch: { kind: "watching", since: start.since, wakes: 1 }, pending: { id: "notice", text: "durable news" } }));
-    expect(await store.startWatch({ ...input, source: "pull" }, start, () => true)).toEqual(news);
+    expect(await store.startWatch({ ...input, source: "pull" }, start, 0, () => true)).toEqual(news);
     expect(store.get(input)).toEqual(news);
+    await expect(store.startWatch({ ...input, cwd: "/other" }, start, 0, () => true)).rejects.toThrow("another workspace");
+    expect(store.get(input)).toEqual(news);
+  });
+  it("rejects stale start tokens after unlink, relink, and non-watching record changes", async () => {
+    const start = { since: "2026-10-01T12:00:00Z", leaf: null, cursor: { attempt: 1, failed: [], concluded: false } };
+    for (const mutation of ["unlink", "relink", "update"] as const) {
+      const store = new ActionRunStore();
+      const linked = await store.link(input);
+      const generation = store.watchGeneration(linked.session, input.runId);
+      if (mutation === "update") await store.update(input, linked.revision, record => ({ ...record, lastReadAt: start.since }));
+      else {
+        await store.unlink(input);
+        if (mutation === "relink") {
+          const relinked = await store.link(input);
+          expect(relinked.revision).toBe(linked.revision);
+        }
+      }
+      const before = store.list();
+      await expect(store.startWatch(input, start, generation, () => true)).rejects.toThrow("changed while starting; try again");
+      expect(store.list()).toEqual(before);
+    }
+  });
+  it("does not invalidate another run or workspace's start token", async () => {
+    const store = new ActionRunStore();
+    const generation = store.watchGeneration({ id: input.id, cwd: input.cwd }, input.runId);
+    await store.link({ ...input, runId: 4813 });
+    const other = await store.link({ ...input, cwd: "/other", repo: "owner/other" });
+    store.invalidateWatchStarts(other.session);
+    const watching = await store.startWatch(input, { since: "2026-10-01T12:00:00Z", leaf: null, cursor: { attempt: 1, failed: [], concluded: false } }, generation, () => true);
+    expect(watching?.watch.kind).toBe("watching");
   });
   it("does not leave a link behind when the atomic start write fails", async () => {
     const dir = await mkdtemp(join(tmpdir(), "action-start-write-"));
     try {
       const store = new ActionRunStore(dir);
-      await expect(store.startWatch(input, { since: "2026-10-01T12:00:00Z", leaf: null, cursor: { attempt: 1, failed: [], concluded: false } }, () => true)).rejects.toThrow();
+      await expect(store.startWatch(input, { since: "2026-10-01T12:00:00Z", leaf: null, cursor: { attempt: 1, failed: [], concluded: false } }, 0, () => true)).rejects.toThrow();
       expect(store.list()).toEqual([]);
     } finally { await rm(dir, { recursive: true, force: true }); }
   });

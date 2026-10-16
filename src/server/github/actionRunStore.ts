@@ -24,6 +24,8 @@ const keyText = (key: ActionRunKey) => `${key.id}\n${key.repo.toLowerCase()}\n${
 export class ActionRunStore {
   private records: ActionRunRecord[] = [];
   private queue: Promise<unknown> = Promise.resolve();
+  // In-flight starts cannot survive a daemon restart, so these tokens need no persisted field.
+  private readonly watchGenerations = new Map<string, number>();
   constructor(private readonly path?: string) {}
 
   async initialize(): Promise<void> {
@@ -44,39 +46,54 @@ export class ActionRunStore {
   /** Any of the session's action runs is watched. */
   isWatching(id: string): boolean { return this.records.some((record) => record.session.id === id && record.watch.kind === "watching"); }
 
+  /** Capture before any asynchronous start work, including when the link is absent. */
+  watchGeneration(ref: ActionRunLink["session"], runId: number): number {
+    const key = `${this.watchScope(ref)}${String(runId)}`;
+    const generation = this.watchGenerations.get(key) ?? 0;
+    this.watchGenerations.set(key, generation);
+    return generation;
+  }
+
+  /** Explicit per-run Stop also invalidates starts when no watch has been saved yet. */
+  invalidateWatchStarts(ref: ActionRunLink["session"], runId?: number): void {
+    const scope = this.watchScope(ref);
+    if (runId !== undefined) {
+      const key = `${scope}${String(runId)}`;
+      this.watchGenerations.set(key, (this.watchGenerations.get(key) ?? 0) + 1);
+      return;
+    }
+    for (const [key, generation] of this.watchGenerations) {
+      if (key.startsWith(scope)) this.watchGenerations.set(key, generation + 1);
+    }
+  }
+
   /** Adds a link, or returns the existing one. Never replaces another action run's link. */
   link(input: LinkInput): Promise<ActionRunRecord> {
     return this.exclusive(async () => {
-      const cwd = canonicalizeStoredCwd(input.cwd);
-      // A chat may link runs from several owned workspaces. The workspace of an
-      // existing run link stays immutable; a different run is an independent key.
-      const other = this.records.find((record) => sameKey(record, input));
-      if (other !== undefined && other.session.cwd !== cwd) throw new Error("Session link belongs to another workspace.");
-      const current = this.get(input);
-      if (current !== undefined) return current;
-      const next: ActionRunRecord = { provider: "github", source: input.source, session: { id: input.id, cwd }, repo: input.repo, runId: input.runId, watch: { kind: "off" }, revision: 0 };
-      await this.persist([...this.records, next]);
-      return structuredClone(next);
+      const { record, exists } = this.linkCandidate(input);
+      if (exists) return record;
+      await this.persist([...this.records, record]);
+      this.invalidateWatchStarts(record.session, record.runId);
+      return structuredClone(record);
     });
   }
 
   /** Link and initialize in one write. A competing watcher owns its cursor and outbox. */
-  startWatch(input: LinkInput, start: { since: string; leaf: string | null; cursor: ActionRunCursor }, stillCurrent: () => boolean): Promise<ActionRunRecord | undefined> {
+  startWatch(input: LinkInput, start: { since: string; leaf: string | null; cursor: ActionRunCursor }, generation: number, stillCurrent: () => boolean): Promise<ActionRunRecord | undefined> {
     return this.exclusive(async () => {
       if (!stillCurrent()) return undefined;
-      const cwd = canonicalizeStoredCwd(input.cwd);
-      const current = this.get(input);
-      if (current !== undefined && current.session.cwd !== cwd) throw new Error("Session link belongs to another workspace.");
-      if (current?.watch.kind === "watching") return current;
+      const { record, exists } = this.linkCandidate(input);
+      if (exists && record.watch.kind === "watching") return record;
+      if (this.watchGeneration(record.session, record.runId) !== generation) throw new Error("The run link changed while starting; try again.");
       const next: ActionRunRecord = {
-        ...(current ?? { provider: "github", source: input.source, session: { id: input.id, cwd }, repo: input.repo, runId: input.runId }),
-        revision: (current?.revision ?? -1) + 1,
+        ...record, revision: exists ? record.revision + 1 : 0,
         watch: { kind: "watching", since: start.since, wakes: 0 },
         cursor: start.cursor, startLeaf: start.leaf, lastReadAt: start.since,
       };
       delete next.pending;
       delete next.conclusion;
-      await this.persist(current === undefined ? [...this.records, next] : this.records.map(record => sameKey(record, input) ? next : record));
+      await this.persist(exists ? this.records.map(record => sameKey(record, input) ? next : record) : [...this.records, next]);
+      this.invalidateWatchStarts(next.session, next.runId);
       return structuredClone(next);
     });
   }
@@ -90,6 +107,7 @@ export class ActionRunStore {
       const current = this.get(key);
       if (current === undefined) return undefined;
       await this.persist(this.records.filter((record) => !sameKey(record, key)));
+      this.invalidateWatchStarts(current.session, current.runId);
       return current;
     });
   }
@@ -102,8 +120,23 @@ export class ActionRunStore {
       const next = { ...change(current), revision: current.revision + 1 };
       if (!Check(RecordSchema, next) || !sameKey(next, key) || next.session.cwd !== current.session.cwd || next.source !== current.source) throw new Error("Invalid action run state update.");
       await this.persist(this.records.map((record) => sameKey(record, key) ? next : record));
+      this.invalidateWatchStarts(next.session, next.runId);
       return structuredClone(next);
     });
+  }
+
+  private watchScope(ref: ActionRunLink["session"]): string {
+    return `${JSON.stringify([ref.id, canonicalizeStoredCwd(ref.cwd)])}\n`;
+  }
+
+  /** A chat can own several workspaces; an existing link keeps its original workspace and source. */
+  private linkCandidate(input: LinkInput): { record: ActionRunRecord; exists: boolean } {
+    const cwd = canonicalizeStoredCwd(input.cwd);
+    const current = this.get(input);
+    if (current !== undefined && current.session.cwd !== cwd) throw new Error("Session link belongs to another workspace.");
+    return { exists: current !== undefined, record: current ?? {
+      provider: "github", source: input.source, session: { id: input.id, cwd }, repo: input.repo, runId: input.runId, watch: { kind: "off" }, revision: 0,
+    } };
   }
 
   private exclusive<T>(run: () => Promise<T>): Promise<T> {
