@@ -3,37 +3,16 @@ import { act, useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PullRequestReview } from "../ui/PullRequestReview";
-import { runKey, type ActionRunApi, type ActionRunLink, type SessionActionRuns } from "./actionRunApi";
+import { runKey, type ActionRunApi, type SessionActionRuns } from "./actionRunApi";
 import { createActionRunsStore } from "./actionRunsStore";
 import { ActionRunsPanel } from "./ActionRunsPanel";
 import { PullRunsSection } from "./PullRunsSection";
 import { derived, failedRun, fixtureNow, items, link, passedRun, permissionError, session } from "./fixtures/actionRuns";
 import { pullItem } from "./fixtures/pull";
+import { runServer } from "./fixtures/runServer";
 
-const AT = "2026-10-15T12:00:00.000Z";
 
-function server(initial: SessionActionRuns) {
-  let current = initial;
-  const runOf = (id: number) => [...current.items.flatMap((item) => item.run ? [item.run] : []), ...current.derived.flatMap((group) => group.runs), passedRun].find((run) => run.runId === id);
-  const setLink = (next: ActionRunLink) => {
-    const known = current.items.some((item) => item.link.runId === next.runId);
-    current = { ...current, items: known ? current.items.map((item) => item.link.runId === next.runId ? { ...item, link: next } : item) : [...current.items, { link: next, run: runOf(next.runId) ?? null }] };
-    return next;
-  };
-  const linkOf = (id: number) => current.items.find((item) => item.link.runId === id)?.link ?? link(id, { kind: "off" }, "pull");
-  return {
-    list: vi.fn(async () => current),
-    read: vi.fn(async (_ref, id: number) => { const item = current.items.find((candidate) => candidate.link.runId === id); if (!item?.run) throw new Error(item?.error ?? "Not linked."); return { link: item.link, run: item.run }; }),
-    link: vi.fn(async (_ref, run: number | string) => {
-      const id = typeof run === "number" ? run : Number(/runs\/(\d+)/u.exec(run)?.[1]);
-      if (!runOf(id)) throw new Error(`GitHub has no run ${String(id)} on forgerie/forgerie.`);
-      return { link: setLink(linkOf(id)), run: runOf(id)! };
-    }),
-    unlink: vi.fn(async (_ref, id: number) => { const removed = linkOf(id); current = { ...current, items: current.items.filter((item) => item.link.runId !== id) }; return removed; }),
-    watch: vi.fn(async (_ref, id: number) => setLink({ ...linkOf(id), watch: { kind: "watching", since: AT, wakes: 0 } })),
-    stopWatch: vi.fn(async (_ref, id: number) => setLink({ ...linkOf(id), watch: { kind: "stopped", reason: "Stopped by you", at: AT } })),
-  } satisfies ActionRunApi;
-}
+const server = (initial: SessionActionRuns) => runServer(initial, [passedRun]).api;
 
 /** The pull request panel as the session binds it: the Actions tab and the runs under each linked pull request share one store. */
 function Harness({ api, readOnly = false, first = true }: { api: ActionRunApi; readOnly?: boolean; first?: boolean }) {
@@ -43,7 +22,7 @@ function Harness({ api, readOnly = false, first = true }: { api: ActionRunApi; r
   const actions = { onRefresh: store.refresh, onLink: store.link, onOpenRun: store.openDetail, onCloseRun: store.closeDetail,
     onUnlink: (key: string, id: number) => { void store.unlink(key, id); }, onWatch: (key: string, id: number, on: boolean) => { void store.setWatch(key, id, on); } };
   return <PullRequestReview load={{ type: "ready", items: [pullItem] }} selected={142} onSelect={() => {}} reading={new Set()} notice={undefined} writing={false}
-    now={fixtureNow} onRefresh={() => {}} onAsk={() => {}} onWatch={() => {}} onLink={async () => false} onUnlink={() => {}} onMerge={() => {}} onClose={() => {}}
+    now={fixtureNow} onRefresh={() => store.recover()} onAsk={() => {}} onWatch={() => {}} onLink={async () => false} onUnlink={() => {}} onMerge={() => {}} onClose={() => {}}
     extraView={{ label: "Actions", title: "Workflow runs", first, onRefresh: store.refresh, content: <ActionRunsPanel state={state} now={fixtureNow} readOnly={readOnly} actions={actions} /> }}
     belowPull={(number) => <PullRunsSection number={number} state={state} now={fixtureNow} readOnly={readOnly} onWatch={actions.onWatch} onRefresh={store.refresh} />} />;
 }
@@ -181,5 +160,18 @@ describe("runs under a linked pull request", () => {
     const alert = document.querySelector(".run-list-alert");
     expect(alert?.textContent).toContain("needs Actions: read to read the runs on this commit.");
     expect(alert?.querySelector("button")?.textContent).toBe("Try again");
+  });
+
+  it("waits on the reread for a pull request linked since the last list, instead of saying it has no runs", async () => {
+    let answer: (value: SessionActionRuns) => void = () => {};
+    const api = server({ items: [], derived: [] });
+    await render(api, { first: false });
+    expect(text()).toContain("GitHub listed no runs for #142.");
+    api.list.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+    await press(document.querySelector('button[aria-label="Read the pull request again"]'));
+    expect(text()).not.toContain("GitHub listed no runs");
+    expect(document.querySelector(".run-list-skeleton")).not.toBeNull();
+    await act(async () => { answer({ items: [], derived }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(document.querySelector(".run-list h3")?.textContent).toBe("Workflow runs on 3f9a2c4");
   });
 });

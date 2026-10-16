@@ -39,7 +39,9 @@ const upsert = (items: readonly ActionRunItem[], next: ActionRunItem) =>
  * server's watcher is the poller. After the first read, a catalog change
  * (`syncLinks`, fed by `session.action-run` events) rereads only the run it
  * names. After a reconnect the list route is read again (`recover`), because
- * the server does not replay missed events.
+ * the server does not replay missed events. The runs under each linked pull
+ * request come with the list, so the list is read again when a pull request
+ * is linked or unlinked, or its head moves (`syncPulls`).
  */
 export function createActionRunsStore(api: ActionRunApi) {
   let state = INITIAL;
@@ -49,6 +51,16 @@ export function createActionRunsStore(api: ActionRunApi) {
   let listing: AbortController | undefined;
   let seen = new Map<string, string>();
   let catalog: readonly ActionRunLink[] = [];
+  /** The linked pull requests and their heads the derived runs were last asked for. */
+  let pulls: string | undefined;
+  /**
+   * Counts unlinks. A read remembers the count it started at, and drops its
+   * answer for a run unlinked since: a slow read must not bring a removed row back.
+   */
+  let epoch = 0;
+  let unlinkedAt = new Map<string, number>();
+  const forget = (key: string) => { epoch += 1; unlinkedAt.set(key, epoch); };
+  const unlinkedSince = (key: string, since: number) => (unlinkedAt.get(key) ?? 0) > since;
   const listeners = new Set<() => void>();
   const set = (patch: Partial<ActionRunsState>) => { state = { ...state, ...patch }; for (const listener of listeners) listener(); };
   const ready = () => state.load.type === "ready" ? state.load : undefined;
@@ -71,11 +83,13 @@ export function createActionRunsStore(api: ActionRunApi) {
     const controller = new AbortController();
     listing = controller;
     const signal = AbortSignal.any([session.signal, controller.signal]);
+    const since = epoch;
     if (ready()) set({ listing: true }); else set({ load: { type: "loading" } });
     api.list(target, signal).then((result) => {
       if (signal.aborted) return;
       seen = new Map(catalog.map((link) => [runKey(link), linkVersion(link)]));
-      set({ load: { type: "ready", items: result.items, derived: result.derived }, listing: false, listError: undefined });
+      const items = result.items.filter((item) => !unlinkedSince(runKey(item.link), since));
+      set({ load: { type: "ready", items, derived: result.derived }, listing: false, listError: undefined });
     }, (error: unknown) => {
       if (signal.aborted) return;
       // A failed reread keeps the rows it has and says why above them.
@@ -89,10 +103,12 @@ export function createActionRunsStore(api: ActionRunApi) {
     if (!target) return;
     const key = runKey(link);
     const signal = session.signal;
+    const since = epoch;
+    const current = () => !signal.aborted && !unlinkedSince(key, since);
     reading(key, true);
     api.read(target, link.runId, signal).then(
-      (result) => { if (!signal.aborted) patchItems((items) => upsert(items, { link: result.link, run: result.run })); },
-      (error: unknown) => { if (!signal.aborted) patchItems((items) => upsert(items, { ...(items.find((item) => sameRunLink(item.link, link)) ?? { run: null }), link, error: messageOf(error) })); },
+      (result) => { if (current()) patchItems((items) => upsert(items, { link: result.link, run: result.run })); },
+      (error: unknown) => { if (current()) patchItems((items) => upsert(items, { ...(items.find((item) => sameRunLink(item.link, link)) ?? { run: null }), link, error: messageOf(error) })); },
     ).finally(() => { if (!signal.aborted) reading(key, false); });
   }
 
@@ -116,6 +132,9 @@ export function createActionRunsStore(api: ActionRunApi) {
       listing = undefined;
       ref = next;
       seen = new Map();
+      pulls = undefined;
+      epoch = 0;
+      unlinkedAt = new Map();
       state = INITIAL;
       for (const listener of listeners) listener();
     },
@@ -136,6 +155,7 @@ export function createActionRunsStore(api: ActionRunApi) {
       const gone = [...seen.keys()].filter((key) => !now.has(key));
       seen = now;
       if (gone.length > 0) {
+        for (const key of gone) forget(key);
         patchItems((items) => items.filter((item) => !gone.includes(runKey(item.link))));
         if (state.detail && gone.includes(state.detail.key)) set({ detail: undefined });
       }
@@ -145,6 +165,17 @@ export function createActionRunsStore(api: ActionRunApi) {
         readOne(link);
       }
     },
+    /**
+     * The session's linked pull requests as last read, each with its head. A
+     * list that was read is read again when one is linked or unlinked, or a
+     * head moves; the first call only records them.
+     */
+    syncPulls(next: readonly { repo: string; number: number; headSha: string }[]) {
+      const key = next.map((pull) => `${pull.repo.toLowerCase()}#${String(pull.number)}@${pull.headSha}`).sort().join("|");
+      const changed = pulls !== undefined && pulls !== key;
+      pulls = key;
+      if (changed && state.load.type !== "idle") list();
+    },
     /** Link a run by its ID or URL. Resolves true once the server linked it. */
     link: (run: number | string) => write(undefined, async (target) => {
       const result = await api.link(target, run);
@@ -152,6 +183,7 @@ export function createActionRunsStore(api: ActionRunApi) {
     }),
     unlink: (key: string, runId: number) => write(key, async (target) => {
       const removed = await api.unlink(target, runId);
+      forget(runKey(removed));
       patchItems((items) => items.filter((item) => !sameRunLink(item.link, removed)));
       if (state.detail?.key === key) set({ detail: undefined });
     }),
@@ -167,9 +199,10 @@ export function createActionRunsStore(api: ActionRunApi) {
       if (!target) return;
       const signal = session.signal;
       set({ detail: { key, runId, load: { type: "loading" } } });
+      const since = epoch;
       const settle = (load: RunDetailState["load"]) => { if (!signal.aborted && state.detail?.key === key) set({ detail: { key, runId, load } }); };
       api.read(target, runId, signal).then((result) => {
-        if (signal.aborted) return;
+        if (signal.aborted || unlinkedSince(key, since)) return;
         patchItems((items) => upsert(items, { link: result.link, run: result.run }));
         settle({ type: "ready" });
       }, (error: unknown) => settle({ type: "failed", message: messageOf(error) }));
