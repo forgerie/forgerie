@@ -175,7 +175,7 @@ export class ActionRunService {
       const report = evaluateActionRunWatch(record.cursor ?? initialActionRunCursor(run.attempt), run);
       const next = await this.deps.store.update(key, record.revision, current => {
         if (current.watch.kind !== "watching") return current;
-        return { ...current, cursor: report.cursor, lastReadAt: this.iso(),
+        return { ...current, cursor: report.cursor, conclusion: run.conclusion, lastReadAt: this.iso(),
           watch: { kind: "watching", since: current.watch.since, wakes: current.watch.wakes + (report.text === undefined ? 0 : 1), ...(report.text === undefined ? {} : { lastWake: this.iso() }) },
           ...(report.text === undefined ? {} : { pending: { id: randomUUID(), text: report.text } }) };
       });
@@ -197,11 +197,8 @@ export class ActionRunService {
   }
 
   private async deliver(record: ActionRunRecord): Promise<void> {
-    const data = record.pending?.text.match(/```json\n([\s\S]*?)\n```/u)?.[1];
-    const notice: unknown = data === undefined ? undefined : JSON.parse(data);
-    const conclusion = typeof notice === "object" && notice !== null && "conclusion" in notice && typeof notice.conclusion === "string" ? notice.conclusion : "unknown";
     await deliverWatch(this.deps.store, keyOf(record), record, this.deps.sessions, () => this.disposed, value => { this.publish(value); }, value => {
-      if (value.cursor?.concluded === true) value.watch = { kind: "stopped", reason: `Run completed (${conclusion}).`, at: this.iso() };
+      if (value.cursor?.concluded === true) value.watch = { kind: "stopped", reason: `Run completed (${value.conclusion ?? "unknown"}).`, at: this.iso() };
       return value;
     });
   }
