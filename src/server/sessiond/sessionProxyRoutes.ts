@@ -88,9 +88,24 @@ function requestFailed(reply: FastifyReply, error: unknown): void {
 }
 
 function bridgeSockets(client: WebSocket, upstream: WebSocket): void {
-  client.on("message", (data) => { sendIfOpen(upstream, data); });
+  // The browser's handshake can finish before the daemon's. Do not lose a
+  // liveness probe sent in that gap; bound the pre-handshake queue instead.
+  const pending: RawData[] = [];
+  let pendingBytes = 0;
+  client.on("message", (data) => {
+    if (upstream.readyState !== WebSocket.CONNECTING) { sendIfOpen(upstream, data); return; }
+    const bytes = Array.isArray(data) ? data.reduce((sum, chunk) => sum + chunk.byteLength, 0) : data.byteLength;
+    if (pending.length >= 32 || pendingBytes + bytes > 64 * 1024) {
+      client.close(1009, "Daemon handshake buffer exceeded"); upstream.close(); return;
+    }
+    pending.push(data); pendingBytes += bytes;
+  });
+  upstream.once("open", () => {
+    for (const data of pending) sendIfOpen(upstream, data);
+    pending.length = 0; pendingBytes = 0;
+  });
   upstream.on("message", (data) => { sendIfOpen(client, data); });
-  client.on("close", () => { upstream.close(); });
+  client.on("close", () => { pending.length = 0; pendingBytes = 0; upstream.close(); });
   upstream.on("close", () => { client.close(); });
   upstream.on("error", () => { client.close(); });
   client.on("error", () => { upstream.close(); });
