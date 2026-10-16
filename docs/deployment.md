@@ -29,7 +29,7 @@ Recovery opens at most four sessions at once. Discovery uses Durable's public st
 
 Read the sessiond journal for `durable session startup recovery finished`, which lists resumed sessions and per-session failures. A missing journal leaves a legacy session idle. Corrupt or locked journals produce failures without blocking recovery of other sessions. Recovery stops opening sessions when shutdown starts.
 
-Dependency replacement can affect code loaded by active agents. Confirm that the operator approves an idle deployment window before installing, building, or restarting the deployed checkout.
+Active Durable sessions do not block deployment or restarts. Build and install dependencies in an isolated checkout so running agents keep their loaded code. Publish the verified build and restart both units without waiting for other sessions to become idle.
 
 ```bash
 nix shell nixpkgs#nodejs_24 -c npm ci
@@ -39,11 +39,11 @@ systemctl --user status forgerie-sessiond.service forgerie-web.service
 curl --fail http://127.0.0.1:8504/api/pi-web/runtime
 ```
 
-Run these commands from the deployed checkout, not from another worktree. Verify that the returned daemon profile is the intended profile. Confirm that the browser loads the new UI. Built entrypoints resolve the compiled browser app; the units do not run TypeScript source.
+The commands above show an in-place update. For active agents, build in an isolated checkout instead and publish its verified `dist` with both units stopped, then start them together. Verify that the returned daemon profile is the intended profile. Confirm that the browser loads the new UI. Built entrypoints resolve the compiled browser app; the units do not run TypeScript source.
 
-On Nix hosts, the repository's `scripts/redeploy-when-idle.sh WORKSPACE [LIMIT_MINUTES]` waits for other sessions to become idle before restarting both user units. Run it through `systemd-run --user` outside sessiond's control group, using `/bin/sh` as its interpreter so a minimal service PATH can reach its Nix bootstrap. It excludes the named workspace, defaults to 60 minutes, and refuses to restart when activity cannot be read or validated. `--check` tests its dependencies without restarting anything. It verifies unit status and `build.json` after restarting, and never removes a workspace. To publish an already verified worktree build, supply its absolute `dist` path and the deployed checkout's absolute `dist` path as the third and fourth arguments. The helper copies first, stops both units, swaps the build, and starts them together. It retains the previous build under the deployed checkout's `.forgerie/deploy.*` directory. This prevents a new UI from calling an old server while the restart waits. Set `FORGERIE_REDEPLOY_REVISION` to the verified commit when queuing that publication; the helper refuses to replace the build if the checkout advances while waiting. The helper does not build or install dependencies. Do not start new agent work during the approved deployment window.
+Use `scripts/redeploy-when-idle.sh WORKSPACE [LIMIT_MINUTES]` only when the operator explicitly requests an idle wait. This optional Nix-host helper waits for other sessions to become idle before restarting both user units. Run it through `systemd-run --user` outside sessiond's control group, using `/bin/sh` as its interpreter so a minimal service PATH can reach its Nix bootstrap. It excludes the named workspace, defaults to 60 minutes, and refuses to restart when activity cannot be read or validated. `--check` tests its dependencies without restarting anything. It verifies unit status and `build.json` after restarting, and never removes a workspace. To publish an already verified worktree build, supply its absolute `dist` path and the deployed checkout's absolute `dist` path as the third and fourth arguments. The helper copies first, stops both units, swaps the build, and starts them together. It retains the previous build under the deployed checkout's `.forgerie/deploy.*` directory. This prevents a new UI from calling an old server while the restart waits. Set `FORGERIE_REDEPLOY_REVISION` to the verified commit when queuing that publication; the helper refuses to replace the build if the checkout advances while waiting. The helper does not build or install dependencies. Its idle wait is optional deployment behavior, not a requirement for Durable recovery.
 
-An isolated worktree build verifies source without replacing deployed `dist/` or dependencies. Landing that source is not deployment. The fork cleanup deliberately leaves deployment pending when agents are active.
+An isolated worktree build verifies source without replacing deployed `dist/` or dependencies. Landing that source is not deployment. Publish the verified build even when other sessions are active.
 
 ## Runtime settings
 
@@ -89,7 +89,7 @@ The inventory is local to one host and process namespace. Do not share it betwee
 
 If the web process is unavailable, `forgerie version` also tries the daemon's health endpoint with a bounded wait. Read the unit journals for startup errors. If dictation is unavailable, check the web unit's worker path and speech host allowlist.
 
-Keep the previous verified commit and build until the new instance works. Rollback needs another approved idle window: restore the previous source, install its lockfile, rebuild, and restart both units. Do not remove profiles or runtime data as part of rollback.
+Keep the previous verified commit and build until the new instance works. Rollback does not require an idle window. Restore the previous source, install its lockfile and rebuild in an isolated checkout, then publish the build and restart both units. Do not remove profiles or runtime data as part of rollback.
 
 ## Scheduled triggers with no login
 

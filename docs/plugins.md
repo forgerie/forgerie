@@ -19,7 +19,7 @@ Pi package operations use the active profile reported by sessiond. Saving a diff
 
 Package and extension changes can need a daemon restart. Settings keeps the restart notice until the active state catches up. Provider registrations freeze at daemon startup; `/reload` does not apply global provider changes.
 
-Restarting stops running agents. Use an approved idle window. The restart action asks for confirmation. If host-side restart is unavailable, follow [deployment](deployment.md).
+Restarting pauses active Durable agents, which recover from saved state after startup. Systemd-managed processes keep running. An idle window is not required. The restart action asks for confirmation. If host-side restart is unavailable, follow [deployment](deployment.md).
 
 Forgerie ships pinned `pi-web-access` 0.39.0 and its own `process` tool. Their hosted tools remain available without installing another browser plugin. Web search uses keyless Exa with no profile configuration. See [web search](web-search.md). Delegation is built in through Durable children. See [child agents](child-agents.md). Hosted sessions also load Pi's built-in MCP extension; see [MCP servers](mcp.md).
 

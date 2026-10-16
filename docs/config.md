@@ -77,7 +77,7 @@ Feature overrides enable a tool for `1` or case-insensitive `true`. Every other 
 
 Changing `agent.dir` or `agent.command` saves a desired profile. It does not move a running daemon's credentials or sessions. Profile-dependent reads and writes use the active profile reported by `/api/pi-web/runtime`.
 
-Restart sessiond only in an approved idle window. Provider registrations freeze at daemon startup. `/reload` does not apply provider or global extension changes. See [deployment](deployment.md).
+Restart sessiond to activate the desired profile; active Durable sessions recover after restart. Provider registrations freeze at daemon startup. `/reload` does not apply provider or global extension changes. See [deployment](deployment.md).
 
 Configure credentials in the actual Pi profile, using Pi's own login flow or profile tools. The browser OAuth and API-key login routes are retired. Credentials already stored in `auth.json` remain usable.
 
@@ -101,8 +101,8 @@ On NixOS, point it at a pinned Azure CLI store path, for example:
 Keep the other fields in your config. A Nix profile path that keeps the package
 reachable prevents garbage collection of a pinned store path. If the binary
 is removed, reads report an auth error; Forgerie never runs `nix run` at request
-time. Restart sessiond only in an approved idle window after changing this
-setting. See [Azure credentials and their security costs](azure-devops.md#connect-an-organization).
+time. Restart sessiond after changing this setting; active Durable sessions
+recover after restart. See [Azure credentials and their security costs](azure-devops.md#connect-an-organization).
 
 ## Backlog settings
 

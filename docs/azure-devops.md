@@ -24,7 +24,8 @@ The daemon must be able to find `az`. If its PATH does not include Azure CLI,
 set `azureDevops.azureCliCommand` in the global Forgerie config to an absolute
 `bin/az` path. On NixOS, use a pinned azure-cli store path; do not configure a
 `nix run` shell command. See [Azure CLI configuration](config.md#azure-cli).
-Restart sessiond in an approved idle window after changing the command.
+Restart sessiond after changing the command. Active Durable sessions recover
+after restart; no idle window is required.
 
 Costs and security limits:
 
