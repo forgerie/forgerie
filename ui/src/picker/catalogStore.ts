@@ -1,4 +1,5 @@
 import type { SessionOpenReceipt } from "@shared/sessionOpen";
+import { watchConnectionRecovery } from "../connectionRecovery";
 import { z } from "zod";
 import { requestsResponse } from "../sessionResponse";
 import { asksSchema, deleteArchivedSchema, listingSchema, parseCatalogEvent, projectsSchema, startupEventSchema, unreadSchema, type CatalogEvent, type StartupEvent, type WireStatus } from "./contracts";
@@ -376,7 +377,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
     onStartup: (listener: (event: StartupEvent) => void) => { startupListeners.add(listener); return () => { startupListeners.delete(listener); }; },
     onWorktree: (listener: (record: WorktreeRecord) => void) => { worktreeListeners.add(listener); return () => { worktreeListeners.delete(listener); }; },
     onTriggersChanged: (listener: () => void) => { triggerListeners.add(listener); return () => { triggerListeners.delete(listener); }; },
-    start: () => { unwatch = transport.watchRecovery?.(recover); return join(); },
+    start: () => { unwatch = watchConnectionRecovery(transport, () => attempt?.socket, recover); return join(); },
     retry: () => { update({ ...state, connection: { type: "loading" } }); recover(); },
     ...mutations,
     dispose: () => { lifetime.abort(); clearTimeout(retryTimer); clearTimeout(frame); closeAttempt(); unwatch?.(); listeners.clear(); unreadListeners.clear(); triggerListeners.clear(); },

@@ -60,6 +60,26 @@ afterEach(async () => {
   await app.close();
 });
 
+describe("session connection health", () => {
+  it.each(["/sessions/probe-session/events", "/sessions/events", "/events"])("answers a liveness probe on %s without opening a session", async path => {
+    await app.ready();
+    const socket = await app.injectWS(path);
+    try {
+      const reply = new Promise<unknown>(resolve => socket.once("message", data => {
+        if (!Buffer.isBuffer(data)) throw new Error("Expected a socket buffer");
+        resolve(JSON.parse(data.toString("utf8")));
+      }));
+      socket.send("not JSON");
+      socket.send(JSON.stringify({ type: "connection.ping", id: 42 }));
+      socket.send(JSON.stringify({ type: "connection.ping", id: "x".repeat(65) }));
+      socket.send(JSON.stringify({ type: "connection.ping", id: "wake-probe" }));
+      expect(await reply).toEqual({ type: "connection.pong", id: "wake-probe" });
+      expect(sessionManager.calls.open).toBe(0);
+      expect(sessionManager.calls.create).toBe(0);
+    } finally { socket.terminate(); }
+  });
+});
+
 describe("session routes", () => {
   it("serves machine listing and asks catalogs through static routes before session-id routes", async () => {
     const routeApp = Fastify({ logger: false });

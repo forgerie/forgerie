@@ -1,4 +1,6 @@
 import { createServer } from "node:http";
+import { respondToConnectionChecks } from "../../../src/server/realtime/connectionHealth";
+import { checkConnection } from "../connectionRecovery";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyCatalogEvent, createCatalogStore, type CatalogState, type CatalogStore } from "./catalogStore";
@@ -59,6 +61,7 @@ async function machine(options: { holdListing?: Promise<void>; badListing?: bool
   });
   http.on("upgrade", (request, socket, head) => sockets.handleUpgrade(request, socket, head, (client) => {
     clients.add(client);
+    respondToConnectionChecks(client);
     client.on("close", () => clients.delete(client));
   }));
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
@@ -99,6 +102,27 @@ function start(api: Awaited<ReturnType<typeof machine>>) {
   void store.start();
   return store;
 }
+
+describe("healthy catalog recovery", () => {
+  it("keeps its subscription and catalog when a browser wake check succeeds", async () => {
+    const api = await machine({ pulls: [] });
+    let wake: () => void = () => undefined;
+    let checked: Promise<boolean> = Promise.resolve(false);
+    const store = createCatalogStore({ ...api.transport,
+      checkConnection: socket => { checked = checkConnection(socket); return checked; },
+      watchRecovery: recover => { wake = recover; return () => { wake = () => undefined; }; },
+    });
+    cleanup.push(store.dispose);
+    await store.start();
+    wake(); wake();
+    expect(await checked).toBe(true);
+    await Promise.resolve();
+    expect(api.reads()).toBe(1);
+    expect(store.getSnapshot().connection.type).toBe("ready");
+    api.emit({ type: "session.name", sessionId: "a", name: "Still live" });
+    await until(store, () => store.getSnapshot().sessions.some(session => session.name === "Still live"));
+  });
+});
 
 describe("pull request links", () => {
   const watching = { kind: "watching", since: "2026-10-07T21:00:00.000Z", wakes: 0 };
