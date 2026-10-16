@@ -43,6 +43,8 @@ Taste and scope growth are not escalations. There is no timeout that forwards a 
 
 The decision log records parent answers and provisional guesses, not every choice an agent judges notable. User answers to escalated child questions record `by: "user"`. `by: "parent"` identifies parent answers and guesses. Each record includes the active workflow run ID, if one exists when the decision commits. A parent's own `record_decision({question, choice, reason, guess: true})` is only for guesses in place of an escalation. `guess: false` is refused; ADR 0005 excludes ordinary choices. The parent uses `ask_user` only for escalations that must wait for you.
 
+Use **Looks right** to confirm a flagged guess without changing its choice or sending a correction. Confirmation clears the outstanding flag and keeps its first confirmation timestamp on retries. It creates no input or task and does not resume work. Open an inactive session before confirming its guess. A confirmed guess can still be overturned later.
+
 Overturning a decision records your correction and sends it once to the affected child if it still has a live run. Otherwise it wakes the parent. Delivery uses a follow-up; it does not interrupt a tool already running. Answers, routing receipts, decisions, and pending correction deliveries survive restart. Question and correction outboxes stay pending until Durable places their input in the target transcript, not merely in its queue. If Stop or another withdrawal removes an unplaced input, the outbox retries with a fresh receipt. A correction retry checks whether the affected child is still live; otherwise it goes to the parent. An input already placed is never resent, even if its run is stopped or the parent ignores its question. The log has no expiry in this slice. A wrong answer can affect work before you overturn it; correction costs model turns and may throw away work.
 
 ## Gated actions
@@ -297,9 +299,10 @@ Completed records expire 90 days after `finishedAt`. Unfinished records remain. 
 | Method and path | Request | Response |
 | --- | --- | --- |
 | `GET /sessions/:id/decisions` | Only query `cwd`. | `Decision[]`, newest first. Sessions without Durable hosting return `[]` (200). |
+| `POST /sessions/:id/decisions/:did/confirm` | Exactly `{cwd}`. | The confirmed `Decision`. Only flagged guesses qualify. Retries preserve the first timestamp. 409 for an inactive session, an overturned guess, or another decision kind. Does not open a runtime. |
 | `POST /sessions/:id/decisions/:did/overturn` | Exactly `{cwd, note}`. Note is nonblank, at most 8000 characters. | The updated `Decision`. 400 for invalid input, 404 for an unknown decision, 409 if already overturned. |
 
-`Decision` and its TypeBox schema live in `src/shared/decisions.ts`. Times are Unix milliseconds. State is `{kind: "standing"}` or `{kind: "overturned", note, at}`. A decision document change emits `workflow_runs_changed`. `flaggedDecisions` counts flagged standing decisions and is omitted when zero. It does not add to `waitingOnYou`.
+`Decision` and its TypeBox schema live in `src/shared/decisions.ts`. Times are Unix milliseconds. State is `{kind: "standing"}`, `{kind: "confirmed", at}`, or `{kind: "overturned", note, at}`. A decision document change emits `workflow_runs_changed`. `flaggedDecisions` counts flagged standing decisions and is omitted when zero. It does not add to `waitingOnYou`.
 
 Server slices record `gated`, `auto-stop`, and `issue` through `logDecision(tx, parent, input, recipient?)` in `durableDecisions.ts`, within the action's own commit. `input.id` must be stable for that action. The helper sets time, active run ID, and standing state, and reuses the saved record on replay. Recipient is internal routing metadata, not part of the wire record.
 

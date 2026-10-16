@@ -39,17 +39,22 @@ ignores.
   height, the process facts move behind a Details button, and the header and
   paddings shrink before the log does.
 
-## Data the mockup needs that the client does not get today
+## Data contracts behind the mockup
 
-| Shown | Needs | Where |
+The mockup stays static. Slice 2 adds the server data below and wires it into
+the current sheets, without applying this prototype's wider layout redesign.
+See [pull requests](../../docs/pull-requests.md), [child agents](../../docs/child-agents.md),
+and [managed processes](../../docs/plugins.md#managed-processes) for current behavior.
+
+| Shown | Contract | Where |
 |---|---|---|
-| Open pull requests under the field | A route that lists the open pull requests of the session's repository, with head branch, draft state and age | New server route. The agent's `github_read prs` action reads the same data |
-| Title and state before linking | A read of a pull request by number without linking it | New server route, or `read` without a link |
+| Open pull requests under the field | At most 50 open/draft summaries, with an explicit completeness flag | `GET /sessions/:id/pull-requests/open` |
+| Title and state before linking | Read-only detailed preview, without a link or watch | `GET /sessions/:id/pull-requests/:number/preview` |
 | Workflows grouped by where they live | The source folder of each saved workflow | `workflowInventorySchema` has `path`; the client can group by it |
-| Looks right on a flagged guess | A way to settle a flagged guess without overturning it | New decision state. Today only an overturn clears the flag |
-| Last tool call of a working child | The child's latest tool name and summary in `ChildSummary` | New field |
-| Cost and time per child | Per-child cost from the run records | `Runs` has the totals; per-child values are inferred, not checked |
-| Last output line of a process | The last log line in `ManagedProcessInfo` | New field, or one output read per row |
+| Looks right on a flagged guess | Durable `confirmed` state, without input or resume; inactive sessions require opening first | `POST /sessions/:id/decisions/:did/confirm` |
+| Last tool call of a working child | `lastTool` contains a bounded name and timestamp, never arguments or results | `DurableChildSummary` |
+| Cost and time per child | `costUsd` is cumulative committed conversation usage across runs, not retained run-history sums. The prototype's individual times remain invented | `DurableChildSummary`; existing run history keeps per-run durations |
+| Last output line of a process | `lastLogLine` contains a bounded 4 KiB suffix, including unfinished output, with omission metadata | `ManagedProcessInfo` |
 | Ask the agent to start one | A way for a sheet to put text in the composer | Client only |
 
 ## Invented content
