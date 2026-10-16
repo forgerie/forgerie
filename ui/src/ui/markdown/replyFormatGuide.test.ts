@@ -1,8 +1,9 @@
 import { REPLY_FORMAT_GUIDE } from "@shared/replyFormatGuide";
 import { describe, expect, it } from "vitest";
 import {
-  parseAsides, parseBars, parseCheckList, parseClaims, parseCommands, parseComparison, parseCorrection, parseDisclosure, parseFacts,
-  parseFileTree, parseSteps, parseTimeline, readCalloutMarker, readQuoteSource,
+  deltaChange, parseAsides, parseBars, parseCheckList, parseCheckResults, parseClaims, parseCommands, parseComparison, parseCorrection, parseDelta,
+  parseDisclosure, parseFacts, parseFileTree, parseFindings, parseLedger, parseRecap, parseRevisions, parseSteps, parseTimeline, parseVerdict,
+  readCalloutMarker, readQuoteSource,
 } from "./richBlockSyntax";
 import { blockFences } from "./blockFences";
 import { richBlocksByLanguage } from "./RichBlocks";
@@ -50,5 +51,28 @@ describe("the injected reply format guide", () => {
     expect(timeline.events.map((event) => event.when)).toEqual(["18:22", "21:20"]);
     expect(timeline.events[1]!.detail).toBe("Indented detail.");
     expect(example("diagram")).toMatch(/^flowchart /);
+  });
+
+  it("gives round-four examples that parse into the structure it describes", () => {
+    const checks = parseCheckResults(example("checks")).checks;
+    expect(checks.map((check) => check.state)).toEqual(["pass", "fail", "skip", "unchecked"]);
+    expect(checks[0]).toMatchObject({ name: "Unit tests", result: "1017 passed" });
+    const review = parseFindings(example("findings"));
+    expect(review.verdict).toBe("changes");
+    expect(review.findings.map((finding) => [finding.severity, finding.where, finding.fix !== ""])).toEqual([["P1", "src/app.ts:12", true], ["Nit", "src/ui.ts:40", false]]);
+    const recap = parseRecap(example("recap"));
+    expect([recap.goal, recap.done.length, recap.left.length, recap.needs, recap.next].every((field) => field !== "" && field !== 0)).toBe(true);
+    expect(parseVerdict(example("verdict"))).toEqual({ answer: "partly", reason: "one-line reason" });
+    expect(parseRevisions(example("commits")).revisions.map((revision) => revision.state)).toEqual(["landed", "pushed"]);
+    const delta = parseDelta(example("delta")).rows;
+    expect(delta.map((row) => { const change = deltaChange(row); return change.complete && change.meaning; })).toEqual(["better", "better"]);
+    const ledger = parseLedger(example("ledger")).rows;
+    expect(ledger.map((row) => row.total)).toEqual([false, false, true, false, true]);
+  });
+
+  it("says that a files block with no marks is a layout and names the research verdicts claims takes", () => {
+    expect(REPLY_FORMAT_GUIDE).toContain("Without marks, `files` is a layout tree.");
+    const verdicts = /`claims` also takes ([^.]+) for sources/.exec(REPLY_FORMAT_GUIDE)![1]!.split(/, | and /);
+    expect(parseClaims(verdicts.map((verdict) => `${verdict}: a claim`).join("\n")).claims.map((claim) => claim.confidence)).toEqual(["supported", "partly", "unsupported", "contradicted"]);
   });
 });

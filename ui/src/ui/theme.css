@@ -128,6 +128,9 @@
   --bar-fill: color-mix(in oklab, var(--live) 70%, var(--background));
   --bar-min: 2px;
   --warn-wash: color-mix(in oklab, var(--diff-modify) 8%, transparent);
+  /* An answer's wash: yes and no beside the warn wash for partly. */
+  --good-wash: color-mix(in oklab, var(--diff-add) 8%, transparent);
+  --bad-wash: color-mix(in oklab, var(--diff-remove) 8%, transparent);
   /* An offer the reader can take, and one that lapses soon: chips and their pressed state. */
   --offer-wash: var(--live-wash);
   --offer-wash-hover: color-mix(in oklab, var(--live) 28%, transparent);

@@ -117,6 +117,28 @@ const richFollowUpReply = [
 const richFollowUpMessages = (text: string): TranscriptMessage[] => [
   say("followup-question", "user", "Are you saying that you add 4k tokens to every message?"), say("followup-answer", "assistant", text),
 ];
+// Round five, a status answer: verdict first, then checks, commits, a layout tree and a delta.
+const richStatusReply = [
+  "```verdict\npartly: The memory work is on main, but cold boot got slower.\n```",
+  "```checks\nVerification\npass: Full server suite — 2,900 passed, 5 skipped\nfail: Browser typecheck/build — 27 errors\npass: Typecheck, lint, Knip\npass: `git diff --check cdb22b2c..8f33333d`\nskip: Physical Fold 8 — no device attached\nunchecked: Screen readers\n```",
+  "```commits\n1d3c2ba7 landed fix(ui): mirror the gated action schema\n2d57cd45 pushed feat(ui): open files named in a reply's files block in the editor\n721dd29a deployed fix(chat): resolve relative links within the session workspace\nfa390d3 local contrib/android-base rebase (3 commits, was 4)\n```",
+  "The tools only see the reader:",
+  "```files\nserver/src/pace-tools/\n  reader.ts # Read-only interface required by tools\n  context.ts # Builds FinanceToolContext\n  catalog.ts # Schemas, descriptions, and tool handlers\n  queries/ # Structured finance operations\n  appCards.ts # Optional Pace app card presentation\n```",
+  "```delta\nlower: Retained heap (MiB): 357.1 -> 208.3\nlower: Document DOM nodes: 18,420 -> 9,977\nlower: Typecheck errors: 27 -> 0\nhigher: UI tests passed: 2,040 -> 2,591\nlower: Cold boot (s): 34 -> 41\n```",
+].join("\n\n");
+const richStatusMessages = (text: string): TranscriptMessage[] => [
+  say("status-question", "user", "Yes or no: are we done?"), say("status-answer", "assistant", text),
+];
+// Round five, a return to a session: a recap, a review, money, and research verdicts.
+const richReviewReply = [
+  "```recap\ngoal: Cut Fuji cold boot to under 20 s\ndone: Kernel update\ndone: initrd trimmed from 41 MB to 18 MB\nleft: Service ordering for network-online\nneeds you: Approve one more reboot\nnext: Measure three cold boots and compare with the 34 s baseline\n```",
+  "```findings\nverdict: changes needed\nnit src/client/src/components/ChatView.ts:812 — Stale comment names the old controller\nP1 src/server/azureDevops/azurePullReader.ts:113,124–125 — Retry-After has no upper bound\n  fix: validate the computed timestamp and bound the delay\nP2 ui/src/sessionStore.ts:432–435 — A hidden catalog notification replaces `pendingReceipt`\n```",
+  "```ledger\nEarmarked against checking\nFrance flights: $4,500.00\nOrthodontics: $1,500.00\nEmergency fund top-up: $18,883.94\n= Total earmarked: $24,883.94\nChecking balance: $18,558.34\n= Shortfall: -$6,325.60\n```",
+  "```claims\nsupported: unluac supports Lua 5.0\n  SourceForge project page, release notes 1.2.3\npartly: The four-point difference is significant\ncontradicted: In stock\n  StarryhHope listing, 28 Sep 2026: sold out\n```",
+].join("\n\n");
+const richReviewMessages = (text: string): TranscriptMessage[] => [
+  say("review-question", "user", "Where are we?"), say("review-answer", "assistant", text),
+];
 // One fence per grammar group: a label the highlight.js common subset drops, a
 // YAML map, a diff, and a Dockerfile.
 const codeLanguagesReply = [
@@ -523,6 +545,8 @@ const scenarios: Record<string, TranscriptMessage[]> = {
   "rich-report": richReportMessages(richReportReply), "rich-report-live": richReportMessages(""),
   "rich-answer": richAnswerMessages(richAnswerReply), "rich-answer-live": richAnswerMessages(""),
   "rich-followup": richFollowUpMessages(richFollowUpReply), "rich-followup-live": richFollowUpMessages(""),
+  "rich-status": richStatusMessages(richStatusReply), "rich-status-live": richStatusMessages(""),
+  "rich-review": richReviewMessages(richReviewReply), "rich-review-live": richReviewMessages(""),
   "code-languages": codeLanguagesMessages,
   ...scenario === "images" || scenario === "images-viewer" ? { images: imageMessages(), "images-viewer": imageMessages() } : {},
   handoff: handoffMessages, "handoff-open": handoffMessages,
@@ -574,12 +598,13 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
   const [queue, setQueue] = useState<QueuedMessage[]>(queueScenarios[scenario] ?? []);
-  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "steps-running" || scenario === "reconnecting-running" || scenario === "streamdown-running" || scenario === "rich-blocks-running" || scenario === "rich-blocks-live" || scenario === "rich-report-live" || scenario === "rich-answer-live" || scenario === "rich-followup-live");
+  const [running, setRunning] = useState(queuePreview || scenario === "shell-agent" || scenario === "skills-running" || scenario === "compaction-live" || scenario === "compaction-queued" || scenario === "compaction-running" || scenario === "compaction-reconnecting" || scenario === "running" || scenario === "tools-running" || scenario === "chain-of-thought-running" || scenario === "steps-running" || scenario === "reconnecting-running" || scenario === "streamdown-running" || scenario === "rich-blocks-running" || scenario === "rich-blocks-live" || scenario === "rich-report-live" || scenario === "rich-answer-live" || scenario === "rich-followup-live" || scenario === "rich-status-live" || scenario === "rich-review-live");
   // Streams the rich-block reply in small chunks, like a model, then completes.
   useEffect(() => {
     const live: Record<string, [string, (text: string) => TranscriptMessage[]]> = {
       "rich-blocks-live": [richBlocksReply, richBlocksMessages], "rich-report-live": [richReportReply, richReportMessages],
       "rich-answer-live": [richAnswerReply, richAnswerMessages], "rich-followup-live": [richFollowUpReply, richFollowUpMessages],
+      "rich-status-live": [richStatusReply, richStatusMessages], "rich-review-live": [richReviewReply, richReviewMessages],
     };
     if (!(scenario in live)) return;
     const [reply, messagesFor] = live[scenario]!;

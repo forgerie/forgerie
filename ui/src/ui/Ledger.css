@@ -1,0 +1,26 @@
+/* Amounts of money. The checklist's frame. Amounts in one right-aligned
+   column of tabular figures; a total takes a rule above and the weight, the
+   last total a double rule below, as on paper. A negative is a minus sign
+   and the failure ink. */
+.ledger {
+  margin-block: var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-document);
+  overflow: hidden;
+}
+.ledger-title { padding: var(--space-2) var(--space-3); background: var(--tint-surface); font-weight: 600; overflow-wrap: anywhere; }
+.ledger-rows { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--space-4); margin: 0; padding: var(--space-1) var(--space-3) var(--space-2); }
+.ledger-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline; padding-block: 0.25rem; }
+.ledger-label { min-inline-size: 0; overflow-wrap: anywhere; }
+.ledger-amount { margin: 0; font-variant-numeric: tabular-nums; text-align: end; }
+.ledger-figure { white-space: nowrap; }
+.ledger-figure[data-negative] { color: var(--ink-bad); }
+.ledger-range { color: var(--muted-foreground); font-size: var(--small-text); }
+.ledger-missing { color: var(--muted-foreground); font-size: var(--small-text); }
+.ledger-row[data-total] {
+  margin-block-start: var(--space-1); padding-block: var(--space-2) 0.3125rem;
+  border-block-start: var(--hairline) solid var(--line-focus);
+  font-weight: 600;
+}
+.ledger-row[data-total] + .ledger-row:not([data-total]) { margin-block-start: var(--space-1); }
+.ledger-row[data-last] .ledger-amount { padding-block-end: 0.125rem; border-block-end: calc(var(--hairline) * 3) double var(--line-focus); }

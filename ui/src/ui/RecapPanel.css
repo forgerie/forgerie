@@ -1,0 +1,41 @@
+/* Where a piece of work stands. The checklist's frame with the correction
+   panel's label column. What waits on the reader leads, on the live wash and
+   rail DESIGN.md gives to "waits on you". */
+.recap-panel {
+  --recap-label: 5.5rem;
+  margin-block: var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-document);
+  overflow: hidden;
+}
+.recap-panel-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: var(--space-3); row-gap: var(--space-1);
+  padding: var(--space-2) var(--space-3); background: var(--tint-surface);
+}
+.recap-panel-title { font-weight: 600; }
+.recap-panel-summary { color: var(--muted-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums; }
+.recap-panel-needs {
+  display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); row-gap: 0.125rem;
+  padding: var(--space-2) var(--space-3) var(--space-2) calc(var(--space-3) - var(--hairline) * 2);
+  border-inline-start: calc(var(--hairline) * 2) solid var(--live);
+  border-block-end: var(--hairline) solid var(--line);
+  background: var(--live-wash);
+}
+.recap-panel-needs-label {
+  flex: 0 0 var(--recap-label); display: inline-flex; align-items: center; gap: 0.375rem;
+  color: var(--ink-live); font-size: var(--small-text); font-weight: 600; white-space: nowrap;
+}
+.recap-panel-needs-icon { flex: none; inline-size: 0.9375rem; block-size: 0.9375rem; }
+.recap-panel-needs-text { flex: 1 1 14rem; min-inline-size: 0; font-weight: 600; overflow-wrap: anywhere; }
+.recap-panel-fields { margin: 0; padding: var(--space-2) var(--space-3) var(--space-3); }
+.recap-panel-field { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); }
+.recap-panel-field + .recap-panel-field { margin-block-start: var(--space-2); }
+.recap-panel-label { flex: 0 0 var(--recap-label); color: var(--muted-foreground); font-size: var(--small-text); }
+.recap-panel-value { flex: 1 1 14rem; min-inline-size: 0; margin: 0; overflow-wrap: anywhere; }
+.recap-panel-field[data-field="goal"] .recap-panel-value { font-weight: 600; }
+.recap-panel-field[data-field="next"] .recap-panel-value { color: var(--quiet-foreground); }
+.recap-panel .recap-panel-list { margin: 0; padding: 0; list-style: none; }
+.recap-panel .recap-panel-entry { display: grid; grid-template-columns: 1rem minmax(0, 1fr); column-gap: var(--space-2); margin: 0; }
+.recap-panel .recap-panel-entry + .recap-panel-entry { margin-block-start: 0.125rem; }
+.recap-panel-mark { inline-size: 1rem; block-size: 1rem; margin-block-start: 0.25rem; color: var(--muted-foreground); }
+.recap-panel-field[data-field="done"] .recap-panel-mark { color: var(--ink-good); }

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { FileTree } from "./FileTree";
 
 export const name = "File tree";
-export const note = "Files a change touched, marked added, changed or deleted";
+export const note = "Files a change touched, marked added, changed or deleted, or a layout with notes";
 
 export default function Change() {
   return <FileTree code={"src/server/sessions/\n  ~ piSessionService.ts # injects the guide\n  + replyFormatGuide.acceptance.test.ts\nui/src/ui/\n  + Checklist.tsx\n  + Checklist.css\n  ~ theme.css # adds block tokens\n- src/server/sessions/replyFormatGuide.ts # moved to src/shared"} />;
@@ -23,4 +23,10 @@ export function Openable() {
 }
 export function Unmarked() {
   return <FileTree code={"docs/\n  briefs/\n    reply-format.md\n  README.md"} />;
+}
+export function Layout() {
+  return <FileTree code={"server/src/pace-tools/\n  reader.ts # Read-only interface required by tools\n  context.ts # Builds FinanceToolContext\n  catalog.ts # Schemas, descriptions, and tool handlers\n  queries/ # Structured finance operations\n  appCards.ts # Optional Pace app card presentation"} />;
+}
+export function DeepLayout() {
+  return <FileTree code={"server/src/pace-tools/\n  reader.ts # Read-only interface required by tools\n  queries/ # Structured finance operations\n    balances.ts # Account balances at a date\n    earmarks/\n      earmarkReconciliationAgainstCheckingAndSavingsAccounts.ts # Matches earmarks to account balances and reports the shortfall\n      index.ts\n  catalog.ts # Schemas, descriptions, and tool handlers"} />;
 }

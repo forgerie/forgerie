@@ -1,0 +1,41 @@
+/* Revisions and how far each got. A code sheet, like the file tree and the
+   command list. Hash, subject and state share three columns; the state is a
+   word plus a four-step meter in neutral ink: local, pushed, landed,
+   deployed. Deployed fills the meter in full ink. */
+.revision-list-room { container-type: inline-size; margin-block: var(--space-4); }
+.revision-list {
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-document);
+  background: var(--code-surface);
+  overflow: hidden;
+}
+.revision-list-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-block-end: var(--hairline) solid var(--line);
+  background: var(--tint-surface);
+}
+.revision-list-title { font-size: var(--small-text); font-weight: 600; }
+.revision-list-summary { color: var(--quiet-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums; }
+.revision-list .revision-list-items {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; column-gap: var(--space-3);
+  margin: 0; padding: var(--space-1) var(--space-3); list-style: none;
+}
+.revision-list .revision-list-item { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline; margin: 0; padding-block: 0.1875rem; }
+.revision-list-hash { display: inline-flex; align-items: center; gap: 0.125rem; }
+.revision-list-code { font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; }
+.revision-list-subject { align-self: center; min-inline-size: 0; font-size: var(--small-text); line-height: 1.5; overflow-wrap: anywhere; }
+.revision-list-state {
+  align-self: center; display: inline-flex; align-items: center; justify-content: end; gap: var(--space-2);
+  color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500;
+}
+.revision-list-item[data-state="deployed"] .revision-list-state { color: var(--foreground); font-weight: 600; }
+.revision-list-meter { display: inline-flex; gap: var(--hairline); }
+.revision-list-step { inline-size: 0.5rem; block-size: var(--meter-height); background: var(--meter-rest); }
+.revision-list-step[data-on] { background: var(--meter-ink); }
+.revision-list-item[data-state="deployed"] .revision-list-step { background: var(--foreground); }
+/* Narrow: the state moves under the subject, so the subject keeps the width. */
+@container (max-width: 27rem) {
+  .revision-list .revision-list-items { grid-template-columns: max-content minmax(0, 1fr); }
+  .revision-list-state { grid-column: 2; justify-content: start; }
+}

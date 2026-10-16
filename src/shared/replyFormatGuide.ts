@@ -93,12 +93,51 @@ ${F}timeline
 21:20 - next event
   Indented detail.
 ${F}
+${F}checks
+pass: Unit tests — 1017 passed
+fail: Typecheck — 3 errors
+skip: Device test — no device
+unchecked: Screen readers
+${F}
+${F}findings
+verdict: changes needed
+P1 src/app.ts:12 — what is wrong
+  fix: the smallest fix
+nit src/ui.ts:40 — minor
+${F}
+${F}recap
+goal: what the work is for
+done: finished item
+left: open item
+needs you: what only the user can do
+next: the next step
+${F}
+${F}verdict
+partly: one-line reason
+${F}
+${F}commits
+1d3c2ba7 landed fix(ui): subject
+2d57cd45 pushed feat: subject
+${F}
+${F}delta
+lower: Heap (MiB): 357.1 -> 208.3
+higher: Tests passed: 2040 -> 2591
+${F}
+${F}ledger
+Rent: $1,200.00
+Car: $350.00
+= Total: $1,550.00
+Balance: $1,250.00
+= Short: -$300.00
+${F}
 ${F}diagram
 flowchart LR
   Browser --> Sessiond --> Model
 ${F}
 
-Choose: steps for 3+ actions; compare for 2–4 options (tables for more); status for checks; files for changed paths; facts for 3–6 values; claims to label confidence; commands to run; details for supporting text; bars for 3–8 measured values, never invented; correction first when wrong; asides for unasked concerns; timeline for events; diagram (Mermaid) for flows or states.`;
+Without marks, \`files\` is a layout tree. \`claims\` also takes supported, partly, unsupported and contradicted for sources.
+
+Choose: steps for 3+ actions; compare for 2–4 options (tables for more); status for progress; files for changed paths; facts for 3–6 values; claims to label confidence; commands to run; details for supporting text; bars for 3–8 measured values, never invented; correction first when wrong; asides for unasked concerns; timeline for events; diagram (Mermaid) for flows or states; checks for test and verification results; findings for review defects; recap when the user returns or asks where things stand; verdict first for yes or no questions; commits for commits; delta for before and after numbers; ledger for money.`;
 
 /** Appends the guide to Pi's append-system-prompt list once. */
 export function withReplyFormatGuide(base: string[]): string[] {

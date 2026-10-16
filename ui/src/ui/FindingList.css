@@ -1,0 +1,52 @@
+/* A review's defects. A verdict strip, then defects worst first. The pill
+   is the aside list's worded severity; the location is the file tree's code
+   face with the folders quieter than the file. */
+.finding-list {
+  margin-block: var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-document);
+  overflow: hidden;
+}
+.finding-list[data-verdict="changes"] { border-block-start: calc(var(--hairline) * 2) solid var(--tone-warn); }
+.finding-list[data-verdict="blocked"] { border-block-start: calc(var(--hairline) * 2) solid var(--tone-bad); }
+.finding-list-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: var(--space-3); row-gap: var(--space-1);
+  padding: var(--space-2) var(--space-3); background: var(--tint-surface);
+}
+.finding-list-verdict { display: inline-flex; align-items: center; gap: 0.375rem; font-weight: 600; }
+.finding-list-verdict-icon { flex: none; inline-size: 1.0625rem; block-size: 1.0625rem; }
+.finding-list[data-verdict="approve"] .finding-list-verdict { color: var(--ink-good); }
+.finding-list[data-verdict="changes"] .finding-list-verdict { color: var(--ink-warn); }
+.finding-list[data-verdict="blocked"] .finding-list-verdict { color: var(--ink-bad); }
+.finding-list-summary { color: var(--muted-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums; }
+.finding-list .finding-list-items {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: var(--space-3);
+  margin: 0; padding: 0 var(--space-3); list-style: none;
+}
+.finding-list .finding-list-item { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline; margin: 0; padding-block: var(--space-2); }
+.finding-list .finding-list-item + .finding-list-item { border-block-start: var(--hairline) solid var(--line); }
+.finding-list-pill {
+  justify-self: stretch; text-align: center;
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--line-focus); border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  font-size: var(--label-text); font-weight: 600; line-height: 1.6; white-space: nowrap;
+}
+.finding-list-item[data-rank="0"] .finding-list-pill { border-color: var(--tone-bad); color: var(--ink-bad); }
+.finding-list-item[data-rank="1"] .finding-list-pill { border-color: var(--tone-warn); color: var(--ink-warn); }
+.finding-list-body { display: flex; flex-direction: column; align-items: flex-start; gap: 0.125rem; min-inline-size: 0; }
+.finding-list-where {
+  max-inline-size: 100%;
+  font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; line-height: 1.5; overflow-wrap: anywhere;
+}
+.finding-list-open {
+  padding: 0; border: 0; background: none; color: inherit; text-align: start;
+  text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 0.2em;
+}
+.finding-list-open:hover { color: var(--primary); text-decoration-color: currentColor; }
+.finding-list-dir { color: var(--quiet-foreground); }
+.finding-list-problem { font-weight: 550; overflow-wrap: anywhere; }
+.finding-list-item[data-rank="3"] .finding-list-problem { font-weight: 400; color: var(--quiet-foreground); }
+.finding-list-fix { display: flex; align-items: baseline; gap: var(--space-2); color: var(--muted-foreground); font-size: var(--small-text); }
+.finding-list-fix-label { flex: none; font-weight: 600; }
+.finding-list-empty { margin: 0; padding: var(--space-2) var(--space-3); color: var(--muted-foreground); font-size: var(--small-text); }

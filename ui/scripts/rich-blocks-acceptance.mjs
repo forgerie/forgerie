@@ -19,7 +19,7 @@ assert.ok(chromeBin, "Chromium is required");
 const chrome = launchChrome(chromeBin, port, profile);
 const base = process.env.APP_URL ?? "http://127.0.0.1:8510/";
 const output = resolve("verification/local/rich-blocks");
-const result = { postures: [], report: [], answer: [], followUp: [], errors: [] };
+const result = { postures: [], report: [], answer: [], followUp: [], status: [], review: [], errors: [] };
 await mkdir(join(output, "shots"), { recursive: true });
 
 async function until(cdp, expression, timeout = 10_000) {
@@ -167,6 +167,79 @@ try {
         for (const [name, selector] of [["correction", ".correction-panel"], ["quote", ".quote-figure"], ["timeline", ".timeline"], ["asides", ".aside-list"]]) {
           await evaluate(cdp, `document.querySelector('${selector}').scrollIntoView({ block: 'start' })`);
           await shot(cdp, `${label}-${name}`);
+        }
+        // Round five: verdict, checks, commits, a layout tree and a delta.
+        await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-status", base).href });
+        await until(cdp, `document.querySelectorAll('.delta-table-row:not(.delta-table-head)').length === 5`);
+        const status = await evaluate(cdp, `(() => {
+          const content = document.querySelector('.markdown-content');
+          return {
+            pageOverflow: document.documentElement.scrollWidth > innerWidth,
+            verdictFirst: content.firstElementChild.matches('.verdict-line') || content.firstElementChild.querySelector('.verdict-line') !== null,
+            verdictWord: document.querySelector('.verdict-line-word').textContent,
+            checksSummary: document.querySelector('.check-results-summary').textContent,
+            meterSegments: document.querySelectorAll('.check-results-segment').length,
+            revisionStates: [...document.querySelectorAll('.revision-list-item')].map((item) => item.dataset.state),
+            layoutSummary: document.querySelector('.path-tree-summary').textContent,
+            layoutNotesAligned: new Set([...document.querySelectorAll('.path-tree-layout-note')].map((note) => Math.round(note.getBoundingClientRect().left))).size === 1,
+            deltaMeanings: [...document.querySelectorAll('.delta-table-row[data-meaning]')].map((row) => row.dataset.meaning),
+            deltaInset: Math.round(document.querySelector('.delta-table').getBoundingClientRect().left - content.getBoundingClientRect().left),
+            deltaLabelLines: Math.max(...[...document.querySelectorAll('.delta-table-label')].map((label) => Math.round(label.getBoundingClientRect().height / parseFloat(getComputedStyle(label).lineHeight)))),
+          };
+        })()`);
+        assert.equal(status.pageOverflow, false, `${label}: status page overflows`);
+        assert.equal(status.verdictFirst, true, `${label}: verdict is not first`);
+        assert.equal(status.verdictWord, "Partly");
+        assert.equal(status.checksSummary, "3 of 4 passed, 1 failed, 1 skipped, 1 not checked");
+        assert.equal(status.meterSegments, 5, `${label}: the meter must leave out what was not checked`);
+        assert.deepEqual(status.revisionStates, ["landed", "pushed", "deployed", "local"]);
+        assert.equal(status.layoutSummary, "Layout, 5 entries", `${label}: layout must count the entries, not the folder`);
+        assert.equal(status.layoutNotesAligned, true, `${label}: layout notes do not line up`);
+        assert.deepEqual(status.deltaMeanings, ["better", "better", "better", "better", "worse"]);
+        assert.equal(status.deltaInset, 0, `${label}: delta is indented (${status.deltaInset} px)`);
+        assert.ok(status.deltaLabelLines <= 2, `${label}: a delta label wraps to ${status.deltaLabelLines} lines`);
+        result.status.push({ scheme, posture: posture.name, ...status });
+        for (const [name, selector] of [["verdict", ".verdict-line"], ["checks", ".check-results"], ["commits", ".revision-list"], ["layout", ".path-tree"], ["delta", ".delta-table"]]) {
+          await evaluate(cdp, `document.querySelector('${selector}').scrollIntoView({ block: 'start' })`);
+          await shot(cdp, `${label}-${name}`);
+        }
+        // Round five: recap, findings, ledger and research verdicts.
+        await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-review", base).href });
+        await until(cdp, `document.querySelectorAll('.ledger-row').length === 6`);
+        const review = await evaluate(cdp, `(() => {
+          const content = document.querySelector('.markdown-content');
+          const recap = document.querySelector('.recap-panel');
+          const amounts = [...document.querySelectorAll('.ledger-figure')].map((node) => Math.round(node.getBoundingClientRect().right));
+          return {
+            pageOverflow: document.documentElement.scrollWidth > innerWidth,
+            needsFirst: recap.querySelector('.recap-panel-head').nextElementSibling.matches('.recap-panel-needs'),
+            pills: [...document.querySelectorAll('.finding-list-pill')].map((pill) => pill.textContent),
+            verdict: document.querySelector('.finding-list').dataset.verdict,
+            amountsAligned: new Set(amounts).size === 1,
+            shortfall: document.querySelector('.ledger-row[data-last] .ledger-figure').textContent,
+            shortfallNegative: document.querySelector('.ledger-row[data-last] .ledger-figure').dataset.negative === "true",
+            struck: document.querySelector('.claim-list-item[data-confidence="contradicted"] del') !== null,
+            badgesAligned: new Set([...document.querySelectorAll('.claim-list-body')].map((body) => Math.round(body.getBoundingClientRect().left))).size === 1,
+          };
+        })()`);
+        assert.equal(review.pageOverflow, false, `${label}: review page overflows`);
+        assert.equal(review.needsFirst, true, `${label}: needs you is not first in the recap`);
+        assert.deepEqual(review.pills, ["P1", "P2", "Nit"], `${label}: findings are not worst first`);
+        assert.equal(review.verdict, "changes");
+        assert.equal(review.amountsAligned, true, `${label}: ledger amounts do not share a right edge`);
+        assert.equal(review.shortfall, "\u2212$6,325.60");
+        assert.equal(review.shortfallNegative, true);
+        assert.equal(review.struck, true, `${label}: a contradicted claim is not struck through`);
+        result.review.push({ scheme, posture: posture.name, ...review });
+        for (const [name, selector] of [["recap", ".recap-panel"], ["findings", ".finding-list"], ["ledger", ".ledger"], ["research", ".claim-list"]]) {
+          await evaluate(cdp, `document.querySelector('${selector}').scrollIntoView({ block: 'start' })`);
+          await shot(cdp, `${label}-${name}`);
+        }
+        if (posture === FOLD8_POSTURES[0]) {
+          await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-status-live", base).href });
+          await until(cdp, `document.querySelector('.markdown')?.dataset.status === 'complete' && document.querySelectorAll('.delta-table-row[data-meaning]').length === 5`, 40_000);
+          await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-review-live", base).href });
+          await until(cdp, `document.querySelector('.markdown')?.dataset.status === 'complete' && document.querySelectorAll('.ledger-row').length === 6`, 40_000);
         }
         if (posture === FOLD8_POSTURES[0]) {
           await cdp.send("Page.navigate", { url: new URL("/verification/preview.html?scenario=rich-followup-live", base).href });

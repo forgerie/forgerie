@@ -170,6 +170,17 @@ export function filePaths(nodes: readonly FileNode[], base = ""): string[] {
   });
 }
 
+/** Whether any entry carries a change mark. A tree with none is a layout, not a change. */
+export function hasMarks(nodes: readonly FileNode[]): boolean {
+  return nodes.some((node) => node.mark !== undefined || hasMarks(node.children));
+}
+
+/** How many entries a tree holds below its top level: the files and folders a layout describes, not the folders it sits in. */
+export function countEntries(nodes: readonly FileNode[]): number {
+  const below = (list: readonly FileNode[]): number => list.reduce((sum, node) => sum + 1 + below(node.children), 0);
+  return nodes.length === 1 && nodes[0]!.directory ? below(nodes[0]!.children) : below(nodes);
+}
+
 export function countMarks(nodes: FileNode[]): Record<FileMark, number> {
   const counts: Record<FileMark, number> = { added: 0, changed: 0, deleted: 0 };
   const walk = (list: FileNode[]) => { for (const node of list) { if (node.mark) counts[node.mark] += 1; walk(node.children); } };
@@ -214,16 +225,18 @@ export function parseFacts(body: string): Fact[] {
   });
 }
 
-export const CONFIDENCES = ["verified", "inferred", "opinion", "unknown"] as const;
+/** How sure the writer is, then the four research verdicts on a source's claim. */
+export const CONFIDENCES = ["verified", "inferred", "opinion", "unknown", "supported", "partly", "unsupported", "contradicted"] as const;
 export type Confidence = typeof CONFIDENCES[number];
 export type Claim = { confidence: Confidence; text: string; detail: string };
 export type ClaimSet = { title: string; claims: Claim[] };
 
-const CLAIM_LINE = /^ ?(?:[-*][ \t]+)?(verified|inferred|opinion|unknown)[ \t]*:[ \t]*(.*)$/i;
+const CLAIM_LINE = /^ ?(?:[-*][ \t]+)?(verified|inferred|opinion|unknown|supported|partly|unsupported|contradicted)[ \t]*:[ \t]*(.*)$/i;
 
 /**
  * Reads a `claims` block: `verified:`, `inferred:`, `opinion:` or `unknown:`
- * starts a claim. Lines under a claim are its evidence. Text before the first
+ * starts a claim, and so do the research verdicts `supported:`, `partly:`,
+ * `unsupported:` and `contradicted:`. Lines under a claim are its evidence. Text before the first
  * claim is the title.
  */
 export function parseClaims(body: string): ClaimSet {
@@ -375,4 +388,208 @@ const SOURCE_LINE = /^(?:—|--)[ \t]+(\S.*)$/;
 /** The source named by a line such as `— src/app.ts:12`, or undefined. */
 export function readQuoteSource(line: string): string | undefined {
   return SOURCE_LINE.exec(line.trim())?.[1]?.trim();
+}
+
+// ---------------------------------------------------------------------------
+// Round four: results, reviews, recaps, answers, commits, changes and money.
+// A line before the first row is a title only once another line follows it:
+// while a reply streams, the last line may be the first row still arriving.
+
+/** Splits `fence` into lines, and keeps a title candidate only when it is not the last line. */
+function titleAndRows<Row>(body: string, readRow: (line: string, rows: Row[]) => Row | undefined | "consumed"): { title: string; rows: Row[] } {
+  const lines = body.split(/\r?\n/);
+  while (lines.length > 0 && lines.at(-1)!.trim() === "") lines.pop();
+  let title = "";
+  const rows: Row[] = [];
+  lines.forEach((line, index) => {
+    if (line.trim() === "") return;
+    const row = readRow(line, rows);
+    if (row === "consumed") return;
+    if (row !== undefined) { rows.push(row); return; }
+    if (rows.length === 0 && title === "" && index < lines.length - 1) title = line.trim();
+  });
+  return { title, rows };
+}
+
+/** `name — result`: a spaced em dash or `--` ends the name. */
+function splitResult(text: string): { name: string; result: string } {
+  const at = /[ \t](?:—|--)[ \t]/.exec(text);
+  return at === null ? { name: text.trim(), result: "" } : { name: text.slice(0, at.index).trim(), result: text.slice(at.index + at[0].length).trim() };
+}
+
+export const RESULT_STATES = ["pass", "fail", "skip", "unchecked"] as const;
+export type ResultState = typeof RESULT_STATES[number];
+export type CheckResult = { state: ResultState; name: string; result: string };
+export type CheckResultSet = { title: string; checks: CheckResult[] };
+
+const RESULT_LINE = /^ ?(?:[-*][ \t]+)?(pass|fail|skip|unchecked)[ \t]*:[ \t]*(.*)$/i;
+
+/**
+ * Reads a `checks` block: `pass:`, `fail:`, `skip:` or `unchecked:` starts a
+ * check, written `name — result`. A line before the first check is the title.
+ */
+export function parseCheckResults(body: string): CheckResultSet {
+  const { title, rows } = titleAndRows<CheckResult>(body, (line) => {
+    const match = RESULT_LINE.exec(line);
+    return match ? { state: match[1]!.toLowerCase() as ResultState, ...splitResult(match[2]!) } : undefined;
+  });
+  return { title, checks: rows };
+}
+
+export const REVIEW_VERDICTS = ["approve", "changes", "blocked"] as const;
+export type ReviewVerdict = typeof REVIEW_VERDICTS[number];
+/** Worst first. `blocker` ranks with P0 and `should-fix` with P1. */
+export const FINDING_RANKS: Record<string, { rank: number; severity: string }> = {
+  p0: { rank: 0, severity: "P0" }, blocker: { rank: 0, severity: "Blocker" },
+  p1: { rank: 1, severity: "P1" }, "should-fix": { rank: 1, severity: "Should fix" },
+  p2: { rank: 2, severity: "P2" }, nit: { rank: 3, severity: "Nit" },
+};
+export type Finding = { rank: number; severity: string; where: string; problem: string; fix: string };
+export type FindingSet = { verdict?: ReviewVerdict; findings: Finding[] };
+
+const VERDICT_LINE = /^\s*verdict[ \t]*:[ \t]*(.*)$/i;
+const FINDING_LINE = /^(?:[-*][ \t]+)?(P0|P1|P2|nit|blocker|should-fix)[ \t]+(\S+)(?:[ \t]+(?:—|--)[ \t]+(.*))?$/i;
+const FIX_LINE = /^[ \t]+fix[ \t]*:[ \t]*(.*)$/i;
+
+function readVerdict(word: string): ReviewVerdict | undefined {
+  const text = word.trim().toLowerCase();
+  if (text.startsWith("approve")) return "approve";
+  if (text.startsWith("blocked")) return "blocked";
+  if (text.startsWith("changes")) return "changes";
+  return undefined;
+}
+
+/**
+ * Reads a `findings` block: an optional `verdict: approve | changes needed |
+ * blocked`, then one defect per line, `P1 path:line — problem`, with an
+ * indented `fix:` under it. Defects come back worst first; equal ranks keep
+ * the order they were written in.
+ */
+export function parseFindings(body: string): FindingSet {
+  let verdict: ReviewVerdict | undefined;
+  const findings: Finding[] = [];
+  for (const line of body.split(/\r?\n/)) {
+    const said = VERDICT_LINE.exec(line);
+    if (said && findings.length === 0) { verdict = readVerdict(said[1]!) ?? verdict; continue; }
+    const finding = FINDING_LINE.exec(line);
+    if (finding) {
+      const { rank, severity } = FINDING_RANKS[finding[1]!.toLowerCase()]!;
+      findings.push({ rank, severity, where: finding[2]!, problem: (finding[3] ?? "").trim(), fix: "" });
+      continue;
+    }
+    const fix = FIX_LINE.exec(line);
+    const current = findings.at(-1);
+    if (fix && current) current.fix = fix[1]!.trim();
+  }
+  const sorted = findings.map((finding, index) => ({ finding, index })).sort((a, b) => a.finding.rank - b.finding.rank || a.index - b.index);
+  return { ...(verdict ? { verdict } : {}), findings: sorted.map(({ finding }) => finding) };
+}
+
+/** The path in a `path:line` location, for opening the file. */
+export function findingPath(where: string): string {
+  return where.replace(/:[\d,–-]+$/, "");
+}
+
+export type Recap = { goal: string; done: string[]; left: string[]; needs: string; next: string };
+
+const RECAP_LINE = /^ ?(?:[-*][ \t]+)?(goal|done|left|needs you|next)[ \t]*:[ \t]*(.*)$/i;
+const NOTHING = /^(?:nothing|none|no|-|—)\.?$/i;
+
+/**
+ * Reads a `recap` block: `goal:`, `done:` and `left:` (each may repeat),
+ * `needs you:` and `next:`. `needs you: nothing` means nothing waits on the reader.
+ */
+export function parseRecap(body: string): Recap {
+  const recap: Recap = { goal: "", done: [], left: [], needs: "", next: "" };
+  for (const line of body.split(/\r?\n/)) {
+    const match = RECAP_LINE.exec(line);
+    if (!match) continue;
+    const value = match[2]!.trim();
+    switch (match[1]!.toLowerCase()) {
+      case "goal": recap.goal = value; break;
+      case "done": if (value !== "") recap.done.push(value); break;
+      case "left": if (value !== "") recap.left.push(value); break;
+      case "needs you": recap.needs = NOTHING.test(value) ? "" : value; break;
+      case "next": recap.next = value; break;
+    }
+  }
+  return recap;
+}
+
+export const ANSWERS = ["yes", "no", "partly"] as const;
+export type Answer = typeof ANSWERS[number];
+export type Verdict = { answer: Answer; reason: string };
+
+const ANSWER_LINE = /^\s*(yes|no|partly)[ \t]*:[ \t]*([\s\S]*)$/i;
+
+/** Reads a `verdict` block: `yes:`, `no:` or `partly:` and the reason. Nothing until the answer word and its colon arrive. */
+export function parseVerdict(body: string): Verdict | undefined {
+  const match = ANSWER_LINE.exec(body.trim());
+  if (!match) return undefined;
+  return { answer: match[1]!.toLowerCase() as Answer, reason: match[2]!.split(/\r?\n/).map((line) => line.trim()).join(" ").trim() };
+}
+
+export const SHIP_STATES = ["local", "pushed", "landed", "deployed"] as const;
+export type ShipState = typeof SHIP_STATES[number];
+export type Revision = { hash: string; state: ShipState; subject: string };
+export type RevisionSet = { title: string; revisions: Revision[] };
+
+const REVISION_LINE = /^ ?(?:[-*][ \t]+)?`?([0-9a-f]{7,40})`?[ \t]+(local|pushed|landed|deployed)(?:[ \t]+(.*))?$/i;
+
+/** Reads a `commits` block: `hash state subject`, the state one of local, pushed, landed or deployed. */
+export function parseRevisions(body: string): RevisionSet {
+  const { title, rows } = titleAndRows<Revision>(body, (line) => {
+    const match = REVISION_LINE.exec(line);
+    return match ? { hash: match[1]!, state: match[2]!.toLowerCase() as ShipState, subject: (match[3] ?? "").trim() } : undefined;
+  });
+  return { title, revisions: rows };
+}
+
+export type Direction = "lower" | "higher" | "";
+export type DeltaRow = { direction: Direction; label: string; before: string; after: string };
+export type DeltaSet = { title: string; rows: DeltaRow[] };
+export type DeltaMeaning = "better" | "worse" | "same" | "none";
+export type DeltaChange =
+  | { complete: false }
+  | { complete: true; change: number; places: number; percent: number | "from zero" | "crosses zero"; meaning: DeltaMeaning };
+
+const DELTA_LINE = /^ ?(?:[-*][ \t]+)?(?:(lower|higher)[ \t]*:[ \t]*)?(.+?):[ \t]*(\S+)[ \t]*(?:->|→)[ \t]*(\S*)[ \t]*$/i;
+
+/** Reads a `delta` block: `lower:` or `higher:` (which way is better), then `label: before -> after`. */
+export function parseDelta(body: string): DeltaSet {
+  return titleAndRows<DeltaRow>(body, (line) => {
+    const match = DELTA_LINE.exec(line);
+    return match ? { direction: (match[1]?.toLowerCase() ?? "") as Direction, label: match[2]!.trim(), before: match[3]!, after: match[4]! } : undefined;
+  });
+}
+
+const toNumber = (text: string) => text === "" ? Number.NaN : Number(text.replace(/,/g, "").replace(/^−/, "-").replace(/[^\d.+-].*$/, ""));
+const places = (text: string) => (/\.(\d+)/.exec(text)?.[1] ?? "").length;
+
+/** What a row's change is and whether it is good, once both numbers are in. */
+export function deltaChange(row: DeltaRow): DeltaChange {
+  const before = toNumber(row.before);
+  const after = toNumber(row.after);
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return { complete: false };
+  const change = after - before;
+  const percent = before === 0 ? "from zero" : after !== 0 && Math.sign(before) !== Math.sign(after) ? "crosses zero" : (change / Math.abs(before)) * 100;
+  const meaning: DeltaMeaning = change === 0 ? "same" : row.direction === "" ? "none" : (change < 0) === (row.direction === "lower") ? "better" : "worse";
+  return { complete: true, change, places: Math.max(places(row.before), places(row.after)), percent, meaning };
+}
+
+export type LedgerRow = { label: string; amount: string; total: boolean };
+export type LedgerSet = { title: string; rows: LedgerRow[] };
+
+const LEDGER_LINE = /^ ?(=[ \t]*)?(.+?):(?:[ \t]+(.*))?$/;
+
+/**
+ * Reads a `ledger` block: `label: amount` per line, `= label: amount` for a
+ * total. An amount may be a range (`$131.30 to -$68.70`); `?` says there is
+ * none. A line before the first row is the title.
+ */
+export function parseLedger(body: string): LedgerSet {
+  return titleAndRows<LedgerRow>(body, (line) => {
+    const match = LEDGER_LINE.exec(line);
+    return match ? { label: match[2]!.trim(), amount: (match[3] ?? "").trim(), total: match[1] !== undefined } : undefined;
+  });
 }
