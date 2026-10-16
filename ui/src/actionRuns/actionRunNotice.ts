@@ -12,6 +12,8 @@ export interface NoticeJob { id: string; name: string; state: string; url: strin
 export interface ActionRunNotice {
   repo: string | undefined;
   runId: number | undefined;
+  /** GitHub's run number, the "#4812" people read. Older notices carry only `runId`. */
+  runNumber: number | undefined;
   attempt: number | undefined;
   workflow: string | undefined;
   url: string | undefined;
@@ -45,13 +47,14 @@ export function actionRunNoticeOf(text: string): ActionRunNotice {
   });
   // `newAttempt` may be the attempt's number or a flag beside `attempt`.
   const newAttempt = integer(news?.newAttempt) ?? (news?.newAttempt === true ? attempt : undefined);
-  return { repo: string(news?.repo), runId: integer(news?.runId), attempt, workflow: string(news?.workflow), url: string(news?.url),
+  return { repo: string(news?.repo), runId: integer(news?.runId), runNumber: integer(news?.runNumber), attempt, workflow: string(news?.workflow), url: string(news?.url),
     failedJobs, newAttempt, conclusion: string(news?.conclusion), text };
 }
 
 /** "CI #4812", or as much of it as the news carried. */
 export function noticeSubject(notice: ActionRunNotice): string {
-  const number = notice.runId === undefined ? undefined : `#${String(notice.runId)}`;
+  const shown = notice.runNumber ?? notice.runId;
+  const number = shown === undefined ? undefined : `#${String(shown)}`;
   if (notice.workflow && number) return `${notice.workflow} ${number}`;
   return notice.workflow ?? (number ? `Run ${number}` : "A workflow run");
 }

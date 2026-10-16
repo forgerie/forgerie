@@ -26,7 +26,8 @@ const runStatus = z.enum(["queued", "waiting", "running", "completed"]);
 const runConclusion = z.enum(["success", "failure", "cancelled", "skipped", "timed_out", "action_required", "neutral", "stale"]).nullable();
 export type RunConclusion = z.infer<typeof runConclusion>;
 export const actionRunSchema = z.object({
-  repo: text, runId, attempt: z.number().int().min(1), workflow: text, workflowPath: text, title: text, event: text,
+  /** `runId` names the run in routes and keys; `runNumber` is GitHub's per-workflow `run_number`, the "#4812" people read. */
+  repo: text, runId, runNumber: z.number().int().min(1), attempt: z.number().int().min(1), workflow: text, workflowPath: text, title: text, event: text,
   branch: text, headSha: text, actor: text, url: text, status: runStatus, conclusion: runConclusion,
   createdAt: date, updatedAt: date,
   pullNumbers: z.array(z.number().int()),
@@ -57,12 +58,6 @@ export type SessionActionRun = z.infer<typeof sessionRunSchema>;
 export const actionRunCatalogSchema = z.object({ links: z.array(actionRunLinkSchema) });
 /** `ActionRunErrorSchema` is `{ kind: "action_run_error", error }`; only the words matter to the reader. */
 const errorSchema = z.object({ error: z.string() });
-/**
- * Unlink and the two watch routes answer with the changed link. The plan
- * names the routes but not that body, so this reads both the pull request
- * routes' form (the link itself) and `{ link }`.
- */
-const linkResultSchema = z.union([actionRunLinkSchema, z.object({ link: actionRunLinkSchema }).transform((body) => body.link)]);
 
 /**
  * On the machine and session streams: `session.action-run` when a link or
@@ -121,8 +116,8 @@ export function createActionRunApi(request: RunRequestFn, prefix = "/api"): Acti
     list: (ref, signal) => call(`${path(ref)}${query(ref)}`, sessionRunsSchema, {}, signal),
     read: (ref, id, signal) => call(`${one(ref, id)}${query(ref)}`, sessionRunSchema, {}, signal),
     link: (ref, run) => call(path(ref), sessionRunSchema, json("PUT", { cwd: ref.cwd, run })),
-    unlink: (ref, id) => call(`${one(ref, id)}${query(ref)}`, linkResultSchema, { method: "DELETE" }),
-    watch: (ref, id) => call(one(ref, id, "/watch"), linkResultSchema, json("POST", { cwd: ref.cwd })),
-    stopWatch: (ref, id) => call(`${one(ref, id, "/watch")}${query(ref)}`, linkResultSchema, { method: "DELETE" }),
+    unlink: (ref, id) => call(`${one(ref, id)}${query(ref)}`, actionRunLinkSchema, { method: "DELETE" }),
+    watch: (ref, id) => call(one(ref, id, "/watch"), actionRunLinkSchema, json("POST", { cwd: ref.cwd })),
+    stopWatch: (ref, id) => call(`${one(ref, id, "/watch")}${query(ref)}`, actionRunLinkSchema, { method: "DELETE" }),
   };
 }

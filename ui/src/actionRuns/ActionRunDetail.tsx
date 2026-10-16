@@ -3,7 +3,7 @@ import { RunDetail } from "../ui/RunDetail";
 import { WatchToggle } from "../ui/WatchToggle";
 import { ago, duration } from "../pullRequests/pullRequestModel";
 import type { ActionRunItem } from "./actionRunApi";
-import { jobSeconds, permissionProblem, runFacts, runMark, runSentence, runSeconds, sortedJobs, watchable, watchNote } from "./actionRunModel";
+import { jobSeconds, permissionProblem, runFacts, runMark, runRef, runSentence, runSeconds, sortedJobs, watchable, watchNote } from "./actionRunModel";
 import type { RunDetailState } from "./actionRunsStore";
 import { RunProblem } from "./RunProblem";
 
@@ -27,7 +27,7 @@ export function ActionRunDetail({ item, detail, refusal, now, writing, readOnly,
   onUnlink: () => void;
 }) {
   const { link, run } = item;
-  const id = `#${String(link.runId)}`;
+  const id = runRef(run, link.runId);
   const problem = refusal ?? (detail.type === "failed" ? detail.message : item.error);
   const notice = problem ? { tone: permissionProblem(problem) ? "warn" as const : "bad" as const,
     content: <RunProblem error={problem} subject="this run" lead={refusal ? undefined : "Forgerie could not read this run."} /> }

@@ -6,7 +6,7 @@ export const note = "Whether something is watched: a pressed eye chip with a cou
 
 function Toggle({ initial, count, disabled }: { initial: boolean; count?: number; disabled?: boolean }) {
   const [on, setOn] = useState(initial);
-  return <WatchToggle on={on} text={on ? "Watching" : "Watch"} what="run #18234561230"
+  return <WatchToggle on={on} text={on ? "Watching" : "Watch"} what={`run ${"#"}4812`}
     count={count} countText="wakes" disabled={disabled} onPress={() => setOn(!on)} />;
 }
 export default function Off() { return <Toggle initial={false} />; }
