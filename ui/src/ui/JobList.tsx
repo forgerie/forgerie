@@ -1,4 +1,4 @@
-import { useCallback, useId, useState } from "react";
+import { useId, useState } from "react";
 import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
 import { StateMark, type WorkState } from "./StateMark";
 import "./JobList.css";
@@ -21,9 +21,9 @@ export interface JobListItem {
 /**
  * Molecule: the jobs of one build. Each row has a state mark, a name, and
  * its time, over a thin ribbon as long as its share of the longest job, so
- * the slow one shows at a glance. A row with output opens it in place,
- * scrolled to its end where the error usually is; a row without opens the
- * job elsewhere. Rows in the `fold` states gather into one row the reader
+ * the slow one shows at a glance. A row with output opens it in place at
+ * its full length, and the pane around the list scrolls; a row without opens
+ * the job elsewhere. Rows in the `fold` states gather into one row the reader
  * can open. The first failure with output opens by itself.
  */
 export function JobList({ label, jobs, empty, linkText, logLabel, fold }: {
@@ -42,8 +42,6 @@ export function JobList({ label, jobs, empty, linkText, logLabel, fold }: {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(jobs.filter((job) => job.state === "failed" && job.log).slice(0, 1).map((job) => job.id)));
   const [unfolded, setUnfolded] = useState(false);
   const toggle = (key: string) => setOpen((current) => { const next = new Set(current); if (!next.delete(key)) next.add(key); return next; });
-  // Opened once at its end; after that the reader's scroll stays.
-  const toEnd = useCallback((element: HTMLPreElement | null) => { if (element) element.scrollTop = element.scrollHeight; }, []);
   const foldable = fold ? jobs.filter((job) => fold.states.includes(job.state)) : [];
   const shown = fold && !unfolded && foldable.length > 1 ? jobs.filter((job) => !fold.states.includes(job.state)) : jobs;
   if (jobs.length === 0) return <p className="job-list-empty">{empty}</p>;
@@ -62,7 +60,7 @@ export function JobList({ label, jobs, empty, linkText, logLabel, fold }: {
             {line}<ChevronRightIcon aria-hidden className="job-list-go" /></button>
           : <a className="job-list-line" style={{ "--job-list-share": share }} href={job.url} target="_blank" rel="noreferrer">{line}<ExternalLinkIcon aria-hidden className="job-list-go" /></a>}
         {opened ? <div className="job-list-log" id={`${id}-${job.id}`}>
-          <pre ref={toEnd} tabIndex={0} role="region" aria-label={`${logLabel}: ${job.name}`}>{job.log}</pre>
+          <pre tabIndex={0} role="region" aria-label={`${logLabel}: ${job.name}`}>{job.log}</pre>
           <a href={job.url} target="_blank" rel="noreferrer">{linkText}<ExternalLinkIcon aria-hidden /></a>
         </div> : null}
       </li>;
