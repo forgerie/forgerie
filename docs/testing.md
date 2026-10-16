@@ -23,6 +23,12 @@ The package-install smoke test also passes the real tarball's manifest to npm's 
 
 Use focused tests while editing. Run `npm run verify` before merging cross-cutting changes. A child agent runs focused checks and leaves `npm run verify` to its parent, unless its task assigns the run; a workflow runs it once per stage. Each commit's pre-commit hook already runs the cached typecheck, Knip, ESLint on staged files and the related tests. Build and install only in an isolated worktree when active agents use the deployed checkout. Do not restart live services to run tests.
 
+## Serial lane
+
+`vitest.config.ts` runs the suite as two projects. The `parallel` lane runs first. The `serial` lane then runs the files in `scripts/test-serial-lane.mjs` one at a time. These files timed out when they shared the CPU with the rest of the suite, and passed when they ran alone. The lane applies to `npm test`, the coverage run and the pre-commit hook's related tests. Coverage and assertions are unchanged.
+
+The cost is wall time: the serial files run after the others and do not overlap with them. Remove a file from the list once it passes reliably in the parallel lane. Do not add a file to hide a real failure: rerun it alone first, and add it only when the alone run passes.
+
 ## Managed process core acceptance
 
 The core API and its limits are in [managed-processes-core.md](managed-processes-core.md).

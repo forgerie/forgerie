@@ -16,5 +16,14 @@
     "nix",
     "setsid"
   ],
-  "ignoreExportsUsedInFile": true
+  "ignoreExportsUsedInFile": true,
+  "vitest": {
+    "config": [
+      "vitest.config.ts"
+    ],
+    "entry": [
+      "src/**/*.test.ts",
+      "scripts/**/*.test.mjs"
+    ]
+  }
 }

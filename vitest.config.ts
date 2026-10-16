@@ -1,12 +1,19 @@
 import { defineConfig } from "vitest/config";
+import { SERIAL_LANE } from "./scripts/test-serial-lane.mjs";
+
+const include = ["src/**/*.test.ts", "scripts/**/*.test.mjs"];
 
 export default defineConfig({
   test: {
     // SDK acceptance tests also boot workers. Match the coverage run's budget
     // instead of starting one expensive compiler/runtime graph per host core.
     maxWorkers: 4,
-    include: ["src/**/*.test.ts", "scripts/**/*.test.mjs"],
     setupFiles: ["scripts/test-agent-profile.mjs"],
+    // Load-sensitive files run alone, after the parallel lane: they time out when they share the CPU.
+    projects: [
+      { extends: true, test: { name: "parallel", include, exclude: ["**/node_modules/**", ...SERIAL_LANE], sequence: { groupOrder: 0 } } },
+      { extends: true, test: { name: "serial", include: [...SERIAL_LANE], fileParallelism: false, sequence: { groupOrder: 1 } } },
+    ],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts", "scripts/**/*.mjs"],
