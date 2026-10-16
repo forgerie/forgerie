@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bundledForgerieAgentsPath } from "./bundledForgerieSkills.js";
 import { ChildAgentCatalog, parseChildAgentFile } from "./durableChildProfiles.js";
 import { planChildRuntime, runtimeGaps } from "./durableChildRuntime.js";
-import { diffInputProblem, imageType, page, DIFF_PAGE_CHARS } from "./durableChildTools.js";
+import { diffInputProblem, page, DIFF_PAGE_CHARS } from "./durableChildTools.js";
+
+import { imageType } from "./readImageSafety.js";
 
 // The agent files sessiond really falls back to.
 const bundled = bundledForgerieAgentsPath();

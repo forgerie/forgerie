@@ -21,6 +21,8 @@ import { ChildRunStore } from "./childRunStore.js";
 import { SessionWorktreeStore } from "../workspaces/sessionWorktreeStore.js";
 import { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
 
+import { png } from "./readImageSafety.testSupport.js";
+
 const execute = promisify(execFile);
 const git = async (cwd: string, ...args: string[]) => (await execute("git", ["-C", cwd, ...args])).stdout.trim();
 
@@ -374,6 +376,39 @@ describe("Durable-native child agents in a Forgerie session", () => {
     expect(imagesSeen).toEqual(["image/png"]);
     expect(text((await reports(ref, "looker"))[0]?.content)).toContain("shot.png: image/png");
   }, 30_000);
+
+  it("protects parent read history when SDK image auto-resizing is disabled", async () => {
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ images: { autoResize: false } }));
+    await writeFile(join(directory, "tall.png"), png(1, 9000));
+    await writeFile(join(directory, "small.png"), png(1, 1));
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "IMAGE tall.png");
+    await until("parent refusal", async () => (await transcript(ref)).some(m => m.role === "assistant" && text(m.content).includes("9000 px")));
+    expect(imagesSeen).toEqual([]);
+    expect(JSON.stringify(await transcript(ref))).not.toContain('"type":"image"');
+    await service.prompt(ref, "IMAGE small.png");
+    await until("parent image", async () => (await transcript(ref)).some(m => m.role === "assistant" && text(m.content).includes("Read image file")));
+    expect(imagesSeen).toEqual(["image/png"]);
+  });
+
+  it.each([9000, 3001])("refuses a compressed %s px image without poisoning child history, then continues", async (height) => {
+    await writeFile(join(directory, "tall.png"), png(1, height));
+    await writeFile(join(directory, "small.png"), png(1, 1));
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    await service.prompt(ref, "Start a child named looker: IMAGE tall.png");
+    await until("refusal report", async () => (await reports(ref, "looker")).length === 1);
+    expect(text((await reports(ref, "looker"))[0]?.content)).toContain(`1 × ${String(height)} px`);
+    expect(text((await reports(ref, "looker"))[0]?.content)).toContain("Crop to regions under 3000 px");
+    expect(imagesSeen).toEqual([]);
+    const child = (await service.durableChildren(ref))[0];
+    if (child === undefined) throw new Error("Missing child");
+    const history = JSON.stringify(await service.durableChildMessages(ref, child.conversationId));
+    expect(history).not.toContain('"type":"image"');
+    await service.prompt(ref, "Send child looker: IMAGE small.png");
+    await until("continued report", async () => (await reports(ref, "looker")).length === 2);
+    expect(imagesSeen).toEqual(["image/png"]);
+  });
 
   it("re-reads a child's agent file on each send, so a long-lived child gets the current tools and instructions", async () => {
     await mkdir(join(directory, ".pi", "agents"), { recursive: true });
