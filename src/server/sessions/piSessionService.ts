@@ -2633,7 +2633,7 @@ export class PiSessionService implements SessionRouteService {
   async inspectPullSession(ref: PullSessionRef): Promise<PullSessionState> {
     const target = await this.resolvePinTarget(ref);
     const archived = await this.getArchived(ref);
-    if (target === undefined && archived === undefined) return { ref, available: false, settled: false, leaf: null };
+    if (target === undefined && archived === undefined) return { ref, exists: false, available: false, settled: false, leaf: null };
     const resolved = target !== undefined ? { id: target.sessionId, cwd: target.cwd } : archived !== undefined ? { id: archived.sessionId, cwd: archived.cwd } : ref;
     if (resolved.id !== ref.id || canonicalizeStoredCwd(resolved.cwd) !== canonicalizeStoredCwd(ref.cwd)) throw new Error("Use the full session id and its own workspace.");
     const manager = await this.historySessionManager(ref);
@@ -2641,7 +2641,7 @@ export class PiSessionService implements SessionRouteService {
     const response = responseFromBranch(manager.getBranch()).response;
     const active = this.activeForRef(ref)?.runtime.session;
     const settled = response.kind === "needs-response" && (response.reason !== "undeclared" || active === undefined || !this.hasActiveWork(active));
-    return { ref: resolved, available: archived === undefined && readonly === undefined, settled, leaf: manager.getLeafId() };
+    return { ref: resolved, exists: true, available: archived === undefined && readonly === undefined, settled, leaf: manager.getLeafId() };
   }
 
   async wakePullSession(ref: PullSessionRef, notice: { id: string; text: string }, stillCurrent: () => boolean, customType: "forgerie:pull-request" | "forgerie:action-run" = "forgerie:pull-request"): ReturnType<PullSessionGateway["wake"]> {

@@ -20,7 +20,7 @@ describe("github_actions tool", () => {
       github.on(`POST ${base}/actions/workflows/ci.yml/dispatches`, details ? json({ workflow_run_id: 4812, run_url: `${base}/actions/runs/4812`, html_url: "https://github.com/owner/repo/actions/runs/4812" }) : new Response(null, { status: 204 }));
       const agent = new GitHubAgent({ fetch: github.fetch, app: { tokenFor: () => Promise.resolve({ ok: true, token: "test" }), dropToken() { /* No expiring token. */ }, status: () => ({ state: "not-configured" }) }, trust: { judge: () => Promise.resolve(() => true) }, resolveRepo: () => Promise.resolve({ slug: "owner/repo", everyone: true }) });
       const store = new ActionRunStore();
-      const service = new ActionRunService({ github: agent, store, pulls: new PullRequestStore(), sessions: { inspect: ref => Promise.resolve({ ref, available: true, settled: false, leaf: null }), wake: () => Promise.resolve("delivered") }, onError: error => { throw error; } });
+      const service = new ActionRunService({ github: agent, store, pulls: new PullRequestStore(), sessions: { inspect: ref => Promise.resolve({ ref, exists: true, available: true, settled: false, leaf: null }), wake: () => Promise.resolve("delivered") }, onError: error => { throw error; } });
       const deps = { read: (cwd: string, request: Parameters<GitHubAgent["read"]>[1]) => agent.read(cwd, request), write: (cwd: string, id: string, request: Parameters<GitHubAgent["write"]>[2]) => agent.write(cwd, id, request), actions: service };
       const [tool] = createGitHubActionsToolDefinitions("/workspace", deps);
       if (tool === undefined) throw new Error("Actions tool missing");

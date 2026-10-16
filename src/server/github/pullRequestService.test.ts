@@ -13,7 +13,7 @@ const ref = { id: "session-1", cwd: "/workspace" };
 const k9 = { id: ref.id, repo: "owner/repo", number: 9 };
 function fixture(store = new PullRequestStore(), publishUnlinked?: (link: PullLink) => void) {
   let now = Date.parse(PR_TIME);
-  let state: PullSessionState = { ref, available: true, settled: false, leaf: "start" };
+  let state: PullSessionState = { ref, exists: true, available: true, settled: false, leaf: "start" };
   let snapshot = pullSnapshot();
   let openResult: RepositoryOpenPulls | undefined;
   const byNumber = new Map<number, ReturnType<typeof pullSnapshot>>();
@@ -64,6 +64,19 @@ describe("PR backend public contracts", () => {
     f.repo("changed/repo"); release();
     await expect(reading).rejects.toThrow("repository changed during the read");
     expect(f.store.list()).toEqual(before);
+  });
+
+  it("rejects discovery results when the session disappears during the provider read", async () => {
+    for (const read of ["open", "preview"] as const) {
+      const f = fixture();
+      let release: () => void = () => undefined;
+      f.hold(new Promise<void>(resolve => { release = resolve; }));
+      const pending = read === "open" ? f.service.open(ref) : f.service.preview(ref, 9);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      f.setState({ exists: false, available: false }); release();
+      await expect(pending).rejects.toThrow("Session not found");
+      expect(f.store.list()).toEqual([]);
+    }
   });
 
   it("rejects linking when the preview repository no longer matches without replacing old links", async () => {
@@ -120,7 +133,7 @@ describe("PR backend public contracts", () => {
         pull: (cwd, number) => Promise.resolve(pullSnapshot({ repo: repoFor(cwd), number })),
         mergePull: (cwd) => { merges.push(cwd); return Promise.resolve({ text: "Merged" }); },
       },
-      sessions: { inspect: (selected) => Promise.resolve({ ref: selected, available: true, settled: false, leaf: "start" }), wake: () => Promise.resolve("delivered") },
+      sessions: { inspect: (selected) => Promise.resolve({ ref: selected, exists: true, available: true, settled: false, leaf: "start" }), wake: () => Promise.resolve("delivered") },
     });
     await service.link(ref, 9); await service.link(target, 9);
     await service.watch(ref, 9); await service.watch(target, 9);

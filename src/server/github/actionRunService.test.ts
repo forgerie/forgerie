@@ -17,7 +17,7 @@ const key = { id: ref.id, repo: "owner/repo", runId: 4812 };
 function fixture(store = new ActionRunStore()) {
   let now = Date.parse(RUN_TIME);
   let run = actionRun();
-  let state: PullSessionState = { ref, available: true, settled: false, leaf: "start" };
+  let state: PullSessionState = { ref, exists: true, available: true, settled: false, leaf: "start" };
   let busy = false;
   let failure: Error | undefined;
   let hold: Promise<void> | undefined;

@@ -4,13 +4,14 @@ import type { PullNote } from "../github/pullRequestService.js";
 it("checks the owning chat, keeps the PR workspace, and routes notifications back without creating a session", async () => {
   const home = { id: "source", cwd: "/repo-a" }, target = { id: "source", cwd: "/repo-b/.worktree/task" };
   let active = true;
+  let exists = true;
   const inspected: unknown[] = [], notices: unknown[] = [];
   const gateway = relatedPullSessions({ owner: () => Promise.resolve({ ref: home, active }) }, {
-    inspect: (ref) => { inspected.push(ref); return Promise.resolve({ ref, available: true, settled: false, leaf: "leaf" }); },
+    inspect: (ref) => { inspected.push(ref); return Promise.resolve({ ref, exists, available: true, settled: false, leaf: "leaf" }); },
     wake: (ref, notice) => { notices.push([ref, notice]); return Promise.resolve("delivered"); },
     note: (ref, notice) => { notices.push([ref, notice]); return Promise.resolve(); },
   });
-  expect(await gateway.inspect(target)).toEqual({ ref: target, available: true, settled: false, leaf: "leaf" });
+  expect(await gateway.inspect(target)).toEqual({ ref: target, exists: true, available: true, settled: false, leaf: "leaf" });
   expect(inspected).toEqual([home]);
   const notice = { id: "wake", text: "repo B check failed" };
   expect(await gateway.wake(target, notice, () => true)).toBe("delivered");
@@ -22,4 +23,6 @@ it("checks the owning chat, keeps the PR workspace, and routes notifications bac
   expect(await gateway.wake(target, notice, () => true)).toBe("busy");
   await gateway.note?.(target, note);
   expect(notices).toHaveLength(2);
+  exists = false;
+  expect((await gateway.inspect(target)).exists).toBe(false);
 });

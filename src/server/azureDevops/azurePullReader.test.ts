@@ -17,7 +17,7 @@ function service(reader: AzurePullReader, notices: string[] = []) {
   return new PullRequestService({ readerFor: () => Promise.resolve(reader), github: {
     repo: () => { throw new Error("GitHub must not be called"); }, pull: () => { throw new Error("GitHub must not be called"); }, mergePull: () => { throw new Error("No writes allowed"); },
   }, now: () => Date.parse(AZURE_TIME), store: new PullRequestStore(), onError: () => undefined,
-  sessions: { inspect: (target) => Promise.resolve({ ref: target, available: true, settled: false, leaf: "start" }), wake: (_ref, notice) => { notices.push(notice.text); return Promise.resolve("delivered"); } } });
+  sessions: { inspect: (target) => Promise.resolve({ ref: target, exists: true, available: true, settled: false, leaf: "start" }), wake: (_ref, notice) => { notices.push(notice.text); return Promise.resolve("delivered"); } } });
 }
 
 describe("Azure PR reads", () => {

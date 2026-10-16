@@ -8,7 +8,7 @@ import type { GitHubAgent } from "./githubAgent.js";
 import { evaluateWatch, initialCursor } from "./pullRequestWatch.js";
 import { keyOf, PullRequestStore, type PullKey, type PullRecord } from "./pullRequestStore.js";
 
-export interface PullSessionState { ref: PullSessionRef; available: boolean; settled: boolean; leaf: string | null }
+export interface PullSessionState { ref: PullSessionRef; exists: boolean; available: boolean; settled: boolean; leaf: string | null }
 export interface PullSessionGateway {
   inspect(ref: PullSessionRef): Promise<PullSessionState>;
   wake(ref: PullSessionRef, notice: { id: string; text: string }, stillCurrent: () => boolean): Promise<"delivered" | "busy">;
@@ -72,7 +72,7 @@ export class PullRequestService {
 
   /** Repository discovery never reads or writes the link store. */
   async open(ref: PullSessionRef): Promise<OpenPullsResponse> {
-    await this.requireSession(ref);
+    await this.requireDiscoverySession(ref);
     const reader = await this.reader(ref.cwd);
     const repo = await reader.repo(ref.cwd);
     const result = await reader.openPulls(ref.cwd);
@@ -84,7 +84,7 @@ export class PullRequestService {
 
   async preview(ref: PullSessionRef, number: number): Promise<PullPreviewResponse> {
     if (!Number.isSafeInteger(number) || number < 1) throw new Error("Use a positive PR number.");
-    await this.requireSession(ref);
+    await this.requireDiscoverySession(ref);
     const reader = await this.reader(ref.cwd);
     const repo = await reader.repo(ref.cwd);
     const snapshot = await reader.pull(ref.cwd, number, true);
@@ -298,11 +298,16 @@ export class PullRequestService {
     return record;
   }
   private async requireDiscoveryTarget(ref: PullSessionRef, reader: PullRequestReader, repo: string): Promise<void> {
-    await this.requireSession(ref);
+    await this.requireDiscoverySession(ref);
     const current = await this.reader(ref.cwd);
     if (current.provider !== reader.provider || (await current.repo(ref.cwd)).slug.toLowerCase() !== repo.toLowerCase()) throw new Error("The session repository changed during the read. Try again.");
   }
 
+  private async requireDiscoverySession(ref: PullSessionRef): Promise<void> {
+    const state = await this.requireSession(ref);
+    // Existence and writability differ: archived and retained transcripts can still read PRs.
+    if (!state.exists) throw new Error("Session not found.");
+  }
   private async requireSession(ref: PullSessionRef): Promise<PullSessionState> {
     const state = await this.deps.sessions.inspect(ref);
     if (state.ref.id !== ref.id || state.ref.cwd !== ref.cwd) throw new Error("Use the full session id and its own workspace.");
