@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { ActionRunStore } from "./github/actionRunStore.js";
+import { ActionRunService } from "./github/actionRunService.js";
+import { registerActionRunRoutes } from "./github/actionRunRoutes.js";
 import { SessionSearchService } from "./sessions/sessionSearchService.js";
 import { registerSessionSearchRoutes } from "./sessions/sessionSearchRoutes.js";
 import { mkdir, rm } from "node:fs/promises";
@@ -140,6 +143,8 @@ async function createSessionDaemonRuntime() {
   const githubIssues = new GitHubIssueClient({ app: github, fetch: fetchGitHub, trust: githubTrust });
   const pullStore = new PullRequestStore(join(piWebDataDir(daemonEnvironment), "pull-requests.json"));
   await pullStore.initialize();
+  const actionRunStore = new ActionRunStore(join(piWebDataDir(daemonEnvironment), "action-runs.json"));
+  await actionRunStore.initialize();
   const githubAgent: GitHubAgent = new GitHubAgent({ app: github, fetch: fetchGitHub, trust: githubTrust, onPullCreated: (input): Promise<void> => pulls.created(input) });
   const pinStore = new SessionPinStore(defaultSessionPinFilePath(daemonEnvironment));
   const tabsStore = new SessionTabsStore(defaultSessionTabsFilePath(daemonEnvironment));
@@ -236,6 +241,13 @@ async function createSessionDaemonRuntime() {
       onIndexError: (error) => { app.log.warn({ err: error }, "durable child index write failed"); },
     }) }),
     github: {
+      actions: {
+        link: (ref, run) => actionRuns.link(ref, run),
+        unlink: (ref, runId) => actionRuns.unlink(ref, runId),
+        watch: (ref, runId) => actionRuns.watch(ref, runId),
+        stopRef: (ref, runId) => actionRuns.stopRef(ref, runId),
+        dispatch: (ref, workflow, branch, inputs) => actionRuns.dispatch(ref, workflow, branch, inputs),
+      },
       target: (ref, id) => relatedWork.toolCwd(ref, id),
       read: (cwd, request) => githubAgent.read(cwd, request),
       write: (cwd, id, request) => githubAgent.write(cwd, id, request),
@@ -243,6 +255,7 @@ async function createSessionDaemonRuntime() {
       createIssue: (repo, id, input) => githubAgent.createIssue(repo, id, input),
       watch: (cwd, id, action, number) => action === "start" ? pulls.watch({ id, cwd }, number) : pulls.stopRef({ id, cwd }, number),
     },
+    actionRunWatches: { isWatching: (id) => actionRunStore.isWatching(id), stop: (id, reason) => actionRuns.stop(id, reason) },
     pullRequestWatches: { isWatching: (id) => pullStore.isWatching(id), stop: (id, reason) => pulls.stop(id, reason) },
     extensionDialogsTimeoutMs: config.extensionDialogsTimeoutMs,
     notificationStore,
@@ -276,6 +289,23 @@ async function createSessionDaemonRuntime() {
     },
     onError: (error, sessionId) => { app.log.error({ err: error, sessionId }, "pull request watch failed"); },
   });
+  const actionRuns: ActionRunService = new ActionRunService({ github: githubAgent, store: actionRunStore, pulls: pullStore,
+    sessions: relatedPullSessions(relatedWork, {
+      inspect: ref => sessions.inspectPullSession(ref),
+      wake: (ref, notice, current) => sessions.wakePullSession(ref, notice, current, "forgerie:action-run"),
+    }),
+    publish: link => {
+      eventHub.publish(link.session.id, { type: "session.action-run", link });
+      eventHub.publishGlobal({ type: "session.action-run", link });
+      sessions.publishPullWatchStatus(link.session.id);
+    },
+    publishUnlinked: link => {
+      eventHub.publish(link.session.id, { type: "session.action-run.unlinked", link });
+      eventHub.publishGlobal({ type: "session.action-run.unlinked", link });
+      sessions.publishPullWatchStatus(link.session.id);
+    },
+    onError: (error, sessionId) => { app.log.error({ err: error, sessionId }, "action run watch failed"); },
+  });
   const promptResources = new PromptResourceCatalogService({ agentDir: activeAgentProfile.dir });
   const promptLibrary = new AgentDirPromptLibrary(activeAgentProfile.dir);
   const resourceEditor = new ResourceEditorService({ agentDir: activeAgentProfile.dir, session: async (id) => {
@@ -301,13 +331,14 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credential: (organization) => azureCredentials.read(organization), fetch });
   const backlog = new BacklogService({ projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues }), createAzureDevopsBacklogProvider(azureItems)] });
-  return { eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
+  return { eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, actionRuns, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 
-function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, github, pulls, actionRuns, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
   registerBacklogRoutes(app, backlog);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);
+  registerActionRunRoutes(app, actionRuns);
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerWorktreeCleanupRoutes(app, worktreeCleanup);
   registerSessionWorktreeRoutes(app, userSessions);
@@ -340,8 +371,9 @@ function registerSessionDaemonRoutes({ eventHub, workspaceActivity, sessions, se
   app.get("/runtime", () => runtimeComponent);
 }
 
-async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): Promise<void> {
+async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pulls, actionRuns, liveChildren, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): Promise<void> {
   pulls.start();
+  actionRuns.start();
   childRuns.start((error) => { app.log.error({ err: error }, "child run retention failed"); });
   let shuttingDown = false;
   const startCleanup = () => { if (!shuttingDown) worktreeCleanup.start(); };
@@ -376,6 +408,7 @@ async function listenSessionDaemon({ sessions, unreadStore, catalogRefresher, pu
     };
     await attempt("stop worktree cleanup", () => worktreeCleanup.stop());
     await attempt("dispose PR watches", () => { pulls.dispose(); });
+    await attempt("dispose run watches", () => { actionRuns.dispose(); });
     await attempt("dispose catalog refresher", () => { catalogRefresher.dispose(); });
     await attempt("dispose sessions", () => sessions.dispose());
     await attempt("detach workspace services", () => workspaceServices.dispose());

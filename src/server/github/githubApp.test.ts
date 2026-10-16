@@ -33,7 +33,7 @@ async function setUp(f: Awaited<ReturnType<typeof fixture>>) {
 const token = (value: string, expiresAt: string) => json({ token: value, expires_at: expiresAt }, { status: 201 });
 
 describe("GitHub App setup", () => {
-  it("asks GitHub for a read-only, webhook-free app that returns to this page", async () => {
+  it("asks GitHub for an Actions-enabled, webhook-free app that returns to this page", async () => {
     const f = await fixture();
     expect(f.app.status()).toEqual({ state: "not-configured" });
     const start = f.app.startSetup("https://forgerie.tail.ts.net/some/path?backlog");
@@ -41,7 +41,7 @@ describe("GitHub App setup", () => {
     expect(JSON.parse(start.manifest)).toEqual({
       name: "Forgerie (zao)", url: "https://forgerie.tail.ts.net", description: "Lists issues in Forgerie's backlog, and lets Forgerie's agents work on issues and pull requests.", public: true,
       redirect_url: "https://forgerie.tail.ts.net/", setup_url: "https://forgerie.tail.ts.net/?backlog", setup_on_update: true,
-      default_permissions: { issues: "write", pull_requests: "write", contents: "write", checks: "read", statuses: "read" }, default_events: [],
+      default_permissions: { issues: "write", pull_requests: "write", contents: "write", checks: "read", statuses: "read", actions: "write" }, default_events: [],
     });
     // A plain-http origin still returns there; only the homepage falls back to github.com.
     expect(JSON.parse(f.app.startSetup("http://zao:8510").manifest)).toMatchObject({ url: "https://github.com", redirect_url: "http://zao:8510/" });
