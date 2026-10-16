@@ -39,7 +39,7 @@ export function DeltaTable({ code, labels = LABELS }: { code: string; labels?: L
         return <li key={index} className="delta-table-row" data-meaning={change.complete ? change.meaning : undefined}>
           <span className="delta-table-label">{row.label}{row.direction !== "" && <small className="delta-table-direction">{labels[row.direction]}</small>}</span>
           <span className="delta-table-num delta-table-before">{shown(row.before)}</span>
-          <span className="delta-table-num delta-table-after">{change.complete ? shown(row.after) : ""}</span>
+          <span className="delta-table-num delta-table-after">{shown(row.after)}</span>
           <span className="delta-table-change">{change.complete && <><span className="delta-table-abs">{signed(change.change, change.places)}</span><span className="delta-table-pct">{percent}</span></>}</span>
           <span className="delta-table-word">{change.complete && <><Trend className="delta-table-trend" aria-hidden="true" />{labels[change.meaning]}</>}</span>
         </li>;
