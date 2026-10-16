@@ -90,13 +90,13 @@ export class ManagedProcessLog {
       const base = Math.max(state.base.offset, size - this.capBytes);
       if (size === base) return null;
       // Allow a trailing newline and the preceding byte to identify a complete 4 KiB line.
-      const start = Math.max(base, size - 4098);
+      const start = Math.max(state.base.offset, base - 1, size - 4098);
       const buffer = Buffer.alloc(size - start);
       const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
       if (bytesRead !== buffer.length) throw new Error("Managed process log shrank while reading");
       const end = buffer[buffer.length - 1] === 10 ? buffer.length - 1 : buffer.length;
       const newline = end === 0 ? -1 : buffer.lastIndexOf(10, end - 1);
-      let from = Math.max(newline + 1, end - 4096);
+      let from = Math.max(newline + 1, end - 4096, base - start);
       const truncatedStart = from > 0 ? buffer[from - 1] !== 10 : start > state.base.offset || state.partial;
       // A suffix can start inside a code point. Skip its continuation bytes.
       if (truncatedStart) {

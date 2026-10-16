@@ -80,6 +80,23 @@ it("bounds output frames and serializes concurrent refreshes without duplicate d
   expect((await f.core.readOutput(id)).lines).toHaveLength(100);
 });
 
+it("omits a listed process confirmed removed before its tail is read", async () => {
+  const f = await fixture();
+  await f.tools.execute({ action: "start", name: "finished", command: "cat" });
+  f.control.live.clear();
+  const read = f.core.lastOutput.bind(f.core);
+  f.core.lastOutput = async id => { await f.core.clearFinished(); return read(id); };
+  expect((await f.panel.snapshot()).processes).toEqual([]);
+});
+it("preserves missing-output errors when the listed record still exists", async () => {
+  const f = await fixture();
+  const started = await f.tools.execute({ action: "start", name: "broken", command: "cat" });
+  const id = started.process?.id;
+  if (id === undefined) throw new Error("Process did not start");
+  const record = await f.core.status(id);
+  await rm(join(record.directory, "output.log"));
+  await expect(f.panel.snapshot()).rejects.toMatchObject({ code: "ENOENT" });
+});
 it("updates list snapshots on live partial output, without consuming event output", async () => {
   const f = await fixture();
   const started = await f.tools.execute({ action: "start", name: "live", command: "cat" });

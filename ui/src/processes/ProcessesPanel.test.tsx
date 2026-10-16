@@ -29,8 +29,9 @@ it("shows each process's last output with truncation made explicit", async () =>
     { ...process, id: "long", name: "Long log", lastLogLine: { text: "tail", truncatedStart: true } },
     { ...process, id: "empty", name: "No output", lastLogLine: null },
   ])} {...actions()} />));
-  expect(document.querySelector('[aria-label="Last output of Reader"]')?.textContent).toBe("ready <script>not markup</script>");
-  expect(document.querySelector('[aria-label="Last output of Long log"]')?.textContent).toBe("…tail");
+  expect(document.querySelector('[aria-label="Last output of Reader"] pre')?.textContent).toBe("ready <script>not markup</script>");
+  expect(document.querySelector('[aria-label="Last output of Long log"] pre')?.textContent).toBe("tail");
+  expect(document.body.textContent).toContain("Beginning of output line omitted.");
   expect(document.querySelector('[aria-label="Last output of No output"]')).toBeNull();
   expect(document.querySelector("script")).toBeNull();
 });

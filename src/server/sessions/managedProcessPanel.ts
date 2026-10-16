@@ -37,8 +37,18 @@ export class ManagedProcessPanel {
       : (await this.tools.execute({ action: "list" })).processes;
     if (processes === undefined) throw new Error("Could not read managed processes");
     const core = await this.core();
-    const items = await Promise.all(processes.map(async process => ({ ...browserProcess(process), lastLogLine: await core.lastOutput(process.id) })));
-    return { available: true, writeSupported: true, processes: items };
+    const items = await Promise.all(processes.map(async process => {
+      try { return { ...browserProcess(process), lastLogLine: await core.lastOutput(process.id) }; }
+      catch (error) {
+        if (hasCode(error, "ENOENT")) {
+          // Clear/retention can remove a listed record. Missing output for an existing record is still an error.
+          try { await core.status(process.id); }
+          catch (inspection) { if (hasCode(inspection, "ENOENT")) return undefined; throw inspection; }
+        }
+        throw error;
+      }
+    }));
+    return { available: true, writeSupported: true, processes: items.filter(item => item !== undefined) };
   }
   watch(): void {
     const tick = async () => {

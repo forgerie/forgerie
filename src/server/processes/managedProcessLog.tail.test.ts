@@ -52,6 +52,16 @@ it("honors the retained boundary after sparse-prefix reclamation", async () => {
   await log.maintain();
   expect(await log.tail()).toEqual({ text: "tail", truncatedStart: true });
 });
+it("keeps a complete line complete before and after retention at its boundary", async () => {
+  const { log } = await fixture("old\nnew\n", 4);
+  expect(await log.tail()).toEqual({ text: "new", truncatedStart: false });
+  await log.maintain();
+  expect(await log.tail()).toEqual({ text: "new", truncatedStart: false });
+});
+it("does not return bytes before an unmaintained cap boundary", async () => {
+  const { log } = await fixture("old\nlongtail", 4);
+  expect(await log.tail()).toEqual({ text: "tail", truncatedStart: true });
+});
 it("does not claim an incomplete UTF-8 code point is valid output", async () => {
   const { file, log } = await fixture("");
   await writeFile(file, Buffer.from([0x6f, 0x6b, 0xf0, 0x9f]));
