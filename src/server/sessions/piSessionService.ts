@@ -2725,10 +2725,17 @@ export class PiSessionService implements SessionRouteService {
     return readSavedChild(saved.path, saved.id, (storage, parent) => storedChildMessages(storage, parent, conversationId, childReadContext));
   }
   private async savedChildSession(ref: PiSessionRef): Promise<{ id: string; path: string }> {
+    // Native journals stay beside the original transcript path when its JSONL is moved or copied.
     const archived = await this.getArchived(ref);
-    if (archived?.archivePath !== undefined) return { id: archived.sessionId, path: archived.archivePath };
+    if (archived !== undefined) {
+      if (archived.originalPath === undefined || archived.originalPath === "") throw new Error("Archived session is missing its original path for child reads");
+      return { id: archived.sessionId, path: archived.originalPath };
+    }
     const readonly = await this.sessionWorktrees?.store.readOnly(ref);
-    if (readonly !== undefined) return { id: readonly.session.id, path: readonly.transcriptPath };
+    if (readonly !== undefined) {
+      if (readonly.session.path === "") throw new Error("Retained session is missing its original path for child reads");
+      return { id: readonly.session.id, path: readonly.session.path };
+    }
     const saved = await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader);
     if (saved === undefined) throw new Error("Session not found");
     return saved;

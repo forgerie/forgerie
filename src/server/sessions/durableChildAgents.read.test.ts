@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
@@ -13,11 +13,12 @@ import { registerDurableChildRoutes } from "./durableChildRoutes.js";
 import { acquireDurableOwnership } from "./durableOwnership.js";
 import { readSavedChild } from "./durableChildSavedReads.js";
 import { DurableSessionJournal, durableSessionPaths } from "./durableSessionJournal.js";
-import { writeDurableSessionLocator } from "./durableSessionLocator.js";
+import { readDurableSessionLocator, writeDurableSessionLocator } from "./durableSessionLocator.js";
 import { bindSession } from "./durableSessionBindings.js";
 import { PiSessionService } from "./piSessionService.js";
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import { CapturingSessionEventHub, testModelRuntime } from "./piSessionService.testSupport.js";
+import { SessionArchiveStore } from "./sessionArchiveStore.js";
 import { SessionWorktreeStore } from "../workspaces/sessionWorktreeStore.js";
 import { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
 
@@ -33,7 +34,7 @@ const Reporter = defineTask({ name: "forgerie.child-reporter", version: 1,
   phases: { retry: () => { throw new Error("A read must not run the reporter"); } },
   abort: () => { throw new Error("A read must not abort the reporter"); } });
 
-it("lists persisted child rows and transcripts over HTTP without opening or resuming a session", async () => {
+it.each(["saved", "archived", "retained-worktree"])("lists %s child rows and transcripts over HTTP without opening or resuming a session", async (location) => {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-child-row-read-"));
   const databasePath = join(directory, "state.sqlite");
   const models = createModels();
@@ -62,14 +63,16 @@ it("lists persisted child rows and transcripts over HTTP without opening or resu
   await writeFile(sessionFile, JSON.stringify({ type: "session", version: 3, id: "saved", cwd: directory, timestamp: "2026-01-01T00:00:00.000Z" }) + "\n");
   const address = { databasePath, journalId: "test", sessionId: "saved", conversationId: parent.id };
   await writeDurableSessionLocator(durableSessionPaths(sessionFile).directory, address);
-  const store = new SessionWorktreeStore();
+  const store = new SessionWorktreeStore(join(directory, "worktrees.json"));
   await store.add({ id: "child-worktree", repo: directory, path: join(directory, "removed"), branch: "child-writer", defaultBranch: "main", sourceCommit: "abc", childOwner: { id: "saved", cwd: directory },
     renamed: true, setup: { phase: "done", log: "" }, state: { kind: "landed", sha: "abc", at: "2026-01-01" }, cleanup: { kind: "done" }, transcripts: [], createdAt: "2026-01-01", updatedAt: "2026-01-01" });
+  const archive = new SessionArchiveStore(join(directory, "archive.json"));
+  await archive.initialize();
   let runtimeOpens = 0;
   const gateway = createPiSessionManagerGateway({ agentDir: directory, env: {}, sessionDirEnvKeys: [] });
   gateway.resolveSessionFile = (cwd, id) => Promise.resolve(cwd === directory && id === "saved" ? { id, cwd, path: sessionFile } : undefined);
   const service = new PiSessionService(new CapturingSessionEventHub(), { agentDir: directory, modelRuntime: testModelRuntime,
-    sessionManager: gateway,
+    sessionManager: gateway, archiveStore: archive,
     sessionWorktrees: new SessionWorktrees(store, { publish: () => undefined }),
     createAgentRuntime: () => { runtimeOpens++; throw new Error("Reads must not open a runtime"); }, heartbeatIntervalMs: 60_000 });
   const app = Fastify(); registerDurableChildRoutes(app, service);
@@ -83,7 +86,33 @@ it("lists persisted child rows and transcripts over HTTP without opening or resu
       questions: [{ questionId: "q:1", question: "Proceed?", askedAt: 2 }],
       worktree: { path: join(directory, "removed"), branch: "child-writer", repo: directory, defaultBranch: "main", cleanup: { kind: "done" }, state: "landed", ahead: 0, dirty: false } }]);
     expect(response.body).not.toContain("private secret");
-    expect((await app.inject(`${base}/${String(child.id)}/messages${query}`)).statusCode).toBe(200);
+    const messages = await app.inject(`${base}/${String(child.id)}/messages${query}`);
+    expect(messages.statusCode).toBe(200);
+    expect(messages.json()).toMatchObject({ messages: [{ role: "assistant", content: [{ type: "toolCall", name: "write" }] }], busy: false });
+    const session = { id: "saved", cwd: directory, path: sessionFile, created: "2026-01-01", modified: "2026-01-01", messageCount: 0, firstMessage: "" };
+    let copy: string | undefined;
+    if (location === "archived") {
+      copy = (await archive.archive({ ...session, sessionId: session.id })).archivePath;
+    } else if (location === "retained-worktree") {
+      await store.add({ id: "parent-worktree", repo: directory, path: directory, branch: "parent", defaultBranch: "main", sessionId: session.id, ownerSession: session,
+        renamed: true, setup: { phase: "done", log: "" }, state: { kind: "active" }, cleanup: { kind: "pending" }, transcripts: [], createdAt: session.created, updatedAt: session.modified });
+      await store.saveTranscripts("parent-worktree", [session]);
+      await store.update("parent-worktree", { state: { kind: "landed", sha: "abc", at: "2026-01-01" }, cleanup: { kind: "done" } });
+      copy = (await store.readOnly(session))?.transcriptPath;
+      await unlink(sessionFile);
+    }
+    if (location !== "saved") {
+      if (copy === undefined) throw new Error("Expected a retained transcript copy");
+      await expect(readFile(sessionFile)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readDurableSessionLocator(durableSessionPaths(copy).directory)).toBeUndefined();
+      expect(await readDurableSessionLocator(durableSessionPaths(sessionFile).directory)).toEqual(address);
+      const after = await app.inject(base + query);
+      expect(after.statusCode).toBe(200);
+      expect(after.json()).toEqual(response.json());
+      const afterMessages = await app.inject(`${base}/${String(child.id)}/messages${query}`);
+      expect(afterMessages.statusCode).toBe(200);
+      expect(afterMessages.json()).toEqual(messages.json());
+    }
     expect((await app.inject(`${base}/999/messages${query}`)).statusCode).toBe(404);
     expect((await app.inject(`/sessions/other/children${query}`)).statusCode).toBe(404);
     expect(runtimeOpens).toBe(0);
@@ -124,4 +153,25 @@ it("borrows an owned family's storage and selects the committed binding rather t
     expect((await owner.harness.inspect(context)).scheduling).toBe("paused");
     await expect(readSavedChild(sessionFile, "other", () => Promise.resolve(null))).rejects.toThrow("Foreign saved child session locator");
   } finally { await owner.release(context); await rm(directory, { recursive: true, force: true }); }
+});
+
+it("rejects archived child reads with missing original-path metadata instead of selecting a transcript copy", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "forgerie-child-row-archive-metadata-"));
+  const archiveFile = join(directory, "archive.json");
+  await writeFile(archiveFile, JSON.stringify({ sessions: [{ sessionId: "saved", cwd: directory, archivedAt: "2026-01-01", archivePath: join(directory, "copy.jsonl") }] }));
+  const archive = new SessionArchiveStore(archiveFile);
+  await archive.initialize();
+  let runtimeOpens = 0;
+  const service = new PiSessionService(new CapturingSessionEventHub(), { agentDir: directory, modelRuntime: testModelRuntime,
+    sessionManager: createPiSessionManagerGateway({ agentDir: directory, env: {}, sessionDirEnvKeys: [] }), archiveStore: archive,
+    createAgentRuntime: () => { runtimeOpens++; throw new Error("Reads must not open a runtime"); }, heartbeatIntervalMs: 60_000 });
+  const app = Fastify(); registerDurableChildRoutes(app, service);
+  try {
+    for (const path of ["", "/7/messages"]) {
+      const response = await app.inject(`/sessions/saved/children${path}?${new URLSearchParams({ cwd: directory })}`);
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toEqual({ error: "Archived session is missing its original path for child reads" });
+    }
+    expect(runtimeOpens).toBe(0);
+  } finally { await app.close(); await service.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
