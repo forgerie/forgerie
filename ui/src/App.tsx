@@ -503,7 +503,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
         initialDraft={commandSelection?.session.id === id ? commandSelection.draft : undefined}
         initialError={commandSelection?.session.id === id ? commandSelection.error : undefined}
         drafts={drafts} onSwitchSession={switchSession}
-        worktree={picker.find(id)?.worktree} pullRequests={picker.find(id)?.pullRequests} worktrees={worktreeApi} onNewSession={() => { void startNew(); }}
+        worktree={picker.find(id)?.worktree} pullRequests={picker.find(id)?.pullRequests} actionRuns={picker.find(id)?.actionRuns} worktrees={worktreeApi} onNewSession={() => { void startNew(); }}
         archive={{ availability: picker.archiveState(id), onArchive: () => { void archiveNext(id); } }} />
     </Activity>;
   });

@@ -75,7 +75,7 @@ export class GitHubApp {
       redirect_url: `${base}/`,
       setup_url: `${base}/?backlog`, setup_on_update: true,
       // Agents comment, close, and label issues, open pull requests, read CI, and merge when CI passes.
-      default_permissions: { issues: "write", pull_requests: "write", contents: "write", checks: "read", statuses: "read" }, default_events: [],
+      default_permissions: { issues: "write", pull_requests: "write", contents: "write", checks: "read", statuses: "read", actions: "write" }, default_events: [],
     };
     return { action: `${GITHUB_WEB}/settings/apps/new?state=${state}`, manifest: JSON.stringify(manifest) };
   }

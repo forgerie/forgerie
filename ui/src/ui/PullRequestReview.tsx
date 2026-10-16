@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
-  ChevronRightIcon, CircleCheckIcon, CircleDashedIcon, CircleMinusIcon, CircleXIcon, ExternalLinkIcon, EyeIcon,
+  ChevronRightIcon, CircleCheckIcon, CircleDashedIcon, CirclePlayIcon, CircleMinusIcon, CircleXIcon, ExternalLinkIcon, EyeIcon,
   GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon, LoaderCircleIcon, MessageSquareIcon,
   PlusIcon, RefreshCwIcon, TriangleAlertIcon, XIcon,
 } from "lucide-react";
@@ -35,6 +35,13 @@ export interface PullRequestBinding {
   onUnlink: (number: number) => void;
   onMerge: (number: number) => void;
   onClose: () => void;
+  /**
+   * A second view beside the pull requests, as one more tab: the session's
+   * CI runs. `first` opens on it. Its own reread replaces the header's.
+   */
+  extraView?: { label: string; title: string; tone?: PullTone | undefined; content: ReactNode; first?: boolean | undefined; onRefresh?: (() => void) | undefined } | undefined;
+  /** More about one linked pull request, under its checks, reviews, and comments. */
+  belowPull?: ((number: number) => ReactNode) | undefined;
 }
 
 const TONE_ICON: Record<PullTone, typeof CircleXIcon> = {
@@ -95,7 +102,7 @@ export function PullRequestReview(props: PullRequestBinding) {
   return createPortal(<Review {...props} />, document.body);
 }
 
-function Review({ load, selected, onSelect, reading, notice, writing, now, onRefresh, onAsk, onWatch, onLink, onUnlink, onMerge, onClose }: PullRequestBinding) {
+function Review({ load, selected, onSelect, reading, notice, writing, now, onRefresh, onAsk, onWatch, onLink, onUnlink, onMerge, onClose, extraView, belowPull }: PullRequestBinding) {
   const titleId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const pressedBackdrop = useRef(false);
@@ -113,42 +120,48 @@ function Review({ load, selected, onSelect, reading, notice, writing, now, onRef
   }, [onClose]);
   const items = load.type === "ready" ? load.items : [];
   const [adding, setAdding] = useState(false);
-  const item = adding ? undefined : items.find((candidate) => candidate.link.number === selected) ?? items.at(-1);
+  const [extraOpen, setExtraOpen] = useState(extraView?.first === true);
+  const extra = extraOpen && extraView ? extraView : undefined;
+  const item = adding || extra ? undefined : items.find((candidate) => candidate.link.number === selected) ?? items.at(-1);
   const pr = item?.pull ?? undefined;
   const source = item?.link.provider === "azure-devops" ? "Azure DevOps" : "GitHub";
   const ask = (message: string) => { onClose(); onAsk(message); };
   const link = async (number: number) => { if (await onLink(number)) { setAdding(false); onSelect(number); } };
+  const refresh = extra?.onRefresh ?? onRefresh;
   return <dialog ref={dialog} className="tree-dialog pr-dialog" aria-labelledby={titleId}
     onPointerDown={(event) => { pressedBackdrop.current = event.target === dialog.current; }}
     onClick={(event) => { if (event.target === dialog.current && pressedBackdrop.current) onClose(); pressedBackdrop.current = false; }}>
     <div className="tree-sheet">
       <header className="tree-head">
-        <h2 id={titleId}>{items.length > 1 ? "Pull requests" : "Pull request"}</h2>
+        <h2 id={titleId}>{extra ? extra.title : items.length > 1 ? "Pull requests" : "Pull request"}</h2>
         {/* The head gives way first: the base is where it lands, and the session chip repeats the head. */}
         <span className="tree-count pr-where" title={pr ? `#${String(pr.number)} ${pr.head} → ${pr.base}` : undefined}>{pr ? <><b>#{pr.number}</b>
           <span className="pr-where-head">{pr.head}</span><span className="pr-where-base">→ {pr.base}</span></>
           : item ? <b>#{item.link.number}</b> : null}</span>
         <button type="button" className="icon-button quiet-button" aria-label={items.length > 1 ? "Read the pull requests again" : "Read the pull request again"} title="Read again"
-          disabled={load.type === "loading"} onClick={onRefresh}><RefreshCwIcon aria-hidden size={18} /></button>
+          disabled={!extra && load.type === "loading"} onClick={refresh}><RefreshCwIcon aria-hidden size={18} /></button>
         {pr && <a className="icon-button quiet-button" href={pr.url} target="_blank" rel="noreferrer" aria-label={`Open on ${source}`} title={`Open on ${source}`}>
           <ExternalLinkIcon aria-hidden size={18} /></a>}
         <button type="button" className="icon-button quiet-button" aria-label="Close pull request" title="Close" onClick={onClose}>
           <XIcon aria-hidden size={18} /></button>
       </header>
-      {items.length > 0 && <PullStrip items={items} current={item?.link.number} adding={adding} reading={reading}
-        onSelect={(number) => { setAdding(false); onSelect(number); }} onAdd={() => setAdding(true)} />}
+      {(items.length > 0 || extraView) && <PullStrip items={items} current={item?.link.number} adding={adding && !extra} reading={reading}
+        onSelect={(number) => { setAdding(false); setExtraOpen(false); onSelect(number); }} onAdd={() => { setExtraOpen(false); setAdding(true); }}
+        extra={extraView ? { label: extraView.label, title: extraView.title, tone: extraView.tone, selected: extra !== undefined, onSelect: () => { setAdding(false); setExtraOpen(true); } } : undefined} />}
       <div className="pr-body">
         {notice && <p className="pr-notice" data-tone={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-        {load.type === "loading" && <p className="changes-message" role="status">{pullRequestCopy.loading}</p>}
-        {load.type === "failed" && <div className="changes-message" role="alert"><p>{load.message}</p>
+        {extra?.content}
+        {!extra && load.type === "loading" && <p className="changes-message" role="status">{pullRequestCopy.loading}</p>}
+        {!extra && load.type === "failed" && <div className="changes-message" role="alert"><p>{load.message}</p>
           <button type="button" onClick={onRefresh}>Try again</button></div>}
-        {load.type === "ready" && (items.length === 0 || adding) && <LinkForm writing={writing} first={items.length === 0}
+        {!extra && load.type === "ready" && (items.length === 0 || adding) && <LinkForm writing={writing} first={items.length === 0}
           onLink={(number) => { void link(number); }} onCancel={items.length > 0 ? () => setAdding(false) : undefined} />}
         {item && !item.pull && <div className="changes-message" role="alert">
           <p>Forgerie could not read pull request #{item.link.number}. {item.error ?? ""}</p>
           <button type="button" onClick={onRefresh}>Try again</button></div>}
         {item && pr && <PullBody key={item.link.number} pr={pr} watch={item.link.watch} now={now} writing={writing} source={source} onAsk={ask}
           onWatch={(on) => onWatch(item.link.number, on)} />}
+        {item && pr && item.link.provider !== "azure-devops" && belowPull?.(item.link.number)}
         {item && <UnlinkRow number={item.link.number} watching={item.link.watch.kind === "watching"} writing={writing} onUnlink={onUnlink} />}
       </div>
       {item && pr && item.link.provider !== "azure-devops" && <MergeFoot key={item.link.number} pr={pr} writing={writing} onMerge={() => onMerge(item.link.number)} />}
@@ -161,25 +174,29 @@ function Review({ load, selected, onSelect, reading, notice, writing, now, onRef
  * wrap onto more lines rather than scroll, so every pull request stays one
  * tap away at any width. Each tab names its number and what holds it.
  */
-function PullStrip({ items, current, adding, reading, onSelect, onAdd }: { items: readonly PullItem[]; current: number | undefined; adding: boolean;
-  reading: ReadonlySet<number>; onSelect: (number: number) => void; onAdd: () => void }) {
+function PullStrip({ items, current, adding, reading, onSelect, onAdd, extra }: { items: readonly PullItem[]; current: number | undefined; adding: boolean;
+  reading: ReadonlySet<number>; onSelect: (number: number) => void; onAdd: () => void;
+  extra?: { label: string; title: string; tone?: PullTone | undefined; selected: boolean; onSelect: () => void } | undefined }) {
   return <div className="pr-strip">
-    <div role="tablist" aria-label="Pull requests in this session" className="pr-tabs">
+    <div role="tablist" aria-label={extra ? "Pull requests and runs in this session" : "Pull requests in this session"} className="pr-tabs">
       {items.map((item) => {
         const mark = item.pull ? markOf(item.pull) : undefined;
         const Icon = mark ? TONE_ICON[mark.tone] : TriangleAlertIcon;
         const watched = item.link.watch.kind === "watching";
         const label = `#${String(item.link.number)}: ${item.pull ? verdict(item.pull).sentence : "could not be read"}${watched ? " Watched by the agent." : ""}`;
         return <button key={`${item.link.repo}#${String(item.link.number)}`} type="button" role="tab" className="pr-tab" data-tone={mark?.tone ?? "blocked"}
-          aria-selected={!adding && current === item.link.number} aria-label={label} title={label} aria-busy={reading.has(item.link.number) || undefined}
+          aria-selected={!adding && !extra?.selected && current === item.link.number} aria-label={label} title={label} aria-busy={reading.has(item.link.number) || undefined}
           onClick={() => onSelect(item.link.number)}>
           <Icon aria-hidden size={14} className="pr-tab-icon" /><b>#{item.link.number}</b>
           <span className="pr-tab-short">{mark?.short ?? "unread"}</span>
           {watched && <EyeIcon aria-hidden size={13} className="pr-tab-eye" />}
         </button>;
       })}
+      {extra && <button type="button" role="tab" className="pr-tab" data-tone={extra.tone ?? "waiting"} aria-selected={extra.selected} title={extra.title}
+        onClick={extra.onSelect}><CirclePlayIcon aria-hidden size={14} className="pr-tab-icon" /><span>{extra.label}</span></button>}
     </div>
-    <button type="button" className="pr-tab pr-tab-add" aria-pressed={adding} onClick={onAdd}><PlusIcon aria-hidden size={14} />Link another</button>
+    <button type="button" className="pr-tab pr-tab-add" aria-pressed={adding || (items.length === 0 && !extra?.selected)} onClick={onAdd}><PlusIcon aria-hidden size={14} />
+      {items.length === 0 ? "Link a pull request" : "Link another"}</button>
   </div>;
 }
 

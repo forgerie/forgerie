@@ -139,7 +139,7 @@ import { siblingWorkspaceCwds, type ProjectWorkspaceCwds } from "../workspaces/p
 import type { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 import { createAskUserToolDefinition, type AskUserInvocation, type AskUserToolDeps } from "./askUserTool.js";
 import { logDecision } from "./durableDecisions.js";
-import { createGitHubToolDefinitions, type GitHubToolDeps } from "./githubTools.js";
+import { createGitHubActionsToolDefinitions, createGitHubToolDefinitions, type GitHubToolDeps } from "./githubTools.js";
 import { createProjectTools, type ProjectToolDeps } from "./projectTools.js";
 import type { WorkspaceServices } from "../workspaces/workspaceServices.js";
 import { createWorkspaceServicesTool, createWorkspaceServicesObserver, type WorkspaceServicesObserver } from "./workspaceServicesTool.js";
@@ -860,7 +860,7 @@ export function createPiWebCustomToolDefinitions(
     // user is already watching, so tracked children may ask too.
     ...(askUser === undefined ? [] : [createAskUserToolDefinition(askUser)]),
     // Not delegation either: the tools act on the session's own repo, as Forgerie's GitHub App.
-    ...(github === undefined ? [] : createGitHubToolDefinitions(cwd, github)),
+    ...(github === undefined ? [] : [...createGitHubToolDefinitions(cwd, github), ...createGitHubActionsToolDefinitions(cwd, github)]),
   ];
 }
 
@@ -1026,6 +1026,7 @@ export interface PiSessionServiceDependencies {
   github?: GitHubToolDeps;
   azurePr?: AzurePrToolDeps;
   pullRequestWatches?: { isWatching(id: string): boolean; stop(id: string, reason?: string): Promise<unknown> };
+  actionRunWatches?: { isWatching(id: string): boolean; stop(id: string, reason?: string): Promise<unknown> };
   /**
    * When true, hosted sessions start with Pi's `codemode` tool active, so an
    * agent can run a script that calls the other tools. Off when omitted.
@@ -1146,6 +1147,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly tabsStore: SessionTabsRepository;
   private readonly agentDir: string;
   private readonly sessionSearch: PiSessionServiceDependencies["sessionSearch"];
+  private readonly actionRunWatches: PiSessionServiceDependencies["actionRunWatches"];
   private readonly pullRequestWatches: PiSessionServiceDependencies["pullRequestWatches"];
   private readonly sessionManager: PiSessionManagerGateway;
   private readonly durableReader: DurableSessionReader | undefined;
@@ -1190,6 +1192,7 @@ export class PiSessionService implements SessionRouteService {
     this.tabsStore = deps.tabsStore ?? new SessionTabsStore();
     this.agentDir = deps.agentDir;
     this.pullRequestWatches = deps.pullRequestWatches;
+    this.actionRunWatches = deps.actionRunWatches;
     this.sessionManager = deps.sessionManager;
     this.sessionWorktrees = deps.sessionWorktrees;
     this.modelRuntime = deps.modelRuntime;
@@ -1531,7 +1534,7 @@ export class PiSessionService implements SessionRouteService {
       this.delegatingSessionFiles(),
     );
 
-    const ownedSessions = (await this.withSessionWorktrees(sessions)).map((session) => this.pullRequestWatches?.isWatching(session.id) === true ? { ...session, watchingPullRequest: true } : session);
+    const ownedSessions = (await this.withSessionWorktrees(sessions)).map((session) => ({ ...session, ...(this.pullRequestWatches?.isWatching(session.id) === true ? { watchingPullRequest: true } : {}), ...(this.actionRunWatches?.isWatching(session.id) === true ? { watchingActionRun: true } : {}) }));
     const cwds = new Set([
       ...ownedSessions.map((session) => session.cwd),
       ...listedSessions.map((session) => session.cwd),
@@ -1586,7 +1589,7 @@ export class PiSessionService implements SessionRouteService {
       .sort(compareArchivedRecords)
       .map((record) => clientSessionFromArchivedRecord(record, sessionsById.get(record.sessionId)))
       .filter(isDefined);
-    const ownedSessions = (await this.withSessionWorktrees(await this.withRelatedSessionsElsewhere(withSessionTabs([...unarchivedSessions, ...archivedSessions], tabsBySessionId(tabsRecords)), cwd), cwd)).map((session) => this.pullRequestWatches?.isWatching(session.id) === true ? { ...session, watchingPullRequest: true } : session);
+    const ownedSessions = (await this.withSessionWorktrees(await this.withRelatedSessionsElsewhere(withSessionTabs([...unarchivedSessions, ...archivedSessions], tabsBySessionId(tabsRecords)), cwd), cwd)).map((session) => ({ ...session, ...(this.pullRequestWatches?.isWatching(session.id) === true ? { watchingPullRequest: true } : {}), ...(this.actionRunWatches?.isWatching(session.id) === true ? { watchingActionRun: true } : {}) }));
     return withSessionTabs(withPinnedFlags(ownedSessions, pinnedSessionIdSet(pinnedRecords)), tabsBySessionId(tabsRecords));
   }
 
@@ -2640,23 +2643,23 @@ export class PiSessionService implements SessionRouteService {
     return { ref: resolved, available: archived === undefined && readonly === undefined, settled, leaf: manager.getLeafId() };
   }
 
-  async wakePullSession(ref: PullSessionRef, notice: { id: string; text: string }, stillCurrent: () => boolean): ReturnType<PullSessionGateway["wake"]> {
+  async wakePullSession(ref: PullSessionRef, notice: { id: string; text: string }, stillCurrent: () => boolean, customType: "forgerie:pull-request" | "forgerie:action-run" = "forgerie:pull-request"): ReturnType<PullSessionGateway["wake"]> {
     const state = await this.inspectPullSession(ref);
     if (!state.available || !stillCurrent()) return "busy";
     const session = await this.getOrOpen(ref);
     if (!(await this.inspectPullSession(ref)).available) return "busy";
-    const alreadyDelivered = session.sessionManager.getBranch().some((entry) => isRecord(entry) && entry["type"] === "custom_message" && entry["customType"] === "forgerie:pull-request" && getString(entry["details"], "noticeId") === notice.id);
+    const alreadyDelivered = session.sessionManager.getBranch().some((entry) => isRecord(entry) && entry["type"] === "custom_message" && entry["customType"] === customType && getString(entry["details"], "noticeId") === notice.id);
     if (alreadyDelivered) return "delivered";
     // Do not put news in Pi's in-memory follow-up queue. The durable pending record survives restarts while busy.
     if (!stillCurrent() || this.hasActiveWork(session) || this.preparingHandoffDestinations.has(session.sessionId)) return "busy";
-    // Pi's Promise lasts for the entire agent turn. Do not block other PR polls on that turn.
+    // Pi's Promise lasts for the entire agent turn. Do not block other GitHub polls on that turn.
     // Keep the outbox record until the next poll observes this notice in the transcript.
-    void this.runSessionEntryMutation(session, "deliver PR activity", () => session.sendCustomMessage(
-      { customType: "forgerie:pull-request", content: notice.text, display: true, details: { noticeId: notice.id } },
+    void this.runSessionEntryMutation(session, `deliver ${customType} activity`, () => session.sendCustomMessage(
+      { customType, content: notice.text, display: true, details: { noticeId: notice.id } },
       { triggerTurn: true, deliverAs: "followUp" },
     )).then(
       () => { this.publishStatus(session); },
-      (error: unknown) => { this.logger.info({ error, sessionId: session.sessionId, noticeId: notice.id }, "PR activity delivery failed"); this.publishStatus(session); },
+      (error: unknown) => { this.logger.info({ error, sessionId: session.sessionId, noticeId: notice.id }, "GitHub activity delivery failed"); this.publishStatus(session); },
     );
     this.publishStatus(session);
     return "busy";
@@ -3950,7 +3953,7 @@ export class PiSessionService implements SessionRouteService {
    * Both are omitted when zero so a resting session carries no extra wire
    * fields and the inbox has nothing to render.
    */
-  private liveWorkCounts(session: PiAgentSession): { workingAgents?: number; runningProcesses?: number; watchingPullRequest?: boolean; waitingOnYou?: number; flaggedDecisions?: number } {
+  private liveWorkCounts(session: PiAgentSession): { workingAgents?: number; runningProcesses?: number; watchingPullRequest?: boolean; watchingActionRun?: boolean; waitingOnYou?: number; flaggedDecisions?: number } {
     const workingAgents = (this.workingAgentsBySession.get(session.sessionId) ?? 0)
       + (session instanceof DurableAgentSession ? session.workingDurableChildren : 0);
     const waitingOnYou = session instanceof DurableAgentSession ? session.waitingOnUser : 0;
@@ -3958,6 +3961,7 @@ export class PiSessionService implements SessionRouteService {
     const runningProcesses = this.processPanels.get(session.sessionId)?.runningCount ?? 0;
     return {
       ...(this.pullRequestWatches?.isWatching(session.sessionId) === true ? { watchingPullRequest: true } : {}),
+      ...(this.actionRunWatches?.isWatching(session.sessionId) === true ? { watchingActionRun: true } : {}),
       ...(workingAgents > 0 ? { workingAgents } : {}),
       ...(runningProcesses > 0 ? { runningProcesses } : {}),
       ...(waitingOnYou > 0 ? { waitingOnYou } : {}),
@@ -4093,9 +4097,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async abort(ref: PiSessionRef): Promise<SessionAbortResult> {
-    if (this.pullRequestWatches !== undefined) {
+    if (this.pullRequestWatches !== undefined || this.actionRunWatches !== undefined) {
       const target = await this.resolvePinTarget(ref);
-      await this.pullRequestWatches.stop(target?.sessionId ?? ref.id, "Session aborted by request.");
+      await this.pullRequestWatches?.stop(target?.sessionId ?? ref.id, "Session aborted by request.");
+      await this.actionRunWatches?.stop(target?.sessionId ?? ref.id, "Session aborted by request.");
     }
     const active = this.activeForRef(ref);
     if (active === undefined) return { aborted: true, restoredMessages: [] };
@@ -4124,9 +4129,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async stop(ref: PiSessionRef): Promise<void> {
-    if (this.pullRequestWatches !== undefined) {
+    if (this.pullRequestWatches !== undefined || this.actionRunWatches !== undefined) {
       const target = await this.resolvePinTarget(ref);
-      await this.pullRequestWatches.stop(target?.sessionId ?? ref.id, "Session stopped by request.");
+      await this.pullRequestWatches?.stop(target?.sessionId ?? ref.id, "Session stopped by request.");
+      await this.actionRunWatches?.stop(target?.sessionId ?? ref.id, "Session stopped by request.");
     }
     const active = this.activeForRef(ref);
     if (active !== undefined) {
@@ -4295,6 +4301,7 @@ export class PiSessionService implements SessionRouteService {
   private async closeActive(sessionId: string, notificationPolicy: NotificationClosePolicy = CLEAR_RUNTIME_NOTIFICATIONS): Promise<void> {
     if (notificationPolicy.kind === "clear" && (notificationPolicy.reason === "archive" || notificationPolicy.reason === "delete")) {
       await this.pullRequestWatches?.stop(sessionId, "Session archived or deleted.");
+      await this.actionRunWatches?.stop(sessionId, "Session archived or deleted.");
     }
     // A session whose open is parked on a `session_start` dialog holds its
     // pending open until the dialog settles; settle it first so closing cannot

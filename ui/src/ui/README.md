@@ -9,7 +9,7 @@ The gates in `ui/gates/` enforce the rules.
 One line per component: the name in backticks, its layer, and what it decides.
 
 - `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions; an input such as a reply box can take the actions' place under the reason; a failed action's problem shows in the failure ink above them.
-- `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays, and a refusal may offer one follow-up (such as Create) to confirm in place.
+- `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays with the refusal's words under it, and a refusal may offer one follow-up (such as Create) to confirm in place.
 - `ValueList` (molecule): a short list of typed values: each in its own box with a Remove named for it, a problem under any box, an empty text, and an add action that turns off at a limit; focus moves into a new box and stays in the list after a removal.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place; inside a list it opens at window level, above the button when the room below is short.
@@ -125,3 +125,9 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `TermList` (atom): a few named values in two aligned columns, each value cut to two lines.
 - `SecretEdit` (molecule): a write-only password draft with a public status, separate save and remove actions, and container-wrapping controls; it never receives the saved value.
 - `SecretSettingsField` (molecule): a write-only settings row with injected public status reads and secret writes; it clears drafts and keeps server error text out of the page.
+- `StateMark` (atom): where a job or a build stands as one icon whose shape and tone both carry it: a cross, a check, a turning ring, a pause, and quiet marks for queued, cancelled, skipped, and unread.
+- `WatchToggle` (atom): whether something is watched, as a pressed eye chip in the live colour with a count of how often it fired, and a control-sized hit area.
+- `RunRow` (molecule): one build in a list: a press target with its mark, name, title, age, state word and short code-face facts; its controls stand beside it and drop under the text when the row is narrow; a note and a toned problem take the full width under both.
+- `JobList` (molecule): the jobs of one build: mark, name and time over a ribbon as long as the job's share of the longest one; output opens in place at full length inside the pane that scrolls it, and passes fold into one row.
+- `RunDetail` (organism): one build opened from its list: back and out, the pipeline and number over the full title, facts, one toned line for where it stands, its watch with the control on the same line, its parts, and a quiet remove.
+- `RunList` (organism): a titled list of builds in a scrolling pane: row-shaped skeletons before the first read, a busy sweep on a reread, one alert with retry, an empty text, and a foot that stays in every state.

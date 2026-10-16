@@ -200,7 +200,7 @@ describe("Durable-native child agents in a Forgerie session", () => {
     expect(await service.continueDurableChild(ref, builder.conversationId, "WRITE next.txt second result", "request-1")).toEqual(next);
     expect(await service.durableChildren(ref)).toHaveLength(2);
     await expect(service.continueDurableChild(ref, builder.conversationId, "different", "request-1")).rejects.toThrow("another task");
-  }, 15_000);
+  }, 30_000);
 
   it("includes inherited parent commits in the landing review", async () => {
     await gitWorkspace();

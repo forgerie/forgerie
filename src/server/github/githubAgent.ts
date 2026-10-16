@@ -1,4 +1,5 @@
 import { FileIssueInputSchema, closeIssueTitle, issueTitleSearchTerms, type FileIssueInput, type FileIssueResult } from "../../shared/fileIssues.js";
+import { listActionRuns, listHeadActionRuns, readActionRun, type ActionRunFilters } from "./actionRunReader.js";
 import { Type, type Static, type TSchema } from "typebox";
 import { Check } from "typebox/value";
 import { canonicalBacklogRoot } from "../backlog/backlogScanner.js";
@@ -25,10 +26,11 @@ export interface GitHubAgentDependencies {
   onPullCreated?: (input: { id: string; cwd: string; repo: string; number: number }) => Promise<void>;
 }
 
-export const READ_ACTIONS = ["issues", "issue", "labels", "prs", "pr"] as const;
+export const READ_ACTIONS = ["issues", "issue", "labels", "prs", "pr", "runs", "run"] as const;
 export const WRITE_ACTIONS = ["comment", "edit", "close", "reopen", "label", "create_pr", "ready_pr", "merge_pr"] as const;
 export interface ReadRequest {
   action: typeof READ_ACTIONS[number];
+  runId?: number; branch?: string; headSha?: string; workflow?: string;
   number?: number; state?: "open" | "closed" | "all"; labels?: string[]; query?: string; limit?: number;
 }
 export interface WriteRequest {
@@ -95,6 +97,30 @@ export class GitHubAgent {
     return readGitHubPull(repo, this.caller(repo.slug), this.deps.trust, app.state === "configured" ? `${app.app.slug}[bot]` : undefined, number, annotations);
   }
 
+  async run(cwd: string, runId: number, annotations = true) {
+    if (!Number.isSafeInteger(runId) || runId < 1) throw new GitHubToolError("Use a positive run ID.");
+    const repo = await this.resolveRepo(cwd);
+    return readActionRun(repo, this.caller(repo.slug), this.deps.trust, runId, annotations);
+  }
+
+  async runs(cwd: string, filters: ActionRunFilters = {}) {
+    const repo = await this.resolveRepo(cwd);
+    return listActionRuns(repo, this.caller(repo.slug), this.deps.trust, filters);
+  }
+
+  async runsForHead(cwd: string, headSha: string) {
+    const repo = await this.resolveRepo(cwd);
+    return listHeadActionRuns(repo, this.caller(repo.slug), this.deps.trust, headSha);
+  }
+
+  async dispatch(cwd: string, workflow: string, ref: string, inputs: Record<string, string> = {}) {
+    if (workflow.trim() === "" || ref.trim() === "") throw new GitHubToolError("Dispatch needs workflow and ref.");
+    const repo = await this.resolveRepo(cwd);
+    const details = await this.caller(repo.slug).sendOrNoContent(`/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, { ref, inputs, return_run_details: true },
+      Type.Object({ workflow_run_id: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), run_url: Type.String(), html_url: Type.String() }), "Actions: write");
+    return details !== undefined ? { repo: repo.slug, runId: details.workflow_run_id, url: details.html_url } : { repo: repo.slug };
+  }
+
   async mergePull(cwd: string, number: number, headSha: string, method: "rebase" | "squash" | "merge", expectedRepo: string): Promise<WriteResult> {
     const repo = await this.resolveRepo(cwd);
     if (repo.slug.toLowerCase() !== expectedRepo.toLowerCase()) throw new GitHubToolError("The repository changed after confirmation. Refresh and confirm again.");
@@ -114,6 +140,8 @@ export class GitHubAgent {
     const call = this.caller(repo.slug);
     const limit = Math.min(Math.max(request.limit ?? 30, 1), MAX_LIMIT);
     switch (request.action) {
+      case "runs": return JSON.stringify(await this.runs(cwd, request), null, 2);
+      case "run": return JSON.stringify(await this.run(cwd, required(request.runId, "runId", "run")), null, 2);
       case "issues": return this.listIssues(repo, call, request, limit);
       case "issue": return this.showIssue(repo, call, required(request.number, "number", "issue"));
       case "labels": {
@@ -426,6 +454,13 @@ export class GitHubAgent {
       token: async () => token ?? mint(),
       get: (path, schema, permission, options) => request("GET", path, undefined, schema, permission, options),
       send: (method, path, body, schema, permission) => request(method, path, body, schema, permission),
+      sendOrNoContent: async (path, body, schema, permission) => {
+        const response = await respond("POST", path, body, permission, {});
+        if (response.status === 204) return undefined;
+        const parsed: unknown = await response.json().catch(() => undefined);
+        if (!Check(schema, parsed)) throw new GitHubToolError(`GitHub sent an unexpected answer for POST ${path}.`);
+        return parsed;
+      },
       graphql: (body, schema, permission = "Pull requests: read") => request("POST", "/graphql", body, schema, permission, { absolute: true }),
       remove: async (path, permission) => { await respond("DELETE", path, undefined, permission, { missingOk: true }); },
     };
@@ -457,6 +492,7 @@ export interface Caller {
   graphql<S extends TSchema>(body: unknown, schema: S, permission?: string): Promise<Static<S>>;
   get<S extends TSchema>(path: string, schema: S, permission: string, options?: { absolute?: boolean }): Promise<Static<S>>;
   send<S extends TSchema>(method: string, path: string, body: unknown, schema: S, permission: string): Promise<Static<S>>;
+  sendOrNoContent<S extends TSchema>(path: string, body: unknown, schema: S, permission: string): Promise<Static<S> | undefined>;
   /** DELETE that treats "already gone" (404) as done. */
   remove(path: string, permission: string): Promise<void>;
 }
