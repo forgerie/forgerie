@@ -3,6 +3,7 @@ import { createSessionStore } from "./sessionStore";
 import { createReadTracker } from "./readReceipt";
 import { messageText } from "./transcript";
 import { createOpenServer, openFixture } from "./testing/openFixture";
+import { sessionWireChunks } from "@shared/sessionWire";
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 const session = { id: "known", cwd: "/workspace" };
@@ -45,6 +46,68 @@ describe("one-read chat open", () => {
     await new Promise(resolve => setTimeout(resolve, 15)); gate.release(); await starting;
     expect(store.getSnapshot().transcript.messages.map(messageText)).toEqual(["new committed text"]);
   });
+  it("applies a large chunked native cut atomically and retains newer interleaved host output", async () => {
+    const initial = openFixture({ readPath: "native", page: { messages: [{ id: "u", role: "user", content: "input" }], start: 0, total: 1 } });
+    const server = await createOpenServer(url => url.pathname.endsWith("/open") ? initial : []); cleanup.push(server.close);
+    server.transport.nativeReadModel = true;
+    const store = createSessionStore("known", server.transport, {}, session); cleanup.push(store.dispose);
+    await store.start();
+    const text = "界🌍".repeat(1_300_000);
+    const open = openFixture({ readPath: "native", page: { messages: [{ id: "u", role: "user", content: "input" }, { id: "a", role: "assistant", content: text }], start: 0, total: 2 }, snapshot: { seq: 5, partial: null } });
+    const frames = [...sessionWireChunks(JSON.stringify({ type: "session.open", open }), "large-cut")];
+    const emit = (frame: string) => { const value: unknown = JSON.parse(frame); server.emit(value); };
+    for (const frame of frames.slice(0, -1)) emit(frame);
+    server.emit({ type: "shell.start", command: "echo retained", seq: 7 });
+    server.emit({ type: "shell.end", output: "retained", exitCode: 0, seq: 8 });
+    await vi.waitFor(() => expect(store.getSnapshot().transcript.messages.some(message => message.parts.some(part => part.type === "shell" && part.run.result.output === "retained"))).toBe(true));
+    expect(store.getSnapshot().transcript.messages.some(message => message.key === "a")).toBe(false);
+    emit(frames.at(-1) ?? "");
+    await vi.waitFor(() => expect(store.getSnapshot().transcript.messages.find(message => message.key === "a")?.parts).toBeDefined());
+    const reply = store.getSnapshot().transcript.messages.find(message => message.key === "a");
+    expect(reply && messageText(reply)).toBe(text);
+    expect(store.getSnapshot().transcript.messages.some(message => message.parts.some(part => part.type === "shell" && part.run.result.output === "retained"))).toBe(true);
+    expect(store.getSnapshot().connection.type).toBe("ready");
+  });
+
+  it.each(["HTTP", "socket"] as const)("keeps the newer %s cut when HTTP finishes during chunk assembly", async winner => {
+    const gate = held(); cleanup.push(gate.release);
+    const http = openFixture({ readPath: "native", page: { messages: [{ role: "user", content: "HTTP cut" }], start: 0, total: 1 }, snapshot: { seq: winner === "HTTP" ? 7 : 3, partial: null } });
+    const server = await createOpenServer(async url => { if (!url.pathname.endsWith("/open")) return []; await gate.promise; return http; }); cleanup.push(server.close);
+    server.transport.nativeReadModel = true;
+    let received = 0;
+    const connect = server.transport.connect;
+    server.transport.connect = path => { const socket = connect(path); socket.addEventListener("message", () => { received++; }); return socket; };
+    const store = createSessionStore("known", server.transport, {}, session); cleanup.push(store.dispose);
+    const starting = store.start();
+    await vi.waitFor(() => expect(server.requests.some(url => url.pathname.endsWith("/open"))).toBe(true));
+    const text = "socket cut".repeat(10_000);
+    const open = openFixture({ readPath: "native", page: { messages: [{ role: "user", content: text }], start: 0, total: 1 }, snapshot: { seq: winner === "socket" ? 7 : 3, partial: null } });
+    const frames = [...sessionWireChunks(JSON.stringify({ type: "session.open", open }), "racing-cut")];
+    for (const frame of frames.slice(0, -1)) { const value: unknown = JSON.parse(frame); server.emit(value); }
+    gate.release(); await starting;
+    expect(store.getSnapshot().transcript.messages.map(messageText)).toEqual(["HTTP cut"]);
+    const final: unknown = JSON.parse(frames.at(-1) ?? ""); server.emit(final);
+    await vi.waitFor(() => expect(received).toBe(frames.length));
+    const expected = winner === "HTTP" ? "HTTP cut" : text;
+    await vi.waitFor(() => expect(store.getSnapshot().transcript.messages.map(messageText)).toEqual([expected]));
+    expect(store.getSnapshot().connection.type).toBe("ready");
+  });
+
+  it("discards an unfinished chunked cut when reconnecting", async () => {
+    let opens = 0;
+    const server = await createOpenServer(url => url.pathname.endsWith("/open") ? openFixture({ readPath: "native", page: { messages: [{ role: "user", content: ++opens === 1 ? "old" : "reconnected" }], start: 0, total: 1 } }) : []); cleanup.push(server.close);
+    server.transport.nativeReadModel = true;
+    const store = createSessionStore("known", server.transport, { retryDelayMs: 1 }, session); cleanup.push(store.dispose);
+    await store.start();
+    const frames = [...sessionWireChunks(JSON.stringify({ type: "session.open", open: { text: "x".repeat(100_000) } }), "unfinished")];
+    const first: unknown = JSON.parse(frames[0] ?? ""); server.emit(first);
+    for (const socket of server.sockets.clients) socket.close();
+    await vi.waitFor(() => expect(store.getSnapshot().transcript.messages.map(messageText)).toEqual(["reconnected"]));
+    server.emit({ type: "session.open", open: openFixture({ readPath: "native", page: { messages: [{ role: "user", content: "fresh cut" }], start: 0, total: 1 }, snapshot: { seq: 3, partial: null } }) });
+    await vi.waitFor(() => expect(store.getSnapshot().transcript.messages.map(messageText)).toEqual(["fresh cut"]));
+    expect(store.getSnapshot().connection.type).toBe("ready");
+  });
+
   it("never acknowledges a prefetched or hidden screen and invalidates a paint wait on switch", async () => {
     const paint = held();
     const server = await createOpenServer(url => url.pathname.endsWith("/open") ? openFixture({ receipt: { catalogId: "captured", throughCompletionOrder: 7 } }) : { catalogId: "captured", sessions: [] }); cleanup.push(server.close);

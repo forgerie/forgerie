@@ -45,7 +45,7 @@ import {
 import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientNewSessionModelSelection, ClientSession, ClientSessionCleanupExecuteResponse, ClientSessionCleanupPreviewResponse, ClientSessionModel, ClientSessionStatus, ClientSessionTreeForkRequest, ClientSessionTreeForkResult, ClientSessionTreeNavigateRequest, ClientSessionTreeNavigateResult, ClientThinkingLevel, SessionStreamSnapshot, SessionUiEvent } from "../types.js";
 import type { DurableSessionAddress } from "./durableSessionAddress.js";
 import type { DurableSessionReader } from "./durableSessionReader.js";
-import type { SessionImage } from "./sessionImages.js";
+import { withImageReferences, type SessionImage } from "./sessionImages.js";
 import type { DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import type { DurableBrowserAttachment, DurableHostState } from "./durableParentReadModel.js";
 import { ParentAsks, ParentAsksSchema } from "./durableParentDocuments.js";
@@ -2867,7 +2867,8 @@ export class PiSessionService implements SessionRouteService {
         ...(readonly === undefined && archived === undefined ? {} : { readOnly: true }),
         ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) } };
     });
-    if (native !== undefined) return { ...native, receipt: receiptFor(native.session.id, native.session.cwd) };
+    if (native !== undefined) return { ...native, page: { ...native.page, messages: withImageReferences(ref, native.page.messages) },
+      receipt: receiptFor(native.session.id, native.session.cwd) };
     const inactiveClassic = this.durableReader !== undefined && nativeAddress === undefined && active === undefined;
     if (readonly !== undefined || archived !== undefined || inactiveClassic) {
       const match = inactiveClassic && readonly === undefined && archived === undefined
@@ -2943,7 +2944,7 @@ export class PiSessionService implements SessionRouteService {
 
   async messages(ref: PiSessionRef, page?: { before?: number; limit?: number }): Promise<ClientMessagePage> {
     const native = await this.durableReader?.messages(ref, page);
-    if (native !== undefined) return native;
+    if (native !== undefined) return { ...native, messages: withImageReferences(ref, native.messages) };
     const sessionManager = await this.historySessionManager(ref);
     return pageMessagesAtSafeBoundary(historyMessages(sessionManager), page);
   }

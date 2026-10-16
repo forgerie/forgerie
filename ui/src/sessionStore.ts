@@ -1,4 +1,5 @@
 import type { EarlierHistory } from "./historyPaging";
+import { SessionWireDecoder } from "@shared/sessionWire";
 import { checkConnection, watchConnectionRecovery } from "./connectionRecovery";
 import type { ReadReceipt } from "./readReceipt";
 import type { ReadTracker } from "./readReceipt";
@@ -405,18 +406,20 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         if (!session) { stop(new Error(`Session ${id} was not found. Check the session ID in the URL.`)); return; }
         update({ ...state, session });
       }
-      const socket = transport.connect(`${root}/events?${new URLSearchParams({ cwd: session.cwd, open: "1", ...(transport.nativeReadModel ? { native: "1" } : {}) })}`);
+      const socket = transport.connect(`${root}/events?${new URLSearchParams({ cwd: session.cwd, open: "1", ...(transport.nativeReadModel ? { native: "1", chunks: "1" } : {}) })}`);
       attempt.socket = socket;
       // Decode synchronously: the proxy forwards binary frames and Blob awaits
       // can reorder deltas and completed messages.
       socket.binaryType = "arraybuffer";
+      const decoder = new SessionWireDecoder();
       socket.addEventListener("message", (event) => {
         if (!current(attempt)) return;
         try {
           const payload = typeof event.data === "string" ? event.data
             : event.data instanceof ArrayBuffer ? new TextDecoder().decode(event.data) : undefined;
           if (payload === undefined) throw new Error("Unsupported WebSocket payload.");
-          const raw: unknown = JSON.parse(payload);
+          const raw = decoder.read(payload);
+          if (raw === undefined) return;
           if (typeof raw === "object" && raw !== null && "type" in raw && raw.type === "session.checkpoint") {
             const frame = z.object({ epoch: z.string().min(1), seq: z.number().int().nonnegative().safe() }).parse(raw);
             if (attempt.epoch !== undefined && attempt.epoch !== frame.epoch) throw new CheckpointUncertain("Daemon epoch changed; reconnect to resync.");
@@ -467,7 +470,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
           else stop(new Error(`Invalid session event: ${messageOf(error)}`));
         }
       });
-      socket.addEventListener("close", () => retry(attempt, new Error("Live connection closed.")));
+      socket.addEventListener("close", () => { decoder.clear(); retry(attempt, new Error("Live connection closed.")); });
       socket.addEventListener("error", () => retry(attempt, new Error("Live connection failed.")));
       await new Promise<void>((resolve, reject) => {
         const cleanup = () => {

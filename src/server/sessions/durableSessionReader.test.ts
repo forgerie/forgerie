@@ -13,6 +13,11 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { durableBrowserSnapshotSchema, type DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
+import { SessionWireDecoder, SESSION_FRAME_BYTES } from "../../shared/sessionWire.js";
+import { createSessionOpenSchema } from "../../shared/sessionOpen.js";
+import { durableBrowserMessageSchema } from "../../shared/durableBrowserSnapshot.js";
+import { z } from "zod";
+import { registerSessionProxyRoutes } from "../sessiond/sessionProxyRoutes.js";
 import { SessionEventHub, type RealtimeSocket } from "../realtime/sessionEventHub.js";
 import { initializeParentDocuments, Presentation } from "./durableParentDocuments.js";
 import { DurableParentReadModel, type DurableHostState } from "./durableParentReadModel.js";
@@ -91,11 +96,18 @@ async function fixture(hub = new SessionEventHub(), acquiredCut?: (cut: SessionO
 }
 
 function client(base: string, cwd: string) {
-  const socket = new WebSocket(`${base.replace("http:", "ws:")}/sessions/logical/events?${new URLSearchParams({ cwd, native: "1" })}`);
+  const socket = new WebSocket(`${base.replace("http:", "ws:")}/sessions/logical/events?${new URLSearchParams({ cwd, native: "1", chunks: "1" })}`);
   const frames: DurableBrowserSnapshot[] = [];
-  socket.on("message", (payload) => { frames.push(durableBrowserSnapshotSchema.parse(JSON.parse(Buffer.isBuffer(payload) ? payload.toString("utf8") : new TextDecoder().decode(payload instanceof ArrayBuffer ? payload : Buffer.concat(payload))))); });
+  const wireBytes: number[] = [];
+  const decoder = new SessionWireDecoder();
+  socket.on("message", (payload) => {
+    const text = Buffer.isBuffer(payload) ? payload.toString("utf8") : new TextDecoder().decode(payload instanceof ArrayBuffer ? payload : Buffer.concat(payload));
+    wireBytes.push(Buffer.byteLength(text));
+    const value = decoder.read(text);
+    if (value !== undefined) frames.push(durableBrowserSnapshotSchema.parse(value));
+  });
   cleanups.push(async () => { if (socket.readyState === socket.CLOSED) return; await new Promise<void>((resolve) => { socket.once("close", () => { resolve(); }); socket.close(); }); });
-  return { socket, frames };
+  return { socket, frames, wireBytes };
 }
 
 function emptySnapshot(): DurableBrowserSnapshot {
@@ -169,9 +181,78 @@ describe("native read-model HTTP and WebSocket paths", () => {
     await vi.waitFor(() => { expect(f.leased()).toBe(0); });
   });
 
+  it("attaches to a text-only turn larger than the socket byte limit without losing content", async () => {
+    const f = await fixture();
+    const text = "界🌍".repeat(1_300_000);
+    await f.user(text);
+    const connection = client(await f.start(), f.directory);
+    await vi.waitFor(() => { expect(connection.frames).toHaveLength(1); });
+    expect(connection.frames[0]?.history.messages[0]?.content).toBe(text);
+    expect(connection.socket.readyState).toBe(WebSocket.OPEN);
+    expect(connection.wireBytes.length).toBeGreaterThan(1);
+    expect(Math.max(...connection.wireBytes)).toBeLessThanOrEqual(SESSION_FRAME_BYTES);
+    await f.user("later turn");
+    await vi.waitFor(() => { expect(connection.frames.at(-1)?.history.total).toBe(2); });
+    expect(connection.frames.at(-1)?.history.messages[0]).toEqual(connection.frames[0]?.history.messages[0]);
+  });
+
+  it("opens a complete oversized turn through the real web proxy with every message intact", async () => {
+    const f = await fixture();
+    await f.conversation().commit(async tx => {
+      await initializeParentDocuments(tx, { id: f.conversation().id });
+      await tx.doc(LiveDoc, f.conversation().id); await tx.doc(InboxDoc, f.conversation().id); await tx.doc(UsageDoc, f.conversation().id);
+    }, context);
+    await f.user("one large turn");
+    const text = "界🌍".repeat(13_000);
+    await f.conversation().commit(async tx => {
+      for (let index = 0; index < 100; index++) await tx.appendEntry(AssistantEntry, f.conversation().id, { model: [fauxAssistantMessage(String(index) + ":" + text)] });
+    }, context);
+    const daemon = await f.start();
+    const proxy = Fastify({ logger: false });
+    await proxy.register(websocket);
+    registerSessionProxyRoutes(proxy, {
+      connectWebSocket: path => new WebSocket(daemon.replace("http:", "ws:") + path),
+      request: async (method, path, _body, signal) => {
+        const response = await fetch(daemon + path, { method, ...(signal === undefined ? {} : { signal }) });
+        return { statusCode: response.status, headers: {}, body: await response.text() };
+      },
+    });
+    const base = await proxy.listen({ host: "127.0.0.1", port: 0 });
+    cleanups.push(() => proxy.close());
+    const schema = createSessionOpenSchema(durableBrowserMessageSchema, z.unknown());
+    const frames: ReturnType<typeof schema.parse>[] = [];
+    const sizes: number[] = [];
+    const decoder = new SessionWireDecoder();
+    const query = new URLSearchParams({ cwd: f.directory, native: "1", open: "1", chunks: "1" });
+    const socket = new WebSocket(base.replace("http:", "ws:") + "/api/sessions/logical/events?" + query.toString());
+    cleanups.push(async () => {
+      if (socket.readyState === WebSocket.CLOSED) return;
+      await new Promise<void>(resolve => { socket.once("close", () => { resolve(); }); socket.terminate(); });
+    });
+    socket.on("message", data => {
+      const payload = Buffer.isBuffer(data) ? data.toString("utf8") : new TextDecoder().decode(data instanceof ArrayBuffer ? data : Buffer.concat(data));
+      sizes.push(Buffer.byteLength(payload));
+      const value = decoder.read(payload);
+      if (typeof value === "object" && value !== null && "type" in value && value.type === "session.open" && "open" in value) frames.push(schema.parse(value.open));
+    });
+    await vi.waitFor(() => { expect(frames).toHaveLength(1); });
+    expect(frames[0]?.page.messages).toHaveLength(101);
+    expect(frames[0]?.page.start).toBe(0);
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(SESSION_FRAME_BYTES);
+    const contents = frames[0]?.page.messages.slice(1).map(message => message.content);
+    expect(contents).toEqual(Array.from({ length: 100 }, (_, index) => [{ type: "text", text: String(index) + ":" + text }]));
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    const opened = await fetch(base + "/api/sessions/logical/open?" + new URLSearchParams({ cwd: f.directory, limit: "50" }).toString());
+    expect(schema.parse(await opened.json()).page.messages).toEqual(frames[0]?.page.messages);
+  });
+
   it("sends image references instead of image bytes and serves each referenced image by itself", async () => {
     const f = await fixture();
     const data = Buffer.alloc(64 * 1024, 7).toString("base64");
+    await f.conversation().commit(async tx => {
+      await initializeParentDocuments(tx, { id: f.conversation().id });
+      await tx.doc(LiveDoc, f.conversation().id); await tx.doc(InboxDoc, f.conversation().id); await tx.doc(UsageDoc, f.conversation().id);
+    }, context);
     await f.conversation().commit((tx) => tx.appendEntry(UserEntry, f.conversation().id, { model: [{ role: "user", timestamp: 1,
       content: [{ type: "text", text: "look" }, { type: "image", data, mimeType: "image/png" }] }] }), context);
     const base = await f.start();
@@ -186,6 +267,16 @@ describe("native read-model HTTP and WebSocket paths", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ mimeType: "image/png", data });
     expect((await fetch(`${base}${url.replace(/^\/api/, "").replace("image=0", "image=1")}`)).status).toBe(404);
+    const query = new URLSearchParams({ cwd: f.directory, limit: "50" });
+    const opened = await fetch(`${base}/sessions/logical/open?${query}`);
+    const body: unknown = await opened.json();
+    expect(body).toMatchObject({ page: { messages: [{ content: [{ text: "look" }, { url }] }] } });
+    expect(JSON.stringify(body)).not.toContain(data);
+    const openedCut = createSessionOpenSchema(durableBrowserMessageSchema, z.unknown()).parse(body);
+    const earlier = await fetch(base + "/sessions/logical/messages?" + new URLSearchParams({ cwd: f.directory, limit: "1", before: "1", historyId: openedCut.historyId }).toString());
+    expect(await earlier.json()).toMatchObject({ messages: [{ content: [{ text: "look" }, { url }] }] });
+    const history = await fetch(`${base}/sessions/logical/messages?${query}`);
+    expect(await history.json()).toMatchObject({ messages: [{ content: [{ text: "look" }, { url }] }] });
   });
 
   it("reattaches with a new epoch after a server and SQLite reopen, preserving committed message IDs", async () => {
@@ -320,6 +411,28 @@ describe("native read-model HTTP and WebSocket paths", () => {
       await vi.waitFor(() => { expect(frames[1]).toMatchObject({ type: "assistant.delta", text: "classic authority" }); });
       expect(f.acquired()).toBe(0);
     } finally { await new Promise<void>(resolve => { socket.once("close", () => { resolve(); }); socket.close(); }); }
+  });
+
+  it.each(["stalled", "buffered"] as const)("keeps %s transport protection during a chunked send", async kind => {
+    const f = await fixture();
+    const app = Fastify({ logger: false });
+    await app.register(websocket);
+    let sent!: Promise<void>;
+    app.get("/transport", { websocket: true }, socket => {
+      const transport = new ControlledWebSocketTransport(socket, { complete: kind !== "stalled", bufferedBytes: kind === "buffered" ? 8 * 1024 * 1024 : 0 });
+      f.hub.markDurable(transport, true);
+      sent = f.hub.sendDurableSnapshot(transport, { ...emptySnapshot(), history: { messages: [{ role: "user", content: "x".repeat(300_000) }], start: 0, total: 1 } }, { timeoutMs: 20 });
+      void sent.catch(() => undefined);
+    });
+    const base = await app.listen({ host: "127.0.0.1", port: 0 });
+    const socket = new WebSocket(base.replace("http:", "ws:") + "/transport");
+    let frames = 0;
+    socket.on("message", () => { frames++; });
+    try {
+      await new Promise<void>(resolve => { socket.once("close", () => { resolve(); }); });
+      await expect(sent).rejects.toThrow(kind === "stalled" ? "stalled" : "byte limit");
+      expect(frames).toBe(kind === "stalled" ? 1 : 0);
+    } finally { socket.terminate(); await app.close(); }
   });
 
   it.each(["stalled", "buffered"] as const)("closes a %s real socket instead of hiding an unbounded transport queue", async (kind) => {

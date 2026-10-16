@@ -18,6 +18,7 @@ import { withImageReferences } from "./sessionImages.js";
 
 interface SessionQuery {
   cwd?: string;
+  chunks?: string;
   native?: string;
   open?: string;
 }
@@ -628,11 +629,11 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
         eventHub.add(request.params.sessionId, socket);
         const opening = request.query.open === "1"
           ? sessions.attachOpenBrowser?.(ref, (open) => {
-            eventHub.markDurable(socket);
+            eventHub.markDurable(socket, request.query.chunks === "1");
             return eventHub.sendOpenSnapshot(socket, { ...open, page: { ...open.page, messages: withImageReferences(ref, open.page.messages) } });
           }, fail)
           : sessions.attachDurableBrowser?.(ref, (snapshot) => {
-            eventHub.markDurable(socket);
+            eventHub.markDurable(socket, request.query.chunks === "1");
             return eventHub.sendDurableSnapshot(socket, { ...snapshot, history: { ...snapshot.history, messages: withImageReferences(ref, snapshot.history.messages) } });
           }, fail);
         if (opening === undefined) {

@@ -1,7 +1,9 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { z } from "zod";
 import { WebSocket, type RawData } from "ws";
 import { SessionDaemonClient } from "../../sessiond/sessionDaemonClient.js";
 import { RESOURCE_EDITOR_BODY_LIMIT } from "../../shared/resourceEditor.js";
+import { SESSION_SOCKET_MAX_BYTES, SESSION_SOCKET_SEND_TIMEOUT_MS } from "../../shared/sessionWire.js";
 import { SESSION_IMAGE_MIME_TYPES } from "../sessions/sessionImages.js";
 
 export interface SessionProxyDaemon {
@@ -33,8 +35,8 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
   app.get(`${prefix}/sessiond/health`, (_request, reply) => proxy({ method: "GET", url: `${prefix}/health` }, reply));
   app.get(`${prefix}/sessiond/runtime`, (_request, reply) => proxy({ method: "GET", url: `${prefix}/runtime` }, reply));
 
-  app.get<{ Params: { sessionId: string } }>(`${prefix}/sessions/:sessionId/events`, { websocket: true }, (socket, request) => {
-    bridgeSockets(socket, daemon.connectWebSocket(stripPrefix(request.url, prefix)));
+  app.get<{ Params: { sessionId: string }; Querystring: { native?: string } }>(`${prefix}/sessions/:sessionId/events`, { websocket: true }, (socket, request) => {
+    bridgeSockets(socket, daemon.connectWebSocket(stripPrefix(request.url, prefix)), request.query.native === "1");
   });
 
   app.get(`${prefix}/sessions/events`, { websocket: true }, (socket) => {
@@ -109,7 +111,10 @@ function requestFailed(reply: FastifyReply, error: unknown): void {
   reply.code(502).send({ error: `Session daemon unavailable: ${error instanceof Error ? error.message : String(error)}` });
 }
 
-function bridgeSockets(client: WebSocket, upstream: WebSocket): void {
+function bridgeSockets(client: WebSocket, upstream: WebSocket, nativeRequested = false): void {
+  // A native request can be admitted as classic. Apply native limits only
+  // after the daemon declares its authority, never to classic large frames.
+  let readPath: "native" | "classic" | undefined = nativeRequested ? undefined : "classic";
   // The browser's handshake can finish before the daemon's. Do not lose a
   // liveness probe sent in that gap; bound the pre-handshake queue instead.
   const pending: RawData[] = [];
@@ -126,11 +131,46 @@ function bridgeSockets(client: WebSocket, upstream: WebSocket): void {
     for (const data of pending) sendIfOpen(upstream, data);
     pending.length = 0; pendingBytes = 0;
   });
-  upstream.on("message", (data) => { sendIfOpen(client, data); });
-  client.on("close", () => { pending.length = 0; pendingBytes = 0; upstream.close(); });
+  let downstreamPending = 0;
+  upstream.on("message", (data) => {
+    const bytes = Array.isArray(data) ? data.reduce((sum, chunk) => sum + chunk.byteLength, 0) : data.byteLength;
+    if (client.readyState !== WebSocket.OPEN) return;
+    if (readPath === undefined && bytes <= SESSION_SOCKET_MAX_BYTES) readPath = admittedReadPath(data);
+    if (readPath === "native" && client.bufferedAmount + bytes > SESSION_SOCKET_MAX_BYTES) { client.terminate(); upstream.terminate(); return; }
+    // Drain each downstream write before reading more daemon frames. Otherwise
+    // chunking only moves an unbounded send queue from sessiond into the proxy.
+    downstreamPending++;
+    upstream.pause();
+    const timer = readPath === "native" ? setTimeout(() => { client.terminate(); upstream.terminate(); }, SESSION_SOCKET_SEND_TIMEOUT_MS) : undefined;
+    timer?.unref();
+    client.send(data, error => {
+      clearTimeout(timer);
+      downstreamPending--;
+      if (error) { client.terminate(); upstream.terminate(); }
+      else if (downstreamPending === 0 && upstream.readyState === WebSocket.OPEN) upstream.resume();
+    });
+  });
+  client.on("close", () => { pending.length = 0; pendingBytes = 0; upstream.resume(); upstream.close(); });
   upstream.on("close", () => { client.close(); });
   upstream.on("error", () => { client.close(); });
   client.on("error", () => { upstream.close(); });
+}
+
+const admissionSchema = z.object({
+  type: z.enum(["session.open", "session.snapshot", "session.chunk", "session.checkpoint"]),
+  readPath: z.enum(["native", "classic"]).optional(),
+  open: z.object({ readPath: z.enum(["native", "classic"]) }).optional(),
+});
+
+/** Inspect only the admission header. Invalid frames remain the client's responsibility. */
+function admittedReadPath(data: RawData): "native" | "classic" | undefined {
+  try {
+    const payload = Buffer.isBuffer(data) ? data.toString("utf8") : new TextDecoder().decode(data instanceof ArrayBuffer ? data : Buffer.concat(data));
+    const frame = admissionSchema.safeParse(JSON.parse(payload));
+    if (!frame.success) return undefined;
+    return frame.data.type === "session.open" ? frame.data.open?.readPath
+      : frame.data.type === "session.checkpoint" ? frame.data.readPath : "native";
+  } catch { return undefined; }
 }
 
 function sendIfOpen(socket: WebSocket, data: RawData): void {

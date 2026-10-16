@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
 import { WebSocket, WebSocketServer } from "ws";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerSessionProxyRoutes } from "./sessionProxyRoutes";
 import { respondToConnectionChecks } from "../realtime/connectionHealth";
 
@@ -286,6 +286,93 @@ describe("machine-scoped session proxy routes", () => {
       socket.close();
     }
   });
+  it.each([false, true])("preserves oversized classic messages after native request=%s", async native => {
+    let upstream: WebSocket | undefined;
+    const connect = daemon.connectWebSocket.bind(daemon);
+    daemon.connectWebSocket = path => { upstream = connect(path); return upstream; };
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const browser = new WebSocket(serverUrl(app) + "/api/machines/local/sessions/s1/events" + (native ? "?native=1&chunks=1" : ""));
+    await waitForOpen(browser);
+    if (upstream === undefined) throw new Error("Daemon connection missing");
+    await waitForOpen(upstream);
+    try {
+      if (native) {
+        const checkpoint = new Promise<void>(resolve => { browser.once("message", () => { resolve(); }); });
+        daemon.broadcast(JSON.stringify({ type: "session.checkpoint", readPath: "classic", epoch: "test", seq: 0 }));
+        await checkpoint;
+      }
+      const payload = JSON.stringify({ type: "message.end", message: { role: "assistant", content: "x".repeat(9 * 1024 * 1024) } });
+      const received: string[] = [];
+      browser.on("message", data => { received.push(Buffer.isBuffer(data) ? data.toString("utf8") : new TextDecoder().decode(data instanceof ArrayBuffer ? data : Buffer.concat(data))); });
+      daemon.broadcast(payload);
+      await vi.waitFor(() => { expect(received).toHaveLength(1); });
+      expect(received[0]).toBe(payload);
+      expect(browser.readyState).toBe(WebSocket.OPEN);
+    } finally { browser.terminate(); }
+  });
+
+  it("keeps daemon reads paused until every already-decoded downstream write completes", async () => {
+    let upstream: WebSocket | undefined;
+    const connect = daemon.connectWebSocket.bind(daemon);
+    daemon.connectWebSocket = path => { upstream = connect(path); return upstream; };
+    const connected = new Promise<WebSocket>(resolve => { app.websocketServer.once("connection", resolve); });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const browser = new WebSocket(serverUrl(app) + "/api/machines/local/sessions/s1/events?chunks=1");
+    await waitForOpen(browser);
+    const downstream = await connected;
+    if (upstream === undefined) throw new Error("Daemon connection missing");
+    await waitForOpen(upstream);
+    const writes: (() => void)[] = [];
+    const send = downstream.send.bind(downstream);
+    const controlled = vi.spyOn(downstream, "send").mockImplementation((data, optionsOrCallback, callback) => {
+      const complete = typeof optionsOrCallback === "function" ? optionsOrCallback : callback;
+      send(data, error => { writes.push(() => { complete?.(error); }); });
+    });
+    const received: string[] = [];
+    browser.on("message", data => { received.push(Buffer.isBuffer(data) ? data.toString("utf8") : new TextDecoder().decode(data instanceof ArrayBuffer ? data : Buffer.concat(data))); });
+    try {
+      // pause() cannot stop messages already decoded from a single receiver buffer.
+      upstream.emit("message", Buffer.from("first"));
+      upstream.emit("message", Buffer.from("second"));
+      await vi.waitFor(() => { expect(writes).toHaveLength(2); expect(received).toEqual(["first", "second"]); });
+      expect(upstream.isPaused).toBe(true);
+      writes[0]?.();
+      expect(upstream.isPaused).toBe(true);
+      writes[1]?.();
+      expect(upstream.isPaused).toBe(false);
+    } finally { controlled.mockRestore(); browser.terminate(); }
+  });
+
+  it.each(["overflow", "error", "stall"] as const)("terminates both proxy peers on a downstream %s", async kind => {
+    let upstream: WebSocket | undefined;
+    const connect = daemon.connectWebSocket.bind(daemon);
+    daemon.connectWebSocket = path => { upstream = connect(path); return upstream; };
+    const connected = new Promise<WebSocket>(resolve => { app.websocketServer.once("connection", resolve); });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const browser = new WebSocket(serverUrl(app) + "/api/machines/local/sessions/s1/events?native=1&chunks=1");
+    await waitForOpen(browser);
+    const downstream = await connected;
+    if (upstream === undefined) throw new Error("Daemon connection missing");
+    await waitForOpen(upstream);
+    const admitted = new Promise<void>(resolve => { browser.once("message", () => { resolve(); }); });
+    daemon.broadcast(JSON.stringify({ type: "session.open", open: { readPath: "native" } }));
+    await admitted;
+    const browserClosed = new Promise<void>(resolve => { browser.once("close", () => { resolve(); }); });
+    const daemonClosed = new Promise<void>(resolve => { upstream?.once("close", () => { resolve(); }); });
+    const controlled = vi.spyOn(downstream, "send").mockImplementation((_data, optionsOrCallback, callback) => {
+      const complete = typeof optionsOrCallback === "function" ? optionsOrCallback : callback;
+      if (kind === "error") complete?.(new Error("configured downstream write error"));
+    });
+    try {
+      if (kind === "stall") vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      upstream.emit("message", Buffer.alloc(kind === "overflow" ? 8 * 1024 * 1024 + 1 : 1));
+      if (kind === "stall") { await vi.advanceTimersByTimeAsync(10_000); vi.useRealTimers(); }
+      await Promise.all([browserClosed, daemonClosed]);
+      expect(browser.readyState).toBe(WebSocket.CLOSED);
+      expect(upstream.readyState).toBe(WebSocket.CLOSED);
+    } finally { vi.useRealTimers(); controlled.mockRestore(); browser.terminate(); }
+  });
+
   it("serves a referenced session image as bytes, not JSON", async () => {
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00]);
     daemon.respondWith({ statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify({ mimeType: "image/png", data: bytes.toString("base64") }) });
@@ -334,6 +421,10 @@ class FakeSessionDaemon {
 
   respondWith(response: FakeSessionDaemonResponse): void {
     this.queuedResponses.push(response);
+  }
+
+  broadcast(payload: string): void {
+    for (const socket of this.sockets) socket.send(payload);
   }
 
   failWith(error: Error): void {

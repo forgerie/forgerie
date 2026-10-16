@@ -8,6 +8,7 @@ import type { SessionOpenTransientEvent } from "../../shared/sessionOpen.js";
 import type { GlobalSessionEvent, RealtimeEvent, SessionNotificationSummaryEvent, SessionUiEvent } from "../../shared/apiTypes.js";
 import { durableBrowserSnapshotSchema, type DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import { projectBrowserSessionEvent } from "../browserMessageProjection.js";
+import { SESSION_FRAME_BYTES, SESSION_SOCKET_MAX_BYTES, SESSION_SOCKET_SEND_TIMEOUT_MS, sessionWireChunks } from "../../shared/sessionWire.js";
 
 export interface RealtimeSocket {
   readonly OPEN: number;
@@ -18,13 +19,14 @@ export interface RealtimeSocket {
   on(event: "close", listener: () => void): unknown;
 }
 
-/** Provisional limit: large active contexts need measurement before broad native cutover. */
-const DURABLE_SOCKET_MAX_BYTES = 8 * 1024 * 1024;
-const DURABLE_SOCKET_SEND_TIMEOUT_MS = 10_000;
+/** Bound queued wire bytes, independently of the size of a complete native cut. */
+const DURABLE_SOCKET_MAX_BYTES = SESSION_SOCKET_MAX_BYTES;
+const DURABLE_SOCKET_SEND_TIMEOUT_MS = SESSION_SOCKET_SEND_TIMEOUT_MS;
 
 export class SessionEventHub {
   private readonly socketsBySession = new Map<string, Set<RealtimeSocket>>();
   private readonly nativeSockets = new WeakSet<RealtimeSocket>();
+  private readonly chunkedSockets = new WeakSet<RealtimeSocket>();
   private readonly globalSockets = new Set<RealtimeSocket>();
   private readonly seqBySession = new Map<string, number>();
   readonly epoch = randomUUID();
@@ -144,7 +146,10 @@ export class SessionEventHub {
     this.add(sessionId, socket);
   }
 
-  markDurable(socket: RealtimeSocket): void { this.nativeSockets.add(socket); }
+  markDurable(socket: RealtimeSocket, chunks = false): void {
+    this.nativeSockets.add(socket);
+    if (chunks) this.chunkedSockets.add(socket);
+  }
 
   addGlobal(socket: RealtimeSocket): void {
     this.globalSockets.add(socket);
@@ -153,11 +158,18 @@ export class SessionEventHub {
 
   /** Called only by a serialized Durable watch. No host queue hides slow network delivery. */
   async sendDurableSnapshot(socket: RealtimeSocket, snapshot: DurableBrowserSnapshot, limits?: { maxBytes?: number; timeoutMs?: number }): Promise<void> {
-    return this.sendBounded(socket, JSON.stringify(durableBrowserSnapshotSchema.parse(snapshot)), limits);
+    return this.sendCut(socket, JSON.stringify(durableBrowserSnapshotSchema.parse(snapshot)), limits);
   }
 
   sendOpenSnapshot(socket: RealtimeSocket, open: SessionOpenResult): Promise<void> {
-    return this.sendBounded(socket, JSON.stringify({ type: "session.open", open }));
+    return this.sendCut(socket, JSON.stringify({ type: "session.open", open }));
+  }
+
+  private async sendCut(socket: RealtimeSocket, payload: string, limits?: { maxBytes?: number; timeoutMs?: number }): Promise<void> {
+    if (!this.chunkedSockets.has(socket) || Buffer.byteLength(payload) <= SESSION_FRAME_BYTES) return this.sendBounded(socket, payload, limits);
+    // The native publisher awaits this whole send and keeps only its latest pending cut.
+    // Await each frame's completion rather than queueing the entire large turn.
+    for (const chunk of sessionWireChunks(payload, randomUUID())) await this.sendBounded(socket, chunk, limits);
   }
 
   private async sendBounded(socket: RealtimeSocket, payload: string, limits?: { maxBytes?: number; timeoutMs?: number }): Promise<void> {
