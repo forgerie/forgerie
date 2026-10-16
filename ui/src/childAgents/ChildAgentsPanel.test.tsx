@@ -33,7 +33,8 @@ describe("child agents panel", () => {
     const rows = [...document.querySelectorAll(".status-row")];
     const api = rows.find(row => row.textContent?.includes("api"));
     const ui = rows.find(row => row.textContent?.includes("design-engineer"));
-    expect(api?.textContent).toContain("Last tool: read");
+    // The fixture tool ran long ago while api still works, so the row says it may be stuck.
+    expect(api?.textContent).toContain("(last: read). It may be stuck.");
     expect(api?.textContent).toContain("$0.50");
     expect(ui?.textContent).toContain("Last tool: Unavailable");
     expect(ui?.textContent).toContain("Unknown cost");

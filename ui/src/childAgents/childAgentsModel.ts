@@ -228,6 +228,22 @@ export function retryWait(retry: ChildRetry, now: number): string {
   return `Next try in ${time}`;
 }
 
+/** Minutes without a tool call before a working child reads as possibly stuck. A guess: tune it from real runs. */
+export const QUIET_MINUTES = 10;
+
+/**
+ * What a child did last, and how long ago. A working child with no tool call for QUIET_MINUTES says it may be stuck,
+ * so the reader does not have to ask. Model output between tool calls does not count as activity here.
+ */
+export function lastToolLine(child: Pick<ChildSummary, "busy" | "lastTool">, now: number): { text: string; quiet: boolean } {
+  const tool = child.lastTool;
+  if (tool == null) return { text: "Last tool: Unavailable", quiet: false };
+  if (tool.at === null) return { text: `Last tool: ${tool.name}`, quiet: false };
+  const minutes = Math.max(0, Math.floor((now - tool.at) / 60_000));
+  if (child.busy && minutes >= QUIET_MINUTES) return { text: `No tool call for ${String(minutes)} min (last: ${tool.name}). It may be stuck.`, quiet: true };
+  return { text: `Last tool: ${tool.name}, ${minutes === 0 ? "under a minute ago" : `${String(minutes)} min ago`}`, quiet: false };
+}
+
 /** The soonest try any child waits for, so a clock ticks only while there is a wait to count. */
 export function nextRetry(children: readonly { retry?: ChildRetry | undefined }[]): number | undefined {
   const times = children.flatMap((child) => child.retry ? [child.retry.until] : []);

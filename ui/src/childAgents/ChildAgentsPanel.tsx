@@ -11,7 +11,7 @@ import { NoticeBar } from "../ui/NoticeBar";
 import { AlertCard } from "../ui/AlertCard";
 import { useNow } from "../ui/useNow";
 import { exchangeLines } from "./childExchange";
-import { branchState, childStatus, childTone, middleCut, nextRetry, orderChildren, retryCount, retryLine, retryWait, unreadableWorktrees, type ChildSummary, type ChildTranscript } from "./childAgentsModel";
+import { branchState, childStatus, lastToolLine, childTone, middleCut, nextRetry, orderChildren, retryCount, retryLine, retryWait, unreadableWorktrees, type ChildSummary, type ChildTranscript } from "./childAgentsModel";
 
 export interface ChildAgentsActions {
   onOpenChild: (conversationId: number) => void;
@@ -65,7 +65,8 @@ export function ChildAgentsPanel({ children, openId, transcript, error, actions,
   /** The clock a retry counts down on. */
   now?: () => number;
 }) {
-  const now = useNow(clock, nextRetry(children));
+  // Tick while a retry counts down, or while a child works, so its last-tool age and quiet flag stay current.
+  const now = useNow(clock, nextRetry(children) ?? (children.some((child) => child.busy) ? Number.POSITIVE_INFINITY : undefined));
   const [localDrafts, setLocalDrafts] = useState<Record<string, string>>({});
   const draft = (key: string) => ({ value: (drafts?.values ?? localDrafts)[key] ?? "", update: (change: (text: string) => string) => {
     if (drafts) drafts.update(key, change);
@@ -113,7 +114,7 @@ export function ChildAgentsPanel({ children, openId, transcript, error, actions,
             onPress={open}
             below={<>{question && <p>{question.question}</p>}{item.questions.length === 0 && item.retry && <p>{retryLine(item.retry, ROW_ERROR_LENGTH)}</p>}
               {item.worktree && <p><code title={item.worktree.branch}>{middleCut(item.worktree.branch, ROW_BRANCH_LENGTH)}</code>, {branchState(item.worktree,
-                shared && item.worktree.statusError !== undefined)}</p>}<p>Last tool: {item.lastTool?.name ?? "Unavailable"}</p></>}
+                shared && item.worktree.statusError !== undefined)}</p>}<p>{lastToolLine(item, now).text}</p></>}
             actions={question ? [{ label: item.questions.length > 1 ? `Answer ${String(item.questions.length)} questions` : "Answer", tone: "primary", onPress: open }]
               : landable ? [{ label: "Review changes", onPress: () => { open(); actions.onReview(item.conversationId); }, disabled: pending !== undefined },
                 { label: "Land", onPress: () => { open(); actions.onLand(item.conversationId); }, disabled: pending !== undefined }] : []} />;

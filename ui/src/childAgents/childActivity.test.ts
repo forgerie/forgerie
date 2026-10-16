@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Check } from "typebox/value";
 import { ChildActivitySchema } from "@shared/childAgents";
-import { childSummarySchema } from "./childAgentsModel";
+import { childSummarySchema, lastToolLine, QUIET_MINUTES } from "./childAgentsModel";
 import { CHILDREN } from "./fixtures/children";
 
 describe("child activity wire projection", () => {
@@ -14,5 +14,21 @@ describe("child activity wire projection", () => {
     }
     expect(childSummarySchema.parse({ ...CHILDREN[0], ...activity }).costUsd).toBe(0);
     expect(childSummarySchema.parse({ ...CHILDREN[0], costUsd: null }).costUsd).toBeNull();
+  });
+});
+
+describe("a child's last tool line", () => {
+  const minute = 60_000;
+  it("says how long ago the last tool ran, and flags a working child that has been quiet", () => {
+    const at = 1_000_000;
+    expect(lastToolLine({ busy: true, lastTool: { name: "bash", at } }, at + 30_000).text).toBe("Last tool: bash, under a minute ago");
+    expect(lastToolLine({ busy: true, lastTool: { name: "bash", at } }, at + (QUIET_MINUTES - 1) * minute)).toEqual({ text: "Last tool: bash, 9 min ago", quiet: false });
+    expect(lastToolLine({ busy: true, lastTool: { name: "bash", at } }, at + QUIET_MINUTES * minute))
+      .toEqual({ text: "No tool call for 10 min (last: bash). It may be stuck.", quiet: true });
+    // An idle child is finished, not stuck.
+    expect(lastToolLine({ busy: false, lastTool: { name: "bash", at } }, at + 60 * minute).quiet).toBe(false);
+    expect(lastToolLine({ busy: true, lastTool: { name: "read", at: null } }, at).text).toBe("Last tool: read");
+    expect(lastToolLine({ busy: true, lastTool: null }, at).text).toBe("Last tool: Unavailable");
+    expect(lastToolLine({ busy: true }, at).text).toBe("Last tool: Unavailable");
   });
 });
