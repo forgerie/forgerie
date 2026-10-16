@@ -9,12 +9,15 @@ export const note = "The session's decision log, with confirmation and correctio
 export const checks = {
   default: {
     "Looks right clears the flag and leaves the guess overturnable": async ({ canvas, within, input, expect, waitFor }) => {
+      const record = () => {
+        const row = canvas.getAllByText(GUESS.question, { exact: true }).map((node) => node.closest(".decision-record")).find((node) => node !== null);
+        if (!row) throw new Error("Expected the confirmed decision record");
+        return within(row);
+      };
       await input.click(canvas.getByRole("button", { name: "Looks right" }));
-      await waitFor(() => { expect(canvas.getByText("Confirmed", { exact: true })).toBeVisible(); });
+      await waitFor(() => { expect(record().getByText("Confirmed", { exact: true })).toBeVisible(); });
       expect(canvas.queryByRole("img", { name: "Flagged guess", exact: true })).toBeNull();
-      const record = canvas.getByText(GUESS.question).closest("li");
-      if (!record) throw new Error("Expected the confirmed decision row");
-      await input.click(within(record).getByRole("button", { name: "Overturn" }));
+      await input.click(record().getByRole("button", { name: "Overturn" }));
       expect(canvas.getByRole("textbox", { name: "What should be done instead?" })).toBeVisible();
       await input.type(canvas.getByRole("textbox", { name: "What should be done instead?" }), "Group by stage instead.");
       await input.click(canvas.getByRole("button", { name: "Send and overturn" }));
