@@ -3,6 +3,7 @@ import fastifyWebsocket from "@fastify/websocket";
 import { WebSocket, WebSocketServer } from "ws";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { registerSessionProxyRoutes } from "./sessionProxyRoutes";
+import { respondToConnectionChecks } from "../realtime/connectionHealth";
 
 let app: FastifyInstance;
 let daemon: FakeSessionDaemon;
@@ -231,6 +232,49 @@ describe("machine-scoped session proxy routes", () => {
     expect(daemon.requests).toEqual([{ method: "GET", path: "/sessions", body: undefined }]);
   });
 
+  it.each(["/events", "/sessions/events", "/sessions/session-1/events"])("forwards an immediate health check while the daemon handshake is pending on %s", async path => {
+    const probeApp = Fastify({ logger: false });
+    await probeApp.register(fastifyWebsocket);
+    const probeDaemon = await FakeSessionDaemon.create(50);
+    registerSessionProxyRoutes(probeApp, probeDaemon);
+    await probeApp.listen({ host: "127.0.0.1", port: 0 });
+    const socket = new WebSocket(`${serverUrl(probeApp)}/api${path}`);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const reply = new Promise<unknown>((resolve, reject) => {
+        timer = setTimeout(() => { reject(new Error("Proxy dropped the connection check before the daemon opened")); }, 500);
+        socket.once("message", data => {
+          if (!Buffer.isBuffer(data)) throw new Error("Expected a socket buffer");
+          resolve(JSON.parse(data.toString("utf8")));
+        });
+      });
+      await waitForOpen(socket);
+      socket.send(JSON.stringify({ type: "connection.ping", id: "early-probe" }));
+      expect(await reply).toEqual({ type: "connection.pong", id: "early-probe" });
+    } finally {
+      clearTimeout(timer); socket.terminate();
+      await probeApp.close(); await probeDaemon.close();
+    }
+  });
+
+  it.each(["bytes", "frames"])("bounds the daemon handshake queue by %s", async limit => {
+    const probeApp = Fastify({ logger: false });
+    await probeApp.register(fastifyWebsocket);
+    const probeDaemon = await FakeSessionDaemon.create(100);
+    registerSessionProxyRoutes(probeApp, probeDaemon);
+    await probeApp.listen({ host: "127.0.0.1", port: 0 });
+    const socket = new WebSocket(`${serverUrl(probeApp)}/api/events`);
+    try {
+      const closed = new Promise<number>(resolve => socket.once("close", code => { resolve(code); }));
+      await waitForOpen(socket);
+      if (limit === "bytes") socket.send(Buffer.alloc(64 * 1024 + 1));
+      else for (let index = 0; index < 33; index++) socket.send(Buffer.alloc(0));
+      expect(await closed).toBe(1009);
+    } finally {
+      socket.terminate(); await probeApp.close(); await probeDaemon.close();
+    }
+  });
+
   it("preserves cwd query context when forwarding session event websockets", async () => {
     await app.listen({ host: "127.0.0.1", port: 0 });
     const socket = new WebSocket(`${serverUrl(app)}/api/machines/local/sessions/session-1/events?cwd=${encodeURIComponent("/repo")}`);
@@ -259,12 +303,15 @@ class FakeSessionDaemon {
   private constructor(private readonly upstream: WebSocketServer) {
     this.upstream.on("connection", (socket) => {
       this.sockets.add(socket);
+      respondToConnectionChecks(socket);
       socket.on("close", () => { this.sockets.delete(socket); });
     });
   }
 
-  static async create(): Promise<FakeSessionDaemon> {
-    const upstream = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  static async create(handshakeDelayMs = 0): Promise<FakeSessionDaemon> {
+    const upstream = new WebSocketServer({ host: "127.0.0.1", port: 0,
+      ...(handshakeDelayMs === 0 ? {} : { verifyClient: (_info, done) => { setTimeout(() => { done(true); }, handshakeDelayMs); } }),
+    });
     await waitForListening(upstream);
     return new FakeSessionDaemon(upstream);
   }

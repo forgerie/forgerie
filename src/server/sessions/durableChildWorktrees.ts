@@ -32,6 +32,11 @@ export class DurableChildWorktrees {
       ...(info.statusError === undefined ? {} : { statusError: info.statusError }) };
   }
 
+  /** Paths of this session's child worktrees that are still on disk and in use. */
+  async activePaths(): Promise<string[]> {
+    return (await this.worktrees.store.list()).filter((record) => this.owns(record) && record.state.kind === "active").map((record) => record.path);
+  }
+
   async report(id: string): Promise<string> {
     const summary = await this.summary(id);
     const files = await this.worktrees.changedFiles(id);
@@ -67,9 +72,11 @@ export class DurableChildWorktrees {
 
   private async owned(id: string): Promise<SessionWorktreeRecord> {
     const record = await this.worktrees.store.require(id);
-    if (record.sourceCommit === undefined || record.childOwner?.id !== this.parent.id || record.childOwner.cwd !== this.parent.cwd) {
-      throw new Error("This worktree is not owned by a child of this session");
-    }
+    if (!this.owns(record)) throw new Error("This worktree is not owned by a child of this session");
     return record;
+  }
+
+  private owns(record: SessionWorktreeRecord): boolean {
+    return record.sourceCommit !== undefined && record.childOwner?.id === this.parent.id && record.childOwner.cwd === this.parent.cwd;
   }
 }

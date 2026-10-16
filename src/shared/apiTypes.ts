@@ -3,6 +3,7 @@ import type { DecisionHintsStatus } from "./decisionHints.js";
 import type { TriggersChangedEvent } from "./triggers.js";
 import type { AzureDevopsGlobalConfig } from "./azureDevopsConfig.js";
 export type { PromptRequestOptions } from "./promptRequest.js";
+import type { ActionRunLink } from "./actionRuns.js";
 import type { SessionResponse } from "./sessionResponse.js";
 import type { PullLink } from "./pullRequests.js";
 import type { SessionWorktreeInfo, WorktreeSessionEvent } from "./sessionWorktree.js";
@@ -303,6 +304,7 @@ export interface SessionNotificationSummaryEvent {
 export interface SessionInfo extends SessionRef {
   /** An opt-in PR watch remains Working while the agent is idle. */
   watchingPullRequest?: boolean;
+  watchingActionRun?: boolean;
   /** Present for a session-owned worktree or a saved session in a completed worktree. */
   worktree?: SessionWorktreeInfo;
   path: string;
@@ -832,6 +834,7 @@ export interface SessionStatus {
   attentionHint?: AttentionHint;
   sessionId: string;
   watchingPullRequest?: boolean;
+  watchingActionRun?: boolean;
   /** Completed worktrees return an inert status without starting Pi in a removed cwd. */
   readOnly?: boolean;
   worktree?: SessionWorktreeInfo;
@@ -1271,6 +1274,8 @@ type SessionUiEventBody =
   | { type: "session.tabs"; sessionId: string; cwd: string; tabs: string[] }
   | { type: "session.created"; session: SessionInfo }
   | WorktreeSessionEvent
+  | { type: "session.action-run"; link: ActionRunLink }
+  | { type: "session.action-run.unlinked"; link: ActionRunLink }
   | { type: "session.pull-request"; link: PullLink }
   | { type: "session.pull-request.unlinked"; link: PullLink }
   | { type: "pi.event"; eventType: string }
@@ -1279,7 +1284,7 @@ type SessionUiEventBody =
 
 export type GlobalSessionEvent =
   | TriggersChangedEvent
-  | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.tabs" | "session.created" | "session.pull-request" | "session.pull-request.unlinked" }>
+  | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.tabs" | "session.created" | "session.pull-request" | "session.pull-request.unlinked" | "session.action-run" | "session.action-run.unlinked" }>
   | SessionNotificationSummaryEvent
   | SessionUnreadEvent
   | SessionStartupProgressEvent

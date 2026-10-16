@@ -1,4 +1,5 @@
 import type { SessionOpenReceipt } from "@shared/sessionOpen";
+import { watchConnectionRecovery } from "../connectionRecovery";
 import { z } from "zod";
 import { requestsResponse } from "../sessionResponse";
 import { asksSchema, deleteArchivedSchema, listingSchema, parseCatalogEvent, projectsSchema, startupEventSchema, unreadSchema, type CatalogEvent, type StartupEvent, type WireStatus } from "./contracts";
@@ -6,6 +7,7 @@ import type { PickerActivity, PickerProject, PickerSession, PickerStatus } from 
 import type { SessionTransport } from "../sessionStore";
 import { mergeRecord, parseWorktreeEvent, type WorktreeRecord } from "../worktrees/worktreeApi";
 import { parsePullEvent, pullCatalogSchema, sameLink, type PullLink } from "../pullRequests/pullRequestApi";
+import { actionRunCatalogSchema, parseActionRunEvent, sameRunLink, type ActionRunLink } from "../actionRuns/actionRunApi";
 
 /** How far the picker's copy of the machine catalog can be trusted. */
 export type CatalogConnection =
@@ -31,6 +33,7 @@ const toStatus = (status: WireStatus): PickerStatus => ({
   attentionHint: status.attentionHint,
   // A flagged decision waits on nobody (docs/adr/0001), so it is counted but never makes the session blocked.
   flaggedDecisions: status.flaggedDecisions,
+  watchingActionRun: status.watchingActionRun,
   // A child agent's question or a workflow stop waits on the reader as much as the session's own question does.
   blocked: status.pendingAsk !== undefined || (status.pendingDialogs?.length ?? 0) > 0 || (status.waitingOnYou ?? 0) > 0,
 });
@@ -45,7 +48,9 @@ export type LocalChange =
   /** A session worktree changed: setup, Land, Discard, archive cleanup, or a branch rename. */
   | { type: "session.worktree"; worktree: WorktreeRecord }
   /** One of a session's pull request links or watches changed, including each wake, or the link was removed. */
-  | { type: "session.pull-request"; link: PullLink; removed: boolean };
+  | { type: "session.pull-request"; link: PullLink; removed: boolean }
+  /** One of a session's Actions run links or watches changed, including each wake, or the link was removed. */
+  | { type: "session.action-run"; link: ActionRunLink; removed: boolean };
 
 /** Apply one live event or confirmed local change. Pure so replay after a snapshot uses the same rules. */
 export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | LocalChange): CatalogState {
@@ -99,6 +104,22 @@ export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | Loc
       });
       return changed ? { ...state, sessions } : state;
     }
+    case "session.action-run": {
+      const { link, removed } = event;
+      let changed = false;
+      const sessions = state.sessions.map((session) => {
+        if (session.id !== link.session.id) return session;
+        const current = session.actionRuns ?? [];
+        const kept = current.filter((item) => !sameRunLink(item, link));
+        const known = kept.length !== current.length;
+        if (removed && !known) return session;
+        changed = true;
+        // A changed link keeps its place; a new one goes last, as the server lists them.
+        const actionRuns = removed ? kept : known ? current.map((item) => sameRunLink(item, link) ? link : item) : [...current, link];
+        return { ...session, actionRuns };
+      });
+      return changed ? { ...state, sessions } : state;
+    }
     case "session.created":
       return state.sessions.some((session) => session.id === event.session.id) ? state
         : { ...state, sessions: [event.session, ...state.sessions] };
@@ -119,6 +140,12 @@ function withPulls(sessions: PickerSession[], links: readonly PullLink[]): Picke
   const byId = new Map<string, PullLink[]>();
   for (const link of links) byId.set(link.session.id, [...byId.get(link.session.id) ?? [], link]);
   return sessions.map((session) => { const pullRequests = byId.get(session.id); return pullRequests ? { ...session, pullRequests } : session; });
+}
+function withRuns(sessions: PickerSession[], links: readonly ActionRunLink[]): PickerSession[] {
+  if (links.length === 0) return sessions;
+  const byId = new Map<string, ActionRunLink[]>();
+  for (const link of links) byId.set(link.session.id, [...byId.get(link.session.id) ?? [], link]);
+  return sessions.map((session) => { const actionRuns = byId.get(session.id); return actionRuns ? { ...session, actionRuns } : session; });
 }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 /** About one frame at 60 Hz. */
@@ -254,6 +281,12 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
             if (current.buffer) current.buffer.push(change); else updateLive(applyCatalogEvent(state, change));
             return;
           }
+          const run = parseActionRunEvent(value);
+          if (run) {
+            const change: LocalChange = { type: "session.action-run", ...run };
+            if (current.buffer) current.buffer.push(change); else updateLive(applyCatalogEvent(state, change));
+            return;
+          }
           event = parseCatalogEvent(value);
         }
         catch (error) { console.warn("Picker ignored a malformed machine event.", error); return; }
@@ -269,7 +302,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
         current.controller.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
       });
       const signal = current.controller.signal;
-      const [listing, asks, unread, projects, pulls] = await Promise.all([
+      const [listing, asks, unread, projects, pulls, runs] = await Promise.all([
         read(`${prefix}/sessions/all`, listingSchema, signal),
         read(`${prefix}/sessions/asks`, asksSchema, signal),
         read(`${prefix}/sessions/unread`, unreadSchema, signal),
@@ -278,6 +311,12 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
         read(`${prefix}/github/pulls`, pullCatalogSchema, signal).catch((error: unknown) => {
           if (signal.aborted) throw error;
           console.warn("Picker could not read pull request links.", error);
+          return { links: [] };
+        }),
+        // Run links too: a server without them, or one whose GitHub App cannot read Actions, still lists sessions.
+        read(`${prefix}/github/action-runs`, actionRunCatalogSchema, signal).catch((error: unknown) => {
+          if (signal.aborted) throw error;
+          console.warn("Picker could not read Actions run links.", error);
           return { links: [] };
         }),
       ]);
@@ -296,7 +335,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
       for (const event of current.buffer ?? []) receiptEvent(event);
       let next: CatalogState = {
         connection: { type: "ready" },
-        sessions: withPulls(listing.sessions, pulls.links),
+        sessions: withRuns(withPulls(listing.sessions, pulls.links), runs.links),
         statuses,
         activities: Object.fromEntries(listing.activities.map((activity) => [activity.sessionId, toActivity(activity)])),
         unread: new Set(unread.sessions.map((entry) => entry.sessionId)),
@@ -376,7 +415,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
     onStartup: (listener: (event: StartupEvent) => void) => { startupListeners.add(listener); return () => { startupListeners.delete(listener); }; },
     onWorktree: (listener: (record: WorktreeRecord) => void) => { worktreeListeners.add(listener); return () => { worktreeListeners.delete(listener); }; },
     onTriggersChanged: (listener: () => void) => { triggerListeners.add(listener); return () => { triggerListeners.delete(listener); }; },
-    start: () => { unwatch = transport.watchRecovery?.(recover); return join(); },
+    start: () => { unwatch = watchConnectionRecovery(transport, () => attempt?.socket, recover); return join(); },
     retry: () => { update({ ...state, connection: { type: "loading" } }); recover(); },
     ...mutations,
     dispose: () => { lifetime.abort(); clearTimeout(retryTimer); clearTimeout(frame); closeAttempt(); unwatch?.(); listeners.clear(); unreadListeners.clear(); triggerListeners.clear(); },

@@ -21,7 +21,7 @@ GitHub CI runs on Linux. It uses `npm run test:coverage -- --no-file-parallelism
 
 The package-install smoke test also passes the real tarball's manifest to npm's own platform validator with `os: "win32"`. npm's CLI `--os` override only affects optional dependencies. This verifies the package restriction, not execution on Windows. Native Windows server support is retired. Browser access from Windows is unchanged.
 
-Use focused tests while editing. Run `npm run verify` before merging cross-cutting changes. Build and install only in an isolated worktree when active agents use the deployed checkout. Do not restart live services to run tests.
+Use focused tests while editing. Run `npm run verify` before merging cross-cutting changes. A child agent runs focused checks and leaves `npm run verify` to its parent, unless its task assigns the run; a workflow runs it once per stage. Each commit's pre-commit hook already runs the cached typecheck, Knip, ESLint on staged files and the related tests. Build and install only in an isolated worktree when active agents use the deployed checkout. Do not restart live services to run tests.
 
 ## Managed process core acceptance
 

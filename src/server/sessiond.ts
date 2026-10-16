@@ -12,6 +12,9 @@ import { resolveBacklogConfig } from "./backlog/backlogConfig.js";
 import { canonicalBacklogRoot } from "./backlog/backlogScanner.js";
 import { AzurePullReader } from "./azureDevops/azurePullReader.js";
 import { originAzureRepo } from "./azureDevops/azureRemote.js";
+import { ActionRunStore } from "./github/actionRunStore.js";
+import { ActionRunService } from "./github/actionRunService.js";
+import { registerActionRunRoutes } from "./github/actionRunRoutes.js";
 import { SessionSearchService } from "./sessions/sessionSearchService.js";
 import { registerSessionSearchRoutes } from "./sessions/sessionSearchRoutes.js";
 import { mkdir, rm } from "node:fs/promises";
@@ -155,6 +158,8 @@ async function createSessionDaemonRuntime() {
   const githubIssues = new GitHubIssueClient({ app: github, fetch: fetchGitHub, trust: githubTrust });
   const pullStore = new PullRequestStore(join(piWebDataDir(daemonEnvironment), "pull-requests.json"));
   await pullStore.initialize();
+  const actionRunStore = new ActionRunStore(join(piWebDataDir(daemonEnvironment), "action-runs.json"));
+  await actionRunStore.initialize();
   const azureCredentials = new AzureDevopsCredentials({ directory: join(piWebDataDir(daemonEnvironment), "azure-devops"), azureCliCommand: config.azureDevops?.azureCliCommand ?? "az", env: daemonEnvironment,
     onCleanupWarning: (message) => { app.log.warn(message); } });
   const azurePulls = new AzurePullReader({ credentials: azureCredentials, fetch });
@@ -272,6 +277,13 @@ async function createSessionDaemonRuntime() {
       onIndexError: (error) => { app.log.warn({ err: error }, "durable child index write failed"); },
     }) }),
     github: {
+      actions: {
+        link: (ref, run) => actionRuns.link(ref, run),
+        unlink: (ref, runId) => actionRuns.unlink(ref, runId),
+        watch: (ref, runId) => actionRuns.watch(ref, runId),
+        stopRef: (ref, runId) => actionRuns.stopRef(ref, runId),
+        dispatch: (ref, workflow, branch, inputs) => actionRuns.dispatch(ref, workflow, branch, inputs),
+      },
       target: (ref, id) => relatedWork.toolCwd(ref, id),
       gateIssueLabels: (cwd, number, slug) => githubAgent.gateIssueLabels(cwd, number, slug),
       read: (cwd, request) => githubAgent.read(cwd, request),
@@ -289,6 +301,7 @@ async function createSessionDaemonRuntime() {
       if (action === "watch") return pulls.watch({ cwd, id }, selected);
       return pulls.stopRef({ cwd, id }, selected);
     } },
+    actionRunWatches: { isWatching: (id) => actionRunStore.isWatching(id), stop: (id, reason) => actionRuns.stop(id, reason) },
     pullRequestWatches: { isWatching: (id) => pullStore.isWatching(id), stop: (id, reason) => pulls.stop(id, reason) },
     extensionDialogsTimeoutMs: config.extensionDialogsTimeoutMs,
     // Settings > Models writes this key while the daemon runs, so read it for each title.
@@ -324,6 +337,23 @@ async function createSessionDaemonRuntime() {
       sessions.publishPullWatchStatus(link.session.id);
     },
     onError: (error, sessionId) => { app.log.error({ err: error, sessionId }, "pull request watch failed"); },
+  });
+  const actionRuns: ActionRunService = new ActionRunService({ github: githubAgent, store: actionRunStore, pulls: pullStore,
+    sessions: relatedPullSessions(relatedWork, {
+      inspect: ref => sessions.inspectPullSession(ref),
+      wake: (ref, notice, current) => sessions.wakePullSession(ref, notice, current, "forgerie:action-run"),
+    }),
+    publish: link => {
+      eventHub.publish(link.session.id, { type: "session.action-run", link });
+      eventHub.publishGlobal({ type: "session.action-run", link });
+      sessions.publishPullWatchStatus(link.session.id);
+    },
+    publishUnlinked: link => {
+      eventHub.publish(link.session.id, { type: "session.action-run.unlinked", link });
+      eventHub.publishGlobal({ type: "session.action-run.unlinked", link });
+      sessions.publishPullWatchStatus(link.session.id);
+    },
+    onError: (error, sessionId) => { app.log.error({ err: error, sessionId }, "action run watch failed"); },
   });
   const triggerWorkflows = new WorkflowLibrary(activeAgentProfile.dir);
   const triggers: TriggerService = await TriggerService.open({
@@ -363,16 +393,17 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credentials: azureCredentials, fetch });
   const backlog = new BacklogService({ settings: backlogSettings, projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues })], sourceProvider: createAzureDevopsBacklogProvider(azureItems) });
-  return { decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
+  return { decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, actionRuns, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 
-function registerSessionDaemonRoutes({ decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, actionRuns, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
   registerDecisionGatewayKeyRoutes(app, decisionHints.gatewayKey, activeAgentProfile.revision);
   registerTriggerRoutes(app, triggers);
   registerBacklogRoutes(app, backlog);
   registerBacklogSettingsRoutes(app, backlogSettings, projects);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);
+  registerActionRunRoutes(app, actionRuns);
   registerWorkspaceActivityRoutes(app, workspaceActivity);
   registerWorktreeCleanupRoutes(app, worktreeCleanup);
   registerSessionWorktreeRoutes(app, userSessions);
@@ -407,8 +438,9 @@ function registerSessionDaemonRoutes({ decisionHints, triggers, eventHub, worksp
   app.get("/runtime", async () => ({ ...runtimeComponent, ...await decisionHintsRuntimeStatus(decisionHints) }));
 }
 
-async function listenSessionDaemon({ triggers, sessions, unreadStore, catalogRefresher, pulls, liveChildren, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): Promise<void> {
+async function listenSessionDaemon({ triggers, sessions, unreadStore, catalogRefresher, pulls, actionRuns, liveChildren, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): Promise<void> {
   pulls.start();
+  actionRuns.start();
   childRuns.start((error) => { app.log.error({ err: error }, "child run retention failed"); });
   let shuttingDown = false;
   const startCleanup = () => { if (!shuttingDown) worktreeCleanup.start(); };
@@ -441,6 +473,7 @@ async function listenSessionDaemon({ triggers, sessions, unreadStore, catalogRef
     };
     await attempt("stop worktree cleanup", () => worktreeCleanup.stop());
     await attempt("dispose PR watches", () => { pulls.dispose(); });
+    await attempt("dispose run watches", () => { actionRuns.dispose(); });
     await attempt("dispose catalog refresher", () => { catalogRefresher.dispose(); });
     await attempt("close triggers", () => triggers.close());
     await attempt("dispose sessions", () => sessions.dispose());

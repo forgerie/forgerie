@@ -5,10 +5,13 @@ export interface GatedActionMatch { category: GatedCategory; description: string
 export interface GatedActionReads {
   git(cwd: string, args: readonly string[]): Promise<string>;
   issueLabels(cwd: string, issue: string | number, repo?: string, worktreeId?: string): Promise<readonly string[]>;
+  /** Whether a Git worktree root holds only throwaway files, so discarding them needs no approval. */
+  disposable(worktreeRoot: string): Promise<boolean>;
 }
 const unavailableReads: GatedActionReads = {
   git: () => Promise.reject(new Error("Git state unavailable")),
   issueLabels: () => Promise.reject(new Error("Issue labels unavailable")),
+  disposable: () => Promise.resolve(false),
 };
 const match = (category: GatedCategory, description: string): GatedActionMatch => ({ category, description });
 const flag = (tokens: readonly string[], long: string, short?: string) => tokens.some(t => t === long || t.startsWith(`${long}=`) || (short !== undefined && /^-[^-]/u.test(t) && t.slice(1).includes(short)));
@@ -186,7 +189,23 @@ function effectiveFlag(tokens: readonly string[], long: string, short: string | 
   }
   return enabled;
 }
+/**
+ * Discarding files in a disposable worktree needs no approval. Branch deletion still gates: refs belong to the whole repository.
+ * The worktree root comes from Git, so `cd`, `-C` and relative paths resolve to the tree the action really changes.
+ */
 async function gitAction(action: string | undefined, tokens: string[], cwd: string, reads: GatedActionReads): Promise<GatedActionMatch | undefined> {
+  const found = await gitMatch(action, tokens, cwd, reads);
+  if (found?.category !== "destroy-local" || action === "branch") return found;
+  const removed = action === "worktree" ? operands(tokens).find(t => t !== "remove") : undefined;
+  if (action === "worktree" && removed === undefined) return found;
+  const tree = removed === undefined ? cwd : resolve(cwd, removed);
+  try {
+    const root = (await reads.git(tree, ["rev-parse", "--show-toplevel"])).trim();
+    if (root !== "" && await reads.disposable(root)) return undefined;
+  } catch { /* An unknown worktree is not disposable. */ }
+  return found;
+}
+async function gitMatch(action: string | undefined, tokens: string[], cwd: string, reads: GatedActionReads): Promise<GatedActionMatch | undefined> {
   if (action === "push") {
     const words = operands(tokens, PUSH_VALUE_OPTIONS);
     if (flag(tokens, "--delete", "d") || words.some(t => t.startsWith(":"))) return match("delete-remote", "Delete a remote Git ref");

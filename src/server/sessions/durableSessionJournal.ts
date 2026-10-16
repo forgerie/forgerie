@@ -1,3 +1,4 @@
+import { endTurnReplyMessage } from "./endTurnReply.js";
 import { constants } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
@@ -254,9 +255,10 @@ export class DurableSessionJournal {
       const id = this.projected.get(projectedKey(0));
       return id === undefined ? [] : [{ id, entry, index: 0 }];
     }
-    if (!this.isTranscriptEntry(entry)) return [];
+    const reply = endTurnReplyMessage(entry);
+    if (reply === undefined && !this.isTranscriptEntry(entry)) return [];
     const aliases: { id: string; entry: EntryRecord; index: number }[] = [];
-    for (const [index, message] of (entry.model ?? []).entries()) {
+    for (const [index, message] of (reply === undefined ? entry.model ?? [] : [reply]).entries()) {
       if (message.role === "system") continue;
       const existing = this.projected.get(projectedKey(index));
       if (existing !== undefined) { aliases.push({ id: existing, entry, index }); continue; }

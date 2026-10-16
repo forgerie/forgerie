@@ -1,4 +1,5 @@
 import type { PullRequestReader } from "./pullRequestReader.js";
+import { deliverWatch, stopWatch, watchStopReason, watchReadExpired, WATCH_POLL_MS } from "./watchLifecycle.js";
 import { randomUUID } from "node:crypto";
 import type { PullLink, PullRequest, PullSessionRef } from "../../shared/pullRequests.js";
 import type { GitHubAgent } from "./githubAgent.js";
@@ -30,8 +31,6 @@ export interface PullServiceDependencies {
 }
 /** One linked pull request as a session reads it. A failed read keeps the link and says why. */
 export interface PullItem { link: PullLink; pull: PullRequest | null; error?: string }
-const POLL_MS = 60_000;
-const UNREADABLE_MS = 15 * 60_000;
 export function publicLink(record: PullRecord): PullLink { return { provider: record.provider, session: record.session, repo: record.repo, number: record.number, watch: record.watch }; }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 const pollKey = (key: PullKey) => `${key.id}\n${key.repo.toLowerCase()}\n${String(key.number)}`;
@@ -44,7 +43,7 @@ export class PullRequestService {
   private disposed = false;
   constructor(private readonly deps: PullServiceDependencies) { this.now = deps.now ?? Date.now; }
   start(): void {
-    this.timer ??= setInterval(() => { void this.poll(); }, POLL_MS);
+    this.timer ??= setInterval(() => { void this.poll(); }, WATCH_POLL_MS);
     this.timer.unref();
   }
   dispose(): void { this.disposed = true; clearInterval(this.timer); this.timer = undefined; }
@@ -188,26 +187,17 @@ export class PullRequestService {
   }
 
   private async stopKey(key: PullKey, reason: string): Promise<PullLink | undefined> {
-    // Retry only local compare-and-writes, never GitHub calls. Concurrent polls cannot defeat Stop.
-    for (;;) {
-      const current = this.deps.store.get(key);
-      if (current === undefined) return undefined;
-      if (current.watch.kind !== "watching" && current.pending === undefined) return publicLink(current);
-      const stopped = await this.deps.store.update(key, current.revision, (record) => {
-        const next: PullRecord = { ...record, watch: { kind: "stopped", reason, at: this.iso() } };
-        delete next.pending;
-        return next;
-      });
-      if (stopped !== undefined) { this.publish(stopped); return publicLink(stopped); }
-    }
+    const stopped = await stopWatch(this.deps.store, key, reason, () => this.iso(), record => { this.publish(record); });
+    return stopped === undefined ? undefined : publicLink(stopped);
   }
 
   private async pollRecord(record: PullRecord): Promise<void> {
     const key = keyOf(record);
     try {
       const session = await this.deps.sessions.inspect(record.session);
-      if (!session.available || (session.settled && session.leaf !== record.startLeaf)) {
-        await this.stopCurrent(record, session.available ? "Session needs a response from the user." : "Session is archived, missing, or read-only.");
+      const reason = watchStopReason(session, record.startLeaf);
+      if (reason !== undefined) {
+        await this.stopCurrent(record, reason);
         return;
       }
       if (record.pending !== undefined) { await this.deliver(record); return; }
@@ -235,7 +225,7 @@ export class PullRequestService {
       const current = this.deps.store.get(key);
       if (current?.watch.kind !== "watching" || current.revision !== record.revision) return;
       const message = messageOf(error);
-      if (this.now() - Date.parse(current.lastReadAt ?? current.watch.since) >= UNREADABLE_MS) {
+      if (watchReadExpired(current.lastReadAt ?? current.watch.since, this.now())) {
         await this.stopCurrent(current, `PR unavailable for 15 minutes: ${message}`);
       } else {
         const next = await this.deps.store.update(key, current.revision, (value) => ({ ...value, watch: { ...current.watch, error: message } }));
@@ -253,14 +243,9 @@ export class PullRequestService {
   }
 
   private async deliver(record: PullRecord): Promise<void> {
-    const key = keyOf(record);
-    const current = () => !this.disposed && this.deps.store.get(key)?.revision === record.revision;
-    if (record.pending === undefined || !current()) return;
-    const result = await this.deps.sessions.wake(record.session, record.pending, current);
-    if (result === "busy" || this.isDisposed()) return;
-    const next = await this.deps.store.update(key, record.revision, (value) => { delete value.pending; return value; });
-    if (next !== undefined) this.publish(next);
+    await deliverWatch(this.deps.store, keyOf(record), record, this.deps.sessions, () => this.disposed, value => { this.publish(value); });
   }
+
   /** The session's links, checked against the workspace the caller named. */
   private records(ref: PullSessionRef): PullRecord[] {
     // A single chat can own secondary repository workspaces. The session gateway

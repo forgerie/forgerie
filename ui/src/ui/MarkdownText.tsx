@@ -11,6 +11,7 @@ import { rehypeCallouts } from "./markdown/rehypeCallouts";
 import { CalloutQuote, richBlocksByLanguage } from "./markdown/RichBlocks";
 import { blockFences, noHeader } from "./markdown/blockFences";
 import { FileTree, type FileLinks } from "./FileTree";
+import { FindingList } from "./FindingList";
 
 function CodeHeader({ language, code }: CodeHeaderProps) {
   return <CodeSheetHead language={language ?? ""} getText={() => code} />;
@@ -33,7 +34,7 @@ const remend = { linkMode: "text-only" as const };
 const linkSafety = { enabled: false };
 const componentsByLanguage = { ...richBlocksByLanguage, ...blockFences };
 
-/** `fileLinks` makes each file in a `files` block that exists open on a tap. Keep it stable: a new object re-renders every block. */
+/** `fileLinks` makes each file in a `files` block, and each location in a `findings` block, that exists open on a tap. Keep it stable: a new object re-renders every block. */
 export const MarkdownText = memo(function MarkdownText({ fileLinks }: { fileLinks?: FileLinks | undefined }) {
   const { origin } = useMarkdownLinkScope();
   const streaming = useAuiState((s) => s.part.status.type === "running");
@@ -46,7 +47,8 @@ export const MarkdownText = memo(function MarkdownText({ fileLinks }: { fileLink
   // Resolve before hardening; only the final plugin can mark a callout.
   const rehypePlugins = useMemo(() => [...fragmentRehypePlugins(origin), rehypeCallouts], [origin]);
   const byLanguage = useMemo(() => fileLinks ? { ...componentsByLanguage,
-    files: { SyntaxHighlighter: ({ code }: SyntaxHighlighterProps) => <FileTree code={code} links={fileLinks} />, CodeHeader: noHeader } }
+    files: { SyntaxHighlighter: ({ code }: SyntaxHighlighterProps) => <FileTree code={code} links={fileLinks} />, CodeHeader: noHeader },
+    findings: { SyntaxHighlighter: ({ code }: SyntaxHighlighterProps) => <FindingList code={code} links={fileLinks} />, CodeHeader: noHeader } }
     : componentsByLanguage, [fileLinks]);
   return <StreamdownTextPrimitive key={origin} containerClassName="markdown" className="markdown-content" components={components} controls={false}
     componentsByLanguage={byLanguage} rehypePlugins={rehypePlugins}

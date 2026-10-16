@@ -12,6 +12,8 @@
   background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 500; transition: background-color 150ms, opacity 150ms; }
 .text-submit-button:not(:disabled):hover { background: var(--hover-surface); }
 .text-submit-button:disabled { opacity: 0.45; }
+.text-submit-error { margin: 0; padding-inline-start: var(--space-3); border-inline-start: 0.125rem solid var(--tone-bad); color: var(--foreground);
+  font-size: var(--small-text); line-height: 1.5; overflow-wrap: anywhere; }
 /* A follow-up to a refused value: the question, then its action and Cancel. */
 /* Empty, it takes no room and adds no gap, but stays a live region so the question is announced. */
 .text-submit-follow-up { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-inline-size: 0; }

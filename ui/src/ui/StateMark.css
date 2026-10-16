@@ -1,0 +1,9 @@
+/* Red and green are the diff's own hues, so a failed job reads like a removed line and a pass like an added one. */
+.state-mark { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
+.state-mark[data-size="large"] { inline-size: 1.25rem; block-size: 1.25rem; }
+.state-mark[data-state="failed"] { color: var(--tone-bad); }
+.state-mark[data-state="passed"] { color: var(--tone-good); }
+.state-mark[data-state="waiting"], .state-mark[data-state="unknown"] { color: var(--tone-warn); }
+.state-mark[data-state="running"] { color: var(--live); animation: state-mark-turn 1.4s linear infinite; }
+@keyframes state-mark-turn { to { rotate: 1turn; } }
+@media (prefers-reduced-motion: reduce) { .state-mark[data-state="running"] { animation: none; } }

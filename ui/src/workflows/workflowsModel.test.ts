@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { activeRun, launchInputs, runStatus, stopIsOpen, stopOutcome, stripSegments, waitingStops, workflowEntryOf, type WorkflowRun } from "./workflowsModel";
-import { BUILDING, CONTRACT_STOP, CONTRACT_WAITING, FAILED, LAND_STOP, LAND_WAITING, LANDED, SAVED, STAGES } from "./fixtures/runs";
+import { BUILDING, CONTRACT_STOP, CONTRACT_WAITING, FAILED, LAND_STOP, LAND_WAITING, LANDED, SAVED, STAGES, STALLED } from "./fixtures/runs";
 
 const RUN_ID = "a".repeat(64);
 describe("workflow transcript entries", () => {
@@ -45,6 +45,9 @@ describe("a run at a glance", () => {
     expect(runStatus(LANDED)).toBe("Finished");
     expect(waitingStops(LAND_WAITING)).toBe(1);
     expect(waitingStops(LANDED)).toBe(0);
+    expect(runStatus(STALLED)).toBe("Stalled: build failed, waiting for you");
+    expect(waitingStops(STALLED)).toBe(1);
+    expect(waitingStops({ ...STALLED, stall: { state: "woken", child: "build", error: "x", at: 0 } })).toBe(0);
     expect(activeRun([LANDED, BUILDING])).toBe(BUILDING);
   });
 

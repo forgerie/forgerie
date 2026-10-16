@@ -7,6 +7,7 @@ import { requestsResponse, type SessionResponse } from "../sessionResponse";
 // words; time is always shorthand.
 import type { WorktreeInfo } from "../worktrees/worktreeApi";
 import type { PullLink } from "../pullRequests/pullRequestApi";
+import type { ActionRunLink } from "../actionRuns/actionRunApi";
 
 export interface PickerSession {
   response?: SessionResponse | undefined;
@@ -23,6 +24,8 @@ export interface PickerSession {
   worktree?: WorktreeInfo | undefined;
   /** The pull requests linked to this session, oldest first, each with its own watch. */
   pullRequests?: readonly PullLink[] | undefined;
+  /** The Actions runs linked to this session, oldest link first, each with its own watch. */
+  actionRuns?: readonly ActionRunLink[] | undefined;
 }
 export interface PickerStatus {
   attentionHint?: AttentionHint | undefined;
@@ -37,6 +40,8 @@ export interface PickerStatus {
   watchingPullRequest?: boolean | undefined;
   /** Flagged guesses in the decision log. A readout only: it never makes the session blocked. */
   flaggedDecisions?: number | undefined;
+  /** The agent watches an Actions run: the same rule as a watched pull request. */
+  watchingActionRun?: boolean | undefined;
 }
 export interface PickerActivity {
   phase: "active" | "idle" | "error";
@@ -120,8 +125,9 @@ export function rowState(session: PickerSession, status: PickerStatus | undefine
   if (status?.isStreaming === true || status?.isCompacting === true || status?.isBashRunning === true || activity?.phase === "active") return "working";
   if (status?.needsResponse ?? requestsResponse(session.response)) return "blocked";
   // Work the session started and is waiting on keeps it in Working while its own turn has ended: a watched pull
-  // request between wakes (T3's rule), and delegated agents that are still running. A request for a response still wins.
+  // request or Actions run between wakes (T3's rule), and delegated agents that are still running. A request for a response still wins.
   if (status?.watchingPullRequest === true || session.pullRequests?.some((link) => link.watch.kind === "watching") === true) return "working";
+  if (status?.watchingActionRun === true || session.actionRuns?.some((link) => link.watch.kind === "watching") === true) return "working";
   if ((status?.workingAgents ?? 0) > 0) return "working";
   return unread ? status?.attentionHint?.likelyNeedsYou === true ? "blocked" : "unread" : "open";
 }

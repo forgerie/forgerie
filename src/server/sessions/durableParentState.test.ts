@@ -17,6 +17,7 @@ import { ExtensionEntries, Labels, ParentAsks, ParentResponse, Presentation, Ses
 import { ASK_USER_ANSWERS_CUSTOM_TYPE, type AskUserQuestion } from "../../shared/apiTypes.js";
 import { renderAskUserAnswersText } from "./sessionAsks.js";
 import { DurableSdkSessionView } from "./durableSdkSessionView.js";
+import { endTurnReplyMessage } from "./endTurnReply.js";
 import { DurableParentReadModel } from "./durableParentReadModel.js";
 
 const questions: AskUserQuestion[] = [{ id: "q", question: "Which?", options: [{ value: "a", label: "A" }] }];
@@ -77,6 +78,43 @@ describe("committed Durable parent state", () => {
     expect(await reopened.state.voidForChatReply(context)).toMatchObject({ askId: third.ask.askId, reason: "answered-in-chat" });
     expect(await reopened.state.response(context)).toEqual({ kind: "needs-response", reason: "reply" });
     expect(await reopened.state.voidForChatReply(context)).toBeUndefined();
+  });
+
+  it("commits a display-only answer with its declaration and projects it once after native reopen", async () => {
+    const f = await fixture();
+    const activeHandle = { address: { journalId: "journal", databasePath: f.databasePath, sessionId: "logical", conversationId: f.conversation.id }, harness: f.harness, conversation: f.conversation, release: () => Promise.resolve() };
+    const liveReader = new DurableParentReadModel({ handle: activeHandle, messageId: entry => String(entry.id) });
+    const frames: unknown[] = [];
+    const failures: Error[] = [];
+    const attached = await liveReader.attach(frame => { frames.push(frame); return Promise.resolve(); }, error => failures.push(error), context);
+    try {
+      await f.state.declareResponse("nothing", context, "Visible answer");
+      await vi.waitFor(() => { expect(JSON.stringify(frames.at(-1))).toContain("Visible answer"); });
+      expect(failures).toEqual([]);
+    } finally { await attached.stop(); }
+    await f.harness.close(context);
+    const reopened = await f.open();
+    const handle = { address: { journalId: "journal", databasePath: f.databasePath, sessionId: "logical", conversationId: reopened.conversation.id }, harness: reopened.harness, conversation: reopened.conversation, release: () => Promise.resolve() };
+    const reader = new DurableParentReadModel({ handle, messageId: entry => String(entry.id) });
+    expect(await reopened.state.response(context)).toEqual({ kind: "none" });
+    const messages = await reader.messages(context);
+    expect(messages).toEqual([expect.objectContaining({ role: "assistant", content: [{ type: "text", text: "Visible answer" }] })]);
+    expect(await reader.messages(context)).toEqual(messages);
+    const view = await reopened.conversation.viewState(context);
+    try { expect(reader.snapshot(view.value, "epoch", 0).history.messages).toEqual(messages); }
+    finally { view.dispose(); }
+    expect((await reopened.conversation.context(context)).messages).toEqual([]);
+    expect(f.provider.state.callCount).toBe(0);
+    expect((await reopened.conversation.entries({}, 100, undefined, context)).items.filter(entry => endTurnReplyMessage(entry) !== undefined)).toHaveLength(1);
+  });
+
+  it("rejects blank replies and pending forms without recording a completion answer", async () => {
+    const f = await fixture();
+    await expect(f.state.declareResponse("nothing", context, "  ")).rejects.toThrow("Invalid visible reply");
+    const { ask } = await f.state.openAsk(questions, context);
+    await expect(f.state.declareResponse("nothing", context, "Answer")).rejects.toThrow("unanswered ask_user");
+    expect(await f.state.pendingAsk(context)).toEqual(ask);
+    expect((await f.conversation.entries({}, 100, undefined, context)).items.some(entry => endTurnReplyMessage(entry) !== undefined)).toBe(false);
   });
 
   it("rejects malformed answers without closing and admits exactly one concurrent browser decision", async () => {

@@ -1,4 +1,5 @@
 import type { EarlierHistory } from "./historyPaging";
+import { checkConnection, watchConnectionRecovery } from "./connectionRecovery";
 import type { ReadReceipt } from "./readReceipt";
 import type { ReadTracker } from "./readReceipt";
 import { z } from "zod";
@@ -48,9 +49,11 @@ export interface SessionTransport {
   /** Request native admission. Inactive and non-Durable sessions negotiate classic events. */
   nativeReadModel?: boolean;
   watchRecovery?: (recover: () => void) => () => void;
+  checkConnection?: (socket: WebSocket) => Promise<boolean>;
 }
 export const browserTransport: SessionTransport = {
   nativeReadModel: true,
+  checkConnection,
   request: (path, init) => fetch(path, init),
   connect: (path) => {
     const url = new URL(path, window.location.href);
@@ -59,7 +62,7 @@ export const browserTransport: SessionTransport = {
   },
   watchRecovery: (recover) => {
     // Mobile sleep can leave a half-open socket without a close event. A return
-    // to the page always opens a fresh subscription and authoritative join.
+    // checks the existing socket before replacing its subscription.
     const visible = () => { if (document.visibilityState === "visible") recover(); };
     const restored = (event: PageTransitionEvent) => { if (event.persisted) recover(); };
     window.addEventListener("online", recover);
@@ -524,7 +527,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   async function start() {
     if (started || lifetime.signal.aborted) return;
     started = true;
-    unwatch = transport.watchRecovery?.(() => recover());
+    unwatch = watchConnectionRecovery(transport, () => join?.socket, () => recover());
     unwatchUnread = reads?.observe((sessionId) => {
       if (sessionId !== id) return;
       catalogVersion++;

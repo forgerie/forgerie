@@ -9,6 +9,7 @@ import { gatedAction, type GatedActionReads } from "./gatedActions.js";
 const reads: GatedActionReads = {
   git: (_cwd, args) => Promise.resolve(args[0] === "status" ? " M dirty.txt" : args[0] === "branch" ? "merged\nmain\n" : args.includes("--short") ? "feature\n" : "refs/remotes/origin/main\n"),
   issueLabels: (_cwd, id) => Promise.resolve(String(id) === "7" ? ["agent-filed"] : []),
+  disposable: () => Promise.resolve(false),
 };
 type RepositoryState = "clean" | "unknown-remote";
 const cases: [string, string | undefined, RepositoryState?][] = [
@@ -174,6 +175,37 @@ it("uses real read-only Git observations for dirty checkout forms and unmerged b
     await git("clean", "-fn", "--no-dry-run"); // Scratch only: verify the same flag sequence really removes the file.
     expect((await git("status", "--porcelain", "--", "preview-check")).stdout).toBe("");
   } finally { await rm(root, {recursive: true, force: true}); }
+});
+
+it("discards files in a disposable worktree without approval, and reads the root of the tree the action changes", async () => {
+  const asked: string[] = [];
+  const scratch: GatedActionReads = {
+    ...reads,
+    git: (cwd, args) => args[0] === "rev-parse" && args[1] === "--show-toplevel"
+      ? (cwd.startsWith("/tmp/") ? Promise.resolve(`${cwd}\n`) : Promise.resolve("/repo\n")) : reads.git(cwd, args),
+    disposable: (root) => { asked.push(root); return Promise.resolve(root.startsWith("/tmp/")); },
+  };
+  const classify = async (command: string, cwd = "/repo") => (await gatedAction("bash", {command}, cwd, scratch))?.category;
+  for (const command of ["git reset --hard", "git clean -fd", "git checkout -- dirty.txt", "git restore dirty.txt", "git checkout -f HEAD"]) {
+    expect(await classify(command, "/tmp/clone")).toBeUndefined();
+    expect(await classify(command)).toBe("destroy-local");
+  }
+  expect(await classify("git -C /tmp/clone reset --hard")).toBeUndefined();
+  expect(await classify("cd /tmp/clone; git clean -fd")).toBeUndefined();
+  // A conditional cd stays unknown, as before: the parser cannot tell && from || or a pipe.
+  expect(await classify("cd /tmp/clone && git clean -fd")).toBe("destroy-local");
+  // The removed worktree decides, not the cwd.
+  expect(await classify("git worktree remove --force /tmp/baseline")).toBeUndefined();
+  expect(await classify("git worktree remove --force ../../repo/copy", "/tmp/clone")).toBe("destroy-local");
+  expect(await classify("git worktree remove --force")).toBe("destroy-local");
+  // Branches are repository refs, shared by every worktree.
+  expect(await classify("git branch -D unmerged", "/tmp/clone")).toBe("destroy-local");
+  // Overridden Git state, a computed cwd or a failed read cannot prove the tree.
+  expect(await classify("git --work-tree=/repo reset --hard", "/tmp/clone")).toBe("destroy-local");
+  expect(await classify("cd \"$DIR\" && git reset --hard", "/tmp/clone")).toBe("destroy-local");
+  const failing: GatedActionReads = {...scratch, git: () => Promise.reject(new Error("not a repository"))};
+  expect((await gatedAction("bash", {command: "git reset --hard"}, "/tmp/clone", failing))?.category).toBe("destroy-local");
+  expect(asked).toContain("/tmp/baseline");
 });
 
 it("does not gate marking a draft PR ready for review", async () => {

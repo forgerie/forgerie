@@ -7,3 +7,5 @@ A child process ends with its child run unless `keepAfterChild: true` is set. Re
 The registry owns launch records and logs. Records contain private environment values. Browser and tool payloads must project public fields, never serialize records. Panel output reads do not acknowledge the durable watch reader. See `docs/managed-processes-core.md`, ADR 0007, and the Processes section of `CONTEXT.md`.
 
 Engineering and verification guidance lives in `.agents/skills/code-quality-architecture/SKILL.md`, `.agents/skills/testing-guide/SKILL.md`, and `docs/testing.md`. User-facing managed process guidance belongs in `docs/plugins.md#managed-processes`.
+
+For session-history, usage or skill-load audits, read docs/session-audits.md first.

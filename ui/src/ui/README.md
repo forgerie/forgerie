@@ -9,7 +9,7 @@ The gates in `ui/gates/` enforce the rules.
 One line per component: the name in backticks, its layer, and what it decides.
 
 - `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions; an input such as a reply box can take the actions' place under the reason; a failed action's problem shows in the failure ink above them.
-- `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays, and a refusal may offer one follow-up (such as Create) to confirm in place.
+- `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays with the refusal's words under it, and a refusal may offer one follow-up (such as Create) to confirm in place.
 - `ValueList` (molecule): a short list of typed values: each in its own box with a Remove named for it, a problem under any box, an empty text, and an add action that turns off at a limit; focus moves into a new box and stays in the list after a removal.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page; `plain` draws a second action beside it with a hairline.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place; inside a list it opens at window level, above the button when the room below is short.
@@ -32,7 +32,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `MarkdownSurface` (atom): the box that gives rendered Markdown the transcript's type: headings, lists, links, tables and quotes as a reply draws them.
 - `MarkdownFragment` (atom): renders a short piece of Markdown inside a block, under the reply's link and image policy, with no outer margin.
 - `Checklist` (molecule): shows progress on a list of tasks from `[x]`/`[~]`/`[ ]`/`[!]`/`[-]` lines, with an in-order meter and a count.
-- `FileTree` (molecule): shows the files a change touched as a tree, marked added, changed or deleted, with single-child directories folded.
+- `FileTree` (molecule): shows the files a change touched as a tree, marked added, changed or deleted, with single-child directories folded; with no marks it is a layout, each entry with its note in one aligned column.
 - `FactList` (molecule): shows a few headline values from `Label: value` lines; cells share a row and wrap by container width.
 - `TreeItem` (atom): one row of an ARIA tree, indented by level, with a chevron on a branch or a toned mark on a leaf, a count, and a dot.
 - `ToggleGroup` (molecule): a few choices of one setting as quiet pressed buttons, each with an optional count, a control-sized hit area, and an optional disabled state; as a form field it shows its label above them; with `multiple`, any number can be pressed (such as days of the week) and the buttons wrap.
@@ -44,13 +44,20 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `CodeEditor` (molecule): an editable CodeMirror editor with line numbers, undo, Tab to indent, Ctrl/Cmd+S, and syntax colour from the file name; read-only, it still selects and copies; it can mark one line and open with the caret on a line.
 - `MarkdownEditor` (organism): a Markdown file formatted like a transcript reply and edited in place with Tiptap, front matter as a read-only block above it (or hidden, when the host shows it elsewhere), Ctrl/Cmd+S, and an optional notice with one action. `useMarkdownView` picks Rich or Source for a file and says when Rich is read-only or off.
 - `Diagram` (molecule): draws Mermaid source once it stops changing, keeps a readable scale by scrolling, and shows the source when it cannot draw.
-- `ClaimList` (molecule): shows findings tagged verified, inferred, opinion or unknown, with a text label and evidence under each.
+- `ClaimList` (molecule): shows findings tagged verified, inferred, opinion or unknown, or with a research verdict (supported, partly, unsupported, contradicted, struck through), with a text label and evidence under each.
 - `Disclosure` (molecule): hides supporting material behind a one-line summary, closed by default and uncontrolled so it stays open while text streams.
 - `CommandBlock` (molecule): one exact command, or what it printed, on a code surface with a copy button: each long line wraps under a hanging indent and is never cut silently; long text can be cut to a few lines with a toggle; a shell command shows a prompt mark the copy leaves out.
 - `CommandList` (molecule): lists shell commands to run in order, each with a note and its own copy button, plus copy all.
 - `BarChart` (molecule): draws a few numbers of one kind as bars from zero, with each value also stated as text.
 - `CorrectionPanel` (molecule): states a correction loudly: the earlier claim struck through, the correct one strong, and the cause.
 - `AsideList` (molecule): lists findings outside the question, each with a high, medium or low pill that reads without colour.
+- `CheckResults` (molecule): shows what a run of checks found from `pass:`/`fail:`/`skip:` lines, each result at the trailing edge, an in-order meter and a count, and what was `unchecked:` as its own group.
+- `FindingList` (molecule): shows a review's defects worst first under a worded verdict, each with a severity pill, a location in the code face that can open its file, the problem and the fix.
+- `RecapPanel` (molecule): shows where work stands for a returning reader: goal, done, left and next, with what needs the reader first on the live wash, or "nothing needs you" in the header.
+- `VerdictLine` (molecule): a yes, no or partly answer and its reason, the word large with its own icon shape so it reads without colour.
+- `RevisionList` (molecule): lists revisions with a hash that copies, a subject, and a word plus a four-step meter for how far each got (local, pushed, landed, deployed).
+- `DeltaTable` (molecule): shows numbers before and after a change, each row's change and percentage, and Better or Worse from which way is good; narrow, the label takes its own line.
+- `Ledger` (molecule): shows amounts of money in one right-aligned column of tabular figures, with ruled totals, a double rule under the last total, signed negatives in the failure ink, ranges, and a missing amount said in words.
 - `RailSection` (molecule): supporting content set smaller and muted on a hairline, optionally closed by a labelled rule that leads into the main text.
 - `TallyRow` (molecule): content with one toned mark per unit of work in its margin; the marks open a panel, and a long tally ends in a count that keeps the worst tone it hides.
 - `Timeline` (molecule): shows events in order with their times in one aligned column, joined by a rail.
@@ -120,3 +127,9 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `TermList` (atom): a few named values in two aligned columns, each value cut to two lines.
 - `SecretEdit` (molecule): a write-only password draft with a public status, separate save and remove actions, and container-wrapping controls; it never receives the saved value.
 - `SecretSettingsField` (molecule): a write-only settings row with injected public status reads and secret writes; it clears drafts and keeps server error text out of the page.
+- `StateMark` (atom): where a job or a build stands as one icon whose shape and tone both carry it: a cross, a check, a turning ring, a pause, and quiet marks for queued, cancelled, skipped, and unread.
+- `WatchToggle` (atom): whether something is watched, as a pressed eye chip in the live colour with a count of how often it fired, and a control-sized hit area.
+- `RunRow` (molecule): one build in a list: a press target with its mark, name, title, age, state word and short code-face facts; its controls stand beside it and drop under the text when the row is narrow; a note and a toned problem take the full width under both.
+- `JobList` (molecule): the jobs of one build: mark, name and time over a ribbon as long as the job's share of the longest one; output opens in place at full length inside the pane that scrolls it, and passes fold into one row.
+- `RunDetail` (organism): one build opened from its list: back and out, the pipeline and number over the full title, facts, one toned line for where it stands, its watch with the control on the same line, its parts, and a quiet remove.
+- `RunList` (organism): a titled list of builds in a scrolling pane: row-shaped skeletons before the first read, a busy sweep on a reread, one alert with retry, an empty text, and a foot that stays in every state.

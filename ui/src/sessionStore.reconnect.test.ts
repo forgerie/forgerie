@@ -1,8 +1,9 @@
 import { openFixture } from "./testing/openFixture";
+import { respondToConnectionChecks } from "../../src/server/realtime/connectionHealth";
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
-import { afterEach, describe, expect, it } from "vitest";
-import { createSessionStore, type SessionStore, type SessionTransport } from "./sessionStore";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { browserTransport, createSessionStore, type SessionStore, type SessionTransport } from "./sessionStore";
 import type { PiMessage, SessionEvent } from "./contracts";
 import { messageText } from "./transcript";
 
@@ -20,7 +21,8 @@ async function recoveryServer() {
   const state = {
     history: [user("before", 1), answer("history answer", 2)],
     partial: null as PiMessage | null, seq: 0, running: false,
-    connections: 0, histories: 0, prompts: 0, failures: 0, rejectSockets: 0,
+    connections: 0, histories: 0, prompts: 0, failures: 0, rejectSockets: 0, checks: 0, slashCommands: 0,
+    slashGate: undefined as ReturnType<typeof deferred> | undefined,
     readFailureStatus: 503, gate: undefined as ReturnType<typeof deferred> | undefined,
     ignoreAbort: false,
   };
@@ -38,6 +40,7 @@ async function recoveryServer() {
     if (path.endsWith("/prompt")) { state.prompts++; send({ error: "Request outcome unknown" }, 503); return; }
     if (path === "/api/sessions/all") { send({ sessions: [{ id: "known", cwd: "/test", name: "Recovery test" }] }); return; }
     if (path.endsWith("/commands")) { send([]); return; }
+    if (path.endsWith("/commands/run")) { state.slashCommands++; await state.slashGate?.promise; send({ type: "done", message: "Command completed" }); return; }
     if (state.failures > 0) { state.failures--; send({ error: "Temporarily unavailable" }, state.readFailureStatus); return; }
     if (path.endsWith("/open")) {
       state.histories++;
@@ -57,7 +60,10 @@ async function recoveryServer() {
   http.on("upgrade", (request, stream, head) => {
     state.connections++;
     if (state.rejectSockets > 0) { state.rejectSockets--; stream.destroy(); return; }
-    ws.handleUpgrade(request, stream, head, (client) => { socket = client; });
+    ws.handleUpgrade(request, stream, head, (client) => {
+      socket = client; respondToConnectionChecks(client);
+      client.on("message", () => { state.checks++; });
+    });
   });
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   const address = http.address();
@@ -69,7 +75,7 @@ async function recoveryServer() {
     watchRecovery: (recover) => { wake = recover; watching = true; return () => { watching = false; }; },
   };
   disposals.push(async () => {
-    state.gate?.resolve();
+    state.gate?.resolve(); state.slashGate?.resolve();
     for (const client of ws.clients) client.terminate();
     ws.close();
     http.closeAllConnections();
@@ -174,6 +180,49 @@ describe("resuming a server-owned run", () => {
 });
 
 describe("automatic connection recovery", () => {
+  it("does not interrupt a healthy session when returning from an image picker", async () => {
+    const api = await recoveryServer();
+    const documentEvents = new EventTarget();
+    const windowEvents = new EventTarget();
+    let visibilityState = "visible";
+    Object.defineProperty(documentEvents, "visibilityState", { get: () => visibilityState });
+    vi.stubGlobal("document", documentEvents);
+    vi.stubGlobal("window", windowEvents);
+    disposals.push(() => { vi.unstubAllGlobals(); });
+    const store = createSessionStore("known", { ...api.transport, watchRecovery: browserTransport.watchRecovery, checkConnection: browserTransport.checkConnection });
+    disposals.push(store.dispose);
+    await store.start();
+    const connections: string[] = [];
+    disposals.push(store.subscribe(() => connections.push(store.getSnapshot().connection.type)));
+    visibilityState = "hidden";
+    documentEvents.dispatchEvent(new Event("visibilitychange"));
+    visibilityState = "visible";
+    documentEvents.dispatchEvent(new Event("visibilitychange"));
+    expect(store.getSnapshot().connection.type).toBe("ready");
+    expect(connections).not.toContain("reconnecting");
+    await until(() => api.state.checks === 1);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(api.state.connections).toBe(1);
+    expect(connections).not.toContain("reconnecting");
+  });
+
+  it("does not cancel a running slash command when a healthy connection passes a wake check", async () => {
+    const api = await recoveryServer();
+    api.state.slashGate = deferred();
+    const store = createSessionStore("known", { ...api.transport, checkConnection: browserTransport.checkConnection });
+    disposals.push(store.dispose);
+    await store.start();
+    const command = store.send("/probe");
+    await until(() => api.state.slashCommands === 1);
+    api.wake();
+    await until(() => api.state.checks === 1);
+    expect(store.getSnapshot().connection.type).toBe("ready");
+    expect(store.getSnapshot().sending).toBe(true);
+    api.state.slashGate.resolve();
+    await command;
+    expect(store.getSnapshot().commandError).toBeUndefined();
+    expect(api.state.connections).toBe(1);
+  });
   it("retains history while disconnected and recovers work completed offline without sending a prompt", async () => {
     const api = await recoveryServer();
     await api.store.start();

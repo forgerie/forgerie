@@ -1,0 +1,42 @@
+/* Numbers before and after. The bar chart's unframed rows between hairlines.
+   The change says better or worse in words, with an arrow for the direction
+   of the number and the tone for its meaning. The label column keeps a
+   readable minimum; the change stacks its amount over its percentage so the
+   number columns stay narrow. */
+.delta-table { container-type: inline-size; margin: var(--space-4) 0; }
+.delta-table-title { margin-block-end: var(--space-2); font-weight: 600; overflow-wrap: anywhere; }
+.delta-table .delta-table-rows {
+  display: grid; grid-template-columns: minmax(9rem, 1fr) max-content max-content max-content max-content; column-gap: var(--space-3);
+  margin: 0; padding: 0; list-style: none;
+  border-block-start: var(--hairline) solid var(--line);
+}
+.delta-table .delta-table-row {
+  grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline;
+  margin: 0; padding-block: var(--space-2);
+  border-block-end: var(--hairline) solid var(--line);
+}
+.delta-table .delta-table-head { padding-block: var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
+.delta-table-label { min-inline-size: 0; overflow-wrap: anywhere; }
+.delta-table-direction { display: block; color: var(--muted-foreground); font-size: var(--meta-text); line-height: 1.4; }
+.delta-table-num { font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+.delta-table-before { color: var(--muted-foreground); }
+.delta-table-after { font-weight: 600; }
+.delta-table-change {
+  display: flex; flex-direction: column; align-items: end;
+  font-size: var(--small-text); font-variant-numeric: tabular-nums; line-height: 1.35; white-space: nowrap;
+}
+.delta-table-pct { color: var(--muted-foreground); font-size: var(--meta-text); }
+.delta-table-word { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--small-text); font-weight: 600; white-space: nowrap; }
+.delta-table-trend { inline-size: 0.9375rem; block-size: 0.9375rem; }
+.delta-table-row[data-meaning="better"] :is(.delta-table-word, .delta-table-abs) { color: var(--ink-good); }
+.delta-table-row[data-meaning="worse"] :is(.delta-table-word, .delta-table-abs) { color: var(--ink-bad); }
+.delta-table-row:is([data-meaning="same"], [data-meaning="none"]) .delta-table-word { color: var(--muted-foreground); font-weight: 500; }
+.delta-table-row[data-meaning="worse"] .delta-table-label { font-weight: 550; }
+/* Narrow: the label takes its own line; the numbers share the next one. */
+@container (max-width: 32rem) {
+  .delta-table .delta-table-rows { grid-template-columns: max-content max-content minmax(0, 1fr) max-content; }
+  .delta-table .delta-table-head { display: none; }
+  .delta-table-label { grid-column: 1 / -1; margin-block-end: 0.125rem; }
+  .delta-table-before::after { content: " \2192"; }
+  .delta-table-change { flex-direction: row; align-items: baseline; justify-content: start; gap: var(--space-2); }
+}

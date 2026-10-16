@@ -14,7 +14,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { WorkflowRunSchema } from "../../shared/workflowRuns.js";
-import { workflowExtension, proposeWorkflow, startWorkflowProposal, workflowRuns } from "./durableWorkflowRuns.js";
+import { workflowExtension, proposeWorkflow, startWorkflowProposal, workflowRuns, waitingWorkflowDecisions, acknowledgeWorkflowStall, WORKFLOW_STALL_GRACE_MS } from "./durableWorkflowRuns.js";
 import { createRegistry, defineDoc, LiveDoc } from "@earendil-works/pi-durable";
 import { afterEach, expect, it, vi } from "vitest";
 import { durableChildExtensions, listChildren, stopChild, answerChildQuestion } from "./durableChildAgents.js";
@@ -106,7 +106,7 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     await submission.wait(context);
     return journal.conversation.context(context);
   }
-  return { root, runStore, children, spawn, parentInputs, calls: () => childCalls, journal: () => journal,
+  return { root, runStore, children, spawn, parentInputs, calls: () => childCalls, journal: () => journal, worktrees,
     restart: async (at: number, corruptRecords = false) => { await recorder?.close(); await journal.close(); now = at; journal = await open(corruptRecords); },
     advanceClock: (ms: number) => { now += ms; },
     recordPath, recordErrors, runtimeErrors,
@@ -123,8 +123,68 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
       if (question === undefined) throw new Error("Missing child question");
       await answerChildQuestion(journal.conversation, question.questionId, "Proceed", context);
     },
-    stop: async (id: number) => stopChild(journal.harness, journal.conversation, id, context, worktrees) };
+    stop: async (id: number) => stopChild(journal.harness, journal.conversation, id, context, worktrees),
+    waiting: () => waitingWorkflowDecisions(journal.harness, journal.conversation.id, context),
+    acknowledge: () => journal.conversation.commit((tx) => acknowledgeWorkflowStall(tx, journal.conversation.id), context),
+    /** Stall watches that have not finished. */
+    stallWatches: () => journal.conversation.commit(async (tx) => {
+      let count = 0;
+      for (const status of ["pending", "running", "waiting", "completing"] as const) {
+        count += (await tx.scanTasks({ status }, 100)).items.filter((task) => task.kind === "forgerie.workflow-stall").length;
+      }
+      return count;
+    }, context) };
 }
+
+const WAKE = 'Child "broken" failed and nothing has run since';
+async function failedAndReported(run: Awaited<ReturnType<typeof fixture>>) {
+  await run.startWorkflow();
+  await run.spawn({ name: "broken", agent: "reader" });
+  await vi.waitFor(async () => { expect((await run.runs())[0]?.children[0]?.state).toMatchObject({ kind: "settled", outcome: "failed", delivered: true }); });
+  await vi.waitFor(async () => { expect((await run.journal().harness.snapshot(LiveDoc, run.journal().conversation.id, context))?.run).toBeUndefined(); });
+}
+it("wakes the agent once when a run sits idle after a child failed, then flags the run for the user", async () => {
+  const run = await fixture(["Invalid API key"]);
+  await failedAndReported(run);
+  expect((await run.runs())[0]?.stall).toBeUndefined();
+  expect(await run.stallWatches()).toBe(1);
+  await run.restart(1000000 + WORKFLOW_STALL_GRACE_MS);
+  await vi.waitFor(() => { expect(run.parentInputs.filter((text) => text.includes(WAKE))).toHaveLength(1); });
+  expect(run.parentInputs.find((text) => text.includes(WAKE))).toContain("Invalid API key");
+  await vi.waitFor(async () => { expect((await run.runs())[0]?.stall).toMatchObject({ state: "woken", child: "broken" }); });
+  expect(await run.waiting()).toBe(0);
+  // The faux agent only replies, so nothing runs after the wake.
+  await run.restart(1000000 + 2 * WORKFLOW_STALL_GRACE_MS);
+  await vi.waitFor(async () => { expect((await run.runs())[0]?.stall).toMatchObject({ state: "flagged", child: "broken" }); });
+  expect((await run.runs())[0]?.stall?.error).toContain("Invalid API key");
+  expect(await run.waiting()).toBe(1);
+  expect(await run.stallWatches()).toBe(0);
+  expect(run.parentInputs.filter((text) => text.includes(WAKE))).toHaveLength(1);
+  await run.acknowledge();
+  expect((await run.runs())[0]?.stall).toBeUndefined();
+  expect(await run.waiting()).toBe(0);
+});
+it("ends the stall watch without waking the agent when it starts new work", async () => {
+  const run = await fixture(["Invalid API key"]);
+  await failedAndReported(run);
+  await run.spawn({ name: "again", agent: "reader" });
+  await vi.waitFor(async () => { expect((await run.runs())[0]?.children[1]?.state).toMatchObject({ kind: "settled", outcome: "answered" }); });
+  await run.restart(1000000 + WORKFLOW_STALL_GRACE_MS);
+  await vi.waitFor(async () => { expect(await run.stallWatches()).toBe(0); });
+  expect(run.parentInputs.some((text) => text.includes(WAKE))).toBe(false);
+  expect((await run.runs())[0]?.stall).toBeUndefined();
+});
+it("does not flag the user after they wrote to the woken agent", async () => {
+  const run = await fixture(["Invalid API key"]);
+  await failedAndReported(run);
+  await run.restart(1000000 + WORKFLOW_STALL_GRACE_MS);
+  await vi.waitFor(async () => { expect((await run.runs())[0]?.stall?.state).toBe("woken"); });
+  await run.acknowledge();
+  await run.restart(1000000 + 2 * WORKFLOW_STALL_GRACE_MS);
+  await vi.waitFor(async () => { expect(await run.stallWatches()).toBe(0); });
+  expect((await run.runs())[0]?.stall).toBeUndefined();
+  expect(await run.waiting()).toBe(0);
+});
 
 it.each(["answered", "failed", "stopped"] as const)("ends a managed child process on committed %s completion, unless kept", async (outcome) => {
   const control = controlledManagedProcessLauncher();
@@ -179,6 +239,8 @@ it("defaults writers and general helpers to worktrees, readers to shared, and ho
   }
   const children = await run.children();
   expect(children.filter((child) => child.worktree !== undefined).map((child) => child.name)).toEqual(["writer", "helper", "isolated"]);
+  // The gate treats exactly these active child worktrees as disposable.
+  expect((await run.worktrees.activePaths()).sort()).toEqual(children.flatMap((child) => child.worktree === undefined ? [] : [child.worktree.path]).sort());
 });
 it("refuses a second busy shared writer and names the first child", async () => {
   const run = await fixture();

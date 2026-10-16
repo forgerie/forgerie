@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentDirPromptLibrary } from "./promptLibrary.js";
-import { assertProseOnly, parseWorkflow, workflowInputs, WorkflowLibrary, workflowPrompt } from "./workflowLibrary.js";
+import { assertProseOnly, FULL_CHECK_RULE, parseWorkflow, workflowInputs, WorkflowLibrary, workflowPrompt } from "./workflowLibrary.js";
 
 const definition = `---
 description: An experiment
@@ -93,6 +93,7 @@ describe("prose workflows in the prompt library", () => {
     expect(prompt).toContain("1. Contract (id contract) [stop: the user approves]");
     expect(prompt).toContain("Workers: ui (agent design-engineer, model anthropic/opus:high).");
     expect(prompt).toContain('call workflow_stop with runId "run-1"');
+    expect(prompt).toContain(FULL_CHECK_RULE);
     expect(() => parseWorkflow("bad", "bad.md", staged.replace("stop: approve }", "stop: approve, workers: [{ name: x }] }"))).toThrow("cannot declare workers");
     expect(() => parseWorkflow("bad", "bad.md", staged.replace("stop: land", "stop: later"))).toThrow("optional stages");
     expect(workflowPrompt("run-1", parseWorkflow("plain", "plain.md", definition), { task: "x" })).not.toContain("workflow_stop");

@@ -1,11 +1,12 @@
 import { decisionAnnotations, riskAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { launchRiskLabel, enabledRiskLabelSettings, type RiskLabelOptions } from "../decisions/riskLabels.js";
 import type { Context, JsonValue } from "@earendil-works/chord";
-import { AgentDoc, LiveDoc, ToolTask, UsageDoc, defineDoc, defineExtension, defineTask, hook, section, type JsonObject, type CommitPublication, type Conversation, type ConversationId, type Harness, type HookApi, type ToolDiagnostic, type ToolExecutionApi, type Tx, type TaskRuntime } from "@earendil-works/pi-durable";
+import { AgentDoc, LiveDoc, ToolTask, UsageDoc, defineExtension, defineTask, hook, section, type JsonObject, type CommitPublication, type Conversation, type ConversationId, type Harness, type HookApi, type ToolDiagnostic, type ToolExecutionApi, type Tx, type TaskRuntime } from "@earendil-works/pi-durable";
 import type { Usage } from "@earendil-works/pi-ai";
 import { Check } from "typebox/value";
 import { GatedActionSchema, GATED_ACTION_ENTRY_KIND, type GatedAction, type GatedActionEntry } from "../../shared/gatedActions.js";
-import { defaultAutonomyPolicySource, type AutonomyPolicySource, type GatedCategory } from "../../shared/autonomyPolicy.js";
+import { defaultAutonomyPolicySource, type AutonomyPolicySource } from "../../shared/autonomyPolicy.js";
+import { GATED_ACTIONS_DOC_KIND, Gates, type GateRecord } from "./durableGateRecords.js";
 import { gatedAction, type GatedActionReads } from "./gatedActions.js";
 import { durableJson } from "./durableJson.js";
 import { deliverInputUntilPlaced, type InputPlacementState } from "./durableInputPlacement.js";
@@ -13,17 +14,11 @@ import { durableChildRunMetadata } from "./durableChildAgents.js";
 import { logDecision } from "./durableDecisions.js";
 import { WorkflowError } from "../resources/workflowLibrary.js";
 
-export const GATED_ACTIONS_DOC_KIND = "forgerie.gated-actions";
-export const GATED_ACTION_GUIDANCE = "Irreversible actions and actions outside the project in the user's name are gated. While approval waits, keep working on parts that do not depend on it. Do not retry the blocked call; its result will arrive as a message.";
+export const GATED_ACTION_GUIDANCE = "Irreversible actions and actions outside the project in the user's name are gated. While approval waits, keep working on parts that do not depend on it. Do not retry the blocked call; its result will arrive as a message. Discarding files in a scratch clone under /tmp or in a child worktree is not gated: run the Git command from that tree, or name it with git -C <path>. A cd joined to the command with && or | still gates.";
 /* eslint-disable @typescript-eslint/consistent-type-definitions */
-type GateRecord = { id: string; conversationId: ConversationId; by: string; tool: string; args: JsonObject; category: GatedCategory; description: string; requestedAt: number;
-  state: {kind: "waiting" | "approved" | "refused"} | {kind: "ran"; result: JsonValue; at: number} | {kind: "failed"; error: string; at: number} };
 type RunInput = { parent: ConversationId; id: string; cwd: string; nestedTools?: string };
 type RunState = { phase: "ready" } | { phase: "unknown" };
 /* eslint-enable @typescript-eslint/consistent-type-definitions */
-const Gates = defineDoc<{ records: Record<string, GateRecord>; cwd: Record<string, string>; nestedTools?: Record<string, string> }>({
-  kind: GATED_ACTIONS_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({records: {}, cwd: {}}),
-});
 export function gatedActionsChanged(publication: CommitPublication, parent: ConversationId): boolean {
   return publication.changes.some(change => change.type === "document" && change.conversationId === parent && change.record.kind === GATED_ACTIONS_DOC_KIND);
 }

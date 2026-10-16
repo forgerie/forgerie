@@ -18,7 +18,7 @@ import type { DurableNativeHistory } from "./durableNativeHistory.js";
 export interface DurableParentState {
   response(context: Context): Promise<SessionResponse>;
   pendingAsk(context: Context): Promise<PendingAskUser | undefined>;
-  declareResponse(awaiting: "nothing" | "reply", context: Context): Promise<void>;
+  declareResponse(awaiting: "nothing" | "reply", context: Context, reply?: string): Promise<void>;
   voidForChatReply(context: Context): Promise<AskUserOutcome | undefined>;
   openAsk(questions: readonly AskUserQuestion[], context: Context): Promise<PendingAskOpenResult>;
   submitAsk(askId: string, submission: AskUserSubmission, context: Context): Promise<PendingAskCloseResult>;
@@ -71,12 +71,13 @@ class ParentState implements DurableParentState {
     return asks.pending === undefined ? undefined : structuredClone(asks.pending);
   }
 
-  async declareResponse(awaiting: "nothing" | "reply", context: Context): Promise<void> {
+  async declareResponse(awaiting: "nothing" | "reply", context: Context, reply?: string): Promise<void> {
     if (!Check(Type.Union([Type.Literal("nothing"), Type.Literal("reply")]), awaiting)) throw new PendingAskValidationError("Invalid response declaration");
+    if (reply !== undefined && (typeof reply !== "string" || reply.trim() === "")) throw new PendingAskValidationError("Invalid visible reply");
     await this.flush(context);
     await this.handle.conversation.commit(async tx => {
       if ((await tx.doc(ParentAsks, this.handle.conversation.id)).pending !== undefined) throw new PendingAskValidationError("An unanswered ask_user form is already waiting for the user");
-      await this.record(tx, { version: 1, kind: "declared", awaiting });
+      await this.record(tx, { version: 1, kind: "declared", awaiting }, undefined, undefined, reply);
     }, context);
   }
 
@@ -184,7 +185,7 @@ class ParentState implements DurableParentState {
     }, context);
   }
 
-  private async record(tx: Tx, event: SessionResponseEvent, sdkEntryId: string = randomUUID(), timestamp = new Date().toISOString()): Promise<void> {
+  private async record(tx: Tx, event: SessionResponseEvent, sdkEntryId: string = randomUUID(), timestamp = new Date().toISOString(), reply?: string): Promise<void> {
     const id = this.handle.conversation.id;
     const asks = await tx.doc(ParentAsks, id);
     const response = await tx.doc(ParentResponse, id);
@@ -197,7 +198,8 @@ class ParentState implements DurableParentState {
     response.protocol = true;
     if (event.kind === "started") response.missingReplyRetry = "available";
     if (next.pendingAsk === undefined) delete asks.pending; else asks.pending = next.pendingAsk;
-    const marker = await tx.appendEntry(id, { kind: "forgerie.app-state", data: { sdkEntryId, change: "custom-entry", customType: SESSION_RESPONSE_CUSTOM_TYPE },
+    const marker = await tx.appendEntry(id, { kind: "forgerie.app-state", data: { sdkEntryId, change: "custom-entry", customType: SESSION_RESPONSE_CUSTOM_TYPE,
+      ...(reply === undefined ? {} : { endTurnReply: { text: reply, timestamp: Date.now() } }) },
       ...(event.kind === "answered" && event.outcome.reason === "answered-in-chat" ? { model: [{ role: "user" as const, content: renderAskUserAnswersText(event.outcome), timestamp: Date.now() }] } : {}) });
     // This rewindable history is compatibility data, not live form authority. It preserves historical asks on forks.
     (await tx.doc(ExtensionEntries, id, SESSION_RESPONSE_CUSTOM_TYPE, null)).entries.push({ id: sdkEntryId, nativeEntryId: marker.id, timestamp, data: copyJson(event) });

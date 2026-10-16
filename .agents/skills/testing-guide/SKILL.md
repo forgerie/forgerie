@@ -38,7 +38,7 @@ For a component's CSS or layout, follow `frontend-design`, `intrinsic-design`, a
 
 ## Verification and failures
 
-Run the focused changed tests first, then typecheck and lint. Cross-cutting changes require `npm run verify`. Deleted modules require the full suite because their import graph is gone. Preserve coverage thresholds.
+Run the focused changed tests first, then typecheck and lint. Cross-cutting changes require `npm run verify`. A child agent leaves that run to its parent unless its task assigns it; see `docs/testing.md`. Deleted modules require the full suite because their import graph is gone. Preserve coverage thresholds.
 
 Inspect the complete failure before changing code or tests. A timeout under concurrent builds is not proof of a product regression. Rerun heavy checks serially before changing deadlines. Do not remove an assertion or lower a gate to make a test pass.
 

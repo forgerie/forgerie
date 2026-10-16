@@ -8,6 +8,8 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, wrapTool, type ToolRegistration, type Wrap } from "@earendil-works/pi-durable";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
 
+import { imageType, readImageProblem } from "./readImageSafety.js";
+
 const run = promisify(execFile);
 /** One page of diff output. pi-subagents bounds a call at 24,000 characters; a page here is larger and continues. */
 export const DIFF_PAGE_CHARS = 60_000;
@@ -78,19 +80,6 @@ export const watchdogDiffTool = defineTool({
   },
 });
 
-/** The largest image sent to a model; providers refuse larger ones. Base64 adds a third. */
-export const MAX_IMAGE_BYTES = 3_750_000;
-
-/** The image type from its first bytes, for the formats models accept. */
-export function imageType(bytes: Uint8Array): string | undefined {
-  const starts = (...values: number[]) => values.every((value, index) => bytes[index] === value);
-  if (starts(0x89, 0x50, 0x4e, 0x47)) return "image/png";
-  if (starts(0xff, 0xd8, 0xff)) return "image/jpeg";
-  if (starts(0x47, 0x49, 0x46, 0x38)) return "image/gif";
-  if (starts(0x52, 0x49, 0x46, 0x46) && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return "image/webp";
-  return undefined;
-}
-
 /** Durable's read refuses images. This wrap returns the image itself, so a child can look at a screenshot. */
 export function readsImages(read: ToolRegistration): Wrap {
   return wrapTool(read, (tool) => ({
@@ -105,9 +94,8 @@ export function readsImages(read: ToolRegistration): Wrap {
       if (bytes?.ok !== true) return result;
       const mimeType = imageType(bytes.value);
       if (mimeType === undefined) return result;
-      if (bytes.value.length > MAX_IMAGE_BYTES) {
-        return { content: [{ type: "text" as const, text: `${path} is a ${mimeType} image of ${String(Math.round(bytes.value.length / 1000))} KB, above the ${String(MAX_IMAGE_BYTES / 1_000_000)} MB a model accepts. Make a smaller copy and read that.` }], isError: true };
-      }
+      const problem = readImageProblem(bytes.value, mimeType);
+      if (problem !== undefined) return { content: [{ type: "text" as const, text: `${path}: ${problem}` }], isError: true };
       return { content: [{ type: "text" as const, text: `${path}: ${mimeType}, ${String(Math.round(bytes.value.length / 1000))} KB` },
         { type: "image" as const, data: Buffer.from(bytes.value).toString("base64"), mimeType }] };
     },

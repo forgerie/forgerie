@@ -32,6 +32,29 @@ describe("end_turn", () => {
     expect(() => tool.execute("end", { awaiting: "reply" }, undefined, undefined, context(["end"], before))).toThrow("no text");
     expect(declare).not.toHaveBeenCalled();
   });
+  it("accepts an explicit visible reply when the calling message has only thinking", async () => {
+    const declare = vi.fn();
+    const result = await createEndTurnToolDefinition({ declare }).execute("end", { awaiting: "reply", reply: "Which option?" }, undefined, undefined,
+      context(["end"], [{ type: "thinking", thinking: "PRIVATE" }]));
+    expect(declare).toHaveBeenCalledWith("reply", "Which option?");
+    expect(result.terminate).toBe(true);
+  });
+  it("does not duplicate the reply when the calling message already has visible text", async () => {
+    const declare = vi.fn();
+    await createEndTurnToolDefinition({ declare }).execute("end", { awaiting: "nothing", reply: "Duplicate" }, undefined, undefined, context(["end"]));
+    expect(declare).toHaveBeenCalledWith("nothing");
+  });
+  it.each(["", "  \n"])("rejects a blank reply %j with no visible text", (reply) => {
+    const declare = vi.fn();
+    expect(() => createEndTurnToolDefinition({ declare }).execute("end", { awaiting: "nothing", reply }, undefined, undefined, context(["end"], []))).toThrow("no text");
+    expect(declare).not.toHaveBeenCalled();
+  });
+  it("does not replace an unanswered form even when a reply is supplied", () => {
+    const declare = vi.fn();
+    const asked = { type: "custom", customType: "forgerie.session-response.v1", data: { version: 1, kind: "asked", ask: { askId: "a", askedAt: "now", questions: [{ id: "q", question: "Which?", options: [] }] } } };
+    expect(() => createEndTurnToolDefinition({ declare }).execute("end", { awaiting: "nothing", reply: "Done" }, undefined, undefined, context(["end"], [], [asked]))).toThrow("unanswered ask_user");
+    expect(declare).not.toHaveBeenCalled();
+  });
   it("asks the corrective retry for plain text without another tool call", () => {
     const tool = createEndTurnToolDefinition({ declare: vi.fn() });
     expect(() => tool.execute("end", { awaiting: "reply" }, undefined, undefined, context(["end"], []))).toThrow(/plain text and call no tool/);

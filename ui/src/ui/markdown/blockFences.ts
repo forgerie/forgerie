@@ -5,15 +5,22 @@
 import type { ComponentsByLanguage } from "@assistant-ui/react-streamdown";
 import { AsideList } from "../AsideList";
 import { BarChart } from "../BarChart";
+import { CheckResults } from "../CheckResults";
 import { Checklist } from "../Checklist";
 import { ClaimList } from "../ClaimList";
 import { CommandList } from "../CommandList";
 import { CorrectionPanel } from "../CorrectionPanel";
+import { DeltaTable } from "../DeltaTable";
 import { Diagram } from "../Diagram";
 import { Disclosure } from "../Disclosure";
 import { FactList } from "../FactList";
 import { FileTree } from "../FileTree";
+import { FindingList } from "../FindingList";
+import { Ledger } from "../Ledger";
+import { RecapPanel } from "../RecapPanel";
+import { RevisionList } from "../RevisionList";
 import { Timeline } from "../Timeline";
+import { VerdictLine } from "../VerdictLine";
 
 // The generic code header (language name and copy) does not belong on a block that is not code.
 export const noHeader = () => null;
@@ -30,6 +37,13 @@ export const blockFences: ComponentsByLanguage = {
   correction: { SyntaxHighlighter: CorrectionPanel, CodeHeader: noHeader },
   asides: { SyntaxHighlighter: AsideList, CodeHeader: noHeader },
   timeline: { SyntaxHighlighter: Timeline, CodeHeader: noHeader },
+  checks: { SyntaxHighlighter: CheckResults, CodeHeader: noHeader },
+  findings: { SyntaxHighlighter: FindingList, CodeHeader: noHeader },
+  recap: { SyntaxHighlighter: RecapPanel, CodeHeader: noHeader },
+  verdict: { SyntaxHighlighter: VerdictLine, CodeHeader: noHeader },
+  commits: { SyntaxHighlighter: RevisionList, CodeHeader: noHeader },
+  delta: { SyntaxHighlighter: DeltaTable, CodeHeader: noHeader },
+  ledger: { SyntaxHighlighter: Ledger, CodeHeader: noHeader },
   // Agents also write the language Mermaid itself names.
   mermaid: { SyntaxHighlighter: Diagram, CodeHeader: noHeader },
 };

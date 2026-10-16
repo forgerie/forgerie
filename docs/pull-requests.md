@@ -2,6 +2,8 @@
 
 Forgerie's GitHub App reads PR data and links each PR to the session that created it. One session can link several PRs, and each has its own watch. Linking another PR never replaces an earlier one. The MVP frontend (`new-ui-mvp`) shows them; the Lit frontend has no PR panel.
 
+See [linked GitHub Actions runs](action-runs.md) for independent run links and watches.
+
 ## Agent tools
 
 `github_write create_pr` adds a session link after GitHub creates the PR. A failed link write reports the created URL. Do not create another PR to repair a failed link.

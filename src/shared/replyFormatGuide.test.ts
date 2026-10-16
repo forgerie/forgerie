@@ -9,8 +9,10 @@ describe("reply format guide", () => {
   });
 
   it("stays within its budget, because every model call carries it", () => {
-    // About 750 tokens. Raise this only with the per-call cost in mind.
-    expect(REPLY_FORMAT_GUIDE.length).toBeLessThanOrEqual(3_000);
+    // About 925 tokens. Raised from 3,000 for the round-four blocks (checks,
+    // findings, recap, verdict, commits, delta, ledger). Raise this only with
+    // the per-call cost in mind.
+    expect(REPLY_FORMAT_GUIDE.length).toBeLessThanOrEqual(3_700);
   });
 
   it("explicitly treats proposal text as a browser document, not a repository file", () => {
@@ -21,7 +23,8 @@ describe("reply format guide", () => {
 
   it("shows an example of every block the browser app renders", () => {
     expect(REPLY_FORMAT_GUIDE).toContain("> [!NOTE]");
-    for (const language of ["steps", "compare", "status", "files", "facts", "diagram", "claims", "commands", "details", "bars", "correction", "asides", "timeline"]) {
+    for (const language of ["steps", "compare", "status", "files", "facts", "diagram", "claims", "commands", "details", "bars", "correction", "asides", "timeline",
+      "checks", "findings", "recap", "verdict", "commits", "delta", "ledger"]) {
       expect(REPLY_FORMAT_GUIDE).toContain("```" + language + "\n");
     }
   });

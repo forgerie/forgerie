@@ -15,7 +15,7 @@ import { useThreadMessages } from "./useThreadMessages";
 import { foldProcessEvents } from "./processes/processEvent";
 import { loadProcessOutput } from "./processes/processApi";
 import { ProcessEventView } from "./processes/ProcessEventView";
-import { markPosition, threadMessageIdAt, type ChildEntryArtifact, type GatedActionArtifact, type OldIssueProposalArtifact, type ProcessEventArtifact, type WorkflowEntryArtifact } from "./transcript";
+import { markPosition, threadMessageIdAt, type ActionRunNoticeArtifact, type ChildEntryArtifact, type GatedActionArtifact, type OldIssueProposalArtifact, type ProcessEventArtifact, type WorkflowEntryArtifact } from "./transcript";
 import type { FoundBinding, MatchBarView } from "./search/found";
 import { MatchBar } from "./search/MatchBar";
 import type { SystemArtifactView } from "./ui/Messages";
@@ -67,6 +67,12 @@ import { createPullRequestApi, type PullLink } from "./pullRequests/pullRequestA
 import { useSessionPulls } from "./pullRequests/useSessionPull";
 import { firstToShow } from "./pullRequests/pullRequestModel";
 import { PullRequestOpener, PullRequestReview } from "./ui/PullRequestReview";
+import { createActionRunApi, type ActionRunLink } from "./actionRuns/actionRunApi";
+import { createActionRunsStore } from "./actionRuns/actionRunsStore";
+import { listTone } from "./actionRuns/actionRunModel";
+import { ActionRunsPanel, type ActionRunsActions } from "./actionRuns/ActionRunsPanel";
+import { PullRunsSection } from "./actionRuns/PullRunsSection";
+import { ActionRunNoticeView } from "./actionRuns/ActionRunNoticeView";
 import { foldChildEntries } from "./childAgents/childAgentsModel";
 import { ChildAgentsOpener } from "./childAgents/ChildAgentsOpener";
 import { ChildAgentsPanel } from "./childAgents/ChildAgentsPanel";
@@ -92,9 +98,11 @@ import { OldIssueProposalLine } from "./issues/OldIssueProposalLine";
 
 const pullRequests = createPullRequestApi(browserTransport.request);
 const NO_LINKS: readonly PullLink[] = [];
+const actionRunApi = createActionRunApi(browserTransport.request);
+const NO_RUN_LINKS: readonly ActionRunLink[] = [];
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ entry: retainedEntry, visible = true, id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, worktrees, onNewSession, relatedWork, resourceLens, found }: {
+export function ForgerieSession({ entry: retainedEntry, visible = true, id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, actionRuns: catalogRuns, worktrees, onNewSession, relatedWork, resourceLens, found }: {
   entry?: SessionEntry | undefined;
   visible?: boolean | undefined;
   /** The search hit the reader opened in this session: a message to mark and step from, or an off-branch entry for the history tree. */
@@ -104,6 +112,8 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
   resourceLens?: ResourceLensRenderer | undefined;
   /** The catalog's live view of this session's pull request link and watch. */
   pullRequests?: readonly PullLink[] | undefined;
+  /** The catalog's live view of this session's linked Actions runs and their watches. */
+  actionRuns?: readonly ActionRunLink[] | undefined;
   onUnread?: ((listener: (id: string) => void) => () => void) | undefined;
   id: string; known?: Session | undefined; initialDraft?: string | undefined;
   /** The catalog's live view of this session's worktree: state, setup, and branch as events report them. */
@@ -212,6 +222,23 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
   const pullItems = pull.load.type === "ready" ? pull.load.items : [];
   const readPulls = useMemo(() => pullItems.flatMap((item) => item.pull ? [item.pull] : []), [pullItems]);
   const linkedCount = Math.max(pull.links.length, pullItems.length);
+  // Actions runs: their own store, read when the pull request panel first opens, then kept current by the catalog's run events.
+  const [actionRuns] = useState(() => createActionRunsStore(actionRunApi));
+  const actionRunState = useSyncExternalStore(actionRuns.subscribe, actionRuns.getSnapshot);
+  const ownRuns = useMemo(() => catalogRuns?.filter((link) => link.session.cwd === cwd) ?? NO_RUN_LINKS, [catalogRuns, cwd]);
+  useEffect(() => { actionRuns.setSession(pullRef); }, [actionRuns, pullRef]);
+  useEffect(() => { actionRuns.syncLinks(ownRuns); }, [actionRuns, ownRuns]);
+  // The server does not replay events missed while the socket was down: the list route is the recovery source.
+  useEffect(() => { if (connected) actionRuns.recover(); }, [actionRuns, connected]);
+  // Runs under each linked pull request come with the run list: read it again when a pull request is linked or unlinked, or its head moves.
+  useEffect(() => { if (pull.load.type === "ready") actionRuns.syncPulls(readPulls); }, [actionRuns, pull.load.type, readPulls]);
+  useEffect(() => () => { actionRuns.dispose(); }, [actionRuns]);
+  const [runsFirst, setRunsFirst] = useState(false);
+  const runActions: ActionRunsActions = {
+    onRefresh: actionRuns.refresh, onLink: actionRuns.link, onOpenRun: actionRuns.openDetail, onCloseRun: actionRuns.closeDetail,
+    onUnlink: (key, runId) => { void actionRuns.unlink(key, runId); }, onWatch: (key, runId, on) => { void actionRuns.setWatch(key, runId, on); },
+  };
+  const runItems = actionRunState.load.type === "ready" ? actionRunState.load.items : [];
   /** Send a chat message with every waiting note. Only the notes it carried leave the tray, and only once Pi accepted it. */
   const sendWithNotes = useCallback(async (text: string, images: PromptAttachment[] | undefined, steer: boolean) => {
     const carried = carriesNotes(text) ? tray.notes() : [];
@@ -360,6 +387,8 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     }
     if (entry !== undefined) return <ChildEntryView entry={entry} onAnswer={childrenAvailable && !readOnly ? childAgents.answer : undefined}
       onOpen={childrenAvailable ? openChildByName : undefined} />;
+    const runNotice = (custom as Partial<ActionRunNoticeArtifact> | undefined)?.actionRunNotice;
+    if (runNotice !== undefined) return <ActionRunNoticeView notice={runNotice} />;
     const event = (custom as Partial<ProcessEventArtifact> | undefined)?.processEvent;
     if (event === undefined) return undefined;
     const onLoadOutput = sessionId && cwd ? () => loadProcessOutput(browserTransport.request, { id: sessionId, cwd }, event.id) : undefined;
@@ -481,8 +510,9 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
       actions={<>
         {/* A landed or discarded worktree has no folder left to diff. */}
         {/* Linked: always, even read-only, so a landed session still shows its pull request. Unlinked: only where the agent could still open one. */}
-        {pullRef && (linkedCount > 0 || (!readOnly && pull.load.type === "ready")) && <PullRequestOpener pulls={readPulls} links={pull.links}
-          onOpen={() => { pull.clearNotice(); setPullSelected(firstToShow(pullItems)); setPullOpen(true); }} />}
+        {pullRef && (linkedCount > 0 || ownRuns.length > 0 || (!readOnly && pull.load.type === "ready")) && <PullRequestOpener pulls={readPulls} links={pull.links}
+          onOpen={() => { pull.clearNotice(); actionRuns.clearNotice(); actionRuns.open(); setRunsFirst(linkedCount === 0 && ownRuns.length > 0);
+            setPullSelected(firstToShow(pullItems)); setPullOpen(true); }} />}
         {childrenAvailable && !readOnly && <WorkflowOpener waiting={waitingStops(running)} running={running !== undefined}
           onOpen={() => { void workflows.readSaved(); setWorkflowSheet({ type: "picker" }); }} />}
         {/* Like the child agents, the log's button appears once there is something in it. A failed read shows it too:
@@ -616,10 +646,14 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
       {visible && decisionsOpen && <DecisionsSheet log={log} actions={logActions} onClose={() => { decisions.dismissError(); setDecisionsOpen(false); }} />}
       {visible && pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
         notice={pull.notice} writing={pull.writing} now={Date.now()}
-        onRefresh={pull.refresh} onWatch={(number, on) => { void pull.setWatch(number, on); }} onLink={pull.linkNumber}
+        onRefresh={() => { pull.refresh(); actionRuns.recover(); }} onWatch={(number, on) => { void pull.setWatch(number, on); }} onLink={pull.linkNumber}
         onUnlink={(number) => { void pull.unlink(number); }}
         onMerge={(number) => { void pull.merge(number, "rebase"); }} onClose={() => setPullOpen(false)}
-        onAsk={(message) => { if (!readOnly) runtimeRef.current?.thread.composer.setText(message); }} />}
+        onAsk={(message) => { if (!readOnly) runtimeRef.current?.thread.composer.setText(message); }}
+        extraView={{ label: "Actions", title: "Workflow runs", tone: listTone(runItems.map((item) => item.run)), first: runsFirst,
+          onRefresh: actionRuns.refresh, content: <ActionRunsPanel state={actionRunState} now={Date.now()} readOnly={readOnly} actions={runActions} /> }}
+        belowPull={(number) => <PullRunsSection number={number} state={actionRunState} now={Date.now()} readOnly={readOnly}
+          onWatch={runActions.onWatch} onRefresh={actionRuns.refresh} />} />}
       {visible && worktreeCommand && worktree && worktrees && <WorktreeDialog command={worktreeCommand} info={worktree} api={worktrees}
         onAsk={readOnly ? undefined : (prompt) => send(prompt)} onDone={() => { void refreshWorktree(); }} onClose={() => setWorktreeCommand(undefined)} />}
     </SessionFrame>

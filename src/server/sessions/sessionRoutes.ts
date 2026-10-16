@@ -1,5 +1,6 @@
 import { sessionEarlierQuerySchema, sessionOpenQuerySchema } from "../../shared/sessionOpen.js";
 import { SessionOpenError } from "./sessionOpen.js";
+import { respondToConnectionChecks } from "../realtime/connectionHealth.js";
 import type { DurableBrowserSessionService } from "./durableParentContracts.js";
 import type { DurableBrowserAttachment } from "./durableParentReadModel.js";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -594,6 +595,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
   });
 
   app.get<{ Params: { sessionId: string }; Querystring: SessionQuery }>(`${prefix}/sessions/:sessionId/events`, { websocket: true }, (socket, request) => {
+    respondToConnectionChecks(socket);
     if (request.query.native === "1") {
       let attachment: DurableBrowserAttachment | undefined;
       let closed = false;
@@ -631,10 +633,12 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
   });
 
   app.get(`${prefix}/sessions/events`, { websocket: true }, (socket) => {
+    respondToConnectionChecks(socket);
     eventHub.addGlobal(socket);
   });
 
   app.get(`${prefix}/events`, { websocket: true }, (socket) => {
+    respondToConnectionChecks(socket);
     eventHub.addGlobal(socket);
   });
 }

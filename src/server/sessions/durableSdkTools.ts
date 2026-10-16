@@ -8,6 +8,7 @@ import { defineTool as sdkDefineTool, createReadToolDefinition, createBashToolDe
 import { defineExtension, defineTool, type ConversationId, type Extension, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { Value } from "typebox/value";
 import { durableJson } from "./durableJson.js";
+import { readImageProblem } from "./readImageSafety.js";
 import { isChildNativeTool } from "./durableChildRuntime.js";
 
 // These tools act on the parent session or its approval surfaces, not a child conversation.
@@ -252,7 +253,14 @@ export class DurableSdkTools {
       });
       const outcome: AgentToolCallOutcome = { toolCall, result, isError: result.isError === true };
       const replacement = await this.options.runner.emitToolResult({ type: "tool_result", ...eventBase, content: result.content, details: result.details, isError: outcome.isError });
-      const final = replacement === undefined ? outcome : { ...outcome, result: { ...result, ...replacement }, isError: replacement.isError ?? outcome.isError };
+      let final = replacement === undefined ? outcome : { ...outcome, result: { ...result, ...replacement }, isError: replacement.isError ?? outcome.isError };
+      if (name === "read") {
+        for (const part of final.result.content) {
+          if (part.type !== "image") continue;
+          const problem = readImageProblem(Buffer.from(part.data, "base64"), part.mimeType);
+          if (problem !== undefined) { final = error(problem); break; }
+        }
+      }
       if (parentToolCallId !== undefined) this.options.emit({ type: "tool_execution_end", ...eventBase, result: final, isError: final.isError });
       return final;
     } catch (cause) {

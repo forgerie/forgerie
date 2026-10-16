@@ -27,3 +27,11 @@
 .claim-list-body { flex: 1 1 var(--claim-text-min); min-inline-size: 0; }
 .claim-list-item[data-confidence="unknown"] .claim-list-body { color: var(--muted-foreground); }
 .claim-list-detail { margin-block-start: var(--space-1); color: var(--muted-foreground); font-size: var(--small-text); }
+/* Research verdicts. "Contradicted" needs a wider badge column; every row
+   shares it so the text still lines up. */
+.claim-list[data-wide] { --claim-badge: 7.75rem; }
+.claim-list-item[data-confidence="supported"] .claim-list-badge { color: var(--ink-good); }
+.claim-list-item[data-confidence="partly"] .claim-list-badge { color: var(--ink-warn); }
+.claim-list-item[data-confidence="contradicted"] .claim-list-badge { color: var(--ink-bad); }
+.claim-list-item[data-confidence="unsupported"] .claim-list-text { color: var(--quiet-foreground); }
+.claim-list-struck { color: var(--quiet-foreground); text-decoration: line-through; text-decoration-color: var(--ink-bad); }

@@ -11,6 +11,7 @@ import { AgentDoc, InboxDoc, LiveDoc, UsageDoc } from "@earendil-works/pi-durabl
 import { ParentAsks, ParentAsksSchema, ParentResponse, ParentResponseSchema, Presentation, PresentationSchema, SessionName, SessionNameSchema } from "./durableParentDocuments.js";
 import { assertHistoryIdentity, SessionOpenError, type SessionOpenPageRequest, type SessionOpenResult } from "./sessionOpen.js";
 import { DurableLiveHistory } from "./durableLiveHistory.js";
+import { endTurnReplyMessage } from "./endTurnReply.js";
 import { SessionBindings } from "./durableSessionBindings.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { ASK_USER_ANSWERS_CUSTOM_TYPE } from "../../shared/apiTypes.js";
@@ -392,6 +393,8 @@ export class DurableParentReadModel {
 }
 
 function defaultEntryMessages(entry: EntryRecord): readonly unknown[] {
+  const reply = endTurnReplyMessage(entry);
+  if (reply !== undefined) return [reply];
   if (isHostEntryKind(entry.kind)) return [{ role: "custom", customType: entry.kind, content: hostEntryText(entry.kind, entry.data), display: true, details: entry.data }];
   if (entry.kind === "pi.compaction") return [{ role: "system", source: "compaction", content: `Compacted history:\n\n${modelText(entry)}` }];
   if (entry.kind === "pi.reset") return [];

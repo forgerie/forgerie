@@ -1,4 +1,6 @@
 import { createServer } from "node:http";
+import { respondToConnectionChecks } from "../../../src/server/realtime/connectionHealth";
+import { checkConnection } from "../connectionRecovery";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyCatalogEvent, createCatalogStore, type CatalogState, type CatalogStore } from "./catalogStore";
@@ -11,7 +13,7 @@ afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await
 const idle = { isStreaming: false, isCompacting: false, isBashRunning: false };
 
 /** A real HTTP + WebSocket server whose catalog the test can change between joins. */
-async function machine(options: { holdListing?: Promise<void>; badListing?: boolean; pulls?: unknown[] } = {}) {
+async function machine(options: { holdListing?: Promise<void>; badListing?: boolean; pulls?: unknown[]; runs?: unknown[] } = {}) {
   let listing = {
     sessions: [
       { id: "a", cwd: "/code/forgerie", name: "Alpha", modified: "2026-09-29T18:00:00.000Z" },
@@ -55,10 +57,13 @@ async function machine(options: { holdListing?: Promise<void>; badListing?: bool
     else if (path === "/api/machines/local/projects") send([{ id: "p", name: "forgerie", path: "/code/forgerie" }]);
     // Without pulls, the server predates pull request links and answers 404.
     else if (path === "/api/github/pulls" && options.pulls) send({ links: options.pulls });
+    // Without runs, the server predates Actions run links and answers 404.
+    else if (path === "/api/github/action-runs" && options.runs) send({ links: options.runs });
     else { response.writeHead(404); response.end(); }
   });
   http.on("upgrade", (request, socket, head) => sockets.handleUpgrade(request, socket, head, (client) => {
     clients.add(client);
+    respondToConnectionChecks(client);
     client.on("close", () => clients.delete(client));
   }));
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
@@ -100,6 +105,27 @@ function start(api: Awaited<ReturnType<typeof machine>>) {
   return store;
 }
 
+describe("healthy catalog recovery", () => {
+  it("keeps its subscription and catalog when a browser wake check succeeds", async () => {
+    const api = await machine({ pulls: [] });
+    let wake: () => void = () => undefined;
+    let checked: Promise<boolean> = Promise.resolve(false);
+    const store = createCatalogStore({ ...api.transport,
+      checkConnection: socket => { checked = checkConnection(socket); return checked; },
+      watchRecovery: recover => { wake = recover; return () => { wake = () => undefined; }; },
+    });
+    cleanup.push(store.dispose);
+    await store.start();
+    wake(); wake();
+    expect(await checked).toBe(true);
+    await Promise.resolve();
+    expect(api.reads()).toBe(1);
+    expect(store.getSnapshot().connection.type).toBe("ready");
+    api.emit({ type: "session.name", sessionId: "a", name: "Still live" });
+    await until(store, () => store.getSnapshot().sessions.some(session => session.name === "Still live"));
+  });
+});
+
 describe("pull request links", () => {
   const watching = { kind: "watching", since: "2026-10-07T21:00:00.000Z", wakes: 0 };
   const link = { provider: "github", session: { id: "a", cwd: "/code/forgerie" }, repo: "o/r", number: 142, watch: { kind: "off" } };
@@ -123,6 +149,39 @@ describe("pull request links", () => {
     const store = start(api);
     await until(store, () => store.getSnapshot().connection.type === "ready");
     expect(store.getSnapshot().sessions.map((session) => session.pullRequests)).toEqual([undefined, undefined]);
+  });
+});
+
+describe("Actions run links", () => {
+  const watching = { kind: "watching", since: "2026-10-15T11:00:00.000Z", wakes: 0 };
+  const link = { provider: "github", session: { id: "a", cwd: "/code/forgerie" }, repo: "o/r", runId: 18234561230, source: "manual", watch: { kind: "off" } };
+  it("joins every run link, then follows link, watch, and unlink events keyed by session, repository, and run", async () => {
+    const second = { ...link, runId: 18234561231, source: "pull" };
+    const api = await machine({ runs: [link, second] });
+    const store = start(api);
+    const runs = () => store.getSnapshot().sessions.find((session) => session.id === "a")?.actionRuns;
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    expect(runs()).toEqual([link, second]);
+    api.emit({ type: "session.action-run", link: { ...second, watch: watching } });
+    await until(store, () => runs()?.[1]?.watch.kind === "watching");
+    expect(runs()?.[0]).toEqual(link);
+    api.emit({ type: "session.action-run", link: { ...link, runId: 18234561299 } });
+    await until(store, () => runs()?.length === 3);
+    // The same run in another repository is another link.
+    api.emit({ type: "session.action-run.unlinked", link: { ...link, repo: "o/other" } });
+    api.emit({ type: "session.action-run.unlinked", link: { ...link, repo: "O/R" } });
+    await until(store, () => runs()?.map((item) => item.runId).join() === "18234561231,18234561299");
+  });
+  it("still lists sessions when the server has no run catalog", async () => {
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    expect(store.getSnapshot().sessions.map((session) => session.actionRuns)).toEqual([undefined, undefined]);
+  });
+  it("carries the watchingActionRun status flag", () => {
+    const base: CatalogState = { connection: { type: "ready" }, sessions: [], statuses: {}, activities: {}, unread: new Set(), projects: [] };
+    const next = applyCatalogEvent(base, { type: "status.update", status: { sessionId: "a", ...idle, watchingActionRun: true } });
+    expect(next.statuses["a"]?.watchingActionRun).toBe(true);
   });
 });
 

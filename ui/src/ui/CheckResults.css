@@ -1,0 +1,44 @@
+/* What a run of checks found. The checklist's frame, count and meter, with
+   pass, fail and skip in place of done and failed. The result sits at the
+   trailing edge; what was not checked is a separate tinted group. */
+.check-results {
+  margin-block: var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-document);
+  overflow: hidden;
+}
+.check-results-header {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+  column-gap: var(--space-3); row-gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--tint-surface);
+}
+.check-results-title { font-weight: 600; min-inline-size: 0; overflow-wrap: anywhere; }
+.check-results-summary { color: var(--muted-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums; }
+.check-results-meter { display: flex; gap: var(--hairline); block-size: var(--meter-height); background: var(--tint-surface); }
+.check-results-segment { flex: 1 1 0; background: var(--meter-rest); }
+.check-results-segment[data-state="pass"] { background: var(--tone-good); }
+.check-results-segment[data-state="fail"] { background: var(--tone-bad); }
+.check-results .check-results-items { margin: 0; padding: var(--space-1) var(--space-3) var(--space-2); list-style: none; }
+.check-results .check-results-item {
+  display: grid; grid-template-columns: 1.125rem minmax(0, 1fr); column-gap: var(--space-2);
+  margin: 0; padding-block: 0.3125rem;
+}
+.check-results .check-results-item + .check-results-item { border-block-start: var(--hairline) solid var(--line); }
+.check-results-icon { inline-size: 1.125rem; block-size: 1.125rem; margin-block-start: 0.1875rem; color: var(--muted-foreground); }
+.check-results-item[data-state="pass"] .check-results-icon { color: var(--ink-good); }
+.check-results-item[data-state="fail"] .check-results-icon { color: var(--ink-bad); }
+.check-results-line { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); min-inline-size: 0; }
+.check-results-name { flex: 1 1 auto; min-inline-size: 0; overflow-wrap: anywhere; }
+.check-results-result {
+  flex: 0 1 auto; margin-inline-start: auto; min-inline-size: 0;
+  color: var(--muted-foreground); font-size: var(--small-text); font-variant-numeric: tabular-nums; text-align: end; overflow-wrap: anywhere;
+}
+.check-results-item[data-state="fail"] .check-results-name { font-weight: 550; }
+.check-results-item[data-state="fail"] .check-results-result { color: var(--ink-bad); font-weight: 550; }
+.check-results-item[data-state="skip"] .check-results-name { color: var(--muted-foreground); }
+.check-results-group { padding: var(--space-2) var(--space-3); border-block-start: var(--hairline) solid var(--line); background: var(--tint-surface); }
+.check-results-group-title { color: var(--muted-foreground); font-size: var(--small-text); font-weight: 600; }
+.check-results .check-results-group .check-results-items { padding: 0; }
+.check-results .check-results-group .check-results-item { border: 0; padding-block: 0.1875rem; }
+.check-results-group .check-results-name { color: var(--quiet-foreground); }

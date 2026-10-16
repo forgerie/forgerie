@@ -64,3 +64,14 @@ describe("FileTree", () => {
     expect(buttons()).toEqual([]);
   });
 });
+
+describe("FileTree as a layout", () => {
+  it("counts the entries under the top folder and links the files that exist", async () => {
+    const fileLinks = links();
+    await act(async () => root.render(<FileTree code={"ui/src/\n  mentionSource.ts # the entry\n  ui/ # pieces\n    OptionRow.tsx"} links={fileLinks} />));
+    expect(document.querySelector(".path-tree-summary")!.textContent).toBe("Layout, 3 entries");
+    expect([...document.querySelectorAll(".path-tree-layout-note")].map((note) => note.textContent)).toEqual(["the entry", "pieces"]);
+    await settle();
+    expect(buttons().map((button) => button.title)).toEqual(["ui/src/mentionSource.ts", "ui/src/ui/OptionRow.tsx"]);
+  });
+});

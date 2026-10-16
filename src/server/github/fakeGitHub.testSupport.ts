@@ -56,3 +56,18 @@ export function defined<T>(value: T | undefined, what: string): T {
 }
 
 function routeOf(request: FakeRequest): string { return `${request.method} ${request.url.split("?")[0] ?? request.url}`; }
+
+/** REST workflow run and attempt jobs, served through the same authenticated caller as PR reads. */
+export function serveActionRun(github: FakeGitHub, repo: string, extra: Record<string, unknown> = {}, jobs: Record<string, unknown>[] = []): void {
+  const base = `https://api.github.com/repos/${repo}`;
+  const run = workflowRun(extra);
+  github.always(`GET ${base}/actions/runs/${String(run.id)}`, json(run));
+  github.always(`GET ${base}/actions/runs`, json({ total_count: 1, workflow_runs: [run] }));
+  github.always(`GET ${base}/actions/runs/${String(run.id)}/attempts/${String(run.run_attempt)}/jobs`, json({ total_count: jobs.length, jobs }));
+}
+export function workflowRun(extra: Record<string, unknown> = {}) {
+  return { id: 4812, run_number: 42, run_attempt: 1, name: "CI", path: ".github/workflows/ci.yml", display_title: "Build", event: "push", head_branch: "main", head_sha: "a".repeat(40), actor: { login: "owner" }, html_url: "https://github.com/owner/repo/actions/runs/4812", status: "in_progress", conclusion: null, created_at: "2026-10-01T12:00:00Z", updated_at: "2026-10-01T12:00:00Z", pull_requests: [], ...extra };
+}
+export function actionJob(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { id: 10, name: "tests", status: "completed", conclusion: "failure", html_url: "https://github.com/owner/repo/actions/runs/4812/job/10", started_at: "2026-10-01T12:00:00Z", completed_at: "2026-10-01T12:00:05Z", check_run_url: "https://api.github.com/repos/owner/repo/check-runs/20", ...extra };
+}

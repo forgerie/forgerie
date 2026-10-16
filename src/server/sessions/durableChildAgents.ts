@@ -582,11 +582,17 @@ export function modelChoice(spec: string): { model: { provider: string; modelId:
   return { model: { provider: id.slice(0, slash), modelId: id.slice(slash + 1) }, ...(level === undefined ? {} : { thinkingLevel: level }) };
 }
 
+/**
+ * How a child checks its work. Over 10-12 to 10-15, workflow builders ran the full suite 377 times (18 hours), up to
+ * 27 times each, mostly to confirm small fixes. The parent now places one full run per stage.
+ */
+export const CHILD_CHECKS = "Check your work with focused checks: the tests for the files you changed (for example the project's related or changed-tests command), the typecheck and the linter. Do not run the project's full test suite or full verification unless your task tells you to; the parent runs it once on the combined work. If you think the change needs it, say so in your report. Report each check you ran and its result.";
+
 /** A child's instructions: its agent file's prompt, its role, how this runtime differs, and the project's context. */
 function childInstructions(name: string, profile: ChildAgentProfile | undefined, plan: ChildRuntimePlan, projectContext: string | undefined): string {
   const project = profile?.inheritProjectContext !== false && projectContext !== undefined && projectContext !== ""
     ? `\n\n<project_context>\n${projectContext}\n</project_context>` : "";
-  return `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked; it asks your parent, not the user.\nDo not file issues. Suggest issues in your report; the parent files them.${plan.section === "" ? "" : `\n\n${plan.section}`}${project}`;
+  return `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked; it asks your parent, not the user.\nDo not file issues. Suggest issues in your report; the parent files them.\n${CHILD_CHECKS}${plan.section === "" ? "" : `\n\n${plan.section}`}${project}`;
 }
 
 function withChildAdmission<T>(worktrees: DurableChildWorktrees | undefined, operation: () => Promise<T>): Promise<T> {

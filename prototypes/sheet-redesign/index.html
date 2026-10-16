@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sheet redesign</title>
+<link rel="stylesheet" href="sheet.css">
+</head>
+<body>
+<div class="stage">
+  <div class="app" aria-hidden="true">
+    <aside></aside>
+    <main></main>
+  </div>
+  <div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" id="sheet"></section>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+if (params.has("still")) document.documentElement.classList.add("still");
+if (params.get("scheme")) document.documentElement.style.colorScheme = params.get("scheme");
+
+// Fake app behind the scrim.
+document.querySelector(".app aside").innerHTML = Array.from({ length: 16 }, (_, i) => `<div class="ghost-line" style="width:${55 + (i * 37) % 40}%"></div>`).join("");
+document.querySelector(".app main").innerHTML = Array.from({ length: 22 }, (_, i) => `<div class="ghost-line" style="width:${45 + (i * 53) % 55}%"></div>`).join("");
+
+const I = {
+  close: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>`,
+  back: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5L5.5 8l4.5 4.5"/></svg>`,
+  chev: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5L10.5 8 6 12.5"/></svg>`,
+  down: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 6L8 10.5 12.5 6"/></svg>`,
+  search: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.25"/><path d="M10.25 10.25L13.5 13.5"/></svg>`,
+  copy: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5"/><path d="M10.5 3.5v-.25A1.25 1.25 0 009.25 2h-5A1.25 1.25 0 003 3.25v5a1.25 1.25 0 001.25 1.25h.25"/></svg>`,
+  check: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>`,
+  x: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>`,
+  answer: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2.75 3.75h10.5v7h-6l-3 2.5v-2.5h-1.5z"/></svg>`,
+  stop: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M5 2.75h6L13.25 5v6L11 13.25H5L2.75 11V5z"/></svg>`,
+  link: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M7 9a2.5 2.5 0 003.5 0l2-2A2.5 2.5 0 009 3.5l-.75.75M9 7a2.5 2.5 0 00-3.5 0l-2 2A2.5 2.5 0 007 12.5l.75-.75"/></svg>`,
+  pr: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4.5" cy="3.75" r="1.5"/><circle cx="4.5" cy="12.25" r="1.5"/><circle cx="11.5" cy="12.25" r="1.5"/><path d="M4.5 5.25v5.5M11.5 10.75V6.5a2 2 0 00-2-2H7.5m1.5-1.5L7.5 4.5 9 6"/></svg>`,
+  prDraft: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4.5" cy="3.75" r="1.5"/><circle cx="4.5" cy="12.25" r="1.5"/><circle cx="11.5" cy="12.25" r="1.5"/><path d="M4.5 5.25v5.5"/><path d="M11.5 4v.5M11.5 7v.75" stroke-linecap="round"/></svg>`,
+  merged: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4.5" cy="3.75" r="1.5"/><circle cx="4.5" cy="12.25" r="1.5"/><circle cx="11.5" cy="8" r="1.5"/><path d="M4.5 5.25v5.5M4.75 5.5C5.5 7.25 7.5 8 10 8"/></svg>`,
+  run: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><circle cx="8" cy="8" r="5.75"/><path d="M6.75 5.75l3.5 2.25-3.5 2.25z"/></svg>`,
+  more: `<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="3.5" cy="8" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="12.5" cy="8" r="1.1"/></svg>`,
+};
+
+const head = ({ title, sub, mono, back, tools = "" }) => `<header class="sheet-head">
+  ${back ? `<button class="icon-btn back" aria-label="${back}">${I.back}</button>` : ""}
+  <div class="titles"><h1 class="${mono ? "mono" : ""}">${title}</h1>${sub ? `<span class="sub">${sub}</span>` : ""}</div>
+  <div class="tools">${tools}<button class="icon-btn" aria-label="Close">${I.close}</button></div>
+</header>`;
+const body = (html, cls = "") => `<div class="sheet-body ${cls}">${html}</div>`;
+const foot = (note, acts) => `<footer class="sheet-foot"><div class="note">${note}</div><div class="acts">${acts}</div></footer>`;
+const marks = (tones) => tones.map((t) => `<i class="mark ${t}"></i>`).join("");
+
+/* ================= Pull request ================= */
+const openPulls = [
+  { n: 61, t: "Session linking for actions", head: "s-01a141eb", age: "2h", glyph: "pr", match: true },
+  { n: 60, t: "Nightly refinement prompt: read yesterday's commits before refining", head: "nightly-refine", age: "9h", glyph: "prDraft", draft: true },
+  { n: 57, t: "Trigger files for scheduled workflows", head: "pr/trigger-files", age: "2d", glyph: "pr" },
+  { n: 52, t: "Durable migration for pi sessions", head: "pi-durable-migration", age: "6d", glyph: "pr" },
+];
+const pullRows = (rows, quiet) => `<div class="rows">${rows.map((p) => `<div class="row press">
+  <span class="lead ${p.draft ? "" : "state-open"}">${I[p.glyph]}</span>
+  <div class="main">
+    <div class="title"><span class="pr-num">#${p.n}</span><span class="name sans trunc" style="flex:1 1 12rem">${p.t}</span></div>
+    <div class="branch"><b>${p.head}</b> into main${p.draft ? ", draft" : ""}${p.match ? `<span class="match">This session's branch</span>` : ""}</div>
+  </div>
+  <div class="trail inline"><span class="meta">${p.age}</span><button class="btn small ${p.match && !quiet ? "primary" : ""}">Link</button></div>
+</div>`).join("")}</div>`;
+
+const prForm = ({ value = "", state = "empty" }) => `<div class="form">
+  <div class="bar">
+    <label class="field ${state === "typed" ? "focused" : state === "error" ? "invalid" : ""}">
+      <span class="prefix">${I.link}</span>
+      <input value="${value}" placeholder="Pull request number or link" aria-label="Pull request number or link" ${state !== "empty" ? "autofocus" : ""}>
+    </label>
+    <button class="btn ${state === "typed" ? "primary" : ""}" ${state === "typed" ? "" : "disabled"}>${state === "typed" ? `Link #${value}` : "Link"}</button>
+  </div>
+  ${state === "empty" ? `<p class="hint">A number such as 59, or a GitHub or Azure DevOps link.</p>` : ""}
+  ${state === "typed" ? `<div class="resolved"><span class="state-merged" style="display:grid">${I.merged}</span><div>
+      <div class="t">Linked GitHub Actions runs</div>
+      <div class="branch"><b>actions-runs</b> merged into main 1h ago, 14 files, +612 −88</div></div></div>` : ""}
+  ${state === "error" ? `<p class="error-text">simonwjackson/forgerie has no pull request #590. Check the number, or paste the link from GitHub.</p>` : ""}
+</div>`;
+
+const prSheet = (state, value) => head({ title: "Pull request", sub: "None linked yet",
+    tools: `<button class="btn quiet small">${I.run} Action runs</button>` })
+  + body(`<div class="lede"><h2>Link this session to a pull request</h2>
+      <p>Forgerie then follows its checks and reviews here, and tells you when it can merge.</p></div>
+    ${prForm({ value, state })}
+    <div class="group-label">Open in simonwjackson/forgerie<span class="count">4</span></div>
+    ${pullRows(openPulls, state === "typed")}`);
+
+/* ================= Workflows ================= */
+const W = (name, desc, src, stages) => ({ name, desc, src, stages });
+const S = (name, workers = 0, stop = false) => ({ name, workers, stop });
+const workflows = [
+  W("design-build-review", "Agree a contract, build the interface and the server side in parallel, have two fresh reviewers check both (contract and standards), then land. You approve the contract and the landing.", "project",
+    [S("Contract", 0, true), S("Design and build", 2), S("Review", 2), S("Land", 0, true)]),
+  W("pr-first", "Open a draft PR with the plan first, build on it, mark it ready, and take review from bots, CI and people on the PR. You merge.", "project",
+    [S("Open the draft PR"), S("Build", 2), S("Review on the PR", 2)]),
+  W("nightly-architecture", "Make evidence-backed architectural improvements overnight, report completed work, and wait for approval before rebasing, verifying, and fast-forwarding main.", "profile",
+    [S("Establish scope", 1), S("Explore responsibilities", 3), S("Implement and test", 1), S("Independently review", 1), S("Explain completed work", 1), S("Approve landing", 0, true), S("Rebase, verify, and fast-forward")]),
+  W("nightly-maintenance", "Fix failing tests, keep checks fast, and simplify code overnight so the user never wakes up worse off; land only after approval.", "profile",
+    [S("Measure bedtime", 2), S("Explore and select", 3), S("Fix, simplify, and test", 1), S("Independently review", 1), S("Write the morning page", 2), S("Approve landing", 0, true), S("Rebase, verify, and fast-forward")]),
+  W("nightly-refine", "Review yesterday's commits and make small architectural refinements for the user to land in the morning.", "profile",
+    [S("Survey yesterday"), S("Refine", 1), S("Review", 1), S("Land", 0, true)]),
+  W("nightly-retro", "Review the last day's sessions for agent struggles and propose environment fixes you pick in the morning.", "profile",
+    [S("Collect sessions"), S("Find struggles", 4), S("Rank against the repo", 1), S("Pick candidates", 0, true), S("Apply picks", 1), S("Land", 0, true)]),
+];
+const route = (stages) => `<div class="route" aria-label="Route">${stages.map((s, i) => `${i ? `<i class="sep"></i>` : ""}<span class="st ${s.stop ? "stop" : ""}">${s.stop ? marks(["stop"]) : s.workers ? `<span class="marks">${marks(Array(s.workers).fill("plan"))}</span>` : ""}${s.name}</span>`).join("")}</div>`;
+const wfRow = (w, active) => {
+  const stops = w.stages.filter((s) => s.stop).length;
+  const workers = w.stages.reduce((n, s) => n + s.workers, 0);
+  return `<div class="row press ${active ? "active" : ""}">
+  <span class="lead"></span>
+  <div class="main">
+    <div class="title"><span class="name">${w.name}</span></div>
+    <p class="line desc">${w.desc}</p>
+    ${route(w.stages)}
+  </div>
+  <div class="trail inline"><span class="meta">${w.stages.length} stages, ${workers} agents</span><span class="chev">${I.chev}</span></div>
+</div>`;
+};
+const workflowsSheet = (filter = "") => {
+  const shown = workflows.filter((w) => w.name.includes(filter));
+  const group = (src, label) => {
+    const rows = shown.filter((w) => w.src === src);
+    return rows.length ? `<div class="group-label">${label}<span class="count">${rows.length}</span></div><div class="rows">${rows.map((w, i) => wfRow(w, i === 0 && src === "project" && !filter)).join("")}</div>` : "";
+  };
+  return head({ title: "Workflows", sub: "6 saved" })
+    + body(`<div class="form" style="padding-block:0.25rem 0.375rem"><label class="field search ${filter ? "focused" : ""}"><span class="prefix">${I.search}</span><input value="${filter}" placeholder="Filter by name or stage"><kbd>/</kbd></label></div>
+      ${group("project", "This project")}${group("profile", "Your profile")}
+      ${filter ? "" : `<div class="group-label">Cannot be read<span class="count">1</span></div>
+      <div class="rows"><div class="row"><span class="lead">${marks(["faint"])}</span><div class="main">
+        <div class="title"><span class="name muted">release-train</span></div>
+        <p class="line">Stage 3 has <code>stop: merge</code>. A stop is <code>approve</code> or <code>land</code>.</p>
+        <p class="line"><code>~/.forgerie/workflows/release-train.md</code></p></div><div class="trail"><button class="btn small">Open file</button></div></div></div>`}`, "scrolls")
+    + foot(`${marks(["plan"])} <span style="margin-inline:0.25rem 0.75rem">one agent</span>${marks(["stop"])} <span style="margin-inline-start:0.25rem">you decide</span>`, "");
+};
+
+/* ================= Decisions ================= */
+const gatedRow = ({ what, when, n, open }) => `<div class="row press ${open ? "active" : ""}">
+  <span class="lead">${I.check}</span>
+  <div class="main"><div class="title"><span class="name sans">${what}</span>${n ? `<span class="meta">${n} times</span>` : ""}</div>
+    ${open ? `<p class="line">You approved this gated action. The agent ran <code>git branch -D c-5676552a1cf5</code> in <code>~/code/sandbox/forgerie</code>.</p>
+      <p class="line">During the <b style="font-weight:550;color:var(--foreground)">design-build-review</b> run, at 12:25.</p>
+      <div class="row-acts"><button class="btn small">Send a correction</button><span class="meta" style="align-self:center">The branch is gone. A correction tells the agent, it does not undo the action.</span></div>` : ""}
+  </div>
+  <div class="trail inline"><span class="meta">${when}</span><span class="chev">${open ? I.down : I.chev}</span></div>
+</div>`;
+const decisionsSheet = (mode) => head({ title: "Decisions", sub: "10 in this session, 2 flagged" })
+  + body(`<div class="chips" role="tablist">
+      <button class="chip on">All <span class="n">10</span></button>
+      <button class="chip attn">Flagged <span class="n">2</span></button>
+      <button class="chip">Gated actions <span class="n">6</span></button>
+      <button class="chip">Answers <span class="n">1</span></button>
+      <button class="chip">Stops <span class="n">1</span></button>
+    </div>
+    <div class="group-label">Flagged guesses<span class="count">2</span><span class="end">The agent chose without you. Check them.</span></div>
+    <article class="dcard">
+      <div class="who">parent answered build<span class="meta">25m</span></div>
+      <p class="q">Keep the old /api/pull-requests route for one release, or remove it now?</p>
+      <p class="choice">Keep it for one release, marked deprecated.</p>
+      <p class="why">The watch app still calls it, and removing it is not in the approved contract.</p>
+      ${mode === "overturn" ? `<div style="margin-block-start:0.625rem"><textarea class="reply" aria-label="What should happen instead">Remove it now. The watch build on my wrist already uses /api/pulls.</textarea>
+        <div class="acts"><button class="btn small primary">Send correction to build</button><button class="btn small quiet">Cancel</button><span class="meta">build is working. It reads the correction before its next step.</span></div></div>`
+      : `<div class="acts"><button class="btn small">Overturn</button><button class="btn small quiet">Looks right</button></div>`}
+    </article>
+    <article class="dcard">
+      <div class="who">parent answered review<span class="meta">2h</span></div>
+      <p class="q">The contract and the standards reviewer disagree about file names. Which wins?</p>
+      <p class="choice">The contract wins. Standards notes become follow-ups.</p>
+      <p class="why">You approved the contract. The standards are advice.</p>
+      <div class="acts"><button class="btn small">Overturn</button><button class="btn small quiet">Looks right</button></div>
+    </article>
+    <div class="group-label">Today<span class="count">6</span></div>
+    <div class="rows">
+      ${gatedRow({ what: "Delete an unmerged Git branch", when: "1m", open: mode === "open" })}
+      ${gatedRow({ what: "Discard changes with git checkout", when: "1h" })}
+      ${gatedRow({ what: "Merge pull request #59", when: "1h" })}
+      <div class="row press"><span class="lead">${I.answer}</span><div class="main"><div class="title"><span class="name sans">Empty sheets size to their content</span></div>
+        <p class="line">parent answered design: should an empty sheet keep its full height?</p></div><div class="trail inline"><span class="meta">40m</span><span class="chev">${I.chev}</span></div></div>
+      <div class="row press"><span class="lead">${marks(["stop"])}</span><div class="main"><div class="title"><span class="name sans">Passed the Contract stop</span></div>
+        <p class="line">The contract matched the plan you approved at 11:02.</p></div><div class="trail inline"><span class="meta">52m</span><span class="chev">${I.chev}</span></div></div>
+      ${gatedRow({ what: "Push Git refs with unknown default branch", when: "3h" })}
+    </div>
+    <div class="group-label">Yesterday<span class="count">2</span></div>
+    <div class="rows">${gatedRow({ what: "Push Git refs with unknown default branch", when: "16h, 17h", n: 2 })}</div>`, "scrolls");
+
+/* ================= Child agents ================= */
+const child = ({ name, agent, tone, state, stateTone = "", line, branch, cost, time, acts = "" }) => `<div class="row press">
+  <span class="lead">${marks([tone])}</span>
+  <div class="main">
+    <div class="title"><span class="name">${name}</span><span class="kind">${agent}</span></div>
+    ${line ?? ""}
+    ${branch ? `<div class="branch" style="margin-top:0.125rem">${branch}</div>` : ""}
+    ${acts ? `<div class="row-acts">${acts}</div>` : ""}
+  </div>
+  <div class="trail"><span class="state ${stateTone}">${state}</span><span class="meta">${[cost, time].filter(Boolean).join("&ensp;")}</span></div>
+</div>`;
+const br = (head, tail, rest) => `<span title="${head}${tail}"><b>${head}…${tail}</b></span>${rest ? `&ensp;${rest}` : ""}`;
+const agentsProblem = () => head({ title: "Child agents", sub: "4 in this session, all idle" })
+  + body(`<div class="notice">
+      <div class="text"><strong>Forgerie cannot read the worktrees of all 4 agents.</strong>
+        <span>The folders under <code>.worktree/</code> may have been removed outside Forgerie, so it cannot say what is ready to land.</span></div>
+      <button class="btn small">Check worktrees</button>
+    </div>
+    <div class="rows">
+      ${child({ name: "build", agent: "full-stack-engineer", tone: "", state: "Idle", branch: br("c-5676552a", "51135941a0b", "status unknown"), cost: "$9.84", time: "38 min" })}
+      ${child({ name: "design", agent: "design-engineer", tone: "", state: "Idle", branch: br("c-ac7f20a2", "4b3cec1fd1c2cffc", "status unknown"), cost: "$7.10", time: "31 min" })}
+      ${child({ name: "review", agent: "reviewer", tone: "", state: "Idle", branch: br("c-1d26bb61", "3b47472225709", "status unknown"), cost: "$5.02", time: "12 min" })}
+      ${child({ name: "standards", agent: "reviewer", tone: "", state: "Idle", branch: br("c-5f9e26ba", "39c4af8fa484", "status unknown"), cost: "$4.62", time: "11 min" })}
+    </div>`)
+  + foot(`Spent <strong>$26.58</strong> on 4 runs`, `<button class="btn">Run history</button>`);
+
+const agentsMixed = () => head({ title: "Child agents", sub: "8 in this session, 1 asks you, 2 at work" })
+  + body(`<div class="rows">
+    ${child({ name: "review", agent: "reviewer", tone: "needs", state: "Asks you", stateTone: "tone-live strong", cost: "$1.12", time: "6 min",
+      line: `<p class="line ink">Should I report the 64-character branch names as a finding, or are they out of scope for this review?</p>`,
+      acts: `<button class="btn small primary">${I.answer} Answer</button><button class="btn small quiet">Open</button>` })}
+    ${child({ name: "build", agent: "full-stack-engineer", tone: "live", state: "Working", stateTone: "tone-live", cost: "$3.40", time: "12 min",
+      line: `<p class="tail-line">bash&ensp;npm test -- ui/src/decisions --reporter=dot</p>` })}
+    ${child({ name: "design", agent: "design-engineer", tone: "warn", state: "Retry 2 of 3 in 1:40", stateTone: "tone-warn", cost: "$2.05", time: "9 min",
+      line: `<p class="line">The model was overloaded. Forgerie tries again on its own.</p><p class="tail-line">overloaded_error: Overloaded (529) request_id=req_011CU7Wm3x…</p>` })}
+    ${child({ name: "standards", agent: "reviewer", tone: "", state: "Ready to land", cost: "$4.62", time: "11 min",
+      branch: br("c-5f9e26ba", "39c4af8fa484", "3 commits ahead of main"), acts: `<button class="btn small">Review changes</button><button class="btn small">Land</button>` })}
+    ${child({ name: "api", agent: "full-stack-engineer", tone: "", state: "Uncommitted files", stateTone: "tone-warn", cost: "$6.31", time: "44 min",
+      branch: br("c-0be14c77", "e9a1d02", "1 commit ahead, 4 files not committed") })}
+    ${child({ name: "scout", agent: "scout", tone: "", state: "Done", cost: "$0.38", time: "3 min",
+      line: `<p class="line">Found 5 sheets that use SheetDialog with a fixed height.</p>` })}
+    ${child({ name: "docs", agent: "design-engineer", tone: "", state: "Landed on main", stateTone: "muted", cost: "$1.90", time: "17 min" })}
+    ${child({ name: "spike-gestures", agent: "creative-technologist", tone: "faint", state: "Discarded", stateTone: "muted", cost: "$2.71", time: "25 min" })}
+    </div>`, "scrolls")
+  + foot(`<strong>1</strong> ready to land. Spent <strong>$22.49</strong> on 8 runs.`, `<button class="btn">Run history</button><button class="btn">Worktrees</button>`);
+
+/* ================= Managed processes ================= */
+const procEmpty = () => head({ title: "Managed processes", sub: "None running" })
+  + body(`<div class="lede"><h2>Nothing runs for this session yet</h2>
+      <p>When the agent starts a dev server, a watcher, or a long test run with the process tool, it shows here. You can read its output, type into it, and stop it. It keeps running when Forgerie restarts, and stops when this session closes.</p>
+      <ul class="examples">
+        <li><code>npm run dev</code><span>a dev server you want to open in the browser</span></li>
+        <li><code>npx vitest --watch</code><span>tests that rerun on every change</span></li>
+        <li><code>nix build .#app</code><span>a build that takes longer than one reply</span></li>
+      </ul></div>`)
+  + foot("", `<button class="btn">Ask the agent to start one</button>`);
+
+const proc = ({ name, tone, state, stateTone = "", cmd, tail, tailBad, note, pid, time }) => `<div class="row press">
+  <span class="lead"><i class="dot ${tone}"></i></span>
+  <div class="main"><div class="title"><span class="name">${name}</span></div>
+    <div class="branch trunc" style="color:var(--foreground)">${cmd}</div>
+    ${tail ? `<p class="tail-line ${tailBad ? "bad" : ""}">${tail}</p>` : ""}${note ? `<p class="line">${note}</p>` : ""}</div>
+  <div class="trail"><span class="state ${stateTone}">${state}</span><span class="meta">${[pid && `pid ${pid}`, time].filter(Boolean).join("&ensp;")}</span></div>
+</div>`;
+const procList = () => head({ title: "Managed processes", sub: "5 in this session, 2 running" })
+  + body(`<div class="rows">
+    ${proc({ name: "vite-dev", tone: "live", state: "Running", stateTone: "tone-live", cmd: "npm run dev -- --host 127.0.0.1 --port 8504", tail: "➜  Local:   http://127.0.0.1:8504/", pid: 48211, time: "14 min" })}
+    ${proc({ name: "vitest-watch", tone: "live", state: "Running", stateTone: "tone-live", cmd: "npx vitest --watch ui/src/decisions", tail: "✓ decisionsModel.test.ts (12 tests) 38ms", pid: 48302, time: "41 min" })}
+    ${proc({ name: "typecheck", tone: "bad", state: "Exited with 2", stateTone: "tone-bad", cmd: "npm run typecheck", tail: "ui/src/ui/SheetDialog.tsx(41,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.", tailBad: true, time: "3m ago" })}
+    ${proc({ name: "api-server", tone: "warn", state: "Lost", stateTone: "tone-warn", cmd: "node --enable-source-maps dist/server.js --config /home/simonwjackson/code/sandbox/forgerie/.worktree/sheet-redesign/forgerie.config.json", note: "Forgerie restarted and could not reattach. The process may still run outside Forgerie; its pid was 47730.", time: "1h ago" })}
+    ${proc({ name: "storybook", tone: "faint", state: "Stopped by you", stateTone: "muted", cmd: "npm run storybook -- --no-open", time: "2h ago" })}
+  </div>`, "scrolls");
+
+const logLines = [
+  ["out", "> forgerie-ui@0.42.0 dev"], ["out", "> vite --host 127.0.0.1 --port 8504"], ["out", ""],
+  ["out", "  VITE v6.3.5  ready in 412 ms"], ["out", ""], ["out", "  ➜  Local:   http://127.0.0.1:8504/"], ["out", "  ➜  press h + enter to show help"],
+  ["err", "(!) Could not auto-determine entry point from rollupOptions or html files. Skipping dependency pre-bundling."],
+  ["out", "12:14:02 [vite] hmr update /src/ui/SheetDialog.tsx, /src/ui/SheetDialog.css"],
+  ["out", "12:17:40 [vite] hmr update /src/decisions/DecisionsSheet.tsx"],
+  ["err", "12:18:11 [vite] Internal server error: Transform failed with 1 error:\n/src/decisions/DecisionsSheet.tsx:88:4: ERROR: Unexpected \"}\""],
+  ["out", "12:18:29 [vite] hmr update /src/decisions/DecisionsSheet.tsx"],
+  ["out", "12:21:03 [vite] page reload src/main.tsx"],
+  ["out", "12:24:56 [vite] hmr update /src/childAgents/ChildAgentsPanel.tsx"],
+];
+const procDetail = () => head({ title: "vite-dev", mono: true, sub: "Running for 14 min", back: "All managed processes",
+    tools: `<button class="btn small quiet facts-toggle">Details</button><button class="btn small danger">${I.stop} Stop</button>` })
+  + body(`<dl class="facts">
+      <dt>Command</dt><dd><code>npm run dev -- --host 127.0.0.1 --port 8504</code></dd>
+      <dt>Folder</dt><dd><code>~/code/sandbox/forgerie/ui</code></dd>
+      <dt>Process</dt><dd>pid <span style="font-variant-numeric:tabular-nums">48211</span>, started 12:12, kept by systemd</dd>
+    </dl>
+    <div class="log">
+      <div class="log-head"><span>Output</span><span class="meta">stderr lines are tinted</span><span class="sp"></span><button class="icon-btn" aria-label="Copy output">${I.copy}</button></div>
+      <pre>${logLines.map(([k, t], i) => `<span class="ln ${k === "err" ? "err" : ""}"><span class="no">${i + 1}</span><span class="tx">${t.replace(/</g, "&lt;")}</span></span>`).join("")}</pre>
+      <div class="log-foot"><span class="dot"></span>Following new output</div>
+    </div>`)
+  + `<footer class="sheet-foot" style="background:var(--background)"><label class="field" style="flex:1 1 14rem;block-size:2.5rem"><input placeholder="Type to send to vite-dev, then Enter"></label><div class="acts"><button class="btn">Send</button><button class="btn quiet">Close stdin</button></div></footer>`;
+
+const scenes = {
+  "pr-empty": () => prSheet("empty", ""),
+  "pr-typed": () => prSheet("typed", "59"),
+  "pr-error": () => prSheet("error", "590"),
+  "workflows": () => workflowsSheet(""),
+  "workflows-filter": () => workflowsSheet("nightly"),
+  "decisions": () => decisionsSheet(""),
+  "decisions-open": () => decisionsSheet("open"),
+  "decisions-overturn": () => decisionsSheet("overturn"),
+  "agents-problem": agentsProblem,
+  "agents-mixed": agentsMixed,
+  "processes-empty": procEmpty,
+  "processes": procList,
+  "process-detail": procDetail,
+};
+const scene = params.get("scene") ?? "pr-empty";
+document.getElementById("sheet").innerHTML = (scenes[scene] ?? scenes["pr-empty"])();
+document.title = `Sheet redesign: ${scene}`;
+</script>
+</body>
+</html>
