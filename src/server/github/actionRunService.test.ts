@@ -163,6 +163,62 @@ describe("linked action runs", () => {
       }
     }
   });
+  it("does not restore a link unlinked while the watch start reads GitHub", async () => {
+    const f = fixture();
+    try {
+      await f.service.link(ref, 4812);
+      let release = () => { /* Set by the read gate. */ };
+      f.hold(new Promise<void>(resolve => { release = resolve; }));
+      const reading = new Promise<void>(resolve => { f.onRead(resolve); });
+      const start = f.service.watch(ref, 4812);
+      const refused = expect(start).rejects.toThrow("changed while starting; try again");
+      await reading;
+      await f.service.unlink(ref, 4812);
+      release(); await refused;
+      expect(f.store.list()).toEqual([]);
+      expect(f.service.isWatching(ref.id)).toBe(false);
+    } finally { f.service.dispose(); }
+  });
+  it("does not restart a competing watch stopped before an earlier start resumes", async () => {
+    for (const stopAll of [false, true]) {
+      const f = fixture();
+      try {
+        let release = () => { /* Set by the read gate. */ };
+        f.hold(new Promise<void>(resolve => { release = resolve; }));
+        const reading = new Promise<void>(resolve => { f.onRead(resolve); });
+        const start = f.service.watch(ref, 4812);
+        const refused = expect(start).rejects.toThrow("changed while starting; try again");
+        await reading;
+        f.hold(); await f.service.watch(ref, 4812);
+        await f.service.stopRef(ref, stopAll ? undefined : 4812);
+        const stopped = f.store.get(key);
+        expect(stopped?.watch.kind).toBe("stopped");
+        release(); await refused;
+        expect(f.store.get(key)).toEqual(stopped);
+        expect(f.service.isWatching(ref.id)).toBe(false);
+      } finally { f.service.dispose(); }
+    }
+  });
+  it("invalidates a pending start even when per-run Stop has no saved watch to change", async () => {
+    for (const alreadyLinked of [false, true]) {
+      const f = fixture();
+      try {
+        if (alreadyLinked) await f.service.link(ref, 4812);
+        let release = () => { /* Set by the read gate. */ };
+        f.hold(new Promise<void>(resolve => { release = resolve; }));
+        const reading = new Promise<void>(resolve => { f.onRead(resolve); });
+        const start = f.service.watch(ref, 4812);
+        const refused = expect(start).rejects.toThrow("changed while starting; try again");
+        await reading;
+        await f.service.stopRef(ref, alreadyLinked ? 4812 : undefined);
+        const before = f.store.list();
+        release(); await refused;
+        expect(f.store.list()).toEqual(before);
+        expect(f.store.list()).toHaveLength(alreadyLinked ? 1 : 0);
+        expect(f.service.isWatching(ref.id)).toBe(false);
+      } finally { f.service.dispose(); }
+    }
+  });
   it("keeps another watch's durable news when an earlier unlinked start resumes", async () => {
     const f = fixture();
     try {

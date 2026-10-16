@@ -90,6 +90,7 @@ export class ActionRunService {
   }
 
   async watch(ref: PullSessionRef, runId: number): Promise<ActionRunLink> {
+    const linkGeneration = this.deps.store.watchGeneration(ref, runId);
     const generation = this.stopGenerations.get(ref.id) ?? 0;
     const current = () => !this.disposed && generation === (this.stopGenerations.get(ref.id) ?? 0);
     const stopped = () => new Error("The watch start was stopped before it could be saved.");
@@ -109,7 +110,7 @@ export class ActionRunService {
     if (existing !== undefined) this.checkRun(existing, run);
     const source = existing?.source ?? (await this.belongsToPull(ref, run) ? "pull" : "manual");
     const next = await this.deps.store.startWatch({ ...ref, repo: run.repo, runId, source },
-      { since: this.iso(), leaf: session.leaf, cursor: initialActionRunCursor(run.attempt) }, current);
+      { since: this.iso(), leaf: session.leaf, cursor: initialActionRunCursor(run.attempt) }, linkGeneration, current);
     if (next === undefined) throw stopped();
     this.publish(next);
     return publicActionRunLink(next);
@@ -129,6 +130,8 @@ export class ActionRunService {
 
   async stopRef(ref: PullSessionRef, runId?: number): Promise<ActionRunLink | ActionRunLink[] | undefined> {
     await this.requireSession(ref);
+    this.deps.store.invalidateWatchStarts(ref, runId);
+    await this.deps.store.flush();
     const records = runId === undefined ? this.records(ref) : [this.resolve(ref, runId)];
     const result: ActionRunLink[] = [];
     for (const record of records) {
