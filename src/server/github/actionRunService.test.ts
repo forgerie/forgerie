@@ -124,6 +124,24 @@ describe("linked action runs", () => {
       expect(store.get(key)?.watch).toMatchObject({ kind: "stopped", reason: "Run completed (failure)." });
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
+  it("uses typed completion state, not notice text, for the stop reason", async () => {
+    const f = fixture();
+    try {
+      await f.service.watch(ref, 4812); f.busy(true);
+      f.setRun({ status: "completed", conclusion: "failure" }); await f.service.poll();
+      const record = f.store.get(key);
+      if (record?.pending === undefined) throw new Error("Completion notice missing");
+      const pending = record.pending;
+      await f.store.update(key, record.revision, value => ({ ...value, pending: { id: pending.id, text: "Completion news from another notice renderer." } }));
+      f.busy(false); await f.service.poll();
+      expect(f.store.get(key)?.watch).toMatchObject({ kind: "stopped", reason: "Run completed (failure)." });
+      expect(f.notices[0]?.text).toBe("Completion news from another notice renderer.");
+      expect(f.service.catalog().links[0]).not.toHaveProperty("conclusion");
+      f.setRun({ status: "running", conclusion: null, attempt: 2 });
+      await f.service.watch(ref, 4812);
+      expect(f.store.get(key)?.conclusion).toBeUndefined();
+    } finally { f.service.dispose(); }
+  });
   it("refuses starts paused on GitHub after session Abort or Stop, without creating a link", async () => {
     for (const reason of ["Session aborted by request.", "Session stopped by request."]) {
       for (const alreadyLinked of [false, true]) {

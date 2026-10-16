@@ -3,12 +3,12 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
-import { ActionRunLinkSchema, type ActionRunLink } from "../../shared/actionRuns.js";
+import { ActionRunLinkSchema, ActionRunSchema, type ActionRunLink } from "../../shared/actionRuns.js";
 import { canonicalizeStoredCwd } from "../workingDirectory.js";
 
 export const ActionRunCursorSchema = Type.Object({ attempt: Type.Integer({ minimum: 1 }), failed: Type.Array(Type.String()), concluded: Type.Boolean() });
 export type ActionRunCursor = Static<typeof ActionRunCursorSchema>;
-const RecordSchema = Type.Intersect([ActionRunLinkSchema, Type.Object({ revision: Type.Integer({ minimum: 0 }), startLeaf: Type.Optional(Type.Union([Type.String(), Type.Null()])), lastReadAt: Type.Optional(Type.String()), cursor: Type.Optional(ActionRunCursorSchema), pending: Type.Optional(Type.Object({ id: Type.String(), text: Type.String() })) })]);
+const RecordSchema = Type.Intersect([ActionRunLinkSchema, Type.Object({ revision: Type.Integer({ minimum: 0 }), startLeaf: Type.Optional(Type.Union([Type.String(), Type.Null()])), lastReadAt: Type.Optional(Type.String()), cursor: Type.Optional(ActionRunCursorSchema), conclusion: Type.Optional(ActionRunSchema.properties.conclusion), pending: Type.Optional(Type.Object({ id: Type.String(), text: Type.String() })) })]);
 export type ActionRunRecord = Static<typeof RecordSchema>;
 const FileSchema = Type.Object({ version: Type.Literal(1), records: Type.Array(RecordSchema) });
 const VERSION = 1;
@@ -75,6 +75,7 @@ export class ActionRunStore {
         cursor: start.cursor, startLeaf: start.leaf, lastReadAt: start.since,
       };
       delete next.pending;
+      delete next.conclusion;
       await this.persist(current === undefined ? [...this.records, next] : this.records.map(record => sameKey(record, input) ? next : record));
       return structuredClone(next);
     });
