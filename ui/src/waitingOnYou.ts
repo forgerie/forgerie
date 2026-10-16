@@ -1,7 +1,7 @@
 // What in a session's transcript waits on the reader right now: a child agent's open question, a workflow stop
 // the run is waiting at, a workflow proposal still open, and a gated action waiting for approval. The session pins these above the composer so they never scroll out of sight.
 import type { ChildEntry } from "./childAgents/childAgentsModel";
-import type { GatedAction, GatedActionEntry } from "./gatedActions/gatedActionsModel";
+import { askerOf, type GatedAction, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
 import { stopIsOpen, type ProposalEntry, type StopEntry, type WorkflowEntry, type WorkflowProposal, type WorkflowRun } from "./workflows/workflowsModel";
 
 export type WaitingItem =
@@ -45,6 +45,16 @@ export function pinKey(item: WaitingItem): string {
     case "proposal": return `p:${item.entry.proposalId}`;
     case "stop": return `s:${item.entry.runId}/${item.entry.stage}/${String(item.entry.round)}`;
     case "gated": return `g:${item.entry.id}`;
+  }
+}
+
+/** What an item is, in a few words, for the folded dock's line. */
+export function waitingName(item: WaitingItem): string {
+  switch (item.kind) {
+    case "question": return `${item.entry.childName}'s question`;
+    case "proposal": return item.entry.name;
+    case "stop": return item.entry.stageName;
+    case "gated": return `approval for ${askerOf(item.entry.by)}`;
   }
 }
 

@@ -88,7 +88,7 @@ import { DecisionsOpener } from "./decisions/DecisionsOpener";
 import { DecisionsSheet } from "./decisions/DecisionsSheet";
 import { flaggedCount, type DecisionLogActions } from "./decisions/decisionsModel";
 import { WorkflowRunStrip } from "./workflows/WorkflowRunStrip";
-import { pinKey, waitingItems, waitingLabel } from "./waitingOnYou";
+import { pinKey, waitingItems, waitingLabel, waitingName } from "./waitingOnYou";
 import { GatedActionCard } from "./gatedActions/GatedActionCard";
 import { GatedActionsReadProblem } from "./gatedActions/GatedActionsReadProblem";
 import { askerOf, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
@@ -542,7 +542,8 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
             onStep={found.type === "message" ? found.onStep : () => undefined} />}
           {sendError && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{sendError}</p></Consequence>}
           {flows.error !== undefined && workflowSheet === undefined && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{flows.error}</p></Consequence>}
-          {waiting.length > 0 && <PinnedDock label={waitingLabel(waiting.length)}>
+          {waiting.length > 0 && <PinnedDock label={waitingLabel(waiting.length)}
+            names={waiting.map(waitingName)} keys={waiting.map(pinKey)}>
             {waiting.map(renderWaiting)}
             {/* After the cards, so a short dock still shows the first card's choices without a scroll. */}
             {held.readError !== undefined && waiting.some((item) => item.kind === "gated")

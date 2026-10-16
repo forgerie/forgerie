@@ -1,10 +1,20 @@
 /* At most 45% of the container's height, and on a short container (a phone on its side) a third: the thread
    keeps room to read and the input below never loses its own. Past that the items scroll, and a shade at the cut
-   edge says more is there. */
-/* A hairline and room above set the dock apart from the thread scrolling behind it. */
+   edge says more is there. Folded, the dock is its heading line alone. */
+/* A hairline sets the dock apart from the thread scrolling behind it. The heading is a full-size control, so the
+   room above it is its own padding, not a gap. */
 .pinned-dock { display: grid; grid-template-rows: auto minmax(0, 1fr); max-block-size: 45cqb; min-inline-size: 0;
-  padding-block-start: var(--space-3); border-block-start: var(--hairline) solid var(--line); }
-.pinned-dock-label { margin: 0 0 var(--space-1); color: var(--ink-live); font-size: var(--label-text); font-weight: 600; }
+  border-block-start: var(--hairline) solid var(--line); }
+.pinned-dock[data-folded] { grid-template-rows: auto; }
+.pinned-dock-heading { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; min-block-size: var(--control-size);
+  margin-block-end: var(--space-1); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--ink-live); font: inherit; font-size: var(--label-text); text-align: start; cursor: pointer; }
+.pinned-dock[data-folded] .pinned-dock-heading { margin-block-end: 0; }
+.pinned-dock-heading:hover { background: var(--hover-surface); }
+.pinned-dock-label { flex: none; font-weight: 600; }
+/* The names cut at one line; the items they stand for are one press away. */
+.pinned-dock-names { flex: 1 1 0; min-inline-size: 0; overflow: hidden; color: var(--muted-foreground); text-overflow: ellipsis; white-space: nowrap; }
+.pinned-dock-chevron { flex: none; inline-size: 1rem; block-size: 1rem; margin-inline-start: auto; color: var(--muted-foreground); }
 .pinned-dock-items { --surface: var(--background); --shade: var(--scroll-shade);
   display: grid; gap: var(--space-2); min-block-size: 0; overflow-y: auto; overscroll-behavior: contain;
   background:
@@ -12,4 +22,5 @@
     linear-gradient(transparent, var(--surface) 50%) bottom / 100% 2rem no-repeat local,
     radial-gradient(farthest-side at 50% 0, var(--shade), transparent) top / 100% 0.75rem no-repeat scroll,
     radial-gradient(farthest-side at 50% 100%, var(--shade), transparent) bottom / 100% 0.75rem no-repeat scroll; }
+.pinned-dock-items[hidden] { display: none; }
 @container (block-size < 30rem) { .pinned-dock { max-block-size: 33cqb; } }

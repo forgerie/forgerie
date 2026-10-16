@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pinKey, waitingItems, waitingLabel } from "./waitingOnYou";
+import { pinKey, waitingItems, waitingLabel, waitingName } from "./waitingOnYou";
 import { BUILDING, CONTRACT_STOP, CONTRACT_WAITING } from "./workflows/fixtures/runs";
 
 const question = (id: string, extra: { answer?: string; cancelled?: boolean } = {}) =>
@@ -19,6 +19,11 @@ describe("what waits on the reader", () => {
   it("counts in the heading", () => {
     expect(waitingLabel(1)).toBe("1 waiting for you");
     expect(waitingLabel(3)).toBe("3 waiting for you");
+  });
+
+  it("names each item in a few words for the folded dock", () => {
+    const items = waitingItems([question("1"), { id: "2", workflowEntry: CONTRACT_STOP }], [CONTRACT_WAITING]);
+    expect(items.map(waitingName)).toEqual(["ui's question", CONTRACT_STOP.stageName]);
   });
 });
 
