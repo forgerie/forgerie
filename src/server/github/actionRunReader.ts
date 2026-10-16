@@ -26,7 +26,7 @@ export async function readActionRun(repo: SessionRepo, call: Caller, trust: Pick
     total ??= batch.total_count;
     if (total !== batch.total_count) break;
     for (const job of batch.jobs) {
-      if (seen.has(job.id)) return { ...await shapeRun(repo, call, trust, raw), jobs, complete: false };
+      if (seen.has(job.id)) return { ...await shapeRun(repo, call, trust, raw, jobs), complete: false };
       seen.add(job.id);
       const state: ActionJob["state"] = job.status !== "completed" ? (job.status === "queued" || job.status === "waiting" ? "queued" : "running")
         : job.conclusion === "skipped" ? "skipped" : job.conclusion === "cancelled" ? "cancelled" : job.conclusion === "success" || job.conclusion === "neutral" ? "passed" : "failed";
@@ -48,9 +48,9 @@ export async function readActionRun(repo: SessionRepo, call: Caller, trust: Pick
     if (jobs.length === batch.total_count) { complete = true; break; }
     if (batch.jobs.length < 100) break;
   }
-  const run = await shapeRun(repo, call, trust, raw);
+  const run = await shapeRun(repo, call, trust, raw, jobs);
   if (run.status === "completed" && jobs.some(job => job.state === "queued" || job.state === "running")) complete = false;
-  const result = { ...run, jobs, complete };
+  const result = { ...run, complete };
   if (!Check(ActionRunSchema, result)) throw new Error("GitHub sent unexpected job data.");
   return result;
 }
@@ -85,8 +85,8 @@ export async function listHeadActionRuns(repo: SessionRepo, call: Caller, trust:
   throw new Error("The head-SHA run list is incomplete. Refresh or read the runs on GitHub.");
 }
 
-async function shapeRun(repo: SessionRepo, call: Caller, trust: Pick<GitHubAuthorTrust, "judge">, raw: Static<typeof Run>): Promise<ActionRun> {
-  let title = raw.display_title.slice(0, 8000);
+async function shapeRun(repo: SessionRepo, call: Caller, trust: Pick<GitHubAuthorTrust, "judge">, raw: Static<typeof Run>, jobs: ActionJob[] = []): Promise<ActionRun> {
+  let textAllowed = repo.everyone;
   if (!repo.everyone) {
     // The dispatcher/actor can be trusted while the title comes from an outside PR commit.
     const authors: GitHubAuthor[] = [];
@@ -99,12 +99,12 @@ async function shapeRun(repo: SessionRepo, call: Caller, trust: Pick<GitHubAutho
     const commit = await call.get(`/commits/${encodeURIComponent(raw.head_sha)}`, Type.Object({ author: User }), "Contents: read");
     authors.push({ login: commit.author?.login, association: "NONE" });
     const allowed = await trust.judge(repo.slug, await call.token(), authors);
-    if (!authors.every(allowed)) title = "(text hidden: outside contributor)";
+    textAllowed = authors.every(allowed);
   }
   if (!["completed", "in_progress", "queued", "waiting", "pending", "requested"].includes(raw.status)) throw new Error("GitHub sent an unexpected workflow run status.");
   const status = raw.status === "completed" ? "completed" : raw.status === "in_progress" ? "running" : ["waiting", "pending", "requested"].includes(raw.status) ? "waiting" : "queued";
-  const run = { repo: repo.slug, runId: raw.id, runNumber: raw.run_number, attempt: raw.run_attempt, workflow: raw.name ?? raw.path, workflowPath: raw.path, title, event: raw.event, branch: raw.head_branch ?? "", headSha: raw.head_sha, actor: raw.actor?.login ?? "deleted-user", url: raw.html_url,
-    status, conclusion: raw.conclusion, createdAt: raw.created_at, updatedAt: raw.updated_at, pullNumbers: raw.pull_requests.map(pull => pull.number), jobs: [], complete: true };
+  const run = { repo: repo.slug, runId: raw.id, runNumber: raw.run_number, attempt: raw.run_attempt, workflow: raw.name ?? raw.path, workflowPath: raw.path, title: textAllowed ? raw.display_title.slice(0, 8000) : "(text hidden: outside contributor)", event: raw.event, branch: raw.head_branch ?? "", headSha: raw.head_sha, actor: raw.actor?.login ?? "deleted-user", url: raw.html_url,
+    status, conclusion: raw.conclusion, createdAt: raw.created_at, updatedAt: raw.updated_at, pullNumbers: raw.pull_requests.map(pull => pull.number), jobs: jobs.map(job => !textAllowed && job.logTail !== undefined ? { ...job, logTail: "(text hidden: outside contributor)" } : job), complete: true };
   if (!Check(ActionRunSchema, run)) throw new Error("GitHub sent an unexpected workflow run state.");
   return run;
 }
