@@ -6,6 +6,7 @@ import { parseSkillInvocation, skillLoadOf, type SkillInvocation } from "./skill
 import { STEP_PREFIX } from "./ui/stepPart";
 import { PULL_NOTICE_TYPE, pullNoticeOf, type PullNotice } from "./pullRequests/pullNotice";
 import { PROCESS_EVENT_TYPE, parseProcessEvent, type ProcessEvent } from "./processes/processEvent";
+import { ACTION_RUN_NOTICE_TYPE, actionRunNoticeOf, type ActionRunNotice } from "./actionRuns/actionRunNotice";
 import { childEntryOf, type ChildEntry } from "./childAgents/childAgentsModel";
 import { issueProposalOf, issueProposalDecisionOf, ISSUE_PROPOSAL_OUTCOME_TYPE } from "./issues/issueProposalModel";
 import type { IssueProposal, IssueProposalArtifact } from "./issues/issueProposal";
@@ -47,6 +48,8 @@ export interface TranscriptMessage {
   pullNotice?: PullNotice;
   /** A managed process finished, failed, stopped, or printed a watched line. */
   processEvent?: ProcessEvent;
+  /** The Actions run watcher woke the agent: failed jobs, a new attempt, or the run's conclusion. */
+  actionRunNotice?: ActionRunNotice;
   /** A child agent asked, was answered, was steered, or reported back. */
   childEntry?: ChildEntry;
   /** A workflow started, waits at a stop, or passed on the reader's decision. */
@@ -128,6 +131,10 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
   if (role === "custom" && message.customType === PULL_NOTICE_TYPE) {
     const text = textOf(message);
     return { id, role: "system", parts: [{ type: "text", text }], pullNotice: pullNoticeOf(text, message.details), key: keyOf(message) };
+  }
+  if (role === "custom" && message.customType === ACTION_RUN_NOTICE_TYPE) {
+    const text = textOf(message);
+    return { id, role: "system", parts: [{ type: "text", text }], actionRunNotice: actionRunNoticeOf(text), key: keyOf(message) };
   }
   if (role === "custom" && message.customType === PROCESS_EVENT_TYPE) {
     const text = textOf(message);
@@ -491,6 +498,8 @@ export type ShellArtifact = { shell: ShellRun };
 export type SummaryArtifact = { summary: HistorySummaryKind };
 /** UI data of a pull request event row, carried as the system message's custom metadata. */
 export type PullNoticeArtifact = { pullNotice: PullNotice };
+/** UI data of an Actions run watcher row, carried as the system message's custom metadata. */
+export type ActionRunNoticeArtifact = { actionRunNotice: ActionRunNotice };
 /** UI data of a managed-process event row, carried as the system message's custom metadata. */
 export type ProcessEventArtifact = { processEvent: ProcessEvent };
 /** UI data of a child agent's row, carried as the system message's custom metadata. */
@@ -515,7 +524,7 @@ export function markPosition(messages: readonly TranscriptMessage[], position: n
 }
 /** Whether a message converts to an assistant reply, which joins the assistant messages next to it. */
 function joinsReply(message: TranscriptMessage): boolean {
-  return message.role === "assistant" && !message.pullNotice && !message.processEvent && !message.childEntry && !message.workflowEntry && !message.summary;
+  return message.role === "assistant" && !message.pullNotice && !message.actionRunNotice && !message.processEvent && !message.childEntry && !message.workflowEntry && !message.summary;
 }
 /**
  * The thread's id for the message at `position`. Adjacent replies join into
@@ -536,6 +545,8 @@ function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
   }
   if (message.pullNotice) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { pullNotice: message.pullNotice } satisfies PullNoticeArtifact } };
+  if (message.actionRunNotice) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
+    metadata: { custom: { actionRunNotice: message.actionRunNotice } satisfies ActionRunNoticeArtifact } };
   if (message.processEvent) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { processEvent: message.processEvent } satisfies ProcessEventArtifact } };
   if (message.childEntry) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],

@@ -28,6 +28,7 @@ export const wireStatusSchema = z.object({
   runningProcesses: z.number().optional(),
   waitingOnYou: z.number().optional(),
   watchingPullRequest: z.boolean().optional(),
+  watchingActionRun: z.boolean().optional(),
   ...blockers,
   response: sessionResponseSchema.optional(),
 });

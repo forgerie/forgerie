@@ -9,7 +9,7 @@ here at its first call site, with its part and one line below.
 One line per component: the name in backticks, its layer, and what it decides.
 
 - `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions.
-- `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays, and a refusal may offer one follow-up (such as Create) to confirm in place.
+- `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays with the refusal's words under it, and a refusal may offer one follow-up (such as Create) to confirm in place.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page.
 - `MenuButton` (molecule): rare commands one tap away behind a ⋯ button, with arrow keys, and a destructive command that asks twice in place.
 - `ChoiceList` (molecule): pick any number of rows; the legend counts the choice, a long list gets a search field, and a chosen id with no row stays visible.
@@ -78,3 +78,9 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `PinnedDock` (molecule): things that wait on the reader, pinned above an input under a counting heading; it takes at most 45% of the container height (a third on a container under 30rem tall) and scrolls inside past that.
 - `TagList` (atom): a few short words that classify something, as quiet pills on one wrapping row; readouts, not controls.
 - `Excerpt` (molecule): long content cut to its first few lines with a fade and a Show more toggle that appears only when it is cut; opened, it scrolls inside a share of the pane.
+- `StateMark` (atom): where a job or a build stands as one icon whose shape and tone both carry it: a cross, a check, a turning ring, a pause, and quiet marks for queued, cancelled, skipped, and unread.
+- `WatchToggle` (atom): whether something is watched, as a pressed eye chip in the live colour with a count of how often it fired, and a control-sized hit area.
+- `RunRow` (molecule): one build in a list: a press target with its mark, name, title, age, state word and short code-face facts; its controls stand beside it and drop under the text when the row is narrow; a note and a toned problem take the full width under both.
+- `JobList` (molecule): the jobs of one build: mark, name and time over a ribbon as long as the job's share of the longest one; output opens in place scrolled to its end, and passes fold into one row.
+- `RunDetail` (organism): one build opened from its list: back and out, the pipeline and number over the full title, facts, one toned line for where it stands, its watch with the control on the same line, its parts, and a quiet remove.
+- `RunList` (organism): a titled list of builds in a scrolling pane: row-shaped skeletons before the first read, a busy sweep on a reread, one alert with retry, an empty text, and a foot that stays in every state.

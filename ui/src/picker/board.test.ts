@@ -45,6 +45,14 @@ describe("row state", () => {
     expect(rowState(session("c"), { ...idle, watchingPullRequest: true, needsResponse: true }, undefined, false)).toBe("blocked");
     expect(rowState(session("d", { pullRequests: [off, { ...off, number: 2, watch: { kind: "stopped", reason: "Merged.", at: ago(1) } }] }), idle, undefined, false)).toBe("open");
   });
+  it("keeps an idle session whose Actions run the agent watches in Working, unless it asks for a response", () => {
+    const off = { provider: "github" as const, session: { id: "a", cwd: "/code/forgerie" }, repo: "o/r", runId: 1, source: "manual" as const, watch: { kind: "off" as const } };
+    const watched = session("a", { actionRuns: [off, { ...off, runId: 2, watch: { kind: "watching", since: ago(10), wakes: 1 } }] });
+    expect(rowState(watched, idle, undefined, true)).toBe("working");
+    expect(rowState(session("b"), { ...idle, watchingActionRun: true }, undefined, false)).toBe("working");
+    expect(rowState(session("c"), { ...idle, watchingActionRun: true, needsResponse: true }, undefined, false)).toBe("blocked");
+    expect(rowState(session("d", { actionRuns: [{ ...off, watch: { kind: "stopped", reason: "run completed (success)", at: ago(1) } }] }), idle, undefined, false)).toBe("open");
+  });
   it("keeps an idle session whose agents are still working in Working, unless it asks for a response", () => {
     expect(rowState(session("a"), { ...idle, workingAgents: 2 }, { phase: "idle" }, true)).toBe("working");
     expect(rowState(session("b"), { ...idle, workingAgents: 1, needsResponse: true }, undefined, false)).toBe("blocked");

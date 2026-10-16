@@ -1,0 +1,42 @@
+/* The pane's own inline padding is the host's: the sheet it sits in sets --tree-pad, and a bare host gets the gutter. */
+.run-list { display: grid; gap: var(--space-2); min-inline-size: 0; padding: var(--space-4) var(--tree-pad, var(--gutter)) 0; }
+.run-list-head { position: relative; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); }
+.run-list-head h3 { margin: 0; font-size: var(--small-text); font-weight: 600; }
+.run-list-count { color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
+/* A reread: a thin sweep under the heading, never a dimmed list. */
+.run-list-busy { position: absolute; inset-inline: 0; inset-block-end: calc(-1 * var(--space-1)); block-size: var(--lane-marker); border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, transparent, var(--live), transparent) 0 0 / 40% 100% no-repeat; animation: run-list-sweep 1.1s ease-in-out infinite; }
+@keyframes run-list-sweep { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+
+.run-list-alert { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--destructive-line); border-radius: var(--radius-control); background: var(--destructive-wash); }
+.run-list-alert-text { flex: 1 1 12rem; min-inline-size: 0; color: var(--foreground); font-size: var(--small-text); line-height: 1.45; overflow-wrap: anywhere; }
+.run-list-alert-text p { margin: 0; }
+.run-list-alert-text a { color: inherit; font-weight: 500; text-underline-offset: 0.2em; }
+.run-list-alert-action { position: relative; flex: none; padding: 0; border: 0; background: none; color: var(--foreground); font-size: var(--small-text);
+  font-weight: 500; text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; }
+.run-list-alert-action::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: max(100%, var(--control-size));
+  block-size: var(--control-size); translate: -50% -50%; }
+
+.run-list-rows { margin: 0; padding: 0; list-style: none; }
+.run-list-rows > li { min-inline-size: 0; }
+.run-list-rows > li + li { border-block-start: var(--hairline) solid var(--line); }
+
+/* Ghosts in the shape of a row: a mark, a name line, a facts line. */
+.run-list-skeleton { display: grid; }
+.run-list-ghost { display: grid; grid-template-columns: 1rem minmax(0, 1fr); grid-template-rows: auto auto; gap: var(--space-2); align-items: center;
+  min-block-size: var(--control-size); padding: var(--space-3) var(--space-1); }
+.run-list-ghost + .run-list-ghost { border-block-start: var(--hairline) solid var(--line); }
+.run-list-ghost b, .run-list-ghost i { display: block; border-radius: var(--radius-document); background: var(--muted); animation: skeleton-pulse 2s ease-in-out infinite; }
+.run-list-ghost b { grid-row: 1; inline-size: 1rem; block-size: 1rem; border-radius: 50%; }
+.run-list-ghost i:first-of-type { grid-column: 2; inline-size: calc(var(--run-list-ghost, 0.6) * 100%); block-size: 0.875rem; }
+.run-list-ghost i:last-of-type { grid-column: 2; inline-size: calc(var(--run-list-ghost, 0.6) * 70%); block-size: 0.625rem; }
+
+.run-list-empty { padding-block: var(--space-2); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; overflow-wrap: anywhere; }
+.run-list-empty p { margin: 0; }
+.run-list-empty strong { display: block; color: var(--foreground); font-size: var(--text-size); font-weight: 600; }
+.run-list-foot { padding-block: var(--space-2) var(--space-4); }
+@media (prefers-reduced-motion: reduce) {
+  .run-list-busy { animation: none; background: var(--live-edge); }
+  .run-list-ghost b, .run-list-ghost i { animation: none; }
+}
