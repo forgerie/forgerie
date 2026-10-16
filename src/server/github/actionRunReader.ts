@@ -6,7 +6,7 @@ import type { GitHubAuthor, GitHubAuthorTrust } from "./githubTrust.js";
 
 const nullable = Type.Union([Type.String(), Type.Null()]);
 const User = Type.Union([Type.Object({ login: Type.String() }), Type.Null()]);
-const Run = Type.Object({ id: Type.Integer(), run_attempt: Type.Integer(), name: nullable, path: Type.String(), display_title: Type.String(), event: Type.String(), head_branch: nullable, head_sha: Type.String(), actor: User, html_url: Type.String(), status: Type.String(), conclusion: nullable, created_at: Type.String(), updated_at: Type.String(), pull_requests: Type.Array(Type.Object({ number: Type.Integer() })) });
+const Run = Type.Object({ id: Type.Integer(), run_number: Type.Integer({ minimum: 1 }), run_attempt: Type.Integer(), name: nullable, path: Type.String(), display_title: Type.String(), event: Type.String(), head_branch: nullable, head_sha: Type.String(), actor: User, html_url: Type.String(), status: Type.String(), conclusion: nullable, created_at: Type.String(), updated_at: Type.String(), pull_requests: Type.Array(Type.Object({ number: Type.Integer() })) });
 const Runs = Type.Object({ total_count: Type.Integer(), workflow_runs: Type.Array(Run) });
 const Job = Type.Object({ id: Type.Integer(), name: Type.String(), status: Type.String(), conclusion: nullable, html_url: Type.String(), started_at: nullable, completed_at: nullable, check_run_url: Type.Optional(Type.String()) });
 const Jobs = Type.Object({ total_count: Type.Integer(), jobs: Type.Array(Job) });
@@ -103,7 +103,7 @@ async function shapeRun(repo: SessionRepo, call: Caller, trust: Pick<GitHubAutho
   }
   if (!["completed", "in_progress", "queued", "waiting", "pending", "requested"].includes(raw.status)) throw new Error("GitHub sent an unexpected workflow run status.");
   const status = raw.status === "completed" ? "completed" : raw.status === "in_progress" ? "running" : ["waiting", "pending", "requested"].includes(raw.status) ? "waiting" : "queued";
-  const run = { repo: repo.slug, runId: raw.id, attempt: raw.run_attempt, workflow: raw.name ?? raw.path, workflowPath: raw.path, title, event: raw.event, branch: raw.head_branch ?? "", headSha: raw.head_sha, actor: raw.actor?.login ?? "deleted-user", url: raw.html_url,
+  const run = { repo: repo.slug, runId: raw.id, runNumber: raw.run_number, attempt: raw.run_attempt, workflow: raw.name ?? raw.path, workflowPath: raw.path, title, event: raw.event, branch: raw.head_branch ?? "", headSha: raw.head_sha, actor: raw.actor?.login ?? "deleted-user", url: raw.html_url,
     status, conclusion: raw.conclusion, createdAt: raw.created_at, updatedAt: raw.updated_at, pullNumbers: raw.pull_requests.map(pull => pull.number), jobs: [], complete: true };
   if (!Check(ActionRunSchema, run)) throw new Error("GitHub sent an unexpected workflow run state.");
   return run;

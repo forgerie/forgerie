@@ -16,6 +16,14 @@ describe("action run watch news", () => {
     expect(done.cursor.concluded).toBe(true);
     expect(evaluateActionRunWatch(done.cursor, { ...run, attempt: 2, status: "completed", conclusion: "failure" }).text).toBeUndefined();
   });
+  it("names a run by its workflow number, while keeping the API ID in notice data", () => {
+    const run = { ...actionRun({ jobs: [{ id: 10, name: "test", state: "failed", url: "job" }] }), runId: 22123456789, runNumber: 4812 };
+    const report = evaluateActionRunWatch(initialActionRunCursor(1), run);
+    expect(report.text?.split("\n")[0]).toContain("run #4812 has new activity");
+    expect(report.text?.split("\n")[0]).not.toContain("22123456789");
+    const data = /```json\n([\s\S]*?)\n```/u.exec(report.text ?? "")?.[1];
+    expect(JSON.parse(data ?? "null")).toMatchObject({ runId: 22123456789, runNumber: 4812 });
+  });
   it("does not checkpoint incomplete reads", () => {
     const cursor = initialActionRunCursor(1);
     expect(() => evaluateActionRunWatch(cursor, actionRun({ complete: false }))).toThrow("incomplete");

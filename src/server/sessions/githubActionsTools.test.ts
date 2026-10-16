@@ -27,7 +27,7 @@ describe("github_actions tool", () => {
       expect(tool.exposure).toBe(MODEL_ONLY_EXPOSURE);
       expect(createPiWebCustomToolDefinitions("/workspace", false, undefined, undefined, undefined, deps).map(tool => tool.name)).toContain("github_actions");
       const result = await tool.execute("dispatch", { action: "dispatch", workflow: "ci.yml", ref: "main", inputs: { target: "linux" } }, undefined, undefined, ctx);
-      expect(result.content[0]).toHaveProperty("text", details ? "Dispatched and linked run 4812.\nhttps://github.com/owner/repo/actions/runs/4812" : "Dispatch accepted, but GitHub returned no run details (HTTP 204). No run was linked. Find it with github_read runs and link it with github_actions link. Do not dispatch again.");
+      expect(result.content[0]).toHaveProperty("text", details ? "Dispatched and linked run ID 4812.\nhttps://github.com/owner/repo/actions/runs/4812" : "Dispatch accepted, but GitHub returned no run details (HTTP 204). No run was linked. Find it with github_read runs and link it with github_actions link. Do not dispatch again.");
       expect(store.list()).toHaveLength(details ? 1 : 0);
       if (details) expect(store.list()[0]?.source).toBe("dispatch");
       expect(JSON.parse(github.requests[0]?.body ?? "null")).toEqual({ ref: "main", inputs: { target: "linux" }, return_run_details: true });

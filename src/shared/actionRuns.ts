@@ -16,7 +16,7 @@ export const ActionJobSchema = Type.Object({
 });
 export type ActionJob = Static<typeof ActionJobSchema>;
 export const ActionRunSchema = Type.Object({
-  repo: text, runId: id, attempt: id, workflow: text, workflowPath: text, title: text, event: text, branch: text, headSha: text, actor: text, url: text,
+  repo: text, runId: id, runNumber: id, attempt: id, workflow: text, workflowPath: text, title: text, event: text, branch: text, headSha: text, actor: text, url: text,
   status: Type.Union([Type.Literal("queued"), Type.Literal("waiting"), Type.Literal("running"), Type.Literal("completed")]),
   conclusion: Type.Union([Type.Null(), Type.Literal("success"), Type.Literal("failure"), Type.Literal("cancelled"), Type.Literal("skipped"), Type.Literal("timed_out"), Type.Literal("action_required"), Type.Literal("neutral"), Type.Literal("stale")]),
   createdAt: date, updatedAt: date, pullNumbers: Type.Array(id), jobs: Type.Array(ActionJobSchema), complete: Type.Boolean(),

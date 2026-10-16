@@ -140,8 +140,8 @@ export class ActionRunService {
     // Persist the known receipt without another GitHub read: dispatch may return before the run is readable.
     try {
       this.publish(await this.deps.store.link({ ...ref, repo: result.repo, runId: result.runId, source: "dispatch" }));
-    } catch (error) { throw new Error(`Dispatched run ${String(result.runId)} at ${result.url}, but could not save its link: ${messageOf(error)}. Do not dispatch again; link this run.`, { cause: error }); }
-    return `Dispatched and linked run ${String(result.runId)}.\n${result.url}`;
+    } catch (error) { throw new Error(`Dispatched run ID ${String(result.runId)} at ${result.url}, but could not save its link: ${messageOf(error)}. Do not dispatch again; link this run.`, { cause: error }); }
+    return `Dispatched and linked run ID ${String(result.runId)}.\n${result.url}`;
   }
 
   async poll(): Promise<void> {
