@@ -18,14 +18,14 @@ describe("a run's state", () => {
     expect(runSentence(passedRun)).toBe("Succeeded in 12m.");
     expect(runSentence(queuedRun)).toBe("Queued.");
     expect(runSentence({ ...passedRun, complete: false })).toBe("Succeeded in 12m. Forgerie could not read every job.");
-    expect(runSentence({ ...runningRun, jobs: [...runningRun.jobs, { ...runningRun.jobs[0]!, id: "x", state: "failed" }] }))
+    expect(runSentence({ ...runningRun, jobs: [...runningRun.jobs, { ...runningRun.jobs[0]!, id: 99, state: "failed" }] }))
       .toBe("1 job failed. In progress: 2 of 5 jobs done.");
   });
 
   it("puts failed jobs first and times a job from GitHub's figure or its start and end", () => {
     expect(sortedJobs(failedRun.jobs).map((job) => job.state)).toEqual(["failed", "failed", "cancelled", "passed", "passed", "passed", "skipped"]);
-    expect(jobSeconds({ id: "1", name: "a", state: "passed", url: "", startedAt: "2026-10-15T12:00:00Z", completedAt: "2026-10-15T12:01:30Z" })).toBe(90);
-    expect(jobSeconds({ id: "1", name: "a", state: "queued", url: "" })).toBeUndefined();
+    expect(jobSeconds({ id: 1, name: "a", state: "passed", url: "", startedAt: "2026-10-15T12:00:00Z", completedAt: "2026-10-15T12:01:30Z" })).toBe(90);
+    expect(jobSeconds({ id: 1, name: "a", state: "queued", url: "" })).toBeUndefined();
   });
 
   it("tones a list by its worst run and ignores unread ones", () => {
