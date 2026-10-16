@@ -293,7 +293,7 @@ function LinkForm({ discovery, writing, first, now, onAsk, onLink, onCancel }: {
         {!open.data.complete && <p className="pr-empty" role="status">Showing the first {open.data.items.length} open PRs. Type a number to preview another.</p>}
         <ul className="pr-checks">{open.data.items.map(item => <li className="pr-check" key={item.number}>
           <button type="button" className="pr-check-line" onClick={() => read(item.number, String(item.number))}>
-            <span className="pr-check-name">#{item.number} {item.title}<span className="pr-check-workflow">{item.head} → {item.base}, {ago(item.updatedAt, now)} ago</span></span>
+            <span className="pr-check-name"><span>#{item.number} {item.title}</span><span className="pr-check-workflow">{item.head} → {item.base}, {ago(item.updatedAt, now)} ago</span></span>
             <span className="pr-check-time">{STATE_WORD[item.state]}</span><span>Preview</span>
           </button></li>)}</ul>
       </>}
