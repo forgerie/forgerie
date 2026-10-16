@@ -102,6 +102,9 @@ describe("the Actions tab", () => {
     expect(rows[0]?.textContent).toContain("fix/upload-retry");
     expect(rows[0]?.textContent).toContain("3f9a2c4");
     expect(rows[0]?.textContent).toContain("attempt 2");
+    // People read GitHub's run number; the run ID stays in routes and keys.
+    expect(rows[0]?.querySelector(".run-row-fact")?.textContent).toBe("#4812");
+    expect(rows[0]?.textContent).not.toContain(String(failedRun.runId));
     expect(rows[0]?.querySelector(".watch-toggle")?.getAttribute("aria-pressed")).toBe("true");
     expect(rows[0]?.querySelector(".watch-toggle")?.textContent).toContain("Watching2 wakes");
     expect(rows[2]?.textContent).toContain("Stopped: run completed (success).");
@@ -116,6 +119,8 @@ describe("the Actions tab", () => {
     expect(api.read).toHaveBeenCalledWith(session, failedRun.runId, expect.anything());
     expect(document.querySelector(".run-detail-title")?.textContent).toBe("Retry dropped upload chunks");
     expect(document.querySelector(".run-detail-verdict")?.textContent).toBe("2 of 7 jobs failed in 12m.");
+    expect(document.querySelector(".run-detail-number")?.textContent).toBe("#4812");
+    expect(button(/^Unlink run/)?.textContent).toBe("Unlink run #4812 from this session.");
     expect([...document.querySelectorAll(".job-list-name")].map((name) => name.textContent).slice(0, 3))
       .toEqual(["Failed: test (ubuntu-latest, node 24)", "Failed: test (macos-latest, node 24)", "Cancelled: e2e (chromium)"]);
     expect(document.querySelector(".job-list-log pre")?.textContent).toContain("AssertionError: expected 2 to be 3");
@@ -136,7 +141,7 @@ describe("the Actions tab", () => {
     // The running one can still be stopped and watched again.
     const running = document.querySelectorAll(".run-row")[1];
     await press(running?.querySelector(".watch-toggle") ?? undefined);
-    expect(document.querySelectorAll(".run-row")[1]?.querySelector(".watch-toggle")?.textContent).toBe("Watch again, run #18234590417");
+    expect(document.querySelectorAll(".run-row")[1]?.querySelector(".watch-toggle")?.textContent).toBe("Watch again, run #4813");
   });
 
   it("keeps a run it could not read, and names the missing Actions permission with its link", async () => {
@@ -144,7 +149,7 @@ describe("the Actions tab", () => {
     const problem = document.querySelector(".run-row-problem");
     expect(problem?.textContent).toContain("Forgerie's GitHub App needs Actions: read to read this run.");
     expect(problem?.querySelector("a")?.getAttribute("href")).toBe("https://github.com/settings/apps/forgerie-dev/permissions");
-    expect(document.querySelector(".run-row-name")?.textContent).toBe("Run #18234488888");
+    expect(document.querySelector(".run-row-name")?.textContent).toBe("Run ID 18234488888");
   });
 
   it("offers no writes in a read-only session", async () => {

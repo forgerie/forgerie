@@ -40,11 +40,11 @@ describe("Actions run API", () => {
     expect(calls.map((call) => call.body)).toEqual([{ cwd: ref.cwd, run: failedRun.runId }, { cwd: ref.cwd, run: failedRun.url }]);
   });
 
-  it("unlinks, watches, and stops on the run's routes, reading the link alone or wrapped", async () => {
+  it("unlinks, watches, and stops on the run's routes, each answering with the link", async () => {
     const id = String(failedRun.runId);
     const { calls, api } = fake({
       [`DELETE /api/sessions/s1/action-runs/${id}${query}`]: { body: watched },
-      [`POST /api/sessions/s1/action-runs/${id}/watch`]: { body: { link: watched } },
+      [`POST /api/sessions/s1/action-runs/${id}/watch`]: { body: watched },
       [`DELETE /api/sessions/s1/action-runs/${id}/watch${query}`]: { body: { ...watched, watch: { kind: "stopped", reason: "Stopped by you", at: "2026-10-15T12:00:00.000Z" } } },
     });
     await expect(api.unlink(ref, failedRun.runId)).resolves.toEqual(watched);
@@ -64,6 +64,10 @@ describe("Actions run API", () => {
   it("refuses a body that breaks the contract", async () => {
     const { api } = fake({ [`GET /api/sessions/s1/action-runs${query}`]: { body: { items: [{ link: watched, run: { ...failedRun, status: "done" } }], derived: [] } } });
     await expect(api.list(ref)).rejects.toThrow();
+    const withoutNumber: Partial<typeof failedRun> = { ...failedRun };
+    delete withoutNumber.runNumber;
+    const missing = fake({ [`GET /api/sessions/s1/action-runs/${String(failedRun.runId)}${query}`]: { body: { link: watched, run: withoutNumber } } });
+    await expect(missing.api.read(ref, failedRun.runId)).rejects.toThrow();
   });
 });
 

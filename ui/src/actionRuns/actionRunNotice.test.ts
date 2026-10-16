@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { convertMessage, fromHistory, reduceEvent } from "../transcript";
 import { actionRunNoticeOf, noticeSentence, noticeTone } from "./actionRunNotice";
-import { attemptText, conclusionText, failedConclusionText, failedText } from "./fixtures/notices";
+import { attemptText, conclusionText, failedConclusionText, failedText, legacyText } from "./fixtures/notices";
 
 describe("forgerie:action-run notices", () => {
   it("reads the watcher's fenced JSON news", () => {
     const notice = actionRunNoticeOf(failedText);
-    expect(notice).toMatchObject({ repo: "forgerie/forgerie", runId: 4812, attempt: 1, workflow: "CI", conclusion: undefined, newAttempt: undefined,
-      url: "https://github.com/forgerie/forgerie/actions/runs/4812" });
+    expect(notice).toMatchObject({ repo: "forgerie/forgerie", runId: 18234561230, runNumber: 4812, attempt: 1, workflow: "CI", conclusion: undefined, newAttempt: undefined,
+      url: "https://github.com/forgerie/forgerie/actions/runs/18234561230" });
     expect(notice.failedJobs.map((job) => job.name)).toEqual(["test (ubuntu-latest, node 24)", "test (macos-latest, node 24)"]);
     expect(notice.text).toBe(failedText);
   });
@@ -17,6 +17,11 @@ describe("forgerie:action-run notices", () => {
     expect(noticeSentence(actionRunNoticeOf(conclusionText))).toBe("Build SM8550 #4813 finished: success.");
     expect(noticeSentence(actionRunNoticeOf(attemptText))).toBe("CI #4812: attempt 2 started. The agent was woken.");
     expect(noticeSentence(actionRunNoticeOf(failedConclusionText))).toBe("CI #4812 finished: failure. 1 job failed. The agent was woken.");
+  });
+
+  it("names the run by its ID when the notice has no run number", () => {
+    expect(actionRunNoticeOf(legacyText).runNumber).toBeUndefined();
+    expect(noticeSentence(actionRunNoticeOf(legacyText))).toBe("CI #18234561230: 1 job failed. The agent was woken.");
   });
 
   it("tones a failure, a success, news while it runs, and an ending without a verdict", () => {
@@ -40,8 +45,8 @@ describe("Actions run notices in the transcript", () => {
       { role: "assistant", content: [{ type: "text", text: "Reading the failures." }], timestamp: 3 },
     ]);
     expect(transcript.messages.map((message) => message.role)).toEqual(["assistant", "system", "assistant"]);
-    expect(transcript.messages[1]).toMatchObject({ actionRunNotice: { runId: 4812, workflow: "CI" } });
-    expect(convertMessage(transcript.messages[1]!)).toMatchObject({ role: "system", metadata: { custom: { actionRunNotice: { runId: 4812 } } } });
+    expect(transcript.messages[1]).toMatchObject({ actionRunNotice: { runId: 18234561230, runNumber: 4812, workflow: "CI" } });
+    expect(convertMessage(transcript.messages[1]!)).toMatchObject({ role: "system", metadata: { custom: { actionRunNotice: { runNumber: 4812 } } } });
   });
 
   it("shows a wake that arrives live, while the session is open", () => {

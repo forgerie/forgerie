@@ -36,10 +36,16 @@ export const conclusionPhrase = (conclusion: string) => conclusion.replaceAll("_
 
 export const shortSha = (sha: string) => sha.slice(0, 7);
 
-/** A run's short facts for a row: its ID, branch, commit, and attempt. `label` is the hover text. */
+/**
+ * How a person names one run: GitHub's run number, "#4812". A run that was
+ * never read has only its ID, which is not a run number, so it says so.
+ */
+export const runRef = (run: Pick<ActionRun, "runNumber"> | null, runId: number) => run ? `#${String(run.runNumber)}` : `ID ${String(runId)}`;
+
+/** A run's short facts for a row: its number, branch, commit, and attempt. `label` is the hover text. */
 export function runFacts(run: ActionRun): { text: string; label: string; code?: boolean }[] {
   return [
-    { text: `#${String(run.runId)}`, label: "Run ID", code: true },
+    { text: `#${String(run.runNumber)}`, label: `Run #${String(run.runNumber)}, ID ${String(run.runId)}`, code: true },
     { text: run.branch, label: `Branch ${run.branch}`, code: true },
     { text: shortSha(run.headSha), label: `Commit ${run.headSha}`, code: true },
     { text: `attempt ${String(run.attempt)}`, label: "Attempt" },

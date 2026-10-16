@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jobSeconds, listTone, permissionProblem, runInput, runMark, runSentence, runWord, sortedJobs, watchable, watchNote } from "./actionRunModel";
+import { jobSeconds, listTone, runFacts, runRef, permissionProblem, runInput, runMark, runSentence, runWord, sortedJobs, watchable, watchNote } from "./actionRunModel";
 import { failedRun, longRun, passedRun, permissionError, queuedRun, run, runningRun } from "./fixtures/actionRuns";
 
 describe("a run's state", () => {
@@ -39,6 +39,15 @@ describe("a run's state", () => {
     expect(watchable(runningRun)).toBe(true);
     expect(watchable(passedRun)).toBe(false);
     expect(watchable(null)).toBe(true);
+  });
+});
+
+describe("a run's name", () => {
+  it("shows GitHub's run number, and the ID only for a run that was never read", () => {
+    expect(runRef(failedRun, failedRun.runId)).toBe("#4812");
+    expect(runRef(null, 18234499999)).toBe("ID 18234499999");
+    expect(runFacts(failedRun).map((fact) => fact.text)).toEqual(["#4812", "fix/upload-retry", "3f9a2c4", "attempt 2"]);
+    expect(runFacts(failedRun)[0]?.label).toBe("Run #4812, ID 18234561230");
   });
 });
 
