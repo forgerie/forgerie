@@ -5,6 +5,7 @@ import type { SessionRef, SessionTreeSnapshot } from "../../shared/apiTypes.js";
 import type { DurableSessionAddress } from "./durableSessionAddress.js";
 import type { DurableNativeHistory } from "./durableNativeHistory.js";
 import type { DurableParentState } from "./durableParentState.js";
+import type { SessionImage } from "./sessionImages.js";
 
 /** Public parent capabilities. Reading these never starts Durable work. */
 export interface DurableParentReader {
@@ -22,5 +23,7 @@ export interface DurableParentMutations {
 /** Opt-in transport capability while the mixed-store reader is composed at daemon startup. */
 export interface DurableBrowserSessionService {
   attachOpenBrowser?(ref: SessionRef, send: (open: SessionOpenResult) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment | undefined>;
+  /** Bytes for an image a live frame referenced; undefined when it does not exist. */
+  sessionImage?(ref: SessionRef, messageId: string, image: number): Promise<SessionImage | undefined>;
   attachDurableBrowser(ref: SessionRef, send: (snapshot: DurableBrowserSnapshot) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment>;
 }

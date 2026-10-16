@@ -45,6 +45,7 @@ import {
 import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientNewSessionModelSelection, ClientSession, ClientSessionCleanupExecuteResponse, ClientSessionCleanupPreviewResponse, ClientSessionModel, ClientSessionStatus, ClientSessionTreeForkRequest, ClientSessionTreeForkResult, ClientSessionTreeNavigateRequest, ClientSessionTreeNavigateResult, ClientThinkingLevel, SessionStreamSnapshot, SessionUiEvent } from "../types.js";
 import type { DurableSessionAddress } from "./durableSessionAddress.js";
 import type { DurableSessionReader } from "./durableSessionReader.js";
+import type { SessionImage } from "./sessionImages.js";
 import type { DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import type { DurableBrowserAttachment, DurableHostState } from "./durableParentReadModel.js";
 import { ParentAsks, ParentAsksSchema } from "./durableParentDocuments.js";
@@ -2833,6 +2834,10 @@ export class PiSessionService implements SessionRouteService {
       const session = this.activeForRef(ref)?.runtime.session;
       return this.nativeHostState(session);
     });
+  }
+
+  async sessionImage(ref: PiSessionRef, messageId: string, image: number): Promise<SessionImage | undefined> {
+    return await this.durableReader?.image(ref, messageId, image) ?? undefined;
   }
 
   async attachDurableBrowser(ref: PiSessionRef, send: (snapshot: DurableBrowserSnapshot) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment> {

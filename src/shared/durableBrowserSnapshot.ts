@@ -10,7 +10,8 @@ export const durableBrowserMessageSchema = z.object({
     z.object({ type: z.literal("text"), text: z.string() }),
     z.object({ type: z.literal("thinking"), thinking: z.string() }),
     z.object({ type: z.literal("toolCall"), id: z.string(), name: z.string(), arguments: z.unknown() }),
-    z.object({ type: z.literal("image"), data: z.string(), mimeType: z.string() }),
+    // Live socket frames carry `url` instead of `data`; the browser loads the bytes by reference.
+    z.object({ type: z.literal("image"), data: z.string().optional(), url: z.string().optional(), mimeType: z.string() }),
   ]))]).optional(),
   timestamp: z.number().optional(), stopReason: z.string().optional(), errorMessage: z.string().optional(),
   toolCallId: z.string().optional(), toolName: z.string().optional(), isError: z.boolean().optional(),

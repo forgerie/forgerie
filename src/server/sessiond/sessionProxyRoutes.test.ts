@@ -286,6 +286,22 @@ describe("machine-scoped session proxy routes", () => {
       socket.close();
     }
   });
+  it("serves a referenced session image as bytes, not JSON", async () => {
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00]);
+    daemon.respondWith({ statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify({ mimeType: "image/png", data: bytes.toString("base64") }) });
+    const response = await app.inject({ url: "/api/machines/local/sessions/s1/images?cwd=%2Frepo&message=m1&image=0" });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toBe("image/png");
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.rawPayload.equals(bytes)).toBe(true);
+    expect(daemon.requests).toEqual([{ method: "GET", path: "/sessions/s1/images?cwd=%2Frepo&message=m1&image=0", body: undefined }]);
+  });
+  it("refuses a daemon image whose type a browser could run as a page", async () => {
+    daemon.respondWith({ statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify({ mimeType: "text/html", data: "PGh0bWw+" }) });
+    expect((await app.inject({ url: "/api/machines/local/sessions/s1/images?cwd=%2Frepo&message=m1&image=0" })).statusCode).toBe(502);
+    daemon.respondWith({ statusCode: 404, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Image not found" }) });
+    expect((await app.inject({ url: "/api/machines/local/sessions/s1/images?cwd=%2Frepo&message=m1&image=9" })).statusCode).toBe(404);
+  });
 });
 
 interface FakeSessionDaemonResponse {
