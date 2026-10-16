@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { StateChecks } from "@simonwjackson/caliper/checks";
 import { PullRunsSection } from "./PullRunsSection";
 import { runKey, type ActionRun } from "./actionRunApi";
 import type { ActionRunsState } from "./actionRunsStore";
@@ -16,7 +17,31 @@ export const composition = {
 };
 export const expectations = {
   UnderPullRequest: { empty: { reason: "The pull request panel is a modal dialog portaled to the document body, outside #caliper-host. The PNG shows it." } },
+  OpenPullRequests: { empty: { reason: "The pull request panel is a modal dialog portaled to the document body, outside #caliper-host. The PNG shows it." } },
+  OpenPullRequestsEmpty: { empty: { reason: "The pull request panel is a modal dialog portaled to the document body, outside #caliper-host. The PNG shows it." } },
+  OpenPullRequestsLoading: { empty: { reason: "The pull request panel is a modal dialog portaled to the document body, outside #caliper-host. The PNG shows it." } },
+  OpenPullRequestsError: { empty: { reason: "The pull request panel is a modal dialog portaled to the document body, outside #caliper-host. The PNG shows it." } },
+  OpenPullRequestsMany: { empty: { reason: "The pull request panel is a modal dialog portaled to the document body, outside #caliper-host. The PNG shows it." } },
 } as const;
+export const checks = {
+  OpenPullRequests: {
+    "preview before linking leaves watching off": async ({ within, input, expect, waitFor }) => {
+      const body = within(document.body), number = `#${String(151)}`;
+      await waitFor(() => expect(body.getByRole("button", { name: new RegExp(`^${number} .*Preview$`) })).toBeVisible());
+      await input.click(body.getByRole("button", { name: new RegExp(`^${number} .*Preview$`) }));
+      await waitFor(() => {
+        expect(body.getByRole("heading", { name: `Preview ${number}` })).toBeVisible();
+        expect(body.getByText(/Not linked yet\./)).toBeVisible();
+      });
+      expect(body.queryByRole("button", { name: "Watch" })).toBeNull();
+      await input.click(body.getByRole("button", { name: `Link ${number}` }));
+      await waitFor(() => {
+        expect(body.getByRole("button", { name: `Unlink ${number} from this session` })).toBeVisible();
+        expect(body.getByRole("button", { name: "Watch" })).toHaveAttribute("aria-pressed", "false");
+      });
+    },
+  },
+} satisfies StateChecks;
 
 const AT = "2026-10-15T12:00:00.000Z";
 function Scenario({ initial, number = 142, inPanel = false }: { initial: ActionRunsState; number?: number; inPanel?: boolean }) {
