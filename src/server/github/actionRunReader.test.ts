@@ -4,12 +4,12 @@ import { FakeGitHub, actionJob, json, serveActionRun, workflowRun } from "./fake
 import type { GitHubAuthor } from "./githubTrust.js";
 
 const base = "https://api.github.com/repos/owner/repo";
-function fixture(everyone = true) {
+function fixture(everyone = true, allowAuthorText = false) {
   const github = new FakeGitHub();
   const judged: GitHubAuthor[][] = [];
   const agent = new GitHubAgent({ fetch: github.fetch,
     app: { tokenFor: () => Promise.resolve({ ok: true, token: "test" }), dropToken() { /* Test tokens do not expire. */ }, status: () => ({ state: "configured", app: { slug: "forgerie", owner: "owner", url: "https://github.com/apps/forgerie" }, installUrl: "" }) },
-    trust: { judge: (_repo, _token, authors) => { judged.push([...authors]); return Promise.resolve(author => author.association === "OWNER"); } },
+    trust: { judge: (_repo, _token, authors) => { judged.push([...authors]); return Promise.resolve(author => allowAuthorText || author.association === "OWNER"); } },
     resolveRepo: () => Promise.resolve({ slug: "owner/repo", everyone }),
   });
   return { github, agent, judged };
@@ -45,6 +45,21 @@ describe("GitHub Actions reads and dispatch", () => {
     expect((await f.agent.run("/workspace", 4812)).title).toBe("(text hidden: outside contributor)");
     expect(f.judged).toEqual([[{ login: "outside", association: "CONTRIBUTOR" }, { login: "outside", association: "NONE" }]]);
     expect(JSON.stringify(await f.agent.runs("/workspace"))).not.toContain("external instruction");
+  });
+  it("applies the run author's trust policy to annotations returned by github_read run", async () => {
+    for (const policy of [{ everyone: false, allowAuthorText: false }, { everyone: true, allowAuthorText: false }, { everyone: false, allowAuthorText: true }]) {
+      const f = fixture(policy.everyone, policy.allowAuthorText);
+      serveActionRun(f.github, "owner/repo", {}, [actionJob(), actionJob({ id: 11, conclusion: "cancelled" })]);
+      f.github.always(`GET ${base}/commits/${"a".repeat(40)}`, json({ author: { login: "outside" } }));
+      f.github.always(`GET ${base}/check-runs/20/annotations`, json([{ message: "external message", raw_details: "external instructions" }]));
+      const text = await f.agent.read("/workspace", { action: "run", runId: 4812 });
+      const hidden = !policy.everyone && !policy.allowAuthorText;
+      expect(text.includes("external instructions")).toBe(!hidden);
+      expect(text.includes("external message")).toBe(false);
+      const run = await f.agent.run("/workspace", 4812);
+      expect(run.jobs.map(job => job.logTail)).toEqual([hidden ? "(text hidden: outside contributor)" : "external instructions", hidden ? "(text hidden: outside contributor)" : "external instructions"]);
+      expect(run.jobs.every(job => job.logSource === "annotations")).toBe(true);
+    }
   });
   it("checks commit authors, not dispatchers, for push run titles", async () => {
     const f = fixture(false); serveActionRun(f.github, "owner/repo");
