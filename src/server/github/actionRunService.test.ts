@@ -173,8 +173,10 @@ describe("action run HTTP routes", () => {
       const address = await app.listen({ port: 0, host: "127.0.0.1" });
       expect(await (await fetch(`${address}${base}?cwd=/workspace`)).json()).toEqual({ items: [], derived: [] });
       const linked = await app.inject({ method: "PUT", url: base, payload: { cwd: ref.cwd, run: actionRun().url } });
-      expect(linked.statusCode).toBe(200); expect(linked.json()).toMatchObject({ link: { provider: "github", runId: 4812 }, run: { jobs: [] } });
-      expect((await app.inject({ method: "GET", url: `${base}/4812?cwd=/workspace` })).statusCode).toBe(200);
+      expect(linked.statusCode).toBe(200); expect(linked.json()).toMatchObject({ link: { provider: "github", runId: 4812 }, run: { runNumber: 42, jobs: [] } });
+      const read = await fetch(`${address}${base}/4812?cwd=/workspace`);
+      expect(read.status).toBe(200);
+      expect(await read.json()).toMatchObject({ run: { runId: 4812, runNumber: 42 } });
       expect((await app.inject({ method: "POST", url: `${base}/4812/watch`, payload: { cwd: ref.cwd } })).json()).toMatchObject({ watch: { kind: "watching" } });
       expect((await app.inject({ method: "GET", url: "/github/action-runs" })).json()).toMatchObject({ links: [{ runId: 4812 }] });
       expect((await app.inject({ method: "DELETE", url: `${base}/4812/watch?cwd=/workspace` })).json()).toMatchObject({ watch: { kind: "stopped" } });

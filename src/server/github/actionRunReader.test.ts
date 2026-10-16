@@ -16,18 +16,27 @@ function fixture(everyone = true) {
 }
 describe("GitHub Actions reads and dispatch", () => {
   it("reads attempt-pinned jobs, durations, skipped jobs and bounded failure annotations", async () => {
-    const f = fixture(); serveActionRun(f.github, "owner/repo", {}, [actionJob(), actionJob({ id: 11, conclusion: "skipped" })]);
+    const f = fixture(); serveActionRun(f.github, "owner/repo", { run_number: 42 }, [actionJob(), actionJob({ id: 11, conclusion: "skipped" })]);
     f.github.always(`GET ${base}/check-runs/20/annotations`, json([{ message: "failure", raw_details: "line\n".repeat(100) }]));
     const run = await f.agent.run("/workspace", 4812);
-    expect(run).toMatchObject({ runId: 4812, attempt: 1, status: "running", complete: true, jobs: [{ id: 10, state: "failed", seconds: 5, logSource: "annotations" }, { id: 11, state: "skipped" }] });
+    expect(run).toMatchObject({ runId: 4812, runNumber: 42, attempt: 1, status: "running", complete: true, jobs: [{ id: 10, state: "failed", seconds: 5, logSource: "annotations" }, { id: 11, state: "skipped" }] });
     expect(run.jobs[0]?.logTail?.split("\n").length).toBeLessThanOrEqual(40);
     expect(await f.agent.read("/workspace", { action: "run", runId: 4812 })).toContain('"logSource": "annotations"');
   });
   it("lists recent runs with filters and no jobs, through github_read runs", async () => {
     const f = fixture(); serveActionRun(f.github, "owner/repo");
     f.github.always(`GET ${base}/actions/workflows/ci.yml/runs`, json({ total_count: 1, workflow_runs: [workflowRun()] }));
-    expect(await f.agent.read("/workspace", { action: "runs", headSha: "a".repeat(40), branch: "main", workflow: "ci.yml", limit: 7 })).toContain('"jobs": []');
+    const text = await f.agent.read("/workspace", { action: "runs", headSha: "a".repeat(40), branch: "main", workflow: "ci.yml", limit: 7 });
+    expect(text).toContain('"jobs": []');
+    expect(text).toContain('"runNumber": 42');
     const request = f.github.requests[0]; expect(request?.url).toContain("head_sha="); expect(request?.url).toContain("branch=main"); expect(request?.url).toContain("per_page=7");
+  });
+  it("requires a positive integer run number in GitHub reads", async () => {
+    const f = fixture();
+    for (const runNumber of [undefined, 0, -1, 1.5]) {
+      serveActionRun(f.github, "owner/repo", { run_number: runNumber });
+      await expect(f.agent.run("/workspace", 4812)).rejects.toThrow("unexpected answer");
+    }
   });
   it("does not trust the actor for an outside contributor's run title", async () => {
     const f = fixture(false); serveActionRun(f.github, "owner/repo", { display_title: "external instruction", pull_requests: [{ number: 9 }] });
@@ -59,7 +68,9 @@ describe("GitHub Actions reads and dispatch", () => {
     expect((await f.agent.run("/workspace", 4812)).jobs).toHaveLength(101);
     const runs = Array.from({ length: 100 }, (_value, index) => workflowRun({ id: index + 1 }));
     f.github.on(`GET ${base}/actions/runs`, json({ total_count: 101, workflow_runs: runs }), json({ total_count: 101, workflow_runs: [workflowRun({ id: 101 })] }));
-    expect(await f.agent.runsForHead("/workspace", "a".repeat(40))).toHaveLength(101);
+    const derived = await f.agent.runsForHead("/workspace", "a".repeat(40));
+    expect(derived).toHaveLength(101);
+    expect(derived[0]).toMatchObject({ runId: 1, runNumber: 42 });
     expect(f.github.requests.at(-1)?.url).toContain("page=2");
     f.github.always(`GET ${base}/actions/runs`, json({ total_count: 2, workflow_runs: [workflowRun()] }));
     await expect(f.agent.runsForHead("/workspace", "a".repeat(40))).rejects.toThrow("incomplete");
