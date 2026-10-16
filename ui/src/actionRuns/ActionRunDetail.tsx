@@ -41,7 +41,7 @@ export function ActionRunDetail({ item, detail, refusal, now, writing, readOnly,
   const longest = Math.max(0, ...(run?.jobs ?? []).map((job) => jobSeconds(job) ?? 0));
   const jobs: JobListItem[] = run ? sortedJobs(run.jobs).map((job) => {
     const seconds = jobSeconds(job);
-    return { id: job.id, name: job.name, state: job.state, stateText: JOB_WORD[job.state], url: job.url, log: job.logTail,
+    return { id: String(job.id), name: job.name, state: job.state, stateText: JOB_WORD[job.state], url: job.url, log: job.logTail,
       time: seconds === undefined ? undefined : duration(seconds), share: seconds === undefined || longest === 0 ? undefined : seconds / longest };
   }) : [];
   const passed = run?.jobs.filter((job) => job.state === "passed").length ?? 0;

@@ -55,6 +55,22 @@ describe("Actions run API", () => {
     expect(calls[1]?.body).toEqual({ cwd: ref.cwd });
   });
 
+  it("parses a server-shaped run whose job IDs are integers", async () => {
+    // As src/shared/actionRuns.ts sends it: job, run, and pull request IDs are integers.
+    const wire = `{"link":{"provider":"github","session":{"id":"s1","cwd":"/home/dev/forgerie"},"repo":"forgerie/forgerie","runId":18234561230,"source":"manual","watch":{"kind":"off"}},
+      "run":{"repo":"forgerie/forgerie","runId":18234561230,"runNumber":4812,"attempt":2,"workflow":"CI","workflowPath":".github/workflows/ci.yml","title":"Retry dropped upload chunks",
+      "event":"push","branch":"fix/upload-retry","headSha":"3f9a2c41d7e85b06c1a9f3e2d4b5a6c7e8f90123","actor":"simonwjackson","url":"https://github.com/forgerie/forgerie/actions/runs/18234561230",
+      "status":"completed","conclusion":"failure","createdAt":"2026-10-15T11:36:00.000Z","updatedAt":"2026-10-15T11:48:00.000Z","pullNumbers":[142],"complete":true,
+      "jobs":[{"id":51003,"name":"test (ubuntu-latest, node 24)","state":"failed","url":"https://github.com/forgerie/forgerie/actions/runs/18234561230/job/51003","seconds":412,"logTail":"boom","logSource":"annotations"},
+        {"id":51001,"name":"lint","state":"passed","url":"https://github.com/forgerie/forgerie/actions/runs/18234561230/job/51001"}]}}`;
+    const request = async () => new Response(wire, { status: 200 });
+    const read = await createActionRunApi(request).read(ref, 18234561230);
+    expect(read.run.jobs.map((job) => job.id)).toEqual([51003, 51001]);
+    const asText = JSON.parse(wire) as { run: { jobs: { id: unknown }[] } };
+    asText.run.jobs[0]!.id = "51003";
+    await expect(createActionRunApi(async () => new Response(JSON.stringify(asText))).read(ref, 18234561230)).rejects.toThrow();
+  });
+
   it("throws the server's own words on a refusal", async () => {
     const error = 'Forgerie\'s GitHub App may not do this on forgerie/forgerie: it needs "Actions: read".';
     const { api } = fake({ "PUT /api/sessions/s1/action-runs": { status: 403, body: { kind: "action_run_error", error } } });

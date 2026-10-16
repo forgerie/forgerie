@@ -24,10 +24,11 @@ export function PullRunsSection({ number, state, now, readOnly, onWatch, onRefre
   const runs = group?.runs ?? [];
   const failure = state.load.type === "failed" ? state.load.message : group?.error;
   return <RunList title={group ? `Workflow runs on ${shortSha(group.headSha)}` : "Workflow runs"} count={runs.length > 0 ? `${String(runs.length)} ${runs.length === 1 ? "run" : "runs"}` : undefined}
-    loading={state.load.type === "loading" || state.load.type === "idle"} busy={state.listing}
+    // A pull request linked since the last read has no runs yet; it waits on the reread instead of saying there are none.
+    loading={state.load.type === "loading" || state.load.type === "idle" || (state.listing && !group)} busy={state.listing && group !== undefined}
     alert={failure ? { text: <RunProblem error={failure} subject="the runs on this commit" lead="Forgerie could not read the runs on this commit." />,
       action: { label: "Try again", onPress: onRefresh } } : undefined}
-    empty={ready && !failure ? <p>{group ? "GitHub reports no workflow run on this commit yet." : `GitHub listed no runs for #${String(number)}.`}</p> : undefined}
+    empty={ready && !failure && !(state.listing && !group) ? <p>{group ? "GitHub reports no workflow run on this commit yet." : `GitHub listed no runs for #${String(number)}.`}</p> : undefined}
     rows={runs.map((run) => {
       const key = runKey(run);
       const item = linked.get(key);

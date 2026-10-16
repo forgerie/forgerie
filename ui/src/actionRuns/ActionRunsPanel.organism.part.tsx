@@ -3,8 +3,7 @@ import { ActionRunsPanel } from "./ActionRunsPanel";
 import { runKey, type ActionRunItem } from "./actionRunApi";
 import type { ActionRunsState } from "./actionRunsStore";
 import { fixtureNow, link, queuedRun, states } from "./fixtures/actionRuns";
-import { pullItem } from "./fixtures/pull";
-import { PullRequestReview } from "../ui/PullRequestReview";
+import { PullPanel } from "./fixtures/pullPanel";
 
 export const name = "Actions runs panel";
 export const note = "The session's linked runs with a link field; a row opens its jobs. Local state only: nothing calls GitHub.";
@@ -18,6 +17,7 @@ export const composition = {
 };
 export const expectations = {
   InPullRequestPanel: { empty: { reason: "The pull request panel is a modal dialog portaled to the document body, outside #caliper-host. The PNG shows it." } },
+  OpenedInPullRequestPanel: { empty: { reason: "The pull request panel is a modal dialog portaled to the document body, outside #caliper-host. The PNG shows it." } },
 } as const;
 
 const AT = "2026-10-15T12:00:00.000Z";
@@ -40,9 +40,7 @@ function Scenario({ initial, readOnly = false, inPanel = false }: { initial: Act
   }} />;
   if (!inPanel) return panel;
   // In place: the Actions tab of the session's pull request panel, beside one linked pull request.
-  return <PullRequestReview load={{ type: "ready", items: [pullItem] }} selected={142} onSelect={() => {}} reading={new Set()} notice={undefined} writing={false}
-    now={fixtureNow} onRefresh={() => {}} onAsk={() => {}} onWatch={() => {}} onLink={async () => false} onUnlink={() => {}} onMerge={() => {}} onClose={() => {}}
-    extraView={{ label: "Actions", title: "Workflow runs", tone: "failed", first: true, content: panel }} />;
+  return <PullPanel first actions={panel} />;
 }
 export default function Ready() { return <Scenario initial={states.ready} />; }
 export function Loading() { return <Scenario initial={states.loading} />; }
@@ -57,3 +55,8 @@ export function Opened() {
 }
 export function ReadOnly() { return <Scenario initial={states.ready} readOnly />; }
 export function InPullRequestPanel() { return <Scenario initial={states.ready} inPanel />; }
+/** A run's jobs open in the panel's scrolling body: the failed job's annotations take their full height, and the body scrolls. */
+export function OpenedInPullRequestPanel() {
+  const first = states.ready.load.items[0]!;
+  return <Scenario initial={{ ...states.ready, detail: { key: runKey(first.link), runId: first.link.runId, load: { type: "ready" } } }} inPanel />;
+}

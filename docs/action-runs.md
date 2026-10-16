@@ -54,6 +54,6 @@ The daemon publishes `session.action-run` and `session.action-run.unlinked` on s
 
 ## Persistence and deployment
 
-Sessiond owns `action-runs.json`, version 1, in the configured Forgerie data directory. It stores one record per session and run: link, revision, start leaf, last successful read, watch cursor (attempt, failed job keys, concluded), and pending notice. Atomic writes precede publication. Malformed or duplicate state stops daemon startup. Back up the file before manual repairs. `pull-requests.json` keeps its existing format.
+Sessiond owns `action-runs.json`, version 1, in the configured Forgerie data directory. It stores one record per session and run: link, revision, start leaf, last successful read, watch cursor (attempt, failed job keys, concluded), optional typed conclusion, and pending notice. The completion stop reason uses the typed conclusion, not notice text. Older records without this optional field still load; their pending completion notices stop with an unknown conclusion. Atomic writes precede publication. Malformed or duplicate state stops daemon startup. Back up the file before manual repairs. `pull-requests.json` keeps its existing format.
 
 Build and restart the local units after landing. A sessiond restart stops active agent runs; check current activity first. Restore the prior build and restart to roll back. Run state remains on disk. This feature does not add webhooks, log downloads, rerun, cancel, Azure DevOps pipelines, or UI dispatch.

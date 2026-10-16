@@ -205,6 +205,8 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
   useEffect(() => { actionRuns.syncLinks(ownRuns); }, [actionRuns, ownRuns]);
   // The server does not replay events missed while the socket was down: the list route is the recovery source.
   useEffect(() => { if (connected) actionRuns.recover(); }, [actionRuns, connected]);
+  // Runs under each linked pull request come with the run list: read it again when a pull request is linked or unlinked, or its head moves.
+  useEffect(() => { if (pull.load.type === "ready") actionRuns.syncPulls(readPulls); }, [actionRuns, pull.load.type, readPulls]);
   useEffect(() => () => { actionRuns.dispose(); }, [actionRuns]);
   const [runsFirst, setRunsFirst] = useState(false);
   const runActions: ActionRunsActions = {
@@ -510,7 +512,7 @@ export function ForgerieSession({ id, known, onUnread, initialDraft, initialErro
         onOpenChild={(name) => { setWorkflowSheet(undefined); openChildByName(name); }} onClose={() => setWorkflowSheet(undefined)} />}
       {pullOpen && <PullRequestReview load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
         notice={pull.notice} writing={pull.writing} now={Date.now()}
-        onRefresh={pull.refresh} onWatch={(number, on) => { void pull.setWatch(number, on); }} onLink={pull.linkNumber}
+        onRefresh={() => { pull.refresh(); actionRuns.recover(); }} onWatch={(number, on) => { void pull.setWatch(number, on); }} onLink={pull.linkNumber}
         onUnlink={(number) => { void pull.unlink(number); }}
         onMerge={(number) => { void pull.merge(number, "rebase"); }} onClose={() => setPullOpen(false)}
         onAsk={(message) => { if (!readOnly) runtimeRef.current?.thread.composer.setText(message); }}
