@@ -57,6 +57,8 @@ export const WorkflowStopStateSchema = Type.Object({
   landed: Type.Optional(Type.Array(Type.String())),
   /** Counts decisions, so each delivery to the agent has its own receipt. */
   round: Type.Optional(Type.Integer({ minimum: 0 })),
+  /** Who passed the stop. Absent: the user. `forgerie`: the Workflow autonomy setting passed it. */
+  decidedBy: Type.Optional(Type.Literal("forgerie")),
 }, { additionalProperties: false });
 export type WorkflowStopState = Static<typeof WorkflowStopStateSchema>;
 /** Suppression is a delivery state, not a delivery error. Old false flags remain false. */
@@ -85,6 +87,8 @@ export const WorkflowRunSchema = Type.Object({
   /** One entry per stop stage, keyed by stage id. */
   stops: Type.Optional(Type.Record(Type.String(), WorkflowStopStateSchema)),
   stall: Type.Optional(WorkflowStallSchema),
+  /** Review rounds allowed per reviewer, from Workflow autonomy at launch. Absent: no limit. */
+  reviewRounds: Type.Optional(Type.Integer({ minimum: 1 })),
   children: Type.Array(Type.Object({ conversationId: Type.Number(), reporterId: Type.Number(), name: Type.String(),
     /** The stage this child request belongs to, when the run has stages. */
     stage: Type.Optional(Type.String()),

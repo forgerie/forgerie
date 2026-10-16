@@ -51,4 +51,11 @@ describe("a workflow stop in the thread", () => {
     expect(button("Approve")).toBeUndefined();
     expect(document.body.textContent).toContain("Waiting for a decision.");
   });
+
+  it("names Forgerie, not you, when Workflow autonomy passed the stop", async () => {
+    await act(async () => root.render(<WorkflowEntryView entry={{ kind: "decided", workflow: "dbr", text: 'Forgerie (Workflow autonomy setting) approved "Contract".' }} />));
+    expect(document.body.textContent).toContain("Forgerie");
+    expect(document.body.textContent).toContain('approved "Contract"');
+    expect(document.body.textContent).not.toContain("you");
+  });
 });

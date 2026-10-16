@@ -27,6 +27,7 @@ import { ResourceEditorService } from "../resources/resourceEditorService.js";
 import { registerPromptLibraryRoutes } from "../resources/promptLibraryRoutes.js";
 import { WorkflowProposalSchema, type WorkflowProposal } from "../../shared/workflowProposals.js";
 import { WorkflowRunSchema, type WorkflowRun } from "../../shared/workflowRuns.js";
+import { WAIT_FOR_USER, type WorkflowAutonomy } from "./workflowAutonomy.js";
 
 const definition = `---
 description: A reusable writing experiment
@@ -63,6 +64,7 @@ let store: ChildRunStore;
 let autoComplete = false;
 let worktrees: SessionWorktrees | undefined;
 let isolate = false;
+let autonomy: WorkflowAutonomy | undefined;
 let started = 0;
 let sequence = 0;
 let proposalText = staged;
@@ -127,7 +129,7 @@ const route: FauxResponseFactory = (context, options, _state, model) => {
     if (last?.role === "user" && said.includes("asked for changes")) return call("workflow_stop", { runId, stage: "contract", summary: "CONTRACT-REVISED" });
     if (last?.role === "user" && said.includes('approved "Contract"')) return spawnAlpha();
     if (last?.role === "user" && said.startsWith("[subagent alpha")) return call("workflow_stop", { runId, stage: "land", summary: "LAND-SUMMARY" });
-    if (last?.role === "user" && said.includes("The user landed")) return call("workflow_finish", { runId, outcome: "completed", result: "STAGED-DONE" });
+    if (last?.role === "user" && said.includes(" landed ") && said.includes("Every stop has passed")) return call("workflow_finish", { runId, outcome: "completed", result: "STAGED-DONE" });
   }
   if (last?.role === "toolResult") {
     if (said === "WORK-DONE") return call("write", { path: "result.txt", content: "CHILD-RESULT" });
@@ -150,6 +152,7 @@ function openService(hostsWorkflows = true): PiSessionService {
   hub = new CapturingSessionEventHub();
   return new PiSessionService(hub, { agentDir, modelRuntime: models,
     sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] }), archiveStore: emptyArchiveStore(), heartbeatIntervalMs: 60000,
+    ...(autonomy === undefined ? {} : { workflowAutonomy: () => autonomy ?? WAIT_FOR_USER }),
     ...(hostsWorkflows ? { durableChildAgents: createDurableChildHost({ extraTools: [work], index: new LiveChildSessionIndex(join(agentDir, "live.json")), runRecords: store, onRunRecordError: (error) => { errors.push(error); }, ...(worktrees === undefined ? {} : { worktrees }) }) } : {}),
   });
 }
@@ -169,7 +172,7 @@ function runBody(value: unknown): WorkflowRun {
 beforeEach(async () => {
   proposalText = staged; proposalChanges = 0; proposalErrors.length = 0; proposalInputs = {}; proposalName = "task-plan"; proposalSummary = "Build and review this task."; proposalBasis = { kind: "new", reason: "No saved workflow fits." };
   modelAgent = undefined; modelArgument = "faux/faux-1"; modelThinking.length = 0; modelWork = undefined; modelRequests.length = 0;
-  errors.length = 0; started = 0; sequence = 0; autoComplete = false; worktrees = undefined; isolate = false;
+  errors.length = 0; started = 0; sequence = 0; autoComplete = false; worktrees = undefined; isolate = false; autonomy = undefined;
   root = await mkdtemp(join(tmpdir(), "forgerie-workflow-runs-"));
   agentDir = join(root, "agent");
   await mkdir(agentDir);
@@ -376,6 +379,29 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       }
       await service.finishWorkflow(ref, run.id, "completed", "Models applied at turn boundaries");
     } finally { releaseWork?.(); await server.close(); }
+  }, 20000);
+
+  it("refuses a reviewer's next round once the run's review round limit is used", async () => {
+    await mkdir(join(agentDir, "agents"));
+    await writeFile(join(agentDir, "agents/reviewer.md"), "---\nname: reviewer\ndescription: Reviews\ntools: work\n---\nReview the work.");
+    modelAgent = "reviewer";
+    autonomy = { landStops: false, approveStops: false, reviewRounds: 1 };
+    await service.dispose(); service = openService();
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "review-limit", body: "---\nworkflow:\n  version: 1\n  stages:\n    - { id: review, name: Review, workers: [{ name: alpha }] }\n---\nWait for instructions.\n" });
+    const run = await service.runWorkflow(ref, "review-limit", {}, "review-limit");
+    expect(run.reviewRounds).toBe(1);
+    const said = async (text: string) => JSON.stringify(await service.messages(ref)).includes(text);
+    await until(async () => await said(`Workflow run ${run.id}`) && !(await service.status(ref)).isStreaming);
+    expect(await said("Review rounds: Forgerie allows 1 per reviewer")).toBe(true);
+    await service.prompt(ref, "MODEL-SPAWN-alpha");
+    await until(() => Promise.resolve(started === 1));
+    await until(async () => (await service.workflowRuns(ref))[0]?.children.every((child) => child.state.kind === "settled") === true && !(await service.status(ref)).isStreaming);
+    await service.prompt(ref, "MODEL-SEND-alpha");
+    await until(async () => await said("Review round limit reached: alpha has reviewed 1 times"));
+    expect(started).toBe(1);
+    expect((await service.workflowRuns(ref))[0]?.children).toHaveLength(1);
+    await service.finishWorkflow(ref, run.id, "completed", "One review round");
   }, 20000);
 
   it.each([false, true])("applies workflow models through direct HTTP messages without changing a busy steer's model (agent file: %s)", async (agentFile) => {
@@ -655,6 +681,59 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       });
       expect(finished.state).toMatchObject({ outcome: "completed", result: "STAGED-DONE" });
     } finally { await server.close(); }
+  }, 30000);
+
+  it("passes approve and land stops itself when Workflow autonomy says so, logs both, and still lands the real branch", async () => {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: sanitizedGitEnv(), encoding: "utf8" });
+    git("init", "-b", "main"); git("config", "user.email", "workflow@example.invalid"); git("config", "user.name", "Workflow tests");
+    await writeFile(join(root, "base.txt"), "base");
+    git("add", "base.txt"); git("commit", "-m", "Initial workspace");
+    const ownership = new SessionWorktreeStore(join(agentDir, "ownership.json"));
+    await ownership.initialize();
+    worktrees = new SessionWorktrees(ownership, { publish: () => undefined });
+    autonomy = { landStops: true, approveStops: true, reviewRounds: 2 };
+    await service.dispose(); service = openService();
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+    const run = await service.runWorkflow(ref, "staged", {}, "staged-auto");
+    const finished = await until(async () => {
+      const current = (await service.workflowRuns(ref))[0];
+      return current?.state.kind === "finished" ? current : false;
+    });
+    expect(finished.state).toMatchObject({ outcome: "completed", result: "STAGED-DONE" });
+    expect(finished.stops?.["contract"]).toMatchObject({ state: "approved", summary: "CONTRACT-SUMMARY", decidedBy: "forgerie" });
+    expect(finished.stops?.["land"]).toMatchObject({ state: "approved", decidedBy: "forgerie", landed: [expect.any(String)] });
+    expect(git("log", "-1", "--format=%s", "main").trim()).toBe("Child result");
+    const logged = (await service.decisions(ref)).filter((decision) => decision.kind === "auto-stop");
+    expect(logged.map((decision) => decision.question).sort()).toEqual(["Contract (staged)", "Land (staged)"]);
+    expect(logged.every((decision) => decision.by === "forgerie" && decision.runId === run.id)).toBe(true);
+  }, 30000);
+
+  it("keeps the land stop waiting for the user when automatic landing conflicts, and tells the agent why", async () => {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: sanitizedGitEnv(), encoding: "utf8" });
+    git("init", "-b", "main"); git("config", "user.email", "workflow@example.invalid"); git("config", "user.name", "Workflow tests");
+    await writeFile(join(root, "base.txt"), "base");
+    git("add", "base.txt"); git("commit", "-m", "Initial workspace");
+    const ownership = new SessionWorktreeStore(join(agentDir, "ownership.json"));
+    await ownership.initialize();
+    worktrees = new SessionWorktrees(ownership, { publish: () => undefined });
+    // While alpha works in its worktree, main gains a different result.txt, so alpha's branch conflicts at landing.
+    modelWork = async () => { await writeFile(join(root, "result.txt"), "MAIN-RESULT"); git("add", "result.txt"); git("commit", "-m", "Main moved"); };
+    autonomy = { landStops: true, approveStops: true, reviewRounds: 2 };
+    await service.dispose(); service = openService();
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+    await service.runWorkflow(ref, "staged", {}, "staged-auto-conflict");
+    const waiting = await until(async () => {
+      const current = (await service.workflowRuns(ref))[0];
+      return current?.stops?.["land"]?.state === "waiting" && JSON.stringify(await service.messages(ref)).includes("could not pass") ? current : false;
+    });
+    expect(waiting.state.kind).toBe("running");
+    expect(waiting.stops?.["contract"]?.decidedBy).toBe("forgerie");
+    expect(waiting.stops?.["land"]?.decidedBy).toBeUndefined();
+    expect(git("log", "-1", "--format=%s", "main").trim()).toBe("Main moved");
+    expect((await service.decisions(ref)).filter((decision) => decision.kind === "auto-stop")).toHaveLength(1);
+    await service.cancelWorkflow(ref, waiting.id);
   }, 30000);
 
   it("recovers a workflow waiting at a user stop without the live index or starting later work", async () => {

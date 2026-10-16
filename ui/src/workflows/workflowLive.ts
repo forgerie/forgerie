@@ -101,9 +101,10 @@ function stopStatus(stage: WorkflowStage, run: WorkflowRun): string {
   if (run.state.kind === "finished" && stop?.state !== "approved") return "Not decided before the run ended";
   if (stop?.state === "waiting") return stage.stop === "land" ? "Waiting for you to land" : "Waiting for your approval";
   if (stop?.state === "approved") {
-    if (stage.stop !== "land") return "Approved by you";
+    const forgerie = stop.decidedBy === "forgerie";
+    if (stage.stop !== "land") return forgerie ? "Approved by Forgerie" : "Approved by you";
     const landed = stop.landed?.length ?? 0;
-    return `Landed ${String(landed)} ${landed === 1 ? "branch" : "branches"}`;
+    return `Landed ${String(landed)} ${landed === 1 ? "branch" : "branches"}${forgerie ? " automatically" : ""}`;
   }
   return stage.stop === "land" ? "You land the branches" : "You approve";
 }

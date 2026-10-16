@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowRun, WorkflowStage, WorkflowStopState } from "./workflowRuns.js";
-import { admitChild, completionProblem, declaredWorker, heldAt, routeProblems, stageViews, stopRequestProblem } from "./workflowStops.js";
+import { admitChild, completionProblem, declaredWorker, heldAt, reviewRoundRefusal, routeProblems, stageViews, stopRequestProblem } from "./workflowStops.js";
 
 const ROUTE: WorkflowStage[] = [
   { id: "contract", name: "Contract", stop: "approve" },
@@ -83,5 +83,22 @@ describe("workflow stops", () => {
       .toEqual({ contract: "done", build: "done", review: "done", land: "waiting" });
     expect(stageViews(run({ contract: "approved", land: "approved" }, [settled("design", "build")])))
       .toEqual({ contract: "done", build: "done", review: "done", land: "done" });
+  });
+});
+
+describe("review round limit", () => {
+  const reviewers = (name: string) => name.includes("review");
+  const rounds = (...names: string[]) => names.map((name) => settled(name, "review"));
+  it("admits everything without a limit, and non-reviewers always", () => {
+    expect(reviewRoundRefusal({ children: rounds("review", "review", "review") }, "review", reviewers)).toBeUndefined();
+    expect(reviewRoundRefusal({ reviewRounds: 1, children: rounds("review") }, "build", reviewers)).toBeUndefined();
+  });
+  it("refuses a reviewer's round after its limit, and a new reviewer name once any reviewer used its rounds", () => {
+    expect(reviewRoundRefusal({ reviewRounds: 2, children: rounds("review") }, "review", reviewers)).toBeUndefined();
+    expect(reviewRoundRefusal({ reviewRounds: 2, children: rounds("review", "review") }, "review", reviewers)).toContain("Review round limit reached: review has reviewed 2 times");
+    expect(reviewRoundRefusal({ reviewRounds: 2, children: rounds("review", "review") }, "review-2", reviewers)).toContain("under this name or a new one");
+    // Two reviewers in parallel each get their own rounds.
+    expect(reviewRoundRefusal({ reviewRounds: 2, children: rounds("contract-review", "standards-review", "contract-review") }, "standards-review", reviewers)).toBeUndefined();
+    expect(reviewRoundRefusal({ reviewRounds: 2, children: rounds("contract-review", "standards-review", "contract-review", "standards-review") }, "standards-review", reviewers)).toContain("file_issue");
   });
 });

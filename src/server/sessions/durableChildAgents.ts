@@ -31,7 +31,7 @@ import type { WorktreeActionResult, WorktreeDiscardPreview } from "../../shared/
 import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { planChildRuntime, runtimeGaps, childIsWriter, missingToolsRefusal, type ChildRuntimePlan, type ChildSkill } from "./durableChildRuntime.js";
 import { readsImages, watchdogDiffTool } from "./durableChildTools.js";
-import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild, workflowChildRefusal, workflowWorkerModel } from "./durableWorkflowRuns.js";
+import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild, workflowChildRefusal, workflowWorkerModel, REVIEWER_AGENT } from "./durableWorkflowRuns.js";
 import { deliverInputUntilPlaced, type InputPlacementState } from "./durableInputPlacement.js";
 import { logDecision } from "./durableDecisions.js";
 import { WorkflowError } from "../resources/workflowLibrary.js";
@@ -479,8 +479,14 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         }
         if (action === "spawn" && existing !== undefined) return { content: [{ type: "text" as const, text: `${name} already exists; use send.` }] };
         if (action === "send" && existing === undefined) return { content: [{ type: "text" as const, text: `No child named ${name}.` }] };
-        // A workflow stop holds work that belongs after it. Ask before preparing a worktree, and again in the commit.
-        const held = await api.commit((tx) => workflowChildRefusal(tx, api.conversationId, name), context);
+        // A workflow stop holds work that belongs after it, and a review round limit holds another review.
+        // Ask before preparing a worktree, and again in the commit.
+        const thisAgent = action === "spawn" ? args.agent : existing?.agent ?? undefined;
+        const reviewers = async (tx: Tx) => {
+          const agents = (await tx.doc(Children, api.conversationId)).agents;
+          return (child: string) => (child === name ? thisAgent : Object.hasOwn(agents, child) ? agents[child]?.agent : undefined) === REVIEWER_AGENT;
+        };
+        const held = await api.commit(async (tx) => workflowChildRefusal(tx, api.conversationId, name, await reviewers(tx)), context);
         if (held !== undefined) return { content: [{ type: "text" as const, text: held }], isError: true };
         // A model the workflow declares for this worker is the user's choice: it wins over the agent's argument.
         const declared = action === "spawn" ? await api.commit((tx) => workflowWorkerModel(tx, api.conversationId, name), context) : undefined;
@@ -512,7 +518,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         const checkout = action === "spawn" && isolation === "worktree"
           ? await requireWorktrees(selected.worktrees).prepare(String(api.taskId)) : undefined;
         const result = await api.commit(async (tx) => {
-          const refusal = await workflowChildRefusal(tx, api.conversationId, name);
+          const refusal = await workflowChildRefusal(tx, api.conversationId, name, await reviewers(tx));
           if (refusal !== undefined) return refusal;
           const state = await tx.doc(Children, api.conversationId);
           const parentAgent = await tx.doc(AgentDoc, api.conversationId);

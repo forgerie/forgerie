@@ -2,6 +2,7 @@
 import { registerDecisionGatewayKeyRoutes } from "./decisions/decisionGatewayKeyRoutes.js";
 import { registerDurableTaskRoutes } from "./sessions/durableTaskRoutes.js";
 import { createDecisionHints, decisionHintsRuntimeStatus } from "./decisions/decisionHints.js";
+import { createWorkflowAutonomyReader } from "./sessions/workflowAutonomy.js";
 import { TriggerService } from "./triggers/triggerService.js";
 import { registerTriggerRoutes } from "./triggers/triggerRoutes.js";
 import { workflowTriggerFire } from "./triggers/triggerFire.js";
@@ -245,6 +246,7 @@ async function createSessionDaemonRuntime() {
   app.addHook("onClose", async () => { await sessionSearch.close(); });
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
     decisionHints,
+    workflowAutonomy: createWorkflowAutonomyReader({ env: daemonEnvironment }),
     modelRuntime: modelRuntime,
     durableReader: createActiveDurableSessionReader(ref => sessions.activeDurableRead(ref)),
     agentDir: activeAgentProfile.dir,

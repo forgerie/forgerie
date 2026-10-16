@@ -10,6 +10,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { piWebDataDir } from "../../config.js";
+import { WAIT_FOR_USER, type WorkflowAutonomy } from "./workflowAutonomy.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
 import { gatedActionsExtension, gateToolCall, type GatedActionsExtensionOptions, gatedActions, decideGatedAction, waitingGatedActions, gatedActionsChanged } from "./durableGatedActions.js";
 import type { GatedActionReads } from "./gatedActions.js";
@@ -46,7 +47,7 @@ import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { decisionExtension, decisions, confirmDecision, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, waitingWorkflowDecisions, acknowledgeWorkflowStall, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals } from "./durableWorkflowRuns.js";
+import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, notifyAutoStopFailed, waitingWorkflowDecisions, acknowledgeWorkflowStall, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import { applySdkCommit } from "./durableMessageChanges.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
@@ -55,6 +56,8 @@ import type { WorkflowModels, WorkflowInputs, WorkflowOutcome, WorkflowRun, Work
 export interface DurableAgentSessionOptions {
   processTools?: ManagedProcessTools;
   gatedIssueLabels?: GatedActionReads["issueLabels"];
+  /** Read at each workflow stop. Omitted: every stop waits for the user. */
+  workflowAutonomy?: () => WorkflowAutonomy;
   /** Where uncommitted work from project worktrees is copied before an agent discards it. Default: `<app data>/worktree-backups`. */
   worktreeBackupDirectory?: string;
   autonomyPolicy?: AutonomyPolicySource;
@@ -389,11 +392,11 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   overturnDecision(id: string, note: string) { return overturnDecision(this.journal.harness, this.journal.conversation, id, note, context); }
   runWorkflow(name: string, inputs: WorkflowInputs, requestId: string, models?: WorkflowModels) {
     if (!this.hostsDurableChildren) throw new Error("Workflow launches require durableChildren");
-    return launchWorkflow(this.journal.harness, this.journal.conversation, new WorkflowLibrary(this.options.services.agentDir), this.options.services.cwd, this.sessionId, name, inputs, requestId, context, models);
+    return launchWorkflow(this.journal.harness, this.journal.conversation, new WorkflowLibrary(this.options.services.agentDir), this.options.services.cwd, this.sessionId, name, inputs, requestId, context, models, this.reviewRounds());
   }
   workflowProposals() { return workflowProposals(this.journal.harness, this.journal.conversation.id, context); }
   startWorkflowProposal(id: string, inputs: WorkflowInputs, requestId: string, models?: WorkflowModels) {
-    return startWorkflowProposal(this.journal.harness, this.journal.conversation, this.options.services.cwd, this.sessionId, id, inputs, requestId, context, models);
+    return startWorkflowProposal(this.journal.harness, this.journal.conversation, this.options.services.cwd, this.sessionId, id, inputs, requestId, context, models, this.reviewRounds());
   }
   changeWorkflowProposal(id: string, note: string) {
     return decideWorkflowProposal(this.journal.harness, this.journal.conversation, id, "changes", note, context);
@@ -416,6 +419,25 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   }
   decideWorkflowStop(runId: string, stage: string, decision: WorkflowStopDecision, note: string | undefined) {
     return decideWorkflowStop(this.journal.harness, this.journal.conversation, runId, stage, decision, note, (run) => this.landWorkflowBranches(run), context);
+  }
+  /** Frozen into each run at launch, so a run keeps the limit it started with. */
+  private reviewRounds(): number | undefined { return (this.options.workflowAutonomy?.() ?? WAIT_FOR_USER).reviewRounds; }
+  private passesStop(stop: "approve" | "land"): boolean {
+    const autonomy = this.options.workflowAutonomy?.() ?? WAIT_FOR_USER;
+    return stop === "land" ? autonomy.landStops : autonomy.approveStops;
+  }
+  /**
+   * Forgerie's own decision at a stop, after the tool's commit. A failed landing leaves the stop waiting for the user,
+   * and the agent hears why, so the transcript says what happened.
+   */
+  private passStop(runId: string, stage: string, stop: "approve" | "land"): void {
+    // Commit publications refresh the run, the decision log and the waiting count in the browser.
+    void decideWorkflowStop(this.journal.harness, this.journal.conversation, runId, stage, stop, undefined, (run) => this.landWorkflowBranches(run), context, "forgerie")
+      .catch(async (error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        await this.journal.conversation.commit((tx) => notifyAutoStopFailed(tx, this.journal.conversation.id, runId, stage, reason), context).catch((report: unknown) => { this.report(report); });
+        this.journal.harness.resume();
+      });
   }
   /** Lands each child branch of the run that has commits, in the order the children started. Stops at the first failure. */
   private async landWorkflowBranches(run: WorkflowRun): Promise<{ landed: string[]; error?: string }> {
@@ -543,7 +565,10 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
         record: (conversation: ConversationId, id: string, label: RiskLabel, identity: RiskToolIdentity) => this.recordToolRiskLabel(conversation, id, label, identity)}}),
       ...(this.childWorktrees === undefined ? {} : { worktrees: this.childWorktrees }),
       ...(host.runRecords === undefined ? {} : { flushRunRecords: () => this.childRunRecords?.flush() ?? Promise.resolve() }) });
-    const workflow = workflowExtension({ library: new WorkflowLibrary(this.options.services.agentDir), cwd: this.options.services.cwd });
+    const workflow = workflowExtension({ library: new WorkflowLibrary(this.options.services.agentDir), cwd: this.options.services.cwd, autonomy: {
+      autoStop: (parent, stop) => { try { return this.dispatch(parent).passesStop(stop); } catch { return false; } },
+      onAutoStop: (parent, runId, stage, stop) => { try { this.dispatch(parent).passStop(runId, stage, stop); } catch (error) { this.report(error); } },
+    } });
     this.registry.install(workflow);
     const decision = decisionExtension();
     this.registry.install(decision);

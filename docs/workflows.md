@@ -105,6 +105,20 @@ Forgerie enforces three rules:
 
 At an approve stop, the card offers **Approve** and **Ask for changes**. Asking for changes sends your note to the agent, which revises and asks again. Each round gets its own card; older cards close. At a land stop, **Land all** lands each child branch with commits, in the order the children started. Each branch rebases onto the default branch first. A conflict or a block stops the landing, keeps the branches that landed, and leaves the stop waiting. Your decision reaches the agent once, as a new message.
 
+### Workflow autonomy
+
+**Settings > Plugins > Workflow autonomy** sets how far a run goes without you. It is on by default.
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| Land automatically | On | When the agent asks at a land stop, Forgerie runs **Land all** itself. A conflict or a block keeps the stop waiting for you, and the agent hears why once. |
+| Pass approve stops | Off | When the agent asks at an approve stop, Forgerie approves, and the run continues. The summary stays in the transcript. |
+| Review rounds | 2 | Each spawn or send to a child with the `reviewer` agent is one round. After the limit, `child_agent` refuses another round for that reviewer, and refuses a new reviewer name. The launch prompt tells the agent to file the remaining must-fix findings with `file_issue` and continue. Choose `unlimited` for no limit. |
+
+Forgerie reads the stop settings when the agent asks at a stop, so a change applies to running workflows. The review limit is frozen into each run at launch (`reviewRounds` on the run). Each stop that Forgerie passes records `decidedBy: "forgerie"` on the stop and an `auto-stop` entry in the [decision log](#decision-log). The card and the plan say **by Forgerie**. Turning the plugin off makes every stop wait and removes the review limit.
+
+Costs: with automatic landing, a run lands without you reading the branches first, and you undo a bad landing with a revert. After the last review round, open must-fix findings become issues, and the branch can still land. The review limit counts only children with the `reviewer` agent. A crash between the stop request and Forgerie's decision leaves the stop waiting for you. Forgerie does not decide again on reopen.
+
 Forgerie draws agent stages from their children, so the drawing can drift from what the agent did. Forgerie does not stop the agent from landing, merging, or pushing with its own shell tools. The launch prompt tells it not to.
 
 The launch prompt also sets where the full checks run (`FULL_CHECK_RULE` in `src/server/resources/workflowLibrary.ts`). Workers run focused checks only. Each stage runs the project's full test suite or full verification once, on its combined result: the parent tells the stage's reviewer to run it, or runs it before the next stop. After the last fix of the stage, it runs once more. The proposal guidance asks the agent to name, in each stage, who runs it. Nothing enforces this; a worker can still run the full suite. See [child agents](child-agents.md#agent-files) for the child side.

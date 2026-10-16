@@ -39,5 +39,19 @@ export const decisionHintsManifest: AppPluginManifest = {
   ],
 };
 
+/** How far a workflow run goes without waiting for you. Off: every stop waits, and reviews have no round limit. */
+export const workflowAutonomyManifest: AppPluginManifest = {
+  id: "workflow-autonomy", name: "Workflow autonomy", runtime: "server",
+  description: "Lets workflow runs pass their stops without waiting for you. Each decision Forgerie makes shows in the transcript and the decision log.",
+  settings: [
+    { type: "boolean", id: "land_stops", label: "Land automatically", default: true,
+      description: "At a land stop, Forgerie lands the run's branches itself. A conflict or a failed landing still waits for you." },
+    { type: "boolean", id: "approve_stops", label: "Pass approve stops", default: false,
+      description: "At an approve stop, such as a contract, Forgerie approves and the run continues. You can still read the summary in the transcript." },
+    { type: "choice", id: "review_rounds", label: "Review rounds", default: "2", choices: ["1", "2", "3", "unlimited"],
+      description: "How many times a reviewer can send work back for must-fix findings. After the last round, the agent records what is left and moves on." },
+  ],
+};
+
 /** Every bundled app plugin (browser and server), in the order Settings lists them. */
-export const APP_PLUGIN_MANIFESTS: readonly AppPluginManifest[] = [accountMetersManifest, decisionHintsManifest];
+export const APP_PLUGIN_MANIFESTS: readonly AppPluginManifest[] = [accountMetersManifest, decisionHintsManifest, workflowAutonomyManifest];

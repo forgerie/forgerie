@@ -11,6 +11,7 @@ export interface SessionServiceDependencyInput {
   agentDir: string;
   durableReader: NonNullable<PiSessionServiceDependencies["durableReader"]>;
   decisionHints?: PiSessionServiceDependencies["decisionHints"];
+  workflowAutonomy?: PiSessionServiceDependencies["workflowAutonomy"];
   managedProcesses?: PiSessionServiceDependencies["managedProcesses"];
   sessionSearch?: PiSessionServiceDependencies["sessionSearch"];
   /** Daemon-lifetime session archive, constructed against the captured daemon environment. */
@@ -67,6 +68,7 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
     durableReader: input.durableReader,
     agentDir: input.agentDir,
     ...(input.decisionHints === undefined ? {} : { decisionHints: input.decisionHints }),
+    ...(input.workflowAutonomy === undefined ? {} : { workflowAutonomy: input.workflowAutonomy }),
     ...(input.managedProcesses === undefined ? {} : { managedProcesses: input.managedProcesses }),
     ...(input.sessionSearch === undefined ? {} : { sessionSearch: input.sessionSearch }),
     archiveStore: input.archiveStore,

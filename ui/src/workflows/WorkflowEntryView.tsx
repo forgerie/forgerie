@@ -33,8 +33,13 @@ export function WorkflowEntryView({ entry, run, deciding = false, onDecide, onRe
       return <EventLine tone="active" subject={run?.definition.name ?? "workflow"} phrase="started" quoteFace="text"
         quote={typeof task === "string" && task.trim() !== "" ? task : undefined} detail={<MarkdownFragment text={entry.text} />} />;
     }
-    case "decided": return <EventLine tone="positive" subject="you" quoteFace="text"
-      phrase={entry.text.replace(/^The user /u, "").replace(/\.$/u, "")} />;
+    case "decided": {
+      // Forgerie passes a stop itself when Workflow autonomy allows it, and says so when it could not.
+      const forgerie = /^Forgerie(?: \(Workflow autonomy setting\))? /u.exec(entry.text);
+      const failed = entry.text.startsWith("Forgerie could not");
+      return <EventLine tone={failed ? "neutral" : "positive"} subject={forgerie === null ? "you" : "Forgerie"} quoteFace="text"
+        phrase={entry.text.slice(forgerie?.[0].length ?? 0).replace(/^The user /u, "").replace(/\.$/u, "")} />;
+    }
     case "proposal": return <WorkflowProposalCard entry={entry} proposal={proposal} read={proposalsRead} onReview={onReviewProposal} />;
     case "stop": {
       const open = onDecide !== undefined && stopIsOpen(run, entry);

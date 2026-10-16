@@ -35,6 +35,13 @@ describe("a stop card", () => {
     expect(stopOutcome(again, CONTRACT_STOP)).toBe("You asked for changes.");
     expect(stopOutcome(undefined, CONTRACT_STOP)).toContain("no longer");
   });
+
+  it("says when Forgerie passed the stop under Workflow autonomy", () => {
+    const approved: WorkflowRun = { ...BUILDING, stops: { ...BUILDING.stops, contract: { ...BUILDING.stops?.["contract"], state: "approved", round: 1, decidedBy: "forgerie" } } };
+    expect(stopOutcome(approved, CONTRACT_STOP)).toBe("Approved by Forgerie (Workflow autonomy).");
+    const landed: WorkflowRun = { ...LANDED, stops: { ...LANDED.stops, land: { ...LANDED.stops?.["land"], state: "approved", decidedBy: "forgerie" } } };
+    expect(stopOutcome(landed, LAND_STOP)).toBe("Landed by Forgerie (Workflow autonomy): feat/run-export-api, design/run-export.");
+  });
 });
 
 describe("a run at a glance", () => {

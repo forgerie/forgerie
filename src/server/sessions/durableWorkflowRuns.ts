@@ -4,8 +4,9 @@ import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { Check } from "typebox/value";
 import { WorkflowOutcomeSchema, WorkflowModelSchema, WorkflowModelsSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowChildDelivery, type WorkflowInputs, type WorkflowModels, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
+import { logDecision } from "./durableDecisions.js";
 import { WorkflowProposalSchema, WorkflowProposalToolSchema, type WorkflowProposal, type WorkflowProposalTool } from "../../shared/workflowProposals.js";
-import { admitChild, completionProblem, declaredWorker, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
+import { admitChild, completionProblem, declaredWorker, reviewRoundRefusal, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
 import { gateWaitsInTx } from "./durableGateRecords.js";
 import { assertProseOnly, parseWorkflow, WorkflowError, workflowInputs, workflowPrompt, workflowRouteText, type ProseWorkflow, type WorkflowInventory, type WorkflowLibrary } from "../resources/workflowLibrary.js";
 
@@ -228,7 +229,17 @@ function savedWorkflowsText(inventory: WorkflowInventory, name?: string): string
   return `Saved workflows. Read one in full with saved_workflows and its name before you adapt it.\n${lines.join("\n")}`;
 }
 
-export function workflowExtension(options: { library?: WorkflowLibrary; cwd?: string } = {}) {
+/**
+ * `autoStop` says whether Forgerie passes a stop of this kind for this parent. After the stop is recorded,
+ * `onAutoStop` decides it outside the tool's commit; the decision arrives to the agent as a new message.
+ * A crash between the two leaves the stop waiting for the user.
+ */
+export interface WorkflowStopAutonomy {
+  autoStop(parent: ConversationId, stop: "approve" | "land"): boolean;
+  onAutoStop(parent: ConversationId, runId: string, stageId: string, stop: "approve" | "land"): void;
+}
+
+export function workflowExtension(options: { library?: WorkflowLibrary; cwd?: string; autonomy?: WorkflowStopAutonomy } = {}) {
   const inventory = async (): Promise<WorkflowInventory> => options.library === undefined || options.cwd === undefined
     ? { workflows: [], diagnostics: [] } : options.library.list(options.cwd);
   return defineExtension({ name: "forgerie.workflows", tasks: [Launch, Cancel, StallWatch], tools: [defineTool({
@@ -276,11 +287,18 @@ export function workflowExtension(options: { library?: WorkflowLibrary; cwd?: st
     }, { additionalProperties: false }),
     // A task-keyed stop receipt prevents replay from asking again after a user decision.
     replay: "safe", executionMode: "sequential",
-    execute: (args, api, context) => asTool(() => api.commit((tx) => requestWorkflowStop(tx, api.conversationId, args.runId, args.stage, args.summary, api.taskId), context)),
+    execute: (args, api, context) => asTool(async () => {
+      let passed: "approve" | "land" | undefined;
+      const text = await api.commit((tx) => requestWorkflowStop(tx, api.conversationId, args.runId, args.stage, args.summary, api.taskId,
+        (stop) => { passed = options.autonomy?.autoStop(api.conversationId, stop) === true ? stop : undefined; return passed !== undefined; }), context);
+      if (passed !== undefined) options.autonomy?.onAutoStop(api.conversationId, args.runId, args.stage, passed);
+      return text;
+    }),
   })] });
 }
 
-export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId: string, stageId: string, summary: string, taskId?: TaskId): Promise<string> {
+export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId: string, stageId: string, summary: string, taskId?: TaskId,
+  auto?: (stop: "approve" | "land") => boolean): Promise<string> {
   const doc = await tx.doc(Runs, parent);
   const key = taskId === undefined ? undefined : String(taskId);
   const receipt = key === undefined ? undefined : doc.stopReceipts?.[key];
@@ -305,6 +323,9 @@ export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId:
   // The stop already asks the user; a stall flag would ask twice.
   delete run.stall;
   await tx.appendEntry(parent, { kind: WORKFLOW_STOP_KIND, data: { runId, stage: stageId, stageName: stage.name, stop: stage.stop, summary, workflow: run.definition.name, round } });
+  if (auto?.(stage.stop) === true) {
+    return remember(`Forgerie ${stage.stop === "land" ? "lands the branches" : "approves"} at "${stage.name}" itself (Settings > Plugins > Workflow autonomy). End your turn now. The result arrives as a new message.`);
+  }
   return remember(`Waiting for the user at "${stage.name}". End your turn now. Their decision arrives as a new message; do not start later stages until then.`);
 }
 
@@ -314,7 +335,7 @@ export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId:
  * their names. A failure leaves the stop waiting and keeps the branches that did land.
  */
 export async function decideWorkflowStop(harness: Harness, parent: Conversation, runId: string, stageId: string, decision: WorkflowStopDecision,
-  note: string | undefined, land: (run: WorkflowRun) => Promise<{ landed: string[]; error?: string }>, context: Context): Promise<WorkflowRun> {
+  note: string | undefined, land: (run: WorkflowRun) => Promise<{ landed: string[]; error?: string }>, context: Context, by: "user" | "forgerie" = "user"): Promise<WorkflowRun> {
   const snapshot = (await harness.snapshot(Runs, parent.id, context))?.records[runId];
   if (snapshot === undefined) throw new WorkflowError(404, "Workflow run not found in this session");
   const stage = snapshot.stages?.find((candidate) => candidate.id === stageId);
@@ -340,13 +361,19 @@ export async function decideWorkflowStop(harness: Harness, parent: Conversation,
       return { error: landing.error };
     }
     const decidedAt = Date.now();
+    const decider = by === "forgerie" ? { decidedBy: "forgerie" as const } : {};
     record.stops = { ...record.stops, [stageId]: decision === "changes"
       ? { state: "open", note: trimmed, decidedAt, round, ...(landed.length === 0 ? {} : { landed }) }
-      : { state: "approved", ...(current.summary === undefined ? {} : { summary: current.summary }), ...(trimmed === "" ? {} : { note: trimmed }), decidedAt, round, ...(landed.length === 0 ? {} : { landed }) } };
+      : { state: "approved", ...(current.summary === undefined ? {} : { summary: current.summary }), ...(trimmed === "" ? {} : { note: trimmed }), decidedAt, round, ...(landed.length === 0 ? {} : { landed }), ...decider } };
     const prefix = `[workflow ${record.definition.name}]`;
+    const who = by === "forgerie" ? "Forgerie (Workflow autonomy setting)" : "The user";
     const prompt = decision === "changes" ? `${prefix} The user asked for changes at "${stage.name}": ${trimmed}\nRevise, then call workflow_stop for "${stageId}" again.`
-      : decision === "land" ? `${prefix} The user landed ${landed.length === 0 ? "no branches (none had commits)" : `${String(landed.length)} branches on the default branch: ${landed.join(", ")}`}.${trimmed === "" ? "" : ` Note: ${trimmed}`}\nEvery stop has passed. Finish the workflow with workflow_finish.`
-        : `${prefix} The user approved "${stage.name}".${trimmed === "" ? "" : ` Note: ${trimmed}`}\nContinue with the next stage.`;
+      : decision === "land" ? `${prefix} ${who} landed ${landed.length === 0 ? "no branches (none had commits)" : `${String(landed.length)} branches on the default branch: ${landed.join(", ")}`}.${trimmed === "" ? "" : ` Note: ${trimmed}`}\nEvery stop has passed. Finish the workflow with workflow_finish.`
+        : `${prefix} ${who} approved "${stage.name}".${trimmed === "" ? "" : ` Note: ${trimmed}`}\nContinue with the next stage.`;
+    if (by === "forgerie") {
+      await logDecision(tx, parent.id, { id: `stop:${runId}:${stageId}:${String(round)}`, kind: "auto-stop", by: "forgerie", question: `${stage.name} (${record.definition.name})`,
+        choice: decision === "land" ? `landed ${landed.length === 0 ? "nothing" : landed.join(", ")}` : "approved", reason: "Settings > Plugins > Workflow autonomy passes this kind of stop", flagged: false });
+    }
     await tx.createTask(Launch, { runId, prompt, requestId: `workflow-stop:${runId}:${stageId}:${String(round)}` }, { ownership: { kind: "conversation" }, background: true });
     // Doc drafts are transaction overlays; materialize the record before the commit settles.
     return { record: publicRun(record) };
@@ -354,6 +381,16 @@ export async function decideWorkflowStop(harness: Harness, parent: Conversation,
   harness.resume();
   if ("error" in run) throw new WorkflowError(409, run.error);
   return run.record;
+}
+
+/** Forgerie could not pass a stop itself: it stays waiting for the user, and the agent hears why once. */
+export async function notifyAutoStopFailed(tx: Tx, parent: ConversationId, runId: string, stageId: string, reason: string): Promise<void> {
+  const record = (await tx.doc(Runs, parent)).records[runId];
+  const stage = record?.stages?.find((candidate) => candidate.id === stageId);
+  if (record === undefined || stage === undefined || record.state.kind !== "running" || stopOf(record, stageId).state !== "waiting") return;
+  const round = stopOf(record, stageId).round ?? 0;
+  const prompt = `[workflow ${record.definition.name}] Forgerie could not pass "${stage.name}" itself: ${reason}\nThe stop now waits for the user. Do not land, merge, rebase or push the branches yourself. End your turn.`;
+  await tx.createTask(Launch, { runId, prompt, requestId: `workflow-stop-auto:${runId}:${stageId}:${String(round)}` }, { ownership: { kind: "conversation" }, background: true });
 }
 
 export async function proposeWorkflow(tx: Tx, parent: ConversationId, id: string, args: WorkflowProposalTool): Promise<WorkflowProposal> {
@@ -440,12 +477,12 @@ export async function doWorkflowProposalHere(harness: Harness, parent: Conversat
 }
 
 export async function startWorkflowProposal(harness: Harness, parent: Conversation, cwd: string, sessionId: string, id: string,
-  supplied: WorkflowInputs, requestId: string, context: Context, models?: WorkflowModels): Promise<WorkflowRun> {
+  supplied: WorkflowInputs, requestId: string, context: Context, models?: WorkflowModels, reviewRounds?: number): Promise<WorkflowRun> {
   const proposal = (await harness.snapshot(Proposals, parent.id, context))?.records[id];
   if (proposal === undefined) throw new WorkflowError(404, "Workflow proposal not found in this session");
   // This is a storage read, never a library or filesystem read. The original bytes are the run's source.
   const definition = parseWorkflow(proposal.name, `proposal:${id}`, proposal.text);
-  return launchResolvedWorkflow(harness, parent, definition, cwd, sessionId, supplied, requestId, context, models, id);
+  return launchResolvedWorkflow(harness, parent, definition, cwd, sessionId, supplied, requestId, context, models, id, reviewRounds);
 }
 
 function requireOpenProposal(proposal: WorkflowProposal | undefined): WorkflowProposal {
@@ -469,7 +506,7 @@ function sameLaunch(run: WorkflowRun & { requestedInputs: WorkflowInputs; reques
 }
 
 export async function launchWorkflow(harness: Harness, parent: Conversation, library: WorkflowLibrary, cwd: string, sessionId: string,
-  name: string, supplied: WorkflowInputs, requestId: string, context: Context, models?: WorkflowModels): Promise<WorkflowRun> {
+  name: string, supplied: WorkflowInputs, requestId: string, context: Context, models?: WorkflowModels, reviewRounds?: number): Promise<WorkflowRun> {
   const id = launchId(sessionId, parent.id, requestId);
   const stored = await harness.snapshot(Runs, parent.id, context);
   const existing = stored?.records[id];
@@ -479,11 +516,11 @@ export async function launchWorkflow(harness: Harness, parent: Conversation, lib
     return sameLaunch(existing, name, supplied, models);
   }
   if (stored?.receipts?.[id] === true) throw new WorkflowError(409, "This workflow receipt expired; launch with a new requestId");
-  return launchResolvedWorkflow(harness, parent, await library.read(cwd, name), cwd, sessionId, supplied, requestId, context, models);
+  return launchResolvedWorkflow(harness, parent, await library.read(cwd, name), cwd, sessionId, supplied, requestId, context, models, undefined, reviewRounds);
 }
 
 async function launchResolvedWorkflow(harness: Harness, parent: Conversation, definition: ProseWorkflow, cwd: string, sessionId: string,
-  supplied: WorkflowInputs, requestId: string, context: Context, models?: WorkflowModels, proposalId?: string): Promise<WorkflowRun> {
+  supplied: WorkflowInputs, requestId: string, context: Context, models?: WorkflowModels, proposalId?: string, reviewRounds?: number): Promise<WorkflowRun> {
   const id = launchId(sessionId, parent.id, requestId);
   const run = await parent.commit(async (tx) => {
     const doc = await tx.doc(Runs, parent.id);
@@ -510,13 +547,15 @@ async function launchResolvedWorkflow(harness: Harness, parent: Conversation, de
     }) }));
     const run: WorkflowRun = { id, requestId, session: { id: sessionId, cwd }, startedAt: Date.now(),
       definition: { name: definition.name, path: definition.path, text: definition.text, sha256: definition.sha256 }, inputs, state: { kind: "running" }, children: [],
+      ...(reviewRounds === undefined ? {} : { reviewRounds }),
       ...(stages === undefined ? {} : { stages, stops: Object.fromEntries(stages.flatMap((stage) => stage.stop === undefined ? [] : [[stage.id, { state: "open" as const, round: 0 }]])) }) };
     // Retry identity uses the accepted request, not stages: the user can change worker models during the run.
     doc.records[id] = { ...run, requestedInputs: supplied, ...(models === undefined ? {} : { requestedModels: models }) };
     doc.receipts = { ...doc.receipts, [id]: true };
     doc.active = id;
     if (proposal !== undefined) proposal.state = { kind: "started", runId: id, decidedAt: run.startedAt };
-    await tx.createTask(Launch, { runId: id, prompt: workflowPrompt(id, { ...definition, definition: { ...definition.definition, ...(stages === undefined ? {} : { stages }) } }, inputs) }, { ownership: { kind: "conversation" }, background: true });
+    const prompt = workflowPrompt(id, { ...definition, definition: { ...definition.definition, ...(stages === undefined ? {} : { stages }) } }, inputs);
+    await tx.createTask(Launch, { runId: id, prompt: reviewRounds === undefined ? prompt : `${prompt}\n\n${reviewRoundRule(reviewRounds)}` }, { ownership: { kind: "conversation" }, background: true });
     return run;
   }, context);
   harness.resume();
@@ -566,18 +605,26 @@ export async function finishWorkflow(tx: Tx, parent: ConversationId, runId: stri
   doc.active = null;
 }
 
+const reviewRoundRule = (limit: number) => `Review rounds: Forgerie allows ${String(limit)} per reviewer in this run (Settings > Plugins > Workflow autonomy). Each spawn or send to a child with the reviewer agent is one round. After the last round, file each remaining must-fix finding with file_issue and continue; Forgerie refuses another round.`;
+
+/** Children of a run with the reviewer agent. Each spawn or send is one review round. */
+export const REVIEWER_AGENT = "reviewer";
+
 /**
  * Whether the agent may start or message this child now. The child tool asks before it prepares a worktree and again
  * in the commit that allocates the reporter. User actions (continuing a child from its view) are not held.
+ * `reviewer` says which child names use the reviewer agent, including this one when it is a reviewer.
  */
-export async function workflowChildRefusal(tx: Tx, parent: ConversationId, name: string): Promise<string | undefined> {
+export async function workflowChildRefusal(tx: Tx, parent: ConversationId, name: string, reviewer: (name: string) => boolean = () => false): Promise<string | undefined> {
   const doc = await tx.doc(Runs, parent);
   const run = doc.active === null ? undefined : doc.records[doc.active];
   if (run === undefined) return undefined;
   if (run.state.kind !== "running") return "This workflow is stopping; do not start or message workers.";
   const admission = admitChild(run, name);
-  return admission.kind === "refused" ? admission.reason : undefined;
+  if (admission.kind === "refused") return admission.reason;
+  return reviewRoundRefusal(run, name, reviewer);
 }
+
 
 /** The active workflow's model choice. Spawns and sends enforce it; null restores the agent file's model, else the session's. */
 export async function workflowWorkerModel(tx: Tx, parent: ConversationId, name: string): Promise<string | null | undefined> {

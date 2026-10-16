@@ -68,7 +68,7 @@ describe("plugin management", () => {
   it("lists real Pi resources, app plugins, and built-ins without executing extension code", async () => {
     const catalog = await service.list();
     expect(catalog.profileDir).toBe(profile.dir);
-    expect(catalog.plugins.map((entry) => entry.kind)).toEqual(["package", "extension", "app", "app", "builtin", "builtin", "builtin"]);
+    expect(catalog.plugins.map((entry) => entry.kind)).toEqual(["package", "extension", "app", "app", "app", "builtin", "builtin", "builtin"]);
     expect(catalog.plugins.find((entry) => entry.kind === "extension")).toMatchObject({ name: "loose", description: "", enabled: false });
     expect(catalog.restartRequired).toBe(false);
   });

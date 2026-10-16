@@ -24,6 +24,7 @@ const inputSchema = z.object({ type: z.enum(["string", "boolean", "number"]), de
 const stopStateSchema = z.object({
   state: z.enum(["open", "waiting", "approved"]), summary: z.string().optional(), note: z.string().optional(),
   requestedAt: z.number().optional(), decidedAt: z.number().optional(), landed: z.array(z.string()).optional(), round: z.number().optional(),
+  decidedBy: z.literal("forgerie").optional(),
 });
 /**
  * Whether the child's report reached the parent (src/shared/workflowRuns.ts, WorkflowChildDeliverySchema).
@@ -169,8 +170,9 @@ export function stopOutcome(run: WorkflowRun | undefined, entry: StopEntry): str
   const stop = run.stops?.[entry.stage];
   const round = stop?.round ?? 0;
   if (stop !== undefined && round === entry.round + 1 && stop.state === "approved") {
-    if (entry.stop === "approve") return `Approved by you${stop.note === undefined ? "." : `: ${stop.note}`}`;
-    return stop.landed === undefined || stop.landed.length === 0 ? "Landed. No branch had commits." : `Landed ${stop.landed.join(", ")}.`;
+    const by = stop.decidedBy === "forgerie" ? " by Forgerie (Workflow autonomy)" : "";
+    if (entry.stop === "approve") return `Approved${by === "" ? " by you" : by}${stop.note === undefined ? "." : `: ${stop.note}`}`;
+    return stop.landed === undefined || stop.landed.length === 0 ? `Landed${by}. No branch had commits.` : `Landed${by === "" ? "" : `${by}:`} ${stop.landed.join(", ")}.`;
   }
   if (stop !== undefined && round === entry.round + 1 && stop.state === "open" && stop.note !== undefined) return `You asked for changes: ${stop.note}`;
   if (round > entry.round) return "You asked for changes.";

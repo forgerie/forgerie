@@ -132,3 +132,15 @@ export function stageViews(run: StagedRun): Record<string, StageView> {
   });
   return views;
 }
+
+/** A reviewer that used its rounds, or a new reviewer after another one did, is refused. Runs without a limit admit all. */
+export function reviewRoundRefusal(run: Pick<WorkflowRun, "reviewRounds" | "children">, name: string, reviewer: (name: string) => boolean): string | undefined {
+  const limit = run.reviewRounds;
+  if (limit === undefined || !reviewer(name)) return undefined;
+  const rounds = new Map<string, number>();
+  for (const child of run.children) if (reviewer(child.name)) rounds.set(child.name, (rounds.get(child.name) ?? 0) + 1);
+  const used = rounds.get(name) ?? 0;
+  const spent = [...rounds].find(([, count]) => count >= limit)?.[0];
+  if (used < limit && (used > 0 || spent === undefined)) return undefined;
+  return `Review round limit reached: ${used >= limit ? name : spent ?? name} has reviewed ${String(limit)} times in this run, and Settings > Plugins > Workflow autonomy allows ${String(limit)}. Do not start another review round, under this name or a new one. File each remaining must-fix finding with file_issue, name them in your stop summary or result, and continue.`;
+}

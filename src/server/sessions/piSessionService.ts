@@ -6,6 +6,7 @@ import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js
 import { appendAttentionHint, readAttentionHint } from "./durableAttentionHints.js";
 import { AttentionHints, ATTENTION_HINT_CUSTOM_TYPE, type AttentionSession } from "../decisions/attentionHints.js";
 import { DECISION_HINT_ERROR_EVENT, type DecisionHints } from "../decisions/decisionHints.js";
+import type { WorkflowAutonomy } from "./workflowAutonomy.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { ManagedProcessRegistry, type ManagedProcessRegistryOptions } from "../processes/managedProcessRegistry.js";
 import type { ManagedProcesses } from "../processes/managedProcesses.js";
@@ -885,6 +886,7 @@ function createDefaultRuntimeFactory(
   azurePr?: AzurePrToolDeps,
   processTools?: (ref: PiSessionRef, sessionDir: string) => Promise<ManagedProcessTools | undefined>,
   decisionHints?: DecisionHints,
+  workflowAutonomy?: () => WorkflowAutonomy,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
@@ -929,6 +931,7 @@ function createDefaultRuntimeFactory(
     const managedTools = await processTools?.({ id: sessionManager.getSessionId(), cwd }, sessionManager.getSessionDir());
     const session = await DurableAgentSession.open({
       ...(decisionHints === undefined ? {} : {decisionHints}),
+      ...(workflowAutonomy === undefined ? {} : {workflowAutonomy}),
       ...(managedTools === undefined ? {} : { processTools: managedTools }),
       ...(handle === undefined ? {} : { handle }),
       ...(beforeResume === undefined ? {} : { beforeResume }),
@@ -984,6 +987,8 @@ function createPiWebEditToolDefinition(cwd: string) {
 export interface PiSessionServiceDependencies {
   /** Optional background-only hint client and live settings; never used for authorization. */
   decisionHints?: DecisionHints;
+  /** Reads Settings > Plugins > Workflow autonomy at each workflow decision. Omitted: every stop waits for the user. */
+  workflowAutonomy?: () => WorkflowAutonomy;
   managedProcesses?: Omit<ManagedProcessRegistryOptions, "onError">;
   durableReader?: DurableSessionReader;
   agentDir: string;
@@ -1281,6 +1286,7 @@ export class PiSessionService implements SessionRouteService {
         return this.managedProcesses.tools(ref.id, { cwd: ref.cwd, stateFile: join(sessionDir, `${ref.id}.process-watches.json`) });
       },
       deps.decisionHints,
+      deps.workflowAutonomy,
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;
