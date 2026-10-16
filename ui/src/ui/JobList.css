@@ -25,7 +25,8 @@
 
 .job-list-log { margin: 0 0 var(--space-3) calc(1rem + var(--space-3)); border: var(--hairline) solid var(--line); border-radius: var(--radius-document);
   background: var(--code-surface); overflow: hidden; }
-.job-list-log pre { margin: 0; max-block-size: min(14rem, 35dvh); padding: var(--space-3); overflow: auto; font-family: var(--code-font);
+/* The output is bounded at the source; it takes its full height, and the pane around the list scrolls. Long lines scroll sideways here. */
+.job-list-log pre { margin: 0; padding: var(--space-3); overflow-x: auto; font-family: var(--code-font);
   font-size: var(--code-size); line-height: 1.55; white-space: pre; }
 .job-list-log pre:focus-visible { outline-offset: -2px; }
 .job-list-log a { display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: var(--control-size); padding-inline: var(--space-3);
