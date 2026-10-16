@@ -1,0 +1,54 @@
+/* The pane's own inline padding is the host's: the sheet it sits in sets --tree-pad, and a bare host gets the gutter. */
+.run-detail { --run-detail-tone: var(--muted-foreground); --run-detail-wash: var(--tint-surface);
+  display: flex; flex-direction: column; gap: var(--space-3); min-inline-size: 0; padding: var(--space-2) var(--tree-pad, var(--gutter)) var(--space-4); }
+.run-detail[data-state="failed"] { --run-detail-tone: var(--tone-bad); --run-detail-wash: var(--destructive-wash); }
+.run-detail[data-state="passed"] { --run-detail-tone: var(--tone-good); }
+.run-detail[data-state="running"] { --run-detail-tone: var(--live); --run-detail-wash: var(--live-wash); }
+.run-detail[data-state="waiting"], .run-detail[data-state="unknown"] { --run-detail-tone: var(--tone-warn); --run-detail-wash: var(--warn-wash); }
+
+.run-detail-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); }
+.run-detail-back, .run-detail-out { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: 2rem;
+  padding: 0 var(--space-2) 0 var(--space-1); border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--muted-foreground); font: inherit; font-size: var(--small-text); text-decoration: none; cursor: pointer; }
+.run-detail-back::before, .run-detail-out::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
+.run-detail-back svg, .run-detail-out svg { flex: none; inline-size: 1rem; block-size: 1rem; }
+.run-detail-out svg { inline-size: 0.8125rem; block-size: 0.8125rem; }
+.run-detail-back:hover, .run-detail-out:hover { background: var(--hover-surface); color: var(--foreground); }
+
+.run-detail-head { display: grid; gap: var(--space-1); min-inline-size: 0; }
+.run-detail-name { margin: 0; color: var(--muted-foreground); font-size: var(--small-text); overflow-wrap: anywhere; }
+.run-detail-pipeline { color: var(--foreground); font-weight: 600; }
+.run-detail-number { font-family: var(--code-font); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
+.run-detail-title { margin: 0; font-size: clamp(1.0625rem, 2.6cqi, 1.25rem); font-weight: 600; line-height: 1.35; text-wrap: pretty; overflow-wrap: anywhere; }
+.run-detail-facts { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: var(--space-1) 0 0; padding: 0; list-style: none;
+  color: var(--muted-foreground); font-size: var(--label-text); }
+.run-detail-facts li { min-inline-size: 0; max-inline-size: 100%; overflow-wrap: anywhere; }
+.run-detail-facts li[data-face="code"] { font-family: var(--code-font); font-size: var(--meta-text); font-variant-ligatures: none; }
+
+/* The one loud line: the tone runs down its edge and colours its mark. */
+.run-detail-verdict { display: flex; align-items: flex-start; gap: var(--space-3); margin: var(--space-1) 0 0;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); border-inline-start: 0.1875rem solid var(--run-detail-tone);
+  border-start-end-radius: var(--radius-control); border-end-end-radius: var(--radius-control); background: var(--run-detail-wash);
+  font-size: var(--text-size); font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+
+.run-detail-notice { padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); font-size: var(--small-text); line-height: 1.45; overflow-wrap: anywhere; }
+.run-detail-notice[data-tone="bad"] { background: var(--destructive-wash); }
+.run-detail-notice[data-tone="warn"] { background: var(--warn-wash); }
+.run-detail-notice[data-tone="quiet"] { padding-block: 0; color: var(--muted-foreground); }
+.run-detail-notice p { margin: 0; }
+.run-detail-notice p + p { margin-block-start: var(--space-1); }
+.run-detail-notice a { color: inherit; font-weight: 500; text-underline-offset: 0.2em; }
+
+.run-detail-watch { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3);
+  padding-block: var(--space-2); border-block: var(--hairline) solid var(--line); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.45; }
+.run-detail-watch p { flex: 1 1 14rem; margin: 0; }
+
+.run-detail-parts-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); margin-block-end: var(--space-1); }
+.run-detail-parts-head h4 { margin: 0; font-size: var(--small-text); font-weight: 600; }
+.run-detail-parts-head span { color: var(--muted-foreground); font-size: var(--label-text); font-variant-numeric: tabular-nums; }
+.run-detail-foot { margin: var(--space-2) 0 0; color: var(--muted-foreground); font-size: var(--label-text); }
+.run-detail-remove { position: relative; padding: 0; border: 0; background: none; color: var(--muted-foreground); font: inherit;
+  text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; }
+.run-detail-remove::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; block-size: var(--control-size); translate: 0 -50%; }
+.run-detail-remove:not(:disabled):hover { color: var(--foreground); }
+.run-detail-remove:disabled { opacity: 0.5; cursor: not-allowed; }
