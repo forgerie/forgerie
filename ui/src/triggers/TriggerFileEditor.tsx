@@ -18,7 +18,7 @@ export interface LineJump { line: number; at: number }
  * front matter is the side panel, so it is not repeated here, and a save keeps
  * it. Source shows the whole file. A jump opens Source with the caret on that
  * line; `markLine` marks a line the server could not read. The caller keys it
- * by the file's read, so a new read or a restored version starts a fresh editor.
+ * by the editing base, so adopting another file version or restoring text starts a fresh editor.
  */
 export function TriggerFileEditor({ path, text, document, view, onView, notices, sourceNotice, markLine, jump, readOnly = false, onChange, onSave }: {
   path: string;

@@ -13,7 +13,7 @@ import { useTriggerList } from "./useTriggerList";
 import type { TriggerPlace } from "./triggersModel";
 import { HOST_ZONE, NOW } from "./fixtures/triggers";
 import {
-  brokenDocument, brokenMaintenance, maintenance, maintenanceDocument, maintenanceVersions, MAINTENANCE_PATH, MAINTENANCE_TEXT, unscheduledDocument, unscheduledMaintenance,
+  brokenDocument, brokenMaintenance, documentOf, maintenance, maintenanceDocument, maintenanceVersions, MAINTENANCE_PATH, MAINTENANCE_TEXT, unscheduledDocument, unscheduledMaintenance,
 } from "./fixtures/triggerFiles";
 import { memoryApi, memoryDirectory, type MemoryFile, type MemoryStore } from "./fixtures/memoryApi";
 import { createTriggerMemory, type TriggerMemory } from "./triggerMemory";
@@ -54,6 +54,14 @@ const press = async (name: string | RegExp) => {
 };
 const code = () => EditorView.findFromDOM(document.querySelector<HTMLElement>(".cm-content")!)!;
 const typeCode = (insert: string) => act(async () => { code().dispatch({ changes: { from: code().state.doc.length, insert } }); });
+const replaceCode = (insert: string) => act(async () => { code().dispatch({ changes: { from: 0, to: code().state.doc.length, insert } }); });
+const changeFile = async (file: MemoryFile, trigger: Trigger = maintenance) => {
+  await act(async () => {
+    store.setFile(trigger.id, file); store.set([trigger]);
+    for (const listener of changes) listener();
+  });
+  await flush();
+};
 const rich = () => (document.querySelector('[role="textbox"]') as (HTMLElement & { editor: Editor }) | null)?.editor;
 const setTime = async (value: string) => {
   const input = document.querySelector<HTMLInputElement>('input[aria-label="Time"]');
@@ -219,6 +227,98 @@ describe("a trigger whose settings live in a workflow file", () => {
     await press("Reload");
     expect(code().state.doc.toString()).toBe(outside);
     expect(unsaved()).toBe(false);
+  });
+
+  it("preserves outside text after reverting a conflicted draft to its original text", async () => {
+    markdownView.write("source"); await open(); await typeCode("\nMine.\n");
+    const outside = documentOf(`${MAINTENANCE_TEXT}\nTheirs.\n`, maintenanceDocument.schedule);
+    await changeFile({ document: outside, versions: maintenanceVersions });
+    expect(text()).toContain("changed on disk while you were editing");
+    await replaceCode(MAINTENANCE_TEXT); await flush();
+    expect(code().state.doc.toString()).toBe(MAINTENANCE_TEXT);
+    await typeCode("\nNew edit.\n"); await press("Save");
+    expect(store.file(maintenance.id)?.document?.text).toBe(outside.text);
+    expect(saves()[0]?.baseSha256).toBe(maintenanceDocument.sha256);
+    expect(text()).toContain("changed on disk while you were editing"); expect(unsaved()).toBe(true);
+    await press("Reload");
+    expect(code().state.doc.toString()).toBe(outside.text); expect(unsaved()).toBe(false);
+    await typeCode("\nAfter reload.\n"); await press("Save");
+    expect(saves()[1]).toEqual({ text: `${outside.text}\nAfter reload.\n`, baseSha256: outside.sha256 });
+  });
+
+  it("keeps the original hash when a conflicted side-panel edit is reverted", async () => {
+    markdownView.write("source"); await open(); await setTime("02:00");
+    const outside = documentOf(`${MAINTENANCE_TEXT}\nTheirs.\n`, maintenanceDocument.schedule);
+    await changeFile({ document: outside }); await setTime("01:00");
+    expect(text()).toContain("changed on disk while you were editing"); expect(unsaved()).toBe(true);
+    await typeCode("\nNew edit.\n"); await press("Save");
+    expect(saves()[0]?.baseSha256).toBe(maintenanceDocument.sha256);
+    expect(store.file(maintenance.id)?.document?.text).toBe(outside.text);
+  });
+
+  it("restores the original version without clearing its conflict or adopting the outside hash", async () => {
+    markdownView.write("source"); await open(); await typeCode("\nMine.\n");
+    const outside = documentOf(`${MAINTENANCE_TEXT}\nTheirs.\n`, maintenanceDocument.schedule);
+    await changeFile({ document: outside, versions: maintenanceVersions });
+    await press("Versions"); await press(/^Today, 9:41 AM/);
+    expect(code().state.doc.toString()).toBe(MAINTENANCE_TEXT);
+    expect(text()).toContain("changed on disk while you were editing"); expect(unsaved()).toBe(true);
+    await press("Save");
+    expect(saves()[0]?.baseSha256).toBe(maintenanceDocument.sha256);
+    expect(store.file(maintenance.id)?.document?.text).toBe(outside.text);
+  });
+
+  it("keeps a recreated file protected when the retained draft is reverted to its original text", async () => {
+    markdownView.write("source"); await open(); await typeCode("\nMine.\n");
+    await changeFile({}, unscheduledMaintenance); expect(text()).toContain("The file is gone");
+    const outside = documentOf(`${MAINTENANCE_TEXT}\nRecreated outside.\n`, maintenanceDocument.schedule);
+    await changeFile({ document: outside });
+    expect(code().state.doc.toString()).toBe(`${MAINTENANCE_TEXT}\nMine.\n`);
+    await replaceCode(MAINTENANCE_TEXT); await flush();
+    expect(text()).toContain("changed on disk while you were editing");
+    await typeCode("\nNew edit.\n"); await press("Save");
+    expect(saves()[0]?.baseSha256).toBe(maintenanceDocument.sha256);
+    expect(store.file(maintenance.id)?.document?.text).toBe(outside.text);
+  });
+
+  it.each(["leave", "command"])("remounts the outside document before adopting its hash on %s discard", async (how) => {
+    markdownView.write("source"); await open(); await typeCode("\nMine.\n");
+    const outside = documentOf(`${MAINTENANCE_TEXT}\nTheirs.\n`, maintenanceDocument.schedule);
+    await changeFile({ document: outside });
+    if (how === "leave") { await press("Triggers"); await press(/^Discard/); }
+    else { await press("Trigger commands"); await press("Discard changes"); }
+    expect(memory.files.size).toBe(0); expect(unsaved()).toBe(false);
+    expect(code().state.doc.toString()).toBe(outside.text);
+    await typeCode("\nAfter discard.\n"); await press("Save");
+    expect(saves()[0]).toEqual({ text: `${outside.text}\nAfter discard.\n`, baseSha256: outside.sha256 });
+  });
+
+  it("keeps Rich undo on its original hash after an outside edit", async () => {
+    await open();
+    await act(async () => { rich()?.commands.focus("end"); rich()?.commands.insertContent(" Mine."); });
+    const outside = documentOf(`${MAINTENANCE_TEXT}\nTheirs.\n`, maintenanceDocument.schedule);
+    await changeFile({ document: outside });
+    await act(async () => { rich()?.commands.undo(); }); await flush();
+    expect(rich()?.getText()).not.toContain("Mine.");
+    expect(text()).toContain("changed on disk while you were editing"); expect(unsaved()).toBe(true);
+    await act(async () => { rich()?.commands.focus("end"); rich()?.commands.insertContent(" After undo."); });
+    await press("Save");
+    expect(saves()[0]?.baseSha256).toBe(maintenanceDocument.sha256);
+    expect(store.file(maintenance.id)?.document?.text).toBe(outside.text);
+    await press("Reload"); expect(rich()?.getText()).toContain("Theirs."); expect(unsaved()).toBe(false);
+  });
+
+  it("drops a deleted trigger's draft before reopening a recreated trigger with the same ID", async () => {
+    markdownView.write("source"); await open(); await typeCode("\nMine.\n");
+    await press("Trigger commands"); await press("Delete trigger…"); await press("Delete trigger");
+    expect(memory.files.size).toBe(0);
+    const recreated = documentOf(`${MAINTENANCE_TEXT}\nRecreated outside.\n`, maintenanceDocument.schedule);
+    await changeFile({ document: recreated });
+    place = { view: "trigger", id: maintenance.id };
+    await act(async () => root.render(<Harness />)); await flush();
+    expect(code().state.doc.toString()).toBe(recreated.text); expect(unsaved()).toBe(false);
+    await typeCode("\nNew edit.\n"); await press("Save");
+    expect(saves()[0]).toEqual({ text: `${recreated.text}\nNew edit.\n`, baseSha256: recreated.sha256 });
   });
 
   it("keeps text-only drafts and leave/reload guards after an outside file deletion", async () => {

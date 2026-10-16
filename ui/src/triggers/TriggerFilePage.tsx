@@ -67,7 +67,7 @@ export function TriggerFilePage({ trigger, file, text, editorKey, settings, sett
   file: TriggerFileLoad;
   /** The editor's text, edits included. */
   text: string;
-  /** Changes when the editor must start again from `text`: a new read of the file, or a restored version. */
+  /** Changes when the editor must start again from `text`: another editing base, a discard, or a restored version. */
   editorKey: string;
   settings: ScheduleDraft; settingsStart: ScheduleDraft;
   textDirty: boolean; settingsDirty: boolean;

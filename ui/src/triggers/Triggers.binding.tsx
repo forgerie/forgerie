@@ -112,7 +112,8 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
   const fileStart: ScheduleDraft | undefined = trigger && fileId ? storedFile?.start ?? scheduleDraftOf(trigger, fileDocument, value?.timezone ?? zone) : undefined;
   const fileSettings = storedFile?.settings ?? fileStart;
   const fileText = storedFile?.text ?? fileDocument?.text ?? "";
-  const textDirty = storedFile !== undefined && storedFile.text !== storedFile.startText;
+  // Reverting to the original text is still unsaved when the disk now holds another version (or no file).
+  const textDirty = storedFile !== undefined && (storedFile.text !== storedFile.startText || storedFile.text !== fileDocument?.text);
   const settingsDirty = fileSettings !== undefined && fileStart !== undefined && settingsChanged(fileSettings, fileStart);
   const fileDirty = textDirty || settingsDirty;
   // Edits made against an older read: the file changed on disk since they began.
@@ -228,7 +229,7 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
     if (!question) return;
     if (question.kind === "leave") {
       const action = leave.current; leave.current = undefined;
-      if (fileId) memory.files.delete(fileId);
+      if (fileId) dropFile();
       dropDraft(); setQuestion(undefined); action?.(); return;
     }
     const target = question.trigger;
@@ -264,6 +265,7 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
     try {
       await api.remove(target.id);
       drafts.delete(draftKey({ view: "trigger", id: target.id }));
+      if (target.id === fileId) dropFile(); else memory.files.delete(target.id);
       pendingRuns.delete(target.id);
       setQuestion(undefined);
       setNote({ text: `Deleted “${target.name}”.` });
@@ -311,17 +313,22 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
     } finally { inFlight.current = false; }
   }
 
-  // The file's edits: kept while they differ from the file as read, against the hash they began from.
+  // Keep a conflicting draft's original hash even after Undo or Restore returns it to its original text.
+  // Only explicit Reload/Discard or a successful save can adopt another version.
   const setFile = (change: { text?: string; settings?: ScheduleDraft }) => {
     if (!fileId || !fileDocument || !fileStart || !fileSettings || inFlight.current) return;
     const next = { text: change.text ?? fileText, settings: change.settings ?? fileSettings };
     const startText = storedFile?.startText ?? fileDocument.text;
-    if (next.text === startText && !settingsChanged(next.settings, fileStart)) memory.files.delete(fileId);
-    else memory.files.set(fileId, { ...next, startText, start: fileStart, baseSha256: storedFile?.baseSha256 ?? fileDocument.sha256 });
+    const baseSha256 = storedFile?.baseSha256 ?? fileDocument.sha256;
+    if (next.text === startText && !settingsChanged(next.settings, fileStart) && baseSha256 === fileDocument.sha256) memory.files.delete(fileId);
+    else memory.files.set(fileId, { ...next, startText, start: fileStart, baseSha256 });
     setFileSave(undefined);
     touch();
   };
-  const dropFile = () => { if (fileId) memory.files.delete(fileId); setFileSave(undefined); touch(); };
+  const dropFile = () => {
+    if (fileId) memory.files.delete(fileId);
+    setFileSave(undefined); setRestores((count) => count + 1); touch();
+  };
   async function saveFile() {
     if (!fileId || !trigger || !fileDocument || !fileStart || !fileSettings || inFlight.current || !fileDirty) return;
     inFlight.current = true;
@@ -378,11 +385,12 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
   };
   const creatorName = trigger?.createdBy.kind === "agent" ? sessionName(trigger.createdBy.sessionId) : undefined;
   const fileSaveState = fileSave && fileSave.id === fileId ? fileSave.state : { type: "idle" as const };
+  // The editor initializes once: its key follows the same base a save uses, not a newer disk read.
   const screen: TriggerScreen = place.view === "list"
     ? { view: "list", list: { load: list.load, clock, projectLabel, starting, failure, onDismissFailure: () => setFailure(undefined),
       onRefresh: refresh, onNew: () => go({ view: "create" }), onClose: () => go(undefined), actions: sharedRow } }
     : trigger && fileId && fileSettings && fileStart ? { view: "file", page: {
-      trigger, file: files.file, text: fileText, editorKey: `${fileId}:${fileDocument?.sha256 ?? ""}:${String(restores)}`,
+      trigger, file: files.file, text: fileText, editorKey: `${fileId}:${storedFile?.baseSha256 ?? fileDocument?.sha256 ?? ""}:${String(restores)}`,
       settings: fileSettings, settingsStart: fileStart, textDirty, settingsDirty, versions: files.versions, save: fileSaveState,
       conflict: fileConflict, failure, clock, starting: starting.has(trigger.id), creatorName, projectName: projectLabel, projects: projectsLoad,
       timezones: value?.timezones ?? [clock.hostZone],
@@ -394,9 +402,9 @@ export function TriggersScreen({ args, list, api, directory, memory, now: clockN
       actions: {
         ...pageCommands,
         onText: (text) => setFile({ text }), onSettings: (settings) => setFile({ settings }),
-        onSave: () => void saveFile(), onDiscard: () => { dropFile(); setRestores((count) => count + 1); },
+        onSave: () => void saveFile(), onDiscard: dropFile,
         onRestore: (versionId) => void restore(versionId),
-        onReload: () => { dropFile(); setRestores((count) => count + 1); files.reread(); },
+        onReload: () => { dropFile(); files.reread(); },
       },
     } }
     : { view: "page", page: {
