@@ -21,6 +21,25 @@ const fields = () => [...document.querySelectorAll("textarea")].map((field) => f
 const button = (text: string) => [...document.querySelectorAll("button")].find((node) => node.textContent === text);
 
 describe("child agents panel", () => {
+  it("shows safe last-tool names and cumulative conversation estimates, with unknown distinct from zero", async () => {
+    const children = [
+      { ...CHILDREN[0]!, costUsd: 0.5, lastTool: { name: "read", at: 1 } },
+      { ...CHILDREN[1]!, costUsd: null, lastTool: null },
+      { ...CHILDREN[2]!, costUsd: 0 },
+    ];
+    const run = RUNS.records[0]!;
+    const runs = { ...RUNS, records: [{ ...run, child: { ...run.child, conversationId: 15 } }] };
+    await act(async () => root.render(<ChildAgentsPanel children={children} runs={runs} actions={actions()} />));
+    const rows = [...document.querySelectorAll(".status-row")];
+    const api = rows.find(row => row.textContent?.includes("api"));
+    const ui = rows.find(row => row.textContent?.includes("design-engineer"));
+    expect(api?.textContent).toContain("Last tool: read");
+    expect(api?.textContent).toContain("$0.50");
+    expect(ui?.textContent).toContain("Last tool: Unavailable");
+    expect(ui?.textContent).toContain("Unknown cost");
+    expect(rows.find(row => row.textContent?.includes("review"))?.textContent).toContain("$0.00");
+  });
+
   it("offers one input: the answer while a question is open, shown as a card where it was asked", async () => {
     await act(async () => root.render(<ChildAgentsPanel children={CHILDREN} openId={21} transcript={TRANSCRIPT} actions={actions()} />));
     expect(fields()).toEqual(["Answer ui: Should the empty state show the last run, or stay blank?"]);
@@ -134,7 +153,7 @@ describe("child agents panel", () => {
       const row = document.querySelector(".status-row");
       expect(row?.getAttribute("data-tone")).toBe("retrying");
       expect(row?.querySelector(".status-row-status")?.textContent).toBe("Next try in 1 min 40 s");
-      expect(row?.querySelector(".status-row-below")?.textContent).toMatch(/^Retrying 2 of 3: 529 \{"type":"error".*…$/u);
+      expect([...row?.querySelectorAll(".status-row-below p") ?? []].find(node => node.textContent?.startsWith("Retrying"))?.textContent).toMatch(/^Retrying 2 of 3: 529 \{"type":"error".*…$/u);
       // The row ticks on its own while the retry waits.
       now = NOW + 99_500;
       await act(async () => { vi.advanceTimersByTime(1_000); });

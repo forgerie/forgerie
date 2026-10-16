@@ -235,6 +235,11 @@ describe("Durable-native child agents in a Forgerie session", () => {
     const helper = await child(ref, "accounting");
     const first = await until("first accounting run", async () => (await runRecords.list({ session: ref.id })).find((row) => row.child.name === "accounting" && row.state.kind === "finished"));
     expect(first.turns).toBe(2);
+    const cost = (records: typeof first[]) => records.reduce((sum, row) => sum + [...Object.values(row.usage?.models ?? {}), ...Object.values(row.usage?.tools ?? {})].reduce((subtotal, bucket) => subtotal + bucket.cost.total, 0), 0);
+    const firstSummary = await child(ref, "accounting");
+    expect(firstSummary.costUsd).toBeCloseTo(cost([first]));
+    expect(firstSummary.lastTool?.name).toBe("work");
+    expect(typeof firstSummary.lastTool?.at).toBe("number");
     expect(first.usage?.tools["work"]).toMatchObject({ input: 7, output: 3, totalTokens: 10, cost: { total: 0.25 } });
     expect(Object.values(first.usage?.models ?? {}).reduce((sum, usage) => sum + usage.totalTokens, 0)).toBeGreaterThan(0);
     expect(first.state.kind).toBe("finished");
@@ -243,6 +248,8 @@ describe("Durable-native child agents in a Forgerie session", () => {
     const rows = await until("second accounting run", async () => { const rows = await runRecords.list({ session: ref.id }); return rows.length === 2 && rows.every((row) => row.state.kind === "finished") ? rows : false; });
     expect(new Set(rows.map((row) => row.id)).size).toBe(2);
     for (const row of rows) { expect(row.turns).toBe(2); expect(row.usage?.tools["work"]?.cost.total).toBe(0.25); }
+    expect((await child(ref, "accounting")).costUsd).toBeCloseTo(cost(rows));
+    expect((await child(ref, "accounting")).lastTool?.name).toBe("work");
     await service.dispose(); service = openService();
     expect(await runRecords.list({ session: ref.id })).toEqual(rows);
   }, 30_000);

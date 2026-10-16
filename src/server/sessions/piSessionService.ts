@@ -46,6 +46,10 @@ import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult,
 import type { DurableSessionAddress } from "./durableSessionAddress.js";
 import type { DurableSessionReader } from "./durableSessionReader.js";
 import { withImageReferences, type SessionImage } from "./sessionImages.js";
+import { DurableChildWorktrees } from "./durableChildWorktrees.js";
+import { listStoredChildren, storedChildMessages } from "./durableChildAgents.js";
+import { readSavedChild } from "./durableChildSavedReads.js";
+import { BACKGROUND_CONTEXT as childReadContext } from "@earendil-works/chord/context";
 import type { DurableBrowserSnapshot } from "../../shared/durableBrowserSnapshot.js";
 import type { DurableBrowserAttachment, DurableHostState } from "./durableParentReadModel.js";
 import { ParentAsks, ParentAsksSchema } from "./durableParentDocuments.js";
@@ -1152,6 +1156,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly pullRequestWatches: PiSessionServiceDependencies["pullRequestWatches"];
   private readonly sessionManager: PiSessionManagerGateway;
   private readonly durableReader: DurableSessionReader | undefined;
+  private readonly childReadWorktrees: SessionWorktrees | undefined;
   private readonly presentationHistory = new PresentationHistoryIdentity();
   private readonly preparingFamilies = new WeakMap<Harness, Promise<void>>();
   private readonly sessionWorktrees: SessionWorktrees | undefined;
@@ -1188,6 +1193,7 @@ export class PiSessionService implements SessionRouteService {
 
   constructor(private readonly events: SessionEventHub, deps: PiSessionServiceDependencies) {
     this.durableReader = deps.durableReader;
+    this.childReadWorktrees = deps.durableChildAgents?.worktrees ?? deps.sessionWorktrees;
     this.archiveStore = deps.archiveStore ?? new SessionArchiveStore();
     this.pinStore = deps.pinStore ?? new SessionPinStore();
     this.tabsStore = deps.tabsStore ?? new SessionTabsStore();
@@ -2696,13 +2702,37 @@ export class PiSessionService implements SessionRouteService {
   }
 
   /** The server half of "open a child". Each call reaches the child through the parent's Durable storage. */
-  async durableChildren(ref: PiSessionRef) { return (await this.durableSession(ref)).durableChildren(); }
+  async durableChildren(ref: PiSessionRef) {
+    const worktrees = this.childReadWorktrees === undefined ? undefined : new DurableChildWorktrees(this.childReadWorktrees, ref);
+    const native = await this.durableReader?.children(ref, worktrees);
+    if (native !== undefined) return native;
+    const active = this.activeForRef(ref)?.runtime.session;
+    if (active instanceof DurableAgentSession) return active.durableChildren();
+    const saved = await this.savedChildSession(ref);
+    return readSavedChild(saved.path, saved.id, (storage, parent) => listStoredChildren(storage, parent, childReadContext, worktrees));
+  }
   async reviewDurableChildWorktree(ref: PiSessionRef, conversationId: number) { return (await this.durableSession(ref)).reviewDurableChildWorktree(conversationId); }
   async continueDurableChild(ref: PiSessionRef, conversationId: number, text: string, requestId: string) { return (await this.durableSession(ref)).continueDurableChild(conversationId, text, requestId); }
   async landDurableChildWorktree(ref: PiSessionRef, conversationId: number) { return (await this.durableSession(ref)).landDurableChildWorktree(conversationId); }
   async previewDurableChildWorktreeDiscard(ref: PiSessionRef, conversationId: number) { return (await this.durableSession(ref)).previewDurableChildWorktreeDiscard(conversationId); }
   async discardDurableChildWorktree(ref: PiSessionRef, conversationId: number, confirmationToken: string) { return (await this.durableSession(ref)).discardDurableChildWorktree(conversationId, confirmationToken); }
-  async durableChildMessages(ref: PiSessionRef, conversationId: number) { return (await this.durableSession(ref)).durableChildMessages(conversationId); }
+  async durableChildMessages(ref: PiSessionRef, conversationId: number) {
+    const native = await this.durableReader?.childMessages(ref, conversationId);
+    if (native !== undefined) return native;
+    const active = this.activeForRef(ref)?.runtime.session;
+    if (active instanceof DurableAgentSession) return active.durableChildMessages(conversationId);
+    const saved = await this.savedChildSession(ref);
+    return readSavedChild(saved.path, saved.id, (storage, parent) => storedChildMessages(storage, parent, conversationId, childReadContext));
+  }
+  private async savedChildSession(ref: PiSessionRef): Promise<{ id: string; path: string }> {
+    const archived = await this.getArchived(ref);
+    if (archived?.archivePath !== undefined) return { id: archived.sessionId, path: archived.archivePath };
+    const readonly = await this.sessionWorktrees?.store.readOnly(ref);
+    if (readonly !== undefined) return { id: readonly.session.id, path: readonly.transcriptPath };
+    const saved = await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader);
+    if (saved === undefined) throw new Error("Session not found");
+    return saved;
+  }
   async messageDurableChild(ref: PiSessionRef, conversationId: number, text: string) { await (await this.durableSession(ref)).messageDurableChild(conversationId, text); }
   async stopDurableChild(ref: PiSessionRef, conversationId: number) { await (await this.durableSession(ref)).stopDurableChild(conversationId); }
   async answerDurableChildQuestion(ref: PiSessionRef, questionId: string, answer: string) { await (await this.durableSession(ref)).answerDurableChildQuestion(questionId, answer); }

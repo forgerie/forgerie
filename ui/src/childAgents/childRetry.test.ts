@@ -29,7 +29,7 @@ describe("a child's retry mirrors the server's schema", () => {
   });
 
   it("is optional on a /children item, and absent while no retry waits", () => {
-    const wire: DurableChildSummary = { name: "api", conversationId: 15, agent: "worker", busy: false, createdAt: 1, questions: [],
+    const wire: DurableChildSummary = { costUsd: null, lastTool: null, name: "api", conversationId: 15, agent: "worker", busy: false, createdAt: 1, questions: [],
       retry: { attempt: 1, max: 3, error: "overloaded", until: NOW + 30_000 } };
     expect(childSummarySchema.parse(wire).retry).toEqual(wire.retry);
     const { retry: _retry, ...without } = wire;

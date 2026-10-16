@@ -3,10 +3,10 @@ import type { ChildSummary, ChildTranscript } from "../childAgentsModel";
 const AT = 1791500000000;
 
 export const CHILDREN: ChildSummary[] = [
-  { name: "api", conversationId: 15, agent: "worker", busy: true, createdAt: AT, questions: [] },
-  { name: "ui", conversationId: 21, agent: "design-engineer", busy: true, createdAt: AT + 1000,
+  { name: "api", conversationId: 15, agent: "worker", busy: true, createdAt: AT, questions: [], costUsd: 0.5, lastTool: { name: "read", at: AT + 10_000 } },
+  { name: "ui", conversationId: 21, agent: "design-engineer", busy: true, createdAt: AT + 1000, costUsd: null, lastTool: null,
     questions: [{ questionId: "q:40", question: "Should the empty state show the last run, or stay blank?", askedAt: AT + 60_000 }] },
-  { name: "review", conversationId: 33, agent: null, busy: false, createdAt: AT + 2000, questions: [] },
+  { name: "review", conversationId: 33, agent: null, busy: false, createdAt: AT + 2000, questions: [], costUsd: 0, lastTool: { name: "x".repeat(80), at: AT + 20_000 } },
 ];
 
 export const TRANSCRIPT: ChildTranscript = {

@@ -1,3 +1,5 @@
+import { listChildren, childMessages } from "./durableChildAgents.js";
+import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { DurableOpenPublisher } from "./durableOpenPublisher.js";
 import { readTaskActivity } from "./durableTaskActivity.js";
 import type { TaskActivity } from "../../shared/durableTaskActivity.js";
@@ -41,6 +43,14 @@ export class DurableSessionReader {
 
   async tasks(ref: SessionRef): Promise<TaskActivity> {
     return await this.read(ref, handle => readTaskActivity(handle.harness, handle.conversation.id, context)) ?? { kind: "unsupported" };
+  }
+
+  children(ref: SessionRef, worktrees?: DurableChildWorktrees) {
+    return this.read(ref, handle => listChildren(handle.harness, handle.conversation.id, context, worktrees));
+  }
+
+  childMessages(ref: SessionRef, conversationId: number) {
+    return this.read(ref, handle => childMessages(handle.harness, handle.conversation.id, conversationId, context));
   }
 
   locate(ref: SessionRef): Promise<DurableSessionAddress | undefined> { return this.options.locate(ref); }

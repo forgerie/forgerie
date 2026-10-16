@@ -19,6 +19,9 @@ export const childSummarySchema = z.object({
   agent: z.string().nullable(),
   busy: z.boolean(),
   createdAt: z.number(),
+  // Optional for an older server; absent accounting remains unknown, never zero.
+  costUsd: z.number().finite().nonnegative().nullable().optional(),
+  lastTool: z.object({ name: z.string().min(1).max(80).regex(/^[A-Za-z0-9_.:-]+$/u), at: z.number().finite().nonnegative().nullable() }).nullable().optional(),
   questions: z.array(childQuestionSchema),
   retry: childRetrySchema.optional(),
   worktree: z.object({

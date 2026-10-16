@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ActionFooter } from "../ui/ActionFooter";
 import { ChildWorkPanel } from "./ChildWorkPanel";
-import { childCost, landBlocker, money, resultText, totalCost, type ChildDetail, type Runs } from "./childWorkModel";
+import { landBlocker, money, resultText, totalCost, type ChildDetail, type Runs } from "./childWorkModel";
 import type { WorktreeActionResult } from "../worktrees/worktreeApi";
 import { SheetDialog } from "../ui/SheetDialog";
 import { StatusRow } from "../ui/StatusRow";
@@ -103,17 +103,17 @@ export function ChildAgentsPanel({ children, openId, transcript, error, actions,
         actions={[{ label: "Check worktrees", onPress: actions.onCleanup }]} />}
       {ordered.length === 0 ? <p>No child agents yet. When the agent starts one, it shows here, and you can open, steer, and stop it.</p>
         : ordered.map((item) => {
-          const cost = childCost(runs, item.conversationId);
+          const cost = item.costUsd ?? undefined;
           const question = item.questions[0];
           const landable = landBlocker(item) === undefined;
           const open = () => actions.onOpenChild(item.conversationId);
           return <StatusRow key={item.conversationId} tone={childTone(item)} mark="block"
-            name={item.name} detail={item.agent ?? undefined} meta={cost === undefined ? undefined : money(cost)}
+            name={item.name} detail={item.agent ?? undefined} meta={money(cost)}
             status={item.questions.length === 0 && item.retry ? retryWait(item.retry, now) : childStatus(item, { worktreeNotice: shared })} label={`Open ${item.name}`}
             onPress={open}
-            below={question || item.retry || item.worktree ? <>{question && <p>{question.question}</p>}{item.questions.length === 0 && item.retry && <p>{retryLine(item.retry, ROW_ERROR_LENGTH)}</p>}
+            below={<>{question && <p>{question.question}</p>}{item.questions.length === 0 && item.retry && <p>{retryLine(item.retry, ROW_ERROR_LENGTH)}</p>}
               {item.worktree && <p><code title={item.worktree.branch}>{middleCut(item.worktree.branch, ROW_BRANCH_LENGTH)}</code>, {branchState(item.worktree,
-                shared && item.worktree.statusError !== undefined)}</p>}</> : undefined}
+                shared && item.worktree.statusError !== undefined)}</p>}<p>Last tool: {item.lastTool?.name ?? "Unavailable"}</p></>}
             actions={question ? [{ label: item.questions.length > 1 ? `Answer ${String(item.questions.length)} questions` : "Answer", tone: "primary", onPress: open }]
               : landable ? [{ label: "Review changes", onPress: () => { open(); actions.onReview(item.conversationId); }, disabled: pending !== undefined },
                 { label: "Land", onPress: () => { open(); actions.onLand(item.conversationId); }, disabled: pending !== undefined }] : []} />;

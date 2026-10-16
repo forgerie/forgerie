@@ -17,10 +17,11 @@ import { Type, type AssistantMessage, type Message } from "@earendil-works/pi-ai
 import {
   AgentDoc, AssistantEntry, CompactionTask, GenerationTask, LiveDoc, configure, defineDoc, defineExtension, defineTask, defineTool, hook, section, wrapTool,
   type Conversation, type ConversationId, type EntryId, type Extension, type Harness, type TaskGraph, type TaskId,
-  type ToolRegistration, type Tx,
+  type ToolRegistration, type Tx, type Storage, type EntryRecord, type Cursor,
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Check } from "typebox/value";
+import { Type as Schema } from "typebox";
 import { parseModelReference, type ThinkingLevel } from "../../shared/thinkingLevels.js";
 import { ChildRetrySchema, type ChildRetry } from "../../shared/childRetry.js";
 import type { DurableSdkTools, DurableSdkToolsOptions } from "./durableSdkTools.js";
@@ -34,6 +35,8 @@ import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, un
 import { deliverInputUntilPlaced, type InputPlacementState } from "./durableInputPlacement.js";
 import { logDecision } from "./durableDecisions.js";
 import { WorkflowError } from "../resources/workflowLibrary.js";
+import { readChildActivity, readStoredChildActivity } from "./durableChildActivity.js";
+import { readChildDocument } from "./durableChildStorageReads.js";
 
 export const CHILD_TOOL_NAME = "child_agent";
 export const CHILD_QUESTION_KIND = "forgerie.child-question";
@@ -627,11 +630,52 @@ export async function durableChildRunMetadata(harness: Harness, parent: Conversa
 }
 
 export async function listChildren(harness: Harness, parent: ConversationId, context: Context, worktrees?: DurableChildWorktrees): Promise<DurableChildSummary[]> {
-  const state = await harness.snapshot(Children, parent, context);
+  return childRows(await harness.snapshot(Children, parent, context), await harness.snapshot(Questions, parent, context), {
+    task: id => harness.getTask(id, context),
+    busy: async id => (await harness.snapshot(LiveDoc, id, context))?.run !== undefined,
+    activity: id => readChildActivity(harness, id, context),
+  }, worktrees);
+}
+
+interface ChildRowsState { agents: Record<string, Pick<ChildRecord, "conversationId" | "agent" | "createdAt" | "worktreeId">>; reporters: Record<string, TaskId> }
+const childRowsSchema = Schema.Unsafe<ChildRowsState>(Schema.Object({
+  agents: Schema.Record(Schema.String(), Schema.Object({ conversationId: Schema.Integer({ minimum: 1 }), agent: Schema.Union([Schema.String(), Schema.Null()]), createdAt: Schema.Number(), worktreeId: Schema.Optional(Schema.String()) })),
+  reporters: Schema.Record(Schema.String(), Schema.Integer({ minimum: 1 })),
+}));
+const questionRowsSchema = Schema.Unsafe<{ items: Record<string, ChildQuestion> }>(Schema.Object({ items: Schema.Record(Schema.String(), Schema.Object({
+  child: Schema.Integer({ minimum: 1 }), childName: Schema.String(), question: Schema.String(), answer: Schema.Union([Schema.String(), Schema.Null()]), askedAt: Schema.Number(), closed: Schema.Optional(Schema.Boolean()),
+  routing: Schema.Optional(Schema.Union([
+    Schema.Object({ kind: Schema.Literal("parent") }),
+    Schema.Object({ kind: Schema.Literal("user"), escalation: Schema.Union([Schema.Literal("irreversible"), Schema.Literal("external")]), guess: Schema.String(), why: Schema.String() }),
+    Schema.Object({ kind: Schema.Literal("answered"), by: Schema.Union([Schema.Literal("parent"), Schema.Literal("user")]), provisional: Schema.Boolean() }),
+  ])),
+})) }));
+const storedLiveSchema = Schema.Object({ run: Schema.Optional(Schema.Object({ taskId: Schema.Integer({ minimum: 1 }) })) });
+
+/** The saved read uses the same row projection as the execution owner's read, with public Storage reads only. */
+export async function listStoredChildren(storage: Storage, parent: ConversationId, context: Context, worktrees?: DurableChildWorktrees): Promise<DurableChildSummary[]> {
+  const state = await readChildDocument(storage, CHILD_AGENTS_DOC_KIND, parent, context);
+  const questions = await readChildDocument(storage, CHILD_QUESTIONS_DOC_KIND, parent, context);
+  if (state !== undefined && !Check(childRowsSchema, state)) throw new Error("Invalid saved child agents document");
+  if (questions !== undefined && !Check(questionRowsSchema, questions)) throw new Error("Invalid saved child questions document");
+  return childRows(state, questions, {
+    task: id => storage.task(id, context),
+    busy: async id => {
+      const live = await readChildDocument(storage, "pi.live", id, context);
+      if (live !== undefined && !Check(storedLiveSchema, live)) throw new Error("Invalid saved child live document");
+      return live?.run !== undefined;
+    },
+    activity: id => readStoredChildActivity(storage, id, context),
+  }, worktrees);
+}
+
+async function childRows(state: ChildRowsState | undefined, questionState: { items: Record<string, ChildQuestion> } | undefined,
+  read: { task: (id: TaskId) => ReturnType<Harness["getTask"]>; busy: (id: ConversationId) => Promise<boolean>; activity: (id: ConversationId) => Promise<Pick<DurableChildSummary, "costUsd" | "lastTool">> },
+  worktrees?: DurableChildWorktrees): Promise<DurableChildSummary[]> {
   const agents = state?.agents ?? {};
   const retries = new Map<ConversationId, ChildRetry>();
   for (const id of Object.values(state?.reporters ?? {})) {
-    const task = await harness.getTask(id, context);
+    const task = await read.task(id);
     const retry = reporterRetry(task);
     const input = task?.input;
     if (retry !== undefined && typeof input === "object" && input !== null && !Array.isArray(input)) {
@@ -639,12 +683,13 @@ export async function listChildren(harness: Harness, parent: ConversationId, con
       if (agent !== undefined) retries.set(agent.conversationId, retry);
     }
   }
-  const questions = Object.entries((await harness.snapshot(Questions, parent, context))?.items ?? {});
+  const questions = Object.entries(questionState?.items ?? {});
   const children = await Promise.all(Object.entries(agents).map(async ([name, agent]) => {
     const retry = retries.get(agent.conversationId);
     return {
       name, conversationId: Number(agent.conversationId), agent: agent.agent, createdAt: agent.createdAt,
-      busy: retry !== undefined || (await harness.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined,
+      ...await read.activity(agent.conversationId),
+      busy: retry !== undefined || await read.busy(agent.conversationId),
       ...(retry === undefined ? {} : { retry }),
       ...(agent.worktreeId === undefined ? {} : { worktree: await requireWorktrees(worktrees).summary(agent.worktreeId) }),
       questions: questions.filter(([, question]) => question.child === agent.conversationId && question.answer === null && question.closed !== true && (question.routing === undefined || question.routing.kind === "user"))
@@ -669,13 +714,38 @@ export async function childMessages(harness: Harness, parent: ConversationId, co
   const { child } = await ownedChild(harness, parent, conversationId, context);
   const view = await child.context(context);
   const live = await harness.snapshot(LiveDoc, child.id, context);
-  const partial = live?.generation?.message;
+  return projectChildMessages(harness, child.id, view.entries, live?.run !== undefined, live?.generation?.message);
+}
+
+/** Saved transcript reads select the current context head, just as Conversation.context() does. */
+export async function storedChildMessages(storage: Storage, parent: ConversationId, conversationId: number, context: Context) {
+  const state = await readChildDocument(storage, CHILD_AGENTS_DOC_KIND, parent, context);
+  if (state !== undefined && !Check(childRowsSchema, state)) throw new Error("Invalid saved child agents document");
+  const agent = Object.values(state?.agents ?? {}).find(candidate => Number(candidate.conversationId) === conversationId);
+  if (agent === undefined) throw new Error(`Conversation ${String(conversationId)} is not a child of this session`);
+  const child = agent.conversationId;
+  if (await storage.conversation(child, context) === undefined) throw new Error("Saved child conversation is missing");
+  const tail = (await storage.scanEntries({ conversationId: child }, 1, undefined, context)).items[0]?.id;
+  const head = tail === undefined ? undefined : await storage.findLatestHeadMarker(child, tail, context);
+  const entries: EntryRecord[] = [];
+  let cursor: Cursor | undefined;
+  if (tail !== undefined) do {
+    const page = await storage.scanEntries({ conversationId: child, maxEntryId: tail, ...(head === undefined ? {} : { minEntryId: head.head }), order: "ascending" }, 256, cursor, context);
+    entries.push(...page.items); cursor = page.next;
+  } while (cursor !== undefined);
+  const live = await readChildDocument(storage, "pi.live", child, context);
+  // Offline reads have no in-flight callback or volatile risk sidecar. Durable risk entries remain in the record.
+  if (live !== undefined && !Check(storedLiveSchema, live)) throw new Error("Invalid saved child live document");
+  return projectChildMessages(storage, child, head === undefined ? entries : [head, ...entries.filter(entry => entry.head === undefined)], live?.run !== undefined);
+}
+
+function projectChildMessages(owner: object, child: ConversationId, entries: readonly EntryRecord[], busy: boolean, partial?: AssistantMessage) {
   return {
-    messages: withRiskAnnotations(harness, child.id, view.entries.flatMap<Message | {role: "custom"; customType: string; content: string; details: RiskLabelEntry}>(entry =>
+    messages: withRiskAnnotations(owner, child, entries.flatMap<Message | {role: "custom"; customType: string; content: string; details: RiskLabelEntry}>(entry =>
       entry.kind === RISK_LABEL_ENTRY_KIND && Check(RiskLabelEntrySchema, entry.data)
         ? [{role: "custom", customType: RISK_LABEL_ENTRY_KIND, content: "Risk opinion (not approval)", details: entry.data}]
-        : withToolInvocationIds(child.id, entry.model ?? [], entry.id)).filter(message => message.role !== "system")),
-    busy: live?.run !== undefined,
+        : withToolInvocationIds(child, entry.model ?? [], entry.id)).filter(message => message.role !== "system")),
+    busy,
     ...(partial === undefined ? {} : { partial }),
   };
 }
