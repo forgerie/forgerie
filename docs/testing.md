@@ -27,7 +27,9 @@ Use focused tests while editing. Run `npm run verify` before merging cross-cutti
 
 `vitest.config.ts` runs the suite as two projects. The `parallel` lane runs first. The `serial` lane then runs the files in `scripts/test-serial-lane.mjs` one at a time. These files timed out when they shared the CPU with the rest of the suite, and passed when they ran alone. The lane applies to `npm test`, the coverage run and the pre-commit hook's related tests. Coverage and assertions are unchanged.
 
-The cost is wall time: the serial files run after the others and do not overlap with them. Remove a file from the list once it passes reliably in the parallel lane. Do not add a file to hide a real failure: rerun it alone first, and add it only when the alone run passes.
+The lane includes `durableChildAutonomy.test.ts` and `durableRiskLabels.test.ts` under `src/server/sessions/`. Before their addition on 2026-10-17, isolated runs passed all 27 and 15 tests, respectively. The complete file list lives in [`scripts/test-serial-lane.mjs`](../scripts/test-serial-lane.mjs); configuration regression tests check actual Vitest discovery, lane ordering, and test-file isolation.
+
+The cost is wall time: the serial files run after the others and do not overlap with them. Remove a file from the list once it passes reliably in the parallel lane. Do not add a file to hide a real failure: rerun it alone first, and add it only when the alone run passes. Passing alone supports resource contention as a cause; it does not prove contention is the only cause or rule out a race.
 
 ## Managed process core acceptance
 
@@ -70,6 +72,30 @@ These checks prove API and runtime behavior. They do not prove browser controls 
 ## Browser verification
 
 The browser suite uses happy-dom for DOM behavior. It does not prove layout, clipping, scroll geometry, or real device behavior.
+
+### Worker budget
+
+`ui/vite.config.ts` defaults to two workers. This bounds the number of compiler and DOM runtime graphs competing for resources. Test-file isolation, setup, assertions, deadlines, and gates stay enabled; there are no added retries. Fewer workers can make healthy runs slower. The budget cannot limit CPU use from other sessions or fix a product race.
+
+Override the budget explicitly when measuring another host or isolating a failure:
+
+```sh
+npm --prefix ui test -- --maxWorkers=4
+npm --prefix ui test -- src/ForgerieSession.drafts.test.tsx --maxWorkers=1
+```
+
+On 2026-10-17, a bounded comparison on Nix Node 24.13.0 used the three previously timeout-sensitive files (`ForgerieSession.drafts.test.tsx`, `triggers/TriggerFile.binding.test.tsx`, and `ui/markdownDocument.corpus.test.ts`) plus `ForgerieSession.decisions.test.tsx`, all under `ui/src/`. Runs used the same source and command, changing only `--maxWorkers`, in order 4, 2, 2, 4. No other checks from this worker overlapped the timed runs.
+
+| Run | Workers | Result | Command wall time | Host starting load average (1 minute) |
+| --- | --- | --- | --- | --- |
+| 1 | 4 | 495/495 passed, 4 files | 140.89 s | 5.28 |
+| 2 | 2 | 495/495 passed, 4 files | 92.88 s | 9.41 |
+| 3 | 2 | 495/495 passed, 4 files | 109.08 s | 6.60 |
+| 4 | 4 | 495/495 passed, 4 files | 171.88 s | 7.33 |
+
+Two workers passed and were faster in this sample, which supports a conservative two-worker default. This is not a full-suite benchmark or proof that two workers are optimal. The shared host load varied, caches were not reset, and most test time was in the markdown corpus. Neither budget reproduced the historical timeouts. Contention is not proven to be the sole cause. Recheck with a representative full browser suite before increasing the default; keep command-line overrides available.
+
+### Browser acceptance
 
 Use the UI's production components and fixture APIs for previews. Do not intercept network requests or replace a production renderer with a copied mockup. `ui/gates/` checks component ownership, parts, tokens, and decomposition. Remove a pending entry when its offence disappears; never add an entry to hide a new offence.
 

@@ -6,6 +6,8 @@
  */
 export const SERIAL_LANE = [
   "src/server/sessions/durableChildAgents.test.ts",
+  "src/server/sessions/durableChildAutonomy.test.ts",
+  "src/server/sessions/durableRiskLabels.test.ts",
   "src/server/sessions/parentAnswers.test.ts",
   "src/server/sessions/workflowRuns.test.ts",
   "src/server/sessions/globalProviderPolicy.acceptance.test.ts",

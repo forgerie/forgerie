@@ -61,7 +61,8 @@ export default defineConfig({
     dedupe: ["zod"],
   },
   build: { outDir: "../dist/client", emptyOutDir: true },
-  test: { setupFiles: ["./src/testSetup.ts"] },
+  // Bound compiler/DOM graphs on shared hosts; CLI --maxWorkers still overrides this default.
+  test: { setupFiles: ["./src/testSetup.ts"], maxWorkers: 2 },
   server: {
     https,
     host: "::",
