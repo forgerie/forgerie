@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { link, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +29,16 @@ describe("Durable storage ownership", () => {
     const second = await acquireDurableOwnership(path);
     leases.push(second);
     second.assertOwned();
+  });
+  it("reports the signal when an acquired lock holder is killed", async () => {
+    const path = await database();
+    const owner = await acquireDurableOwnership(path);
+    leases.push(owner);
+    const children = execFileSync("ps", ["--ppid", String(process.pid), "-o", "pid=,args="], { encoding: "utf8" });
+    const holder = children.split("\n").find(line => line.includes(`${path}.lock cat`));
+    if (holder === undefined) throw new Error("Missing test lock holder");
+    process.kill(Number(holder.trim().split(/\s+/)[0]), "SIGTERM");
+    await expect.poll(() => { try { owner.assertOwned(); return "owned"; } catch (error) { return String(error); } }).toContain("flock exit null, signal SIGTERM");
   });
   it("canonicalizes file symlinks and rejects hard-link aliases", async () => {
     const path = await database();

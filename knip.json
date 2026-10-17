@@ -14,6 +14,7 @@
     "findmnt",
     "flock",
     "nix",
+    "ps",
     "setsid"
   ],
   "ignoreExportsUsedInFile": true,

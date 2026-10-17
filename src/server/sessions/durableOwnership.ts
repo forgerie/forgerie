@@ -47,9 +47,9 @@ export async function acquireDurableOwnership(databasePath: string): Promise<Dur
       if (output === marker) { clearTimeout(timeout); resolveReady(); }
     });
     holder.once("error", (error) => { failure = error; clearTimeout(timeout); rejectReady(error); });
-    holder.once("close", (code) => {
+    holder.once("close", (code, signal) => {
       clearTimeout(timeout);
-      if (!releasing) failure = new Error(`Durable storage ownership lost or already held: ${canonicalPath} (flock exit ${String(code)}) ${errorOutput.trim()}`);
+      if (!releasing) failure = new Error(`Durable storage ownership lost or already held: ${canonicalPath} (flock exit ${String(code)}, signal ${signal ?? "none"}) ${errorOutput.trim()}`);
       rejectReady(failure ?? new Error("Durable ownership closed before readiness"));
     });
     // flock starts cat only after acquisition. The echo proves that the kernel lock is held.

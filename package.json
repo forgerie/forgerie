@@ -63,6 +63,7 @@
     "verify:static": "npm run typecheck && npm run lint && npm run knip && npm run knip:ui",
     "verify": "npm run verify:static && npm test && npm run verify:ui",
     "verify:ui": "npm --prefix ui run verify",
+    "verify:durable-restart": "node scripts/verify-durable-session-restart.mjs",
     "verify:staged": "node scripts/verify-staged.mjs",
     "start": "tsx src/server/index.ts",
     "start:sessiond": "tsx src/server/sessiond.ts",

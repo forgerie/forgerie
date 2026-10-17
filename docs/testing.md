@@ -121,3 +121,16 @@ Server coverage measures product code under `src/`. It excludes test support, de
 Coverage writes HTML, LCOV, and JSON under `coverage/`. Thresholds are a ratchet; do not lower them to make cleanup pass. Prefer tests of externally visible behavior, validation, durable state, lifecycle ordering, and failure handling.
 
 Keep test-file isolation. Tests change environment variables, globals, filesystem state, and process state. Real temporary repositories, in-process servers, and controlled subprocesses verify these contracts without touching live profiles or service units.
+
+## Durable session supervisor acceptance
+
+On Node 24, build the server with `npx tsc -p tsconfig.build.json`, then run
+`npm run verify:durable-restart`. The proof cleanly skips without Linux
+user-systemd. It uses a uniquely named temporary unit with
+`KillMode=control-group`, a temporary profile/data directory, and the faux
+provider. It restarts while safe and unsafe tools are in flight, then uses
+startup recovery without another input. It checks that the safe call uses the
+new owner and the unsafe call reports interruption without running twice.
+It stops and cleans the proof unit in all cases, and retains shutdown and
+recovery logs on failure. It never contacts deployed Forgerie services.
+This exercises the journal and startup recovery seam, not the HTTP daemon.
