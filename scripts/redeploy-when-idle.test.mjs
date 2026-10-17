@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "vitest";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -94,4 +94,76 @@ it("refuses missing revision or incomplete publication paths before delegation",
       assert.equal(await f.cliCalls(index), "");
     }
   } finally { await f.close(); }
+});
+
+it.each([{ mode: "immediate", code: 0 }, { mode: "idle", code: 37 }])("launches $mode from a minimal environment and retains publisher exit $code after source removal", async ({ mode, code }) => {
+  const root = await mkdtemp(join(tmpdir(), "publisher-launch-"));
+  try {
+    const source = join(root, "source"), target = join(root, "target"), bin = join(root, "bin");
+    await mkdir(source); await mkdir(bin);
+    const git = (...args) => spawnSync("git", args, { encoding: "utf8" });
+    assert.equal(git("init", "-q", source).status, 0);
+    await writeFile(join(source, ".gitignore"), "dist/\nnode_modules\n");
+    await writeFile(join(source, "package-lock.json"), "locked dependencies\n");
+    await writeFile(join(source, "package.json"), '{"type":"module"}');
+    assert.equal(git("-C", source, "add", ".").status, 0);
+    assert.equal(git("-C", source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verified source").status, 0);
+    assert.equal(git("clone", "-q", source, target).status, 0);
+    const revision = git("-C", source, "rev-parse", "HEAD").stdout.trim();
+    const prepared = join(source, "dist"), deployed = join(target, "dist");
+    await mkdir(prepared); await mkdir(deployed);
+    const dependencies = join(root, "installed-dependencies"); await mkdir(dependencies);
+    await mkdir(join(dependencies, "captured-dependency"));
+    await writeFile(join(dependencies, "captured-dependency/package.json"), '{"name":"captured-dependency","main":"index.js"}');
+    await writeFile(join(dependencies, "captured-dependency/index.js"), "module.exports = 'captured dependencies';");
+    await symlink(dependencies, join(source, "node_modules"));
+    const calls = join(root, "worker.json");
+    await writeFile(join(prepared, "cli.js"), `import fs from 'node:fs'; import dependency from 'captured-dependency'; fs.writeFileSync(${JSON.stringify(calls)}, JSON.stringify({args:process.argv.slice(2), home:process.env.HOME, dependency})); process.exit(${code});\n`);
+    await writeFile(join(prepared, ".forgerie-verified.json"), '{"receipt":"copied unchanged; the real CLI validates it"}');
+    await writeFile(join(bin, "nix"), `#!/bin/sh\nprintf '%s\\n' "$*" > '${root}/bootstrap'\nwhile [ "$1" != --command ]; do shift; done\nshift\nexport PATH='${bin}:${process.env.PATH}'\nexec "$@"\n`, { mode: 0o755 });
+    await writeFile(join(bin, "systemd-run"), `#!${process.execPath}\nrequire('node:fs').writeFileSync('${root}/launch.json', JSON.stringify(process.argv.slice(2)));\n`, { mode: 0o755 });
+    const args = mode === "immediate" ? ["--now", prepared, deployed, revision.slice(0, 8)] : ["/own", "0", prepared, deployed];
+    const env = { HOME: root, PATH: bin, FORGERIE_REDEPLOY_REVISION: revision.slice(0, 8) };
+    const launch = () => spawnSync("/bin/sh", [script, "--launch", ...args], { env, encoding: "utf8" });
+    await writeFile(join(source, "untracked.txt"), "not verified");
+    const dirty = launch();
+    assert.notEqual(dirty.status, 0);
+    assert.match(dirty.stderr, /Verified source checkout must be clean/);
+    await rm(join(source, "untracked.txt"));
+    assert.equal(git("-C", target, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "advanced target").status, 0);
+    const stale = launch();
+    assert.notEqual(stale.status, 0);
+    assert.match(stale.stderr, /Deployed checkout revision differs/);
+    assert.equal(git("-C", target, "checkout", "--detach", revision).status, 0);
+    await assert.rejects(readFile(join(root, "launch.json")), /ENOENT/);
+    const result = launch();
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(await readFile(join(root, "bootstrap"), "utf8"), /shell.*--command bash/);
+    const unitArgs = JSON.parse(await readFile(join(root, "launch.json"), "utf8"));
+    const workerEnv = Object.fromEntries(unitArgs.filter(arg => arg.startsWith("--setenv=")).map(arg => { const value = arg.slice(9), at = value.indexOf("="); return [value.slice(0, at), value.slice(at + 1)]; }));
+    assert.equal(workerEnv.HOME, root);
+    assert.ok(workerEnv.PATH.includes(process.env.PATH));
+    const worker = unitArgs.slice(unitArgs.indexOf("--") + 1);
+    const receipt = worker[worker.indexOf("--run-staged") + 1];
+    assert.equal(JSON.parse(await readFile(receipt, "utf8")).status, "queued");
+    await writeFile(join(bin, "systemd-run"), "#!/bin/sh\nexit 19\n", { mode: 0o755 });
+    const rejected = launch();
+    assert.equal(rejected.status, 19);
+    assert.match(rejected.stderr, /Launch failed; retained/);
+    const receipts = await Promise.all((await readdir(join(target, ".forgerie"))).map(stage => readFile(join(target, ".forgerie", stage, "result.json"), "utf8").then(JSON.parse)));
+    assert.ok(receipts.some(value => value.status === "failed" && value.phase === "launch" && value.exitCode === 19));
+    await rm(source, { recursive: true }); await rm(dependencies, { recursive: true });
+    const completed = spawnSync(worker[0], worker.slice(1), { env: workerEnv, encoding: "utf8" });
+    assert.equal(completed.status, code, completed.stdout + completed.stderr);
+    const terminal = JSON.parse(await readFile(receipt, "utf8"));
+    assert.deepEqual({ status: terminal.status, exitCode: terminal.exitCode, revision: terminal.revision }, { status: code === 0 ? "passed" : "failed", exitCode: code, revision });
+    const call = JSON.parse(await readFile(calls, "utf8"));
+    const staged = call.args[1];
+    assert.notEqual(staged, prepared);
+    assert.equal(git("-C", join(staged, ".."), "rev-parse", "HEAD").stdout.trim(), revision);
+    assert.equal(git("-C", join(staged, ".."), "status", "--porcelain").stdout.trim(), "");
+    assert.deepEqual(call.args, ["deploy", staged, deployed, revision, ...(mode === "idle" ? ["--when-idle", "/own", "--limit-minutes", "0"] : [])]);
+    assert.equal(call.dependency, "captured dependencies");
+    assert.equal(call.home, root);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

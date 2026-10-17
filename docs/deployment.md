@@ -37,7 +37,7 @@ Active Durable sessions do not block deployment or restarts. Build and install d
 
 Obtain approval to stop both units before publication. Active sessions pause during the restart; they do not require an idle window. The publisher never builds, installs dependencies, changes source, or removes a workspace.
 
-Use a clean isolated checkout at the commit you intend to deploy. Run dependency installation, build, and verification there, not in the running checkout. Land that same commit in the deployed checkout before publication. Keep the isolated checkout and its dependencies until publication finishes.
+Use a clean isolated checkout at the commit you intend to deploy. Run dependency installation, build, and verification there, not in the running checkout. Land that same commit in the deployed checkout before publication. For a direct CLI invocation, keep the isolated checkout and its dependencies until publication finishes. The staged launcher below can capture them before removal.
 
 ```bash
 # In the isolated checkout, with Node 24:
@@ -55,7 +55,7 @@ NODE="$(command -v node)"
 
 # Run independently of the units being stopped. Do not add an idle wait.
 UNIT="forgerie-publish-$(date +%s)"
-systemd-run --user --collect --wait --unit="$UNIT" --setenv="PATH=$PATH" -- \
+systemd-run --user --collect --wait --unit="$UNIT" --setenv="PATH=$PATH" --setenv="HOME=$HOME" -- \
   "$NODE" "$BUILD/dist/cli.js" deploy "$BUILD/dist" "$DEPLOYED/dist" "$SHA"
 journalctl --user -u "$UNIT" --no-pager
 ```
@@ -75,6 +75,52 @@ Publication takes an exclusive per-checkout lock at `.forgerie/publish.lock`. A 
 Readiness requires both units to be active, `/build.json` to report the prepared browser entry, and `/api/pi-web/runtime` to report `components.web.available` and `components.sessiond.available` as `true`. An active unit alone does not prove the daemon socket is ready. The publisher retries these checks within the existing readiness budget. The default readiness budget is 60 seconds; `--readiness-seconds N` accepts 0–600. This does not prove every Durable session has recovered. Read the daemon journal, check `/api/pi-web/runtime` for the intended daemon profile, and confirm the browser loads the new UI. `FORGERIE_REDEPLOY_URL` overrides `http://127.0.0.1:8504`; pass it with `systemd-run --setenv=FORGERIE_REDEPLOY_URL=...` when needed.
 
 If stopping, swapping, starting, or readiness fails, the publisher attempts to restore and restart the previous build and exits nonzero. Failed new builds remain at `.forgerie/deploy.*/failed` when a swap occurred. A rollback failure reports the recovery directory and exits nonzero. The publisher does not remove profiles or Durable data. Retained builds cost disk space and need later operator cleanup.
+
+### Stage an independent launch before removing the build worktree
+
+The helper can queue the same verified CLI publisher independently, without
+keeping its original worktree alive:
+
+```bash
+/bin/sh scripts/redeploy-when-idle.sh --launch --now "$BUILD/dist" "$DEPLOYED/dist" "$SHA"
+```
+
+This is the launcher for calls from Forgerie when the source worktree may go
+away. It enters the Nix tool environment and passes both `PATH` and `HOME` to
+`systemd-run --user`. It normalizes the explicit revision (a full SHA or Git
+revision) to a full 40-character commit SHA. Direct CLI and ordinary helper
+publication still require the full SHA as above.
+
+Before queuing, the launcher checks that the original source is clean at that
+revision and the deployed checkout is at the same revision. It makes an
+independent Git clone at that SHA under the deployed checkout's
+`.forgerie/publish.*` directory, then copies the verified build and installed
+source dependencies there. Dependency links are dereferenced. The source can
+be removed after the launcher returns. This costs extra disk space and copy
+time; missing dependencies or dependency-link cycles prevent launch. It never
+installs dependencies or changes the deployed `node_modules`.
+
+The staged CLI remains the only publication implementation. It validates the
+unchanged receipt, source and target revisions, lockfiles, and build digest,
+then uses the same exclusive lock, stop/swap/start, rollback, expected-build
+check, and web/sessiond runtime readiness checks described above. The launcher
+does not attest an unverified build or replace those checks.
+
+The launcher prints the temporary unit name and retained directory. Read
+`publish.log` and `result.json` there after the calling session disconnects.
+The result changes from `queued` to `passed` or `failed`, with the publisher's
+exit code, revision, and unit name. A launch failure records its exit code with
+`phase: "launch"`. An uncatchable kill or host loss can leave `queued`; inspect
+the retained log and unit journal instead of treating it as success. Keep the
+staging directory until the publisher finishes, then clean retained files
+manually. The main publisher also retains its separate previous/failed builds.
+
+To request the existing explicit idle policy through this launcher:
+
+```bash
+FORGERIE_REDEPLOY_REVISION="$SHA" /bin/sh scripts/redeploy-when-idle.sh \
+  --launch /absolute/path/to/own-workspace 60 "$BUILD/dist" "$DEPLOYED/dist"
+```
 
 ### Optional explicit idle behavior
 
