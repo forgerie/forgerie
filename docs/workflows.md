@@ -67,7 +67,7 @@ The card's kicker says where the plan comes from: **Based on** a saved workflow'
 | Action | Result |
 | --- | --- |
 | **Start workflow** | Starts from the proposal's frozen instructions and your inputs. The proposal closes as **Started**. Another active workflow or a busy parent blocks Start with a reason. |
-| **Do it here** | The agent follows the plan itself, in this chat, without workers. Forgerie delivers the plan's prose and your inputs once, and the proposal closes as **Done here, without workers**. No run starts, so there is no run strip, decision log run, or land stop. At a stop, the agent asks you in its reply. Nothing enforces the order of the stages or stops spawning children; the instruction asks the agent not to. A changed route disables Do it here until the agent rewrites the plan. |
+| **Do it here** | The agent follows the plan itself, in this chat, without workers. Forgerie delivers the plan's prose and your inputs once, and the proposal closes as **Done here, without workers**. No run starts, so there is no run strip, decision log run, or land stop. At a stop, the agent asks you in its reply. Nothing enforces the order of the stages or stops spawning children; the instruction asks the agent not to. A changed route disables Do it here until the agent rewrites the plan. When the route declares workers but no stage has two or more, Do it here is the main action, and the card adds **one worker at a time**: workers would run one after another and add only handoffs. A route without declared workers keeps Start first. |
 | **Ask for changes** | Requires a note. Closes the proposal and delivers the note to the agent once. The agent revises and proposes again. |
 | **Dismiss** | Closes the proposal without waking the agent. |
 

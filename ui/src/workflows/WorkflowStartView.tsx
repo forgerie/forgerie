@@ -15,7 +15,7 @@ import { WorkflowRouteEditor } from "./WorkflowRouteEditor";
 import { planDocument, planOf, planTitle } from "./workflowPlan";
 import { changeLine, changesNote, modelChoices, reshapes, routeChanges, undoChange, type ModelChoices } from "./workflowRoute";
 import {
-  launchInputs, proposalInputs, proposalLaunchInputs, proposalOutcome, proseOf,
+  launchInputs, oneWorkerAtATime, proposalInputs, proposalLaunchInputs, proposalOutcome, proseOf,
   type ProposalAction, type ProposalEntry, type SavedWorkflow, type WorkflowInput, type WorkflowInputs, type WorkflowProposal, type WorkflowStage,
 } from "./workflowsModel";
 
@@ -92,6 +92,8 @@ export function WorkflowStartView({ source, blocked, pending, error, models, age
   const changes = routeChanges(original, stages);
   const stale = reshapes(changes).length > 0;
   const modelCount = changes.length - reshapes(changes).length;
+  /** A plan that never runs two workers at once leads with Do it here. A changed route leads with Update the plan. */
+  const hereFirst = onHere !== undefined && !stale && oneWorkerAtATime(stages);
 
   const set = (name: string, value: string) => { setTyped({ ...values, [name]: value }); setEdited(new Set([...edited, name])); setProblem(undefined); };
   const resetInput = (name: string) => {
@@ -127,17 +129,19 @@ export function WorkflowStartView({ source, blocked, pending, error, models, age
       : modelCount > 0 ? `${count(modelCount, "model", "models")} changed. The run uses ${modelCount === 1 ? "it" : "them"}; the plan stays as it is.`
       : saved !== undefined ? "It runs in this chat. You can keep talking while it works."
         : onHere === undefined ? "It runs in this chat. Nothing is saved to the repository."
-          : "Start runs it with workers. Do it here has this agent do the work itself, without workers. Nothing is saved to the repository."));
-  const startAction: FooterAction = { label: "Start workflow", tone: stale ? undefined : "primary", onPress: start,
+          : hereFirst ? "No stage runs two workers at once, so Do it here does the same work without the handoffs. Start still runs it with workers. Nothing is saved to the repository."
+            : "Start runs it with workers. Do it here has this agent do the work itself, without workers. Nothing is saved to the repository."));
+  const startAction: FooterAction = { label: "Start workflow", tone: stale || hereFirst ? undefined : "primary", onPress: start,
     disabled: busy || !ready || blocked !== undefined || stale || closed !== undefined };
   // Do it here follows the plan as written, so a changed route must reach the agent first.
-  const hereAction: FooterAction[] = onHere === undefined ? [] : [{ label: "Do it here", onPress: doHere,
+  const hereAction: FooterAction[] = onHere === undefined ? [] : [{ label: "Do it here", tone: hereFirst ? "primary" : undefined, onPress: doHere,
     disabled: busy || !ready || blocked !== undefined || stale || closed !== undefined }];
+  // The main action comes last: a narrow footer moves it to its own first row.
   const actions: FooterAction[] = closed !== undefined ? [] : saved !== undefined ? [startAction] : [
     { label: "Dismiss", onPress: () => onDismiss?.(), disabled: busy },
     stale ? startAction : { label: "Ask for changes", onPress: openChanges, disabled: busy || !ready },
-    ...hereAction,
-    stale ? { label: "Update the plan", tone: "primary", onPress: openChanges, disabled: busy } : startAction,
+    ...(hereFirst ? [startAction, ...hereAction]
+      : [...hereAction, stale ? { label: "Update the plan", tone: "primary" as const, onPress: openChanges, disabled: busy } : startAction]),
   ];
   const foot = <ActionFooter stack note={footNote} problem={closed === undefined ? problem ?? error : undefined} actions={actions}
     input={changing && closed === undefined && onChanges !== undefined ? <ReplyBox label="What should change in this workflow?" placeholder="Say what to change"

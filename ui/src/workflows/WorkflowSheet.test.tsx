@@ -225,6 +225,27 @@ describe("a proposal's sheet", () => {
     expect(note()).toBe("Handing the plan to the agent…");
   });
 
+  it("leads with Do it here when no stage runs two workers at once, and keeps Start one click away", async () => {
+    const onHere = vi.fn();
+    const onStart = vi.fn();
+    const sequential = PROPOSAL_STAGES.map((stage) => stage.id === "port" ? { ...stage, workers: stage.workers?.slice(0, 1) } : stage);
+    const plan = { ...RICH_PROPOSAL, definition: { ...RICH_PROPOSAL.definition, stages: sequential } };
+    await act(async () => root.render(proposal({ onHere, onStart, source: { kind: "proposal", entry: { ...RICH_ENTRY, stages: sequential }, proposal: plan } }).element));
+    const labels = [...sheet().querySelectorAll(".action-footer-button")].map((node) => node.textContent);
+    expect(labels).toEqual(["Dismiss", "Ask for changes", "Start workflow", "Do it here"]);
+    expect(button("Do it here")?.getAttribute("data-tone")).toBe("primary");
+    expect(button("Start workflow")?.getAttribute("data-tone")).toBeNull();
+    expect(note()).toContain("No stage runs two workers at once");
+    await press("Start workflow");
+    expect(onStart).toHaveBeenCalled();
+    await press("Do it here");
+    expect(onHere).toHaveBeenCalled();
+    // A plan with a parallel stage keeps Start first.
+    await act(async () => root.render(<div key="parallel">{proposal({ onHere }).element}</div>));
+    expect(button("Start workflow")?.getAttribute("data-tone")).toBe("primary");
+    expect(button("Do it here")?.getAttribute("data-tone")).toBeNull();
+  });
+
   it("says which saved workflow a proposal adapts and what changed, or why it is a new plan", async () => {
     const saved = { ...RICH_PROPOSAL, basis: { kind: "saved" as const, name: "design-build-review", changes: "Drops the design worker: this task has no interface." } };
     await act(async () => root.render(proposal({ source: { kind: "proposal", entry: RICH_ENTRY, proposal: saved } }).element));

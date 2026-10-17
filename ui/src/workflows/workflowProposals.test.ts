@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { proposalGlance, proposalLaunchInputs, proposalInputs, proposalIsOpen, proposalOutcome, proseOf, workflowEntryOf, workflowProposalsSchema } from "./workflowsModel";
+import { oneWorkerAtATime, proposalGlance, proposalLaunchInputs, proposalInputs, proposalIsOpen, proposalOutcome, proseOf, workflowEntryOf, workflowProposalsSchema } from "./workflowsModel";
 import { CHANGES_PROPOSAL, DISMISSED_PROPOSAL, PROPOSAL, PROPOSAL_STAGES, PROSE_PROPOSAL, REPLACED_PROPOSAL, STARTED_PROPOSAL } from "./fixtures/proposals";
 import { STAGES } from "./fixtures/runs";
 
@@ -33,9 +33,16 @@ describe("a proposal at a glance", () => {
     expect(proposalGlance(STAGES)).toBe("4 stages · 3 workers · 2 stops");
     // The same worker in two stages counts once.
     expect(proposalGlance([{ id: "a", name: "A", workers: [{ name: "w" }] }, { id: "b", name: "B", workers: [{ name: "w" }], stop: "approve" }]))
-      .toBe("2 stages · 1 worker · 1 stop");
+      .toBe("2 stages · 1 worker · 1 stop · one worker at a time");
     expect(proposalGlance([{ id: "a", name: "A" }])).toBe("1 stage");
     expect(proposalGlance([])).toBe("Prose only, no stages");
+  });
+
+  it("knows a plan that never runs two workers at once, and treats a plan without workers as unknown", () => {
+    expect(oneWorkerAtATime(PROPOSAL_STAGES)).toBe(false);
+    expect(oneWorkerAtATime([{ id: "build", name: "Build", workers: [{ name: "build" }] }, { id: "review", name: "Review", workers: [{ name: "review" }] }])).toBe(true);
+    expect(oneWorkerAtATime([{ id: "a", name: "A", stop: "approve" }])).toBe(false);
+    expect(oneWorkerAtATime([])).toBe(false);
   });
 });
 

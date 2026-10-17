@@ -281,7 +281,18 @@ export function proposalGlance(stages: readonly WorkflowStage[]): string {
   const workers = new Set(stages.flatMap((stage) => (stage.workers ?? []).map((worker) => worker.name))).size;
   const stops = stages.filter((stage) => stage.stop !== undefined).length;
   return [count(stages.length, "stage", "stages"), workers === 0 ? undefined : count(workers, "worker", "workers"),
-    stops === 0 ? undefined : count(stops, "stop", "stops")].filter((part) => part !== undefined).join(" · ");
+    stops === 0 ? undefined : count(stops, "stop", "stops"), oneWorkerAtATime(stages) ? "one worker at a time" : undefined]
+    .filter((part) => part !== undefined).join(" · ");
+}
+
+/**
+ * Whether a route declares workers but never runs two at once. Such a plan gains no parallel time from workers, only
+ * handoffs, so the sheet makes Do it here its main action. A route without declared workers is unknown: the agent may
+ * still start several, so Start stays first.
+ */
+export function oneWorkerAtATime(stages: readonly WorkflowStage[]): boolean {
+  const sizes = stages.map((stage) => stage.workers?.length ?? 0);
+  return sizes.some((size) => size > 0) && sizes.every((size) => size < 2);
 }
 
 /**
