@@ -17,7 +17,16 @@ describe("local checkout CLI", () => {
     const result = invoke("--help");
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Services must already exist");
+    expect(result.stdout).toContain("forgerie deploy record BUILT_DIST EXPECTED_SHA");
+    expect(result.stdout).toContain("forgerie deploy BUILT_DIST DEPLOYED_DIST EXPECTED_SHA");
     expect(result.stdout).not.toContain("forgerie install");
+  });
+
+  it("rejects deploy without arguments as missing a full expected SHA, not as a retired command", () => {
+    const result = invoke("deploy");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Expected a full 40-character commit SHA");
+    expect(result.stderr).not.toContain("Unknown command");
   });
 
   it("reports the installed package version without contacting a service", () => {

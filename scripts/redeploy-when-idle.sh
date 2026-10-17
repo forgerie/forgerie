@@ -45,7 +45,9 @@ main() {
   systemctl --user restart forgerie-sessiond.service forgerie-web.service
   # Verify the units and HTTP, not merely the restart command's exit status.
   deadline=$(( $(date +%s) + 60 ))
-  until systemctl --user is-active --quiet forgerie-sessiond.service forgerie-web.service && curl -fsS --max-time 5 "$url/build.json" >/dev/null; do
+  until systemctl --user is-active --quiet forgerie-sessiond.service &&
+    systemctl --user is-active --quiet forgerie-web.service &&
+    curl -fsS --max-time 5 "$url/build.json" >/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then say "failed: services or HTTP did not become ready"; return 1; fi
     sleep 2
   done

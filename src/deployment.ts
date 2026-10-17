@@ -113,7 +113,10 @@ async function waitForIdle(options: Publication): Promise<void> {
 }
 async function units(action: "stop" | "start" | "is-active"): Promise<void> {
   const ordered = action === "start" ? [...FORGERIE_SERVICE_UNITS].reverse() : [...FORGERIE_SERVICE_UNITS];
-  await execute("systemctl", ["--user", action, ...(action === "is-active" ? ["--quiet"] : []), ...ordered], { timeout: 30_000 });
+  if (action === "is-active") {
+    // systemctl succeeds for a group when ANY requested unit is active.
+    for (const unit of ordered) await execute("systemctl", ["--user", action, "--quiet", unit], { timeout: 30_000 });
+  } else await execute("systemctl", ["--user", action, ...ordered], { timeout: 30_000 });
 }
 async function stopUnits(): Promise<void> {
   await units("stop");

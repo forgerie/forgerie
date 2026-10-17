@@ -62,6 +62,12 @@ if (action === 'stop') {
     if (b.failPrevious) fs.mkdirSync(path.join(${JSON.stringify(join(target, ".forgerie"))}, dir, 'previous', 'conflict'), {recursive: true});
   }
 }
+if (action === 'is-active' && b.inactiveSessiondForNext) {
+  const next = fs.readFileSync(${JSON.stringify(join(deployed, "server/index.js"))}, 'utf8') === 'next';
+  // Match systemctl's real grouped semantics: ANY active requested unit succeeds.
+  const active = args.filter(arg => arg.endsWith('.service')).some(unit => !next || unit !== 'forgerie-sessiond.service');
+  process.exit(active ? 0 : 3);
+}
 if (action === 'show') console.log(b.stillActive ? 'active\\nactive' : 'inactive\\ninactive');
 `);
   await chmod(join(bin, "systemctl"), 0o755);
@@ -120,7 +126,8 @@ it.each(["busy", "unavailable"])("publishes immediately without reading %s activ
     ["--user", "stop", "forgerie-web.service", "forgerie-sessiond.service"],
     ["--user", "show", "--property=ActiveState", "--value", "forgerie-web.service", "forgerie-sessiond.service"],
     ["--user", "start", "forgerie-sessiond.service", "forgerie-web.service"],
-    ["--user", "is-active", "--quiet", "forgerie-web.service", "forgerie-sessiond.service"],
+    ["--user", "is-active", "--quiet", "forgerie-web.service"],
+    ["--user", "is-active", "--quiet", "forgerie-sessiond.service"],
   ]);
   expect(await readFile(join(f.deployed, "server/index.js"), "utf8")).toBe("next");
   const stages = await f.stages(); expect(stages).toHaveLength(1);
@@ -300,4 +307,15 @@ it.each([
   ["--readiness-seconds"], ["--readiness-seconds", ""], ["--readiness-seconds", "601"],
 ])("refuses malformed deploy options %j before service changes", async (...flags) => {
   await expect(deployCommand(["/unopened/source", "/unopened/target", "a".repeat(40), ...flags])).rejects.toThrow();
+});
+
+it("rolls back a dead sessiond even when web and the expected HTTP build are healthy", async () => {
+  const f = await fixture(); expect((await f.record()).code).toBe(0);
+  await f.behavior({ inactiveSessiondForNext: true });
+  const result = await f.publish();
+  expect(result.code).toBe(1);
+  expect(result.stderr).toContain("previous build restored");
+  expect(await readFile(join(f.deployed, "server/index.js"), "utf8")).toBe("previous");
+  const stages = await f.stages();
+  expect(await readFile(join(stages[0] ?? "", "failed/server/index.js"), "utf8")).toBe("next");
 });
