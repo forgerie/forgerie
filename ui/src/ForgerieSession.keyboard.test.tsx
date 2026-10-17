@@ -35,7 +35,8 @@ afterEach(async () => {
 async function session(patch: Partial<SessionStatus> = {}) {
   const commands: unknown[] = [];
   const switches: unknown[] = [];
-  const state = { status: { isStreaming: false, isCompacting: false, isBashRunning: false, queuedMessages: [], ...patch } as SessionStatus, fail: false, aborts: 0 };
+  const prompts: unknown[] = [];
+  const state = { status: { isStreaming: false, isCompacting: false, isBashRunning: false, queuedMessages: [], ...patch } as SessionStatus, fail: false, aborts: 0, refuseSockets: false };
   const ws = new WebSocketServer({ noServer: true });
   const http = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -56,6 +57,7 @@ async function session(patch: Partial<SessionStatus> = {}) {
       send({ aborted: true, restoredMessages: state.status.queuedMessages });
     }
     else if (path.endsWith("/commands")) send([]);
+    else if (path.endsWith("/prompt")) { prompts.push(body); send({ accepted: true }); }
     else if (path.endsWith("/commands/run")) {
       commands.push(body);
       if (state.fail) { response.writeHead(503); response.end(JSON.stringify({ error: "Tree read failed" })); }
@@ -63,7 +65,10 @@ async function session(patch: Partial<SessionStatus> = {}) {
       else send({ type: "tree", tree: { nodes: [{ id: "u1", parentId: null, kind: "user", summary: "First question" }], activeLeafId: "u1", activePathIds: ["u1"] } });
     } else { response.writeHead(404); response.end(JSON.stringify({ error: `Unexpected path ${path}` })); }
   });
-  http.on("upgrade", (request, socket, head) => ws.handleUpgrade(request, socket, head, () => {}));
+  http.on("upgrade", (request, socket, head) => {
+    if (state.refuseSockets) { socket.destroy(); return; }
+    ws.handleUpgrade(request, socket, head, () => {});
+  });
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   const address = http.address();
   if (!address || typeof address === "string") throw new Error("No port");
@@ -81,9 +86,28 @@ async function session(patch: Partial<SessionStatus> = {}) {
     await new Promise<void>((resolve) => http.close(() => resolve()));
   });
   await act(async () => root.render(<ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={(...args) => { switches.push(args); }} />));
-  await until(() => input()?.disabled === false);
-  return { commands, switches, state };
+  // The message box opens before the join, so the status chip says when the session is live.
+  await until(() => input() !== null && [undefined, "Connecting"].every((label) => document.querySelector(".status-chip-label")?.textContent !== label));
+  return { commands, switches, state, prompts, drop: () => { for (const socket of ws.clients) socket.terminate(); } };
 }
+
+it("keeps the message box open while reconnecting, and sends the message once the session joins again", async () => {
+  const api = await session();
+  api.state.refuseSockets = true; api.drop();
+  const label = () => document.querySelector(".status-chip-label")?.textContent;
+  await until(() => label() === "Reconnecting");
+  expect(input().disabled).toBe(false);
+  await act(async () => { input().value = "hello"; input().dispatchEvent(new Event("input", { bubbles: true })); });
+  const sendButton = document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]');
+  expect(sendButton?.disabled).toBe(false);
+  await act(async () => sendButton!.click());
+  await until(() => document.body.textContent?.includes("Your message sends when the connection returns.") === true);
+  expect(api.prompts).toEqual([]);
+  api.state.refuseSockets = false;
+  await until(() => api.prompts.length === 1);
+  expect(api.prompts[0]).toMatchObject({ cwd: "/work", text: "hello" });
+  await until(() => !document.body.textContent?.includes("Your message sends when the connection returns."));
+});
 
 it("opens the session tree through the command API after two Escapes in an empty message", async () => {
   const api = await session();

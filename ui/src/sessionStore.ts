@@ -35,6 +35,8 @@ export interface SessionState {
   transcript: Transcript;
   ask: AskState;
   sending: boolean;
+  /** A message written while the connection recovers. It goes out once the session joins again. */
+  waitingToSend?: boolean;
   commandError?: string;
   commands: CommandCatalog;
   commandResult?: CommandResult;
@@ -82,6 +84,8 @@ interface RecoveryTiming {
   requestTimeoutMs?: number;
   /** Tree actions. A summary uses the model, so Forgerie's own proxy waits 5 minutes for them. */
   treeActionTimeoutMs?: number;
+  /** How long a message waits for the connection to return before it goes back to the message box. */
+  connectionWaitMs?: number;
   now?: () => number;
 }
 interface Join {
@@ -111,6 +115,7 @@ function permanent(error: unknown) {
     || error instanceof ReadFailure && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
 }
 const SLASH_WAIT_MS = 10 * 60_000;
+const CONNECTION_WAIT_MS = 2 * 60_000;
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 /** The client stopped waiting for a command; the command itself may still run. */
 class LostWait extends Error {
@@ -539,6 +544,45 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     });
     await connect();
   }
+  /**
+   * Resolves once the session joins again. A failed connection or a closed
+   * store refuses, and so does a wait longer than `connectionWaitMs`.
+   */
+  function connected(signal?: AbortSignal): Promise<void> {
+    if (state.connection.type === "ready") return Promise.resolve();
+    if (state.connection.type === "failed") return Promise.reject(new NotSentError(`The session is disconnected. ${state.connection.message}`));
+    return new Promise((resolve, reject) => {
+      const stops = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
+      const check = () => {
+        if (state.connection.type === "ready") settle();
+        else if (state.connection.type === "failed") settle(new NotSentError(`The session is disconnected. ${state.connection.message}`));
+      };
+      const onAbort = () => settle(new NotSentError("Stopped waiting for the connection."));
+      const timer = setTimeout(() => settle(new NotSentError(`The connection did not return within ${Math.round((timing.connectionWaitMs ?? CONNECTION_WAIT_MS) / 1000)} seconds.`)), timing.connectionWaitMs ?? CONNECTION_WAIT_MS);
+      function settle(error?: Error) {
+        clearTimeout(timer); listeners.delete(check); stops.removeEventListener("abort", onAbort);
+        if (error) reject(error); else resolve();
+      }
+      if (stops.aborted) { onAbort(); return; }
+      listeners.add(check);
+      stops.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+  /**
+   * A message sent while the connection recovers waits here, then goes out
+   * with the session's state after the join. Nothing reached the server before
+   * the join, so a refusal returns the draft to the message box.
+   */
+  async function untilConnected() {
+    if (state.connection.type === "ready") return;
+    if (state.sending) throw new NotSentError("Wait for the current message to send.");
+    update({ ...state, sending: true, waitingToSend: true, commandError: undefined });
+    try {
+      await connected().catch((error: unknown) => {
+        throw new NotSentError(`${messageOf(error)} Your message is back in the message box.`, { cause: error });
+      });
+    } finally { update({ ...state, sending: false, waitingToSend: false }); }
+  }
   async function runSlash(endpoint: "commands/run" | "commands/respond", body: { text: string } | { requestId: string; value: string }): Promise<CommandResult> {
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new NotSentError("The session is not connected.");
@@ -844,8 +888,10 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       }
       if (isCommand(text)) {
         if (attachments?.length) throw new NotSentError("Remove attachments before running a slash command.");
+        await untilConnected();
         return runSlash("commands/run", { text });
       }
+      await untilConnected();
       await command("prompt", text, attachments, options.steer === true, options.diffAnnotations);
     },
     respondToCommand: (requestId: string, value: string) => runSlash("commands/respond", { requestId, value }),
@@ -886,6 +932,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     setThinkingLevel: (level: string) => changeRuntime("thinking-level", { level }),
     dismissCompaction: () => { if (state.compaction.type === "finished") update({ ...state, compaction: idleCompaction }); },
     saveAttachment: async (attachment: PromptAttachment, signal?: AbortSignal) => {
+      // A file added while the connection recovers waits for it, as a message does.
+      await connected(signal).catch((error: unknown) => { throw new Error(`${messageOf(error)} Your file stays here.`, { cause: error }); });
       const session = state.session;
       if (!session || state.connection.type !== "ready") throw new Error("The session is not connected. Your file stays here.");
       const response = await request(`${root}/attachments`, savedAttachmentsSchema, {

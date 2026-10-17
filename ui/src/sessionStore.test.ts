@@ -2,7 +2,7 @@ import { openFixture } from "./testing/openFixture";
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
-import { createSessionStore, type SessionStore, type SessionTransport } from "./sessionStore";
+import { createSessionStore, NotSentError, type SessionStore, type SessionTransport } from "./sessionStore";
 import { messageText } from "./transcript";
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -176,12 +176,47 @@ describe("session transport", () => {
     expect(store.getSnapshot().sending).toBe(false);
     expect(store.getSnapshot().transcript.messages).toHaveLength(2);
   });
-  it("blocks sending after a disconnect", async () => {
+  it("holds a message sent during a disconnect, then sends it once the session joins again", async () => {
     const api = await server();
-    const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
+    const store = createSessionStore("known", api.transport, { retryDelayMs: 100 }); cleanup.push(store.dispose);
     await store.start(); api.close();
     await waitFor(store, () => store.getSnapshot().connection.type === "reconnecting");
-    await expect(store.send("hello")).rejects.toThrow("not connected");
+    const sent = store.send("hello");
+    expect(store.getSnapshot()).toMatchObject({ sending: true, waitingToSend: true });
+    expect(api.requests.some((request) => request.path.endsWith("prompt"))).toBe(false);
+    await sent;
+    expect(store.getSnapshot()).toMatchObject({ connection: { type: "ready" }, sending: false, waitingToSend: false });
+    expect(api.requests.filter((request) => request.path.endsWith("/prompt"))).toHaveLength(1);
+  });
+  it("refuses a second message while one waits for the connection", async () => {
+    const api = await server();
+    const store = createSessionStore("known", api.transport, { retryDelayMs: 100 }); cleanup.push(store.dispose);
+    await store.start(); api.close();
+    await waitFor(store, () => store.getSnapshot().connection.type === "reconnecting");
+    const first = store.send("hello");
+    await expect(store.send("hello")).rejects.toBeInstanceOf(NotSentError);
+    await first;
+    expect(api.requests.filter((request) => request.path.endsWith("/prompt"))).toHaveLength(1);
+  });
+  it("returns a waiting message to the draft when the connection does not come back in time", async () => {
+    const api = await server();
+    const store = createSessionStore("known", api.transport, { retryDelayMs: 10_000, connectionWaitMs: 50 }); cleanup.push(store.dispose);
+    await store.start(); api.close();
+    await waitFor(store, () => store.getSnapshot().connection.type === "reconnecting");
+    const sent = store.send("hello");
+    await expect(sent).rejects.toBeInstanceOf(NotSentError);
+    await expect(sent).rejects.toThrow("Your message is back in the message box.");
+    expect(store.getSnapshot()).toMatchObject({ sending: false, waitingToSend: false });
+    expect(api.requests.some((request) => request.path.endsWith("prompt"))).toBe(false);
+  });
+  it("refuses a waiting message when the store closes", async () => {
+    const api = await server();
+    const store = createSessionStore("known", api.transport, { retryDelayMs: 10_000 }); cleanup.push(store.dispose);
+    await store.start(); api.close();
+    await waitFor(store, () => store.getSnapshot().connection.type === "reconnecting");
+    const sent = store.send("hello");
+    store.dispose();
+    await expect(sent).rejects.toBeInstanceOf(NotSentError);
     expect(api.requests.some((request) => request.path.endsWith("prompt"))).toBe(false);
   });
   it("reports an unknown session before opening a socket", async () => {

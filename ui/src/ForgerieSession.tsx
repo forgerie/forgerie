@@ -23,7 +23,7 @@ import { Thread } from "./ui/Thread";
 import { SessionFrame } from "./ui/SessionFrame";
 import { StatusChip } from "./ui/StatusChip";
 import { Consequence } from "./ui/Consequence";
-import { CircleAlertIcon } from "lucide-react";
+import { CircleAlertIcon, WifiOffIcon } from "lucide-react";
 import { sessionStatus } from "./session/sessionStatus";
 import { StatusDetail, type ConnectionTrouble } from "./session/StatusDetail";
 import { TaskActivity } from "./session/TaskActivity";
@@ -435,8 +435,9 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     messages, onNew, onCancel, hasEarlier: state.earlier.type !== "complete", onLoadEarlier: store.loadEarlier, adapters: { dictation, attachments },
     isRunning: state.transcript.isRunning,
     isLoading: state.connection.type === "loading",
-    isDisabled: state.connection.type !== "ready",
-    isSendDisabled: state.sending || state.connection.type !== "ready",
+    // The message box stays open while the connection recovers: a message sent then waits for the join.
+    isDisabled: false,
+    isSendDisabled: state.sending || state.connection.type === "failed",
   });
   useEffect(() => { runtimeRef.current = runtime; return () => { runtimeRef.current = null; }; }, [runtime]);
   // Bring back the saved chat draft, then save every change. A fork's prompt draft, set next, replaces it.
@@ -541,6 +542,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
         beforeComposer={<>
           {found && matchBar && <MatchBar view={matchBar} onClose={found.onClose} onRetry={retryFound ?? (() => undefined)}
             onStep={found.type === "message" ? found.onStep : () => undefined} />}
+          {state.waitingToSend && !readOnly && <Consequence icon={<WifiOffIcon />}><p role="status">Reconnecting. Your message sends when the connection returns.</p></Consequence>}
           {sendError && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{sendError}</p></Consequence>}
           {flows.error !== undefined && workflowSheet === undefined && !readOnly && <Consequence tone="warn" icon={<CircleAlertIcon />}><p role="alert">{flows.error}</p></Consequence>}
           {waiting.length > 0 && <PinnedDock label={waitingLabel(waiting.length)}

@@ -232,7 +232,6 @@ describe("automatic connection recovery", () => {
     api.close();
     await until(() => api.store.getSnapshot().connection.type === "reconnecting");
     expect(texts(api.store)).toEqual(["before", "history answer"]);
-    await expect(api.store.send("hello")).rejects.toThrow("not connected");
     await until(() => ready(api.store));
     expect(texts(api.store)).toEqual(["before", "history answer", "offline question", "offline answer"]);
     expect(api.store.getSnapshot().transcript.messages.slice(0, 2).map((message) => message.id)).toEqual(oldIds);
