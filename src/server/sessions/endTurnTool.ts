@@ -1,11 +1,13 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { MODEL_ONLY_EXPOSURE } from "./codemode.js";
 import { assertReplyWritten, assertTerminalToolAlone, previousToolRefusedReply, responseFromBranch } from "./sessionResponse.js";
 
 export const END_TURN_TOOL_NAME = "end_turn";
 
-const Parameters = Type.Object({ reply: Type.Optional(Type.String({ description: "Your visible final answer or question. Supply it here when you have not written visible text in this message. Thinking is not visible. Omit when this message already has your answer as text." })), awaiting: Type.Union([Type.Literal("nothing"), Type.Literal("reply")], { description: "reply when you need any response from the user; nothing when this is only a result or completion report." }) });
+// The model gets one completion path. Execution still accepts pre-schema saved arguments.
+const Parameters = Type.Object({ reply: Type.String({ minLength: 1, pattern: "\\S", description: "Your visible final answer or question. Required and nonblank. Thinking is not visible." }), awaiting: Type.Union([Type.Literal("nothing"), Type.Literal("reply")], { description: "reply when you need any response from the user; nothing when this is only a result or completion report." }) });
+type SavedArguments = Omit<Static<typeof Parameters>, "reply"> & { reply?: string };
 
 /** The declaration is durable before the run ends. No sidebar state is written. */
 export interface EndTurnToolDeps { declare(awaiting: "nothing" | "reply", reply?: string): void | Promise<void> }
@@ -14,11 +16,11 @@ export function createEndTurnToolDefinition(deps: EndTurnToolDeps) {
     name: END_TURN_TOOL_NAME,
     exposure: MODEL_ONLY_EXPOSURE,
     label: "End turn",
-    description: "End this run and declare whether you need a user reply. Call this tool alone. Write your final answer or question as visible text, or supply it in reply. Use ask_user instead for a browser question form.",
-    promptSnippet: "end_turn: end every run with awaiting=reply or awaiting=nothing; put your answer in reply if you have not written visible text; ask_user also ends a run",
-    promptGuidelines: ["End every run with end_turn, unless ask_user or another turn-ending tool already ends it. Write your final answer as visible text in the same message or put it in the reply parameter, then call end_turn alone and last. Thinking is not shown to the user. If end_turn refuses a call because the message has no text, reply with plain text only and call no tool; that text ends the run. A second silent end_turn call stops the run as a failure. Set awaiting to reply whenever you want the user to answer, decide, review, confirm, or supply information. Set it to nothing only when you have no request for the user. A run without a declaration is shown as Needs your response. Never use end_turn while work remains to be completed in this run."],
+    description: "End this run and declare whether you need a user reply. Call this tool alone and supply your final answer or question in the required reply field. Use ask_user instead for a browser question form.",
+    promptSnippet: "end_turn: end every run with awaiting=reply or awaiting=nothing; always put your nonblank answer or question in reply; ask_user also ends a run",
+    promptGuidelines: ["End every run with end_turn, unless ask_user or another turn-ending tool already ends it. Put your final answer or question in the required, nonblank reply parameter, then call end_turn alone and last. Do not send a separate copy as text. Thinking is not shown to the user. If validation rejects a call, correct the required reply field. Set awaiting to reply whenever you want the user to answer, decide, review, confirm, or supply information. Set it to nothing only when you have no request for the user. A run without a declaration is shown as Needs your response. Never use end_turn while work remains to be completed in this run."],
     parameters: Parameters,
-    execute(toolCallId, params, _signal, _onUpdate, ctx) {
+    execute(toolCallId, params: SavedArguments, _signal, _onUpdate, ctx) {
       const branch = ctx.sessionManager.getBranch();
       assertTerminalToolAlone(branch, toolCallId);
       let reply: string | undefined;

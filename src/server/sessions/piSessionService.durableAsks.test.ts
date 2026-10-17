@@ -154,7 +154,7 @@ it("commits the production end_turn declaration to the native parent response", 
   const modelRuntime = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json") });
   const provider = fauxProvider(); modelRuntime.registerNativeProvider(provider.provider); await modelRuntime.refresh({ allowNetwork: false });
   const { fauxToolCall } = await import("@earendil-works/pi-ai/providers/faux");
-  provider.setResponses([fauxAssistantMessage([{ type: "text", text: "The result is ready." }, fauxToolCall("end_turn", { awaiting: "nothing" })], { stopReason: "toolUse" })]);
+  provider.setResponses([fauxAssistantMessage([{ type: "text", text: "The result is ready." }, fauxToolCall("end_turn", { awaiting: "nothing", reply: "The result is ready." })], { stopReason: "toolUse" })]);
   const gateway = createPiSessionManagerGateway({ agentDir: directory, env: {}, sessionDirEnvKeys: [] });
   const service = new PiSessionService(new SessionEventHub(), { agentDir: directory, modelRuntime, sessionManager: gateway, heartbeatIntervalMs: 60_000 });
   try {

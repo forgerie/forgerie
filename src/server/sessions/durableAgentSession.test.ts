@@ -478,33 +478,56 @@ describe("SDK-compatible Durable execution", () => {
     ]);
     await session.prompt("Tell the user the result, then end the run.");
     expect(provider.state.callCount).toBe(2);
-    expect(JSON.stringify(session.messages.find(message => message.role === "toolResult" && message.toolName === "end_turn"))).toContain("call no tool");
+    expect(JSON.stringify(session.messages.find(message => message.role === "toolResult" && message.toolName === "end_turn"))).toContain("reply");
     expect(session.messages.at(-1)).toMatchObject({ role: "assistant", content: [{ type: "text", text: "The result is ready. Which fix do you want?" }] });
     expect(declare).not.toHaveBeenCalled();
   });
-  it("bounds silent end_turn retries through the production runtime without declaring completion", async () => {
+  it("rejects a missing reply before execution and lets the model correct the call", async () => {
     const declare = vi.fn();
     const { provider, session } = await fixture([createEndTurnToolDefinition({ declare })]);
-    provider.setResponses(Array.from({ length: 3 }, (_, index) => fauxAssistantMessage([
-      { type: "thinking", thinking: "The result is ready." },
-      fauxToolCall("end_turn", { awaiting: "nothing" }, { id: `empty-${String(index)}` }),
-    ], { stopReason: "toolUse" })));
+    provider.setResponses([
+      fauxAssistantMessage([fauxToolCall("end_turn", { awaiting: "nothing" }, { id: "missing" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("end_turn", { awaiting: "nothing", reply: "The result is ready." }, { id: "corrected" })], { stopReason: "toolUse" }),
+    ]);
     await session.prompt("Tell the user the result, then end the run.");
     expect(provider.state.callCount).toBe(2);
     const results = session.messages.filter(message => message.role === "toolResult" && message.toolName === "end_turn");
-    expect(results).toHaveLength(2);
-    expect(results.every(message => message.role === "toolResult" && message.isError)).toBe(true);
-    expect(JSON.stringify(results.at(-1))).toContain("run stopped");
-    expect(declare).not.toHaveBeenCalled();
+    expect(results[0]).toMatchObject({ isError: true });
+    expect(JSON.stringify(results[0])).toContain("Validation failed for tool");
+    expect(JSON.stringify(results[0])).toContain("reply");
+    expect(results[1]).toMatchObject({ isError: false });
+    expect(declare).toHaveBeenCalledExactlyOnceWith("nothing", "The result is ready.");
+  });
 
-    // The next actual input gets its own correction budget, not the previous run's exhausted one.
-    provider.setResponses([
-      fauxAssistantMessage([fauxToolCall("end_turn", { awaiting: "nothing" }, { id: "next-empty" })], { stopReason: "toolUse" }),
-      fauxAssistantMessage([{ type: "text", text: "The result is ready." }, fauxToolCall("end_turn", { awaiting: "nothing" }, { id: "corrected" })], { stopReason: "toolUse" }),
-    ]);
-    await session.prompt("Continue and write visible text.");
-    expect(declare).toHaveBeenCalledExactlyOnceWith("nothing");
-    expect(session.messages.at(-1)).toMatchObject({ role: "toolResult", toolCallId: "corrected", isError: false });
+  it.each(["call", "execute"] as const)("keeps a historical no-reply %s checkpoint fail-closed after reopen", async phase => {
+    const declare = vi.fn();
+    const tool = createEndTurnToolDefinition({ declare });
+    const { session, manager, services } = await fixture([tool]);
+    const args = { awaiting: "nothing" };
+    const taskId = await session.journal.conversation.commit(async tx => {
+      const entry = await tx.appendEntry(AssistantEntry, session.journal.conversation.id, {
+        model: [fauxAssistantMessage([{ type: "text", text: "Historical answer" }, fauxToolCall("end_turn", args, { id: "saved-end" })], { stopReason: "toolUse" })],
+      });
+      return tx.createTask(ToolTask, { assistant: entry.id, callId: "saved-end" }, { ownership: { kind: "conversation" } });
+    }, context);
+    const file = manager.getSessionFile();
+    if (file === undefined) throw new Error("Fixture must persist");
+    await session.close();
+    const storage = await openNodeSqliteStorage(durableSessionPaths(file).database);
+    try {
+      const task = await storage.task(taskId, context);
+      if (task === undefined) throw new Error("Missing saved end_turn");
+      await storage.commit([{ type: "task", value: { ...task, memos: {}, state: { status: "running", checkpoint: phase === "call" ? { phase } : { phase, arguments: args, replay: "unsafe" } } } }], context);
+    } finally { await storage.close(context); }
+    const reopened = await DurableAgentSession.open({ services, sessionManager: SessionManager.open(file), customTools: [tool] });
+    sessions.push(reopened);
+    await reopened.journal.harness.waitForTask(taskId, context);
+    await reopened.journal.project();
+    const result = reopened.messages.find(message => message.role === "toolResult" && message.toolCallId === "saved-end");
+    expect(result).toMatchObject({ isError: true });
+    expect(JSON.stringify(result)).toContain(phase === "call" ? "reply" : "interrupted");
+    if (phase === "call") expect(JSON.stringify(result)).toContain("Validation failed for tool");
+    expect(declare).not.toHaveBeenCalled();
   });
 
   it("runs real QuickJS codemode through the same tool registry", async () => {

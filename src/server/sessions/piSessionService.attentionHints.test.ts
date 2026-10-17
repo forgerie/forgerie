@@ -20,7 +20,7 @@ async function fixture(decisionHints?: DecisionHints, replyText = "Please approv
   const directory = await mkdtemp(join(tmpdir(), "forgerie-attention-"));
   const models = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: join(directory, "models.json"), allowModelNetwork: false });
   const provider = fauxProvider(); models.registerNativeProvider(provider.provider);
-  provider.setResponses([fauxAssistantMessage([{ type: "text", text: replyText }, fauxToolCall("end_turn", { awaiting: "nothing" })], { stopReason: "toolUse" })]);
+  provider.setResponses([fauxAssistantMessage([{ type: "text", text: replyText }, fauxToolCall("end_turn", { awaiting: "nothing", reply: replyText })], { stopReason: "toolUse" })]);
   const gateway = createPiSessionManagerGateway({ agentDir: directory, env: { HOME: directory }, sessionDirEnvKeys: [] });
   let hub = new CapturingSessionEventHub();
   const sources: { session: DurableAgentSession; callbacks: ((event: unknown) => void)[] }[] = [];
@@ -126,7 +126,7 @@ it.each(["closed family", "sealed store", "master switched off", "attention swit
     await f.service().status(f.ref);
     expect(f.sources).toHaveLength(2);
     f.hub().sessionEvents.length = 0;
-    f.provider.setResponses([fauxAssistantMessage([{ type: "text", text: "Please reply to the new turn." }, fauxToolCall("end_turn", { awaiting: "reply" })], { stopReason: "toolUse" })]);
+    f.provider.setResponses([fauxAssistantMessage([{ type: "text", text: "Please reply to the new turn." }, fauxToolCall("end_turn", { awaiting: "reply", reply: "Please reply to the new turn." })], { stopReason: "toolUse" })]);
     await f.service().prompt(f.ref, "New turn");
     await vi.waitFor(() => { expect(f.hub().sessionEvents.some(({ event }) => event.type === "pi.event" && event.eventType === "agent_settled")).toBe(true); });
     expect((await f.service().status(f.ref)).response).toEqual({ kind: "needs-response", reason: "reply" });

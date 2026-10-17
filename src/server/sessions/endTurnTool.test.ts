@@ -1,4 +1,5 @@
 import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import { Check } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
 import { createEndTurnToolDefinition } from "./endTurnTool.js";
 
@@ -8,7 +9,12 @@ function context(calls: string[], before: unknown[] = [{ type: "text", text: "He
   return { sessionManager: { getBranch: () => [...earlier, { type: "message", message: { role: "assistant", content } }] } } as unknown as ExtensionToolContext;
 }
 describe("end_turn", () => {
-  it.each(["nothing", "reply"] as const)("records %s and ends the run without another model call", async (awaiting) => {
+  it("offers only a required nonblank reply, while direct saved calls retain compatibility", () => {
+    const tool = createEndTurnToolDefinition({ declare: vi.fn() });
+    for (const reply of [undefined, "", "  \n"]) expect(Check(tool.parameters, { awaiting: "nothing", ...(reply === undefined ? {} : { reply }) })).toBe(false);
+    expect(Check(tool.parameters, { awaiting: "nothing", reply: "Visible answer" })).toBe(true);
+  });
+  it.each(["nothing", "reply"] as const)("executes a historical call without reply and records %s", async (awaiting) => {
     const declare = vi.fn();
     const tool = createEndTurnToolDefinition({ declare });
     const result = await tool.execute("end", { awaiting }, undefined, undefined, context(["end"]));

@@ -1,3 +1,4 @@
+import { Check } from "typebox/value";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,7 +70,7 @@ async function hostedSession(codemodeEnabled: boolean, steps: (seenTools: string
 }
 
 /** A step that records the tools the model was offered, then answers. */
-function recordTools(seenTools: string[][], answer: AssistantMessage): AgentStep {
+function recordTools(seenTools: string[][], answer: AssistantMessage): (context: TranscriptContext) => AssistantMessage {
   return (context) => {
     seenTools.push(getCurrentTools(context.messages).map((tool) => tool.name));
     return answer;
@@ -101,7 +102,7 @@ function scriptResultText(events: readonly SessionUiEvent[]): string {
 describe("Hosted response declarations", () => {
   it.each(["reply", "nothing"] as const)("ends a real hosted run with %s, without another model response", async (awaiting) => {
     const harness = await hostedSession(true, () => [fauxAssistantMessage([
-      fauxText("The result is ready."), fauxToolCall("end_turn", { awaiting }, { id: "end-1" }),
+      fauxText("The result is ready."), fauxToolCall("end_turn", { awaiting, reply: "The result is ready." }, { id: "end-1" }),
     ], { stopReason: "toolUse" })]);
     await runPrompt(harness);
     expect((await harness.service.status(harness.ref)).response).toEqual(awaiting === "reply" ? { kind: "needs-response", reason: "reply" } : { kind: "none" });
@@ -111,10 +112,16 @@ describe("Hosted response declarations", () => {
 
   it("shows a hidden-only end_turn reply once, including read-only reopen and runtime replay", async () => {
     const reply = "The result is ready. Which fix do you want?";
-    const harness = await hostedSession(true, (seenTools) => [recordTools(seenTools, fauxAssistantMessage([
-      { type: "thinking", thinking: "PRIVATE REASONING" },
-      fauxToolCall("end_turn", { awaiting: "reply", reply }, { id: "reply-end" }),
-    ], { stopReason: "toolUse" }))]);
+    const harness = await hostedSession(true, (seenTools) => [context => {
+      const tool = getCurrentTools(context.messages).find(candidate => candidate.name === "end_turn");
+      if (tool === undefined) throw new Error("Missing model-facing end_turn");
+      expect(Check(tool.parameters, { awaiting: "reply" })).toBe(false);
+      expect(Check(tool.parameters, { awaiting: "reply", reply: "  " })).toBe(false);
+      return recordTools(seenTools, fauxAssistantMessage([
+        { type: "thinking", thinking: "PRIVATE REASONING" },
+        fauxToolCall("end_turn", { awaiting: "reply", reply }, { id: "reply-end" }),
+      ], { stopReason: "toolUse" }))(context);
+    }]);
     await runPrompt(harness);
     const answers = async (service: PiSessionService) => projectBrowserMessageResponse(await service.messages(harness.ref)).messages
       .filter(message => typeof message === "object" && message !== null && Reflect.get(message, "role") === "assistant" && JSON.stringify(Reflect.get(message, "content")).includes('"type":"text"'));
@@ -156,27 +163,22 @@ describe("Hosted response declarations", () => {
     expect(visible.at(-1)).toMatchObject({ role: "assistant", content: [{ type: "text", text: "Both problems have one cause. Which fix do you want?" }] });
   });
 
-  it("stops repeated silent declarations, exposes the errors, and keeps the response request after restart", async () => {
-    const harness = await hostedSession(true, (seenTools) => Array.from({ length: 3 }, (_, index) => recordTools(seenTools,
-      fauxAssistantMessage([fauxToolCall("end_turn", { awaiting: "nothing" }, { id: `silent-${String(index)}` })], { stopReason: "toolUse" }))));
+  it("rejects blank required replies, records no completion, and accepts a corrected reply", async () => {
+    const harness = await hostedSession(true, seenTools => [
+      recordTools(seenTools, fauxAssistantMessage([fauxToolCall("end_turn", { awaiting: "nothing", reply: "  " }, { id: "blank" })], { stopReason: "toolUse" })),
+      recordTools(seenTools, fauxAssistantMessage([fauxToolCall("end_turn", { awaiting: "nothing", reply: "Visible completion" }, { id: "corrected" })], { stopReason: "toolUse" })),
+    ]);
     const events = await runPrompt(harness);
     expect(harness.seenTools).toHaveLength(2);
-    expect((await harness.service.status(harness.ref)).response).toEqual({ kind: "needs-response", reason: "undeclared" });
+    expect((await harness.service.status(harness.ref)).response).toEqual({ kind: "none" });
     const visible = projectBrowserMessageResponse(await harness.service.messages(harness.ref));
     expect(visible.messages.filter(message => typeof message === "object" && message !== null && Reflect.get(message, "role") === "toolResult"))
-      .toEqual([expect.objectContaining({ toolName: "end_turn", isError: true }), expect.objectContaining({ toolName: "end_turn", isError: true })]);
-    expect(events.map(projectBrowserSessionEvent).filter(event => event.type === "tool.end" && event.isError)).toHaveLength(2);
-    expect(JSON.stringify(visible.messages)).toContain("run stopped");
-
-    await harness.service.dispose();
-    const reopened = new PiSessionService(new CapturingSessionEventHub(), {
-      agentDir: harness.agentDir, modelRuntime: harness.modelRuntime,
-      sessionManager: createPiSessionManagerGateway({ agentDir: harness.agentDir, env: {}, sessionDirEnvKeys: [] }),
-      askUserEnabled: true, heartbeatIntervalMs: 60_000,
-    });
-    services.push(reopened);
-    expect((await reopened.machineListing()).sessions.find(item => item.id === harness.ref.id)?.response).toEqual({ kind: "needs-response", reason: "undeclared" });
-    expect(JSON.stringify(projectBrowserMessageResponse(await reopened.messages(harness.ref)).messages)).toContain("run stopped");
+      .toEqual([expect.objectContaining({ toolName: "end_turn", isError: true })]);
+    // Successful model-only declarations are hidden; their visible reply is projected once.
+    expect(visible.messages.filter(message => typeof message === "object" && message !== null && Reflect.get(message, "role") === "assistant" && JSON.stringify(Reflect.get(message, "content")).includes('"type":"text"')))
+      .toEqual([expect.objectContaining({ content: [{ type: "text", text: "Visible completion" }] })]);
+    expect(events.map(projectBrowserSessionEvent).filter(event => event.type === "tool.end" && event.isError)).toHaveLength(1);
+    expect(JSON.stringify(visible.messages)).toContain("Visible completion");
   });
 
   it("rebuilds an unanswered browser form after constructing a new daemon service", async () => {
