@@ -683,6 +683,24 @@ describe("SDK-compatible Durable execution", () => {
     expect(session.getSessionStats()).toEqual({ sessionId: session.sessionId, totalMessages: 0, userMessages: 0, assistantMessages: 0,
       toolCalls: 0, tokens: { input: 9, output: 15, cacheRead: 21, cacheWrite: 33, total: 78 }, cost: 3 });
   });
+  it.each(["write", "edit"] as const)("runs delayed concrete %s before the next bash call in its round", async name => {
+    const { session, provider, directory } = await fixture();
+    if (name === "edit") await writeFile(join(directory, "ordered.sh"), "#!/bin/sh\nprintf initial");
+    const emit = session.extensionRunner.emitToolCall.bind(session.extensionRunner);
+    vi.spyOn(session.extensionRunner, "emitToolCall").mockImplementation(async event => {
+      if (event.toolName === name) await new Promise(resolve => setTimeout(resolve, 150));
+      return emit(event);
+    });
+    provider.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall(name, name === "write" ? { path: "ordered.sh", content: "#!/bin/sh\nprintf ordered" } : { path: "ordered.sh", oldText: "initial", newText: "ordered" }),
+        fauxToolCall("bash", { command: "chmod +x ordered.sh && ./ordered.sh" }, { id: "run-written" }),
+      ], { stopReason: "toolUse" }), fauxAssistantMessage("Done."),
+    ]);
+    await session.prompt("Write then execute.");
+    const result = session.messages.find(message => message.role === "toolResult" && message.toolCallId === "run-written");
+    expect(result).toMatchObject({ isError: false, content: [{ type: "text", text: "ordered" }] });
+  });
   it("audits SDK implementations, not tool names", async () => {
     const { session } = await fixture([], true, ["read", "ls", "grep", "find", "bash", "edit", "write", "+codemode"]);
     const tools = (await session.journal.conversation.agent(context)).tools;

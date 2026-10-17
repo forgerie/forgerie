@@ -51,8 +51,8 @@ export class DurableSdkTools {
     const base: { definition: ToolDefinition; replay: "safe" | "unsafe" }[] = [
       { definition: sdkDefineTool(createReadToolDefinition(cwd, { autoResizeImages: settings.getImageAutoResize() })), replay: "safe" }, // Reads files; image transforms stay in memory.
       { definition: sdkDefineTool(createBashToolDefinition(cwd, { ...(commandPrefix === undefined ? {} : { commandPrefix }), ...(shellPath === undefined ? {} : { shellPath }) })), replay: "unsafe" }, // Arbitrary commands.
-      { definition: sdkDefineTool(createEditToolDefinition(cwd)), replay: "unsafe" }, // Writes files.
-      { definition: sdkDefineTool(createWriteToolDefinition(cwd)), replay: "unsafe" }, // Writes files.
+      { definition: sdkDefineTool({ ...createEditToolDefinition(cwd), executionMode: "sequential" }), replay: "unsafe" }, // Writes files.
+      { definition: sdkDefineTool({ ...createWriteToolDefinition(cwd), executionMode: "sequential" }), replay: "unsafe" }, // Writes files.
       // Both call ensureTool(), which can download and install executables in the Pi profile.
       { definition: sdkDefineTool(createGrepToolDefinition(cwd)), replay: "unsafe" },
       { definition: sdkDefineTool(createFindToolDefinition(cwd)), replay: "unsafe" },

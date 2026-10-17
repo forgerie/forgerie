@@ -411,7 +411,10 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       hook(CompactionTask, { beforeCompact: async (_request, api, ctx) => { await (await resolve(api.conversationId, ctx)).flushRunRecords?.(); return undefined; } }),
     ],
     tools: [askHumanTool, ...codingTools, watchdogDiffTool, ...extraTools, ...sharedTools],
-    wraps: [...(readTool === undefined ? [] : [readsImages(readTool)]),
+    wraps: [
+      // One sequential mutation makes the entire tool round respect declaration order.
+      ...codingTools.filter(tool => tool.name === "write" || tool.name === "edit").map(tool => wrapTool(tool, inner => ({ ...inner, executionMode: "sequential" }))),
+      ...(readTool === undefined ? [] : [readsImages(readTool)]),
       ...(bashTool === undefined || options.riskLabels === undefined ? [] : [wrapTool(bashTool, tool => ({...tool,
         execute: (args, api, context) => {
           // Owner resolution and the ask are detached too. Preserve the native tool's result,
