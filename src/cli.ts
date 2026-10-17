@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { effectivePiWebConfig } from "./config.js";
+import { deployCommand } from "./deployment.js";
 import { packageVersion, printPiWebVersionReport } from "./piWebVersionReport.js";
 import { FORGERIE_SERVICE_UNITS } from "./shared/localServices.js";
 
@@ -40,6 +41,8 @@ function help(): void {
 
 Usage:
   forgerie start|stop|restart|status|logs
+  forgerie deploy record BUILT_DIST EXPECTED_SHA
+  forgerie deploy BUILT_DIST DEPLOYED_DIST EXPECTED_SHA [--when-idle WORKSPACE [--limit-minutes N]] [--readiness-seconds N]
   forgerie doctor
   forgerie version
   forgerie --version
@@ -52,6 +55,7 @@ For deployment: follow docs/deployment.md
 
 async function main(): Promise<void> {
   const [command = "help", ...args] = process.argv.slice(2);
+  if (command === "deploy") { await deployCommand(args); return; }
   if (args.length > 0) throw new Error(`Unexpected argument: ${args[0] ?? ""}`);
   if (command === "start" || command === "stop" || command === "restart" || command === "status") {
     requireSystemd();

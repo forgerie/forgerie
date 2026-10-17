@@ -15,6 +15,8 @@ The CLI controls existing Linux units. It never writes unit files or installs a 
 | `forgerie restart` | Restart the existing web and sessiond units. |
 | `forgerie status` | Read both units' status. |
 | `forgerie logs` | Follow both units' journals. |
+| `forgerie deploy record BUILT_DIST EXPECTED_SHA` | Record an operator-verified isolated build. |
+| `forgerie deploy BUILT_DIST DEPLOYED_DIST EXPECTED_SHA` | Publish that build immediately and restart both units. |
 | `forgerie doctor` | Report Node, config, runtime versions, and unit status. |
 | `forgerie version` | Read local installed and running versions. |
 | `forgerie --version` | Print the installed package version only. |
@@ -31,19 +33,78 @@ Read the sessiond journal for `durable session startup recovery finished`, which
 
 Active Durable sessions do not block deployment or restarts. Build and install dependencies in an isolated checkout so running agents keep their loaded code. Publish the verified build and restart both units without waiting for other sessions to become idle.
 
+### Publish a verified isolated build now
+
+Obtain approval to stop both units before publication. Active sessions pause during the restart; they do not require an idle window. The publisher never builds, installs dependencies, changes source, or removes a workspace.
+
+Use a clean isolated checkout at the commit you intend to deploy. Run dependency installation, build, and verification there, not in the running checkout. Land that same commit in the deployed checkout before publication. Keep the isolated checkout and its dependencies until publication finishes.
+
 ```bash
-nix shell nixpkgs#nodejs_24 -c npm ci
-nix shell nixpkgs#nodejs_24 -c npm run build
-systemctl --user restart forgerie-sessiond.service forgerie-web.service
-systemctl --user status forgerie-sessiond.service forgerie-web.service
-curl --fail http://127.0.0.1:8504/api/pi-web/runtime
+# In the isolated checkout, with Node 24:
+npm ci
+npm run build
+npm run verify
+
+BUILD=/absolute/path/to/verified-worktree
+DEPLOYED=/absolute/path/to/deployed-checkout
+SHA="$(git -C "$BUILD" rev-parse HEAD)"
+NODE="$(command -v node)"
+
+# Attest only after the checks and build above have passed.
+"$NODE" "$BUILD/dist/cli.js" deploy record "$BUILD/dist" "$SHA"
+
+# Run independently of the units being stopped. Do not add an idle wait.
+UNIT="forgerie-publish-$(date +%s)"
+systemd-run --user --collect --wait --unit="$UNIT" --setenv="PATH=$PATH" -- \
+  "$NODE" "$BUILD/dist/cli.js" deploy "$BUILD/dist" "$DEPLOYED/dist" "$SHA"
+journalctl --user -u "$UNIT" --no-pager
 ```
 
-The commands above show an in-place update. For active agents, build in an isolated checkout instead and publish its verified `dist` with both units stopped, then start them together. Verify that the returned daemon profile is the intended profile. Confirm that the browser loads the new UI. Built entrypoints resolve the compiled browser app; the units do not run TypeScript source.
+If the build is already verified, start at `BUILD=...`; do not repeat the checks merely to publish it. If `forgerie` is linked to this build, it accepts the same `deploy` arguments. The CLI ships in the package; the repository helper is not required.
 
-Use `scripts/redeploy-when-idle.sh WORKSPACE [LIMIT_MINUTES]` only when the operator explicitly requests an idle wait. This optional Nix-host helper waits for other sessions to become idle before restarting both user units. Run it through `systemd-run --user` outside sessiond's control group, using `/bin/sh` as its interpreter so a minimal service PATH can reach its Nix bootstrap. It excludes the named workspace, defaults to 60 minutes, and refuses to restart when activity cannot be read or validated. `--check` tests its dependencies without restarting anything. It verifies unit status and `build.json` after restarting, and never removes a workspace. To publish an already verified worktree build, supply its absolute `dist` path and the deployed checkout's absolute `dist` path as the third and fourth arguments. The helper copies first, stops both units, swaps the build, and starts them together. It retains the previous build under the deployed checkout's `.forgerie/deploy.*` directory. This prevents a new UI from calling an old server while the restart waits. Set `FORGERIE_REDEPLOY_REVISION` to the verified commit when queuing that publication; the helper refuses to replace the build if the checkout advances while waiting. The helper does not build or install dependencies. Its idle wait is optional deployment behavior, not a requirement for Durable recovery.
+**An independent launcher is required when calling from Forgerie or any process inside either target unit's cgroup.** Use `systemd-run --user` as above, not `nohup`, a background shell, or a child of sessiond. The publisher does not detach itself. Stopping sessiond can end the calling shell's wait, but the transient publisher continues. Read its journal from a new connection. A separate operator terminal outside those cgroups can run the CLI directly.
 
-An isolated worktree build verifies source without replacing deployed `dist/` or dependencies. Landing that source is not deployment. Publish the verified build even when other sessions are active.
+`deploy record` writes `dist/.forgerie-verified.json` with the expected full 40-character commit SHA, build-content digest, and dependency-lockfile digest. This is an explicit operator attestation that this build passed checks, not proof that the command ran those checks. It refuses to replace an existing receipt. A clean rebuild removes the old receipt; verify and record the rebuilt output again. Do not record old output against a new commit.
+
+Publication requires two different, non-overlapping, existing absolute build directories, each directly under its checkout root. Symlink build directories and symlink build contents are refused. Both checkout revisions must equal the explicit SHA. The isolated source checkout must be clean. Both lockfiles must match the receipt. The publisher validates the CLI, server entrypoints, browser manifest and entry asset, and rejects changed or unstamped output. It checks revisions again after any wait, after staging, and before the swap. Unrelated edits in the deployed checkout do not replace the verified source.
+
+The publisher leaves `node_modules` unchanged. Matching lockfiles cannot prove that installed dependencies are correct. Confirm the deployed dependencies already satisfy that lockfile. If dependencies must change, plan and approve that separate update; do not copy an isolated checkout's dependencies over running agents. Dependency upgrades are not an atomic part of this operation.
+
+Publication takes an exclusive per-checkout lock at `.forgerie/publish.lock`. A competing publisher fails rather than waiting. The publisher copies and validates the build under `.forgerie/deploy.*` before stopping anything. It stops both units, confirms they are stopped, swaps the directories on that filesystem, then starts both units. It retains the previous build at `.forgerie/deploy.*/previous` and prints that path. Do not run another deployment mechanism against the same checkout while it holds this lock.
+
+Readiness requires both units to be active and `/build.json` to report the prepared browser entry. The default readiness budget is 60 seconds; `--readiness-seconds N` accepts 0–600. This does not prove every Durable session has recovered. Read the daemon journal, check `/api/pi-web/runtime` for the intended daemon profile, and confirm the browser loads the new UI. `FORGERIE_REDEPLOY_URL` overrides `http://127.0.0.1:8504`; pass it with `systemd-run --setenv=FORGERIE_REDEPLOY_URL=...` when needed.
+
+If stopping, swapping, starting, or readiness fails, the publisher attempts to restore and restart the previous build and exits nonzero. Failed new builds remain at `.forgerie/deploy.*/failed` when a swap occurred. A rollback failure reports the recovery directory and exits nonzero. The publisher does not remove profiles or Durable data. Retained builds cost disk space and need later operator cleanup.
+
+### Optional explicit idle behavior
+
+Only add an idle wait when the operator requests one:
+
+```bash
+# Use the same independent systemd-run launcher as above.
+"$NODE" "$BUILD/dist/cli.js" deploy "$BUILD/dist" "$DEPLOYED/dist" "$SHA" \
+  --when-idle /absolute/path/to/own-workspace --limit-minutes 60
+```
+
+Idle mode excludes the named workspace and defaults to 60 minutes (0–10080 accepted). Busy, unavailable, or malformed activity never permits a restart. Immediate publication never queries activity, even if the activity endpoint is unavailable.
+
+The optional Nix-host helper retains its idle-first interface:
+
+```bash
+# Restart only, after an explicit idle wait:
+/bin/sh scripts/redeploy-when-idle.sh /absolute/path/to/own-workspace 60
+
+# Publish a recorded build after an explicit idle wait:
+FORGERIE_REDEPLOY_REVISION="$SHA" /bin/sh scripts/redeploy-when-idle.sh \
+  /absolute/path/to/own-workspace 60 "$BUILD/dist" "$DEPLOYED/dist"
+
+# Publish immediately, with no activity query:
+/bin/sh scripts/redeploy-when-idle.sh --now "$BUILD/dist" "$DEPLOYED/dist" "$SHA"
+```
+
+These helper calls also require an independent launcher when called from Forgerie. Run `/bin/sh /absolute/path/to/scripts/redeploy-when-idle.sh ...` through `systemd-run --user` so a minimal service PATH can reach its Nix bootstrap. Pass `FORGERIE_REDEPLOY_REVISION` with `--setenv` for idle publication; a missing SHA is an error. Publication delegates to the prepared build's CLI and requires its receipt. Restart-only calls keep their default 60-minute idle wait and fail closed. `--check` tests helper dependencies without restarting anything. The helper's restart-only log defaults to `~/.local/share/forgerie/redeploy-when-idle.log`; publication logs go to the launcher journal.
+
+Landing source is not deployment. Publish the verified build even when other sessions are active.
 
 ## Runtime settings
 
@@ -89,7 +150,7 @@ The inventory is local to one host and process namespace. Do not share it betwee
 
 If the web process is unavailable, `forgerie version` also tries the daemon's health endpoint with a bounded wait. Read the unit journals for startup errors. If dictation is unavailable, check the web unit's worker path and speech host allowlist.
 
-Keep the previous verified commit and build until the new instance works. Rollback does not require an idle window. Restore the previous source, install its lockfile and rebuild in an isolated checkout, then publish the build and restart both units. Do not remove profiles or runtime data as part of rollback.
+Keep the previous verified commit and build until the new instance works. A killed publisher or host crash can interrupt the two directory renames; this is not crash-atomic deployment. Inspect `.forgerie/deploy.*` and the unit journals before recovery. A dead publisher lock becomes eligible for recovery after 120 seconds. Do not remove a live publisher's lock. If `dist` is missing, stop both units from an independent terminal and restore the retained `previous` directory before starting them. Never overwrite the only retained build. Rollback does not require an idle window. Restore the previous source, install its lockfile and rebuild in an isolated checkout, then publish the build and restart both units. Do not remove profiles or runtime data as part of rollback.
 
 ## Scheduled triggers with no login
 
