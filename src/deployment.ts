@@ -15,6 +15,10 @@ const manifestSchema = z.object({ entry: z.string().regex(/^[\w.-]+\.js$/) });
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const receiptSchema = z.object({ revision: revisionSchema, digest: digestSchema, lockDigest: digestSchema });
 const activitySchema = z.object({ workspaces: z.array(z.object({ cwd: z.string(), hasSessionActivity: z.boolean() })) });
+const readyRuntimeSchema = z.object({ components: z.object({
+  web: z.object({ available: z.literal(true) }),
+  sessiond: z.object({ available: z.literal(true) }),
+}) });
 
 type WaitPolicy = { kind: "immediate" } | { kind: "idle"; workspace: string; limitMinutes: number };
 interface Publication {
@@ -132,9 +136,10 @@ async function ready(options: Publication, expected: z.infer<typeof manifestSche
       await units("is-active");
       const running = manifestSchema.parse(await request(`${options.url}/build.json`));
       if (running.entry !== expected.entry) throw new Error("HTTP build identity differs");
+      readyRuntimeSchema.parse(await request(`${options.url}/api/pi-web/runtime`));
       return;
     } catch (cause) {
-      if (Date.now() >= deadline) throw new Error("Services or expected HTTP build did not become ready", { cause });
+      if (Date.now() >= deadline) throw new Error("Services, expected HTTP build, or daemon runtime did not become ready", { cause });
       await delay(Math.min(2_000, deadline - Date.now()));
     }
   }

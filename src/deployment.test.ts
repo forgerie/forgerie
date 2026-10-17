@@ -73,6 +73,8 @@ if (action === 'show') console.log(b.stillActive ? 'active\\nactive' : 'inactive
   await chmod(join(bin, "systemctl"), 0o755);
   let activity: unknown = { workspaces: [{ cwd: "/other", hasSessionActivity: true }] };
   let activityStatus = 200, activityCalls = 0, badReadiness = false;
+  let runtimeCalls = 0;
+  let runtimeResponses: { body: unknown; status?: number }[] = [{ body: { components: { web: { available: true }, sessiond: { available: true } } } }];
   let onActivity: (() => Promise<void>) | undefined;
   const server = createServer((request, response) => {
     void (async () => {
@@ -80,11 +82,18 @@ if (action === 'show') console.log(b.stillActive ? 'active\\nactive' : 'inactive
         activityCalls++;
         if (onActivity !== undefined) await onActivity();
         response.writeHead(activityStatus, { "content-type": "application/json" }); response.end(JSON.stringify(activity));
-      } else {
+      } else if (request.url === "/api/pi-web/runtime") {
+        runtimeCalls++;
+        // Runtime availability is modeled separately from the served build.
+        const runtime = runtimeResponses.length > 1 ? runtimeResponses.shift() : runtimeResponses[0];
+        if (runtime === undefined) throw new Error("No configured runtime response");
+        response.writeHead(runtime.status ?? 200, { "content-type": "application/json" });
+        response.end(JSON.stringify(runtime.body));
+      } else if (request.url === "/build.json") {
         const body = await readFile(join(deployed, "client/build.json"), "utf8");
         response.writeHead(200, { "content-type": "application/json" });
         response.end(badReadiness && body.includes("next.js") ? '{"entry":"wrong.js"}' : body);
-      }
+      } else { response.writeHead(404); response.end(); }
     })().catch(() => { response.writeHead(503); response.end(); });
   });
   servers.push(server);
@@ -101,6 +110,8 @@ if (action === 'show') console.log(b.stillActive ? 'active\\nactive' : 'inactive
     activity: (value: unknown, status = 200) => { activity = value; activityStatus = status; },
     activityCalls: () => activityCalls,
     badReadiness: () => { badReadiness = true; },
+    runtimeResponses: (...responses: { body: unknown; status?: number }[]) => { runtimeResponses = responses; },
+    runtimeCalls: () => runtimeCalls,
     onActivity: (callback: () => Promise<void>) => { onActivity = callback; },
     stages: async () => (await readdir(join(target, ".forgerie"))).filter((name) => name.startsWith("deploy.")).map((name) => join(target, ".forgerie", name)),
   };
@@ -122,6 +133,7 @@ it.each(["busy", "unavailable"])("publishes immediately without reading %s activ
   const result = await f.publish();
   expect(result, result.stderr).toMatchObject({ code: 0 });
   expect(f.activityCalls()).toBe(0);
+  expect(f.runtimeCalls()).toBe(1);
   expect(await f.calls()).toEqual([
     ["--user", "stop", "forgerie-web.service", "forgerie-sessiond.service"],
     ["--user", "show", "--property=ActiveState", "--value", "forgerie-web.service", "forgerie-sessiond.service"],
@@ -315,6 +327,23 @@ it("rolls back a dead sessiond even when web and the expected HTTP build are hea
   const result = await f.publish();
   expect(result.code).toBe(1);
   expect(result.stderr).toContain("previous build restored");
+  expect(await readFile(join(f.deployed, "server/index.js"), "utf8")).toBe("previous");
+  const stages = await f.stages();
+  expect(await readFile(join(stages[0] ?? "", "failed/server/index.js"), "utf8")).toBe("next");
+});
+
+it.each([
+  { name: "unavailable daemon", body: { components: { web: { available: true }, sessiond: { available: false, error: "ECONNREFUSED sessiond.sock" } } } },
+  { name: "unavailable web", body: { components: { web: { available: false }, sessiond: { available: true } } } },
+  { name: "malformed runtime", body: { components: { web: { available: true } } } },
+  { name: "runtime HTTP failure", body: { error: "unavailable" }, status: 503 },
+])("rolls back $name despite active units and the correct HTTP build", async (unready) => {
+  const f = await fixture(); expect((await f.record()).code).toBe(0);
+  f.runtimeResponses(unready, { body: { components: { web: { available: true }, sessiond: { available: true } } } });
+  const result = await f.publish();
+  expect(result.code).toBe(1);
+  expect(result.stderr).toContain("previous build restored");
+  expect(f.runtimeCalls()).toBe(2);
   expect(await readFile(join(f.deployed, "server/index.js"), "utf8")).toBe("previous");
   const stages = await f.stages();
   expect(await readFile(join(stages[0] ?? "", "failed/server/index.js"), "utf8")).toBe("next");
