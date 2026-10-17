@@ -134,3 +134,13 @@ new owner and the unsafe call reports interruption without running twice.
 It stops and cleans the proof unit in all cases, and retains shutdown and
 recovery logs on failure. It never contacts deployed Forgerie services.
 This exercises the journal and startup recovery seam, not the HTTP daemon.
+
+## Worktree dependency preflight
+
+Run `npm ci` from the worktree root before verification. Root `prepare` installs
+`ui/` with its own lockfile. The repository's post-create hook does this for
+Forgerie-created worktrees; manual Git worktrees need the command explicitly.
+`node scripts/verify-staged.mjs --check-dependencies` checks the whole current
+root and browser dependency environments without running staged validation.
+Staged validation runs this check before the cached typecheck. It accepts working
+links and reports incomplete installs as one environment error, not Knip findings.

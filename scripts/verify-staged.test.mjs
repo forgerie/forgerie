@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  assertDependenciesReady,
   createStagedSnapshot,
   createValidationPlan,
   createValidationPlanForChanges,
@@ -175,3 +176,40 @@ describe("staged validation planning", () => {
 function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
+
+
+describe("dependency environment preflight", () => {
+  async function fixture() {
+    const root = await mkdtemp(join(tmpdir(), "forgerie-dependency-preflight-"));
+    await mkdir(join(root, "ui"));
+    for (const prefix of ["", "ui"]) await writeFile(join(root, prefix, "package.json"), JSON.stringify({ devDependencies: { tool: "1.0.0" } }));
+    return root;
+  }
+  async function install(directory) {
+    await mkdir(join(directory, "tool"), { recursive: true });
+    await mkdir(join(directory, ".bin"));
+    await writeFile(join(directory, "tool/package.json"), JSON.stringify({ bin: { tool: "cli.js" } }));
+    await writeFile(join(directory, "tool/cli.js"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    await symlink("../tool/cli.js", join(directory, ".bin/tool"));
+  }
+  it.each(["absent", "cache-only", "broken link", "nested"])("reports %s installs as one actionable environment error", async kind => {
+    const root = await fixture();
+    try {
+      if (kind === "cache-only") await mkdir(join(root, "node_modules/.cache"), { recursive: true });
+      if (kind === "broken link") await symlink(join(root, "missing"), join(root, "node_modules"));
+      if (kind === "nested") await mkdir(join(root, "node_modules/node_modules"), { recursive: true });
+      expect(() => assertDependenciesReady(root)).toThrow(/Dependency environment.*root:.*ui:.*npm ci/);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it("accepts working directory links and rejects a broken ui binary", async () => {
+    const root = await fixture();
+    try {
+      await install(join(root, "installed"));
+      await symlink(join(root, "installed"), join(root, "node_modules"));
+      await install(join(root, "ui/node_modules"));
+      expect(() => assertDependenciesReady(root)).not.toThrow();
+      await rm(join(root, "ui/node_modules/tool/cli.js"));
+      expect(() => assertDependenciesReady(root)).toThrow(/ui:.*\.bin.*tool.*npm ci/);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+});

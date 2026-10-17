@@ -1,0 +1,5 @@
+#!/bin/sh
+# Root prepare also runs the UI's locked install. Keep each worktree independent.
+set -eu
+cd "${1:?expected new worktree path}"
+npm ci --no-audit --no-fund

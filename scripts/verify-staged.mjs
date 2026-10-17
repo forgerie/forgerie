@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -73,7 +73,6 @@ export function createStagedSnapshot(options = {}) {
       cwd,
       stdio: ["ignore", "ignore", "inherit"],
     });
-    const nodeModulesPath = join(cwd, "node_modules");
     for (const modules of ["node_modules", join("ui", "node_modules")]) {
       const source = join(cwd, modules);
       if (existsSync(source) && existsSync(join(snapshotRoot, modules, ".."))) {
@@ -172,7 +171,40 @@ function npmInvocation(npmArgs) {
   };
 }
 
+/** Check local installs, not packages or binaries accidentally inherited from a parent checkout. */
+export function assertDependenciesReady(cwd = process.cwd()) {
+  const failures = [];
+  for (const prefix of ["", "ui"]) {
+    const directory = join(cwd, prefix);
+    const modules = join(directory, "node_modules");
+    const label = prefix || "root";
+    try {
+      if (!statSync(modules).isDirectory()) throw new Error("node_modules is not a directory");
+      if (existsSync(join(modules, "node_modules"))) throw new Error("nested node_modules/node_modules");
+      const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+      for (const name of Object.keys({ ...manifest.dependencies, ...manifest.devDependencies })) {
+        // An absolute local path cannot fall back to an ancestor's installation.
+        const dependency = JSON.parse(readFileSync(join(modules, name, "package.json"), "utf8"));
+        const bins = typeof dependency.bin === "string" ? [name.split("/").at(-1)] : Object.keys(dependency.bin ?? {});
+        for (const bin of bins) {
+          const path = join(modules, ".bin", bin);
+          if (!statSync(path).isFile()) throw new Error(`invalid tool binary: ${bin}`);
+          accessSync(path, constants.X_OK);
+        }
+      }
+    } catch (error) {
+      failures.push(`${label}: ${error.message}`);
+    }
+  }
+  if (failures.length > 0) throw new Error(`Dependency environment is incomplete or broken. ${failures.join("; ")}. Recover from the worktree root with: npm ci (also installs ui/ through prepare). If lifecycle scripts are disabled, run: npm ci --ignore-scripts && npm --prefix ui ci`);
+}
+
 function main() {
+  assertDependenciesReady();
+  if (process.argv[2] === "--check-dependencies") {
+    console.log("Root and ui dependency environments ready.");
+    return 0;
+  }
   const changes = readStagedChanges();
   const plan = createValidationPlanForChanges(changes);
   console.log(`[pre-commit] Planning validation for ${String(plan.paths.length)} staged file(s).`);
@@ -180,6 +212,7 @@ function main() {
   const useSnapshot = hasUnstagedWork();
   const validationRoot = useSnapshot ? createStagedSnapshot() : process.cwd();
   try {
+    assertDependenciesReady(validationRoot);
     for (const step of createValidationSteps(plan)) {
       const status = runNpmStep(step, validationRoot);
       if (status !== 0) return status;

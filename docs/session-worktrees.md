@@ -102,8 +102,16 @@ For a Node project, the post-create hook can install dependencies:
 ```sh
 #!/bin/sh
 set -eu
-npm install
+npm ci
 ```
+
+This repository's executable post-create hook runs `npm ci` in the new worktree.
+The root `prepare` script also installs `ui/` from its lockfile. A manual
+`git worktree add` does not run the hook; run `npm ci` from that worktree's root.
+Separate installs cost disk space and setup time. Before staged validation,
+`node scripts/verify-staged.mjs --check-dependencies` checks both local installs
+and their executable tools. It accepts working directory links, but rejects
+missing, cache-only, broken, or nested installs with an `npm ci` recovery command.
 
 Make the hook executable. Prefer installing dependencies into the new worktree. Shared mutable `node_modules` can bring file collisions back.
 

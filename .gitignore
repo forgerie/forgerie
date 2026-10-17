@@ -16,6 +16,7 @@ coverage/
 # Keep runtime uploads local; project configuration, backlog, and workflows belong in Git.
 .forgerie/*
 !.forgerie/config.json
+!.forgerie/hooks/
 !.forgerie/backlog/
 !.forgerie/workflows/
 .pi-web/
