@@ -188,13 +188,19 @@ describe("Durable session journal", () => {
 
   it("opens a base-build journal whose title follows stamped Durable messages", async () => {
     const { file } = await baseBuildFixture();
-    const manager = SessionManager.open(file);
+    const original = await readFile(file, "utf8");
     const provider = fauxProvider();
     const models = createModels(); models.setProvider(provider.provider);
-    const journal = await DurableSessionJournal.open({ manager, models, registry: createRegistry(), agent: {} });
-    journals.push(journal);
-    expect(manager.getSessionName()).toBe("title");
-    expect((await journal.conversation.context(context)).messages).toHaveLength(4);
+    for (let reopen = 0; reopen < 3; reopen++) {
+      const manager = SessionManager.open(file);
+      const journal = await DurableSessionJournal.open({ manager, models, registry: createRegistry(), agent: {} });
+      journals.push(journal);
+      expect(manager.getSessionName()).toBe("title");
+      expect((await journal.conversation.context(context)).messages).toHaveLength(4);
+      expect(manager.getEntries().filter(entry => entry.type === "message")).toHaveLength(4);
+      await journal.close();
+      expect(await readFile(file, "utf8")).toBe(original);
+    }
     expect(provider.state.callCount).toBe(0);
   }, 20_000);
 
@@ -252,6 +258,13 @@ describe("Durable session journal", () => {
     expect(options.manager.getEntries().filter((entry) => entry.type === "message")).toHaveLength(4);
     expect(await readFile(durableSessionPaths(sessionFile).original, "utf8")).toBe(original);
     await journal.close();
+    const complete = await readFile(sessionFile, "utf8");
+    for (let reopen = 0; reopen < 3; reopen++) {
+      const journal = await DurableSessionJournal.open({ ...options, manager: SessionManager.open(sessionFile) });
+      journals.push(journal);
+      await journal.close();
+      expect(await readFile(sessionFile, "utf8")).toBe(complete);
+    }
     const reopenedOptions = { ...options, manager: SessionManager.open(sessionFile) };
     const reopened = await DurableSessionJournal.open(reopenedOptions);
     journals.push(reopened);
@@ -333,11 +346,11 @@ describe("Durable session journal", () => {
     if (file === undefined) throw new Error("Fixture must persist");
     expect(SessionManager.open(file).buildSessionContext().messages).toHaveLength(1);
   });
-  it("does not let an inherited parent stamp hide a new fork message with the same native ID", async () => {
+  it.each(["parent-session", "same-session"])("does not let a %s old stamp hide a distinct fork message with the same native ID", async (owner) => {
     const options = await fixture();
     const manager = SessionManager.create(options.manager.getCwd(), options.manager.getSessionDir());
     manager.appendMessage({ role: "user", content: "parent input", timestamp: 1 });
-    const parentMessage = { ...fauxAssistantMessage("parent answer"), forgerieDurableSessionId: "parent-session", forgerieDurableEntryId: 0 };
+    const parentMessage = { ...fauxAssistantMessage("parent answer"), forgerieDurableSessionId: owner === "same-session" ? manager.getSessionId() : owner, forgerieDurableEntryId: 0 };
     manager.appendMessage(parentMessage);
     const journal = await DurableSessionJournal.open({ ...options, manager });
     journals.push(journal);

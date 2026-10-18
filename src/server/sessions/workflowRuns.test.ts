@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import Fastify from "fastify";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type, type JsonObject } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
 import { defineTool } from "@earendil-works/pi-durable";
@@ -187,6 +187,36 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await service.dispose(); await rm(root, { recursive: true, force: true }); expect(errors).toEqual([]); });
 
 describe("saved prose workflows through production Durable sessions and HTTP", () => {
+  it("leaves a complete old-stamp transcript byte-identical on cold workflow reads", async () => {
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    await service.prompt(ref, "Completed history");
+    await until(async () => !(await service.status(ref)).isStreaming);
+    await service.dispose();
+    const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] });
+    const file = (await gateway.listAll()).find(session => session.id === ref.id)?.path;
+    if (file === undefined) throw new Error("Missing completed transcript");
+    const manager = SessionManager.open(file);
+    let downgraded = 0;
+    for (const entry of manager.getEntries()) {
+      if (entry.type !== "message") continue;
+      for (const property of ["forgerieDurableJournalId", "forgerieDurableConversationId", "forgerieDurableMessageIndex"] as const) {
+        if (property in entry.message) { Reflect.deleteProperty(entry.message, property); downgraded++; }
+      }
+    }
+    expect(downgraded).toBeGreaterThan(0);
+    await writeFile(file, [manager.getHeader(), ...manager.getEntries()].map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    const original = await readFile(file, "utf8");
+    for (let reopen = 0; reopen < 3; reopen++) {
+      service = openService();
+      const server = app();
+      try {
+        const response = await server.inject({ url: `/sessions/${ref.id}/workflow-runs?cwd=${encodeURIComponent(root)}` });
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual([]);
+        expect(await readFile(file, "utf8")).toBe(original);
+      } finally { await server.close(); await service.dispose(); }
+    }
+  });
   it("stops the whole run, keeps its files, rejects other sessions, and accepts cancellation retries", async () => {
     await new AgentDirPromptLibrary(agentDir).save({ name: "experiment", body: definition });
     const ref = { id: (await service.start(root)).id, cwd: root };

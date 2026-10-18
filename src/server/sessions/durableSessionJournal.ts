@@ -1,6 +1,7 @@
 import { endTurnReplyMessage } from "./endTurnReply.js";
 import { constants } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -69,6 +70,7 @@ export class DurableSessionJournal {
     });
   }
   private readonly projected = new Map<string, string>();
+  private readonly legacyProjected = new Map<number, { id: string; value: object }[]>();
   private projection: Promise<void> = Promise.resolve();
   private closing: Promise<void> | undefined;
   private projectionFileReady = false;
@@ -102,6 +104,17 @@ export class DurableSessionJournal {
     });
     for (const entry of manager.getEntries()) {
       const stamp = entry.type === "message" ? entry.message : entry.type === "custom_message" || entry.type === "branch_summary" ? entry.details : undefined;
+      if (typeof stamp === "object" && stamp !== null && DURABLE_SESSION_PROPERTY in stamp && stamp[DURABLE_SESSION_PROPERTY] === this.ownerSessionId
+        && DURABLE_ENTRY_PROPERTY in stamp && typeof stamp[DURABLE_ENTRY_PROPERTY] === "number"
+        && !(DURABLE_JOURNAL_PROPERTY in stamp) && !(DURABLE_CONVERSATION_PROPERTY in stamp) && !(DURABLE_MESSAGE_PROPERTY in stamp)) {
+        const nativeId = stamp[DURABLE_ENTRY_PROPERTY];
+        const value = { ...stamp };
+        Reflect.deleteProperty(value, DURABLE_SESSION_PROPERTY);
+        Reflect.deleteProperty(value, DURABLE_ENTRY_PROPERTY);
+        const previous = this.legacyProjected.get(nativeId) ?? [];
+        previous.push({ id: entry.id, value });
+        this.legacyProjected.set(nativeId, previous);
+      }
       if (typeof stamp !== "object" || stamp === null || !(DURABLE_JOURNAL_PROPERTY in stamp) || stamp[DURABLE_JOURNAL_PROPERTY] !== this.handle.address.journalId
         || !(DURABLE_ENTRY_PROPERTY in stamp) || typeof stamp[DURABLE_ENTRY_PROPERTY] !== "number"
         || !(DURABLE_CONVERSATION_PROPERTY in stamp) || typeof stamp[DURABLE_CONVERSATION_PROPERTY] !== "number"
@@ -232,6 +245,15 @@ export class DurableSessionJournal {
     return this.projection;
   }
 
+  /** Old two-field stamps are local to one logical session. Match the native payload
+   * as well as its ID so a distinct fork cannot consume an inherited projection.
+   * Consume one record per contribution, including identical multi-message values. */
+  private legacyProjection(entry: EntryRecord, value: unknown): string | undefined {
+    const previous = this.legacyProjected.get(entry.id);
+    const index = previous?.findIndex(candidate => isDeepStrictEqual(candidate.value, value)) ?? -1;
+    return index < 0 ? undefined : previous?.splice(index, 1)[0]?.id;
+  }
+
   private projectEntry(entry: EntryRecord): { id: string; entry: EntryRecord; index: number }[] {
     const projectedKey = (index: number) => `${String(entry.conversationId)}:${String(entry.id)}:${String(index)}`;
     const stamp = (index: number) => ({ [DURABLE_SESSION_PROPERTY]: this.ownerSessionId, [DURABLE_ENTRY_PROPERTY]: entry.id,
@@ -247,7 +269,7 @@ export class DurableSessionJournal {
     }
     if (!this.projected.has(projectedKey(0)) && isHostEntryKind(entry.kind)) {
       const data = typeof entry.data === "object" && entry.data !== null && !Array.isArray(entry.data) ? entry.data : {};
-      const id = this.manager.appendCustomMessageEntry(entry.kind, hostEntryText(entry.kind, entry.data), true, { ...data, ...stamp(0) });
+      const id = this.legacyProjection(entry, data) ?? this.manager.appendCustomMessageEntry(entry.kind, hostEntryText(entry.kind, entry.data), true, { ...data, ...stamp(0) });
       this.projected.set(projectedKey(0), id);
       return [{ id, entry, index: 0 }];
     }
@@ -263,7 +285,7 @@ export class DurableSessionJournal {
       const existing = this.projected.get(projectedKey(index));
       if (existing !== undefined) { aliases.push({ id: existing, entry, index }); continue; }
       // Complete family identity and message position make interrupted multi-message export restartable.
-      const id = this.manager.appendMessage({ ...message, ...stamp(index) });
+      const id = this.legacyProjection(entry, message) ?? this.manager.appendMessage({ ...message, ...stamp(index) });
       aliases.push({ id, entry, index });
       this.projected.set(projectedKey(index), id);
     }
