@@ -234,6 +234,18 @@ describe("approving and refusing", () => {
     expect(calls.filter((call) => call.method === "POST")).toHaveLength(2);
   });
 
+  it("approves several calls one after another, each as its own choice, and goes on past a failure", async () => {
+    const { calls, store } = routes((path, init) => {
+      if (init.method !== "POST") return json(200, [PUSH, RESET]);
+      return path.includes(encodeURIComponent(RESET.id)) ? json(409, { error: "Gated action is not waiting" }) : json(200, PUSH_RUNNING);
+    });
+    await store.retry();
+    expect(await store.approveAll([RESET.id, PUSH.id])).toBe(1);
+    expect(calls.filter((call) => call.method === "POST").map((call) => call.path)).toEqual([
+      `/api/sessions/s%201/gated-actions/${encodeURIComponent(RESET.id)}/approve`, `/api/sessions/s%201/gated-actions/${encodeURIComponent(PUSH.id)}/approve`]);
+    expect(store.getSnapshot()).toMatchObject({ deciding: undefined, error: { id: RESET.id, message: "Gated action is not waiting" } });
+  });
+
   it("tells no one after it is disposed", async () => {
     const reply = held();
     const { store } = routes(() => reply.promise);

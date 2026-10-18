@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { GatedActionCard } from "./GatedActionCard";
 import { PinnedDock } from "../ui/PinnedDock";
+import { NoticeBar } from "../ui/NoticeBar";
 import type { GatedAction, GatedChoice, GatedActionEntry } from "./gatedActionsModel";
 import {
   PUSH, PUSH_ENTRY, PUSH_FAILED, PUSH_RAN, PUSH_REFUSED, PUSH_RUNNING, PUSH_UNKNOWN, REPLY, REPLY_ENTRY, RESET, RESET_ENTRY,
@@ -69,4 +70,13 @@ export function PinnedRiskDanger() {
 /** Decided: the opinion stays with the record of what happened. */
 export function RefusedWithRisk() {
   return <GatedActionCard entry={PUSH_ENTRY} record={{ ...PUSH_REFUSED, riskLabel: RISK_CHECK }} read onApprove={() => {}} onRefuse={() => {}} />;
+}
+/** Two held calls in the dock: one choice after the cards approves both; each card keeps its exact command and its own choices. */
+export function HeldCalls() {
+  const none = () => undefined;
+  return <PinnedDock label="2 waiting for you" names={["force-push", "reset"]}>
+    <GatedActionCard entry={PUSH_ENTRY} record={PUSH} read onApprove={none} onRefuse={none} />
+    <GatedActionCard entry={RESET_ENTRY} record={RESET} read onApprove={none} onRefuse={none} />
+    <NoticeBar message="2 held calls wait for you. Each card above shows its exact command." actions={[{ label: "Approve all 2", primary: true, onPress: none }]} />
+  </PinnedDock>;
 }

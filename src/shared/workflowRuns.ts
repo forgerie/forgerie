@@ -59,6 +59,10 @@ export const WorkflowStopStateSchema = Type.Object({
   round: Type.Optional(Type.Integer({ minimum: 0 })),
   /** Who passed the stop. Absent: the user. `forgerie`: the Workflow autonomy setting passed it. */
   decidedBy: Type.Optional(Type.Literal("forgerie")),
+  /** Times Forgerie failed to pass this waiting stop itself. A land stop allows one repair and one more try. */
+  autoFailures: Type.Optional(Type.Integer({ minimum: 0 })),
+  /** Forgerie already tried this waiting stop again after a repair. */
+  autoRetried: Type.Optional(Type.Boolean()),
 }, { additionalProperties: false });
 export type WorkflowStopState = Static<typeof WorkflowStopStateSchema>;
 /** Suppression is a delivery state, not a delivery error. Old false flags remain false. */

@@ -313,6 +313,15 @@ export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId:
   if (run.state.kind !== "running") throw new WorkflowError(409, "This workflow is stopping or finished");
   const stage = run.stages?.find((candidate) => candidate.id === stageId);
   const current = stopOf(run, stageId);
+  // After one failed automatic land and a repair, the agent may ask once more, and Forgerie tries to land again.
+  if (stage?.stop === "land" && current.state === "waiting" && current.autoFailures === 1 && current.autoRetried !== true) {
+    const problem = stopRequestProblem(run, stageId);
+    if (problem !== undefined) throw new WorkflowError(409, problem);
+    if (auto?.("land") === true) {
+      run.stops = { ...run.stops, [stageId]: { ...current, summary, requestedAt: Date.now(), autoRetried: true } };
+      return remember(`Forgerie tries to land the repaired branches at "${stage.name}" once more. End your turn now. The result arrives as a new message.`);
+    }
+  }
   // A replayed call, or a second ask for a stop already waiting, does not add another card.
   if (stage !== undefined && current.state === "waiting") return remember(`Already waiting for the user at "${stage.name}". End your turn.`);
   await reconcileReportFailures(tx, parent, run);
@@ -388,9 +397,24 @@ export async function notifyAutoStopFailed(tx: Tx, parent: ConversationId, runId
   const record = (await tx.doc(Runs, parent)).records[runId];
   const stage = record?.stages?.find((candidate) => candidate.id === stageId);
   if (record === undefined || stage === undefined || record.state.kind !== "running" || stopOf(record, stageId).state !== "waiting") return;
-  const round = stopOf(record, stageId).round ?? 0;
-  const prompt = `[workflow ${record.definition.name}] Forgerie could not pass "${stage.name}" itself: ${reason}\nThe stop now waits for the user. Do not land, merge, rebase or push the branches yourself. End your turn.`;
-  await tx.createTask(Launch, { runId, prompt, requestId: `workflow-stop-auto:${runId}:${stageId}:${String(round)}` }, { ownership: { kind: "conversation" }, background: true });
+  const current = stopOf(record, stageId);
+  const round = current.round ?? 0;
+  const failures = (current.autoFailures ?? 0) + 1;
+  record.stops = { ...record.stops, [stageId]: { ...current, autoFailures: failures } };
+  const prompt = `[workflow ${record.definition.name}] Forgerie could not pass "${stage.name}" itself: ${reason}\n${autoStopFailureAdvice(stage, failures)}`;
+  // The first failure keeps its original receipt, so a notice saved before repairs existed replays once.
+  await tx.createTask(Launch, { runId, prompt, requestId: `workflow-stop-auto:${runId}:${stageId}:${String(round)}${failures === 1 ? "" : `:${String(failures)}`}` }, { ownership: { kind: "conversation" }, background: true });
+}
+
+/**
+ * What the agent may do after Forgerie failed to pass a stop. A failed automatic land, such as a conflict with the
+ * default branch, gets one repair in the workers' own branches while the stop still waits; the default branch stays
+ * the user's. An idle stop waited 163 min for the user after one land conflict (nightly flow audit, 2026-10-18).
+ */
+export function autoStopFailureAdvice(stage: { id: string; name: string; stop?: "approve" | "land" | undefined }, failures: number): string {
+  const guard = "The stop now waits for the user. Do not land, merge or push to the default branch yourself.";
+  if (stage.stop !== "land" || failures > 1) return `${guard}${stage.stop === "land" ? " The one repair attempt is used." : ""} End your turn.`;
+  return `${guard} You may make one repair attempt first: send each worker whose branch failed to land an instruction to rebase its own branch onto the current default branch, keep every change already there, resolve the conflict, run focused checks and report. When they have reported, run the full check once, then call workflow_stop for "${stage.id}" again; Forgerie then tries to land once more. If the conflict needs a product decision, or no repair is possible, end your turn and let the user decide.`;
 }
 
 export async function proposeWorkflow(tx: Tx, parent: ConversationId, id: string, args: WorkflowProposalTool): Promise<WorkflowProposal> {

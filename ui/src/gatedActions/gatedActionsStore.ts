@@ -104,6 +104,21 @@ export function createGatedActionsStore(request: Request, ref: () => SessionRef 
     /** Approves the call: Forgerie runs it once, exactly as recorded. */
     approve: (id: string) => decide(id, "approve"),
     refuse: (id: string) => decide(id, "refuse"),
+    /**
+     * Approves several calls, one after another, each as its own decision. A failure stays on its card and does not
+     * stop the rest. Resolves with how many the server recorded.
+     */
+    async approveAll(ids: readonly string[]): Promise<number> {
+      let approved = 0;
+      let failure: GatedActionsState["error"];
+      for (const id of ids) {
+        if (await decide(id, "approve")) approved++;
+        else failure ??= state.error;
+      }
+      // Each choice clears the last failure. Keep the first one on its card, so the reader sees what did not run.
+      if (failure !== undefined && state.error === undefined) update({ ...state, error: failure });
+      return approved;
+    },
     dismissError() { if (state.error !== undefined) update({ ...state, error: undefined }); },
     dispose() { disposed = true; if (timer !== undefined) clearTimeout(timer); listeners.clear(); },
   };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  argumentsText, askerOf, CATEGORY_LABEL, consequenceOf, errorText, firstLine, GATED_ACTION_TYPE, GATED_CATEGORIES, gatedActionSchema, gatedActionsSchema,
+  argumentsText, askerOf, batchApprovable, CATEGORY_LABEL, consequenceOf, errorText, firstLine, GATED_ACTION_TYPE, GATED_CATEGORIES, gatedActionSchema, gatedActionsSchema,
   gatedEntryOf, gatedIsWaiting, gatedMeta, gatedOutcome, resultText, saysMore, shownCall, sortGated, unknownOutcome,
 } from "./gatedActionsModel";
 import {
@@ -129,5 +129,15 @@ describe("what the card says", () => {
     expect(saysMore("one line")).toBe(false);
     expect(saysMore("one\ntwo")).toBe(true);
     expect(saysMore("x".repeat(200))).toBe(true);
+  });
+});
+
+describe("approving several waiting calls at once", () => {
+  it("offers two or more calls whose records still wait, and nothing it cannot prove", () => {
+    expect(batchApprovable([PUSH_ENTRY, RESET], [PUSH, RESET], false)).toEqual([PUSH.id, RESET.id]);
+    expect(batchApprovable([PUSH_ENTRY, RESET], [PUSH_RUNNING, RESET], false)).toEqual([]);
+    expect(batchApprovable([PUSH_ENTRY], [PUSH], false)).toEqual([]);
+    expect(batchApprovable([PUSH_ENTRY, RESET], undefined, false)).toEqual([]);
+    expect(batchApprovable([PUSH_ENTRY, RESET], [PUSH, RESET], true)).toEqual([]);
   });
 });

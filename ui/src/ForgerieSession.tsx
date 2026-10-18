@@ -91,7 +91,8 @@ import { WorkflowRunStrip } from "./workflows/WorkflowRunStrip";
 import { pinKey, waitingItems, waitingLabel, waitingName } from "./waitingOnYou";
 import { GatedActionCard } from "./gatedActions/GatedActionCard";
 import { GatedActionsReadProblem } from "./gatedActions/GatedActionsReadProblem";
-import { askerOf, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
+import { askerOf, batchApprovable, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
+import { NoticeBar } from "./ui/NoticeBar";
 import { PinnedDock } from "./ui/PinnedDock";
 import { EventLine } from "./ui/EventLine";
 import { OldIssueProposalLine } from "./issues/OldIssueProposalLine";
@@ -341,6 +342,9 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
   const gatedReadFailed = held.readError !== undefined;
   const waiting = useMemo(() => readOnly ? [] : waitingItems(folded, runs, proposals, { records, readFailed: gatedReadFailed }),
     [folded, runs, proposals, records, gatedReadFailed, readOnly]);
+  // Several held calls, such as pushes that are all ready, take one choice. Each still runs as its own approval.
+  const batch = useMemo(() => held.deciding !== undefined ? [] : batchApprovable(waiting.flatMap((item) => item.kind === "gated" ? [item.entry] : []), records, gatedReadFailed),
+    [waiting, records, gatedReadFailed, held.deciding]);
   const pinned = useMemo(() => new Set(waiting.map(pinKey)), [waiting]);
   // A gated action's card renders from its entry at once; the session's record says what became of it.
   const gatedView = useCallback((entry: GatedActionEntry, key?: string) => <GatedActionCard key={key} entry={entry}
@@ -549,6 +553,8 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
             names={waiting.map(waitingName)} keys={waiting.map(pinKey)}>
             {waiting.map(renderWaiting)}
             {/* After the cards, so a short dock still shows the first card's choices without a scroll. */}
+            {batch.length > 0 && <NoticeBar message={`${String(batch.length)} held calls wait for you. Each card above shows its exact command.`}
+              actions={[{ label: `Approve all ${String(batch.length)}`, primary: true, onPress: () => { void gated.approveAll(batch); } }]} />}
             {held.readError !== undefined && waiting.some((item) => item.kind === "gated")
               && <GatedActionsReadProblem error={held.readError} onRetry={() => { void gated.retry(); }} />}
           </PinnedDock>}

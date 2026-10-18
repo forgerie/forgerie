@@ -9,7 +9,7 @@ import { createRegistry } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { durableChildExtensions } from "./durableChildAgents.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
-import { proposeWorkflow, startWorkflowProposal, workflowExtension, workflowProposals, workflowRuns, WORKFLOW_DOC_KIND, WORKFLOW_PROPOSALS_DOC_KIND } from "./durableWorkflowRuns.js";
+import { autoStopFailureAdvice, proposeWorkflow, startWorkflowProposal, workflowExtension, workflowProposals, workflowRuns, WORKFLOW_DOC_KIND, WORKFLOW_PROPOSALS_DOC_KIND } from "./durableWorkflowRuns.js";
 
 it("replays a proposal without another entry and commits Start's run and decision together", async () => {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-workflow-proposal-commit-"));
@@ -50,4 +50,16 @@ it("declares replay safety for native tools with committed receipts", () => {
   const extensions = [workflowExtension(), ...durableChildExtensions().parent];
   const policies = Object.fromEntries(extensions.flatMap(extension => extension.tools ?? []).map(tool => [tool.name, tool.replay]));
   expect(policies).toMatchObject({ propose_workflow: "safe", workflow_finish: "safe", workflow_stop: "safe", child_agent: "safe" });
+});
+
+it("offers one repair after a failed automatic land, and none after a second failure or at an approve stop", () => {
+  const land = { id: "land", name: "Land", stop: "land" as const };
+  expect(autoStopFailureAdvice(land, 1)).toContain("You may make one repair attempt first");
+  expect(autoStopFailureAdvice(land, 1)).toContain('call workflow_stop for "land" again');
+  for (const advice of [autoStopFailureAdvice(land, 2), autoStopFailureAdvice({ id: "contract", name: "Contract", stop: "approve" }, 1)]) {
+    expect(advice).not.toContain("repair attempt first");
+    expect(advice).toContain("Do not land, merge or push to the default branch yourself.");
+    expect(advice).toMatch(/End your turn\.$/u);
+  }
+  expect(autoStopFailureAdvice(land, 2)).toContain("The one repair attempt is used.");
 });

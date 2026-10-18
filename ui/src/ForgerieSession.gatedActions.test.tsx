@@ -8,7 +8,7 @@ import { ForgerieSession } from "./ForgerieSession";
 import { browserTransport } from "./sessionStore";
 import type { PiMessage, SessionStatus } from "./contracts";
 import type { GatedAction } from "./gatedActions/gatedActionsModel";
-import { PUSH, PUSH_ENTRY, PUSH_RAN, PUSH_RUNNING } from "./gatedActions/fixtures/gatedActions";
+import { PUSH, PUSH_ENTRY, PUSH_RAN, PUSH_RUNNING, RESET, RESET_ENTRY } from "./gatedActions/fixtures/gatedActions";
 
 let root: Root;
 let server: WebSocketServer | undefined;
@@ -31,7 +31,10 @@ afterEach(async () => {
   document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
-const messages: PiMessage[] = [
+const gateEntry = (entry: typeof PUSH_ENTRY, id: number): PiMessage => ({ role: "custom", customType: "forgerie.gated-action", content: `Gated action: ${JSON.stringify(entry)}`,
+  details: { ...entry, durableSessionId: "test", durableEntryId: id, durableJournalId: "j-1", durableConversationId: 1, durableMessageIndex: 0 } });
+let messages: PiMessage[] = [];
+const oneGate: PiMessage[] = [
   { role: "user", content: "Rebase the export branch and push it." },
   { role: "assistant", content: [{ type: "text", text: "The branch is rebased. The push needs your approval." }] },
   // As the session file holds it: the entry's fields, with the file's own bookkeeping stamped in.
@@ -40,7 +43,8 @@ const messages: PiMessage[] = [
 ];
 
 /** A Durable session with a blocked call. The routes answer from `state`, which a test changes as the server would. */
-async function sessionWithGate(status: SessionStatus, options: { records?: GatedAction[]; refusal?: string; readFails?: boolean } = {}) {
+async function sessionWithGate(status: SessionStatus, options: { records?: GatedAction[]; refusal?: string; readFails?: boolean; second?: boolean } = {}) {
+  messages = options.second === true ? [...oneGate, gateEntry(RESET_ENTRY, 13)] : oneGate;
   const state = { records: options.records ?? [PUSH], refusal: options.refusal, readFails: options.readFails ?? false };
   const posts: { path: string; body: unknown }[] = [];
   server = new WebSocketServer({ port: 0 });
@@ -52,9 +56,13 @@ async function sessionWithGate(status: SessionStatus, options: { records?: Gated
   vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
     if (init.method === "POST") posts.push({ path, body: JSON.parse(String(init.body)) });
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
+    if (path.endsWith(`/gated-actions/${encodeURIComponent(RESET.id)}/approve`)) {
+      state.records = state.records.map((record) => record.id === RESET.id ? { ...RESET, state: { kind: "approved" } } : record);
+      return Response.json({ ...RESET, state: { kind: "approved" } });
+    }
     if (path.endsWith(`/gated-actions/${encodeURIComponent(PUSH.id)}/approve`)) {
       if (state.refusal !== undefined) return Response.json({ error: state.refusal }, { status: 409 });
-      state.records = [PUSH_RUNNING];
+      state.records = state.records.map((record) => record.id === PUSH.id ? PUSH_RUNNING : record);
       return Response.json(PUSH_RUNNING);
     }
     if (path.includes("/gated-actions?")) return state.readFails ? Response.json({ error: "Durable storage is unavailable." }, { status: 500 }) : Response.json(state.records);
@@ -126,6 +134,22 @@ describe("a gated action in a session", () => {
     await act(async () => { dockButton("Retry")?.click(); });
     await until(() => document.querySelector(".pinned-dock") === null);
     expect(document.querySelector(".decision-card-closed")?.textContent).toBe("Approved — ran");
+  });
+
+  it("approves every waiting call with one choice, one request per call, and offers no batch for a single call", async () => {
+    const api = await sessionWithGate(idle, { second: true, records: [PUSH, RESET] });
+    await until(() => dockButton("Approve all 2") !== undefined);
+    expect(document.querySelector(".pinned-dock .notice-bar")?.textContent).toContain("2 held calls wait for you. Each card above");
+    await act(async () => { dockButton("Approve all 2")?.click(); });
+    await until(() => api.posts.length === 2);
+    expect(api.posts.map((post) => post.path).sort()).toEqual([PUSH.id, RESET.id].map((id) => `/api/sessions/test/gated-actions/${encodeURIComponent(id)}/approve`).sort());
+    await until(() => document.querySelector(".pinned-dock") === null);
+  });
+
+  it("offers no batch when only one call waits", async () => {
+    await sessionWithGate(idle);
+    await until(() => dockButton("Approve and run") !== undefined);
+    expect(document.querySelector(".pinned-dock .notice-bar")).toBeNull();
   });
 
   it("offers no choice in a read-only session, and pins nothing", async () => {

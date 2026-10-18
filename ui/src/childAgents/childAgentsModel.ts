@@ -23,6 +23,8 @@ export const childSummarySchema = z.object({
   costUsd: z.number().finite().nonnegative().nullable().optional(),
   lastTool: z.object({ name: z.string().min(1).max(80).regex(/^[A-Za-z0-9_.:-]+$/u), at: z.number().finite().nonnegative().nullable() }).nullable().optional(),
   questions: z.array(childQuestionSchema),
+  // Optional for an older server. The parent agent, not the reader, owes this answer.
+  waitingForParent: z.object({ questionId: z.string(), askedAt: z.number() }).optional(),
   retry: childRetrySchema.optional(),
   worktree: z.object({
     repo: z.string().optional(), defaultBranch: z.string().optional(), cleanup: cleanupSchema.optional(), cleanupRetryToken: z.string().optional(), statusError: z.string().optional(),
@@ -235,7 +237,13 @@ export const QUIET_MINUTES = 10;
  * What a child did last, and how long ago. A working child with no tool call for QUIET_MINUTES says it may be stuck,
  * so the reader does not have to ask. Model output between tool calls does not count as activity here.
  */
-export function lastToolLine(child: Pick<ChildSummary, "busy" | "lastTool">, now: number): { text: string; quiet: boolean } {
+export function lastToolLine(child: Pick<ChildSummary, "busy" | "lastTool" | "waitingForParent">, now: number): { text: string; quiet: boolean } {
+  // A child that asked its parent is quiet on purpose. Say who it waits for, not that it may be stuck.
+  const asked = child.waitingForParent;
+  if (asked !== undefined) {
+    const minutes = Math.max(0, Math.floor((now - asked.askedAt) / 60_000));
+    return { text: `Waiting for the parent agent to answer ${asked.questionId}, ${minutes === 0 ? "asked under a minute ago" : `asked ${String(minutes)} min ago`}`, quiet: false };
+  }
   const tool = child.lastTool;
   if (tool == null) return { text: "Last tool: Unavailable", quiet: false };
   if (tool.at === null) return { text: `Last tool: ${tool.name}`, quiet: false };

@@ -131,6 +131,16 @@ export function gatedIsWaiting(record: GatedAction | undefined, read: boolean): 
   return record === undefined ? !read : record.state.kind === "waiting";
 }
 
+/**
+ * The waiting calls one choice may approve together: two or more, each with a record that says it still waits. An
+ * unread or failed read approves nothing in a batch, since a card may already be decided elsewhere.
+ */
+export function batchApprovable(entries: readonly Pick<GatedActionEntry, "id">[], records: readonly GatedAction[] | undefined, readFailed: boolean): string[] {
+  if (records === undefined || readFailed) return [];
+  const ids = entries.map((entry) => entry.id).filter((id) => records.some((record) => record.id === id && record.state.kind === "waiting"));
+  return ids.length >= 2 ? ids : [];
+}
+
 /** Whether a gated action has its final outcome: it ran, failed, or was refused. Nothing changes it after that. */
 export function isSettled(record: GatedAction): boolean {
   return record.state.kind === "ran" || record.state.kind === "failed" || record.state.kind === "refused";

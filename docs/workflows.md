@@ -111,7 +111,7 @@ At an approve stop, the card offers **Approve** and **Ask for changes**. Asking 
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| Land automatically | On | When the agent asks at a land stop, Forgerie runs **Land all** itself. A conflict or a block keeps the stop waiting for you, and the agent hears why once. |
+| Land automatically | On | When the agent asks at a land stop, Forgerie runs **Land all** itself. A conflict or a block keeps the stop waiting for you, and the agent hears why. After the first failure the agent may make one repair: it sends the workers to rebase their own branches, runs the full check, and asks at the stop again; Forgerie then tries to land once more. A second failure waits for you. The agent never lands, merges or pushes the default branch itself. |
 | Pass approve stops | Off | When the agent asks at an approve stop, Forgerie approves, and the run continues. The summary stays in the transcript. |
 | Review rounds | 2 | Each spawn or send to a child with the `reviewer` agent is one round. After the limit, `child_agent` refuses another round for that reviewer, and refuses a new reviewer name. The launch prompt tells the agent to file the remaining must-fix findings with `file_issue` and continue. Choose `unlimited` for no limit. |
 

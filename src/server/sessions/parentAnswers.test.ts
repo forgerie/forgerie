@@ -25,6 +25,7 @@ let mode = "answer";
 let busy = false;
 let releaseBusy: (() => void) | undefined;
 let parentQuestions: string[] = [];
+let toolResults: string[] = [];
 const text = (value: unknown): string => typeof value === "string" ? value : Array.isArray(value) ? value.map((part: {text?: string}) => part.text ?? "").join("") : "";
 function open(host = true) {
   hub = new CapturingSessionEventHub();
@@ -34,11 +35,12 @@ function open(host = true) {
 }
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "forgerie-parent-answers-")); await mkdir(join(root, "agent"));
-  mode = "answer"; busy = false; releaseBusy = undefined; parentQuestions = [];
+  mode = "answer"; busy = false; releaseBusy = undefined; parentQuestions = []; toolResults = [];
   models = await ModelRuntime.create({ authPath: join(root, "agent/auth.json"), modelsPath: join(root, "agent/models.json") });
   const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   provider.setResponses(Array.from({ length: 200 }, () => async (request) => {
     const last = [...request.messages].reverse().find((message) => message.role !== "system"); const said = text(last?.content);
+    if (last?.role === "toolResult") toolResults.push(said);
     const call = (name: string, args: Record<string, string | boolean>) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
     if (said === "Start") return call("child_agent", { action: "spawn", name: "helper", message: "Ask", isolation: "shared" });
     if (last?.role === "toolResult" && said.startsWith("Started") && busy) await new Promise<void>((resolve) => { releaseBusy = resolve; });
@@ -50,6 +52,9 @@ beforeEach(async () => {
     if (question) {
       parentQuestions.push(said);
       if (said.includes("Second question")) return fauxAssistantMessage("I will answer later");
+      if (mode === "bare") return call("child_agent", { action: "answer", name: "helper", questionId: required(question[1]).replace(/^q:/u, ""), answer: "TASK-VALUE", reason: "The task specifies it" });
+      if (mode === "wrong") return call("child_agent", { action: "answer", name: "helper", questionId: "999999", answer: "TASK-VALUE", reason: "The task specifies it" });
+      if (mode === "send") return call("child_agent", { action: "send", name: "helper", message: "Use TASK-VALUE" });
       return mode === "answer" || mode === "live" ? call("child_agent", { action: "answer", name: "helper", questionId: required(question[1]), answer: "TASK-VALUE", reason: "The task specifies it" })
       : mode === "hold" ? fauxAssistantMessage("I will answer later") : call("child_agent", { action: "escalate", questionId: required(question[1]), kind: mode, guess: "TASK-GUESS", why: "Escalation reason" });
     }
@@ -70,6 +75,28 @@ it("routes a child's question to its parent, answers without a card, and logs th
   expect(hub.sessionEvents.some(({event}) => JSON.stringify(event).includes("workflow_runs_changed"))).toBe(true);
 });
 
+it("accepts a question handle without its q: prefix and still answers the right child", async () => {
+  mode = "bare"; const ref = await start();
+  await vi.waitFor(async () => { expect(await service.decisions(ref)).toMatchObject([{ kind: "child-answer", by: "parent", choice: "TASK-VALUE" }]); });
+  const child = required((await service.durableChildren(ref))[0]);
+  await vi.waitFor(async () => { expect(JSON.stringify(await service.durableChildMessages(ref, child.conversationId))).toContain("The parent answered: TASK-VALUE"); });
+});
+it("names the open handles when an answer uses an unknown question", async () => {
+  mode = "wrong"; const ref = await start();
+  await vi.waitFor(() => { expect(toolResults.some((said) => said.includes("Child question 999999 not found"))).toBe(true); });
+  const qid = questionId(parentQuestions[0]);
+  expect(toolResults.find((said) => said.includes("not found"))).toContain(`Open questions: ${qid}.`);
+  expect(await service.decisions(ref)).toEqual([]);
+});
+it("says a send does not answer a child's waiting question, and keeps the question open", async () => {
+  mode = "send"; const ref = await start();
+  await vi.waitFor(() => { expect(toolResults.some((said) => said.startsWith("Sent to helper."))).toBe(true); });
+  const qid = questionId(parentQuestions[0]);
+  expect(toolResults.find((said) => said.startsWith("Sent to helper."))).toContain(`helper is still waiting on question ${qid}. This message does not answer it`);
+  const child = required((await service.durableChildren(ref))[0]);
+  expect(child.waitingForParent).toMatchObject({ questionId: qid });
+  expect(await service.decisions(ref)).toEqual([]);
+});
 it.each(["irreversible", "external"])("escalates %s as a user card with the parent's guess and logs the user's answer", async (kind) => {
   mode = kind; const ref = await start();
   await vi.waitFor(async () => { expect((await service.status(ref)).waitingOnYou).toBe(1); });

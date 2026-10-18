@@ -73,6 +73,8 @@ let modelAgent: string | undefined;
 let modelArgument: string | undefined;
 const modelThinking: string[] = [];
 let modelWork: (() => Promise<void>) | undefined;
+/** The faux agent answers a failed automatic land with one repair and a second land request. */
+let repairLand = false;
 const modelRequests: { name: string; model: string; phase: string }[] = [];
 let proposalInputs: Record<string, string | boolean | number> = {};
 let proposalName = "task-plan";
@@ -130,6 +132,8 @@ const route: FauxResponseFactory = (context, options, _state, model) => {
     if (last?.role === "user" && said.includes('approved "Contract"')) return spawnAlpha();
     if (last?.role === "user" && said.startsWith("[subagent alpha")) return call("workflow_stop", { runId, stage: "land", summary: "LAND-SUMMARY" });
     if (last?.role === "user" && said.includes(" landed ") && said.includes("Every stop has passed")) return call("workflow_finish", { runId, outcome: "completed", result: "STAGED-DONE" });
+    // A repair after a failed automatic land: the worker's `work` call stands in for its rebase. Its report asks again.
+    if (repairLand && last?.role === "user" && said.includes("one repair attempt first")) return call("child_agent", { action: "send", name: "alpha", message: "MODEL-TURN-alpha" });
   }
   if (last?.role === "toolResult") {
     if (said === "WORK-DONE") return call("write", { path: "result.txt", content: "CHILD-RESULT" });
@@ -171,7 +175,7 @@ function runBody(value: unknown): WorkflowRun {
 }
 beforeEach(async () => {
   proposalText = staged; proposalChanges = 0; proposalErrors.length = 0; proposalInputs = {}; proposalName = "task-plan"; proposalSummary = "Build and review this task."; proposalBasis = { kind: "new", reason: "No saved workflow fits." };
-  modelAgent = undefined; modelArgument = "faux/faux-1"; modelThinking.length = 0; modelWork = undefined; modelRequests.length = 0;
+  modelAgent = undefined; modelArgument = "faux/faux-1"; modelThinking.length = 0; modelWork = undefined; repairLand = false; modelRequests.length = 0;
   errors.length = 0; started = 0; sequence = 0; autoComplete = false; worktrees = undefined; isolate = false; autonomy = undefined;
   root = await mkdtemp(join(tmpdir(), "forgerie-workflow-runs-"));
   agentDir = join(root, "agent");
@@ -763,7 +767,46 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     expect(waiting.stops?.["land"]?.decidedBy).toBeUndefined();
     expect(git("log", "-1", "--format=%s", "main").trim()).toBe("Main moved");
     expect((await service.decisions(ref)).filter((decision) => decision.kind === "auto-stop")).toHaveLength(1);
+    expect(waiting.stops?.["land"]?.autoFailures).toBe(1);
+    const notice = JSON.stringify(await service.messages(ref));
+    expect(notice).toContain("one repair attempt first");
+    expect(notice).toContain("Do not land, merge or push to the default branch yourself");
     await service.cancelWorkflow(ref, waiting.id);
+  }, 30000);
+
+  it("lands after one repair of an automatic land conflict", async () => {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: sanitizedGitEnv(), encoding: "utf8" });
+    git("init", "-b", "main"); git("config", "user.email", "workflow@example.invalid"); git("config", "user.name", "Workflow tests");
+    await writeFile(join(root, "base.txt"), "base");
+    git("add", "base.txt"); git("commit", "-m", "Initial workspace");
+    const ownership = new SessionWorktreeStore(join(agentDir, "ownership.json"));
+    await ownership.initialize();
+    worktrees = new SessionWorktrees(ownership, { publish: () => undefined });
+    let ref = { id: "", cwd: root };
+    let calls = 0;
+    // First work call: main gains a conflicting result.txt. Second: the repair rebuilds alpha's branch on current main.
+    modelWork = async () => {
+      calls++;
+      if (calls === 1) { await writeFile(join(root, "result.txt"), "MAIN-RESULT"); git("add", "result.txt"); git("commit", "-m", "Main moved"); return; }
+      const path = (await service.durableChildren(ref)).find((child) => child.name === "alpha")?.worktree?.path;
+      if (path === undefined) throw new Error("alpha has no worktree");
+      const wt = (...args: string[]) => execFileSync("git", args, { cwd: path, env: sanitizedGitEnv(), encoding: "utf8" });
+      wt("reset", "-q", "--hard", "main"); await writeFile(join(path, "result.txt"), "MAIN-RESULT\nCHILD-RESULT"); wt("add", "result.txt"); wt("commit", "-qm", "Child result, repaired");
+    };
+    repairLand = true;
+    autonomy = { landStops: true, approveStops: true, reviewRounds: 2 };
+    await service.dispose(); service = openService();
+    ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+    await service.runWorkflow(ref, "staged", {}, "staged-auto-repair");
+    const finished = await until(async () => {
+      const current = (await service.workflowRuns(ref))[0];
+      return current?.state.kind === "finished" ? current : false;
+    });
+    expect(finished.state).toMatchObject({ outcome: "completed", result: "STAGED-DONE" });
+    expect(finished.stops?.["land"]).toMatchObject({ state: "approved", decidedBy: "forgerie", landed: [expect.any(String)] });
+    expect(git("log", "-1", "--format=%s", "main").trim()).toBe("Child result, repaired");
+    expect(git("log", "--format=%s", "main")).toContain("Main moved");
   }, 30000);
 
   it("recovers a workflow waiting at a user stop without the live index or starting later work", async () => {

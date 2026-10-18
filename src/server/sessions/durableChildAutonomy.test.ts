@@ -17,7 +17,7 @@ import { WorkflowRunSchema } from "../../shared/workflowRuns.js";
 import { workflowExtension, proposeWorkflow, startWorkflowProposal, workflowRuns, waitingWorkflowDecisions, acknowledgeWorkflowStall, WORKFLOW_STALL_GRACE_MS } from "./durableWorkflowRuns.js";
 import { createRegistry, defineDoc, LiveDoc } from "@earendil-works/pi-durable";
 import { afterEach, expect, it, vi } from "vitest";
-import { durableChildExtensions, listChildren, stopChild, answerChildQuestion } from "./durableChildAgents.js";
+import { durableChildExtensions, listChildren, stopChild, answerChildQuestion, QUESTION_REMINDER_MS } from "./durableChildAgents.js";
 import { ChildAgentCatalog } from "./durableChildProfiles.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
@@ -27,9 +27,12 @@ import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { ChildRunStore } from "./childRunStore.js";
 
 const roots: string[] = [];
+/** When true, the faux parent leaves every child question unanswered, as a busy or confused parent would. */
+let parentHolds = false;
 const journals: DurableSessionJournal[] = [];
 const recorders: DurableChildRunRecords[] = [];
 afterEach(async () => {
+  parentHolds = false;
   await Promise.all(recorders.splice(0).map((recorder) => recorder.close()));
   await Promise.all(journals.splice(0).map((journal) => journal.close()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -67,6 +70,7 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
       parentInputs.push(text);
       const part = typeof last.content === "string" ? last.content : last.content.find((part) => part.type === "text")?.text ?? "";
       const question = /^\[child \S+ asks ([^\]]+)\]/.exec(part);
+      if (question !== null && parentHolds) return fauxAssistantMessage("PARENT-HOLDS");
       if (question !== null) return fauxAssistantMessage([fauxToolCall("child_agent", { action: "escalate", questionId: question[1] ?? "", kind: "external", guess: "Proceed", why: "Configured escalation for retry tests" })], { stopReason: "toolUse" });
       if (part.startsWith("SPAWN ")) return fauxAssistantMessage([fauxToolCall("child_agent", spawnArgs(part.slice(6)))], { stopReason: "toolUse" });
     }
@@ -223,6 +227,29 @@ it.each(["answered", "failed", "stopped"] as const)("ends a managed child proces
   } finally { await registry.dispose(); }
 });
 
+it("reminds the parent once, after the reminder time, about a question it left unanswered", async () => {
+  parentHolds = true;
+  const run = await fixture();
+  await run.spawn({ name: "waiter", agent: "reader", message: "HOLD" });
+  await vi.waitFor(() => { expect(run.parentInputs.some((text) => text.startsWith("[child waiter asks q:"))).toBe(true); });
+  await vi.waitFor(async () => { expect((await run.children())[0]?.waitingForParent?.questionId).toMatch(/^q:/u); });
+  expect(run.parentInputs.some((text) => text.includes("still waits on"))).toBe(false);
+  await run.restart(1000000 + QUESTION_REMINDER_MS);
+  await vi.waitFor(() => { expect(run.parentInputs.filter((text) => text.startsWith("[child waiter still waits on q:"))).toHaveLength(1); });
+  expect(run.parentInputs.find((text) => text.includes("still waits on"))).toContain("A send does not answer it.");
+  await run.restart(1000000 + 3 * QUESTION_REMINDER_MS);
+  await sleep(300);
+  expect(run.parentInputs.filter((text) => text.includes("still waits on"))).toHaveLength(1);
+});
+it("sends no reminder for a question the parent escalated to the user", async () => {
+  const run = await fixture();
+  await run.spawn({ name: "waiter", agent: "reader", message: "HOLD" });
+  await vi.waitFor(async () => { expect((await run.children())[0]?.questions).toHaveLength(1); });
+  expect((await run.children())[0]?.waitingForParent).toBeUndefined();
+  await run.restart(1000000 + 2 * QUESTION_REMINDER_MS);
+  await sleep(300);
+  expect(run.parentInputs.some((text) => text.includes("still waits on"))).toBe(false);
+});
 it("refuses missing tools with catalog alternatives, unless explicitly allowed", async () => {
   const run = await fixture();
   expect(JSON.stringify(await run.spawn({ name: "refused", agent: "missing" }))).toContain("unobtainable");

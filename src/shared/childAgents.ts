@@ -24,4 +24,6 @@ export interface DurableChildSummary extends ChildActivity {
   retry?: ChildRetry;
   /** Open questions, oldest first. */
   questions: { questionId: string; question: string; askedAt: number }[];
+  /** The oldest question that waits for the parent agent's answer or escalation. The child does nothing until then. */
+  waitingForParent?: { questionId: string; askedAt: number };
 }

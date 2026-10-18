@@ -276,10 +276,21 @@ async function gitMatch(action: string | undefined, tokens: string[], cwd: strin
     return match("destroy-local", "Remove a dirty or unreadable Git worktree");
   }
   if (action === "branch" && (tokens.some(t => /^-[^-]*D/u.test(t)) || (flag(tokens, "--delete", "d") && flag(tokens, "--force", "f")))) {
+    const names = operands(tokens);
     try {
       const merged = (await reads.git(cwd, ["branch", "--format=%(refname:short)", "--merged", "HEAD"])).trim().split("\n");
-      if (operands(tokens).every(t => merged.includes(t))) return undefined;
+      if (names.every(t => merged.includes(t))) return undefined;
     } catch { /* Unknown is not merged. */ }
+    // A local main that was not fast-forwarded makes a landed branch look unmerged. The fetched default branch of
+    // origin holds every commit of a branch merged into it, so deleting that branch loses nothing. A stale fetch
+    // only gates more.
+    try {
+      const defaultRef = (await reads.git(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD"])).trim();
+      if (defaultRef.startsWith("refs/remotes/origin/") && defaultRef !== "refs/remotes/origin/HEAD") {
+        const merged = (await reads.git(cwd, ["branch", "--format=%(refname:short)", "--merged", defaultRef])).trim().split("\n");
+        if (names.length > 0 && names.every(t => merged.includes(t))) return undefined;
+      }
+    } catch { /* No known remote default branch: HEAD alone decides. */ }
     return match("destroy-local", "Delete an unmerged Git branch");
   }
   return undefined;

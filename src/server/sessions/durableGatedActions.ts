@@ -14,7 +14,7 @@ import { durableChildRunMetadata } from "./durableChildAgents.js";
 import { logDecision } from "./durableDecisions.js";
 import { WorkflowError } from "../resources/workflowLibrary.js";
 
-export const GATED_ACTION_GUIDANCE = "Irreversible actions and actions outside the project in the user's name are gated. While approval waits, keep working on parts that do not depend on it. Do not retry the blocked call; its result will arrive as a message. Discarding files in a scratch clone under /tmp or in a child worktree is not gated: run the Git command from that tree, or name it with git -C <path>. A cd joined to the command with && or | still gates.";
+export const GATED_ACTION_GUIDANCE = "Irreversible actions and actions outside the project in the user's name are gated. While approval waits, keep working on parts that do not depend on it. Do not retry the blocked call; its result will arrive as a message. Discarding files in a scratch clone under /tmp or in a child worktree is not gated: run the Git command from that tree, name it with git -C <path>, or start with cd <path> &&. Any later cd, a pipe, a loop or a variable cannot be checked and gates, so write each worktree path and branch name literally. git branch -D is not gated when HEAD or origin's default branch already holds the branch. Pushes to a default branch always gate: put the pushes that are ready into one call, so the user approves them once.";
 /* eslint-disable @typescript-eslint/consistent-type-definitions */
 type RunInput = { parent: ConversationId; id: string; cwd: string; nestedTools?: string };
 type RunState = { phase: "ready" } | { phase: "unknown" };

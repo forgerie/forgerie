@@ -31,4 +31,11 @@ describe("a child's last tool line", () => {
     expect(lastToolLine({ busy: true, lastTool: null }, at).text).toBe("Last tool: Unavailable");
     expect(lastToolLine({ busy: true }, at).text).toBe("Last tool: Unavailable");
   });
+  it("says a quiet child waits for its parent's answer, not that it may be stuck", () => {
+    const at = 1_000_000;
+    const child = { busy: true, lastTool: { name: "bash", at }, waitingForParent: { questionId: "q:313", askedAt: at } };
+    expect(lastToolLine(child, at + 65 * minute)).toEqual({ text: "Waiting for the parent agent to answer q:313, asked 65 min ago", quiet: false });
+    expect(lastToolLine(child, at + 10_000).text).toBe("Waiting for the parent agent to answer q:313, asked under a minute ago");
+    expect(childSummarySchema.parse({ ...CHILDREN[0], waitingForParent: child.waitingForParent }).waitingForParent).toEqual(child.waitingForParent);
+  });
 });

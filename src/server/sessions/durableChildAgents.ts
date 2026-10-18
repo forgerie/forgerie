@@ -186,7 +186,11 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
       await runtime.commit(async (tx) => {
         const next = (report?: string, suppressed: "duplicate" | "aborted" = "aborted"): { status: "running"; checkpoint: ReporterState } => ({ status: "running", checkpoint: report === undefined ? { phase: "report", suppressed } : { phase: "report", report } });
         if (settled.status === "unanswered") {
-          return next(settled.reason === "aborted" ? undefined : `[subagent ${name} failed: ${settled.reason}${detail === undefined ? "" : `: ${detail}`}]`);
+          if (settled.reason === "aborted") return next();
+          // A failed input is not a dead child: a later steer or retry can still be running. Say so, or the parent
+          // starts a replacement that edits the same files.
+          const stillRunning = (await tx.doc(LiveDoc, conversationId)).run !== undefined;
+          return next(`[subagent ${name} failed: ${settled.reason}${detail === undefined ? "" : `: ${detail}`}${stillRunning ? `. ${childStillRunningNote(name)}` : ""}]`);
         }
         if (settled.type !== "input") return next();
         const agent = (await tx.doc(Children, runtime.conversationId)).agents[name];
@@ -271,7 +275,8 @@ async function parentOf(api: CommitApi, context: Context): Promise<ConversationI
 }
 
 /** Saving the question and outbox is atomic. Queued questions stay pending until placement, including across aborts. */
-const QuestionDelivery = defineTask<{ questionId: string; text: string }, InputPlacementState, null>({
+// requestId is absent on the original question delivery, so outboxes saved before reminders replay unchanged.
+const QuestionDelivery = defineTask<{ questionId: string; text: string; requestId?: string }, InputPlacementState, null>({
   name: "forgerie.child-question-delivery", version: 1, initial: () => ({ phase: "deliver" }),
   phases: { deliver: async (task, runtime, context) => {
     const question = (await runtime.snapshot(Questions, runtime.conversationId, context))?.items[task.input.questionId];
@@ -279,9 +284,38 @@ const QuestionDelivery = defineTask<{ questionId: string; text: string }, InputP
       await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
       return;
     }
-    await deliverInputUntilPlaced(runtime, task.state.checkpoint, { requestId: `child-question:${task.input.questionId}`, content: task.input.text,
+    await deliverInputUntilPlaced(runtime, task.state.checkpoint, { requestId: task.input.requestId ?? `child-question:${task.input.questionId}`, content: task.input.text,
       previousRecipient: runtime.conversationId, selectRecipient: () => Promise.resolve(runtime.conversationId) }, context);
   } },
+  abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+});
+
+/** How long a question may wait for the parent before Forgerie reminds it once. Holds in the audit ran 65 to 121 min. */
+export const QUESTION_REMINDER_MS = 10 * 60_000;
+
+/**
+ * One reminder to the parent, only while the question still waits for the parent's answer or escalation. A question
+ * escalated to the user gets none: the parent cannot act on it. The Harness clock sets the time, so it survives restart.
+ */
+type ReminderState = { phase: "start" } | { phase: "wait"; until: number };
+const QuestionReminder = defineTask<{ questionId: string }, ReminderState, null>({
+  name: "forgerie.child-question-reminder", version: 1, initial: () => ({ phase: "start" }),
+  phases: {
+    start: (_task, runtime, context) => runtime.commit(() => ({ status: "running", checkpoint: { phase: "wait", until: runtime.now() + QUESTION_REMINDER_MS } }), context),
+    wait: async (task, runtime, context) => {
+      await runtime.sleep(task.state.checkpoint.until, context);
+      await runtime.commit(async (tx) => {
+        const { questionId } = task.input;
+        const question = (await tx.doc(Questions, runtime.conversationId)).items[questionId];
+        if (question?.answer === null && question.closed !== true && question.routing?.kind === "parent") {
+          await tx.createTask(QuestionDelivery, { questionId, requestId: `child-question-reminder:${questionId}`,
+            text: `[child ${question.childName} still waits on ${questionId}, asked over ${String(QUESTION_REMINDER_MS / 60_000)} min ago] ${question.question}\nThe child does nothing until you call child_agent with action answer (name ${question.childName}, questionId ${questionId}) or escalate. A send does not answer it.` },
+            { conversationId: runtime.conversationId, ownership: { kind: "conversation" }, background: true });
+        }
+        return { status: "terminal", outcome: { status: "completed", result: null } };
+      }, context);
+    },
+  },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });
 
@@ -302,6 +336,7 @@ const askHumanTool = defineTool({
       const childName = Object.entries(agents).find(([, agent]) => agent.conversationId === api.conversationId)?.[0] ?? "child";
       doc.items[questionId] = { child: api.conversationId, childName, question: args.question, answer: null, askedAt: Date.now(), routing: { kind: "parent" } };
       await tx.createTask(QuestionDelivery, { questionId, text: `[child ${childName} asks ${questionId}] ${args.question}` }, { conversationId: parentId, ownership: { kind: "conversation" }, background: true });
+      await tx.createTask(QuestionReminder, { questionId }, { conversationId: parentId, ownership: { kind: "conversation" }, background: true });
     }, context);
     for (;;) {
       const item = (await api.snapshot(Questions, parentId, context))?.items[questionId];
@@ -565,7 +600,10 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
           const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(action === "send" ? { workflowSend: true } : {}), ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
           state.reporters[String(api.taskId)] = reporter;
           await associateWorkflowChild(tx, api.conversationId, agent.conversationId, reporter, name);
-          if (action === "send") return refresh ? `Sent to ${name}.` : `Sent to ${name}. Its agent file ${String(agent.agent)} is gone, so it keeps the tools it was started with.`;
+          if (action === "send") {
+            const waiting = openQuestionNote(parentQuestions((await tx.doc(Questions, api.conversationId)).items, name), name);
+            return `${refresh ? `Sent to ${name}.` : `Sent to ${name}. Its agent file ${String(agent.agent)} is gone, so it keeps the tools it was started with.`}${waiting}`;
+          }
           return `Started ${name}${profile === undefined ? "" : ` (${profile.name})`}.${runtime === undefined ? "" : runtimeGaps(runtime)}`;
         }, context);
         const current = (await api.snapshot(Children, api.conversationId, context))?.agents[name];
@@ -574,7 +612,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
     },
   });
   const extensions = {
-    parent: [defineExtension({ name: "forgerie.child-agents", tasks: [Anchor, Reporter, QuestionDelivery], tools: [childTool] })],
+    parent: [defineExtension({ name: "forgerie.child-agents", tasks: [Anchor, Reporter, QuestionDelivery, QuestionReminder], tools: [childTool] })],
     childOnly: [ChildTools],
     refresh: () => durableChildExtensions(options),
   };
@@ -704,9 +742,16 @@ async function childRows(state: ChildRowsState | undefined, questionState: { ite
       questions: questions.filter(([, question]) => question.child === agent.conversationId && question.answer === null && question.closed !== true && (question.routing === undefined || question.routing.kind === "user"))
         .map(([questionId, question]) => ({ questionId, question: question.question, askedAt: question.askedAt }))
         .sort((a, b) => a.askedAt - b.askedAt),
+      ...waitingForParent(questions, agent.conversationId),
     };
   }));
   return children.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** The oldest question of this child that waits for the parent, so a quiet child reads as waiting, not stuck. */
+function waitingForParent(questions: readonly [string, ChildQuestion][], child: ConversationId): Pick<DurableChildSummary, "waitingForParent"> {
+  const [found] = parentQuestions(Object.fromEntries(questions.filter(([, question]) => question.child === child)));
+  return found === undefined ? {} : { waitingForParent: { questionId: found[0], askedAt: found[1].askedAt } };
 }
 
 async function ownedChild(harness: Harness, parent: ConversationId, conversationId: number, context: Context) {
@@ -798,13 +843,47 @@ export async function stopChild(harness: Harness, parent: Conversation, conversa
   });
 }
 
+/** Part of a failure report when the child still runs other work, such as a later message or a retry. */
+export function childStillRunningNote(name: string): string {
+  return `This request failed, but ${name} is still running other work. Do not start a replacement for the same files; wait for its report, or stop it first`;
+}
+
+/**
+ * The stored key of a question. Parents often drop the `q:` prefix of the handle in the notification ("313" for
+ * "q:313"); accept that only when the prefixed key exists. Ownership and state checks still apply to the result.
+ */
+export function questionKey(items: Readonly<Record<string, unknown>>, questionId: string): string | undefined {
+  const id = questionId.trim();
+  if (Object.hasOwn(items, id)) return id;
+  const prefixed = `q:${id}`;
+  return /^\d+$/u.test(id) && Object.hasOwn(items, prefixed) ? prefixed : undefined;
+}
+
+/** Questions from children that wait for the parent's `answer` or `escalate`, oldest first. */
+function parentQuestions(items: Readonly<Record<string, ChildQuestion>>, childName?: string): [string, ChildQuestion][] {
+  return Object.entries(items).filter(([, question]) => question.answer === null && question.closed !== true && question.routing?.kind === "parent"
+    && (childName === undefined || question.childName === childName)).sort(([, a], [, b]) => a.askedAt - b.askedAt);
+}
+
+/** A `send` does not answer a waiting `ask_human`. Tell the parent which handle does. */
+function openQuestionNote(questions: readonly [string, ChildQuestion][], name: string): string {
+  if (questions.length === 0) return "";
+  const handles = questions.map(([id]) => id).join(", ");
+  return ` ${name} is still waiting on ${questions.length === 1 ? "question" : "questions"} ${handles}. This message does not answer it: call child_agent with action answer (name ${name}, questionId ${questions[0]?.[0] ?? ""}) or escalate.`;
+}
+
 type ChildResolution = { action: "answer"; name: string; questionId: string; answer: string; reason: string }
   | { action: "escalate"; questionId: string; kind: "irreversible" | "external" | "contradicts" | "stuck"; guess: string; why: string };
 
 async function resolveChildQuestion(tx: Tx, parent: ConversationId, args: ChildResolution, receipt: string): Promise<string> {
   const items = (await tx.doc(Questions, parent)).items;
-  const item = Object.hasOwn(items, args.questionId) ? items[args.questionId] : undefined;
-  if (item === undefined) throw new WorkflowError(404, "Child question not found");
+  const key = questionKey(items, args.questionId);
+  const item = key === undefined ? undefined : items[key];
+  if (key === undefined || item === undefined) {
+    const open = parentQuestions(items, args.action === "answer" ? args.name : undefined).map(([id]) => id);
+    throw new WorkflowError(404, `Child question ${args.questionId} not found. ${open.length === 0 ? "No question waits for you." : `Open questions: ${open.join(", ")}. Pass the whole handle, including q:.`}`);
+  }
+  args = { ...args, questionId: key };
   if (item.resolvedBy === receipt) return "Question already resolved by this call.";
   if (item.answer !== null || item.closed === true || item.routing?.kind !== "parent") throw new WorkflowError(409, "Child question is not waiting for the parent");
   if (args.action === "answer" && item.childName !== args.name) throw new WorkflowError(404, "Question does not belong to that child");
@@ -939,7 +1018,7 @@ async function sharedWriterRefusal(tx: Tx, parent: ConversationId): Promise<stri
       const input = task?.input;
       if (task?.state.status !== "terminal" && typeof input === "object" && input !== null && !Array.isArray(input) && input["conversationId"] === agent.conversationId) busy = true;
     }
-    if (busy) return `Cannot spawn a shared writer: child ${name} is still busy in the same working directory. Use isolation: worktree or wait for ${name} to finish.`;
+    if (busy) return `Cannot spawn a shared writer: child ${name} is still busy in the same working directory. Use isolation: worktree or wait for ${name} to finish. A worktree does not protect files outside it: do not point two children at the same absolute paths.`;
   }
   return undefined;
 }

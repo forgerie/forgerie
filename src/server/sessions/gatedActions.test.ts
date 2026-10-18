@@ -181,6 +181,33 @@ it("uses real read-only Git observations for dirty checkout forms and unmerged b
   } finally { await rm(root, {recursive: true, force: true}); }
 });
 
+it("deletes a branch that origin's default branch already holds, even when local main is behind", async () => {
+  const base = await mkdtemp(join(tmpdir(), "forgerie-classifier-remote-"));
+  const root = join(base, "work"); const remote = join(base, "remote.git");
+  const run = (cwd: string, ...args: string[]) => promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8"});
+  const git = (...args: string[]) => run(root, ...args);
+  const observed: GatedActionReads = {...reads, git: async (_cwd, args) => (await git(...args)).stdout};
+  const classify = async (command: string) => (await gatedAction("bash", {command}, root, observed))?.category;
+  try {
+    await promisify(execFile)("git", ["init", "--bare", "-b", "main", remote]);
+    await promisify(execFile)("git", ["init", "-b", "main", root]);
+    await git("config", "user.name", "Test"); await git("config", "user.email", "test@example.invalid");
+    await writeFile(join(root, "base.txt"), "base"); await git("add", "base.txt"); await git("commit", "-m", "Base");
+    await git("remote", "add", "origin", remote); await git("push", "-q", "origin", "main"); await git("remote", "set-head", "origin", "main");
+    // The branch landed on origin/main, but local main was never fast-forwarded.
+    await git("checkout", "-q", "-b", "landed"); await writeFile(join(root, "landed.txt"), "x"); await git("add", "landed.txt"); await git("commit", "-m", "Landed");
+    await git("push", "-q", "origin", "landed:main");
+    await git("checkout", "-q", "-b", "unmerged", "main"); await writeFile(join(root, "other.txt"), "y"); await git("add", "other.txt"); await git("commit", "-m", "Unmerged");
+    await git("checkout", "-q", "main");
+    expect(await classify("git branch -D landed")).toBeUndefined();
+    expect(await classify("git branch -D unmerged")).toBe("destroy-local");
+    expect(await classify("git branch -D landed unmerged")).toBe("destroy-local");
+    // Without a known remote default branch, only HEAD can prove a merge.
+    await git("remote", "set-head", "origin", "--delete");
+    expect(await classify("git branch -D landed")).toBe("destroy-local");
+  } finally { await rm(base, {recursive: true, force: true}); }
+});
+
 it("discards files in a disposable worktree without approval, and reads the root of the tree the action changes", async () => {
   const asked: string[] = [];
   const scratch: GatedActionReads = {
