@@ -1,5 +1,12 @@
 #!/bin/sh
 # Root prepare also runs the UI's locked install. Keep each worktree independent.
 set -eu
-cd "${1:?expected new worktree path}"
+target="${1:?expected new worktree path}"
+trap 'status=$?; if [ "$status" -ne 0 ]; then printf "Dependency setup failed (exit %s) at %s. From that worktree root, run: npm ci\n" "$status" "$target" >&2; fi' 0
+cd "$target"
+# Keep the receipt outside the checkout so it does not count as retained work.
+# Both Git's first-checkout hook and Forgerie's lifecycle runner use this hook.
+marker=$(git rev-parse --git-path forgerie-post-create.done)
+[ ! -f "$marker" ] || exit 0
 npm ci --no-audit --no-fund
+: > "$marker"

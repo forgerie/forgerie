@@ -99,7 +99,11 @@ export class SessionWorktrees {
         const existing = (await discoverGitWorktrees(record.repo)).find((item) => item.path === record.path && item.prunable !== true);
         if (existing === undefined) {
           await mkdir(dirname(record.path), { recursive: true });
-          await git(record.repo, "worktree", "add", "-b", record.branch, record.path, record.sourceCommit ?? record.defaultBranch);
+          // Leave setup to the lifecycle hook below, not Git's first-checkout hook.
+          // It streams setup logs and allows 15 minutes rather than Git's 2-minute deadline.
+          await execute("git", ["-C", record.repo, "worktree", "add", "-b", record.branch, record.path, record.sourceCommit ?? record.defaultBranch], {
+            env: { ...sanitizedGitEnv(), FORGERIE_MANAGED_WORKTREE_SETUP: "1" }, maxBuffer: 16 * 1024 * 1024, timeout: 120_000,
+          });
         } else if (existing.branch !== record.branch) throw new Error("Setup checkout no longer has its owned branch");
         record = await this.change(record.id, { setup: { phase: "hook", log: "" } });
         let writes = Promise.resolve();

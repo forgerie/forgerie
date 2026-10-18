@@ -106,9 +106,26 @@ npm ci
 ```
 
 This repository's executable post-create hook runs `npm ci` in the new worktree.
-The root `prepare` script also installs `ui/` from its lockfile. A manual
-`git worktree add` does not run the hook; run `npm ci` from that worktree's root.
-Separate installs cost disk space and setup time. Before staged validation,
+The root `prepare` script also installs `ui/` from its lockfile. With
+`core.hooksPath=.githooks` (configured by root `prepare`), a manual
+`git worktree add` runs that same hook through `.githooks/post-checkout`.
+Only a null previous HEAD, checkout flag `1`, and a linked Git worktree admit
+setup. Normal branch switches, file checkouts, and the main checkout do nothing.
+Forgerie's managed creation defers setup to its lifecycle runner, which streams
+logs and retains the 15-minute hook timeout instead of Git's 2-minute deadline.
+
+A successful setup writes `forgerie-post-create.done` in that worktree's private
+Git directory. Both entry points share this receipt and do not repeat the install.
+It is a one-time setup receipt, not a dependency-health check. A failure leaves no
+receipt and prints `npm ci` as the recovery command. Git can leave the new checkout
+in place after a hook failure; from that worktree root, run `npm ci`, or rerun
+`.forgerie/hooks/worktree-post-create "$PWD"` to also record successful setup.
+Use Forgerie's setup retry for a failed managed allocation.
+
+Manual creation now takes installation time and can require network access.
+`git worktree add --no-checkout` does not run setup. After populating that checkout,
+run `npm ci` from its root. Git hooks disabled by configuration also need this
+explicit command. Separate installs cost disk space and setup time. Before staged validation,
 `node scripts/verify-staged.mjs --check-dependencies` checks both local installs
 and their executable tools. It accepts working directory links, but rejects
 missing, cache-only, broken, or nested installs with an `npm ci` recovery command.

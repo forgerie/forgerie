@@ -1,0 +1,26 @@
+#!/bin/sh
+# Git supplies a null previous HEAD only for the first worktree checkout.
+set -eu
+[ "$#" -eq 3 ] && [ "$3" = 1 ] || exit 0
+case "$1" in
+  0000000000000000000000000000000000000000|0000000000000000000000000000000000000000000000000000000000000000) ;;
+  *) exit 0 ;;
+esac
+# Managed creation runs the hook itself, with streaming logs and a 15-minute timeout.
+[ "${FORGERIE_MANAGED_WORKTREE_SETUP:-}" != 1 ] || exit 0
+git_dir=$(git rev-parse --absolute-git-dir)
+common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+[ "$git_dir" != "$common_dir" ] || exit 0
+target=$(git rev-parse --show-toplevel)
+hook="$target/.forgerie/hooks/worktree-post-create"
+[ -x "$hook" ] || exit 0
+export FORGERIE_WORKTREE_PATH="$target"
+FORGERIE_REPO_PATH=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+export FORGERIE_REPO_PATH
+if "$hook" "$target"; then
+  exit 0
+else
+  status=$?
+  printf 'Worktree setup failed (exit %s) at %s. From that worktree root, run: npm ci\n' "$status" "$target" >&2
+  exit "$status"
+fi

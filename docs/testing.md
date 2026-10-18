@@ -160,7 +160,13 @@ wait for the lock to age out or delete it in the check: that would hide the fail
 
 Run `npm ci` from the worktree root before verification. Root `prepare` installs
 `ui/` with its own lockfile. The repository's post-create hook does this for
-Forgerie-created worktrees; manual Git worktrees need the command explicitly.
+Forgerie-created worktrees. This repository's `.githooks/post-checkout` also runs
+it on the first checkout of a manual linked worktree when Git hooks are enabled.
+The shared post-create hook records success in the private Git directory to avoid
+a second install. `--no-checkout` creation and disabled hooks still need `npm ci`
+explicitly. Run `npm test -- scripts/worktree-post-checkout.test.mjs` to exercise
+real manual/managed Git creation, setup failure/retry, and ordinary checkouts
+with a controlled npm executable (no dependency downloads).
 `node scripts/verify-staged.mjs --check-dependencies` checks the whole current
 root and browser dependency environments without running staged validation.
 Staged validation runs this check before the cached typecheck. It accepts working
