@@ -10,6 +10,11 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 
+if (process.argv[2] === "--daemon") {
+  await import("./verify-daemon-session-restart.mjs");
+  process.exit(process.exitCode ?? 0);
+}
+
 const execute = promisify(execFile);
 const owner = process.argv[2] === "--owner";
 if (!owner) {
@@ -17,8 +22,8 @@ if (!owner) {
     assert.equal(process.platform, "linux");
     await execute("systemctl", ["--user", "show-environment"], { timeout: 5000 });
   } catch {
-    console.log("SKIP: Durable restart proof requires Linux user-systemd.");
-    process.exit(0);
+    console.error("UNVERIFIED: Durable restart proof requires Linux user-systemd.");
+    process.exit(2);
   }
 }
 const root = owner ? process.argv[3] : await mkdtemp(join(tmpdir(), "fg-durable-restart-"));

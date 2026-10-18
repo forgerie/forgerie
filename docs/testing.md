@@ -125,15 +125,36 @@ Keep test-file isolation. Tests change environment variables, globals, filesyste
 ## Durable session supervisor acceptance
 
 On Node 24, build the server with `npx tsc -p tsconfig.build.json`, then run
-`npm run verify:durable-restart`. The proof cleanly skips without Linux
-user-systemd. It uses a uniquely named temporary unit with
+`npm run verify:durable-restart`. Without Linux user-systemd, both modes
+print `UNVERIFIED` and exit 2, not a pass. It uses a uniquely named temporary unit with
 `KillMode=control-group`, a temporary profile/data directory, and the faux
 provider. It restarts while safe and unsafe tools are in flight, then uses
 startup recovery without another input. It checks that the safe call uses the
 new owner and the unsafe call reports interruption without running twice.
 It stops and cleans the proof unit in all cases, and retains shutdown and
 recovery logs on failure. It never contacts deployed Forgerie services.
-This exercises the journal and startup recovery seam, not the HTTP daemon.
+This small proof exercises the journal and startup recovery seam, not the HTTP daemon.
+
+Run `npm run verify:durable-restart -- --daemon` for production-daemon acceptance.
+It starts the compiled `dist/server/sessiond.js` entry point, not a replacement
+signal handler. Each case uses a unique temporary user-systemd unit, an empty
+profile/data directory, a faux provider loaded through a profile extension, and
+an attached native browser WebSocket. It restarts with a tool in flight. The
+graceful case must stop within `TimeoutStopSec=10s` without timeout or shutdown
+errors. The forced case sends SIGKILL to the proof unit. Both require startup
+recovery before any new prompt or browser attachment, interruption without
+repeating the unsafe call, and successful extension, read, and bash tools under
+the new owner. All proof units are stopped; failed profiles and daemon/supervisor
+logs are retained. No live units, profiles, credentials, or provider APIs are used.
+This is a socket-level browser attachment, not browser UI acceptance.
+
+Current-repo result (2026-10-18): graceful restart passed. Immediate startup after
+SIGKILL failed with `ELOCKED` on the temporary `data/workspace-services` directory.
+The acceptance command remains standalone and is **not connected to deployment
+preflight** while that real ownership defect is present. The staged launcher in
+`scripts/redeploy-when-idle.sh` delegates publication checks to `src/deployment.ts`;
+wire acceptance there only after the defect is fixed and both cases pass. Do not
+wait for the lock to age out or delete it in the check: that would hide the failure.
 
 ## Worktree dependency preflight
 
