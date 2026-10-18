@@ -6,16 +6,23 @@ Optional [risk labels](decision-hints.md#risk-labels) add gateway opinions only 
 
 ## Default categories
 
-All six categories are gated. `src/shared/autonomyPolicy.ts` owns their schema, labels and defaults. The injectable `AutonomyPolicySource.read(cwd)` returns defaults in this slice. Version 1 already includes `autoPassStops: false`; configurable policy storage comes in slice 4.
+All seven categories are gated by default. `src/shared/autonomyPolicy.ts` owns their schema, labels and defaults. The injectable `AutonomyPolicySource.read(cwd)` returns defaults in this slice. One setting relaxes one category: see [Pushes to the default branch](#pushes-to-the-default-branch). Version 1 already includes `autoPassStops: false`; configurable policy storage comes in slice 4.
 
 | Category | Recognised actions |
 | --- | --- |
-| `force-push` | Force flags, positive forced refspecs, pushes to the observed remote default branch, `--all`/`--branches` and mirror pushes. Unknown repository state and implicit destinations gate. Explicit refspecs still count with `--tags`; `--repo` names the remote. |
+| `force-push` | Force flags, positive forced refspecs, `--all`/`--branches` and mirror pushes. Unknown repository state, an unknown default branch and implicit destinations gate here, because a configured refspec can force. Explicit refspecs still count with `--tags`; `--repo` names the remote. |
+| `push-default` | An unforced push with explicit refspecs to the observed remote default branch, including `HEAD` on that branch. |
 | `destroy-local` | Hard reset; clean except preview; checkout/restore of dirty paths, including checkout pathspecs and forced dirty-tree switches; forced or dirty worktree removal; forced deletion of an unmerged branch (`-D`, `--delete --force`, `-d -f`, `-df`). A branch counts as merged when `HEAD` or the fetched default branch of `origin` (`refs/remotes/origin/HEAD`) holds it, so a landed branch can be deleted before local `main` is fast-forwarded; a stale fetch only gates more. Unreadable dirty/merge state gates. Discarding files in a [disposable worktree](#disposable-worktrees) is not gated. |
 | `delete-remote` | Push deletion flags or deletion refspecs; GitHub release delete; GitHub API DELETE. |
 | `github-merge-close` | `github_write` merge/close; `gh pr merge/close`; issue close unless GitHub confirms `agent-filed`. The issue lookup uses the GitHub client. Lookup failure and pull requests gate. |
 | `publish` | npm publish, including `--dry-run`; GitHub release create. |
 | `messages` | Tool names ending in `ebay_seller_update`, `ebay_seller_offer_respond` or `ebay_seller_message_reply`, including prefixed MCP names. |
+
+### Pushes to the default branch
+
+**Settings > Plugins > Workflow autonomy > Push to the default branch without asking** lists folders, separated by commas, such as `~/code/sandbox`. A `push-default` call runs without a gate when its repository lies inside one of them. The repository is the main checkout that owns the Git directory (`git rev-parse --git-common-dir`), so a linked worktree anywhere counts as its main checkout's repository, and `git -C <path>` decides by `<path>`, not by the session's folder. Both sides compare by real path, so `~/code` does not match `~/code-work`. The default `none` asks for every push. Relative paths and `/` are ignored. Turning the plugin off asks again.
+
+Only `push-default` is affected. Force-pushes, pushes of all branches, unknown destinations, deletions, publishes and merges still wait for you. An allowed push leaves no gate record; the transcript keeps the command. The cost: a change reaches the shared default branch without you reading it first, and you undo a bad one with a revert. Allow only folders whose default branches are yours.
 
 ### Disposable worktrees
 

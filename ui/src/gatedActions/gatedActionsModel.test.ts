@@ -43,7 +43,8 @@ describe("the transcript entry", () => {
 
 describe("what the card says", () => {
   it("names every category with the shared label, and says what cannot be undone and what Approve does", () => {
-    expect(CATEGORY_LABEL["force-push"]).toBe("Force-push or push to the default branch");
+    expect(CATEGORY_LABEL["force-push"]).toBe("Force-push, or push all or unknown branches");
+    expect(CATEGORY_LABEL["push-default"]).toBe("Push to the default branch");
     for (const category of GATED_CATEGORIES) {
       expect(CATEGORY_LABEL[category]).not.toBe("");
       expect(consequenceOf(category)).toMatch(/\. Approve runs it once, exactly as shown\.$/u);
@@ -56,7 +57,7 @@ describe("what the card says", () => {
     expect(askerOf("parent")).toBe("the parent");
     expect(askerOf("build")).toBe("build");
     expect(askerOf("child ")).toBe("child ");
-    expect(gatedMeta(PUSH_ENTRY)).toBe("Force-push or push to the default branch, asked by build");
+    expect(gatedMeta(PUSH_ENTRY)).toBe("Force-push, or push all or unknown branches, asked by build");
     expect(gatedMeta({ by: "parent", category: "publish" })).toBe("Publish packages or releases, asked by the parent");
   });
 

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, realpath, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
@@ -51,8 +51,8 @@ const cases: [string, string | undefined, RepositoryState?][] = [
   ["git push --push-option --tags origin", "force-push"], ["git push -o --tags origin", "force-push"],
   ["git push --tags -o --no-tags origin", undefined], ["git push --repo --tags", "force-push"],
   ["git push --tags --no-tags --repo origin", "force-push"], ["git push --no-tags --tags --repo origin", undefined],
-  ["git push --tags --no-tags origin main", "force-push"], ["git push --tags --no-tags origin feature", undefined],
-  ["git push -n origin main", "force-push"], ["git push --no-dry-run origin main", "force-push"],
+  ["git push --tags --no-tags origin main", "push-default"], ["git push --tags --no-tags origin feature", undefined],
+  ["git push -n origin main", "push-default"], ["git push --no-dry-run origin main", "push-default"],
   ["git push -n --no-dry-run -f origin feature", "force-push"], ["git push -n --delete origin feature", "delete-remote"],
   ["git push -n origin feature", undefined], ["git push --no-dry-run -n origin feature", undefined],
   ["command -p git push -f", "force-push"], ["command -v git", undefined],
@@ -70,7 +70,7 @@ const cases: [string, string | undefined, RepositoryState?][] = [
   ["npm --cache /tmp/cache --loglevel silent publish", "publish"],
   ["npm --access public view publish", undefined], ["npm -wpackage view publish", undefined],
   ["cd x && git push origin feature", undefined], ["cd x && git push origin feature 2>&1 | tail -3", undefined],
-  ["cd ~/x && cd y && git push -q origin feature", undefined], ["cd x && git push origin main", "force-push"],
+  ["cd ~/x && cd y && git push -q origin feature", undefined], ["cd x && git push origin main", "push-default"],
   ["cd x || true && git push origin feature", "force-push"], ["cd x | cat && git push origin feature", "force-push"],
   ["cd \"$X\" && git push origin feature", "force-push"], ["true && cd x && git push origin feature", "force-push"],
   ["(cd x); git push origin feature", "force-push"],
@@ -84,9 +84,9 @@ const cases: [string, string | undefined, RepositoryState?][] = [
   ["cat <<EOF\n$(git push --force)\nEOF", "force-push"],
   ["cat <<'EOF'\n$(git push --force)\nEOF", undefined],
   ["cat <<EOF.txt\ndata\nEOF.txt\ngit push -f", "force-push"],
-  ["git push --tags origin main", "force-push"], ["git push --branches origin", "force-push"],
-  ["git push --repo origin main", "force-push"], ["git push --repo=origin main", "force-push"],
-  ["git push main --repo origin", "force-push"], ["git push --tags --repo origin main", "force-push"],
+  ["git push --tags origin main", "push-default"], ["git push --branches origin", "force-push"],
+  ["git push --repo origin main", "push-default"], ["git push --repo=origin main", "push-default"],
+  ["git push main --repo origin", "push-default"], ["git push --tags --repo origin main", "push-default"],
   ["git push --tags origin feature", undefined], ["git push --repo origin feature", undefined],
   ["git push --repo=origin feature", undefined], ["git push --tags origin", undefined],
   ["git push origin feature", "force-push", "unknown-remote"],
@@ -109,7 +109,7 @@ const cases: [string, string | undefined, RepositoryState?][] = [
   ["git push --force-with-lease", "force-push"], ["git -C x push -f", "force-push"],
   ['echo "git push -f"', undefined], ["git reset --soft", undefined], ["git clean -n", undefined],
   ["gh pr view", undefined], ["npm publish --dry-run", "publish"], ["npm publish", "publish"],
-  ["git push origin main", "force-push"], ["git push origin feature:main", "force-push"],
+  ["git push origin main", "push-default"], ["git push origin feature:main", "push-default"],
   ["git push --force origin feature", "force-push"], ["git push origin +feature", "force-push"],
   ["git push origin feature --force-with-lease=main:abc", "force-push"], ["git push --delete origin feature", "delete-remote"],
   ["git push origin :feature", "delete-remote"], ["git push origin --delete feature", "delete-remote"],
@@ -153,7 +153,7 @@ it("gates GitHub ownership lookup failure and all prefixed eBay tools", async ()
 it("gates a HEAD push on the default branch and keeps -C state reads in the target repository", async () => {
   const paths: string[] = [];
   const defaults: GatedActionReads = {...reads, git: (cwd, args) => { paths.push(cwd); return Promise.resolve(args.includes("--short") ? "main" : "refs/remotes/origin/main"); }};
-  expect((await gatedAction("bash", {command: "git -C x push -u origin HEAD"}, "/repo", defaults))?.category).toBe("force-push");
+  expect((await gatedAction("bash", {command: "git -C x push -u origin HEAD"}, "/repo", defaults))?.category).toBe("push-default");
   expect(paths.every(path => path === "/repo/x")).toBe(true);
 });
 it("uses real read-only Git observations for dirty checkout forms and unmerged branch aliases", async () => {
@@ -205,6 +205,26 @@ it("deletes a branch that origin's default branch already holds, even when local
     // Without a known remote default branch, only HEAD can prove a merge.
     await git("remote", "set-head", "origin", "--delete");
     expect(await classify("git branch -D landed")).toBe("destroy-local");
+  } finally { await rm(base, {recursive: true, force: true}); }
+});
+
+it("names the main checkout of a default-branch push, also from a linked worktree, and keeps a force-push separate", async () => {
+  const base = await mkdtemp(join(tmpdir(), "forgerie-classifier-push-"));
+  const root = join(base, "repo"); const remote = join(base, "remote.git"); const linked = join(base, "elsewhere", "wt");
+  const run = (cwd: string, ...args: string[]) => promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8"});
+  const observed: GatedActionReads = {...reads, git: async (cwd, args) => (await run(cwd, ...args)).stdout};
+  try {
+    await promisify(execFile)("git", ["init", "--bare", "-b", "main", remote]);
+    await promisify(execFile)("git", ["init", "-b", "main", root]);
+    await run(root, "config", "user.name", "Test"); await run(root, "config", "user.email", "test@example.invalid");
+    await writeFile(join(root, "base.txt"), "base"); await run(root, "add", "base.txt"); await run(root, "commit", "-m", "Base");
+    await run(root, "remote", "add", "origin", remote); await run(root, "push", "-q", "origin", "main"); await run(root, "remote", "set-head", "origin", "main");
+    await run(root, "worktree", "add", "-q", "-b", "feature", linked);
+    for (const cwd of [root, linked]) {
+      expect(await gatedAction("bash", {command: "git push origin HEAD:main"}, cwd, observed)).toEqual({category: "push-default", description: "Push to default branch main", repo: await realpath(root)});
+      expect((await gatedAction("bash", {command: "git push --force origin HEAD:main"}, cwd, observed))?.category).toBe("force-push");
+      expect((await gatedAction("bash", {command: "git push --all origin"}, cwd, observed))?.category).toBe("force-push");
+    }
   } finally { await rm(base, {recursive: true, force: true}); }
 });
 

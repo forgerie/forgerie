@@ -7,7 +7,7 @@ import { assertDecisionHintOffEquivalence } from "../decisions/decisionHintsOffE
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -24,7 +24,8 @@ import { defaultAutonomyPolicy } from "../../shared/autonomyPolicy.js";
 import { durableChildExtensions, listChildren } from "./durableChildAgents.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { decisions, decisionExtension } from "./durableDecisions.js";
-import { gatedActions, gatedActionsExtension, decideGatedAction, waitingGatedActions, gatedActionsChanged } from "./durableGatedActions.js";
+import { gatedActions, gatedActionsExtension, decideGatedAction, waitingGatedActions, gatedActionsChanged, gateToolCall, pushAllowed } from "./durableGatedActions.js";
+import { sanitizedGitEnv } from "../git/gitEnv.js";
 import { GATED_ACTIONS_DOC_KIND } from "./durableGateRecords.js";
 
 const roots: string[] = []; const journals: DurableSessionJournal[] = [];
@@ -175,6 +176,41 @@ it("reads the injectable policy and does not gate a disabled category", async ()
   const f = await fixture(); f.state.gated = false;
   const task = await call(f.journal); f.journal.harness.resume(); await f.journal.harness.waitForTask(task, context);
   expect(await gatedActions(f.journal.harness, f.journal.conversation.id, context)).toEqual([]); expect(f.state.runs).toBe(1);
+});
+it("allows a push to the default branch only for a repository inside an allowed folder, and still gates a force-push", async () => {
+  const f = await fixture();
+  const run = (cwd: string, ...args: string[]) => promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8"});
+  const mine = join(f.root, "mine"); const work = join(f.root, "work");
+  for (const folder of [mine, work]) {
+    const repo = join(folder, "repo"); const remote = join(folder, "remote.git");
+    await mkdir(folder, {recursive: true});
+    await promisify(execFile)("git", ["init", "--bare", "-b", "main", remote]); await promisify(execFile)("git", ["init", "-b", "main", repo]);
+    await run(repo, "config", "user.name", "Test"); await run(repo, "config", "user.email", "test@example.invalid");
+    await writeFile(join(repo, "a.txt"), "a"); await run(repo, "add", "a.txt"); await run(repo, "commit", "-m", "A");
+    await run(repo, "remote", "add", "origin", remote); await run(repo, "push", "-q", "origin", "main"); await run(repo, "remote", "set-head", "origin", "main");
+  }
+  const options = {parent: f.journal.conversation.id, harness: () => f.journal.harness, pushDefaultFolders: () => [mine],
+    reads: {git: async (cwd: string, args: readonly string[]) => (await run(cwd, ...args)).stdout, issueLabels: () => Promise.resolve([]), disposable: () => Promise.resolve(false)}};
+  // Each check needs its own tool task, as each real call has; the gate ID comes from it. The tasks never run here.
+  const gate = async (command: string) => gateToolCall(options, {name: "bash", arguments: {command}},
+    {conversationId: f.journal.conversation.id, taskId: await call(f.journal, "bash", {command})}, context);
+  expect(await gate(`git -C ${join(mine, "repo")} push origin HEAD:main`)).toBeUndefined();
+  // The -C target decides, not the conversation's folder.
+  expect(await gate(`git -C ${join(work, "repo")} push origin HEAD:main`)).toMatch(/^Blocked until the user approves/u);
+  expect(await gate(`git -C ${join(mine, "repo")} push --force origin HEAD:main`)).toMatch(/^Blocked until the user approves/u);
+  expect((await gatedActions(f.journal.harness, f.journal.conversation.id, context)).map(gate => gate.category).sort()).toEqual(["force-push", "push-default"]);
+});
+it("matches allowed folders by real path, not by text prefix", async () => {
+  const root = await mkdtemp(join(tmpdir(), "forgerie-push-folders-")); roots.push(root);
+  for (const folder of ["code/repo", "code-other/repo", "link-target/repo"]) await mkdir(join(root, folder), {recursive: true});
+  await symlink(join(root, "link-target"), join(root, "link"));
+  expect(await pushAllowed(join(root, "code/repo"), [join(root, "code")])).toBe(true);
+  expect(await pushAllowed(join(root, "code"), [join(root, "code")])).toBe(true);
+  expect(await pushAllowed(join(root, "code-other/repo"), [join(root, "code")])).toBe(false);
+  expect(await pushAllowed(join(root, "link-target/repo"), [join(root, "link")])).toBe(true);
+  expect(await pushAllowed(join(root, "code/repo"), [join(root, "missing")])).toBe(false);
+  expect(await pushAllowed(undefined, [root])).toBe(false);
+  expect(await pushAllowed(join(root, "code/repo"), [])).toBe(false);
 });
 it("returns independent gates newest first for separate calls", async () => {
   const f = await fixture(); await blocked(f); await sleep(2);

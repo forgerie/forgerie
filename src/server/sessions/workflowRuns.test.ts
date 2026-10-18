@@ -419,7 +419,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     await mkdir(join(agentDir, "agents"));
     await writeFile(join(agentDir, "agents/reviewer.md"), "---\nname: reviewer\ndescription: Reviews\ntools: work\n---\nReview the work.");
     modelAgent = "reviewer";
-    autonomy = { landStops: false, approveStops: false, reviewRounds: 1 };
+    autonomy = { landStops: false, approveStops: false, reviewRounds: 1, pushDefaultFolders: [] };
     await service.dispose(); service = openService();
     const ref = { id: (await service.start(root)).id, cwd: root };
     await new AgentDirPromptLibrary(agentDir).save({ name: "review-limit", body: "---\nworkflow:\n  version: 1\n  stages:\n    - { id: review, name: Review, workers: [{ name: alpha }] }\n---\nWait for instructions.\n" });
@@ -725,7 +725,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     const ownership = new SessionWorktreeStore(join(agentDir, "ownership.json"));
     await ownership.initialize();
     worktrees = new SessionWorktrees(ownership, { publish: () => undefined });
-    autonomy = { landStops: true, approveStops: true, reviewRounds: 2 };
+    autonomy = { landStops: true, approveStops: true, reviewRounds: 2, pushDefaultFolders: [] };
     await service.dispose(); service = openService();
     const ref = { id: (await service.start(root)).id, cwd: root };
     await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
@@ -753,7 +753,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     worktrees = new SessionWorktrees(ownership, { publish: () => undefined });
     // While alpha works in its worktree, main gains a different result.txt, so alpha's branch conflicts at landing.
     modelWork = async () => { await writeFile(join(root, "result.txt"), "MAIN-RESULT"); git("add", "result.txt"); git("commit", "-m", "Main moved"); };
-    autonomy = { landStops: true, approveStops: true, reviewRounds: 2 };
+    autonomy = { landStops: true, approveStops: true, reviewRounds: 2, pushDefaultFolders: [] };
     await service.dispose(); service = openService();
     const ref = { id: (await service.start(root)).id, cwd: root };
     await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
@@ -794,7 +794,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       wt("reset", "-q", "--hard", "main"); await writeFile(join(path, "result.txt"), "MAIN-RESULT\nCHILD-RESULT"); wt("add", "result.txt"); wt("commit", "-qm", "Child result, repaired");
     };
     repairLand = true;
-    autonomy = { landStops: true, approveStops: true, reviewRounds: 2 };
+    autonomy = { landStops: true, approveStops: true, reviewRounds: 2, pushDefaultFolders: [] };
     await service.dispose(); service = openService();
     ref = { id: (await service.start(root)).id, cwd: root };
     await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });

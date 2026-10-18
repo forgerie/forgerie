@@ -1,5 +1,7 @@
 import { decisionAnnotations, riskAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { launchRiskLabel, enabledRiskLabelSettings, type RiskLabelOptions } from "../decisions/riskLabels.js";
+import { realpath } from "node:fs/promises";
+import { isAbsolute, relative, sep } from "node:path";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { AgentDoc, LiveDoc, ToolTask, UsageDoc, defineExtension, defineTask, hook, section, type JsonObject, type CommitPublication, type Conversation, type ConversationId, type Harness, type HookApi, type ToolDiagnostic, type ToolExecutionApi, type Tx, type TaskRuntime } from "@earendil-works/pi-durable";
 import type { Usage } from "@earendil-works/pi-ai";
@@ -14,7 +16,7 @@ import { durableChildRunMetadata } from "./durableChildAgents.js";
 import { logDecision } from "./durableDecisions.js";
 import { WorkflowError } from "../resources/workflowLibrary.js";
 
-export const GATED_ACTION_GUIDANCE = "Irreversible actions and actions outside the project in the user's name are gated. While approval waits, keep working on parts that do not depend on it. Do not retry the blocked call; its result will arrive as a message. Discarding files in a scratch clone under /tmp or in a child worktree is not gated: run the Git command from that tree, name it with git -C <path>, or start with cd <path> &&. Any later cd, a pipe, a loop or a variable cannot be checked and gates, so write each worktree path and branch name literally. git branch -D is not gated when HEAD or origin's default branch already holds the branch. Pushes to a default branch always gate: put the pushes that are ready into one call, so the user approves them once.";
+export const GATED_ACTION_GUIDANCE = "Irreversible actions and actions outside the project in the user's name are gated. While approval waits, keep working on parts that do not depend on it. Do not retry the blocked call; its result will arrive as a message. Discarding files in a scratch clone under /tmp or in a child worktree is not gated: run the Git command from that tree, name it with git -C <path>, or start with cd <path> &&. Any later cd, a pipe, a loop or a variable cannot be checked and gates, so write each worktree path and branch name literally. git branch -D is not gated when HEAD or origin's default branch already holds the branch. A push to a default branch gates unless the user allowed the repository's folder in Settings; when it gates, put the pushes that are ready into one call, so the user approves them once.";
 /* eslint-disable @typescript-eslint/consistent-type-definitions */
 type RunInput = { parent: ConversationId; id: string; cwd: string; nestedTools?: string };
 type RunState = { phase: "ready" } | { phase: "unknown" };
@@ -113,6 +115,8 @@ export interface GatedActionsExtensionOptions {
   policy?: AutonomyPolicySource;
   riskLabels?: RiskLabelOptions;
   name?: string;
+  /** Folders whose repositories may push to their default branch without a gate. Read at each call. */
+  pushDefaultFolders?: () => readonly string[];
 }
 export function gatedActionsExtension(options: GatedActionsExtensionOptions) {
   const labels = options.riskLabels;
@@ -137,24 +141,40 @@ export async function gateToolCall(options: GatedActionsExtensionOptions, call: 
   const executionCwd = nested?.cwd ?? cwd;
   const found = await gatedAction(call.name, call.arguments, executionCwd, options.reads);
   if (found === undefined || !(await (options.policy ?? defaultAutonomyPolicySource).read(executionCwd)).gated[found.category]) return undefined;
+  if (found.category === "push-default" && await pushAllowed(found.repo, options.pushDefaultFolders?.() ?? [])) return undefined;
+  // The repository only decides the folder rule. Saved records and entries keep their public shape.
+  const gate = {category: found.category, description: found.description};
   const childName = api.conversationId === options.parent ? undefined : Object.entries(await durableChildRunMetadata(harness, options.parent, context)).find(([, child]) => child.conversationId === api.conversationId)?.[0];
   const admitted = await harness.commit(async tx => {
     const doc = await tx.doc(Gates, options.parent);
     if (Object.hasOwn(doc.records, id)) return false;
     const by = api.conversationId === options.parent ? "parent" : `child ${childName ?? String(api.conversationId)}`;
-    doc.records[id] = {id, conversationId: api.conversationId, by, tool: call.name, args: jsonArgs(call.arguments), ...found, requestedAt: Date.now(), state: {kind: "waiting"}};
+    doc.records[id] = {id, conversationId: api.conversationId, by, tool: call.name, args: jsonArgs(call.arguments), ...gate, requestedAt: Date.now(), state: {kind: "waiting"}};
     doc.cwd[id] = cwd;
     if (nested !== undefined) { doc.nestedTools ??= {}; doc.nestedTools[id] = nested.extension; }
-    const entry: GatedActionEntry = {id, by, tool: call.name, ...found, command: preview(call.name, call.arguments)};
+    const entry: GatedActionEntry = {id, by, tool: call.name, ...gate, command: preview(call.name, call.arguments)};
     await tx.appendEntry(options.parent, {kind: GATED_ACTION_ENTRY_KIND, data: durableJson(entry)});
     return true;
   }, context);
   if (admitted && options.riskLabels !== undefined) launchRiskLabel(options.riskLabels.hints,
-    {tool: call.name, args: call.arguments, cwd: executionCwd, gate: found}, async label => {
+    {tool: call.name, args: call.arguments, cwd: executionCwd, gate}, async label => {
       // Labels have no write access to the gate document or its harness.
       await decisionAnnotations(harness).write(String(options.parent), `gate:${id}`, durableJson({target: "gate", id, label}));
     }, options.riskLabels.onError);
   return blocked(id);
+}
+/** Whether the user's folders hold this repository. Real paths, so a symlinked folder cannot widen or hide the match. */
+export async function pushAllowed(repo: string | undefined, folders: readonly string[]): Promise<boolean> {
+  if (repo === undefined || folders.length === 0) return false;
+  const target = await realpath(repo).catch(() => undefined);
+  if (target === undefined) return false;
+  for (const folder of folders) {
+    const root = await realpath(folder).catch(() => undefined);
+    if (root === undefined) continue;
+    const inside = relative(root, target);
+    if (inside === "" || (!isAbsolute(inside) && inside.split(sep)[0] !== "..")) return true;
+  }
+  return false;
 }
 const blocked = (id: string) => `Blocked until the user approves (gate ${id}). Keep working on anything that does not depend on it; you will get the result as a message.`;
 function preview(tool: string, args: Record<string, unknown>): string {

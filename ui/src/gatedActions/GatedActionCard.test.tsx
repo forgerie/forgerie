@@ -29,7 +29,7 @@ describe("a gated action that waits on the reader", () => {
     expect(card().getAttribute("aria-label")).toBe("Force-push feat/run-export to origin");
     expect(card().hasAttribute("data-open")).toBe(true);
     expect(card().hasAttribute("data-pin-choices")).toBe(true);
-    expect(document.querySelector(".decision-card-meta")?.textContent).toBe("Force-push or push to the default branch, asked by build");
+    expect(document.querySelector(".decision-card-meta")?.textContent).toBe("Force-push, or push all or unknown branches, asked by build");
     const command = document.querySelector("[aria-label='Command'] .command-block-code")!;
     expect(command.textContent).toBe("git push --force-with-lease origin feat/run-export");
     expect(command.hasAttribute("data-shell")).toBe(true);

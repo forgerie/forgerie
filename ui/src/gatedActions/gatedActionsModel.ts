@@ -11,7 +11,7 @@ import type { PiMessage } from "../contracts";
 /** The transcript entry the hook writes when it blocks a call. */
 export const GATED_ACTION_TYPE = "forgerie.gated-action";
 
-export const GATED_CATEGORIES = ["force-push", "destroy-local", "delete-remote", "github-merge-close", "publish", "messages"] as const;
+export const GATED_CATEGORIES = ["force-push", "push-default", "destroy-local", "delete-remote", "github-merge-close", "publish", "messages"] as const;
 export const gatedCategorySchema = z.enum(GATED_CATEGORIES);
 export type GatedCategory = z.infer<typeof gatedCategorySchema>;
 
@@ -19,7 +19,7 @@ export type GatedCategory = z.infer<typeof gatedCategorySchema>;
 export const autonomyPolicySchema = z.strictObject({
   version: z.literal(1),
   gated: z.strictObject({
-    "force-push": z.boolean(), "destroy-local": z.boolean(), "delete-remote": z.boolean(),
+    "force-push": z.boolean(), "push-default": z.boolean(), "destroy-local": z.boolean(), "delete-remote": z.boolean(),
     "github-merge-close": z.boolean(), publish: z.boolean(), messages: z.boolean(),
   }),
   autoPassStops: z.boolean(),
@@ -86,6 +86,7 @@ export const CATEGORY_LABEL: Record<GatedCategory, string> = gatedCategoryLabels
 /** What cannot be undone, by category: the reason the call waits for the reader. One sentence each. */
 const CONSEQUENCE: Record<GatedCategory, string> = {
   "force-push": "It replaces the branch on the remote, and commits that exist only there are lost.",
+  "push-default": "It changes the default branch on the remote for everyone who uses it.",
   "destroy-local": "It throws away work that is not committed, and Git cannot bring it back.",
   "delete-remote": "It deletes from the remote for everyone who uses it.",
   "github-merge-close": "It acts on GitHub in your name.",

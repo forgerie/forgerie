@@ -1,8 +1,12 @@
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import type { GatedCategory } from "../../shared/autonomyPolicy.js";
 
-export interface GatedActionMatch { category: GatedCategory; description: string }
+export interface GatedActionMatch {
+  category: GatedCategory; description: string;
+  /** For `push-default`: the main checkout of the repository that pushes, so a setting can allow it per folder. */
+  repo?: string;
+}
 export interface GatedActionReads {
   git(cwd: string, args: readonly string[]): Promise<string>;
   issueLabels(cwd: string, issue: string | number, repo?: string, worktreeId?: string): Promise<readonly string[]>;
@@ -244,7 +248,16 @@ async function gitMatch(action: string | undefined, tokens: string[], cwd: strin
       if (refs.some(ref => {
         const destination = (ref.includes(":") ? ref.split(":")[1] : ref)?.replace(/^refs\/heads\//u, "");
         return destination === "" || destination === defaultBranch || (destination === "HEAD" && branch === defaultBranch) || destination?.includes("*") === true;
-      })) return match("force-push", `Push to default branch ${defaultBranch}`);
+      })) {
+        // Only a proven default branch with explicit, unforced refs reaches here. The repository is the main checkout
+        // that owns the Git directory, so a worktree elsewhere still counts as its repository.
+        const found = match("push-default", `Push to default branch ${defaultBranch}`);
+        try {
+          const common = (await reads.git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).trim();
+          if (common !== "" && basename(common) === ".git") return {...found, repo: dirname(common)};
+        } catch { /* Without a known repository, no folder can allow it. */ }
+        return found;
+      }
     } catch { return match("force-push", "Push Git refs with unknown default branch"); }
   }
   if (action === "reset" && flag(tokens, "--hard")) return match("destroy-local", "Discard local changes with git reset --hard");

@@ -501,6 +501,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       harness: () => this.journal.harness,
       ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error, DECISION_HINT_ERROR_EVENT); }}}),
       ...(this.options.autonomyPolicy === undefined ? {} : {policy: this.options.autonomyPolicy}),
+      pushDefaultFolders: () => (this.options.workflowAutonomy?.() ?? WAIT_FOR_USER).pushDefaultFolders,
       reads: {git: gitRead,
         issueLabels: this.options.gatedIssueLabels ?? (() => Promise.reject(new Error("GitHub labels unavailable"))),
         // Child worktrees are read at call time: they start after the gate and change as children spawn and land.
