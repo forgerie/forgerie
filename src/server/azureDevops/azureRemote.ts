@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
+import { originRemoteUrl } from "../git/originRemote.js";
 
 const execute = promisify(execFile);
 export interface AzureRepo { organization: string; project: string; repository: string }
@@ -36,13 +37,8 @@ export function parseAzureRemote(remote: string): AzureRepo | undefined {
 }
 
 export async function originAzureRepo(cwd: string): Promise<AzureRepo | undefined> {
-  try {
-    const { stdout } = await execute("git", ["-C", cwd, "remote", "get-url", "origin"], { env: sanitizedGitEnv() });
-    return parseAzureRemote(stdout);
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === 2) return undefined;
-    throw error;
-  }
+  const remote = await originRemoteUrl(cwd);
+  return remote === undefined ? undefined : parseAzureRemote(remote);
 }
 
 export const azureRepoKey = (repo: AzureRepo): string => `${repo.organization}/${repo.project}/${repo.repository}`;

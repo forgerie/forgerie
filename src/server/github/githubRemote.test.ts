@@ -40,4 +40,8 @@ describe("GitHub remote parsing", () => {
     await git("remote", "add", "origin", "git@github.com:korri-os/korri.git");
     expect(await originGitHubRepo(repo)).toBe("korri-os/korri");
   });
+  it("reports a folder that is not a git checkout as no repo", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "forgerie-github-remote-")); directories.push(folder);
+    expect(await originGitHubRepo(folder)).toBeUndefined();
+  });
 });

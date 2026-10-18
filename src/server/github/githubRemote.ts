@@ -1,8 +1,5 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { sanitizedGitEnv } from "../git/gitEnv.js";
+import { originRemoteUrl } from "../git/originRemote.js";
 
-const execute = promisify(execFile);
 const SLUG = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/u;
 
 /**
@@ -29,12 +26,6 @@ export function parseGitHubRemote(url: string): string | undefined {
  * points at someone else's repo, and listing their issues would be a quiet surprise.
  */
 export async function originGitHubRepo(repo: string): Promise<string | undefined> {
-  try {
-    const { stdout } = await execute("git", ["-C", repo, "remote", "get-url", "origin"], { env: sanitizedGitEnv() });
-    return parseGitHubRemote(stdout);
-  } catch (error) {
-    // Exit code 2 means no remote named origin; anything else is a real failure.
-    if (error instanceof Error && "code" in error && error.code === 2) return undefined;
-    throw error;
-  }
+  const remote = await originRemoteUrl(repo);
+  return remote === undefined ? undefined : parseGitHubRemote(remote);
 }
