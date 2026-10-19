@@ -62,6 +62,41 @@ describe("managed processes", () => {
       expect((await manager.list()).map((item) => item.id)).toEqual(["running"]);
     } finally { await manager.dispose(); }
   });
+  it("releases each finished record once, across reads and owners, and retries a failed release", async () => {
+    const root = await directory(); const { launcher, live } = controlledLauncher();
+    const released: string[] = [];
+    let failNext = false;
+    launcher.release = (record) => {
+      if (failNext) { failNext = false; return Promise.reject(new Error("systemctl failed")); }
+      released.push(record.id); return Promise.resolve();
+    };
+    const manager = new ManagedProcesses({ stateDirectory: root, sessionId: "release-once", launcher });
+    await manager.initialize();
+    try {
+      const ended = await manager.start({ id: "ended", command: "true", cwd: root });
+      await writeFile(join(ended.directory, "result"), "success\nexited\n0\n");
+      live.delete("ended");
+      await manager.start({ id: "lost", command: "cat", cwd: root });
+      live.delete("lost");
+      await manager.start({ id: "running", command: "cat", cwd: root });
+      for (let n = 0; n < 5; n++) await manager.list();
+      await manager.status("ended");
+      await manager.maintain();
+      expect(released.sort()).toEqual(["ended", "lost"]);
+      await manager.dispose();
+      await manager.initialize();
+      await manager.list();
+      expect(released.sort()).toEqual(["ended", "lost"]);
+      const late = await manager.start({ id: "late", command: "true", cwd: root });
+      await writeFile(join(late.directory, "result"), "success\nexited\n0\n");
+      live.delete("late");
+      failNext = true;
+      await expect(manager.list()).rejects.toThrow("systemctl failed");
+      await manager.list();
+      await manager.list();
+      expect(released.filter((id) => id === "late")).toEqual(["late"]);
+    } finally { await manager.dispose(); }
+  });
   it("gives one owner the session lease and releases it without stopping durable processes", async () => {
     const root = await directory(); const { launcher } = controlledLauncher();
     const first = new ManagedProcesses({ stateDirectory: root, sessionId: "lease", launcher });

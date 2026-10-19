@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import lockfile from "proper-lockfile";
@@ -12,6 +12,9 @@ import {
   type ManagedProcessInputResult, type ManagedProcessLauncher, type ManagedProcessRecord,
   type ManagedProcessSnapshot, type ManagedProcessStart,
 } from "./managedProcessTypes.js";
+
+/** Present once the launcher released a terminal record's supervisor state. */
+const RELEASED_MARKER = "released";
 
 export interface ManagedProcessesOptions {
   stateDirectory: string;
@@ -165,19 +168,32 @@ export class ManagedProcesses {
   }
   private async classify(record: ManagedProcessRecord): Promise<ManagedProcessSnapshot> {
     const result = await readResult(record.directory);
-    if (result !== undefined) { await this.options.launcher.release(record); return { ...record, state: { kind: "ended", result } }; }
+    if (result !== undefined) { await this.releaseOnce(record); return { ...record, state: { kind: "ended", result } }; }
     try {
       const lost: unknown = JSON.parse(await readFile(join(record.directory, "lost.json"), "utf8"));
       if (lost !== true) throw new Error("Invalid lost process record");
+      await this.releaseOnce(record);
       return { ...record, state: { kind: "lost" } };
     } catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
     if (await this.options.launcher.inspect(record) === "running") return { ...record, state: { kind: "running" } };
     // ExecStopPost can publish between the first read and unit inspection.
     const finalResult = await readResult(record.directory);
-    if (finalResult !== undefined) { await this.options.launcher.release(record); return { ...record, state: { kind: "ended", result: finalResult } }; }
+    if (finalResult !== undefined) { await this.releaseOnce(record); return { ...record, state: { kind: "ended", result: finalResult } }; }
     await atomicWrite(join(record.directory, "lost.json"), "true");
-    await this.options.launcher.release(record);
+    await this.releaseOnce(record);
     return { ...record, state: { kind: "lost" } };
+  }
+  /**
+   * A terminal record never runs again, so its supervisor cleanup is needed once. Every list,
+   * status and maintenance pass classifies every record, and a systemd release starts a
+   * systemctl child from sessiond's main thread. The marker keeps that cost off the hot path.
+   * A failed release writes no marker, so the next read retries it.
+   */
+  private async releaseOnce(record: ManagedProcessRecord): Promise<void> {
+    const marker = join(record.directory, RELEASED_MARKER);
+    try { await access(marker); return; } catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
+    await this.options.launcher.release(record);
+    await atomicWrite(marker, "true");
   }
   private exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.operations.then(() => {

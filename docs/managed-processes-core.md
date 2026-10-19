@@ -55,7 +55,9 @@ include the attached-process label when `supervision.kind === "attached"`.
 The launcher port consumes validated, prepared records. Its operations are
 `launch`, `inspect`, `stop`, `stopSession`, and `release`. `inspect` rejects when
 supervision is unknown; it returns `gone` only on positive evidence. `release`
-is idempotent and runs after a terminal record has been read/persisted. Tests
+is idempotent and runs once after a terminal record has been read/persisted;
+the core then writes the `released` marker and never calls it for that record
+again. Tests
 can supply a controlled implementation without starting units.
 
 ## Files and recovery
@@ -69,6 +71,11 @@ The layout is `<stateDirectory>/managed-processes/<sessionId>/<id>/`:
 - `result`: three newline-terminated fields: result, code, status. `ExecStopPost`
   writes it with fsync and atomic rename. Example: `signal\nkilled\nKILL\n`.
 - `lost.json`: durable evidence that a process was classified lost.
+- `released`: written after `release` succeeds for an ended or lost record.
+  Every list, status and maintenance pass classifies every record, and a
+  systemd `release` starts a `systemctl` child from the sessiond main thread.
+  Without the marker that cost grows with every finished record. A failed
+  `release` writes no marker, so the next read retries it.
 - `stdin`, `stdin.eof`: mode-0600 FIFOs.
 - `keeper.sh`, `result.sh`: copied launch helpers, independent of a Forgerie
   source/build-directory move. Temporary metadata files can remain after a crash.
