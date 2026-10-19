@@ -55,6 +55,32 @@ describe("session-owned worktrees with real git", () => {
     expect((await reloaded.require(f.record.id)).sessionId).toBe("owner");
   });
 
+  it("keeps a worktree's git counts for the status window, refreshes after it, and forgets them when the record changes", async () => {
+    const f = await fixture();
+    let now = 1_000_000;
+    const cached = new SessionWorktrees(f.store, { publish: () => undefined }, { now: () => now, statusCacheMs: 10_000 });
+    expect(await cached.info(f.record, f.session.id)).toMatchObject({ ahead: 0, dirtyFiles: 0 });
+    await commit(f, f.record.path, "one ahead\n");
+    await writeFile(join(f.record.path, "scratch.txt"), "dirty\n");
+    // Inside the window the last answer stands, even though git would now say otherwise.
+    now += 9_999;
+    expect(await cached.info(f.record, f.session.id)).toMatchObject({ ahead: 0, dirtyFiles: 0 });
+    expect(await f.worktrees.info(f.record, f.session.id)).toMatchObject({ ahead: 1, dirtyFiles: 1 });
+    now += 1;
+    expect(await cached.info(f.record, f.session.id)).toMatchObject({ ahead: 1, dirtyFiles: 1 });
+    // A change to the record is seen at once: the next read asks git again.
+    await commit(f, f.record.path, "two ahead\n");
+    expect(await cached.info(f.record, f.session.id)).toMatchObject({ ahead: 1 });
+    await cached.renameFromTitle(f.session.id, "Renamed");
+    const renamed = await f.store.require(f.record.id);
+    expect(await cached.info(renamed, f.session.id)).toMatchObject({ ahead: 2, branch: renamed.branch });
+    // Concurrent readers share one answer.
+    now += 10_000;
+    await commit(f, renamed.path, "three ahead\n");
+    const answers = await Promise.all(Array.from({ length: 5 }, () => cached.info(renamed, f.session.id)));
+    expect(answers.map((info) => info.ahead)).toEqual([3, 3, 3, 3, 3]);
+  });
+
   it("allocates a child at the parent's HEAD and reuses its receipt after interrupted setup", async () => {
     const f = await fixture();
     await commit(f, f.record.path, "parent branch\n");

@@ -25,10 +25,27 @@ interface WorktreeEvents {
   stopServices?(record: SessionWorktreeRecord): Promise<void>;
 }
 
+export interface SessionWorktreesOptions {
+  now?: () => number;
+  /**
+   * How long info() keeps a worktree's git-derived status. Default 0: ask git on every call.
+   * Session lists, project views, heartbeats and child summaries all ask for the same six git
+   * answers per active worktree, and each git call is a child process started from sessiond's
+   * main thread. A record change forgets the status at once.
+   */
+  statusCacheMs?: number;
+}
+type WorktreeGitStatus = Pick<SessionWorktreeInfo, "ahead" | "behind" | "dirtyFiles" | "statusError">;
+
 /** All git lifecycle mutations are serialized per main checkout. Git's own locks protect external writers. */
 export class SessionWorktrees {
   private readonly queues = new Map<string, Promise<void>>();
-  constructor(readonly store: SessionWorktreeStore, private readonly events: WorktreeEvents = { publish: () => undefined }) {}
+  /** Record ID to its git status, with the time it was read, or the read in flight. */
+  private readonly status = new Map<string, { at: number; value: Promise<WorktreeGitStatus> }>();
+  private readonly now: () => number;
+  constructor(readonly store: SessionWorktreeStore, private readonly events: WorktreeEvents = { publish: () => undefined }, private readonly settings: SessionWorktreesOptions = {}) {
+    this.now = settings.now ?? Date.now;
+  }
 
   /** Reconcile a branch rename interrupted between git and the ownership write. */
   async initialize(): Promise<void> {
@@ -142,12 +159,22 @@ export class SessionWorktrees {
   async info(record: SessionWorktreeRecord, sessionId: string): Promise<SessionWorktreeInfo> {
     const info = worktreeInfo(record, sessionId);
     if (record.state.kind !== "active") return info;
-    try {
-      await assertOwnedCheckout(record);
-      const [counts, files] = await Promise.all([git(record.path, "rev-list", "--left-right", "--count", `${record.sourceCommit ?? record.defaultBranch}...HEAD`), dirtyFiles(record.path)]);
-      const [behind, ahead] = counts.trim().split(/\s+/).map(Number);
-      return { ...info, ahead: ahead ?? 0, behind: behind ?? 0, dirtyFiles: files.length };
-    } catch (error) { return { ...info, statusError: message(error) }; }
+    return { ...info, ...await this.gitStatus(record) };
+  }
+  private gitStatus(record: SessionWorktreeRecord): Promise<WorktreeGitStatus> {
+    const window = this.settings.statusCacheMs ?? 0;
+    const now = this.now();
+    const held = this.status.get(record.id);
+    if (held !== undefined && now - held.at < window) return held.value;
+    const value = readGitStatus(record);
+    if (window > 0) {
+      const entry = { at: now, value };
+      this.status.set(record.id, entry);
+      // Do not keep a failed read as the answer for the whole window. A record change may also
+      // have replaced the entry in the meantime; leave that newer entry alone.
+      void value.then((status) => { if (status.statusError !== undefined && this.status.get(record.id) === entry) this.status.delete(record.id); }, () => { if (this.status.get(record.id) === entry) this.status.delete(record.id); });
+    }
+    return value;
   }
 
   /** Changed paths for a child report, including committed changes and uncommitted work. */
@@ -386,6 +413,7 @@ export class SessionWorktrees {
   }
   private async change(id: string, changes: SessionWorktreeChanges): Promise<SessionWorktreeRecord> {
     const record = await this.store.update(id, changes);
+    this.status.delete(id);
     this.events.publish(record);
     return record;
   }
@@ -399,6 +427,14 @@ export class SessionWorktrees {
   }
 }
 
+async function readGitStatus(record: SessionWorktreeRecord): Promise<WorktreeGitStatus> {
+  try {
+    await assertOwnedCheckout(record);
+    const [counts, files] = await Promise.all([git(record.path, "rev-list", "--left-right", "--count", `${record.sourceCommit ?? record.defaultBranch}...HEAD`), dirtyFiles(record.path)]);
+    const [behind, ahead] = counts.trim().split(/\s+/).map(Number);
+    return { ahead: ahead ?? 0, behind: behind ?? 0, dirtyFiles: files.length };
+  } catch (error) { return { statusError: message(error) }; }
+}
 async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await execute("git", ["-C", cwd, ...args], { env: sanitizedGitEnv(), maxBuffer: 16 * 1024 * 1024, timeout: 120_000 })).stdout;
 }

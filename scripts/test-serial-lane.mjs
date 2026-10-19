@@ -14,5 +14,6 @@ export const SERIAL_LANE = [
   "src/server/sessions/sessionRpc.test.ts",
   "src/server/workspaces/workspaceServicesLauncher.test.ts",
   "src/server/triggers/triggerRoutes.test.ts",
+  "src/server/triggers/triggerTool.test.ts",
   "src/server/speech/speechService.test.ts",
 ];

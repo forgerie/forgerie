@@ -99,6 +99,8 @@ import { ResourceEditorService } from "./resources/resourceEditorService.js";
 import { ResourceEditorError } from "./resources/resourceEditorFiles.js";
 import { registerResourceEditorRoutes } from "./resources/resourceEditorRoutes.js";
 
+/** A worktree's ahead/behind/dirty counts are reused this long across session lists, project views and heartbeats. */
+const WORKTREE_STATUS_CACHE_MS = 10_000;
 const daemonEnvironment: NodeJS.ProcessEnv = Object.freeze({ ...process.env });
 const { config } = effectivePiWebConfig({ env: daemonEnvironment });
 const activeAgentProfile = createActiveAgentProfileDescriptor({
@@ -227,7 +229,7 @@ async function createSessionDaemonRuntime() {
       const affected = await sessions.prepareWorktreeRemoval(record.path);
       return affected;
     },
-  });
+  }, { statusCacheMs: WORKTREE_STATUS_CACHE_MS });
   await sessionWorktrees.initialize();
   const groups = new ProjectGroups(join(piWebDataDir(daemonEnvironment), "project-groups.json"), projectWorkspaceDeps.projects);
   const relatedWork = new ProjectWorkspaces({ ...projectWorkspaceDeps, groups, worktrees: sessionWorktrees, agentDir: activeAgentProfile.dir,
