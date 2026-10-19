@@ -17,20 +17,27 @@ const itemSchema = Type.Object({ run: ChildRunSchema, checkpoint: Type.Optional(
 const fileSchema = Type.Object({ version: Type.Literal(1), records: Type.Array(itemSchema) }, { additionalProperties: false });
 type StoredRun = Static<typeof itemSchema>;
 
-/** One sessiond owns this file. Retained completions are immutable; expired completions are never inserted. */
+/**
+ * One sessiond owns this file. Retained completions are immutable; expired completions are never inserted.
+ * The records stay in memory after the first read: the browser polls the run list every few seconds
+ * for each open session, and the file holds every run of the last 90 days. A change made to the file
+ * by anything else is not seen until the next sessiond start.
+ */
 export class ChildRunStore {
   private queue: Promise<unknown> = Promise.resolve();
   private timer: NodeJS.Timeout | undefined;
+  /** Loaded records, or undefined before the first successful read. Never handed out; results are copies. */
+  private records: StoredRun[] | undefined;
   constructor(private readonly path: string, private readonly now: () => number = Date.now) {}
 
   async list(filter: ChildRunFilter = {}): Promise<ChildRun[]> {
-    return this.exclusive(async () => (await this.retained()).filter(({ run }) =>
+    return this.exclusive(async () => structuredClone((await this.retained()).filter(({ run }) =>
       (filter.session === undefined || run.session.id === filter.session) && (filter.agent === undefined || run.child.agent === filter.agent))
-      .map(({ run }) => run).sort((a, b) => b.startedAt - a.startedAt || a.id.localeCompare(b.id)));
+      .map(({ run }) => run).sort((a, b) => b.startedAt - a.startedAt || a.id.localeCompare(b.id))));
   }
 
   async pending(session?: string): Promise<StoredRun[]> {
-    return this.exclusive(async () => (await this.retained()).filter(({ run }) => (session === undefined || run.session.id === session) && run.state.kind === "running"));
+    return this.exclusive(async () => structuredClone((await this.retained()).filter(({ run }) => (session === undefined || run.session.id === session) && run.state.kind === "running")));
   }
 
   save(run: ChildRun, checkpoint?: ChildRunCheckpoint): Promise<void> {
@@ -67,6 +74,14 @@ export class ChildRunStore {
     return run.state.kind === "finished" && run.state.finishedAt <= this.now() - CHILD_RUN_RETENTION_DAYS * 86_400_000;
   }
   private async retained(): Promise<StoredRun[]> {
+    const loaded = this.records ?? await this.load();
+    const records = loaded.filter((item) => !this.expired(item));
+    if (records.length !== loaded.length) await this.persist(records);
+    else this.records = loaded;
+    return records;
+  }
+  /** A file that cannot be read or validated is never cached: the next call reads it again. */
+  private async load(): Promise<StoredRun[]> {
     let source: string;
     try { source = await readFile(this.path, "utf8"); }
     catch (error) { if (missing(error)) return []; throw error; }
@@ -78,15 +93,15 @@ export class ChildRunStore {
       if (ids.has(item.run.id)) throw new Error("Duplicate child run ID");
       ids.add(item.run.id);
     }
-    const records = value.records.filter((item) => !this.expired(item));
-    if (records.length !== value.records.length) await this.persist(records);
-    return records;
+    return value.records;
   }
+  /** Memory follows the file: records are replaced only after the rename succeeds. */
   private async persist(records: StoredRun[]): Promise<void> {
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
     const temporary = `${this.path}.${randomUUID()}.tmp`;
     try { await writeFile(temporary, `${JSON.stringify({ version: 1, records })}\n`, { mode: 0o600 }); await rename(temporary, this.path); }
     finally { await unlink(temporary).catch((error: unknown) => { if (!missing(error)) throw error; }); }
+    this.records = records;
   }
 }
 function validTiming(run: ChildRun): boolean {

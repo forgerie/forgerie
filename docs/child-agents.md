@@ -296,6 +296,8 @@ Usage is the committed change in the child's own `pi.usage` between run boundari
 
 Records live in `$PI_WEB_DATA_DIR/child-runs.json`, with private recovery checkpoints and atomic file replacement. Child generation and compaction requests wait for pending record writes. This adds disk I/O before requests. A write failure is reported and blocks a new child request rather than spending without a saved accounting boundary. Startup also reopens parents with unfinished records, even if the live-child index no longer lists them. A read alone never starts that recovery.
 
+Sessiond reads the file once and keeps the records in memory; reads and writes work on that copy, and each write replaces the file atomically before the copy changes. Reads return copies, so callers cannot change the store. Sessiond is the file's only writer. A change made to the file by another program is not seen until sessiond restarts.
+
 Completed records expire 90 days after `finishedAt`. Unfinished records remain. Sessiond prunes on startup, reads, writes, and a daily timer. Expiry removes only history metadata. It does not delete conversations, transcripts, branches, or worktree files. Invalid history files fail rather than being reset or overwritten. Records are new metadata, not a complete backfill of historical child runs.
 
 ### Decision log API

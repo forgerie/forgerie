@@ -75,6 +75,22 @@ describe("child run records on disk", () => {
     } finally { await store.stop(); }
   });
 
+  it("reads its file once, serves later reads from memory, and keeps that memory private", async () => {
+    const f = await fixture();
+    await f.store.save(run("one", now));
+    for (let n = 0; n < 5; n++) { await f.store.list(); await f.store.pending(); }
+    await f.store.save(run("two"));
+    // One sessiond owns the file. A change made behind its back is not seen until it reopens,
+    // which also proves that reads come from memory, not from the file.
+    await writeFile(f.path, JSON.stringify({ version: 1, records: [{ run: run("behind", now) }] }));
+    expect((await f.store.list()).map((item) => item.id)).toEqual(["one", "two"]);
+    expect((await new ChildRunStore(f.path, () => now).list()).map((item) => item.id)).toEqual(["behind"]);
+    // Results are copies: a caller's edit cannot reach the store.
+    for (const item of await f.store.list()) item.turns = 99;
+    for (const item of await f.store.pending()) item.run.turns = 99;
+    expect((await f.store.list()).map((item) => item.turns)).toEqual([2, 2]);
+  });
+
   it("serializes concurrent writes without losing records", async () => {
     const f = await fixture();
     await Promise.all(Array.from({ length: 12 }, (_, n) => f.store.save(run(`run-${String(n)}`, now))));

@@ -2,7 +2,7 @@ import type { ChildRun } from "../../shared/childRuns.js";
 import { ManagedProcessRegistry } from "../processes/managedProcessRegistry.js";
 import { controlledManagedProcessLauncher } from "../processes/managedProcesses.testSupport.js";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -88,9 +88,9 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     ...(recordRuns ? { flushRunRecords: async () => { await failedWrite; await recorder?.flush(); } } : {}),
     commit: (change, ctx) => journal.harness.commit(change, ctx) });
   for (const extension of [...extensions.parent, ...extensions.childOnly]) registry.install(extension);
-  async function open(corruptRecords = false) {
+  async function open(failRecordWrite = false) {
     // Let the retry's real history write fail before either flush caller can pass the accounting boundary.
-    if (corruptRecords) failedWrite = new Promise<void>((resolve) => { releaseFailedWrite = resolve; });
+    if (failRecordWrite) failedWrite = new Promise<void>((resolve) => { releaseFailedWrite = resolve; });
     const journal = await DurableSessionJournal.open({ manager, models, registry, agent: { cwd: root, model: { provider: "faux", modelId: "faux-1" }, extensions: [...extensions.parent, workflowExtension()] },
       familyOptions: { models, registry, now: () => now, settings: { retry: { enabled: false } }, onReport: (error) => { runtimeErrors.push(error); } } });
     journals.push(journal);
@@ -99,8 +99,9 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
         (error) => { recordErrors.push(error); releaseFailedWrite?.(); }, () => now, onFinished);
       recorders.push(recorder);
     }
-    // Only this private history file fails. Durable can still admit the retry and run its tools.
-    if (corruptRecords) await writeFile(recordPath, "{invalid child run history");
+    // Only this private history write fails, once. Durable can still admit the retry and run its tools.
+    // The store keeps its records in memory, so the failure must come from the store, not from the file.
+    if (failRecordWrite) vi.spyOn(runStore, "save").mockImplementationOnce(() => Promise.reject(new Error("child run history write failed")));
     journal.harness.resume(); return journal;
   }
   let journal = await open();
@@ -111,7 +112,7 @@ async function fixture(errors: string[] = [], holdAt?: number, recordRuns = fals
     return journal.conversation.context(context);
   }
   return { root, runStore, children, spawn, parentInputs, calls: () => childCalls, journal: () => journal, worktrees,
-    restart: async (at: number, corruptRecords = false) => { await recorder?.close(); await journal.close(); now = at; journal = await open(corruptRecords); },
+    restart: async (at: number, failRecordWrite = false) => { await recorder?.close(); await journal.close(); now = at; journal = await open(failRecordWrite); },
     advanceClock: (ms: number) => { now += ms; },
     recordPath, recordErrors, runtimeErrors,
     activeChildRun: async (id: number) => { await recorder?.flush(); return recorder?.activeChildRun(id); },
@@ -384,7 +385,6 @@ it("keeps an observer waiting after its owner faults on run-record flush, then p
   await run.spawn({ action: "send", name: "retry", message: "Steer" });
   await run.answer();
   await vi.waitFor(async () => { expect((await run.children())[0]?.retry).toMatchObject({ attempt: 1, until: 1030000 }); });
-  const savedRecords = await readFile(run.recordPath, "utf8");
   await run.restart(1030000, true);
   try {
     await vi.waitFor(async () => { expect((await run.children())[0]?.questions).toHaveLength(1); });
@@ -396,7 +396,6 @@ it("keeps an observer waiting after its owner faults on run-record flush, then p
     // Let the observer finish a poll while the admitted retry is still placed and waiting on the question.
     run.advanceClock(1000);
     await sleep(350);
-    await writeFile(run.recordPath, savedRecords);
     const question = (await run.children())[0]?.questions[0];
     if (question === undefined) throw new Error("Missing retry question");
     await answerChildQuestion(run.journal().conversation, question.questionId, "RETRY-SUCCESS", context);
@@ -413,7 +412,7 @@ it("keeps an observer waiting after its owner faults on run-record flush, then p
     expect(run.runtimeErrors.some((error) => String(error).includes("returned without durable progress"))).toBe(false);
     expect(run.calls()).toBe(2);
   } finally {
-    await writeFile(run.recordPath, savedRecords);
+    vi.restoreAllMocks();
   }
 });
 
