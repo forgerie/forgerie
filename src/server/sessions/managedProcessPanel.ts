@@ -21,15 +21,23 @@ function browserProcess(process: PublicProcess): ManagedProcessInfo {
   };
 }
 
+interface ManagedProcessPanelOptions {
+  activeIntervalMs?: number;
+  idleIntervalMs?: number;
+}
+
 /** Independent browser read positions do not consume the durable watch reader. */
 export class ManagedProcessPanel {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private closed = false;
+  private watching = false;
+  private unsubscribe: (() => void) | undefined;
   private cursors = new Map<string, ManagedProcessLogCursor>();
   private refreshing: Promise<void> | undefined;
   private current: ManagedProcessesSnapshot = { available: false, writeSupported: false, processes: [] };
   constructor(private readonly core: () => Promise<ManagedProcesses>, private readonly tools: ManagedProcessTools | undefined,
-    private readonly publish: (event: SessionUiEvent) => void, private readonly onError: (error: unknown) => void) {}
+    private readonly publish: (event: SessionUiEvent) => void, private readonly onError: (error: unknown) => void,
+    private readonly options: ManagedProcessPanelOptions = {}) {}
   get runningCount(): number { return this.current.processes.filter(process => process.status === "running" || process.status === "terminating").length; }
   async snapshot(): Promise<ManagedProcessesSnapshot> {
     const processes = this.tools === undefined
@@ -51,14 +59,32 @@ export class ManagedProcessPanel {
     return { available: true, writeSupported: true, processes: items.filter(item => item !== undefined) };
   }
   watch(): void {
-    const tick = async () => {
-      try { await this.refresh(); } catch (error) { if (!this.closed) this.onError(error); }
-      if (!this.closed) { this.timer = setTimeout(() => { void tick(); }, 1000); this.timer.unref(); }
-    };
-    void tick();
+    if (this.watching || this.closed) return;
+    this.watching = true;
+    this.unsubscribe = this.tools?.onChange(() => this.refreshAfterMutation());
+    void this.refresh().catch((error: unknown) => { if (!this.closed) this.onError(error); });
+  }
+  private async refreshAfterMutation(): Promise<void> {
+    try {
+      // An in-flight snapshot may predate the mutation. Finish it before requesting a fresh one.
+      await this.refreshing;
+      if (!this.closed) await this.refresh();
+    } catch (error) { if (!this.closed) this.onError(error); }
+  }
+  private schedule(): void {
+    clearTimeout(this.timer);
+    if (!this.watching || this.closed) return;
+    const interval = this.runningCount > 0 ? this.options.activeIntervalMs ?? 1000 : this.options.idleIntervalMs ?? 10_000;
+    this.timer = setTimeout(() => {
+      void this.refresh().catch((error: unknown) => { if (!this.closed) this.onError(error); });
+    }, interval);
+    this.timer.unref();
   }
   refresh(): Promise<void> {
-    return this.refreshing ??= this.refreshNow().finally(() => { this.refreshing = undefined; });
+    return this.refreshing ??= this.refreshNow().finally(() => {
+      this.refreshing = undefined;
+      this.schedule();
+    });
   }
   private async refreshNow(): Promise<void> {
     const snapshot = await this.snapshot();
@@ -108,13 +134,15 @@ export class ManagedProcessPanel {
     try {
       if ((await core.status(id)).state.kind !== "running") return { ok: false, reason: "process_exited" };
       const result = await core.writeStdin(id, input);
+      const eof = end === true && result.kind === "written" ? await core.closeStdin(id) : undefined;
+      await this.refreshAfterMutation();
       if (result.kind !== "written") return { ok: false, reason: result.kind === "stdin-full" ? "stdin_full" : "stdin_closed", bytesWritten: result.bytesWritten };
-      if (end === true && (await core.closeStdin(id)).kind !== "written") return { ok: false, reason: "stdin_closed", bytesWritten: result.bytesWritten };
+      if (eof !== undefined && eof.kind !== "written") return { ok: false, reason: "stdin_closed", bytesWritten: result.bytesWritten };
       return { ok: true, bytesWritten: result.bytesWritten };
     } catch (error) { if (hasCode(error, "ENOENT")) return { ok: false, reason: "not_found" }; throw error; }
   }
   private isClosed(): boolean { return this.closed; }
-  dispose(): void { this.closed = true; clearTimeout(this.timer); }
+  dispose(): void { this.closed = true; clearTimeout(this.timer); this.unsubscribe?.(); }
 }
 
 /** Keep the newest output within the browser transport budget. */

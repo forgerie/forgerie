@@ -261,4 +261,23 @@ its offline limits still apply. Closing a browser is not session close.
 
 ## Browser projection
 
-`managedProcessPanel.ts` reads the session registry through `getManagedProcesses`. It uses the registry's shared, daemon-owned tool dispatcher for names and intentional Stop bookkeeping. Runtimes attach and detach delivery without disposing that dispatcher. Archived/read-only runtimes have no process panel owner. Polling emits `processes.update` and independent `processes.output` batches. Panel browsing never acknowledges the watch reader. Snapshots include `lastLogLine` from a bounded tail read, so list rows update even while the newest line is unfinished. Browser payloads allowlist fields; launch environments and private file paths never leave the server. The launcher does not expose a PID or completion timestamp, so the compatible fields remain `pid: 0` and `endTime: null`, not invented observations.
+`managedProcessPanel.ts` reads the session registry through `getManagedProcesses`.
+It uses the registry's shared, daemon-owned tool dispatcher for names and
+intentional Stop bookkeeping. Runtimes attach and detach delivery without
+disposing that dispatcher. Archived/read-only runtimes have no process panel
+owner.
+
+Polling emits `processes.update` and independent `processes.output` batches.
+The panel polls every 1 second while any process is running or terminating,
+and every 10 seconds otherwise. Constructor options `activeIntervalMs` and
+`idleIntervalMs` override these defaults. Tool mutations (start, stop, write,
+clear, and update) and browser stdin writes refresh the panel immediately;
+disposal removes the mutation subscription. The daemon-owned watch dispatcher's
+polling interval does not change.
+
+Panel browsing never acknowledges the watch reader. Snapshots include
+`lastLogLine` from a bounded tail read, so list rows update even while the
+newest line is unfinished. Browser payloads allowlist fields; launch environments
+and private file paths never leave the server. The launcher does not expose a
+PID or completion timestamp, so the compatible fields remain `pid: 0` and
+`endTime: null`, not invented observations.
