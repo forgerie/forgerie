@@ -10,6 +10,8 @@ import type { ManagedProcessLauncher } from "./managedProcessTypes.js";
 
 export interface ManagedProcessSession { cwd: string; stateFile: string }
 
+const DEFAULT_LIVENESS_CACHE_MS = 15_000;
+
 export interface ManagedProcessRegistryOptions {
   stateDirectory: string;
   environment?: NodeJS.ProcessEnv;
@@ -17,6 +19,8 @@ export interface ManagedProcessRegistryOptions {
   onError(error: unknown, sessionId: string): void;
   intervalMs?: number;
   logCapBytes?: number;
+  /** See ManagedProcessesOptions.livenessCacheMs. Sessiond reuses a running answer for 15 seconds. */
+  livenessCacheMs?: number;
   resolveSession?(sessionId: string): Promise<ManagedProcessSession | undefined>;
   onTurn?(sessionId: string): Promise<void>;
 }
@@ -118,6 +122,7 @@ export class ManagedProcessRegistry {
     const resolved = session ?? await this.options.resolveSession?.(sessionId);
     const launcher = await (this.options.prepareLauncher?.() ?? prepareManagedProcessLauncher(this.options.environment));
     const owner = new ManagedProcesses({ stateDirectory: this.options.stateDirectory, sessionId, launcher,
+      livenessCacheMs: this.options.livenessCacheMs ?? DEFAULT_LIVENESS_CACHE_MS,
       ...(this.options.environment === undefined ? {} : { environment: this.options.environment }),
       ...(this.options.logCapBytes === undefined ? {} : { logCapBytes: this.options.logCapBytes }) });
     // A killed daemon's lease stays fresh for ten seconds. Never bypass a live owner.

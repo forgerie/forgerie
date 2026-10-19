@@ -97,6 +97,50 @@ describe("managed processes", () => {
       expect(released.filter((id) => id === "late")).toEqual(["late"]);
     } finally { await manager.dispose(); }
   });
+  it("reuses a running answer for the liveness window, but sees exits, stops and expiry at once", async () => {
+    const root = await directory(); const { launcher, live } = controlledLauncher();
+    const inspected: string[] = [];
+    const inspect = launcher.inspect.bind(launcher);
+    launcher.inspect = (record) => { inspected.push(record.id); return inspect(record); };
+    let now = 1_000_000;
+    const manager = new ManagedProcesses({ stateDirectory: root, sessionId: "liveness", launcher, livenessCacheMs: 15_000, now: () => now });
+    await manager.initialize();
+    try {
+      const exits = await manager.start({ id: "exits", command: "true", cwd: root });
+      await manager.start({ id: "stopped", command: "cat", cwd: root });
+      await manager.start({ id: "vanishes", command: "cat", cwd: root });
+      inspected.length = 0;
+      for (let n = 0; n < 5; n++) { await manager.list(); await manager.readOutput("vanishes"); now += 1000; }
+      expect(inspected).toEqual([]);
+      // A published result wins at once, inside the window.
+      await writeFile(join(exits.directory, "result"), "success\nexited\n0\n");
+      live.delete("exits");
+      expect((await manager.status("exits")).state.kind).toBe("ended");
+      // An explicit stop forgets the answer, so the next read asks the supervisor.
+      await manager.stop("stopped");
+      expect((await manager.status("stopped")).state.kind).toBe("lost");
+      expect(inspected).toEqual(["stopped"]);
+      // A supervisor that vanishes without a result is seen once the window ends.
+      live.delete("vanishes");
+      expect((await manager.status("vanishes")).state.kind).toBe("running");
+      now += 10_001;
+      expect((await manager.status("vanishes")).state.kind).toBe("lost");
+      expect(inspected).toEqual(["stopped", "vanishes"]);
+    } finally { await manager.dispose(); }
+  });
+  it("asks the supervisor on every read when no liveness window is set", async () => {
+    const root = await directory(); const { launcher } = controlledLauncher();
+    let inspections = 0;
+    const inspect = launcher.inspect.bind(launcher);
+    launcher.inspect = (record) => { inspections++; return inspect(record); };
+    const manager = new ManagedProcesses({ stateDirectory: root, sessionId: "no-window", launcher });
+    await manager.initialize();
+    try {
+      await manager.start({ id: "one", command: "cat", cwd: root });
+      await manager.list(); await manager.list();
+      expect(inspections).toBe(3);
+    } finally { await manager.dispose(); }
+  });
   it("gives one owner the session lease and releases it without stopping durable processes", async () => {
     const root = await directory(); const { launcher } = controlledLauncher();
     const first = new ManagedProcesses({ stateDirectory: root, sessionId: "lease", launcher });

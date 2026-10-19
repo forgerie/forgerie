@@ -86,7 +86,16 @@ preparation, not a command to retry. Startup never re-runs a command.
 
 A saved result wins over unit liveness. Otherwise a live unit is running; a
 missing supervisor becomes a lost process. The core re-reads the result after
-observing that a supervisor is gone to close the exit/inspection race. Failed
+observing that a supervisor is gone to close the exit/inspection race.
+
+Sessiond reuses a positive `inspect` answer for 15 seconds (`livenessCacheMs`;
+the core default is 0, which asks on every read). The process watcher reads
+every record each second, and a systemd `inspect` starts a `systemctl` child
+from the sessiond main thread. A published result still wins at once, so a
+normal exit appears within one watcher pass. An explicit stop, session stop or
+child stop forgets the answer. Only a supervisor that vanishes without writing
+a result is classified lost up to 15 seconds late. Negative answers and
+inspection errors are never reused. Failed
 units are collected automatically; `release` also resets a retained failed unit
 by its exact name. It does not reset unrelated units.
 

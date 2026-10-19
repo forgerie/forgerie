@@ -99,3 +99,16 @@ it("closes a real attached command before removing its files", async () => {
   await registry.closeSession("attached");
   await expect(access(record.directory)).rejects.toMatchObject({ code: "ENOENT" });
 });
+
+it("reuses a running answer across the maintenance passes of the sessiond default window", async () => {
+  const f = await fixture(); const registry = f.registry(); const owner = await registry.get("busy");
+  let inspections = 0;
+  const inspect = f.launcher.inspect.bind(f.launcher);
+  f.launcher.inspect = (record) => { inspections++; return inspect(record); };
+  await owner.start({ id: "one", command: "cat", cwd: f.root });
+  // intervalMs is 10, so this spans many maintenance passes, all inside the 15-second window.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await owner.list();
+  expect(inspections).toBe(1);
+  expect(f.errors).toEqual([]);
+});

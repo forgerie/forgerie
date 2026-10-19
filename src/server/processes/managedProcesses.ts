@@ -22,6 +22,13 @@ export interface ManagedProcessesOptions {
   launcher: ManagedProcessLauncher;
   environment?: NodeJS.ProcessEnv;
   logCapBytes?: number;
+  /**
+   * How long a positive supervisor answer stays valid. Default 0: ask on every read.
+   * A published result still wins at once, and a stop forgets the answer. Only a supervisor
+   * that vanishes without a result is seen up to this late.
+   */
+  livenessCacheMs?: number;
+  now?: () => number;
 }
 
 /** One owner per session; dispose releases ownership, not durable managed processes. */
@@ -31,6 +38,8 @@ export class ManagedProcesses {
   private compromised = false;
   private closed = false;
   private operations = Promise.resolve();
+  /** Record ID to the time the supervisor last said it was running. */
+  private readonly confirmedRunning = new Map<string, number>();
   constructor(private readonly options: ManagedProcessesOptions) {
     managedProcessRecordSchema.shape.sessionId.parse(options.sessionId);
     if (!isAbsolute(options.stateDirectory)) throw new Error("Managed process state directory must be absolute");
@@ -78,7 +87,10 @@ export class ManagedProcesses {
   stopChild(child: { name: string; runId: string }): Promise<void> {
     return this.exclusive(async () => {
       for (const record of await this.snapshots()) {
-        if (record.state.kind === "running" && record.child?.name === child.name && record.child.runId === child.runId && record.keepAfterChild !== true) await this.options.launcher.stop(record);
+        if (record.state.kind === "running" && record.child?.name === child.name && record.child.runId === child.runId && record.keepAfterChild !== true) {
+          this.confirmedRunning.delete(record.id);
+          await this.options.launcher.stop(record);
+        }
       }
     });
   }
@@ -87,6 +99,7 @@ export class ManagedProcesses {
   closeSession(): Promise<void> {
     return this.exclusive(async () => {
       this.closed = true;
+      this.confirmedRunning.clear();
       await this.options.launcher.stopSession(this.options.sessionId);
       const records = await this.snapshots();
       const deadline = Date.now() + Math.max(5, ...records.map((record) => record.stopTimeoutSeconds)) * 1000 + 10_000;
@@ -99,9 +112,11 @@ export class ManagedProcesses {
     });
   }
   status(id: string): Promise<ManagedProcessSnapshot> { return this.exclusive(async () => this.classify(await this.record(id))); }
-  stop(id: string): Promise<void> { return this.exclusive(async () => { await this.options.launcher.stop(await this.record(id)); }); }
+  stop(id: string): Promise<void> {
+    return this.exclusive(async () => { const record = await this.record(id); this.confirmedRunning.delete(id); await this.options.launcher.stop(record); });
+  }
   /** Initiates session close; caller polls list() until no record is running before deletion. */
-  stopSession(): Promise<void> { return this.exclusive(() => this.options.launcher.stopSession(this.options.sessionId)); }
+  stopSession(): Promise<void> { return this.exclusive(() => { this.confirmedRunning.clear(); return this.options.launcher.stopSession(this.options.sessionId); }); }
   writeStdin(id: string, data: string | Buffer): Promise<ManagedProcessInputResult> {
     return this.exclusive(async () => writeProcessInput((await this.record(id)).directory, Buffer.isBuffer(data) ? data : Buffer.from(data)));
   }
@@ -131,6 +146,7 @@ export class ManagedProcesses {
   }
   async dispose(): Promise<void> {
     await this.operations;
+    this.confirmedRunning.clear();
     try {
       if (this.options.launcher.supervision.kind === "attached") await this.options.launcher.stopSession(this.options.sessionId);
     } finally { const release = this.releaseLock; this.releaseLock = undefined; await release?.(); }
@@ -175,13 +191,28 @@ export class ManagedProcesses {
       await this.releaseOnce(record);
       return { ...record, state: { kind: "lost" } };
     } catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
-    if (await this.options.launcher.inspect(record) === "running") return { ...record, state: { kind: "running" } };
+    if (await this.supervisorSaysRunning(record)) return { ...record, state: { kind: "running" } };
     // ExecStopPost can publish between the first read and unit inspection.
     const finalResult = await readResult(record.directory);
     if (finalResult !== undefined) { await this.releaseOnce(record); return { ...record, state: { kind: "ended", result: finalResult } }; }
     await atomicWrite(join(record.directory, "lost.json"), "true");
     await this.releaseOnce(record);
     return { ...record, state: { kind: "lost" } };
+  }
+  /**
+   * The process watcher reads every record each second, and a systemd inspect starts a
+   * systemctl child from sessiond's main thread. Reuse a positive answer inside the window.
+   * Negative answers and errors are never reused.
+   */
+  private async supervisorSaysRunning(record: ManagedProcessRecord): Promise<boolean> {
+    const window = this.options.livenessCacheMs ?? 0;
+    const now = this.options.now ?? Date.now;
+    const confirmed = this.confirmedRunning.get(record.id);
+    if (window > 0 && confirmed !== undefined && now() - confirmed < window) return true;
+    this.confirmedRunning.delete(record.id);
+    if (await this.options.launcher.inspect(record) !== "running") return false;
+    if (window > 0) this.confirmedRunning.set(record.id, now());
+    return true;
   }
   /**
    * A terminal record never runs again, so its supervisor cleanup is needed once. Every list,
