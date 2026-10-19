@@ -5,13 +5,14 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionWorktreeStore } from "./sessionWorktreeStore.js";
+import { GitWorktreeDiscovery } from "./gitWorktreeDiscovery.js";
 import { SessionWorktrees } from "./sessionWorktrees.js";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true }))); roots.length = 0; });
 
-async function fixture() {
+async function fixture(discovery?: GitWorktreeDiscovery) {
   const root = await mkdtemp(join(tmpdir(), "forgerie-session-worktree-"));
   roots.push(root);
   const repo = join(root, "repo");
@@ -26,7 +27,7 @@ async function fixture() {
   const store = new SessionWorktreeStore(join(root, "worktrees.json"));
   await store.initialize();
   const events: unknown[] = [];
-  const worktrees = new SessionWorktrees(store, { publish: (record) => { events.push(record); } });
+  const worktrees = new SessionWorktrees(store, { publish: (record) => { events.push(record); }, worktreesChanged: () => discovery?.invalidate() });
   const record = await worktrees.create(repo, "token");
   const transcript = join(root, "session.jsonl");
   await writeFile(transcript, "transcript outside workspace\n");
@@ -53,6 +54,24 @@ describe("session-owned worktrees with real git", () => {
     const reloaded = new SessionWorktreeStore(join(f.root, "worktrees.json"));
     await reloaded.initialize();
     expect((await reloaded.require(f.record.id)).sessionId).toBe("owner");
+  });
+
+  it("refreshes project discovery immediately after managed creation, rename and removal, including linked-path reads", async () => {
+    const discovery = new GitWorktreeDiscovery(undefined, { cacheMs: 10_000 });
+    const f = await fixture(discovery);
+    expect(await discovery.discoverGitWorktrees(f.repo)).toHaveLength(2);
+    expect(await discovery.discoverGitWorktrees(f.record.path)).toHaveLength(2);
+    const child = await f.worktrees.createForChild(f.session, "discovery-child");
+    expect((await discovery.discoverGitWorktrees(f.repo)).map((tree) => tree.path)).toContain(child.path);
+    expect(await discovery.discoverGitWorktrees(f.record.path)).toHaveLength(3);
+    expect(await discovery.isGitRepository(child.path)).toBe(true);
+    await f.worktrees.renameFromTitle(f.session.id, "Discovery title");
+    expect((await discovery.discoverGitWorktrees(f.repo)).find((tree) => tree.path === f.record.path)?.branch).toBe("discovery-title");
+    expect(await discovery.isGitRepository(child.path)).toBe(true);
+    expect(await f.worktrees.land(child.id, [])).toMatchObject({ kind: "landed", cleanup: { kind: "done" } });
+    expect(await discovery.isGitRepository(child.path)).toBe(false);
+    expect(await discovery.discoverGitWorktrees(f.record.path)).toHaveLength(2);
+    expect((await discovery.discoverGitWorktrees(f.repo)).map((tree) => tree.path)).not.toContain(child.path);
   });
 
   it("keeps a worktree's git counts for the status window, refreshes after it, and forgets them when the record changes", async () => {

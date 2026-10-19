@@ -27,6 +27,57 @@ export async function discoverGitWorktrees(path: string): Promise<GitWorktreeInf
   return parseGitWorktreeList(stdout);
 }
 
+export interface GitWorktreeDiscoveryOptions {
+  now?: () => number;
+  /** Default 0: read Git on every call. Sessiond enables a short window for project views. */
+  cacheMs?: number;
+}
+
+interface GitWorktreeRunner {
+  isGitRepository(path: string): Promise<boolean>;
+  discoverGitWorktrees(path: string): Promise<GitWorktreeInfo[]>;
+}
+
+interface DiscoveryEntry<T> { at: number; value: Promise<T> }
+
+/** Git facts for read-only workspace discovery; lifecycle ownership checks use fresh reads. */
+export class GitWorktreeDiscovery {
+  private readonly repositories = new Map<string, DiscoveryEntry<boolean>>();
+  private readonly worktrees = new Map<string, DiscoveryEntry<GitWorktreeInfo[]>>();
+  private readonly now: () => number;
+  constructor(private readonly git: GitWorktreeRunner = { isGitRepository, discoverGitWorktrees }, private readonly settings: GitWorktreeDiscoveryOptions = {}) {
+    this.now = settings.now ?? Date.now;
+  }
+
+  isGitRepository(path: string): Promise<boolean> {
+    return this.read(this.repositories, path, () => this.git.isGitRepository(path));
+  }
+  discoverGitWorktrees(path: string): Promise<GitWorktreeInfo[]> {
+    return this.read(this.worktrees, path, () => this.git.discoverGitWorktrees(path));
+  }
+  invalidate(): void {
+    // A repo can be registered through its main path, a linked path, or a symlink. Clear all
+    // project discovery entries rather than run more Git children to resolve those aliases.
+    this.repositories.clear();
+    this.worktrees.clear();
+  }
+
+  private read<T>(cache: Map<string, DiscoveryEntry<T>>, path: string, read: () => Promise<T>): Promise<T> {
+    const window = this.settings.cacheMs ?? 0;
+    if (window <= 0) return read();
+    const held = cache.get(path);
+    if (held !== undefined && this.now() - held.at < window) return held.value;
+    const value = read();
+    // A pending read is shared even when Git takes longer than the cache window.
+    const entry = { at: Infinity, value };
+    cache.set(path, entry);
+    void value.then(() => { entry.at = this.now(); }, () => {
+      if (cache.get(path) === entry) cache.delete(path);
+    });
+    return value;
+  }
+}
+
 /**
  * Parses `git worktree list --porcelain` output into facts only. Deciding which worktrees a
  * project should show (for example hiding prunable ones) is workspace policy, not parsing.

@@ -73,6 +73,7 @@ import { ProjectGroups } from "./projects/projectGroups.js";
 import { ProjectWorkspaces } from "./projects/projectWorkspaces.js";
 import { relatedPullSessions } from "./projects/relatedPullSessions.js";
 import { registerProjectGroupRoutes } from "./projects/projectGroupRoutes.js";
+import { GitWorktreeDiscovery } from "./workspaces/gitWorktreeDiscovery.js";
 import { WorkspaceService } from "./workspaces/workspaceService.js";
 import { SessionWorktreeStore } from "./workspaces/sessionWorktreeStore.js";
 import { SessionWorktrees } from "./workspaces/sessionWorktrees.js";
@@ -101,6 +102,7 @@ import { registerResourceEditorRoutes } from "./resources/resourceEditorRoutes.j
 
 /** A worktree's ahead/behind/dirty counts are reused this long across session lists, project views and heartbeats. */
 const WORKTREE_STATUS_CACHE_MS = 10_000;
+const WORKTREE_DISCOVERY_CACHE_MS = 10_000;
 const daemonEnvironment: NodeJS.ProcessEnv = Object.freeze({ ...process.env });
 const { config } = effectivePiWebConfig({ env: daemonEnvironment });
 const activeAgentProfile = createActiveAgentProfileDescriptor({
@@ -197,7 +199,8 @@ async function createSessionDaemonRuntime() {
   // Cross-workspace session relationships are reported regardless of whether
   // agents may spawn sessions: children can predate a config change, and the
   // session tree should stay honest about them either way.
-  const projectWorkspaceDeps = { projects: new ProjectService(new ProjectStore(projectStorePath(daemonEnvironment))), workspaces: new WorkspaceService() };
+  const workspaceGit = new GitWorktreeDiscovery(undefined, { cacheMs: WORKTREE_DISCOVERY_CACHE_MS });
+  const projectWorkspaceDeps = { projects: new ProjectService(new ProjectStore(projectStorePath(daemonEnvironment))), workspaces: new WorkspaceService(workspaceGit) };
   const projectWorkspaces = new RegisteredProjectWorkspaceCwds(projectWorkspaceDeps);
   const spawnTargets = config.spawnSessions ? new ProjectScopedSpawnTargetResolver(projectWorkspaceDeps) : undefined;
   const worktreeStore = new SessionWorktreeStore(join(piWebDataDir(daemonEnvironment), "session-worktrees.json"));
@@ -209,6 +212,7 @@ async function createSessionDaemonRuntime() {
   });
   await workspaceServices.initialize();
   const sessionWorktrees: SessionWorktrees = new SessionWorktrees(worktreeStore, {
+    worktreesChanged: () => { workspaceGit.invalidate(); },
     publish(record) {
       // A secondary checkout must never replace the chat's primary worktree in existing clients.
       if (record.relatedSession !== undefined || record.childOwner !== undefined) return;
