@@ -1,21 +1,16 @@
 import { z } from "zod";
-import type { ManagedProcessesSnapshot, ManagedProcessWriteResult } from "@shared/apiTypes";
+import type { ManagedProcessLogLine, ManagedProcessesSnapshot, ManagedProcessWriteResult } from "@shared/apiTypes";
 import { loadProcessLines, type Request } from "./processApi";
+import { snapshotSchema } from "./processSchemas";
 
-const snapshotSchema = z.object({ available: z.boolean(), writeSupported: z.boolean(), processes: z.array(z.object({
-  id: z.string(), name: z.string(), pid: z.number(), command: z.string(), cwd: z.string(), startTime: z.number(), endTime: z.number().nullable(),
-  status: z.enum(["running", "terminating", "terminate_timeout", "exited", "killed"]), exitCode: z.number().nullable(), success: z.boolean().nullable(),
-  endReason: z.enum(["exit", "signal", "spawn_error", "missing_pid", "kill_timeout", "lost"]).nullable(),
-  signal: z.object({ name: z.string(), number: z.number().nullable(), description: z.string() }).nullable(), errorMessage: z.string().nullable(),
-  supervision: z.enum(["systemd", "attached"]).optional(), notice: z.string().optional(),
-  lastLogLine: z.object({ text: z.string(), truncatedStart: z.boolean() }).nullable().optional(),
-})) }) satisfies z.ZodType<ManagedProcessesSnapshot>;
 const actionSchema = z.object({ ok: z.boolean(), reason: z.string().optional(), bytesWritten: z.number().int().nonnegative().optional() });
 export type ProcessesView = { kind: "loading" } | { kind: "failed"; error: string } | { kind: "ready"; snapshot: ManagedProcessesSnapshot };
 /** `output` is the selected process's log as one text; `stderr` holds the indexes of its lines that came from stderr. */
 export interface ProcessesState { view: ProcessesView; selected?: string; output?: string; stderr?: readonly number[]; error?: string; readError?: string; pending?: boolean }
 
-/** One browser projection, refreshed on join and process events. No launch records enter this store. */
+const OUTPUT_TAIL_LINES = 200;
+
+/** One browser projection, read on join and kept current by process events. No launch records enter this store. */
 export function createProcessesStore(request: Request, ref: () => { id: string; cwd: string } | undefined) {
   let state: ProcessesState = { view: { kind: "loading" } };
   const listeners = new Set<() => void>();
@@ -23,8 +18,26 @@ export function createProcessesStore(request: Request, ref: () => { id: string; 
   let reading = false;
   let again = false;
   let selectionVersion = 0;
+  // Keep typed lines as the output source; text and stderr indexes are its public projection.
+  let outputLines: readonly ManagedProcessLogLine[] = [];
+  function setOutput(lines?: readonly ManagedProcessLogLine[]) {
+    outputLines = lines?.slice(-OUTPUT_TAIL_LINES) ?? [];
+    return { output: lines === undefined ? undefined : outputLines.map(line => line.text).join("\n"),
+      stderr: lines === undefined ? undefined : outputLines.flatMap((line, index) => line.type === "stderr" ? [index] : []) };
+  }
   const update = (next: ProcessesState) => { if (!disposed) { state = next; for (const listener of listeners) listener(); } };
   const path = (id: string) => `/api/sessions/${encodeURIComponent(id)}/processes`;
+  function applySnapshot(snapshot: ManagedProcessesSnapshot) {
+    if (disposed) return;
+    const selected = snapshot.processes.some(item => item.id === state.selected) ? state.selected : undefined;
+    if (selected !== state.selected) selectionVersion++;
+    update({ ...state, view: { kind: "ready", snapshot }, readError: undefined, selected,
+      ...(selected === undefined ? setOutput() : {}) });
+  }
+  function applyOutput(id: string, lines: readonly ManagedProcessLogLine[]) {
+    if (disposed || id !== state.selected || lines.length === 0) return;
+    update({ ...state, ...setOutput([...outputLines, ...lines]) });
+  }
   async function refresh() {
     if (reading) { again = true; return; }
     const session = ref(); if (!session || disposed) return;
@@ -33,13 +46,12 @@ export function createProcessesStore(request: Request, ref: () => { id: string; 
       const response = await request(`${path(session.id)}?${new URLSearchParams({ cwd: session.cwd })}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const snapshot = snapshotSchema.parse(await response.json());
-      const selected = snapshot.processes.some(item => item.id === state.selected) ? state.selected : undefined;
-      update({ ...state, view: { kind: "ready", snapshot }, readError: undefined, selected, ...(selected === undefined ? { output: undefined, stderr: undefined } : {}) });
+      applySnapshot(snapshot);
+      const selected = state.selected;
       const version = selectionVersion;
       if (selected !== undefined) {
-        const lines = await loadProcessLines(request, session, selected, 200);
-        if (version === selectionVersion) update({ ...state, output: lines.map((line) => line.text).join("\n"),
-          stderr: lines.flatMap((line, index) => line.type === "stderr" ? [index] : []) });
+        const lines = await loadProcessLines(request, session, selected, OUTPUT_TAIL_LINES);
+        if (!disposed && version === selectionVersion) update({ ...state, ...setOutput(lines) });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -67,8 +79,10 @@ export function createProcessesStore(request: Request, ref: () => { id: string; 
   return {
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     getSnapshot: () => state,
+    applySnapshot,
+    applyOutput,
     refresh: () => { void refresh(); },
-    select: (id: string | undefined) => { selectionVersion++; update({ ...state, selected: id, output: undefined, stderr: undefined, error: undefined }); void refresh(); },
+    select: (id: string | undefined) => { selectionVersion++; update({ ...state, selected: id, ...setOutput(), error: undefined }); void refresh(); },
     stop: (id: string) => { void action(id, "kill").catch(() => undefined); },
     write: (id: string, input: string, end?: boolean) => action(id, "write", input, end),
     dispose: () => { disposed = true; listeners.clear(); },

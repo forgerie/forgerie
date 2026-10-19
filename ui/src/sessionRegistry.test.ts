@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSessionRegistry } from "./sessionRegistry";
 import { createOpenServer, openFixture } from "./testing/openFixture";
+import type { ManagedProcessesSnapshot, SessionUiEvent } from "@shared/apiTypes";
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 const session = (id: string) => ({ id, cwd: "/workspace" });
@@ -52,6 +53,38 @@ describe("six-entry session lifetime", () => {
     await vi.waitFor(() => expect(registry.getSnapshot().every(record => record.state === "seeded")).toBe(true));
     expect(server.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(2);
   });
+});
+
+it("consumes process pushes over the socket without HTTP and refreshes after reconnect", async () => {
+  let snapshot: ManagedProcessesSnapshot = { available: true, writeSupported: true, processes: [{
+    id: "one", name: "Reader", pid: 0, command: "cat", cwd: "/workspace", startTime: 1, endTime: null,
+    status: "running", exitCode: null, success: null, endReason: null, signal: null, errorMessage: null,
+  }] };
+  const server = await createOpenServer(url => {
+    if (url.pathname.endsWith("/open")) return openFixture({ session: session("known") });
+    if (url.pathname.endsWith("/processes")) return snapshot;
+    if (url.pathname.endsWith("/output")) return { ok: true, lines: [{ type: "stdout", text: "initial" }] };
+    return Response.json({ error: "Panel unavailable in fixture" }, { status: 404 });
+  }); cleanup.push(server.close);
+  const registry = createSessionRegistry(server.transport, { isVisible: () => true, afterPaint: async () => {} }); cleanup.push(registry.dispose);
+  const entry = registry.select(session("known")); if (!entry) throw new Error("Missing selected entry");
+  await vi.waitFor(() => expect(entry.processes.getSnapshot().view.kind).toBe("ready"));
+  entry.processes.select("one");
+  await vi.waitFor(() => expect(entry.processes.getSnapshot().output).toBe("initial"));
+  const requests = server.requests.filter(url => url.pathname.includes("/processes")).length;
+  const pushed = { ...snapshot, processes: snapshot.processes.map(process => ({ ...process, lastLogLine: { text: "pushed", truncatedStart: false } })) };
+  server.emit({ type: "processes.update", snapshot: pushed } satisfies SessionUiEvent);
+  server.emit({ type: "processes.output", id: "one", lines: [{ type: "stderr", text: "pushed" }], droppedLines: 0 } satisfies SessionUiEvent);
+  await vi.waitFor(() => expect(entry.processes.getSnapshot().output).toBe("initial\npushed"));
+  expect(entry.processes.getSnapshot().view).toEqual({ kind: "ready", snapshot: pushed });
+  expect(entry.processes.getSnapshot().stderr).toEqual([1]);
+  expect(server.requests.filter(url => url.pathname.includes("/processes"))).toHaveLength(requests);
+  // A change missed while disconnected heals through the normal join read, not polling.
+  snapshot = { ...snapshot, processes: [] };
+  for (const socket of server.sockets.clients) socket.close();
+  await vi.waitFor(() => expect(entry.processes.getSnapshot().view).toEqual({ kind: "ready", snapshot }), { timeout: 3000 });
+  expect(entry.processes.getSnapshot().selected).toBeUndefined();
+  expect(server.requests.filter(url => url.pathname.endsWith("/processes"))).toHaveLength(3);
 });
 
 it("keeps a deeply paged selected reader intact, then demotes it only when hidden", async () => {

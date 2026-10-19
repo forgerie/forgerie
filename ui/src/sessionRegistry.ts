@@ -31,9 +31,11 @@ export function createSessionEntry(session: Session, transport: SessionTransport
   const reads = createReadTracker(transport, { isVisible: () => visible && !store.getSnapshot().transcript.isRunning && (options.isVisible?.() ?? document.visibilityState === "visible"),
     subscribe: options.onUnread, afterRender: options.afterPaint ?? afterTranscriptPaint });
   const store = createSessionStore(session.id, transport, {}, session.cwd ? session : undefined, reads, event => {
-    if (event === "processes.update" || event === "processes.output") void processes.refresh();
     if (event === CHILDREN_CHANGED_EVENT) { childAgents.refresh(); workflows.refresh(); taskActivity.refresh(); }
     if (event === WORKFLOW_RUNS_CHANGED_EVENT) { workflows.refresh(); decisions.refresh(); gated.refresh(); }
+  }, event => {
+    if (event.type === "processes.update") processes.applySnapshot(event.snapshot);
+    else processes.applyOutput(event.id, event.lines);
   });
   let readyAt: number | undefined;
   cleanups.add(store.subscribe(() => {

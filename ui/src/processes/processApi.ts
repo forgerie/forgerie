@@ -2,9 +2,10 @@
 // GET /api/sessions/:id/processes/:processId/output (src/server/sessions/processRoutes.ts).
 import { z } from "zod";
 import type { ManagedProcessLogLine } from "@shared/apiTypes";
+import { processLogLineSchema } from "./processSchemas";
 
 const outputSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), lines: z.array(z.object({ type: z.enum(["stdout", "stderr"]), text: z.string() })) }),
+  z.object({ ok: z.literal(true), lines: z.array(processLogLineSchema) }),
   z.object({ ok: z.literal(false), reason: z.string() }),
 ]);
 const reasons: Record<string, string> = {

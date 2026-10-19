@@ -1,5 +1,6 @@
 import type { EarlierHistory } from "./historyPaging";
 import { SessionWireDecoder } from "@shared/sessionWire";
+import { processesEventSchema, type ProcessesEvent } from "./processes/processSchemas";
 import { checkConnection, watchConnectionRecovery } from "./connectionRecovery";
 import type { ReadReceipt } from "./readReceipt";
 import type { ReadTracker } from "./readReceipt";
@@ -140,7 +141,7 @@ export function shellAvailabilityOf(state: SessionState): ShellAvailability {
  */
 export function createSessionStore(id: string, transport: SessionTransport, timing: RecoveryTiming = {}, known?: Session, reads?: ReadTracker,
   /** Server events the transcript does not use, by Pi event type, such as a child agent's change. */
-  onPiEvent?: (eventType: string) => void) {
+  onPiEvent?: (eventType: string) => void, onProcessesEvent?: (event: ProcessesEvent) => void) {
   let state: SessionState = { connection: { type: "loading" }, earlier: { type: "complete" }, completedRuns: 0, problems: [], ...(known?.id === id ? { session: known } : {}), transcript: fromHistory([]), ask: noAsk, sending: false, commands: { type: "loading" }, compaction: idleCompaction, tree: closedTree, dialogPhase: noDialogPhase };
   const now = timing.now ?? Date.now;
   let problemId = 0;
@@ -452,8 +453,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
           }
           if (onPiEvent && typeof raw === "object" && raw !== null && "type" in raw && raw.type === "pi.event"
             && "eventType" in raw && typeof raw.eventType === "string") onPiEvent(raw.eventType);
-          if (onPiEvent && typeof raw === "object" && raw !== null && "type" in raw
-            && (raw.type === "processes.update" || raw.type === "processes.output")) onPiEvent(raw.type);
+          if (onProcessesEvent && typeof raw === "object" && raw !== null && "type" in raw
+            && (raw.type === "processes.update" || raw.type === "processes.output")) onProcessesEvent(processesEventSchema.parse(raw));
           const parsed = parseEvent(raw);
           if (!parsed || parsed.seq !== undefined && parsed.seq <= attempt.seq) return;
           if (!attempt.seeding && attempt.readPath === "native" && !nativeHostEvent(parsed)) return;
