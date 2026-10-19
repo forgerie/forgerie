@@ -33,6 +33,8 @@ On hosts without a systemd user manager, Forgerie starts an **attached process**
 
 A child process ends when its child run finishes unless the child sets `keepAfterChild: true`. A kept child process still ends at session close. Exits and watched output missed during a restart reach the session on resume with the watch's requested attention.
 
+While the agent is busy, process events that need a turn wait as one queued follow-up. A later event joins that follow-up instead of adding another, so several exits cost one model turn.
+
 Forgerie no longer installs `@aliou/pi-processes`. Hosted sessions ignore a copy in the Pi profile and warn with its path. Remove that copy and restart in an approved window: extension factories ran before filtering, so removing hooks cannot undo their earlier side effects.
 
 ## Current browser-app plugins

@@ -12,11 +12,16 @@ interface InputPlacementOptions {
   onPlaced?(tx: Tx, entry: EntryId): Promise<void>;
 }
 
+/** Each withdrawn attempt reserves a fresh request ID, so a retry never reuses the withdrawn receipt. */
+export function placementRequestId(requestId: string, attempt: number | undefined): string {
+  return attempt === undefined || attempt === 0 ? requestId : `${requestId}:retry:${String(attempt)}`;
+}
+
 /** A queued receipt is not delivery. Keep the outbox live until an entry exists, retrying only unplaced withdrawals. */
 export async function deliverInputUntilPlaced<I>(runtime: TaskRuntime<I, InputPlacementState, null, object>, state: InputPlacementState,
   options: InputPlacementOptions, context: Context): Promise<void> {
   const attempt = state.attempt ?? 0;
-  const requestId = attempt === 0 ? options.requestId : `${options.requestId}:retry:${String(attempt)}`;
+  const requestId = placementRequestId(options.requestId, attempt);
   const recipient = state.recipient;
   if (recipient === undefined) {
     await runtime.commit(async (tx) => {

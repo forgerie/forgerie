@@ -1,11 +1,13 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxProvider, fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
+import { Type } from "@earendil-works/pi-ai";
+import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { createRegistry } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, defineTool, InboxDoc } from "@earendil-works/pi-durable";
 import { expect, it, vi } from "vitest";
 import { Presentation } from "./durableParentDocuments.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
@@ -91,5 +93,49 @@ it("counts only new coalesced matches and overflow after acceptance, restart and
       .map(entry => processSummarySchema.parse(entry.data));
     expect(summaries).toHaveLength(4);
     expect(summaries.map(summary => summary.events.reduce((count, event) => count + event.count, 0) + (summary.overflow?.context ?? 0))).toEqual([20, 30, 5, 1]);
+  } finally { await journal.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it("joins process-event wakes queued behind a busy turn into one follow-up, and keeps them all after withdrawal", async () => {
+  const root = await mkdtemp(join(tmpdir(), "forgerie-process-coalesce-"));
+  const manager = SessionManager.create(root, join(root, "sessions"));
+  const models = createModels(); const provider = fauxProvider({ tokensPerSecond: 100000 }); models.setProvider(provider.provider);
+  const hold = defineExtension({ name: "process-hold", tools: [defineTool({
+    name: "hold", description: "Hold this turn until it is stopped", parameters: Type.Object({}), replay: "safe",
+    execute: async (_args, _api, ctx) => { await sleep(60_000, undefined, { signal: ctx.abortSignal }); return { content: [] }; },
+  })] });
+  const prompts: string[] = [];
+  provider.setResponses(Array.from({ length: 20 }, () => (request) => {
+    const last = [...request.messages].reverse().find(message => message.role === "user");
+    const text = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content);
+    prompts.push(text);
+    return text === "Start" ? fauxAssistantMessage([fauxToolCall("hold", {})], { stopReason: "toolUse" }) : fauxAssistantMessage("received");
+  }));
+  const registry = createRegistry(); registry.install(processEventsExtension()); registry.install(hold);
+  const journal = await DurableSessionJournal.open({ manager, models, registry, agent: { model: { provider: "faux", modelId: "faux-1" }, extensions: [hold] } });
+  const wake = (id: string, name: string): ProcessEventSummary => ({ id, missed: false, events: [
+    { processId: name, name, watchId: "exit", attention: "turn", kind: "exit", line: 0, count: 1, samples: [], reason: "exited 1" },
+  ] });
+  const inbox = async () => (await journal.harness.snapshot(InboxDoc, journal.conversation.id, context))?.items ?? [];
+  const wakes = () => prompts.filter(prompt => prompt.includes("Managed process events"));
+  try {
+    journal.harness.resume();
+    await journal.conversation.submit({ type: "input", content: "Start" }, context);
+    await vi.waitFor(() => { expect(prompts).toContain("Start"); });
+    await acceptProcessEvents(journal.conversation, wake("a", "alpha"), context);
+    await vi.waitFor(async () => { expect(await inbox()).toHaveLength(1); });
+    await acceptProcessEvents(journal.conversation, wake("b", "beta"), context);
+    await acceptProcessEvents(journal.conversation, wake("c", "gamma"), context);
+    const items = await inbox();
+    expect(items).toHaveLength(1);
+    const queued = JSON.stringify(items[0]);
+    for (const name of ["alpha", "beta", "gamma"]) expect(queued).toContain(name);
+    expect(queued.split("Managed process events").length - 1).toBe(1);
+    // Abort withdraws the queued wake. Its retry must carry the joined text, not only the first event.
+    await journal.conversation.abort(context);
+    await vi.waitFor(() => { expect(wakes()).toHaveLength(1); });
+    await journal.conversation.waitForIdle(context);
+    expect(wakes()).toHaveLength(1);
+    for (const name of ["alpha", "beta", "gamma"]) expect(wakes()[0]).toContain(name);
   } finally { await journal.close(); await rm(root, { recursive: true, force: true }); }
 });
