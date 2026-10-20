@@ -1,6 +1,7 @@
 #!/usr/bin/env -S nix shell nixpkgs#nodejs_24 -c node
 // Read-only browser navigation. Example:
-// node ui/scripts/stack-latency-baseline.mjs /tmp/result.json http://127.0.0.1:8504/ ID_A,ID_B 1000 12
+// node ui/scripts/stack-latency-baseline.mjs /tmp/result.json http://127.0.0.1:8504/ ID_A,ID_B 1000 12 [paceMs=60]
+// paceMs 0 reproduces the unpaced runner, which Chromium history throttling can censor.
 // No network bodies, titles, transcript text, environment, or full URLs are saved.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -8,10 +9,12 @@ import { writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { loadavg, cpus } from "node:os";
 import { CDP, evaluate, sleep } from "../../scripts/lib/cdp.mjs";
-import { destinationReady, routeLabel, summarize } from "./stack-latency-contract.mjs";
+import { destinationReady, paceDelay, routeLabel, summarize, SWITCH_PACE_MS } from "./stack-latency-contract.mjs";
 
 async function main() {
-  const [output, url, ids, count = "1000", coldCount = "12"] = process.argv.slice(2);
+  const [output, url, ids, count = "1000", coldCount = "12", pace = String(SWITCH_PACE_MS)] = process.argv.slice(2);
+  const paceMs = Number(pace);
+  paceDelay(undefined, 0, paceMs);
   assert.ok(output && url && ids, "output, URL and two comma-separated session IDs required");
   assert.ok(!existsSync(output), "Refusing to replace baseline evidence; choose a new output path");
   assert.equal(new URL(url).hostname, "127.0.0.1", "Only loopback measurement is allowed");
@@ -40,7 +43,7 @@ async function main() {
   const browser = (...args) => execFileSync("agent-browser", ["--session", sessionName, ...args], { encoding: "utf8", timeout: 90000 });
   const result = { protocol: "destination-route-selection-and-API-reply/v2", startedAt: new Date().toISOString(), source: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
     viewport: "1440x900 DPR1 desktop emulation", syntheticClick: true, paint: "rAF-observed DOM then next-rAF opportunity; not compositor presentation timestamp", prefetchDisabled: true,
-    cold: "browser store/document cold; asset cache warm after first navigation; daemon and OS cache uncontrolled", loadStart: loadavg(), cores: cpus().length,
+    cold: "browser store/document cold; asset cache warm after first navigation; daemon and OS cache uncontrolled", loadStart: loadavg(), paceMs, historyThrottleWarnings: [], cores: cpus().length,
     build: await get("/build.json"), boots: [], catalogSessions: catalog.sessions.length, histories: targets.map(({ total, pageSize, readPath }, target) => ({ target, total, pageSize, readPath })), opens: [] };
   let cdp;
   try {
@@ -48,7 +51,9 @@ async function main() {
     const port = new URL(browser("get", "cdp-url").trim()).port;
     const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     cdp = await CDP.connect(pages.find(page => page.type === "page").webSocketDebuggerUrl);
-    await cdp.send("Page.enable"); await cdp.send("Performance.enable");
+    await cdp.send("Page.enable"); await cdp.send("Performance.enable"); await cdp.send("Log.enable");
+    // A throttled history update leaves the route behind the selection; record where it happened.
+    cdp.listeners.set("Log.entryAdded", [({ entry }) => { if (/Throttling navigation/u.test(entry.text)) result.historyThrottleWarnings.push({ completedSamples: result.opens.length }); }]);
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
     await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: `Object.defineProperty(navigator,'connection',{value:{saveData:true,effectiveType:'4g'},configurable:true});window.__longTasks=[];window.__observer=new PerformanceObserver(list=>{for(const e of list.getEntries())if(window.__longTasks.length<5000)window.__longTasks.push({start:e.startTime,duration:e.duration});});window.__observer.observe({type:'longtask',buffered:true});` });
     const ready = async expression => {
@@ -64,8 +69,11 @@ async function main() {
       await ready(`!!document.getElementById(${JSON.stringify(`picker-row-${targets[1].id}`)}) && !document.querySelector('.transcript')`);
       result.boots.push(await evaluate(cdp, `({catalogReadyObservedMs:performance.now(),longTasks:window.__longTasks,assets:performance.getEntriesByType('resource').filter(e=>new URL(e.name).pathname.startsWith('/assets/')).map(e=>({duration:e.duration,bytes:e.decodedBodySize,transfer:e.transferSize}))})`));
     };
+    let lastClick;
     async function open(targetIndex, kind) {
       const target = targets[targetIndex];
+      await sleep(paceDelay(lastClick, performance.now(), paceMs));
+      lastClick = performance.now();
       const measured = await evaluate(cdp, `new Promise((resolve,reject)=>{
         const target=${JSON.stringify(target)}, destinationReady=${destinationReady.toString()};
         performance.clearResourceTimings();window.__longTasks=[];

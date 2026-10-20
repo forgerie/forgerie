@@ -11,7 +11,7 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { cpus, loadavg } from "node:os";
 import { join } from "node:path";
 import { CDP, evaluate, sleep } from "./lib/cdp.mjs";
-import { destinationReady, summarize } from "../ui/scripts/stack-latency-contract.mjs";
+import { destinationReady, paceDelay, summarize } from "../ui/scripts/stack-latency-contract.mjs";
 import { plateau, soakOptions, soakPhase, UNSUPPORTED_SOAK_PATHS } from "./stack-latency-soak-model.mjs";
 
 const options = soakOptions(process.argv.slice(2));
@@ -38,8 +38,12 @@ const elapsedMin = () => (performance.now() - started) / 60000;
 const metrics = async () => (await (await fetch(`${fixture.origin}/__fixtures/metrics`, { signal: AbortSignal.timeout(10000) })).json());
 const vmRss = async pid => Number((await readFile(`/proc/${pid}/status`, "utf8")).match(/^VmRSS:\s+(\d+) kB/mu)?.[1] ?? Number.NaN) * 1024;
 
+// Paced so Chromium's history throttle cannot leave the route behind the selection.
+let lastClick;
 async function open(index) {
   const target = targets[index];
+  await sleep(paceDelay(lastClick, performance.now()));
+  lastClick = performance.now();
   const result = await evaluate(cdp, `new Promise(resolve=>{const target=${JSON.stringify(target)},destinationReady=${destinationReady.toString()};
     const click=performance.now();document.getElementById('picker-row-'+target.id)?.click();
     const tick=()=>{if(destinationReady(document,target))resolve({ms:performance.now()-click});else if(performance.now()-click>20000)resolve({failed:true});else requestAnimationFrame(tick);};requestAnimationFrame(tick);})`);

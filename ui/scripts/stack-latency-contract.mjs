@@ -47,6 +47,19 @@ export function matchTokenPaints(received, paints, initialCount) {
   });
 }
 
+/**
+ * Chromium ignores history updates beyond 200 within 10 s in one document and logs
+ * "Throttling navigation to prevent the browser from hanging" (crbug.com/1038223).
+ * The app pushes one entry per session switch, so an unpaced runner faster than
+ * 50 ms per switch can leave the URL behind the selection. Runners keep click
+ * starts this far apart; the idle gap lies outside every timed interval.
+ */
+export const SWITCH_PACE_MS = 60;
+export function paceDelay(lastClickMs, nowMs, paceMs = SWITCH_PACE_MS) {
+  if (!Number.isFinite(paceMs) || paceMs < 0) throw new Error("Pace must be a nonnegative number of milliseconds");
+  return lastClickMs === undefined ? 0 : Math.max(0, paceMs - (nowMs - lastClickMs));
+}
+
 export function routeLabel(address) {
   const path = new URL(address, "http://localhost").pathname;
   if (path.startsWith("/assets/")) return "asset";

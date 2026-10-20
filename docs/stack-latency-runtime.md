@@ -105,6 +105,23 @@ event was received once, and that the visible transcript holds exactly one copy
 of the final reply with exactly the planned token count. Frame batching is
 allowed. This is the classic event hub, not native or provider streaming.
 
+## Switch pacing
+
+The app pushes one history entry per session switch. Chromium ignores history
+updates beyond 200 within 10 seconds in one document and logs "Throttling
+navigation to prevent the browser from hanging" (crbug.com/1038223). The URL
+then stays on the previous session while the selection, transcript and
+composer move on, and the readiness predicate's route check fails. An
+unpaced warm-switch run faster than about 50 ms per switch hits this on the
+401st or 1001st push of a document; the earlier 398-switch live censor was
+this throttle, not a product stall.
+
+`ui/scripts/stack-latency-baseline.mjs` and the soak runner therefore keep
+click starts at least `SWITCH_PACE_MS` (60 ms) apart. The idle gap is outside
+every timed interval. The baseline runner takes an optional sixth argument,
+`paceMs`; `0` reproduces the unpaced runner. It records `paceMs` and any
+throttle warnings in its output.
+
 ## Soak runner
 
 ```sh

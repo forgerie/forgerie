@@ -1,8 +1,16 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { Window } from "happy-dom";
-import { destinationReady, matchTokenPaints, routeLabel, summarize } from "./stack-latency-contract.mjs";
+import { destinationReady, matchTokenPaints, paceDelay, routeLabel, summarize, SWITCH_PACE_MS } from "./stack-latency-contract.mjs";
 
+test("switch pacing keeps history updates under Chromium's 200 per 10 s limit", () => {
+  assert.equal(paceDelay(undefined, 5), 0);
+  assert.equal(paceDelay(100, 130), SWITCH_PACE_MS - 30);
+  assert.equal(paceDelay(100, 100 + SWITCH_PACE_MS + 1), 0);
+  assert.equal(paceDelay(100, 110, 0), 0);
+  assert.ok(10_000 / SWITCH_PACE_MS < 200);
+  assert.throws(() => paceDelay(0, 1, -1));
+});
 test("small samples do not claim tail percentiles", () => {
   assert.deepEqual(summarize([3, 1, 2]), { n: 3, min: 1, median: 2, max: 3, p95: null, p99: null });
   assert.equal(summarize(Array.from({ length: 100 }, (_, i) => i)).p95, 94);
