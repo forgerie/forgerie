@@ -342,8 +342,8 @@ export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId:
 
 /**
  * How long Land waits for working children of the run to report before it lands. A repair child can still change its
- * branch, and Land then threw "Stop the child before changing its worktree" (01a151b4 L603, L660). Those repairs took
- * 3 to 10.5 min, so Forgerie's own land waits 10 min. The user's Land click waits 90 s: the browser aborts that
+ * branch, and Land then threw "Stop the child before changing its worktree" (issue #56). The repairs in that report
+ * took 3 to 10.5 min, so Forgerie's own land waits 10 min. The user's Land click waits 90 s: the browser aborts that
  * request after 120 s (`ui/src/workflows/workflowsStore.ts`), and the land itself needs the rest.
  */
 const USER_LAND_REPORT_WAIT_MS = 90_000;

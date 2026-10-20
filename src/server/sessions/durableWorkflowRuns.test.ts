@@ -6,7 +6,7 @@ import { awaitWithContext, BACKGROUND_CONTEXT as context } from "@earendil-works
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { createRegistry, defineExtension, defineTask } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, defineTask, type TaskId } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { durableChildExtensions } from "./durableChildAgents.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
@@ -72,19 +72,21 @@ it("tells the repair agent that Land rebases each branch alone, in start order, 
   expect(advice).toContain("A merge commit, or a fast-forward to a merge, does not repair a branch");
 });
 
-/** A repair child's completion report. It stays live until the test releases it, as a reporter does while its child works. */
-let releaseReport: () => void = () => undefined;
-const RepairReport = defineTask<null, { phase: "work" }, null>({
-  name: "test.repair-report", version: 1, initial: () => ({ phase: "work" }),
-  phases: { work: async (_task, runtime, context) => {
-    await awaitWithContext(new Promise<void>((resolve) => { releaseReport = resolve; }), context);
-    await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
-  } },
-  abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
-});
+/** The fixture a land test gets: a run whose land stop waits while its child alpha still works on a repair. */
+interface RepairingRun { journal: DurableSessionJournal; runId: string; reporter: TaskId; releaseReport: () => void }
 
-/** A run whose land stop waits while its child alpha still works on a repair. */
-async function landWhileRepairing(run: (fixture: { journal: DurableSessionJournal; runId: string; reporter: Awaited<ReturnType<typeof startRepair>> }) => Promise<void>) {
+async function landWhileRepairing(run: (fixture: RepairingRun) => Promise<void>) {
+  // alpha's completion report. It stays live until this test releases it, as a reporter does while its child works.
+  let releaseReport: () => void = () => undefined;
+  const reported = new Promise<void>((resolve) => { releaseReport = resolve; });
+  const RepairReport = defineTask<null, { phase: "work" }, null>({
+    name: "test.repair-report", version: 1, initial: () => ({ phase: "work" }),
+    phases: { work: async (_task, runtime, context) => {
+      await awaitWithContext(reported, context);
+      await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+    } },
+    abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+  });
   const directory = await mkdtemp(join(tmpdir(), "forgerie-workflow-land-wait-"));
   const manager = SessionManager.create(directory, directory);
   manager.appendMessage(fauxAssistantMessage("Prior context"));
@@ -97,32 +99,29 @@ async function landWhileRepairing(run: (fixture: { journal: DurableSessionJourna
   registry.install(defineExtension({ name: "test.repair", tasks: [RepairReport] }));
   const journal = await DurableSessionJournal.open({ manager, models, registry, agent: { model: { provider: "faux", modelId: "faux-1" } } });
   const parent = journal.conversation.id;
-  const text = "---\nworkflow:\n  version: 1\n  stages:\n    - { id: build, name: Build }\n    - { id: land, name: Land, stop: land }\n---\nBuild, then land.\n";
-  const proposal = await journal.conversation.commit((tx) => proposeWorkflow(tx, parent, "p:land", { name: "land-wait", summary: "Land after a repair.", text, basis: { kind: "new", reason: "Test." } }), context);
-  const launched = await startWorkflowProposal(journal.harness, journal.conversation, directory, manager.getSessionId(), proposal.id, {}, "land-wait", context);
-  await journal.conversation.commit((tx) => requestWorkflowStop(tx, parent, launched.id, "land", "Land the repaired branch."), context);
-  const reporter = await startRepair(journal);
-  try { await run({ journal, runId: launched.id, reporter }); }
-  finally {
-    await journal.harness.abortTask(reporter, context);
+  let reporter: TaskId | undefined;
+  try {
+    const text = "---\nworkflow:\n  version: 1\n  stages:\n    - { id: build, name: Build }\n    - { id: land, name: Land, stop: land }\n---\nBuild, then land.\n";
+    const proposal = await journal.conversation.commit((tx) => proposeWorkflow(tx, parent, "p:land", { name: "land-wait", summary: "Land after a repair.", text, basis: { kind: "new", reason: "Test." } }), context);
+    const launched = await startWorkflowProposal(journal.harness, journal.conversation, directory, manager.getSessionId(), proposal.id, {}, "land-wait", context);
+    await journal.conversation.commit((tx) => requestWorkflowStop(tx, parent, launched.id, "land", "Land the repaired branch."), context);
+    reporter = await journal.conversation.commit(async (tx) => {
+      const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
+      const task = await tx.createTask(RepairReport, null, { ownership: { kind: "conversation" }, background: true });
+      await associateWorkflowChild(tx, parent, child.id, task, "alpha");
+      return task;
+    }, context);
+    journal.harness.resume();
+    await run({ journal, runId: launched.id, reporter, releaseReport });
+  } finally {
+    if (reporter !== undefined) await journal.harness.abortTask(reporter, context);
     await journal.close();
     await rm(directory, { recursive: true, force: true });
   }
 }
-async function startRepair(journal: DurableSessionJournal) {
-  const parent = journal.conversation.id;
-  const reporter = await journal.conversation.commit(async (tx) => {
-    const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
-    const task = await tx.createTask(RepairReport, null, { ownership: { kind: "conversation" }, background: true });
-    await associateWorkflowChild(tx, parent, child.id, task, "alpha");
-    return task;
-  }, context);
-  journal.harness.resume();
-  return reporter;
-}
 
 it.each(["user", "forgerie"] as const)("%s land waits for a working repair child's report, then lands", async (by) => {
-  await landWhileRepairing(async ({ journal, runId, reporter }) => {
+  await landWhileRepairing(async ({ journal, runId, reporter, releaseReport }) => {
     const landedRuns: WorkflowRun[] = [];
     const land = async (run: WorkflowRun) => {
       // The report is in before Land touches a worktree.
