@@ -10,9 +10,22 @@ export const snapshotSchema = z.object({ available: z.boolean(), writeSupported:
   lastLogLine: z.object({ text: z.string(), truncatedStart: z.boolean() }).nullable().optional(),
 })) }) satisfies z.ZodType<ManagedProcessesSnapshot>;
 
-export const processLogLineSchema = z.object({ type: z.enum(["stdout", "stderr"]), text: z.string() });
+const lineNumberSchema = z.number().int().positive().safe();
+const processLogLineSchema = z.object({ type: z.enum(["stdout", "stderr"]), text: z.string(),
+  number: lineNumberSchema.optional(), terminated: z.boolean().optional(), truncatedStart: z.boolean().optional() });
+const cursorSchema = z.object({ offset: z.number().int().nonnegative().safe(), line: lineNumberSchema });
+export const processOutputBatchSchema = z.object({ lines: z.array(processLogLineSchema), cursor: cursorSchema.optional(),
+  droppedLines: z.number().int().nonnegative().safe().optional() }).superRefine((batch, ctx) => {
+  if (batch.cursor === undefined) return;
+  let previous = 0;
+  for (const line of batch.lines) {
+    if (line.number === undefined) continue; // Older daemons may not send positions for every line.
+    if (line.number <= previous || line.number >= batch.cursor.line) ctx.addIssue({ code: "custom", message: "Invalid managed process line order or cursor" });
+    previous = line.number;
+  }
+});
 export type ProcessesEvent = Extract<SessionUiEvent, { type: "processes.update" | "processes.output" }>;
 export const processesEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("processes.update"), snapshot: snapshotSchema }),
-  z.object({ type: z.literal("processes.output"), id: z.string(), lines: z.array(processLogLineSchema), droppedLines: z.number().int().nonnegative() }),
+  processOutputBatchSchema.safeExtend({ type: z.literal("processes.output"), id: z.string(), droppedLines: z.number().int().nonnegative().safe() }),
 ]) satisfies z.ZodType<ProcessesEvent>;
