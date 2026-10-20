@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import { isAbsolute, join, resolve } from "node:path";
 
 export function nativeFixtureOptions(args) {
-  const [root, rawPort, clientDist, sizes = "20,300"] = args;
+  const measure = args.includes("--measure");
+  const limit = args.find(arg => arg.startsWith("--seed-limit-sec="));
+  const seedLimitSec = limit === undefined ? 180 : Number(limit.slice("--seed-limit-sec=".length));
+  assert.ok(Number.isInteger(seedLimitSec) && seedLimitSec >= 10 && seedLimitSec <= 600, "--seed-limit-sec must be an integer from 10 to 600");
+  const [root, rawPort, clientDist, sizes = "20,300"] = args.filter(arg => arg !== "--measure" && arg !== limit);
   assert.ok(root && isAbsolute(root) && resolve(root).startsWith("/tmp/") && resolve(root) !== "/tmp", "A fresh absolute /tmp fixture root is required");
   const port = Number(rawPort);
   assert.ok(Number.isInteger(port) && port >= 18641 && port <= 18656, "Use an assigned loopback fixture port (18641–18656)");
   assert.ok(clientDist && isAbsolute(clientDist), "An absolute built client directory is required");
   const turns = sizes.split(",").map(Number);
   assert.ok(turns.length >= 2 && turns.length <= 8 && turns.every(n => Number.isInteger(n) && n > 0 && n <= 1500), "Supply 2–8 histories, each 1–1500 turns");
-  return { root: resolve(root), port, clientDist: resolve(clientDist), turns };
+  return { root: resolve(root), port, clientDist: resolve(clientDist), turns, measure, seedLimitSec };
 }
 
 export function fixtureEnvironment(root, inherited = process.env) {
