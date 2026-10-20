@@ -200,3 +200,9 @@ it("keeps required-response rows hint-free in today's order and before inferred 
   }
   expect(sections(all, { grouping: "state", showArchived: false, now: NOW }).flatMap(section => section.rows).map(row => row.session.id)).toEqual(["dialog", "declared-new", "declared-old", "hint-high", "hint-new"]);
 });
+
+it("copies each session's workflow to its row and leaves absent workflows undefined", () => {
+  const workflow = { name: "Ship", stages: ["done", "waiting"] as ("done" | "waiting")[], stage: "Review", waiting: 1 };
+  const result = rows(input({ sessions: [session("a"), session("b"), session("c")], statuses: { a: { ...idle, workflow }, b: idle } }));
+  expect(result.map((row) => row.workflow)).toEqual([workflow, undefined, undefined]);
+});

@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyCatalogEvent, createCatalogStore, type CatalogState, type CatalogStore } from "./catalogStore";
 import type { SessionTransport } from "../sessionStore";
 import { attention, rows } from "./board";
+import { parseCatalogEvent } from "./contracts";
+import { statusSchema } from "../contracts";
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); });
@@ -451,4 +453,27 @@ describe("cached guarded receipt lookup", () => {
     await until(store, () => seen.length === 3);
     expect(seen[2]).toEqual({ id: "a", receipt: undefined });
   });
+});
+
+describe("workflow status", () => {
+  const base: CatalogState = { connection: { type: "ready" }, sessions: [], statuses: {}, activities: {}, unread: new Set(), projects: [] };
+  it("copies the workflow from a wire status and clears it when absent", () => {
+    const workflow = { name: "Ship", stages: ["done", "waiting"], stage: "Review", waiting: 1 };
+    const event = parseCatalogEvent({ type: "status.update", status: { sessionId: "a", ...idle, workflow } });
+    if (!event) throw new Error("Expected status event");
+    const next = applyCatalogEvent(base, event);
+    expect(next.statuses["a"]?.workflow).toEqual(workflow);
+    const repeated = parseCatalogEvent({ type: "status.update", status: { sessionId: "a", ...idle, workflow } });
+    if (!repeated) throw new Error("Expected status event");
+    expect(applyCatalogEvent(next, repeated)).toBe(next);
+    expect(statusSchema.parse({ ...idle, workflow }).workflow).toEqual(workflow);
+    expect(applyCatalogEvent(next, { type: "status.update", status: { sessionId: "a", ...idle } }).statuses["a"]?.workflow).toBeUndefined();
+  });
+  it.each([{ name: "Ship", stages: ["invalid"], stage: "Review", waiting: 1 }, { name: "Ship", stages: [], stage: "Review", waiting: "one" }])(
+    "drops a malformed workflow without dropping its status", (workflow) => {
+      const event = parseCatalogEvent({ type: "status.update", status: { sessionId: "a", ...idle, workflow } });
+      if (!event) throw new Error("Expected status event");
+      expect(applyCatalogEvent(base, event).statuses["a"]).toMatchObject({ ...idle, workflow: undefined });
+      expect(statusSchema.parse({ ...idle, workflow })).toMatchObject({ ...idle, workflow: undefined });
+    });
 });

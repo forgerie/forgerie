@@ -70,6 +70,8 @@ const route: FauxResponseFactory = (context) => {
     if (said.startsWith("The user answered:")) return answer(`Thanks. ${said}`);
     return answer(`Tool said: ${said}`);
   }
+  const workflow = /^Request workflow stop ([a-f0-9]{64})/.exec(said);
+  if (workflow !== null) return call("workflow_stop", { runId: workflow[1] ?? "", stage: "review", summary: "Ready for review" });
   const question = /^\[child (\w+) asks ([^\]]+)\]/.exec(said);
   if (question !== null) return call("child_agent", { action: "escalate", questionId: question[2] ?? "", kind: "external", guess: "Teal", why: "Configured external escalation for the user-answer tests" });
   if (said.startsWith("[subagent")) return answer("Noted.");
@@ -487,6 +489,41 @@ describe("Durable-native child agents in a Forgerie session", () => {
     await until("asker report", async () => (await reports(ref, "asker")).length === 1);
     expect(await childText(ref, asker.conversationId)).toContain("toolResult: The user answered: Teal");
     await expect(service.answerDurableChildQuestion(ref, questionId, "Again")).rejects.toThrow("is not open");
+  }, 30_000);
+
+  it("publishes a workflow glance at a stop, restores it on reopen, and clears it when finished", async () => {
+    await mkdir(join(agentDir, "prompts"), { recursive: true });
+    await writeFile(join(agentDir, "prompts", "ship.md"), `---
+workflow:
+  version: 1
+  stages:
+    - { id: build, name: Build }
+    - { id: review, name: Review, stop: approve }
+---
+Prepare the change and ask for review.
+`);
+    const ref = { id: (await service.start(directory)).id, cwd: directory };
+    expect((await service.status(ref)).workflow).toBeUndefined();
+    const run = await service.runWorkflow(ref, "ship", {}, "glance-test");
+    await until("workflow working", async () => (await service.status(ref)).workflow?.stage === "Build");
+    expect((await service.status(ref)).workflow).toEqual({ name: "ship", stages: ["working", "next"], stage: "Build", waiting: 0 });
+    await until("workflow launch broadcast", () => Promise.resolve(hub.globalEvents.some((event) => event.type === "status.update" && event.status.workflow?.stage === "Build")));
+    await until("workflow launch idle", async () => !(await service.status(ref)).isStreaming);
+    await service.prompt(ref, `Request workflow stop ${run.id}`);
+    const glance = { name: "ship", stages: ["done", "waiting"], stage: "Review", waiting: 1 };
+    await until("workflow waiting", async () => (await service.status(ref)).workflow?.waiting === 1);
+    expect((await service.status(ref)).workflow).toEqual(glance);
+    await until("workflow broadcast", () => Promise.resolve(hub.globalEvents.some((event) => event.type === "status.update" && event.status.workflow?.waiting === 1)));
+    expect((await service.machineListing()).statuses.find((status) => status.sessionId === ref.id)?.workflow).toEqual(glance);
+    await until("workflow parent idle", async () => !(await service.status(ref)).isStreaming);
+    await service.dispose(); service = openService();
+    expect((await service.status(ref)).workflow).toEqual(glance);
+    await service.finishWorkflow(ref, run.id, "stopped", "Stopped after review");
+    await until("workflow cleared", async () => (await service.status(ref)).workflow === undefined);
+    expect((await service.status(ref)).waitingOnYou).toBeUndefined();
+    expect(hub.globalEvents.filter((event) => event.type === "status.update").at(-1)).toMatchObject({ status: { sessionId: ref.id } });
+    const finalStatus = hub.globalEvents.filter((event) => event.type === "status.update").at(-1);
+    expect(finalStatus?.status).not.toHaveProperty("workflow");
   }, 30_000);
 
   it("recovers live child work from journals after the external child index is lost", async () => {

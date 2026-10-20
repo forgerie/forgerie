@@ -92,6 +92,8 @@ export const DIALOG_INPUT_MAX_LENGTH = 4_000;
 export const doubleEscapeActionSchema = z.enum(["tree", "fork", "none"]);
 export type DoubleEscapeAction = z.infer<typeof doubleEscapeActionSchema>;
 export const statusSchema = z.object({
+  workflow: z.object({ name: z.string(), stages: z.array(z.enum(["done", "working", "waiting", "failed", "next"])),
+    stage: z.string(), waiting: z.number() }).optional().catch(undefined),
   isStreaming: z.boolean(),
   isCompacting: z.boolean(),
   isBashRunning: z.boolean(),

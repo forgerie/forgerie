@@ -1,3 +1,4 @@
+import type { WorkflowGlance } from "./workflowGlance.js";
 import type { AttentionHint } from "./attentionHints.js";
 import type { DecisionHintsStatus } from "./decisionHints.js";
 import type { TriggersChangedEvent } from "./triggers.js";
@@ -831,6 +832,7 @@ export interface SessionAskCatalogSnapshot {
 }
 
 export interface SessionStatus {
+  workflow?: WorkflowGlance;
   attentionHint?: AttentionHint;
   sessionId: string;
   watchingPullRequest?: boolean;

@@ -1,3 +1,4 @@
+import { statusSchema } from "../contracts";
 import { attentionHintSchema } from "@shared/attentionHints";
 import { sessionResponseSchema } from "../sessionResponse";
 import { z } from "zod";
@@ -21,6 +22,7 @@ const blockers = {
   pendingDialogs: z.array(z.object({ dialogId: z.string() })).optional(),
 };
 export const wireStatusSchema = z.object({
+  workflow: statusSchema.shape.workflow,
   attentionHint: attentionHintSchema.optional().catch(undefined),
   sessionId: z.string(),
   isStreaming: z.boolean(),

@@ -1,3 +1,4 @@
+import type { WorkflowGlance } from "@shared/workflowGlance";
 import type { AttentionHint } from "@shared/attentionHints";
 import { requestsResponse, type SessionResponse } from "../sessionResponse";
 // Pure picker model: sessions in, grouped rows out. No I/O, no clock of its own.
@@ -28,6 +29,7 @@ export interface PickerSession {
   actionRuns?: readonly ActionRunLink[] | undefined;
 }
 export interface PickerStatus {
+  workflow?: WorkflowGlance | undefined;
   attentionHint?: AttentionHint | undefined;
   isStreaming: boolean;
   isCompacting: boolean;
@@ -81,6 +83,7 @@ export interface Location {
   branch?: string;
 }
 export interface Row {
+  workflow?: WorkflowGlance | undefined;
   likelyNeedsYou?: boolean;
   attentionKind?: AttentionHint["kind"];
   urgency?: AttentionHint["urgency"];
@@ -206,6 +209,7 @@ export function rows(input: BoardInput): Row[] {
     const location = input.locate(session.cwd);
     return {
       session, state, group, working, busy,
+      workflow: status?.workflow,
       ...(status?.attentionHint === undefined || baseline !== "unread" ? {} : {
         likelyNeedsYou: state === "blocked",
         attentionKind: status.attentionHint.kind, urgency: status.attentionHint.urgency,

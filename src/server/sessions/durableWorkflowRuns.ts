@@ -1,3 +1,4 @@
+import { waitingStops, workflowGlance, type WorkflowGlance } from "../../shared/workflowGlance.js";
 import { createHash } from "node:crypto";
 import { AssistantEntry, defineDoc, defineExtension, defineTask, defineTool, InboxDoc, LiveDoc, type CommitPublication, type Conversation, type ConversationId, type Cursor, type Harness, type SubmissionRecord, type TaskId, type Tx } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
@@ -704,8 +705,13 @@ async function submissionState(tx: Tx, submission: SubmissionRecord): Promise<Wo
 export async function waitingWorkflowDecisions(harness: Harness, parent: ConversationId, context: Context): Promise<number> {
   const doc = await harness.snapshot(Runs, parent, context);
   const run = doc?.active == null ? undefined : doc.records[doc.active];
-  if (run?.state.kind !== "running") return 0;
-  return Object.values(run.stops ?? {}).filter((stop) => stop.state === "waiting").length + (run.stall?.state === "flagged" ? 1 : 0);
+  return waitingStops(run);
+}
+/** The active run's inbox readout; finished and stopping runs have no glance. */
+export async function activeWorkflowGlance(harness: Harness, parent: ConversationId, context: Context): Promise<WorkflowGlance | undefined> {
+  const doc = await harness.snapshot(Runs, parent, context);
+  const run = doc?.active == null ? undefined : doc.records[doc.active];
+  return run === undefined ? undefined : workflowGlance(run);
 }
 export async function activeWorkflowRunInTx(tx: Tx, parent: ConversationId): Promise<string | undefined> {
   return (await tx.doc(Runs, parent)).active ?? undefined;

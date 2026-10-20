@@ -27,6 +27,7 @@ interface Timing { retryDelayMs?: number; maxRetryDelayMs?: number }
 
 const toStatus = (status: WireStatus): PickerStatus => ({
   isStreaming: status.isStreaming, isCompacting: status.isCompacting, isBashRunning: status.isBashRunning,
+  workflow: status.workflow,
   workingAgents: status.workingAgents, runningProcesses: status.runningProcesses,
   needsResponse: status.response === undefined ? undefined : requestsResponse(status.response),
   watchingPullRequest: status.watchingPullRequest,
@@ -69,7 +70,10 @@ export function applyCatalogEvent(state: CatalogState, event: CatalogEvent | Loc
     // state, so the picker does not rebuild thousands of rows for it.
     case "status.update": {
       const next = toStatus(event.status);
-      return sameFields(state.statuses[event.status.sessionId], next) ? state
+      const previous = state.statuses[event.status.sessionId];
+      // A wire read creates a new object even when the route and its waits did not change.
+      if (JSON.stringify(previous?.workflow) === JSON.stringify(next.workflow)) next.workflow = previous?.workflow;
+      return sameFields(previous, next) ? state
         : { ...state, statuses: { ...state.statuses, [event.status.sessionId]: next } };
     }
     case "activity.update": {

@@ -1,3 +1,4 @@
+import type { WorkflowGlance } from "../../shared/workflowGlance.js";
 import { readTaskActivity, watchTaskActivity } from "./durableTaskActivity.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { decisionAnnotations, riskAnnotationMessages, withRiskAnnotations, withToolInvocationIds } from "../decisions/optionalDecisionAnnotations.js";
@@ -47,7 +48,7 @@ import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { decisionExtension, decisions, confirmDecision, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, notifyAutoStopFailed, waitingWorkflowDecisions, acknowledgeWorkflowStall, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals } from "./durableWorkflowRuns.js";
+import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, notifyAutoStopFailed, waitingWorkflowDecisions, activeWorkflowGlance, acknowledgeWorkflowStall, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import { applySdkCommit } from "./durableMessageChanges.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
@@ -149,6 +150,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private childCount = 0;
   /** Child questions, workflow stops, and workflow proposals that wait for the user. */
   private waitingCount = 0;
+  private workflowGlanceValue: WorkflowGlance | undefined;
   private waitingGates = 0;
   private gateOptions: GatedActionsExtensionOptions | undefined;
   private gateUnsubscribe: (() => void) | undefined;
@@ -383,6 +385,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   // ─── Host operations on Durable children. None of them starts a parent turn. ───
   get hostsDurableChildren(): boolean { return this.options.childAgents !== undefined; }
   get workingDurableChildren(): number { return this.childCount; }
+  get workflowGlance(): WorkflowGlance | undefined { return this.workflowGlanceValue; }
   get waitingOnUser(): number { return this.waitingCount + this.waitingGates; }
   get flaggedDecisions(): number { return this.flaggedCount; }
   gatedActions() { return gatedActions(this.journal.harness, this.journal.conversation.id, context); }
@@ -625,7 +628,9 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     const recountWaiting = async () => {
       const waiting = await openChildQuestions(this.journal.harness, parent, context) + await waitingWorkflowDecisions(this.journal.harness, parent, context) + await openWorkflowProposals(this.journal.harness, parent, context);
       const flagged = await flaggedDecisions(this.journal.harness, parent, context);
-      if (waiting === this.waitingCount && flagged === this.flaggedCount) return;
+      const glance = await activeWorkflowGlance(this.journal.harness, parent, context);
+      if (waiting === this.waitingCount && flagged === this.flaggedCount && JSON.stringify(glance) === JSON.stringify(this.workflowGlanceValue)) return;
+      this.workflowGlanceValue = glance;
       this.waitingCount = waiting;
       this.flaggedCount = flagged;
       this.emit({ type: "durable_children_changed" });

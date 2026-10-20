@@ -1,9 +1,9 @@
 // Saved workflows and their runs. The server side is src/server/sessions/durableWorkflowRuns.ts;
 // the routes are src/server/sessions/workflowRoutes.ts; the stop rules are src/shared/workflowStops.ts.
 import { z } from "zod";
-import { stageViews, type StageView } from "@shared/workflowStops";
+import { viewsOf } from "@shared/workflowGlance";
+export { viewsOf, stripSegments, waitingStops } from "@shared/workflowGlance";
 import { textOf, type PiMessage } from "../contracts";
-import type { StageStripSegment } from "../ui/StageStrip";
 import type { ChildRetry } from "../childAgents/childAgentsModel";
 
 const valueSchema = z.union([z.string(), z.boolean(), z.number()]);
@@ -147,14 +147,6 @@ export function activeRun(runs: readonly WorkflowRun[]): WorkflowRun | undefined
   return runs.find((run) => run.state.kind !== "finished");
 }
 
-/** How each stage reads now. A finished run reads as done when it completed, and keeps its stops otherwise. */
-export function viewsOf(run: WorkflowRun): Record<string, StageView> {
-  const views = stageViews(run);
-  if (run.state.kind !== "finished") return views;
-  const completed = run.state.outcome === "completed";
-  return Object.fromEntries(Object.entries(views).map(([id, view]) => [id, completed ? "done" : view === "working" || view === "waiting" ? "next" : view]));
-}
-
 /** Whether a stop card is the one the run is waiting on now. An older round of the same stop is closed. */
 export function stopIsOpen(run: WorkflowRun | undefined, entry: StopEntry): boolean {
   const stop = run?.stops?.[entry.stage];
@@ -253,26 +245,6 @@ export function deliveryProblem(state: Pick<Settled, "delivered" | "deliveryErro
     : `Report not delivered: ${state.deliveryError}`;
 }
 
-/** The route as StageStrip segments: one bar per stage, one lane per worker of a stage with several. */
-export function stripSegments(run: WorkflowRun): StageStripSegment[] {
-  const views = viewsOf(run);
-  return (run.stages ?? []).map((stage) => {
-    const view = views[stage.id] ?? "next";
-    const workers = stage.workers ?? [];
-    if (workers.length < 2) {
-      const latest = run.children.filter((child) => child.stage === stage.id).at(-1);
-      const failed = view !== "working" && latest?.state.kind === "settled" && latest.state.outcome === "failed";
-      return { key: stage.id, lanes: [failed ? "failed" : view] };
-    }
-    return { key: stage.id, lanes: workers.map((worker) => {
-      const latest = run.children.filter((child) => child.name === worker.name).at(-1);
-      if (latest?.state.kind === "working") return "working";
-      if (latest?.state.kind === "settled") return latest.state.outcome === "failed" ? "failed" : "done";
-      return view === "done" ? "done" : view === "working" ? "next" : view;
-    }) };
-  });
-}
-
 const count = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
 
 /** A proposal at a glance: "4 stages · 3 workers · 2 stops". Workers count once by name; a zero count of workers or stops is left out. */
@@ -361,10 +333,4 @@ export function proposalLaunchInputs(inputs: readonly (readonly [string, Workflo
 /** A workflow file's prose: its text without the frontmatter, which the route already shows. */
 export function proseOf(text: string): string {
   return text.replace(/^---\r?\n[\s\S]*?\r?\n---[^\S\r\n]*(?:\r?\n|$)/u, "").trim();
-}
-
-/** How many stops wait on the reader in this run. */
-export function waitingStops(run: WorkflowRun | undefined): number {
-  if (run?.state.kind !== "running") return 0;
-  return Object.values(run.stops ?? {}).filter((stop) => stop.state === "waiting").length + (run.stall?.state === "flagged" ? 1 : 0);
 }

@@ -4017,11 +4017,12 @@ export class PiSessionService implements SessionRouteService {
    * Both are omitted when zero so a resting session carries no extra wire
    * fields and the inbox has nothing to render.
    */
-  private liveWorkCounts(session: PiAgentSession): { workingAgents?: number; runningProcesses?: number; watchingPullRequest?: boolean; watchingActionRun?: boolean; waitingOnYou?: number; flaggedDecisions?: number } {
+  private liveWorkCounts(session: PiAgentSession): Pick<ClientSessionStatus, "workingAgents" | "runningProcesses" | "watchingPullRequest" | "watchingActionRun" | "waitingOnYou" | "flaggedDecisions" | "workflow"> {
     const workingAgents = (this.workingAgentsBySession.get(session.sessionId) ?? 0)
       + (session instanceof DurableAgentSession ? session.workingDurableChildren : 0);
     const waitingOnYou = session instanceof DurableAgentSession ? session.waitingOnUser : 0;
     const flaggedDecisions = session instanceof DurableAgentSession ? session.flaggedDecisions : 0;
+    const glance = session instanceof DurableAgentSession ? session.workflowGlance : undefined;
     const runningProcesses = this.processPanels.get(session.sessionId)?.runningCount ?? 0;
     return {
       ...(this.pullRequestWatches?.isWatching(session.sessionId) === true ? { watchingPullRequest: true } : {}),
@@ -4030,6 +4031,7 @@ export class PiSessionService implements SessionRouteService {
       ...(runningProcesses > 0 ? { runningProcesses } : {}),
       ...(waitingOnYou > 0 ? { waitingOnYou } : {}),
       ...(flaggedDecisions > 0 ? { flaggedDecisions } : {}),
+      ...(glance === undefined ? {} : { workflow: glance }),
     };
   }
 
