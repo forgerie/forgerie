@@ -10,6 +10,8 @@ const positionSchema = z.object({ offset: z.number().int().nonnegative(), line: 
 export type ManagedProcessLogCursor = z.infer<typeof positionSchema>;
 const stateSchema = z.object({
   version: z.literal(1), base: positionSchema, partial: z.boolean(), read: positionSchema,
+  /** Prefix already punched. Written only after a successful punch; absent means unknown. */
+  reclaimed: z.number().int().nonnegative().optional(),
 });
 type LogState = z.infer<typeof stateSchema>;
 export interface ManagedProcessLogReadOptions {
@@ -80,6 +82,67 @@ export class ManagedProcessLog {
       return { lines, cursor: { offset, line }, droppedLines: Math.max(0, state.base.line - position.line) };
     } finally { await file.close(); }
   }
+  /**
+   * The newest `maxLines` lines exactly as read(ended, {cursor: {offset: 0, line: 1}}) would number
+   * and mark them, with the cursor that browse reaches at the end. droppedLines counts every earlier
+   * line, including those before the retention base. Retention runs as it does for read(); the
+   * durable watch reader is never acknowledged or moved. Only bytes after the newest known line
+   * start are counted, and only the returned lines are decoded.
+   */
+  async readTail(ended: boolean, maxLines: number): Promise<ManagedProcessLogBatch> {
+    if (!Number.isSafeInteger(maxLines) || maxLines < 1 || maxLines > 10_000) throw new Error("Invalid managed process log batch size");
+    const state = await this.maintain();
+    const file = await open(join(this.directory, "output.log"), "r");
+    try {
+      const size = Math.min((await file.stat()).size, state.base.offset + this.capBytes);
+      const chunk = Buffer.alloc(Math.min(64 * 1024, Math.max(1, size - state.base.offset)));
+      const readAt = async (offset: number, length: number) => {
+        const { bytesRead } = await file.read(chunk, 0, length, offset);
+        if (bytesRead !== length) throw new Error("Managed process log shrank while reading");
+        return chunk.subarray(0, length);
+      };
+      // An acknowledged cursor after a newline is an absolute line start from read(). A cursor after a
+      // final unterminated line is not, so counting then starts at the base, which always is.
+      const anchor = state.read.offset > state.base.offset && state.read.offset <= size
+        && (await readAt(state.read.offset - 1, 1))[0] === 10 ? state.read : state.base;
+      // Next line number and offset after the last newline, counted forward from the anchor.
+      let line = anchor.line, lineEnd = anchor.offset;
+      for (let offset = anchor.offset; offset < size;) {
+        const bytes = await readAt(offset, Math.min(chunk.length, size - offset));
+        for (let index = bytes.indexOf(10); index >= 0; index = bytes.indexOf(10, index + 1)) { line++; lineEnd = offset + index + 1; }
+        offset += bytes.length;
+      }
+      const fragment = ended && size > lineEnd;
+      const cursor = fragment ? { offset: size, line: line + 1 } : { offset: lineEnd, line };
+      // Find the start of the newest terminated lines by searching backwards from the final newline.
+      let wanted = maxLines - (fragment ? 1 : 0), start = lineEnd;
+      if (wanted > 0 && lineEnd > state.base.offset) {
+        start = state.base.offset;
+        let searchEnd = lineEnd - 1; // Exclude the newline that terminates the newest line.
+        while (searchEnd > state.base.offset && wanted > 0) {
+          const from = Math.max(state.base.offset, searchEnd - chunk.length);
+          const bytes = await readAt(from, searchEnd - from);
+          let index = bytes.length;
+          while (wanted > 0 && (index = index === 0 ? -1 : bytes.lastIndexOf(10, index - 1)) >= 0) {
+            if (--wanted === 0) start = from + index + 1;
+          }
+          searchEnd = from;
+        }
+      }
+      const content = Buffer.alloc(cursor.offset - start);
+      if (content.length > 0) {
+        const { bytesRead } = await file.read(content, 0, content.length, start);
+        if (bytesRead !== content.length) throw new Error("Managed process log shrank while reading");
+      }
+      const texts = content.subarray(0, lineEnd - start).toString("utf8").split("\n").slice(0, -1);
+      let number = line - texts.length;
+      const lines: ManagedProcessLogBatch["lines"] = texts.map((text, index) => ({ number: number++, text, terminated: true,
+        truncatedStart: index === 0 && start === state.base.offset && state.partial }));
+      if (fragment) lines.push({ number, text: content.subarray(lineEnd - start).toString("utf8"), terminated: false,
+        truncatedStart: lineEnd === state.base.offset && state.partial });
+      return { lines, cursor, droppedLines: (lines[0]?.number ?? cursor.line) - 1 };
+    } finally { await file.close(); }
+  }
   /** A bounded live preview, including unfinished output. Never retains or acknowledges logs. */
   async tail(): Promise<ManagedProcessLogTail | null> {
     const state = await this.load();
@@ -127,6 +190,7 @@ export class ManagedProcessLog {
       const size = (await file.stat()).size;
       if (size < state.base.offset || size < state.read.offset) throw new Error("Managed process log was externally truncated");
       const cutoff = Math.max(state.base.offset, size - this.capBytes);
+      const loadedBase = state.base.offset;
       const buffer = Buffer.alloc(64 * 1024);
       while (state.base.offset < cutoff) {
         const length = Math.min(buffer.length, cutoff - state.base.offset);
@@ -138,7 +202,7 @@ export class ManagedProcessLog {
         state.partial = buffer[bytesRead - 1] !== 10;
         state.base.offset += bytesRead;
       }
-      if (state.base.offset > 0) {
+      if (state.base.offset > loadedBase) {
         // NEVER rename, copy-truncate or shift this file: systemd holds O_APPEND
         // descriptors on its inode and can write while retention runs. Instead
         // keep absolute byte offsets and punch a sparse prefix with KEEP_SIZE.
@@ -150,10 +214,19 @@ export class ManagedProcessLog {
         // truncated. Unterminated lines are emitted only after the process ends.
         // Logical size grows; allocated storage is cap + up to two FS blocks.
         await this.save(state);
-        await execute("fallocate", ["--punch-hole", "--keep-size", "--offset", "0", "--length", String(state.base.offset), path], { timeout: 30_000 });
+        await this.punch(path, state.base.offset);
+      } else if (state.base.offset > (state.reclaimed ?? 0)) {
+        // The base is already durable; a crash may have skipped its punch. Retry it,
+        // then record the receipt so later unchanged passes neither save nor punch.
+        await this.punch(path, state.base.offset);
+        state.reclaimed = state.base.offset;
+        await this.save(state);
       }
       return state;
     } finally { await file.close(); }
+  }
+  private async punch(path: string, length: number): Promise<void> {
+    await execute("fallocate", ["--punch-hole", "--keep-size", "--offset", "0", "--length", String(length), path], { timeout: 30_000 });
   }
   private async load(): Promise<LogState> {
     try { return stateSchema.parse(JSON.parse(await readFile(join(this.directory, "read-position.json"), "utf8"))); }
