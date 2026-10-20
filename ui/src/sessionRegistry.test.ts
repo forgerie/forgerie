@@ -22,8 +22,10 @@ describe("six-entry session lifetime", () => {
     await vi.waitFor(() => expect(api.registry.getSnapshot().every(record => record.state === "seeded")).toBe(true));
     expect(api.sockets.clients.size).toBe(6);
     expect(api.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(6);
-    // All initial panel refresh timers have finished: six entries × (open + eight panel reads, including the task list).
-    await vi.waitFor(() => expect(api.requests).toHaveLength(54));
+    // Hidden entries seed only transcript + commands. The selected entry reads its seven panel routes.
+    await vi.waitFor(() => expect(api.requests).toHaveLength(19));
+    expect(api.registry.select(session("s1"))).toBe(prefetched);
+    await vi.waitFor(() => expect(api.requests).toHaveLength(26));
     expect(api.registry.select(session("s1"))).toBe(prefetched);
     const requests = api.requests.length;
     await new Promise(resolve => setTimeout(resolve, 20)); expect(api.requests).toHaveLength(requests);
@@ -119,4 +121,28 @@ it("keeps a deeply paged selected reader intact, then demotes it only when hidde
   registry.select(session("next"));
   expect(disposed).toHaveBeenCalledTimes(1);
   expect(registry.getSnapshot().some(record => record.entry === entry)).toBe(false);
+});
+
+it("defers speculative and hidden reconnect panel reads until selection, without reopening the transcript", async () => {
+  const api = await fixture();
+  const entry = api.registry.prefetch(session("hidden"));
+  if (!entry) throw new Error("Missing prefetched entry");
+  await vi.waitFor(() => expect(entry.store.getSnapshot().connection.type).toBe("ready"));
+  await new Promise(resolve => setTimeout(resolve, 350));
+  const panels = () => api.requests.filter(url => !/\/(open|commands)$/u.test(url.pathname));
+  expect(panels()).toHaveLength(0);
+  for (const socket of api.sockets.clients) socket.close();
+  await vi.waitFor(() => expect(api.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(2), { timeout: 3000 });
+  await vi.waitFor(() => expect(entry.store.getSnapshot().connection.type).toBe("ready"));
+  await new Promise(resolve => setTimeout(resolve, 350));
+  expect(panels()).toHaveLength(0);
+  expect(api.registry.select(session("hidden"))).toBe(entry);
+  await vi.waitFor(() => expect(panels()).toHaveLength(7));
+  expect(api.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(2);
+  api.registry.setVisible(false);
+  api.emit({ type: "pi.event", eventType: "durable_children_changed" });
+  await new Promise(resolve => setTimeout(resolve, 350));
+  expect(panels()).toHaveLength(7);
+  api.registry.setVisible(true);
+  await vi.waitFor(() => expect(panels()).toHaveLength(10));
 });

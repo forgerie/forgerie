@@ -29,6 +29,7 @@ export function createTaskActivityStore(request: Request, ref: () => SessionRef 
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
+  let reading: AbortController | undefined;
   /** Only the newest read may land: an older one that returns late would put back a list the server already replaced. */
   let latest = 0;
   /**
@@ -50,11 +51,14 @@ export function createTaskActivityStore(request: Request, ref: () => SessionRef 
     const session = ref();
     if (!session || disposed) return;
     const version = ++latest;
+    reading?.abort();
+    const controller = new AbortController();
+    reading = controller;
     const startedIn = connected ? epoch : -1;
     update({ reading: true });
     try {
       const response = await request(`/api/sessions/${encodeURIComponent(session.id)}/tasks?${new URLSearchParams({ cwd: session.cwd })}`,
-        { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+        { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) });
       const body: unknown = await response.json().catch(() => undefined);
       if (!response.ok) {
         const failure = errorSchema.safeParse(body);
@@ -68,10 +72,11 @@ export function createTaskActivityStore(request: Request, ref: () => SessionRef 
     } catch (error) {
       // The last good list stays, marked stale, so a failed read never empties the panel.
       if (version === latest) update({ reading: false, error: error instanceof Error ? error.message : String(error), stale: state.activity !== undefined });
-    }
+    } finally { if (reading === controller) reading = undefined; }
   }
 
   function refresh() {
+    if (disposed) return;
     clearTimeout(timer);
     timer = setTimeout(() => { void read(); }, timing.refreshDelayMs ?? 250);
   }
@@ -94,6 +99,6 @@ export function createTaskActivityStore(request: Request, ref: () => SessionRef 
       epoch += 1;
       if (state.activity !== undefined && !state.stale) update({ stale: true });
     },
-    dispose() { disposed = true; clearTimeout(timer); listeners.clear(); },
+    dispose() { disposed = true; latest++; reading?.abort(); clearTimeout(timer); listeners.clear(); },
   };
 }

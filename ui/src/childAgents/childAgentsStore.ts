@@ -41,6 +41,11 @@ export function createChildAgentsStore(request: Request, ref: () => SessionRef |
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
+  let visible = true;
+  let refreshNeeded = false;
+  const lifetime = new AbortController();
+  let listRead: AbortController | undefined;
+  let openRead: AbortController | undefined;
   let detailVersion = 0;
   let retryRead: (() => Promise<void>) | undefined;
   let continuation: { id: number; text: string; requestId: string } | undefined;
@@ -52,7 +57,9 @@ export function createChildAgentsStore(request: Request, ref: () => SessionRef |
   const path = (session: SessionRef, rest = "", query = false) =>
     `/api/sessions/${encodeURIComponent(session.id)}/children${rest}${query ? `?${new URLSearchParams({ cwd: session.cwd })}` : ""}`;
   async function call<T>(url: string, schema: z.ZodType<T>, init: RequestInit = {}): Promise<T> {
-    const response = await request(url, { ...init, cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    const response = await request(url, { ...init, cache: "no-store", signal: AbortSignal.any([
+      AbortSignal.timeout(15_000), ...(init.signal ? [init.signal] : []), ...(init.method === undefined ? [lifetime.signal] : []),
+    ]) });
     if (!response.ok) {
       const body = errorSchema.safeParse(await response.json().catch(() => undefined));
       throw new HttpFailure(body.success ? body.data.error : `HTTP ${String(response.status)}`, response.status);
@@ -64,37 +71,47 @@ export function createChildAgentsStore(request: Request, ref: () => SessionRef |
 
   async function readList() {
     const session = ref();
-    if (!session || state.available === false) return;
+    if (!session || disposed || state.available === false) return;
+    if (!visible) { refreshNeeded = true; return; }
+    listRead?.abort();
+    const controller = new AbortController();
+    listRead = controller;
     try {
-      const children = await call(path(session, "", true), childSummariesSchema);
+      const children = await call(path(session, "", true), childSummariesSchema, { signal: controller.signal });
+      if (controller.signal.aborted || disposed) return;
       update({ ...state, available: true, children });
       if (children.length > 0) {
         try {
-          const runs = await call(`/api/sessions/children/runs?${new URLSearchParams({ session: session.id })}`, runsSchema);
-          update({ ...state, runs });
-        } catch { update({ ...state, runs: undefined }); } // History failures do not hide active children; opening history shows the error.
+          const runs = await call(`/api/sessions/children/runs?${new URLSearchParams({ session: session.id })}`, runsSchema, { signal: controller.signal });
+          if (!controller.signal.aborted) update({ ...state, runs });
+        } catch { if (!controller.signal.aborted) update({ ...state, runs: undefined }); } // History failures do not hide active children; opening history shows the error.
       }
     } catch (error) {
+      if (controller.signal.aborted || disposed) return;
       // 404: the flag is off or the session is not a Durable one. Stop asking.
       if (error instanceof HttpFailure && error.status === 404) update({ ...state, available: false, children: [] });
       else update({ ...state, error: error instanceof Error ? error.message : String(error) });
-    }
+    } finally { if (listRead === controller) listRead = undefined; }
   }
   async function readOpen() {
     const session = ref();
     const open = state.open;
-    if (!session || !open) return;
+    if (!session || !open || disposed) return;
+    if (!visible) { refreshNeeded = true; return; }
+    openRead?.abort();
+    const controller = new AbortController();
+    openRead = controller;
     try {
-      const transcript = await call(path(session, `/${String(open.conversationId)}/messages`, true), childTranscriptSchema);
-      if (state.open?.conversationId === open.conversationId) update({ ...state, open: { conversationId: open.conversationId, transcript } });
+      const transcript = await call(path(session, `/${String(open.conversationId)}/messages`, true), childTranscriptSchema, { signal: controller.signal });
+      if (!controller.signal.aborted && state.open?.conversationId === open.conversationId) update({ ...state, open: { conversationId: open.conversationId, transcript } });
     } catch (error) {
-      if (state.open?.conversationId === open.conversationId) update({ ...state, open: { ...open, error: error instanceof Error ? error.message : String(error) } });
-    }
+      if (!controller.signal.aborted && state.open?.conversationId === open.conversationId) update({ ...state, open: { ...open, error: error instanceof Error ? error.message : String(error) } });
+    } finally { if (openRead === controller) openRead = undefined; }
   }
   /** While an open child works, its answer streams, so read it on a short clock. */
   function schedulePoll() {
     clearTimeout(pollTimer);
-    if (disposed || !state.open) return;
+    if (disposed || !visible || !state.open || listRead || openRead) return;
     pollTimer = setTimeout(() => { void Promise.all([readList(), readOpen()]).then(schedulePoll); }, timing.pollMs ?? 1000);
   }
   async function act(action: () => Promise<unknown>) {
@@ -109,8 +126,10 @@ export function createChildAgentsStore(request: Request, ref: () => SessionRef |
     }
   }
   function refresh() {
-    clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => { void Promise.all([readList(), readOpen()]).then(schedulePoll); }, timing.refreshDelayMs ?? 250);
+    if (disposed) return;
+    if (!visible) { refreshNeeded = true; return; }
+    clearTimeout(refreshTimer); clearTimeout(pollTimer);
+    refreshTimer = setTimeout(() => { refreshTimer = undefined; void Promise.all([readList(), readOpen()]).then(schedulePoll); }, timing.refreshDelayMs ?? 250);
   }
 
   const requireSession = () => { const session = ref(); if (!session) throw new Error("Session is no longer open"); return session; };
@@ -144,13 +163,23 @@ export function createChildAgentsStore(request: Request, ref: () => SessionRef |
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     getSnapshot: () => state,
     refresh,
+    setVisible(next: boolean) {
+      if (disposed || visible === next) return;
+      visible = next;
+      if (!next) {
+        refreshNeeded ||= refreshTimer !== undefined || listRead !== undefined || openRead !== undefined;
+        clearTimeout(refreshTimer); refreshTimer = undefined; clearTimeout(pollTimer);
+        listRead?.abort(); openRead?.abort();
+      } else if (refreshNeeded || state.open) { refreshNeeded = false; refresh(); }
+    },
     open(conversationId: number) {
       if (state.open?.conversationId === conversationId) return;
       ++detailVersion;
+      openRead?.abort();
       update({ ...state, open: { conversationId }, detail: { kind: "none" }, outcome: undefined, error: undefined });
       void readOpen().then(schedulePoll);
     },
-    close() { ++detailVersion; clearTimeout(pollTimer); update({ ...state, open: undefined, detail: { kind: "none" }, outcome: undefined }); },
+    close() { ++detailVersion; openRead?.abort(); clearTimeout(pollTimer); update({ ...state, open: undefined, detail: { kind: "none" }, outcome: undefined }); },
     updateDraft(key: string, change: (text: string) => string) { update({ ...state, drafts: { ...state.drafts, [key]: change(state.drafts?.[key] ?? "") } }); },
     retryDetail() { return retryRead?.(); },
     dismissDetail() { ++detailVersion; update({ ...state, detail: { kind: "none" } }); },
@@ -190,6 +219,6 @@ export function createChildAgentsStore(request: Request, ref: () => SessionRef |
     answer: (questionId: string, answer: string) => act(async () => {
       await post(requireSession(), "/questions/answer", { questionId, answer });
     }),
-    dispose() { disposed = true; clearTimeout(refreshTimer); clearTimeout(pollTimer); listeners.clear(); },
+    dispose() { disposed = true; lifetime.abort(); listRead?.abort(); openRead?.abort(); clearTimeout(refreshTimer); clearTimeout(pollTimer); listeners.clear(); },
   };
 }
