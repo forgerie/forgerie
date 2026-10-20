@@ -1,4 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -10,6 +12,7 @@ import { createRegistry, defineExtension, defineTask, type TaskId } from "@earen
 import { expect, it } from "vitest";
 import { durableChildExtensions } from "./durableChildAgents.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
+import { sanitizedGitEnv } from "../git/gitEnv.js";
 import type { WorkflowRun } from "../../shared/workflowRuns.js";
 import { associateWorkflowChild, autoStopFailureAdvice, decideWorkflowStop, proposeWorkflow, requestWorkflowStop, startWorkflowProposal, workflowExtension, workflowProposals, workflowRuns, WORKFLOW_DOC_KIND, WORKFLOW_PROPOSALS_DOC_KIND } from "./durableWorkflowRuns.js";
 
@@ -72,8 +75,13 @@ it("tells the repair agent that Land rebases each branch alone, in start order, 
   expect(advice).toContain("A merge commit, or a fast-forward to a merge, does not repair a branch");
 });
 
-/** The fixture a land test gets: a run whose land stop waits while its child alpha still works on a repair. */
-interface RepairingRun { journal: DurableSessionJournal; runId: string; reporter: TaskId; releaseReport: () => void }
+/**
+ * The fixture a land test gets: a run whose land stop waits while its child alpha still works on a repair. alpha has a
+ * real Git worktree with one commit, and `land` rebases its branch onto main and fast-forwards main, as Land does.
+ */
+interface RepairingRun { journal: DurableSessionJournal; runId: string; reporter: TaskId; releaseReport: () => void;
+  land: () => Promise<{ landed: string[] }>; mainLog: () => Promise<string[]> }
+const git = async (cwd: string, ...args: string[]) => (await promisify(execFile)("git", ["-C", cwd, ...args], { env: sanitizedGitEnv(), encoding: "utf8" })).stdout;
 
 async function landWhileRepairing(run: (fixture: RepairingRun) => Promise<void>) {
   // alpha's completion report. It stays live until this test releases it, as a reporter does while its child works.
@@ -101,6 +109,15 @@ async function landWhileRepairing(run: (fixture: RepairingRun) => Promise<void>)
   const parent = journal.conversation.id;
   let reporter: TaskId | undefined;
   try {
+    const repo = join(directory, "repo");
+    const worktree = join(directory, "alpha");
+    await promisify(execFile)("git", ["init", "-q", "-b", "main", repo], { env: sanitizedGitEnv() });
+    await git(repo, "config", "user.email", "test@example.invalid"); await git(repo, "config", "user.name", "Test");
+    await writeFile(join(repo, "base.txt"), "base\n"); await git(repo, "add", "base.txt"); await git(repo, "commit", "-qm", "Base");
+    await git(repo, "worktree", "add", "-q", "-b", "c-alpha", worktree);
+    await writeFile(join(worktree, "repair.txt"), "repaired\n"); await git(worktree, "add", "repair.txt"); await git(worktree, "commit", "-qm", "Alpha repair");
+    const land = async () => { await git(worktree, "rebase", "-q", "main"); await git(repo, "merge", "-q", "--ff-only", "c-alpha"); return { landed: ["c-alpha"] }; };
+    const mainLog = async () => (await git(repo, "log", "--format=%s", "main")).trim().split("\n");
     const text = "---\nworkflow:\n  version: 1\n  stages:\n    - { id: build, name: Build }\n    - { id: land, name: Land, stop: land }\n---\nBuild, then land.\n";
     const proposal = await journal.conversation.commit((tx) => proposeWorkflow(tx, parent, "p:land", { name: "land-wait", summary: "Land after a repair.", text, basis: { kind: "new", reason: "Test." } }), context);
     const launched = await startWorkflowProposal(journal.harness, journal.conversation, directory, manager.getSessionId(), proposal.id, {}, "land-wait", context);
@@ -112,7 +129,7 @@ async function landWhileRepairing(run: (fixture: RepairingRun) => Promise<void>)
       return task;
     }, context);
     journal.harness.resume();
-    await run({ journal, runId: launched.id, reporter, releaseReport });
+    await run({ journal, runId: launched.id, reporter, releaseReport, land, mainLog });
   } finally {
     if (reporter !== undefined) await journal.harness.abortTask(reporter, context);
     await journal.close();
@@ -121,21 +138,23 @@ async function landWhileRepairing(run: (fixture: RepairingRun) => Promise<void>)
 }
 
 it.each(["user", "forgerie"] as const)("%s land waits for a working repair child's report, then lands", async (by) => {
-  await landWhileRepairing(async ({ journal, runId, reporter, releaseReport }) => {
+  await landWhileRepairing(async ({ journal, runId, reporter, releaseReport, land, mainLog }) => {
     const landedRuns: WorkflowRun[] = [];
-    const land = async (run: WorkflowRun) => {
+    const landAfterReport = async (run: WorkflowRun) => {
       // The report is in before Land touches a worktree.
       expect((await journal.harness.getTask(reporter, context))?.state.status).toBe("terminal");
       landedRuns.push(run);
-      return { landed: ["c-alpha"] };
+      return land();
     };
-    const decided = decideWorkflowStop(journal.harness, journal.conversation, runId, "land", "land", undefined, land, context, by);
+    const decided = decideWorkflowStop(journal.harness, journal.conversation, runId, "land", "land", undefined, landAfterReport, context, by);
     await sleep(200);
     expect(landedRuns).toEqual([]);
+    expect(await mainLog()).toEqual(["Base"]);
     releaseReport();
     const run = await decided;
     expect(landedRuns).toHaveLength(1);
     expect(run.stops?.["land"]).toMatchObject({ state: "approved", landed: ["c-alpha"] });
+    expect(await mainLog()).toEqual(["Alpha repair", "Base"]);
   });
 });
 
@@ -143,11 +162,12 @@ it.each([
   ["user", /^Nothing landed\. Land waited 0 s for the report of alpha, and it is still working\. Land did not change any branch\. Click Land all again after alpha reports\.$/u],
   ["forgerie", /^Nothing landed\. Land waited 0 s for the report of alpha, and it is still working\. Land did not change any branch\.$/u],
 ] as const)("%s land fails and names the child when its report does not arrive in time", async (by, message) => {
-  await landWhileRepairing(async ({ journal, runId }) => {
+  await landWhileRepairing(async ({ journal, runId, land, mainLog }) => {
     let lands = 0;
-    const land = () => { lands++; return Promise.resolve({ landed: [] }); };
-    await expect(decideWorkflowStop(journal.harness, journal.conversation, runId, "land", "land", undefined, land, context, by, 50)).rejects.toThrow(message);
+    const counted = () => { lands++; return land(); };
+    await expect(decideWorkflowStop(journal.harness, journal.conversation, runId, "land", "land", undefined, counted, context, by, 50)).rejects.toThrow(message);
     expect(lands).toBe(0);
+    expect(await mainLog()).toEqual(["Base"]);
     const [run] = await workflowRuns(journal.harness, journal.conversation.id, context);
     expect(run?.stops?.["land"]?.state).toBe("waiting");
     expect(run?.children).toMatchObject([{ name: "alpha", state: { kind: "working" } }]);

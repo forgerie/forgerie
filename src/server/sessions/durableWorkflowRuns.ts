@@ -348,10 +348,17 @@ export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId:
  */
 const USER_LAND_REPORT_WAIT_MS = 90_000;
 const AUTO_LAND_REPORT_WAIT_MS = 10 * 60_000;
+/**
+ * After the reports, the session waits up to this long for its working-child count to reach 0 before it lands. The
+ * count follows the task graph after a 100 ms debounce, and the owner check on each child-worktree land reads it.
+ */
+export const LAND_CHILDREN_SETTLE_MS = 5_000;
 
 /**
  * Waits until every child of the run has reported: no completion reporter of the run is still live. Returns the names
- * of the children still working when `limitMs` runs out, or an empty list.
+ * of the children still working when `limitMs` runs out, or an empty list. It includes children that Land skips (no
+ * active worktree, or nothing to land): sessiond's `beforeRelatedAction` refuses every child-worktree land while the
+ * owning session counts a working agent, whatever that agent's worktree.
  */
 async function waitForRunReports(harness: Harness, parent: ConversationId, runId: string, context: Context, limitMs: number): Promise<string[]> {
   const working = async (): Promise<{ name: string; reporter: TaskId }[]> => {

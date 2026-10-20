@@ -49,7 +49,7 @@ import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { decisionExtension, decisions, confirmDecision, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, notifyAutoStopFailed, waitingWorkflowDecisions, activeWorkflowGlance, acknowledgeWorkflowStall, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals } from "./durableWorkflowRuns.js";
+import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, notifyAutoStopFailed, waitingWorkflowDecisions, activeWorkflowGlance, acknowledgeWorkflowStall, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals, LAND_CHILDREN_SETTLE_MS } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import { applySdkCommit } from "./durableMessageChanges.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
@@ -474,6 +474,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   }
   /** Lands each child branch of the run that has commits, in the order the children started. Stops at the first failure. */
   private async landWorkflowBranches(run: WorkflowRun): Promise<{ landed: string[]; error?: string }> {
+    await this.settleWorkingChildren();
     const children = await this.durableChildren();
     const landed: string[] = [];
     for (const conversationId of [...new Set(run.children.map((child) => child.conversationId))]) {
@@ -490,6 +491,20 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       landed.push(worktree.branch);
     }
     return { landed };
+  }
+  /**
+   * The owner check on a child-worktree land refuses while `workingDurableChildren` is above 0. That count follows the
+   * task graph after a debounce, so it can still count a child whose report just arrived. Wait for its next update.
+   * A child that keeps working past the bound still blocks the land, with the owner check's message.
+   */
+  private settleWorkingChildren(): Promise<void> {
+    if (this.childCount === 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      const settled = () => { if (this.childCount === 0) finish(); };
+      const finish = () => { clearTimeout(timer); this.listeners.delete(settled); resolve(); };
+      const timer = setTimeout(finish, LAND_CHILDREN_SETTLE_MS);
+      this.listeners.add(settled);
+    });
   }
   durableChildren() { return listChildren(this.journal.harness, this.journal.conversation.id, context, this.childWorktrees); }
   reviewDurableChildWorktree(conversationId: number) { return reviewChildWorktree(this.journal.harness, this.journal.conversation.id, conversationId, context, this.childWorktrees); }

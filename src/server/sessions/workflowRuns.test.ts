@@ -877,6 +877,49 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     expect(finished.state).toMatchObject({ outcome: "completed", result: "STAGED-DONE" });
   }, 30000);
 
+  it("waits for a working child without a worktree, which sessiond's owner check counts, then lands", async () => {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: sanitizedGitEnv(), encoding: "utf8" });
+    git("init", "-b", "main"); git("config", "user.email", "workflow@example.invalid"); git("config", "user.name", "Workflow tests");
+    await writeFile(join(root, "base.txt"), "base");
+    git("add", "base.txt"); git("commit", "-m", "Initial workspace");
+    const ownership = new SessionWorktreeStore(join(agentDir, "ownership.json"));
+    await ownership.initialize();
+    // The same rule as sessiond's beforeRelatedAction: no child-worktree land while the owning session has a working agent.
+    worktrees = new SessionWorktrees(ownership, { publish: () => undefined, async beforeRelatedAction(record, actorId) {
+      const owner = record.relatedSession ?? record.childOwner;
+      if (owner === undefined) return;
+      const status = await service.status(owner);
+      if ((actorId !== owner.id && (status.isStreaming || status.isCompacting || status.isBashRunning)) || (status.workingAgents ?? 0) > 0) {
+        throw new Error("Stop the owning session's run and agents before removing this worktree.");
+      }
+    } });
+    let calls = 0;
+    let releaseReview: () => void = () => undefined;
+    // First work call: alpha's build in its worktree. Second: beta's review in the shared checkout, held until released.
+    modelWork = async () => {
+      calls++;
+      if (calls === 2) await new Promise<void>((resolve) => { releaseReview = resolve; });
+    };
+    autonomy = { landStops: false, approveStops: true, reviewRounds: 2, pushDefaultFolders: [] };
+    await service.dispose(); service = openService();
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+    const run = await service.runWorkflow(ref, "staged", {}, "staged-owner-check");
+    await until(async () => (await service.workflowRuns(ref))[0]?.stops?.["land"]?.state === "waiting" && !(await service.status(ref)).isStreaming);
+    await service.prompt(ref, "MODEL-SPAWN-beta");
+    await until(async () => calls === 2 && ((await service.status(ref)).workingAgents ?? 0) > 0);
+    const children = await service.durableChildren(ref);
+    expect(children.find((child) => child.name === "beta")?.worktree).toBeUndefined();
+    // Before the wait, this click failed at once with "Stop the owning session's run and agents".
+    const landing = service.decideWorkflowStop(ref, run.id, "land", "land", undefined).then((landed) => ({ landed }), (error: unknown) => ({ error }));
+    await sleep(300);
+    releaseReview();
+    const outcome = await landing;
+    const branch = children.find((child) => child.name === "alpha")?.worktree?.branch;
+    expect(outcome).toMatchObject({ landed: { stops: { land: { state: "approved", landed: [branch] } } } });
+    expect(git("log", "-1", "--format=%s", "main").trim()).toBe("Child result");
+  }, 30000);
+
   it("recovers a workflow waiting at a user stop without the live index or starting later work", async () => {
     const ref = { id: (await service.start(root)).id, cwd: root };
     await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
