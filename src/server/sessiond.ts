@@ -32,6 +32,7 @@ import { createModelRuntimeForAgentDir } from "./sessions/modelRuntime.js";
 import { bootstrapAndFreezeGlobalExtensionProviders } from "./sessions/globalProviderPolicy.js";
 import { ModelCatalogRefresher } from "./sessions/modelCatalogRefresher.js";
 import { PiSessionService } from "./sessions/piSessionService.js";
+import { DurableAgentSession } from "./sessions/durableAgentSession.js";
 import { createPiSessionManagerGateway } from "./sessions/piSessionManagerGateway.js";
 import { BacklogClaimStore } from "./backlog/backlogClaimStore.js";
 import { BacklogService } from "./backlog/backlogService.js";
@@ -483,6 +484,8 @@ async function listenSessionDaemon({ triggers, sessions, unreadStore, catalogRef
         app.log.error({ err: error, operation }, "session daemon shutdown operation failed");
       }
     };
+    // Synchronous, inside the signal handler: the same stop signal is ending every tool process right now.
+    await attempt("stop advancing durable turns", () => { DurableAgentSession.stopAdvancingTurns(); });
     await attempt("stop worktree cleanup", () => worktreeCleanup.stop());
     await attempt("dispose PR watches", () => { pulls.dispose(); });
     await attempt("dispose run watches", () => { actionRuns.dispose(); });

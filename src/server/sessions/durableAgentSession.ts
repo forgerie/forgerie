@@ -18,9 +18,10 @@ import type { GatedActionReads } from "./gatedActions.js";
 import type { AutonomyPolicySource } from "../../shared/autonomyPolicy.js";
 import { readFile } from "node:fs/promises";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
+import type { Context } from "@earendil-works/chord";
 import { clampThinkingLevel, getSupportedThinkingLevels, type AssistantMessage, type ImageContent, type Message } from "@earendil-works/pi-ai";
 import { ExtensionRunner, ModelRegistry, collectEntriesForBranchSummary, generateBranchSummary, convertToLlm, createLocalBashOperations, createSyntheticSourceInfo, estimateTokens, type AgentSessionServices, type BuildSystemPromptOptions, type ExtensionUIContext, type PromptOptions, type SessionManager, type SessionStartEvent, type ToolDefinition, type SessionBeforeTreeEvent } from "@earendil-works/pi-coding-agent";
-import { GenerationTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult, type Submission, type Harness, type ConversationId, type Conversation, type EntryId, type Registry } from "@earendil-works/pi-durable";
+import { GenerationTask, ToolTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult, type Submission, type Harness, type ConversationId, type Conversation, type EntryId, type Registry } from "@earendil-works/pi-durable";
 import type { DurableSessionAddress, DurableSessionHandle } from "./durableSessionAddress.js";
 import type { DurableNativeHistory } from "./durableNativeHistory.js";
 import { createDurableParentState, type DurableParentState } from "./durableParentState.js";
@@ -81,6 +82,29 @@ export interface DurableAgentSessionOptions {
 export class DurableAgentSession implements PiAgentSession, DurableParentReader, DurableParentMutations {
   private static readonly registries = new WeakMap<Harness, Registry>();
   private static readonly adapters = new WeakMap<Harness, Map<ConversationId, DurableAgentSession>>();
+  private static stopping = false;
+
+  /**
+   * Call first when the daemon stops. The stop signal also reaches every tool process, so a running command ends with a
+   * result that only reports the stop (bash: exit 143). After this call no turn in this process sends a model request,
+   * starts a tool or records a tool result. Each of those steps waits until its Harness closes and commits nothing.
+   * The next daemon then resumes the turn under its own ownership and adapter: it sends the request or starts the tool,
+   * and a command that was running reports that it was interrupted. Durable never runs an unsafe tool again.
+   */
+  static stopAdvancingTurns(): void { DurableAgentSession.stopping = true; }
+
+  /** Resolves at once unless the daemon is stopping. Then it rejects only when the invocation is aborted. */
+  private static async holdWhileStopping(invocation: Context): Promise<void> {
+    if (!DurableAgentSession.stopping) return;
+    const signal = invocation.abortSignal;
+    if (signal === undefined) throw new Error("A stopping daemon cannot hold a turn step without its invocation signal");
+    // The Durable scheduler propagates a hook failure only after the invocation is aborted, so fail only then.
+    await new Promise<void>((resolve) => {
+      if (signal.aborted) resolve();
+      else signal.addEventListener("abort", () => { resolve(); }, { once: true });
+    });
+    signal.throwIfAborted();
+  }
 
   private dispatch(conversationId: ConversationId): DurableAgentSession {
     const adapter = DurableAgentSession.adapters.get(this.journal.harness)?.get(conversationId);
@@ -299,8 +323,14 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.registry.install(askDeliveryExtension());
     this.registry.install(processEventsExtension());
     this.registry.install(defineExtension({ name: "forgerie.sdk-context", sections: [section("forgerie", (input) => this.dispatch(input.conversationId).systemPrompt, { tag: false })],
-      hooks: [hook(GenerationTask, {
-        beforeRequest: async (request, api) => {
+      hooks: [hook(ToolTask, {
+        // Before intent: the next daemon starts this call as new.
+        beforeTool: async (_call, _api, invocation) => { await DurableAgentSession.holdWhileStopping(invocation); return undefined; },
+        // Before the result entry: a result that only reports the stop is never recorded.
+        afterTool: async (_call, _result, _api, invocation) => { await DurableAgentSession.holdWhileStopping(invocation); return undefined; },
+      }), hook(GenerationTask, {
+        beforeRequest: async (request, api, invocation) => {
+          await DurableAgentSession.holdWhileStopping(invocation);
           const adapter = this.dispatch(api.conversationId);
           await adapter.mutation;
           adapter.journal.assertOwned();
