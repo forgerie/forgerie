@@ -41,6 +41,27 @@ How to read this table:
 
 The raw files, the harness copies and the CPU profile are in `/tmp/forgerie-stack-latency/cefda578-browser-render/`: `coldvisit-*`, `paired-*`, `rounds-summary.txt`, `paired-summary.txt` and `shots/`.
 
-## Known remaining cost
+## The composer editor survives a hidden session
 
-A CPU profile of the before build (4 cold opens and 31 switches) had about 1.03 s of its 3.35 s of samples in CodeMirror's `readSelectionRange`. The call came from the composer's `EditorView` constructor during the React layout effect that creates the editor on each reveal. The likely cause is a forced synchronous layout of the newly revealed transcript. That layout may happen anyway before paint, so this is a candidate to measure, not a proven saving. Investigate it before you change composer mount behaviour.
+A retained session is hidden by React `Activity`, not unmounted. Activity runs layout-effect cleanups on hide, so the composer used to destroy its CodeMirror `EditorView` on every hide and build a new one on every reveal. Building it read the document selection, which forced a synchronous layout of the whole revealed transcript. The editor then inserted its own DOM and measured it, which forced a second layout.
+
+`ui/src/ui/ComposerEditor.tsx` now keeps the editor across a hide:
+
+| Rule | Why |
+| --- | --- |
+| On reveal, the kept editor is presented as the fresh editor it replaces: the composer's draft, the caret at the end, and no undo history from before the switch. | Keyboard behaviour stays the same. When the caret is already at the end and the history is empty, nothing is dispatched. |
+| The draft still comes only from the assistant-ui composer. The existing value effect syncs a draft that changed while the session was hidden. | No second draft source. |
+| Each bar's mount, reveal and hide sweeps the kept editors and destroys every editor whose bar left the document. | React runs no effect for a bar that is removed while hidden. A hidden bar stays in the document and a removed one does not. The registry evicts a session when another opens, so the next bar sweeps the evicted editor. |
+
+Cost: a hidden editor keeps its CodeMirror listeners (document `selectionchange`, window `resize` and `scroll`) until its session is evicted. Each listener returns early for an editor that is not focused, so the cost per event is small, but it is not measured. The session registry bounds the number of kept editors.
+
+Evidence: same fixture and harness as above. Head is `596b6358` and the candidate is this change. They were served at the same time and alternated each round. Host load was 3.5 to 19.7, uncontrolled.
+
+| Warm switch, useful rAF, 5 rounds × 200 per build | Head | Candidate |
+| --- | ---: | ---: |
+| Median / p95 / p99 | 57.1 / 170.9 / 238.4 ms | 38.0 / 67.8 / 102.4 ms |
+| Next-rAF paint opportunity, median / p95 | 82.5 / 263.4 ms | 53.4 / 90.7 ms |
+| Long tasks (count / max) | 175 / 168 ms | 11 / 88 ms |
+| Round median, candidate minus head | — | −10.7, −80.1, −85.6, −23.2, −1.5 ms |
+
+Two earlier gates with a prototype of the same idea agreed: candidate faster in 8 of 10 rounds. A trace of 100 switches at load 6 to 7 measured layout per switch at a median of 36.6 ms (head) against 23.4 ms (candidate). The rest is the one layout the browser must do anyway. The head-build tails are wide because two head rounds ran at load 13 to 19, so the medians and the per-round signs are firmer than the p95 ratio. Raw files: `composer-*.json`, `reveal-*.json` and `composer-gate-summary.txt` in the artifact directory.
