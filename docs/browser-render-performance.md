@@ -65,3 +65,24 @@ Evidence: same fixture and harness as above. Head is `596b6358` and the candidat
 | Round median, candidate minus head | — | −10.7, −80.1, −85.6, −23.2, −1.5 ms |
 
 Two earlier gates with a prototype of the same idea agreed: candidate faster in 8 of 10 rounds. A trace of 100 switches at load 6 to 7 measured layout per switch at a median of 36.6 ms (head) against 23.4 ms (candidate). The rest is the one layout the browser must do anyway. The head-build tails are wide because two head rounds ran at load 13 to 19, so the medians and the per-round signs are firmer than the p95 ratio. Raw files: `composer-*.json`, `reveal-*.json` and `composer-gate-summary.txt` in the artifact directory.
+
+## Streaming tokens: no renderer change (2026-10-20)
+
+Runtime's bounded stream fixture was used at commit `fcea856a` (`--stream-cadence=30hz|burst --stream-tokens=300`). Each run asserted all 300 events, exactly one visible copy and the exact final text. Chromium 155, 1440×900 DPR1 desktop emulation. The client was the `e626e133` build. Host load was 9.6 to 28.7 and uncontrolled.
+
+| Measure | 30 Hz | Burst (25 tokens per 250 ms) |
+| --- | ---: | ---: |
+| Paint batches for 300 tokens | 273, 284 (two runs) | 12 |
+| Receive → paint opportunity, median / p95 | 30.2 / 47.8 ms, 30.4 / 44.7 ms | 16.4 ms (n=12) |
+| Receive → DOM text, median / p95 | 9.6 / 19.6 ms, 10.5 / 17.2 ms | — |
+| Main-thread busy per token (CPU profile) | 10.1 ms | 4.5 ms |
+| React commits per token | 4.0 | 2.1 |
+| Forced layout per token | one, median 4.15 ms | coalesced, 90 ms total |
+
+Where the time goes, from a source-mapped CPU profile:
+
+- **Forced layout, about 4 ms per token at 30 Hz.** assistant-ui's viewport auto-scroll (`useThreadViewportAutoScroll` `onResize`) reads `scrollHeight` after every content mutation. Each layout marks about 17 objects dirty out of about 10,000. One token is painted per frame at 30 Hz, so the frame would need this layout anyway. The code is in a dependency.
+- **Commit fan-out.** react-dom and assistant-ui's store, tap and core packages take about 2.5 to 3 ms per token. Each delta produces several commits.
+- **Render-owned code: under 1 ms per token in total.** The largest share is the composer bar re-rendering on each token (about 0.4 ms). `Thread`, `Messages` and `MarkdownText` each take 0.01 to 0.04 ms per token.
+
+No rendering change was made. Batching deltas would cut commits, but it belongs at store publication, which browser-data owns. Batching in the renderer would create a second state owner. The render-owned share is too small to show a measured gain above the noise of these runs. Raw files: `stream-*.json`, `stream-*.cpuprofile` and `stream-attribution-sm-30hz.txt` in the artifact directory.
