@@ -11,6 +11,7 @@
     "extensions/**/*.ts"
   ],
   "ignoreBinaries": [
+    "agent-browser",
     "findmnt",
     "flock",
     "nix",

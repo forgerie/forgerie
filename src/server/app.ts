@@ -25,6 +25,7 @@ import { getPiWebRuntime, getPiWebVersionStatus } from "./piWebStatus.js";
 import { SessionDaemonActiveAgentProfileProvider, type ActiveAgentProfileProvider } from "./activeAgentProfileProvider.js";
 import { registerUiSettingsRoutes, type UiSettingsOptions } from "./uiSettings/routes.js";
 import type { Project, Workspace, WorkspaceEffectiveConfig } from "./types.js";
+import type { StackLatencySink } from "../shared/stackLatency.js";
 
 export interface AppDependencies {
   uiSettings?: UiSettingsOptions;
@@ -41,6 +42,8 @@ export interface AppDependencies {
   logger?: FastifyServerOptions["logger"];
   /** Maximum accepted HTTP request body size in bytes. */
   bodyLimit?: number;
+  /** Measurement-only proxy spans for a validated trace header. Absent in production. */
+  stackLatency?: { sink: StackLatencySink };
 }
 
 interface LocalProjectRouteOptions {
@@ -130,8 +133,14 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
   // The current browser still uses this local-only URL. No machine registry or remote proxy exists.
   registerLocalProjectRoutes(app, projects, workspaces, "/api/machines/local", { config: configService });
 
-  registerSessionProxyRoutes(app, sessionDaemon);
-  registerSessionProxyRoutes(app, sessionDaemon, "/api/machines/local");
+  if (deps.stackLatency === undefined) {
+    registerSessionProxyRoutes(app, sessionDaemon);
+    registerSessionProxyRoutes(app, sessionDaemon, "/api/machines/local");
+  } else {
+    const measurement = { measurement: true, sink: deps.stackLatency.sink };
+    registerSessionProxyRoutes(app, sessionDaemon, "/api", measurement);
+    registerSessionProxyRoutes(app, sessionDaemon, "/api/machines/local", measurement);
+  }
   registerWorkspaceExplorerRoutes(app, projects, workspaces, "/api", { config: configService });
   registerWorkspaceExplorerRoutes(app, projects, workspaces, "/api/machines/local", { config: configService });
   registerPromptResourceCatalogProxyRoutes(app, projects, workspaces, sessionDaemon, "/api");
