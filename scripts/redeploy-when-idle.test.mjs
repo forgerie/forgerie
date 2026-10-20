@@ -169,7 +169,8 @@ it.each([{ mode: "immediate", code: 0 }, { mode: "idle", code: 37 }])("launches 
     closeSync(output);
     assert.equal(completed.status, code, readFileSync(log, "utf8"));
     const terminal = JSON.parse(await readFile(receipt, "utf8"));
-    assert.deepEqual({ status: terminal.status, exitCode: terminal.exitCode, revision: terminal.revision }, { status: code === 0 ? "passed" : "failed", exitCode: code, revision });
+    // This publisher stub writes no warnings file; the result still carries an empty list.
+    assert.deepEqual({ status: terminal.status, exitCode: terminal.exitCode, revision: terminal.revision, warnings: terminal.warnings }, { status: code === 0 ? "passed" : "failed", exitCode: code, revision, warnings: [] });
     const call = JSON.parse(await readFile(calls, "utf8"));
     const staged = call.args[1];
     assert.notEqual(staged, prepared);

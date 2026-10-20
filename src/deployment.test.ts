@@ -68,7 +68,14 @@ if (action === 'is-active' && b.inactiveSessiondForNext) {
   const active = args.filter(arg => arg.endsWith('.service')).some(unit => !next || unit !== 'forgerie-sessiond.service');
   process.exit(active ? 0 : 3);
 }
-if (action === 'show') console.log(b.stillActive ? 'active\\nactive' : 'inactive\\ninactive');
+if (action === 'show') {
+  // b.health lists, per read, [web, sessiond] as [Result, NRestarts]; the last entry repeats.
+  const reads = fs.readFileSync(${JSON.stringify(calls)}, 'utf8').split('\\n').filter(line => line.includes('"show"')).length;
+  const health = b.health ?? [[['success', 0], ['success', 0]]];
+  const units = health[Math.min(reads, health.length) - 1];
+  // systemd's own property order, not the requested one.
+  console.log(units.map(([result, restarts]) => 'ActiveState=' + (b.stillActive ? 'active' : 'inactive') + '\\nResult=' + result + '\\nNRestarts=' + restarts).join('\\n\\n'));
+}
 `);
   await chmod(join(bin, "systemctl"), 0o755);
   let activity: unknown = { workspaces: [{ cwd: "/other", hasSessionActivity: true }] };
@@ -134,17 +141,40 @@ it.each(["busy", "unavailable"])("publishes immediately without reading %s activ
   expect(result, result.stderr).toMatchObject({ code: 0 });
   expect(f.activityCalls()).toBe(0);
   expect(f.runtimeCalls()).toBe(1);
+  const show = ["--user", "show", "--property=ActiveState,Result,NRestarts", "forgerie-web.service", "forgerie-sessiond.service"];
   expect(await f.calls()).toEqual([
+    show,
     ["--user", "stop", "forgerie-web.service", "forgerie-sessiond.service"],
-    ["--user", "show", "--property=ActiveState", "--value", "forgerie-web.service", "forgerie-sessiond.service"],
+    show,
     ["--user", "start", "forgerie-sessiond.service", "forgerie-web.service"],
     ["--user", "is-active", "--quiet", "forgerie-web.service"],
     ["--user", "is-active", "--quiet", "forgerie-sessiond.service"],
+    show,
   ]);
+  expect(result.stdout).not.toContain("Warning:");
   expect(await readFile(join(f.deployed, "server/index.js"), "utf8")).toBe("next");
   const stages = await f.stages(); expect(stages).toHaveLength(1);
   expect(await readFile(join(stages[0] ?? "", "previous/server/index.js"), "utf8")).toBe("previous");
   expect(await readFile(join(f.target, "package-lock.json"), "utf8")).toBe("dependencies-v1");
+});
+
+it("reports a stop timeout and automatic restarts in result.json without rolling back", async () => {
+  const f = await fixture(); expect((await f.record()).code).toBe(0);
+  await f.behavior({ health: [
+    [["success", 0], ["success", 0]],
+    [["success", 0], ["timeout", 0]],
+    [["success", 0], ["success", 2]],
+  ] });
+  // The staged unit's command, as the launcher queues it.
+  const stage = join(f.target, ".forgerie/publish.warnings"); await mkdir(stage, { recursive: true });
+  const result = await command("bash", [helper, "--run-staged", join(stage, "result.json"), f.prepared, f.deployed, f.sha, "--readiness-seconds", "0"], f.env);
+  expect(result, result.stderr).toMatchObject({ code: 0 });
+  const warnings = ["sessiond stop timed out; SIGKILL", "sessiond restarted 2× after start (NRestarts 0 → 2)"];
+  for (const warning of warnings) expect(result.stdout).toContain(`Warning: ${warning}`);
+  expect(JSON.parse(await readFile(join(stage, "result.json"), "utf8"))).toEqual({ status: "passed", exitCode: 0, revision: f.sha, unit: "", warnings });
+  expect(await readdir(stage)).toEqual(["result.json"]);
+  expect(await readFile(join(f.deployed, "server/index.js"), "utf8")).toBe("next");
+  expect((await f.calls()).filter((args) => args[1] === "stop")).toHaveLength(1);
 });
 
 it("keeps only the newest two previous builds after another publication", async () => {

@@ -87,9 +87,16 @@ launch_build() {
 write_publish_result() {
   local status=$?
   trap - EXIT
+  # The publisher writes unit restart and stop-timeout warnings; they never change the status.
+  local warnings='[]'
+  if [ -f "$publish_warnings" ]; then
+    warnings=$(jq -c 'if type == "array" and all(.[]; type == "string") then . else error("invalid warnings") end' "$publish_warnings") ||
+      warnings='["publisher warnings file was unreadable"]'
+    rm -f -- "$publish_warnings"
+  fi
   jq -n --arg status "$([ "$status" -eq 0 ] && echo passed || echo failed)" --argjson exitCode "$status" \
-    --arg revision "$publish_revision" --arg unit "${FORGERIE_PUBLISH_UNIT:-}" \
-    '{status:$status,exitCode:$exitCode,revision:$revision,unit:$unit}' > "$publish_result.tmp"
+    --arg revision "$publish_revision" --arg unit "${FORGERIE_PUBLISH_UNIT:-}" --argjson warnings "$warnings" \
+    '{status:$status,exitCode:$exitCode,revision:$revision,unit:$unit,warnings:$warnings}' > "$publish_result.tmp"
   mv "$publish_result.tmp" "$publish_result"
   [ "$status" -ne 0 ] || remove_published_stage "$(dirname "$publish_result")"
   exit "$status"
@@ -108,13 +115,15 @@ remove_published_stage() {
 }
 run_staged() {
   publish_result="${1:?missing result path}"; publish_revision="${4:?missing revision}"
+  publish_warnings="$(dirname "$publish_result")/warnings.json"
   local prepared="$2" deployed="$3"
   shift 4
+  rm -f -- "$publish_warnings"
   trap write_publish_result EXIT
   trap 'exit 143' TERM
   trap 'exit 130' INT
   trap 'exit 129' HUP
-  node "$prepared/cli.js" deploy "$prepared" "$deployed" "$publish_revision" "$@"
+  FORGERIE_PUBLISH_WARNINGS="$publish_warnings" node "$prepared/cli.js" deploy "$prepared" "$deployed" "$publish_revision" "$@"
 }
 main() {
   if [ "${1:-}" = "--launch" ]; then shift; launch_build "$@"; return; fi

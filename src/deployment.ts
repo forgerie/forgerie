@@ -28,6 +28,8 @@ interface Publication {
   wait: WaitPolicy;
   url: string;
   readinessSeconds: number;
+  /** The staged launcher merges this JSON array into result.json. */
+  warningsFile: string | undefined;
 }
 
 async function git(root: string, ...args: string[]): Promise<string> {
@@ -122,13 +124,52 @@ async function units(action: "stop" | "start" | "is-active"): Promise<void> {
     for (const unit of ordered) await execute("systemctl", ["--user", action, "--quiet", unit], { timeout: 30_000 });
   } else await execute("systemctl", ["--user", action, ...ordered], { timeout: 30_000 });
 }
-async function stopUnits(): Promise<void> {
-  await units("stop");
-  const status = await execute("systemctl", ["--user", "show", "--property=ActiveState", "--value", ...FORGERIE_SERVICE_UNITS], { timeout: 10_000 });
-  const states = status.stdout.trim().split(/\s+/);
-  if (states.length !== 2 || states.some((state) => state !== "inactive" && state !== "failed")) throw new Error("Both units must be stopped before the swap");
-}
 function reason(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+
+type UnitHealth = Record<string, { result: string; restarts: number }>;
+type UnitStates = Record<string, Record<string, string>>;
+const unitHealthSchema = z.object({ Result: z.string().min(1), NRestarts: z.string().regex(/^\d+$/).transform(Number) });
+/** One `systemctl show` per moment. It prints one `Key=Value` block per unit, in request order. */
+async function unitStates(): Promise<UnitStates> {
+  const { stdout } = await execute("systemctl", ["--user", "show", "--property=ActiveState,Result,NRestarts", ...FORGERIE_SERVICE_UNITS], { timeout: 10_000 });
+  const blocks = stdout.trim().split(/\n\s*\n/);
+  if (blocks.length !== FORGERIE_SERVICE_UNITS.length) throw new Error(`Expected ${String(FORGERIE_SERVICE_UNITS.length)} unit blocks from systemctl show`);
+  return Object.fromEntries(FORGERIE_SERVICE_UNITS.map((unit, index) => [unit, Object.fromEntries((blocks[index] ?? "").split("\n").map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]))]));
+}
+/** Restart state is diagnostic: a malformed value is reported, never a reason to stop or roll back. */
+function healthOf(states: UnitStates): UnitHealth {
+  return Object.fromEntries(Object.entries(states).map(([unit, values]) => {
+    const parsed = unitHealthSchema.parse(values);
+    return [unit, { result: parsed.Result, restarts: parsed.NRestarts }];
+  }));
+}
+/** Stop both units and return their state, which also records a stop timeout. */
+async function stopUnits(): Promise<UnitStates> {
+  await units("stop");
+  const states = await unitStates();
+  if (Object.values(states).some((state) => state["ActiveState"] !== "inactive" && state["ActiveState"] !== "failed")) throw new Error("Both units must be stopped before the swap");
+  return states;
+}
+function unitName(unit: string): string { return unit.replace(/^forgerie-/, "").replace(/\.service$/, ""); }
+/**
+ * Compare unit state before the stop, after it, and after readiness. A start
+ * resets `Result` and, after an explicit stop, `NRestarts` (verified on
+ * systemd 259), so a count after readiness is automatic restarts since the start.
+ */
+function unitHealthWarnings(before: UnitHealth, stopped: UnitHealth | undefined, ready: UnitHealth | undefined): string[] {
+  const warnings: string[] = [];
+  for (const unit of FORGERIE_SERVICE_UNITS) {
+    const name = unitName(unit), was = before[unit], stop = stopped?.[unit], now = ready?.[unit];
+    if (was === undefined) continue;
+    if (stop !== undefined && stop.result !== "success" && stop.result !== was.result) {
+      warnings.push(stop.result === "timeout" ? `${name} stop timed out; SIGKILL` : `${name} stop ended with result ${stop.result}`);
+    }
+    if (now === undefined) continue;
+    if (now.restarts > 0) warnings.push(`${name} restarted ${String(now.restarts)}× after start (NRestarts ${String(was.restarts)} → ${String(now.restarts)})`);
+    if (now.result !== "success") warnings.push(`${name} result ${now.result} after start`);
+  }
+  return warnings;
+}
 async function ready(options: Publication, expected: z.infer<typeof manifestSchema>): Promise<void> {
   const deadline = Date.now() + options.readinessSeconds * 1_000;
   for (;;) {
@@ -186,6 +227,13 @@ async function publish(options: Publication): Promise<void> {
   let compromised: Error | undefined;
   const release = await lockfile.lock(targetRoot, { lockfilePath: join(stateDir, "publish.lock"), stale: 120_000, onCompromised: (error) => { compromised = error; } });
   let stage: string | undefined;
+  // Unit restarts and stop timeouts are reported, never a reason to roll back.
+  const warnings: string[] = [];
+  let before: UnitHealth | undefined, stopped: UnitHealth | undefined, compared = false;
+  const readHealth = async (moment: string, read: () => Promise<UnitStates> = unitStates): Promise<UnitHealth | undefined> => {
+    try { return healthOf(await read()); }
+    catch (error) { warnings.push(`could not read unit restart state ${moment}: ${reason(error)}`); return undefined; }
+  };
   const guard = async (): Promise<void> => {
     if (compromised !== undefined) throw compromised;
     await checkout(prepared, options.revision, true);
@@ -199,16 +247,21 @@ async function publish(options: Publication): Promise<void> {
     const next = join(stage, "next"), previous = join(stage, "previous");
     await cp(prepared, next, { recursive: true, errorOnExist: true, force: false });
     await verifyReceipt(next, options.revision);
-    await guard();
+    // The baseline read overlaps the last source check; nothing stops before both finish.
+    [before] = await Promise.all([readHealth("before the stop"), guard()]);
     let movedPrevious = false, installedNext = false, stopAttempted = false;
     try {
       stopAttempted = true;
-      await stopUnits();
+      const afterStop = await stopUnits();
+      stopped = await readHealth("after the stop", () => Promise.resolve(afterStop));
       await guard();
       await rename(deployed, previous); movedPrevious = true;
       await rename(next, deployed); installedNext = true;
       await units("start");
       await ready(options, await manifest(deployed));
+      const health = await readHealth("after readiness");
+      if (before !== undefined) warnings.push(...unitHealthWarnings(before, stopped, health));
+      compared = true;
       console.log(`Published ${options.revision}; previous build retained at ${previous}`);
     } catch (cause) {
       try {
@@ -225,10 +278,19 @@ async function publish(options: Publication): Promise<void> {
     try {
       const removed = await pruneRetainedBuilds(stateDir, stage);
       if (removed.length > 0) console.log(`Removed ${String(removed.length)} older previous build(s); kept the newest ${String(RETAINED_PREVIOUS_BUILDS)}: ${removed.join(", ")}`);
-    } catch (error) { console.error(`Warning: could not remove older previous builds in ${stateDir}: ${reason(error)}`); }
+    } catch (error) { warnings.push(`could not remove older previous builds in ${stateDir}: ${reason(error)}`); }
   } finally {
+    // A failed publication still reports what it saw, such as a stop that timed out.
+    if (!compared && before !== undefined) warnings.push(...unitHealthWarnings(before, stopped, undefined));
+    for (const warning of warnings) console.log(`Warning: ${warning}`);
     // Keep failed/previous builds for operator inspection. Only remove an unpublished copy.
-    try { if (stage !== undefined) await rm(join(stage, "next"), { recursive: true, force: true }); }
+    try {
+      const { warningsFile } = options;
+      if (warningsFile !== undefined) {
+        await writeFile(warningsFile, `${JSON.stringify(warnings)}\n`).catch((error: unknown) => { console.error(`Warning: could not write ${warningsFile}: ${reason(error)}`); });
+      }
+      if (stage !== undefined) await rm(join(stage, "next"), { recursive: true, force: true });
+    }
     finally { await release(); }
   }
 }
@@ -258,5 +320,7 @@ export async function deployCommand(args: string[]): Promise<void> {
   const url = process.env["FORGERIE_REDEPLOY_URL"] ?? "http://127.0.0.1:8504";
   const parsedUrl = new URL(url);
   if (!["http:", "https:"].includes(parsedUrl.protocol)) throw new Error("Deployment URL must use HTTP or HTTPS");
-  await publish({ prepared, deployed, revision, wait, url: url.replace(/\/$/, ""), readinessSeconds });
+  const warningsFile = process.env["FORGERIE_PUBLISH_WARNINGS"];
+  if (warningsFile !== undefined && !isAbsolute(warningsFile)) throw new Error("FORGERIE_PUBLISH_WARNINGS must be an absolute path");
+  await publish({ prepared, deployed, revision, wait, url: url.replace(/\/$/, ""), readinessSeconds, warningsFile });
 }
