@@ -72,6 +72,17 @@ launch_build() {
     echo "Launch failed; retained $stage" >&2; return "$status"
   fi
   echo "Queued $unit; retained build, publish.log and result.json: $stage"
+  # The unit runs from its own clone. The verified source is no longer needed.
+  local git_dir common_dir main_root
+  git_dir=$(git -C "$source_root" rev-parse --path-format=absolute --git-dir)
+  common_dir=$(git -C "$source_root" rev-parse --path-format=absolute --git-common-dir)
+  if [ "$git_dir" != "$common_dir" ]; then
+    IFS= read -r main_root < <(git -C "$source_root" worktree list --porcelain)
+    main_root="${main_root#worktree }"
+    printf 'The publisher no longer needs the source worktree. Remove it with: git -C %q worktree remove %q\n' "$main_root" "$source_root"
+  else
+    echo "The publisher no longer needs the source checkout: $source_root"
+  fi
 }
 write_publish_result() {
   local status=$?
@@ -80,7 +91,20 @@ write_publish_result() {
     --arg revision "$publish_revision" --arg unit "${FORGERIE_PUBLISH_UNIT:-}" \
     '{status:$status,exitCode:$exitCode,revision:$revision,unit:$unit}' > "$publish_result.tmp"
   mv "$publish_result.tmp" "$publish_result"
+  [ "$status" -ne 0 ] || remove_published_stage "$(dirname "$publish_result")"
   exit "$status"
+}
+# The unit's last step, after the publisher (which runs from the clone) has exited.
+# A failed publication keeps everything for inspection.
+remove_published_stage() {
+  local stage="$1"
+  [[ "$(basename "$stage")" = publish.* && "$(basename "$(dirname "$stage")")" = .forgerie ]] ||
+    { echo "Kept staged files: $stage is not a .forgerie/publish.* directory" >&2; return 0; }
+  if rm -rf -- "$stage/source" "$stage/launcher.sh"; then
+    echo "Removed the staged clone, build and node_modules; kept publish.log and result.json: $stage"
+  else
+    echo "Could not remove all staged files in $stage; remove them manually" >&2
+  fi
 }
 run_staged() {
   publish_result="${1:?missing result path}"; publish_revision="${4:?missing revision}"

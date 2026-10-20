@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -145,6 +145,31 @@ it.each(["busy", "unavailable"])("publishes immediately without reading %s activ
   const stages = await f.stages(); expect(stages).toHaveLength(1);
   expect(await readFile(join(stages[0] ?? "", "previous/server/index.js"), "utf8")).toBe("previous");
   expect(await readFile(join(f.target, "package-lock.json"), "utf8")).toBe("dependencies-v1");
+});
+
+it("keeps only the newest two previous builds after another publication", async () => {
+  const f = await fixture(); expect((await f.record()).code).toBe(0);
+  // Two earlier publications' retained builds, oldest first.
+  const earlier = [join(f.target, ".forgerie/deploy.earliest"), join(f.target, ".forgerie/deploy.earlier")];
+  for (const [index, stage] of earlier.entries()) {
+    await mkdir(join(stage, "previous/server"), { recursive: true });
+    await writeFile(join(stage, "previous/server/index.js"), stage);
+    const time = new Date(Date.now() - (2 - index) * 3_600_000);
+    await utimes(stage, time, time);
+  }
+  // A rollback's retained failed build is not a previous build and stays for inspection.
+  const inspected = join(f.target, ".forgerie/deploy.rolled-back");
+  await mkdir(join(inspected, "failed"), { recursive: true });
+  const result = await f.publish();
+  expect(result, result.stderr).toMatchObject({ code: 0 });
+  expect(result.stdout).toContain(`Removed 1 older previous build(s); kept the newest 2: ${earlier[0] ?? ""}`);
+  const stages = (await f.stages()).filter((stage) => stage !== inspected);
+  expect(stages).toHaveLength(2);
+  expect(stages).toContain(earlier[1]);
+  const published = stages.find((stage) => stage !== earlier[1]) ?? "";
+  expect(await readFile(join(published, "previous/server/index.js"), "utf8")).toBe("previous");
+  expect(await readdir(inspected)).toEqual(["failed"]);
+  expect(await readFile(join(f.deployed, "server/index.js"), "utf8")).toBe("next");
 });
 
 it.each([

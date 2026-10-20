@@ -70,11 +70,11 @@ Publication requires two different, non-overlapping, existing absolute build dir
 
 The publisher leaves `node_modules` unchanged. Matching lockfiles cannot prove that installed dependencies are correct. Confirm the deployed dependencies already satisfy that lockfile. If dependencies must change, plan and approve that separate update; do not copy an isolated checkout's dependencies over running agents. Dependency upgrades are not an atomic part of this operation.
 
-Publication takes an exclusive per-checkout lock at `.forgerie/publish.lock`. A competing publisher fails rather than waiting. The publisher copies and validates the build under `.forgerie/deploy.*` before stopping anything. It stops both units, confirms they are stopped, swaps the directories on that filesystem, then starts both units. It retains the previous build at `.forgerie/deploy.*/previous` and prints that path. Do not run another deployment mechanism against the same checkout while it holds this lock.
+Publication takes an exclusive per-checkout lock at `.forgerie/publish.lock`. A competing publisher fails rather than waiting. The publisher copies and validates the build under `.forgerie/deploy.*` before stopping anything. It stops both units, confirms they are stopped, swaps the directories on that filesystem, then starts both units. It retains the previous build at `.forgerie/deploy.*/previous` and prints that path. After a successful publication it keeps the newest two `previous` builds and removes the older `deploy.*` directories that hold only a `previous` build. It prints the removed paths. A cleanup failure prints a warning and does not roll back the new build. Do not run another deployment mechanism against the same checkout while it holds this lock.
 
 Readiness requires both units to be active, `/build.json` to report the prepared browser entry, and `/api/pi-web/runtime` to report `components.web.available` and `components.sessiond.available` as `true`. An active unit alone does not prove the daemon socket is ready. The publisher retries these checks within the existing readiness budget. The default readiness budget is 60 seconds; `--readiness-seconds N` accepts 0–600. This does not prove every Durable session has recovered. Read the daemon journal, check `/api/pi-web/runtime` for the intended daemon profile, and confirm the browser loads the new UI. `FORGERIE_REDEPLOY_URL` overrides `http://127.0.0.1:8504`; pass it with `systemd-run --setenv=FORGERIE_REDEPLOY_URL=...` when needed.
 
-If stopping, swapping, starting, or readiness fails, the publisher attempts to restore and restart the previous build and exits nonzero. Failed new builds remain at `.forgerie/deploy.*/failed` when a swap occurred. A rollback failure reports the recovery directory and exits nonzero. The publisher does not remove profiles or Durable data. Retained builds cost disk space and need later operator cleanup.
+If stopping, swapping, starting, or readiness fails, the publisher attempts to restore and restart the previous build and exits nonzero. Failed new builds remain at `.forgerie/deploy.*/failed` when a swap occurred. A rollback failure reports the recovery directory and exits nonzero. The publisher does not remove profiles or Durable data. It never removes a `deploy.*` directory that holds a `failed` build or any other entry; inspect and remove those manually. Two retained previous builds cost disk space.
 
 ### Stage an independent launch before removing the build worktree
 
@@ -96,7 +96,9 @@ revision and the deployed checkout is at the same revision. It makes an
 independent Git clone at that SHA under the deployed checkout's
 `.forgerie/publish.*` directory, then copies the verified build and installed
 source dependencies there. Dependency links are dereferenced. The source can
-be removed after the launcher returns. This costs extra disk space and copy
+be removed after the launcher returns. For a linked worktree, the launcher
+prints the exact command, for example
+`git -C /path/to/main-checkout worktree remove /path/to/verified-worktree`. This costs extra disk space and copy
 time; missing dependencies or dependency-link cycles prevent launch. It never
 installs dependencies or changes the deployed `node_modules`.
 
@@ -111,9 +113,15 @@ The launcher prints the temporary unit name and retained directory. Read
 The result changes from `queued` to `passed` or `failed`, with the publisher's
 exit code, revision, and unit name. A launch failure records its exit code with
 `phase: "launch"`. An uncatchable kill or host loss can leave `queued`; inspect
-the retained log and unit journal instead of treating it as success. Keep the
-staging directory until the publisher finishes, then clean retained files
-manually. The main publisher also retains its separate previous/failed builds.
+the retained log and unit journal instead of treating it as success.
+
+After `result.json` records `passed`, the unit's last step removes the clone,
+build, `node_modules` and `launcher.sh` from its `publish.*` directory. This
+runs after the publisher exits, because the publisher runs from that clone.
+Only `publish.log` and `result.json` remain; remove them when you no longer
+need them. A `failed` or `queued` result keeps every staged file for
+inspection; remove that directory manually after inspection. The main
+publisher keeps its own previous builds as described above.
 
 To request the existing explicit idle policy through this launcher:
 

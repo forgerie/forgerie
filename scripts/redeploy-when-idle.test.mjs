@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { it } from "vitest";
+import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const script = new URL("./redeploy-when-idle.sh", import.meta.url).pathname;
@@ -99,15 +100,17 @@ it("refuses missing revision or incomplete publication paths before delegation",
 it.each([{ mode: "immediate", code: 0 }, { mode: "idle", code: 37 }])("launches $mode from a minimal environment and retains publisher exit $code after source removal", async ({ mode, code }) => {
   const root = await mkdtemp(join(tmpdir(), "publisher-launch-"));
   try {
-    const source = join(root, "source"), target = join(root, "target"), bin = join(root, "bin");
-    await mkdir(source); await mkdir(bin);
+    // The verified source is a linked worktree, as Forgerie creates it.
+    const main = join(root, "main"), source = join(root, "source"), target = join(root, "target"), bin = join(root, "bin");
+    await mkdir(main); await mkdir(bin);
     const git = (...args) => spawnSync("git", args, { encoding: "utf8" });
-    assert.equal(git("init", "-q", source).status, 0);
-    await writeFile(join(source, ".gitignore"), "dist/\nnode_modules\n");
-    await writeFile(join(source, "package-lock.json"), "locked dependencies\n");
-    await writeFile(join(source, "package.json"), '{"type":"module"}');
-    assert.equal(git("-C", source, "add", ".").status, 0);
-    assert.equal(git("-C", source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verified source").status, 0);
+    assert.equal(git("init", "-q", main).status, 0);
+    await writeFile(join(main, ".gitignore"), "dist/\nnode_modules\n");
+    await writeFile(join(main, "package-lock.json"), "locked dependencies\n");
+    await writeFile(join(main, "package.json"), '{"type":"module"}');
+    assert.equal(git("-C", main, "add", ".").status, 0);
+    assert.equal(git("-C", main, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verified source").status, 0);
+    assert.equal(git("-C", main, "worktree", "add", "-q", "--detach", source).status, 0);
     assert.equal(git("clone", "-q", source, target).status, 0);
     const revision = git("-C", source, "rev-parse", "HEAD").stdout.trim();
     const prepared = join(source, "dist"), deployed = join(target, "dist");
@@ -138,6 +141,8 @@ it.each([{ mode: "immediate", code: 0 }, { mode: "idle", code: 37 }])("launches 
     await assert.rejects(readFile(join(root, "launch.json")), /ENOENT/);
     const result = launch();
     assert.equal(result.status, 0, result.stdout + result.stderr);
+    const removal = /Remove it with: (git -C .+ worktree remove .+)$/m.exec(result.stdout)?.[1];
+    assert.equal(removal, `git -C ${main} worktree remove ${source}`, result.stdout);
     assert.match(await readFile(join(root, "bootstrap"), "utf8"), /shell.*--command bash/);
     const unitArgs = JSON.parse(await readFile(join(root, "launch.json"), "utf8"));
     const workerEnv = Object.fromEntries(unitArgs.filter(arg => arg.startsWith("--setenv=")).map(arg => { const value = arg.slice(9), at = value.indexOf("="); return [value.slice(0, at), value.slice(at + 1)]; }));
@@ -152,16 +157,34 @@ it.each([{ mode: "immediate", code: 0 }, { mode: "idle", code: 37 }])("launches 
     assert.match(rejected.stderr, /Launch failed; retained/);
     const receipts = await Promise.all((await readdir(join(target, ".forgerie"))).map(stage => readFile(join(target, ".forgerie", stage, "result.json"), "utf8").then(JSON.parse)));
     assert.ok(receipts.some(value => value.status === "failed" && value.phase === "launch" && value.exitCode === 19));
-    await rm(source, { recursive: true }); await rm(dependencies, { recursive: true });
-    const completed = spawnSync(worker[0], worker.slice(1), { env: workerEnv, encoding: "utf8" });
-    assert.equal(completed.status, code, completed.stdout + completed.stderr);
+    // Run the printed command: the clean source worktree goes away before the publisher runs.
+    const removed = spawnSync("bash", ["-c", removal], { encoding: "utf8" });
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.equal(existsSync(source), false);
+    await rm(dependencies, { recursive: true });
+    const stage = dirname(receipt), log = join(stage, "publish.log");
+    // systemd appends the unit's output to publish.log.
+    const output = openSync(log, "a");
+    const completed = spawnSync(worker[0], worker.slice(1), { env: workerEnv, stdio: ["ignore", output, output] });
+    closeSync(output);
+    assert.equal(completed.status, code, readFileSync(log, "utf8"));
     const terminal = JSON.parse(await readFile(receipt, "utf8"));
     assert.deepEqual({ status: terminal.status, exitCode: terminal.exitCode, revision: terminal.revision }, { status: code === 0 ? "passed" : "failed", exitCode: code, revision });
     const call = JSON.parse(await readFile(calls, "utf8"));
     const staged = call.args[1];
     assert.notEqual(staged, prepared);
-    assert.equal(git("-C", join(staged, ".."), "rev-parse", "HEAD").stdout.trim(), revision);
-    assert.equal(git("-C", join(staged, ".."), "status", "--porcelain").stdout.trim(), "");
+    assert.equal(dirname(staged), join(stage, "source"));
+    if (code === 0) {
+      // A passed publication removes the clone, build and node_modules after the publisher exits.
+      assert.deepEqual((await readdir(stage)).sort(), ["publish.log", "result.json"]);
+      assert.match(await readFile(log, "utf8"), /Removed the staged clone, build and node_modules; kept publish\.log and result\.json/);
+    } else {
+      // A failed publication keeps everything for inspection.
+      assert.deepEqual((await readdir(stage)).sort(), ["launcher.sh", "publish.log", "result.json", "source"]);
+      assert.equal(git("-C", join(staged, ".."), "rev-parse", "HEAD").stdout.trim(), revision);
+      assert.equal(git("-C", join(staged, ".."), "status", "--porcelain").stdout.trim(), "");
+      assert.ok(existsSync(join(stage, "source/node_modules/captured-dependency/index.js")));
+    }
     assert.deepEqual(call.args, ["deploy", staged, deployed, revision, ...(mode === "idle" ? ["--when-idle", "/own", "--limit-minutes", "0"] : [])]);
     assert.equal(call.dependency, "captured dependencies");
     assert.equal(call.home, root);

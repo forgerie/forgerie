@@ -144,6 +144,30 @@ async function ready(options: Publication, expected: z.infer<typeof manifestSche
     }
   }
 }
+// A successful publication retains this many .forgerie/deploy.<id>/previous builds for rollback.
+const RETAINED_PREVIOUS_BUILDS = 2;
+
+/**
+ * Remove the stages of older successful publications. Only a stage that holds
+ * exactly `previous` is eligible: a stage with `failed` or `next` records a
+ * rollback or an interrupted publication, and stays for operator inspection.
+ */
+async function pruneRetainedBuilds(stateDir: string, current: string): Promise<string[]> {
+  const stages: { path: string; modified: number }[] = [];
+  for (const name of await readdir(stateDir)) {
+    if (!name.startsWith("deploy.")) continue;
+    const path = join(stateDir, name);
+    const stat = await lstat(path);
+    if (!stat.isDirectory()) continue;
+    const entries = await readdir(path);
+    if (entries.length === 1 && entries[0] === "previous") stages.push({ path, modified: path === current ? Number.POSITIVE_INFINITY : stat.mtimeMs });
+  }
+  stages.sort((a, b) => b.modified - a.modified || b.path.localeCompare(a.path));
+  const removed = stages.slice(RETAINED_PREVIOUS_BUILDS).map((stage) => stage.path);
+  for (const path of removed) await rm(path, { recursive: true, force: true });
+  return removed;
+}
+
 async function publish(options: Publication): Promise<void> {
   // The operator must use an independent launcher (see docs/deployment.md).
   // Running inside sessiond's cgroup would kill the publisher during stop.
@@ -197,6 +221,11 @@ async function publish(options: Publication): Promise<void> {
       } catch (rollbackCause) { throw new AggregateError([cause, rollbackCause], `Publication failed (${reason(cause)}) and rollback failed (${reason(rollbackCause)}). Inspect ${stage} and both units before recovery.`, { cause: rollbackCause }); }
       throw new Error(`Publication failed (${reason(cause)}); previous build restored. Retained files: ${stage}`, { cause });
     }
+    // The new build is live. A cleanup failure must not roll it back.
+    try {
+      const removed = await pruneRetainedBuilds(stateDir, stage);
+      if (removed.length > 0) console.log(`Removed ${String(removed.length)} older previous build(s); kept the newest ${String(RETAINED_PREVIOUS_BUILDS)}: ${removed.join(", ")}`);
+    } catch (error) { console.error(`Warning: could not remove older previous builds in ${stateDir}: ${reason(error)}`); }
   } finally {
     // Keep failed/previous builds for operator inspection. Only remove an unpublished copy.
     try { if (stage !== undefined) await rm(join(stage, "next"), { recursive: true, force: true }); }
