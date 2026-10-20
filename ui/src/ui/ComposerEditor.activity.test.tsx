@@ -9,6 +9,7 @@ import { useThreadMessages } from "../useThreadMessages";
 import { Composer } from "./Composer";
 import type { ComposerInputElement } from "./ComposerEditor";
 import { ImageViewerProvider } from "./ImageViewer";
+import { shownComposerInput } from "./shownComposerInput";
 
 // A retained session's composer is hidden by Activity, not unmounted. These
 // tests pin that a reveal looks exactly like the fresh editor it used to be,
@@ -88,6 +89,16 @@ describe("composer editor across Activity hide and reveal", () => {
     expect(input(0).value).toBe("zero");
     expect(input(1).value).toBe("one");
     expect(input(0)).not.toBe(input(1));
+  });
+
+  it("finds the shown session's composer, not a kept hidden one earlier in the document", async () => {
+    await render(0);
+    await render(1);
+    // Kept editors stay in the document. The first match is the hidden session's.
+    expect(document.querySelector("[data-composer-input]")).toBe(input(0));
+    expect(shownComposerInput()).toBe(input(1));
+    await render(0);
+    expect(shownComposerInput()).toBe(input(0));
   });
 
   it("destroys the editor of a session removed while hidden, and of one removed while shown", async () => {

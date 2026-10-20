@@ -20,6 +20,7 @@ import type { DiffBlock } from "./DiffEditor";
 import { shellLayout, type ShellLayout } from "./AppShell";
 import { useSheetDrag } from "./useSheetDrag";
 import { MARKDOWN_WORDS, useMarkdownView, type MarkdownView } from "./useMarkdownView";
+import { shownComposerInput } from "./shownComposerInput";
 
 // CodeMirror and its language parsers are about 325 kB. They load when a review first shows a diff.
 const DiffEditor = lazy(() => import("./DiffEditor").then((module) => ({ default: module.DiffEditor })));
@@ -536,7 +537,7 @@ function Review({ source, files: filesSource, notes, focusNoteId, openPath, onAd
         <button type="button" className="primary changes-write" onClick={() => {
           requestClose();
           // The notes are written; the message is next.
-          requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-composer-input]")?.focus());
+          requestAnimationFrame(() => shownComposerInput()?.focus());
         }}>Write message</button>
       </footer>}
     </div>
