@@ -28,11 +28,17 @@ export function createSessionEntry(session: Session, transport: SessionTransport
   const gated = createGatedActionsStore(transport.request, ref);
   // Live Durable tasks for the status panel: read again on the same change event as the children, on reconnect, and on panel open.
   const taskActivity = createTaskActivityStore(transport.request, ref);
+  // Hidden entries keep their transcript subscriptions, but panel reads can wait for selection.
+  const pendingPanels = new Set<{ refresh: () => void | Promise<void> }>();
+  const refreshPanels = (...panels: { refresh: () => void | Promise<void> }[]) => {
+    for (const panel of panels) { if (visible) void panel.refresh(); else pendingPanels.add(panel); }
+  };
+  childAgents.setVisible(false);
   const reads = createReadTracker(transport, { isVisible: () => visible && !store.getSnapshot().transcript.isRunning && (options.isVisible?.() ?? document.visibilityState === "visible"),
     subscribe: options.onUnread, afterRender: options.afterPaint ?? afterTranscriptPaint });
   const store = createSessionStore(session.id, transport, {}, session.cwd ? session : undefined, reads, event => {
-    if (event === CHILDREN_CHANGED_EVENT) { childAgents.refresh(); workflows.refresh(); taskActivity.refresh(); }
-    if (event === WORKFLOW_RUNS_CHANGED_EVENT) { workflows.refresh(); decisions.refresh(); gated.refresh(); }
+    if (event === CHILDREN_CHANGED_EVENT) refreshPanels(childAgents, workflows, taskActivity);
+    if (event === WORKFLOW_RUNS_CHANGED_EVENT) refreshPanels(workflows, decisions, gated);
   }, event => {
     if (event.type === "processes.update") processes.applySnapshot(event.snapshot);
     else processes.applyOutput(event.id, event.lines, event.cursor, event.droppedLines);
@@ -44,16 +50,19 @@ export function createSessionEntry(session: Session, transport: SessionTransport
     taskActivity.setConnected(state.connection.type === "ready");
     if (state.connection.type !== "ready" || state.lastReadyAt === readyAt) return;
     readyAt = state.lastReadyAt;
-    childAgents.refresh(); workflows.refresh(); decisions.refresh(); gated.refresh(); void processes.refresh(); taskActivity.refresh();
+    refreshPanels(childAgents, workflows, decisions, gated, processes, taskActivity);
   }));
   let disposed = false;
   return {
     session, store, childAgents, processes, workflows, decisions, gated, taskActivity, signal: lifetime.signal,
-    setVisible: (next: boolean) => { visible = next; store.setVisible(next); },
+    setVisible: (next: boolean) => {
+      visible = next; store.setVisible(next); childAgents.setVisible(next);
+      if (next) { const panels = [...pendingPanels]; pendingPanels.clear(); refreshPanels(...panels); }
+    },
     onDispose: (cleanup: () => void) => { cleanups.add(cleanup); return () => { cleanups.delete(cleanup); }; },
     dispose: () => {
       if (disposed) return;
-      disposed = true; visible = false; lifetime.abort();
+      disposed = true; visible = false; lifetime.abort(); pendingPanels.clear();
       store.dispose(); childAgents.dispose(); processes.dispose(); workflows.dispose(); decisions.dispose(); gated.dispose(); taskActivity.dispose();
       for (const cleanup of cleanups) cleanup();
       cleanups.clear();

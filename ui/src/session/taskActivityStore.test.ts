@@ -169,3 +169,17 @@ describe("the task activity store", () => {
     store.dispose();
   });
 });
+
+it("cancels obsolete task reads and cancels the final read on disposal", async () => {
+  const pending: { signal: AbortSignal | null | undefined; finish: (response: Response) => void }[] = [];
+  const store = createTaskActivityStore((_path, init) => new Promise<Response>(finish => { pending.push({ signal: init.signal, finish }); }), session);
+  store.retry(); store.retry();
+  expect(pending[0]?.signal?.aborted).toBe(true);
+  pending[1]?.finish(Response.json(BUSY));
+  await vi.waitFor(() => expect(store.getSnapshot().activity).toEqual(BUSY));
+  pending[0]?.finish(Response.json(WORKING));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(store.getSnapshot().activity).toEqual(BUSY);
+  store.retry(); store.dispose();
+  expect(pending[2]?.signal?.aborted).toBe(true);
+});
