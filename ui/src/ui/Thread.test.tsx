@@ -71,6 +71,8 @@ describe("Homepage-derived thread", () => {
       { id: "user", role: "user", parts: [{ type: "text", text: "Keep **this** literal" }] },
       answer("## Implementation\n\nUse **streaming** and `cwd`.\n\n- Load history\n- Send prompts\n\n```ts\nconst cwd = '/tmp';\n```\n\n| State | Meaning |\n| --- | --- |\n| Ready | Send |"),
     ] });
+    // Code remains readable immediately; the optional full grammar kit adds colour after loading.
+    await act(async () => { await vi.dynamicImportSettled(); });
     expect(document.querySelector('.message-user .user-bubble')?.textContent).toBe("Keep **this** literal");
     expect(document.querySelector('.message-assistant h2')?.textContent).toBe("Implementation");
     expect(document.querySelector('.message-assistant strong')?.textContent).toBe("streaming");

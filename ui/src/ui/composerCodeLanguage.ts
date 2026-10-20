@@ -3,7 +3,7 @@ import type { Facet } from "@codemirror/state";
 import { languages } from "@codemirror/language-data";
 import { Autolink, parser as commonmark, parseCode, Strikethrough, TaskList, type MarkdownParser } from "@lezer/markdown";
 import type { EditorView } from "@codemirror/view";
-import hljs from "./codeGrammars";
+import { codeLanguageName } from "./codeLanguageNames";
 
 /** The language word of a fence's info string: "ts" in "```ts title=x". */
 export function codeFenceTag(info: string | undefined): string | undefined {
@@ -11,19 +11,19 @@ export function codeFenceTag(info: string | undefined): string | undefined {
 }
 
 /**
- * The grammar for a draft's code fence. The same highlight.js instance the
- * transcript highlights with decides whether a tag names a language, so both
- * call a fence code. The draft then colours the tags the editor carries a
+ * The grammar for a draft's code fence. The full highlight.js name registry
+ * decides whether a tag names a language, without eagerly loading its grammar
+ * implementations. The transcript recognizes the same tags. The draft then colours the tags the editor carries a
  * grammar for, and the editor carries fewer than highlight.js does (143 against
  * 193), so a nix or elixir draft draws labelled plain code. Unknown tags never
  * get a guessed grammar, so "javascript-extra" stays plain.
  */
 export function composerCodeLanguage(info: string): LanguageDescription | null {
   const tag = codeFenceTag(info);
-  const known = tag === undefined ? undefined : hljs.getLanguage(tag);
+  const known = tag === undefined ? undefined : codeLanguageName(tag);
   if (tag === undefined || known === undefined) return null;
   return LanguageDescription.matchLanguageName(languages, tag, false)
-    ?? LanguageDescription.matchLanguageName(languages, known.name ?? "", false);
+    ?? LanguageDescription.matchLanguageName(languages, known, false);
 }
 
 type MarkdownEditing = typeof import("@codemirror/lang-markdown");
