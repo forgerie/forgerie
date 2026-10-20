@@ -112,7 +112,7 @@ Repeat in light mode and read every PNG. The four Fold 8 CSS viewports are `704 
 
 `scripts/test-selection.mjs` adds tests for speech-worker files read at runtime. Package manifests, TypeScript or Vitest configuration, bundled dependencies, and deleted source files trigger the full suite. Deletion removes import-graph evidence, so related tests alone are not sufficient.
 
-`test:changed` selects committed, staged, unstaged, and untracked paths, then tests current worktree content. The pre-commit hook uses the same policy for staged source. A dirty worktree uses a temporary Git-index snapshot with the installed server dependencies. The complete verification remains the merge gate, including the separate browser app.
+`test:changed` selects committed, staged, unstaged, and untracked paths, then tests current worktree content. The pre-commit hook uses the same policy for staged source. A dirty worktree uses a temporary Git-index snapshot with the installed server dependencies. The snapshot has no `.git`, so a test must not read Git history: check in an old source as a fixture under `fixtures/` (for example `src/server/sessions/fixtures/durableSessionJournal.f4929197.ts.txt`). The complete verification remains the merge gate, including the separate browser app.
 
 ## Coverage and isolation
 

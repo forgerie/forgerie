@@ -4,6 +4,8 @@ coverage/
 .env
 .DS_Store
 *.log
+# TypeScript incremental build state, such as ui/tsconfig.tsbuildinfo.
+*.tsbuildinfo
 .playwright-cli/
 
 # Local plugin development sandboxes. Symlink these into ~/.pi-web/plugins/<plugin-id>.

@@ -64,6 +64,7 @@ export function hasUnstagedWork(options = {}) {
   return tracked.length > 0 || untracked.length > 0;
 }
 
+/** The snapshot holds the staged files and links to node_modules. It has no `.git`: tests must not read Git history. */
 export function createStagedSnapshot(options = {}) {
   const cwd = resolve(options.cwd ?? process.cwd());
   const snapshotRoot = mkdtempSync(join(tmpdir(), "forgerie-staged-"));

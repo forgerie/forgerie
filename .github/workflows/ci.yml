@@ -15,11 +15,8 @@ jobs:
     name: Verify and package (ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
-      # Full history: durableSessionJournal.test.ts reads an earlier build with `git show <sha>:<path>`.
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

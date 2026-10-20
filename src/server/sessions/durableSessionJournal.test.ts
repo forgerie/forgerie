@@ -41,7 +41,9 @@ async function baseBuildFixture() {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-base-journal-"));
   directories.push(directory);
   const execute = promisify(execFile);
-  const source = (await execute("git", ["show", "f4929197:src/server/sessions/durableSessionJournal.ts"])).stdout;
+  // `git show f4929197:src/server/sessions/durableSessionJournal.ts`, checked in:
+  // the pre-commit snapshot and shallow clones have no history to read it from.
+  const source = await readFile(join(import.meta.dirname, "fixtures/durableSessionJournal.f4929197.ts.txt"), "utf8");
   const base = source.replace(/from "(\.[^"]+)\.js"/g, (_match: string, relative: string) => `from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, relative + ".ts")).href)}`);
   await symlink(join(process.cwd(), "node_modules"), join(directory, "node_modules"), "dir");
   await writeFile(join(directory, "baseJournal.mts"), base);
