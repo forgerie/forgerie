@@ -52,7 +52,7 @@ it("decodes each entry page only once for a cold committed open without writing 
   } finally { stop(); }
 });
 
-it("retries the prepared entry pages when a commit appends during presentation membership reads", async () => {
+it("rescans inside the cut when this conversation appends during presentation membership reads", async () => {
   const { storage, harness, conversation, reader, hub } = await fixture();
   const snapshot = harness.snapshot.bind(harness);
   let appended = false;
@@ -123,4 +123,43 @@ it("records optional preparation and projection phases without changing the cut 
     await expect(reader.open("/fixture", { limit: 50 }, hub, context, undefined, trace)).rejects.toThrow("read failed");
     expect(trace.diagnostics().errors).toBe(3);
   } finally { trace.dispose(); }
+});
+
+/** Commit once per preparation scan start, as child, workflow or parent work can during an open. */
+function appendDuringEachScan(conversation: Awaited<ReturnType<typeof fixture>>["conversation"], write: () => Promise<unknown>, limit: number) {
+  const entries = conversation.entries.bind(conversation);
+  let appends = 0;
+  vi.spyOn(conversation, "entries").mockImplementation(async (...args: Parameters<typeof conversation.entries>) => {
+    const page = await entries(...args);
+    if (args[2] === undefined && appends < limit) { appends++; await write(); }
+    return page;
+  });
+  return () => appends;
+}
+
+it("opens without retrying while a sibling conversation in the same journal appends during every preparation scan", async () => {
+  const { storage, conversation, reader, hub } = await fixture();
+  const sibling = await conversation.commit(async tx => (await tx.createConversation({ ownership: { kind: "ownerless" } })).id, context);
+  const appends = appendDuringEachScan(conversation, () => conversation.commit(tx => tx.appendEntry(sibling, { kind: "pi.user", model: [{ role: "user", content: "child work", timestamp: 1 }] }), context), 10);
+  const scans = vi.spyOn(storage, "scanEntries");
+  const cut = await reader.open("/fixture", { limit: 50 }, hub, context);
+  expect(cut.page.total).toBe(300);
+  expect(JSON.stringify(cut.page.messages)).not.toContain("child work");
+  // One preparation scan of two pages; sibling commits neither retry nor rescan.
+  expect(appends()).toBe(1);
+  expect(scans).toHaveBeenCalledTimes(2);
+});
+
+it("ends in one consistent open while the parent appends during every preparation scan", async () => {
+  const { conversation, reader, hub } = await fixture();
+  let written = 0;
+  const appends = appendDuringEachScan(conversation, () => conversation.commit(tx => tx.appendEntry(conversation.id, { kind: "pi.user", model: [{ role: "user", content: `parent ${String(++written)}`, timestamp: 1 }] }), context), 10);
+  const cut = await reader.open("/fixture", { limit: 50 }, hub, context);
+  // The cut includes exactly the parent entries committed before it, in order, with no gap.
+  expect(cut.page.total).toBe(300 + appends());
+  expect(cut.page.messages.at(-1)?.content).toBe(`parent ${String(appends())}`);
+  const contents = cut.page.messages.map(message => message.content);
+  expect(new Set(contents).size).toBe(contents.length);
+  vi.restoreAllMocks();
+  expect(await reader.open("/fixture", { limit: 50 }, hub, context)).toEqual(cut);
 });
