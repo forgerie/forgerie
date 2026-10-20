@@ -9,6 +9,8 @@ import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_
 import { projectBrowserMessagePreviewResponse, projectBrowserMessageResponse } from "../browserMessageProjection.js";
 import { normalizeRequestCwd } from "../workingDirectory.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
+import { stackLatencyRoute } from "../realtime/stackLatencyRoute.js";
+import type { StackLatencySink } from "../../shared/stackLatency.js";
 import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 import { normalizeSessionCleanupRequest } from "./sessionCleanup.js";
 import { isKnownThinkingLevel, type ThinkingLevel } from "../../shared/thinkingLevels.js";
@@ -58,7 +60,13 @@ const MAX_NOTIFICATION_CWD_LENGTH = 32 * 1024;
 const MAX_NOTIFICATION_DAEMON_ID_LENGTH = 512;
 const MAX_NOTIFICATION_ID_LENGTH = 1024;
 
-export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRouteService & Partial<DurableBrowserSessionService>, eventHub: SessionEventHub, prefix = "", userSessions?: UserSessionWorktrees): void {
+export interface SessionRouteOptions {
+  /** Measurement-only daemon spans. Absent in production unless a test or temporary profile injects one. */
+  stackLatency?: StackLatencySink;
+}
+
+export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRouteService & Partial<DurableBrowserSessionService>, eventHub: SessionEventHub, prefix = "", userSessions?: UserSessionWorktrees, options: SessionRouteOptions = {}): void {
+  const openTrace = stackLatencyRoute(options.stackLatency, "session-open");
   app.get<{ Querystring: SessionQuery }>(`${prefix}/sessions`, async (request, reply) => {
     if (request.query.cwd === undefined || request.query.cwd === "") return reply.code(400).send({ error: "cwd query parameter is required" });
     try {
@@ -223,13 +231,19 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
-  app.get<{ Params: { sessionId: string }; Querystring: MessageQuery }>(`${prefix}/sessions/:sessionId/open`, async (request, reply) => {
+  app.get<{ Params: { sessionId: string }; Querystring: MessageQuery }>(`${prefix}/sessions/:sessionId/open`, openTrace.hooks, async (request, reply) => {
     const query = sessionOpenQuerySchema.safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: query.error.message });
+    let execution: ReturnType<typeof openTrace.execute>;
     try {
       if (sessions.open === undefined) throw new SessionOpenError("Consistent session opens are unavailable", 503, "OPEN_UNAVAILABLE");
-      return await sessions.open({ id: request.params.sessionId, cwd: normalizeRequestCwd(query.data.cwd) }, query.data);
+      const ref = { id: request.params.sessionId, cwd: normalizeRequestCwd(query.data.cwd) };
+      execution = openTrace.execute(request);
+      const result = await sessions.open(ref, query.data, execution?.context);
+      execution?.finish();
+      return result;
     } catch (error) {
+      execution?.finish("error");
       return reply.code(openErrorStatus(error)).send({ error: errorMessage(error), ...(error instanceof SessionOpenError ? { code: error.code } : {}) });
     }
   });

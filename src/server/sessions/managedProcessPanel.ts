@@ -108,21 +108,9 @@ export class ManagedProcessPanel {
   }
   async output(id: string, tailLines = 50): Promise<ManagedProcessOutputResult> {
     try {
-      const core = await this.core();
-      let cursor = { offset: 0, line: 1 };
-      let lines: ManagedProcessLogBatch["lines"] = [];
-      let omitted = 0;
-      for (;;) {
-        const batch = await core.readOutput(id, { cursor, maxLines: 1000 });
-        const combined = [...lines, ...batch.lines];
-        lines = combined.slice(-Math.max(1, Math.min(200, tailLines)));
-        omitted += batch.droppedLines + combined.length - lines.length;
-        cursor = batch.cursor;
-        if (batch.lines.length < 1000) {
-          const bounded = boundedOutput(lines);
-          return { ok: true, lines: bounded, cursor, droppedLines: omitted + lines.length - bounded.length };
-        }
-      }
+      const { lines, cursor, droppedLines } = await (await this.core()).readTail(id, Math.max(1, Math.min(200, tailLines)));
+      const bounded = boundedOutput(lines);
+      return { ok: true, lines: bounded, cursor, droppedLines: droppedLines + lines.length - bounded.length };
     } catch (error) { if (hasCode(error, "ENOENT")) return { ok: false, reason: "not_found" }; throw error; }
   }
   async kill(id: string): Promise<ManagedProcessKillResult> {
