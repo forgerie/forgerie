@@ -66,8 +66,9 @@ The layout is `<stateDirectory>/managed-processes/<sessionId>/<id>/`:
 
 - `command.json`: versioned command, environment, ownership and launch intent.
 - `output.log`: merged stdout/stderr, opened with `append:` by systemd.
-- `read-position.json`: absolute base offset/line and the acknowledged cursor.
-  An absent initial file means offset 0, line 1.
+- `read-position.json`: absolute base offset/line, the acknowledged cursor and
+  an optional `reclaimed` receipt: the prefix length already punched. An absent
+  initial file means offset 0, line 1. An absent receipt means "unknown".
 - `result`: three newline-terminated fields: result, code, status. `ExecStopPost`
   writes it with fsync and atomic rename. Example: `signal\nkilled\nKILL\n`.
 - `lost.json`: durable evidence that a process was classified lost.
@@ -158,7 +159,12 @@ for newlines, commits its absolute base offset and line number, then punches a
 hole in that prefix with `fallocate --punch-hole --keep-size`. The inode and
 append offsets never move. Concurrent appends are beyond the sampled range.
 A crash after metadata commit but before punching only leaves extra allocated
-blocks; the next maintenance call retries reclamation.
+blocks; the next maintenance call retries reclamation. Only a successful punch
+records the `reclaimed` receipt. A pass whose base did not advance, and whose
+base equals the receipt, neither saves the file nor runs `fallocate`. The first
+unchanged pass after an advance records the receipt, so each advance costs one
+extra punch and save. Older code ignores and drops the receipt, which costs at
+most one repeated punch; no migration is needed in either direction.
 
 Line numbers start at 1 and never reset. A cap that cuts a line keeps the
 surviving tail with `truncatedStart: true`. `droppedLines` reports complete lines
@@ -175,6 +181,14 @@ only an unfinished line is buffered across chunks, and UTF-8 decoding waits
 until the line is complete. A running unterminated line still needs to be read
 again on the next call because its cursor has not advanced. Retention scans
 remain separate and can read the discarded prefix when applying the cap.
+
+`ManagedProcessLog.readTail(ended, maxLines)` returns the newest lines exactly
+as a browse from `{ offset: 0, line: 1 }` numbers and marks them, with the same
+end cursor. `droppedLines` counts every earlier line, including retention's.
+It runs retention like `read()` and never moves the event-reader position. It
+counts newlines forward from the newest known line start (the acknowledged
+cursor after a newline, otherwise the base), then decodes only the returned
+lines. With no acknowledged reader it still reads the retained bytes once.
 
 The reader preserves the shared file's newline order. It cannot separate
 stdout from stderr or repair application writes that interleave inside a line.

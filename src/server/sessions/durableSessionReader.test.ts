@@ -863,3 +863,30 @@ it.each(["enabled", "risk_labels"] as const)("projects cached native cuts with t
     expect(commits).toEqual([]); expect(failures).toEqual([]); expect(await f.scheduling()).toBe("paused");
   } finally { release(); off(); await f.reader.close(); }
 });
+
+it("reuses the admitted publisher's committed history for HTTP open while retaining fresh admission and host metadata", async () => {
+  const f = await fixture();
+  await f.conversation().commit(async tx => {
+    await initializeParentDocuments(tx, { id: f.conversation().id });
+    await tx.doc(LiveDoc, f.conversation().id); await tx.doc(InboxDoc, f.conversation().id); await tx.doc(UsageDoc, f.conversation().id);
+  }, context);
+  await f.user("first committed input");
+  const ref = { id: "logical", cwd: f.directory };
+  const attachment = await f.reader.attachOpen(ref, f.hub, () => Promise.resolve(), error => { throw error; });
+  expect(attachment).toBeDefined();
+  try {
+    await f.user("new committed input");
+    const entries = vi.spyOn(f.conversation(), "entries");
+    const acquired = f.acquired();
+    const cut = await f.reader.open(ref, { limit: 50 }, f.hub, () => ({ status: { readOnly: true } }));
+    expect(cut?.page.messages.map(message => message.content)).toEqual(["first committed input", "new committed input"]);
+    expect(cut?.status.readOnly).toBe(true);
+    expect(entries).not.toHaveBeenCalled();
+    expect(f.acquired()).toBe(acquired + 1);
+    expect(f.leased()).toBe(1);
+    f.failAcquire(new Error("fresh admission denied"));
+    await expect(f.reader.open(ref, { limit: 50 }, f.hub)).rejects.toThrow("fresh admission denied");
+    expect(f.leased()).toBe(1);
+  } finally { await attachment?.stop(); }
+  expect(f.leased()).toBe(0);
+});
