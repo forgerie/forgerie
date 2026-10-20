@@ -15,8 +15,6 @@ import {
 
 /** Present once the launcher released a terminal record's supervisor state. */
 const RELEASED_MARKER = "released";
-/** The log reader's largest batch: fewer per-batch retention passes for a long tail. */
-const TAIL_BATCH_LINES = 10_000;
 
 export interface ManagedProcessesOptions {
   stateDirectory: string;
@@ -139,20 +137,7 @@ export class ManagedProcesses {
   readTail(id: string, maxLines: number): Promise<ManagedProcessLogBatch> {
     return this.exclusive(async () => {
       const snapshot = await this.classify(await this.record(id));
-      const log = this.log(snapshot);
-      const ended = snapshot.state.kind !== "running";
-      // Still decodes every retained line. A log-level tail read can replace this loop.
-      let cursor: ManagedProcessLogCursor = { offset: 0, line: 1 };
-      let lines: ManagedProcessLogBatch["lines"] = [];
-      let droppedLines = 0;
-      for (;;) {
-        const batch = await log.read(ended, { cursor, maxLines: TAIL_BATCH_LINES });
-        const combined = lines.concat(batch.lines);
-        lines = combined.slice(-maxLines);
-        droppedLines += batch.droppedLines + combined.length - lines.length;
-        cursor = batch.cursor;
-        if (batch.lines.length < TAIL_BATCH_LINES) return { lines, cursor, droppedLines };
-      }
+      return this.log(snapshot).readTail(snapshot.state.kind !== "running", maxLines);
     });
   }
   /** Read only the newest 4 KiB line suffix without consuming the event reader. */

@@ -33,5 +33,6 @@ export interface StackLatencyContext {
   readonly clock: StackLatencySpan["clock"];
   readonly operation: StackLatencySpan["operation"];
   start(phase: StackLatencySpan["phase"]): (outcome?: StackLatencySpan["outcome"]) => void;
-  measure<T>(phase: StackLatencySpan["phase"], run: () => Promise<T>): Promise<T>;
+  /** `run` receives a context whose spans name this phase as their parent. */
+  measure<T>(phase: StackLatencySpan["phase"], run: (phase: StackLatencyContext) => Promise<T>): Promise<T>;
 }

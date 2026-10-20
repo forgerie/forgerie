@@ -54,8 +54,9 @@ export function createStackLatencyContext(options: StackLatencyOptions): StackLa
     return {
       traceId, spanId, clock: options.clock, operation: options.operation, start,
       async measure(phase, run) {
-        const finish = start(phase);
-        try { const result = await run(); finish(); return result; }
+        const span = begin(phase, spanId);
+        const finish = span.finish;
+        try { const result = await run(context(span.spanId)); finish(); return result; }
         catch (error) { finish(error instanceof Error && error.name === "AbortError" ? "aborted" : "error"); throw error; }
       },
     };

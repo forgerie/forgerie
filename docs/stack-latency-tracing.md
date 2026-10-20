@@ -14,6 +14,8 @@ A span has a 32-character hex trace ID, an operation, a phase, a start and a dur
 | `execute` | request | `PiSessionService.open` call to its result. |
 | `admission` | `execute` | Open preparation: owner lookup, Durable flush, unread receipt, read-only, archive and worktree checks. |
 | `storage-read` | `execute` | Native `DurableSessionReader.openAddress`, or the saved-file read for an inactive classic session. |
+| `storage-read` | native `storage-read` | One read-model preparation attempt: required documents, binding check and, without an attached publisher, the entry scan. |
+| `projection` | native `storage-read` | Browser messages for the cut, inside the commit. With an attached publisher it reuses the committed history. |
 | `projection` | `execute` | Image references and receipt for native opens; the in-memory cut for an active classic session. |
 | `serialize` | request | Fastify `preSerialization` hook to `onSend`. This is an interval, not pure CPU time. |
 

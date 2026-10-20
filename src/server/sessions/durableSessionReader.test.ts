@@ -27,6 +27,8 @@ import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { PiSessionService } from "./piSessionService.js";
 import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import { testModelRuntime } from "./piSessionService.testSupport.js";
+import { createStackLatencyContext } from "../realtime/stackLatency.js";
+import type { StackLatencySpan } from "../../shared/stackLatency.js";
 import { registerDurableTaskRoutes } from "./durableTaskRoutes.js";
 import { registerSessionRoutes } from "./sessionRoutes.js";
 
@@ -889,4 +891,36 @@ it("reuses the admitted publisher's committed history for HTTP open while retain
     expect(f.leased()).toBe(1);
   } finally { await attachment?.stop(); }
   expect(f.leased()).toBe(0);
+});
+
+it("nests the reader's storage spans inside the service's native storage-read span, with and without an attached publisher", async () => {
+  const f = await fixture();
+  await f.conversation().commit(async tx => {
+    await initializeParentDocuments(tx, { id: f.conversation().id });
+    await tx.doc(LiveDoc, f.conversation().id); await tx.doc(InboxDoc, f.conversation().id); await tx.doc(UsageDoc, f.conversation().id);
+  }, context);
+  await f.user("traced input");
+  const service = new PiSessionService(f.hub, { agentDir: f.directory, sessionManager: createPiSessionManagerGateway({ agentDir: f.directory, env: {}, sessionDirEnvKeys: [] }),
+    modelRuntime: testModelRuntime, durableReader: f.reader, heartbeatIntervalMs: 60_000 });
+  cleanups.push(() => service.dispose());
+  const ref = { id: "logical", cwd: f.directory };
+  const tracedOpen = async () => {
+    const spans: StackLatencySpan[] = [];
+    const trace = createStackLatencyContext({ traceId: "d".repeat(32), clock: "sessiond", operation: "session-open", sink: { record: span => { spans.push(span); } } });
+    const cut = await service.open(ref, { limit: 50 }, trace);
+    const storage = spans.filter(span => span.phase === "storage-read" && span.parentSpanId === "0");
+    expect(storage).toHaveLength(1);
+    return { cut, nested: spans.filter(span => span.parentSpanId === storage[0]?.spanId).map(span => span.phase) };
+  };
+  const scanned = await tracedOpen();
+  expect(scanned.cut.page.messages.map(message => message.content)).toEqual(["traced input"]);
+  expect(scanned.nested).toEqual(["storage-read", "projection"]);
+  const attachment = await f.reader.attachOpen(ref, f.hub, () => Promise.resolve(), error => { throw error; });
+  try {
+    const entries = vi.spyOn(f.conversation(), "entries");
+    const borrowed = await tracedOpen();
+    expect(entries).not.toHaveBeenCalled();
+    expect(borrowed.cut.page).toEqual(scanned.cut.page);
+    expect(borrowed.nested).toEqual(["storage-read", "projection"]);
+  } finally { await attachment?.stop(); }
 });

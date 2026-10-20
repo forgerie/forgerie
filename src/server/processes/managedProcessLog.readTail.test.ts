@@ -47,8 +47,8 @@ const cases: [string, string | Buffer, number][] = [
   ["retention across many lines", Array.from({ length: 20_000 }, (_, index) => `retained ${String(index)}`).join("\n") + "\npartial", 64 * 1024],
 ];
 
-it.each(cases.flatMap(([name, text, cap]) => [true, false].flatMap(ended => [1, 3, 50, 10_000].map(count => [name, text, cap, ended, count] as const))))(
-  "matches browse for %s (cap %i, ended %s, last %i)", async (_name, text, cap, ended, count) => {
+it.each(cases.flatMap(([name, text, cap]) => [true, false].flatMap(ended => [1, 3, 50, 10_000].map(count => [name, cap, ended, count, text] as const))))(
+  "matches browse for %s (cap %i, ended %s, last %i)", async (_name, cap, ended, count, text) => {
     const browsed = await fixture(text, cap);
     const expected = await browseTail(browsed.log, ended, count);
     const tailed = await fixture(text, cap);

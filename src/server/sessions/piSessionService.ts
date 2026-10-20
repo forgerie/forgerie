@@ -2906,7 +2906,7 @@ export class PiSessionService implements SessionRouteService {
 
   /** Preparation may await. The active classic cut below must not. */
   async open(ref: PiSessionRef, page: SessionOpenPageRequest, trace?: StackLatencyContext): Promise<SessionOpenResult> {
-    const phase = <T>(name: StackLatencySpan["phase"], run: () => Promise<T>): Promise<T> => trace === undefined ? run() : trace.measure(name, run);
+    const phase = <T>(name: StackLatencySpan["phase"], run: (inner?: StackLatencyContext) => Promise<T>): Promise<T> => trace === undefined ? run() : trace.measure(name, run);
     const { active, nativeAddress, catalog, readonly, archived, worktreeInfo } = await phase("admission", async () => {
       // Freeze admission before preparation. A stopped native owner is an error, not a fallback.
       const active = this.activeForRef(ref)?.runtime.session;
@@ -2923,13 +2923,13 @@ export class PiSessionService implements SessionRouteService {
       const unread = catalog.sessions.find(item => item.sessionId === id && item.cwd === canonicalizeStoredCwd(cwd));
       return unread === undefined ? null : { catalogId: catalog.catalogId, throughCompletionOrder: unread.completionOrder };
     };
-    const native = nativeAddress === undefined ? undefined : await phase("storage-read", async () => await this.durableReader?.openAddress(ref, nativeAddress, page, this.events, () => {
+    const native = nativeAddress === undefined ? undefined : await phase("storage-read", async inner => await this.durableReader?.openAddress(ref, nativeAddress, page, this.events, () => {
       const session = this.activeForRef(ref)?.runtime.session;
       const host = this.nativeHostState(session);
       return { ...host, status: { ...host.status,
         ...(readonly === undefined && archived === undefined ? {} : { readOnly: true }),
         ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) } };
-    }));
+    }, inner));
     if (native !== undefined) {
       const projected = trace?.start("projection");
       const result = { ...native, page: { ...native.page, messages: withImageReferences(ref, native.page.messages) },
