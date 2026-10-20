@@ -156,7 +156,13 @@ export function createChildAgentsStore(request: Request, ref: () => SessionRef |
         update({ ...state, outcome, detail: { kind: "none" } });
       }
     } catch (error) { update({ ...state, error: error instanceof Error ? error.message : String(error) }); }
-    finally { await Promise.all([readList(), readOpen()]); update({ ...state, pending: undefined }); }
+    finally {
+      await Promise.all([readList(), readOpen()]);
+      update({ ...state, pending: undefined });
+      // These reads can supersede a poll's reads, whose own continuation then skips scheduling.
+      // schedulePoll keeps one timer, so this cannot start a second poller.
+      schedulePoll();
+    }
   }
 
   return {
