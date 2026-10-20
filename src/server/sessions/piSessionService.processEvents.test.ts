@@ -143,7 +143,7 @@ it("rebinds the panel to the restored daemon dispatcher without losing names or 
   const resumed = f.open();
   await resumed.initializeManagedProcesses();
   expect((await resumed.processes(ref)).processes[0]).toMatchObject({ id: record.id, name: "panel-owned", status: "running" });
-  expect(await resumed.processOutput(ref, record.id)).toEqual({ ok: true, lines: [{ type: "stdout", text: "ready" }] });
+  expect(await resumed.processOutput(ref, record.id)).toEqual({ ok: true, lines: [{ type: "stdout", text: "ready", number: 1, terminated: true, truncatedStart: false }], cursor: { offset: 6, line: 2 }, droppedLines: 0 });
   expect(JSON.stringify(await resumed.messages(ref))).toContain("forgerie.process-events");
   expect(await resumed.killProcess(ref, record.id)).toMatchObject({ ok: true });
   const session = (await f.catalog()).find(item => item.id === ref.id);

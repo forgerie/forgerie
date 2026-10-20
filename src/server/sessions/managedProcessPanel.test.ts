@@ -20,11 +20,11 @@ afterEach(async () => {
   try { for (const close of cleanup.splice(0).reverse()) await close(); }
   finally { vi.useRealTimers(); }
 });
-async function fixture(attached = false, intervals: { activeIntervalMs?: number; idleIntervalMs?: number } = {}) {
+async function fixture(attached = false, intervals: { activeIntervalMs?: number; idleIntervalMs?: number } = {}, logCapBytes?: number) {
   const root = await mkdtemp(join(tmpdir(), "process-panel-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const control = controlledManagedProcessLauncher();
-  const core = new ManagedProcesses({ stateDirectory: root, sessionId: "panel", launcher: attached ? new AttachedManagedProcessLauncher() : control.launcher,
+  const core = new ManagedProcesses({ stateDirectory: root, sessionId: "panel", ...(logCapBytes === undefined ? {} : { logCapBytes }), launcher: attached ? new AttachedManagedProcessLauncher() : control.launcher,
     environment: { PATH: process.env["PATH"], SECRET: "never-send-this" } });
   await core.initialize(); cleanup.push(() => core.dispose());
   const tools = new ManagedProcessTools({ sessionId: "panel", cwd: root, stateFile: join(root, "watches.json"), getManagedProcesses: () => Promise.resolve(core) });
@@ -44,9 +44,9 @@ it("projects names and lost reasons without private records, and browses without
   await appendFile(join(record.directory, "output.log"), "one\ntwo\n");
   expect((await f.panel.snapshot()).processes[0]?.lastLogLine).toEqual({ text: "two", truncatedStart: false });
   await f.panel.refresh();
-  expect(await f.panel.output(id, 1)).toEqual({ ok: true, lines: [{ type: "stdout", text: "two" }] });
+  expect(await f.panel.output(id, 1)).toEqual({ ok: true, lines: [{ type: "stdout", text: "two", number: 2, terminated: true, truncatedStart: false }], cursor: { offset: 8, line: 3 }, droppedLines: 1 });
   expect((await f.core.readOutput(id)).lines.map(line => line.text)).toEqual(["one", "two"]);
-  expect(f.events).toContainEqual({ type: "processes.output", id, lines: [{ type: "stdout", text: "one" }, { type: "stdout", text: "two" }], droppedLines: 0 });
+  expect(f.events).toContainEqual({ type: "processes.output", id, lines: [{ type: "stdout", text: "one", number: 1, terminated: true, truncatedStart: false }, { type: "stdout", text: "two", number: 2, terminated: true, truncatedStart: false }], cursor: { offset: 8, line: 3 }, droppedLines: 0 });
   const wire = JSON.stringify(f.events);
   expect(wire).not.toContain("never-send-this"); expect(wire).not.toContain("environment"); expect(wire).not.toContain(record.directory);
   f.control.live.clear();
@@ -85,7 +85,14 @@ it("bounds output frames and serializes concurrent refreshes without duplicate d
   for (const frame of frames) {
     expect(Buffer.byteLength(frame.lines.map(line => line.text).join(""))).toBeLessThanOrEqual(32 * 1024);
     expect(frame.droppedLines).toBe(92);
+    expect(frame.lines.map(line => line.number)).toEqual([93, 94, 95, 96, 97, 98, 99, 100]);
+    expect(frame.cursor).toEqual({ offset: 409_700, line: 101 });
   }
+  const tail = await f.panel.output(id, 200);
+  if (!tail.ok) throw new Error("Expected output");
+  expect(tail.lines.map(line => line.number)).toEqual([93, 94, 95, 96, 97, 98, 99, 100]);
+  expect(tail.cursor).toEqual({ offset: 409_700, line: 101 });
+  expect(tail.droppedLines).toBe(92);
   expect((await f.core.readOutput(id)).lines).toHaveLength(100);
 });
 
@@ -221,7 +228,7 @@ it("keeps the active cadence for terminating processes and publishes new output 
     if (tick?.type !== "return") throw new Error("Expected a terminating refresh");
     await tick.value;
     expect(list).toHaveBeenCalledTimes(beforeTick + 1);
-    expect(f.events).toContainEqual({ type: "processes.output", id, lines: [{ type: "stdout", text: "stopping" }], droppedLines: 0 });
+    expect(f.events).toContainEqual({ type: "processes.output", id, lines: [{ type: "stdout", text: "stopping", number: 1, terminated: true, truncatedStart: false }], cursor: { offset: 9, line: 2 }, droppedLines: 0 });
   } finally {
     f.panel.dispose();
     await f.panel.refresh();
@@ -272,5 +279,79 @@ it("refreshes panel output immediately after writing stdin through the HTTP pane
   f.events.length = 0;
   await appendFile(join(record.directory, "output.log"), "pending\n");
   await expect.poll(() => f.panel.write(id, "", true)).toEqual({ ok: true, bytesWritten: 0 });
-  expect(f.events).toContainEqual({ type: "processes.output", id, lines: [{ type: "stdout", text: "pending" }], droppedLines: 0 });
+  expect(f.events).toContainEqual({ type: "processes.output", id, lines: [{ type: "stdout", text: "pending", number: 1, terminated: true, truncatedStart: false }], cursor: { offset: 8, line: 2 }, droppedLines: 0 });
+});
+
+it("keeps absolute positions through repeated text, empty polls, and the final unterminated line", async () => {
+  const f = await fixture();
+  const started = await f.tools.execute({ action: "start", name: "positions", command: "cat" });
+  const id = started.process?.id;
+  if (id === undefined) throw new Error("Process did not start");
+  const record = await f.core.status(id);
+  await appendFile(join(record.directory, "output.log"), "same\nsame\npartial");
+  const initial = await f.panel.output(id);
+  expect(initial).toEqual({ ok: true, lines: [
+    { type: "stdout", text: "same", number: 1, terminated: true, truncatedStart: false },
+    { type: "stdout", text: "same", number: 2, terminated: true, truncatedStart: false },
+  ], cursor: { offset: 10, line: 3 }, droppedLines: 0 });
+  await f.panel.refresh();
+  const first = f.events.filter(event => event.type === "processes.output");
+  expect(first).toHaveLength(1);
+  expect(first[0]).toMatchObject(initial.ok ? { lines: initial.lines, cursor: initial.cursor } : {});
+  await f.panel.refresh();
+  expect(f.events.filter(event => event.type === "processes.output")).toHaveLength(1);
+  f.control.live.clear();
+  await f.panel.refresh();
+  expect(f.events.filter(event => event.type === "processes.output").at(-1)).toMatchObject({
+    lines: [{ type: "stdout", text: "partial", number: 3, terminated: false, truncatedStart: false }], cursor: { offset: 17, line: 4 },
+  });
+  // Neither browsing path acknowledges the durable log reader.
+  expect((await f.core.readOutput(id)).lines.map(line => line.number)).toEqual([1, 2, 3]);
+});
+it("preserves retention positions and marks a retained mid-line suffix", async () => {
+  const f = await fixture(false, {}, 12);
+  const started = await f.tools.execute({ action: "start", name: "retention", command: "cat" });
+  const id = started.process?.id;
+  if (id === undefined) throw new Error("Process did not start");
+  const record = await f.core.status(id);
+  await appendFile(join(record.directory, "output.log"), "old\nprefix remaining\n");
+  await f.panel.refresh();
+  const result = await f.panel.output(id);
+  expect(result).toEqual({ ok: true, lines: [{ type: "stdout", text: "x remaining", number: 2, terminated: true, truncatedStart: true }],
+    cursor: { offset: 21, line: 3 }, droppedLines: 1 });
+  expect(f.events.find(event => event.type === "processes.output")).toMatchObject(result.ok ? {
+    lines: result.lines, cursor: result.cursor, droppedLines: result.droppedLines,
+  } : {});
+});
+it("keeps a UTF-8-safe transport suffix with its original line identity without changing the full log", async () => {
+  const f = await fixture();
+  const started = await f.tools.execute({ action: "start", name: "large line", command: "cat" });
+  const id = started.process?.id;
+  if (id === undefined) throw new Error("Process did not start");
+  const record = await f.core.status(id);
+  const text = `${"é".repeat(20_000)}-end!`;
+  await appendFile(join(record.directory, "output.log"), text + "\n");
+  const result = await f.panel.output(id);
+  if (!result.ok) throw new Error("Expected output");
+  expect(result.lines).toHaveLength(1);
+  expect(result.lines[0]).toMatchObject({ number: 1, terminated: true, truncatedStart: true });
+  expect(result.lines[0]?.text.endsWith("-end!")).toBe(true);
+  expect(result.cursor).toEqual({ offset: Buffer.byteLength(text) + 1, line: 2 });
+  expect(result.lines[0]?.text).not.toContain("�");
+  expect(Buffer.byteLength(result.lines[0]?.text ?? "")).toBeLessThanOrEqual(32 * 1024);
+  expect((await f.core.readOutput(id)).lines[0]?.text).toBe(text);
+});
+it("drops an older line when the remaining byte budget cannot hold one UTF-8 code point", async () => {
+  const f = await fixture();
+  const started = await f.tools.execute({ action: "start", name: "byte edge", command: "cat" });
+  const id = started.process?.id;
+  if (id === undefined) throw new Error("Process did not start");
+  const record = await f.core.status(id);
+  await appendFile(join(record.directory, "output.log"), `é\n${"x".repeat(32 * 1024 - 1)}\n`);
+  const result = await f.panel.output(id);
+  if (!result.ok) throw new Error("Expected output");
+  expect(result.lines).toHaveLength(1);
+  expect(result.lines[0]).toMatchObject({ number: 2, truncatedStart: false, terminated: true });
+  expect(result.droppedLines).toBe(1);
+  expect(result.cursor).toEqual({ offset: 32 * 1024 + 3, line: 3 });
 });

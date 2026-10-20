@@ -275,6 +275,29 @@ clear, and update) and browser stdin writes refresh the panel immediately;
 disposal removes the mutation subscription. The daemon-owned watch dispatcher's
 polling interval does not change.
 
+`GET /sessions/:id/processes/:processId/output` and `processes.output` carry
+additive position fields. Each line has its absolute `number`, `terminated`,
+and `truncatedStart`. A batch has `cursor: { offset, line }`: the absolute byte
+offset and next unread line number from `ManagedProcessLogBatch`. Positions
+belong to one process in one session, not to a browser connection. They survive
+retention and daemon reconnects. Running partial lines still wait for a newline;
+an ended process can emit one final line with `terminated: false`.
+
+HTTP tails retain at most 200 lines. HTTP tails and pushed batches have a 32 KiB
+text budget. A clipped line keeps a UTF-8-safe suffix and `truncatedStart: true`,
+without changing its line number or the batch cursor. `droppedLines` counts
+lines omitted by retention and the transport budget; HTTP tails also count
+lines omitted by the requested tail limit. Clipping never changes the full log.
+
+The browser applies snapshots directly. A pushed snapshot supersedes an older
+in-flight HTTP snapshot or its failure. The selected output reconciles HTTP
+cuts and live batches by line number, retains at most 200 lines, and preserves
+live lines beyond an older HTTP cut. Repeated text at distinct positions remains
+distinct. Missing positions (older daemons) or a gap trigger an authoritative
+HTTP refresh, never text-based deduplication. Manual refresh and reconnect also
+read the authoritative tail; the browser does not poll. Optional position fields
+keep existing HTTP clients compatible.
+
 Panel browsing never acknowledges the watch reader. Snapshots include
 `lastLogLine` from a bounded tail read, so list rows update even while the
 newest line is unfinished. Browser payloads allowlist fields; launch environments

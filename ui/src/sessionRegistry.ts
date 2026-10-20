@@ -35,7 +35,7 @@ export function createSessionEntry(session: Session, transport: SessionTransport
     if (event === WORKFLOW_RUNS_CHANGED_EVENT) { workflows.refresh(); decisions.refresh(); gated.refresh(); }
   }, event => {
     if (event.type === "processes.update") processes.applySnapshot(event.snapshot);
-    else processes.applyOutput(event.id, event.lines);
+    else processes.applyOutput(event.id, event.lines, event.cursor, event.droppedLines);
   });
   let readyAt: number | undefined;
   cleanups.add(store.subscribe(() => {

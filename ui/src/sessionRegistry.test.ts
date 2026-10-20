@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSessionRegistry } from "./sessionRegistry";
 import { createOpenServer, openFixture } from "./testing/openFixture";
-import type { ManagedProcessesSnapshot, SessionUiEvent } from "@shared/apiTypes";
+import type { ManagedProcessOutputResult, ManagedProcessesSnapshot, SessionUiEvent } from "@shared/apiTypes";
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 const session = (id: string) => ({ id, cwd: "/workspace" });
@@ -60,10 +60,11 @@ it("consumes process pushes over the socket without HTTP and refreshes after rec
     id: "one", name: "Reader", pid: 0, command: "cat", cwd: "/workspace", startTime: 1, endTime: null,
     status: "running", exitCode: null, success: null, endReason: null, signal: null, errorMessage: null,
   }] };
+  let output: Extract<ManagedProcessOutputResult, { ok: true }> = { ok: true, lines: [{ type: "stdout", text: "initial", number: 1 }], cursor: { offset: 8, line: 2 } };
   const server = await createOpenServer(url => {
     if (url.pathname.endsWith("/open")) return openFixture({ session: session("known") });
     if (url.pathname.endsWith("/processes")) return snapshot;
-    if (url.pathname.endsWith("/output")) return { ok: true, lines: [{ type: "stdout", text: "initial" }] };
+    if (url.pathname.endsWith("/output")) return output;
     return Response.json({ error: "Panel unavailable in fixture" }, { status: 404 });
   }); cleanup.push(server.close);
   const registry = createSessionRegistry(server.transport, { isVisible: () => true, afterPaint: async () => {} }); cleanup.push(registry.dispose);
@@ -74,17 +75,31 @@ it("consumes process pushes over the socket without HTTP and refreshes after rec
   const requests = server.requests.filter(url => url.pathname.includes("/processes")).length;
   const pushed = { ...snapshot, processes: snapshot.processes.map(process => ({ ...process, lastLogLine: { text: "pushed", truncatedStart: false } })) };
   server.emit({ type: "processes.update", snapshot: pushed } satisfies SessionUiEvent);
-  server.emit({ type: "processes.output", id: "one", lines: [{ type: "stderr", text: "pushed" }], droppedLines: 0 } satisfies SessionUiEvent);
+  server.emit({ type: "processes.output", id: "one", lines: [{ type: "stderr", text: "pushed", number: 2 }], cursor: { offset: 15, line: 3 }, droppedLines: 0 } satisfies SessionUiEvent);
   await vi.waitFor(() => expect(entry.processes.getSnapshot().output).toBe("initial\npushed"));
   expect(entry.processes.getSnapshot().view).toEqual({ kind: "ready", snapshot: pushed });
   expect(entry.processes.getSnapshot().stderr).toEqual([1]);
   expect(server.requests.filter(url => url.pathname.includes("/processes"))).toHaveLength(requests);
   // A change missed while disconnected heals through the normal join read, not polling.
-  snapshot = { ...snapshot, processes: [] };
+  output = { ok: true, lines: [...output.lines, { type: "stderr", text: "pushed", number: 2 }, { type: "stdout", text: "missed", number: 3 }], cursor: { offset: 22, line: 4 } };
   for (const socket of server.sockets.clients) socket.close();
-  await vi.waitFor(() => expect(entry.processes.getSnapshot().view).toEqual({ kind: "ready", snapshot }), { timeout: 3000 });
-  expect(entry.processes.getSnapshot().selected).toBeUndefined();
+  await vi.waitFor(() => expect(entry.processes.getSnapshot().output).toBe("initial\npushed\nmissed"), { timeout: 3000 });
+  expect(entry.processes.getSnapshot().selected).toBe("one");
+  expect(entry.processes.getSnapshot().stderr).toEqual([1]);
   expect(server.requests.filter(url => url.pathname.endsWith("/processes"))).toHaveLength(3);
+  const readsAfterReconnect = server.requests.filter(url => url.pathname.includes("/processes")).length;
+  server.emit({ type: "processes.output", id: "one", lines: output.lines, cursor: output.cursor, droppedLines: 0 } satisfies SessionUiEvent);
+  // A later snapshot is also a barrier: both preceding socket frames have been consumed.
+  server.emit({ type: "processes.update", snapshot: pushed } satisfies SessionUiEvent);
+  await vi.waitFor(() => expect(entry.processes.getSnapshot().view).toEqual({ kind: "ready", snapshot: pushed }));
+  expect(entry.processes.getSnapshot().output).toBe("initial\npushed\nmissed");
+  expect(server.requests.filter(url => url.pathname.includes("/processes"))).toHaveLength(readsAfterReconnect);
+  output = { ...output, lines: [...output.lines, { type: "stdout", text: "manual", number: 4 }], cursor: { offset: 29, line: 5 } };
+  await entry.processes.refresh();
+  expect(entry.processes.getSnapshot().output).toBe("initial\npushed\nmissed\nmanual");
+  snapshot = { ...snapshot, processes: [] };
+  server.emit({ type: "processes.update", snapshot } satisfies SessionUiEvent);
+  await vi.waitFor(() => expect(entry.processes.getSnapshot().selected).toBeUndefined());
 });
 
 it("keeps a deeply paged selected reader intact, then demotes it only when hidden", async () => {

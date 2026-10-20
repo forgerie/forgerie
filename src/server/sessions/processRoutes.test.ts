@@ -132,7 +132,7 @@ describe("process routes", () => {
 class RecordingProcessService implements ProcessRouteService {
   readonly calls: Record<string, unknown>[] = [];
   snapshot: ManagedProcessesSnapshot = { available: true, writeSupported: true, processes: [] };
-  outputResult: ManagedProcessOutputResult = { ok: true, lines: [{ type: "stdout", text: "ready" }] };
+  outputResult: ManagedProcessOutputResult = { ok: true, lines: [{ type: "stdout", text: "ready", number: 10, terminated: true, truncatedStart: false }], cursor: { offset: 100, line: 11 }, droppedLines: 9 };
   killResult: ManagedProcessKillResult = { ok: false, reason: "not_found" };
   writeResult: ManagedProcessWriteResult = { ok: true };
   error: Error | undefined;

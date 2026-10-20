@@ -3,7 +3,7 @@ import type { ManagedProcesses } from "../processes/managedProcesses.js";
 import type { ManagedProcessTools } from "../processes/processTool.js";
 import { publicProcess, type PublicProcess } from "../processes/processToolProjection.js";
 import { newProcessWatch } from "../processes/processWatchState.js";
-import type { ManagedProcessLogCursor } from "../processes/managedProcessLog.js";
+import type { ManagedProcessLogBatch, ManagedProcessLogCursor } from "../processes/managedProcessLog.js";
 import { hasCode } from "../processes/managedProcessFiles.js";
 
 /** Browser projection only: never publish launch records, environment, or log paths. */
@@ -100,7 +100,7 @@ export class ManagedProcessPanel {
       this.cursors.set(process.id, batch.cursor);
       if (batch.lines.length > 0 || batch.droppedLines > 0) {
         const lines = boundedOutput(batch.lines);
-        this.publish({ type: "processes.output", id: process.id, lines,
+        this.publish({ type: "processes.output", id: process.id, lines, cursor: batch.cursor,
           droppedLines: batch.droppedLines + batch.lines.length - lines.length });
       }
     }
@@ -110,12 +110,18 @@ export class ManagedProcessPanel {
     try {
       const core = await this.core();
       let cursor = { offset: 0, line: 1 };
-      let lines: { type: "stdout"; text: string }[] = [];
+      let lines: ManagedProcessLogBatch["lines"] = [];
+      let omitted = 0;
       for (;;) {
         const batch = await core.readOutput(id, { cursor, maxLines: 1000 });
-        lines = [...lines, ...batch.lines.map(line => ({ type: "stdout" as const, text: line.text }))].slice(-Math.max(1, Math.min(200, tailLines)));
+        const combined = [...lines, ...batch.lines];
+        lines = combined.slice(-Math.max(1, Math.min(200, tailLines)));
+        omitted += batch.droppedLines + combined.length - lines.length;
         cursor = batch.cursor;
-        if (batch.lines.length < 1000) return { ok: true, lines: boundedOutput(lines) };
+        if (batch.lines.length < 1000) {
+          const bounded = boundedOutput(lines);
+          return { ok: true, lines: bounded, cursor, droppedLines: omitted + lines.length - bounded.length };
+        }
       }
     } catch (error) { if (hasCode(error, "ENOENT")) return { ok: false, reason: "not_found" }; throw error; }
   }
@@ -146,15 +152,24 @@ export class ManagedProcessPanel {
 }
 
 /** Keep the newest output within the browser transport budget. */
-function boundedOutput(input: readonly { text: string }[]): ManagedProcessLogLine[] {
+function boundedOutput(input: ManagedProcessLogBatch["lines"]): ManagedProcessLogLine[] {
   let remaining = 32 * 1024;
   const lines: ManagedProcessLogLine[] = [];
   for (const line of [...input].reverse()) {
     if (remaining <= 0) break;
     const bytes = Buffer.from(line.text);
-    const text = new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.length, remaining)), { stream: true });
+    let start = Math.max(0, bytes.length - remaining);
+    // A suffix may start inside a UTF-8 code point. Do not publish a broken prefix.
+    while (start < bytes.length) {
+      const byte = bytes[start];
+      if (byte === undefined || (byte & 0xc0) !== 0x80) break;
+      start++;
+    }
+    if (start === bytes.length && bytes.length > 0) break;
+    const text = bytes.subarray(start).toString("utf8");
     remaining -= Buffer.byteLength(text);
-    lines.push({ type: "stdout", text });
+    lines.push({ type: "stdout", text, number: line.number, terminated: line.terminated,
+      truncatedStart: line.truncatedStart || start > 0 });
   }
   return lines.reverse();
 }

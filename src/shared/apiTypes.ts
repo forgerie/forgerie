@@ -1200,6 +1200,25 @@ export interface ManagedProcessSignal {
 export interface ManagedProcessLogLine {
   type: "stdout" | "stderr";
   text: string;
+  /** Absolute, one-based identity in this process's merged log. Omitted by older daemons. */
+  number?: number;
+  terminated?: boolean;
+  /** Retention or the browser transport budget omitted a prefix of this line. */
+  truncatedStart?: boolean;
+}
+
+export interface ManagedProcessOutputCursor {
+  /** Absolute byte offset; retention never shifts the append file. */
+  offset: number;
+  /** Next unread one-based line number. */
+  line: number;
+}
+
+export interface ManagedProcessOutputBatch {
+  lines: ManagedProcessLogLine[];
+  cursor?: ManagedProcessOutputCursor;
+  /** Lines omitted before this batch by retention, the tail limit or the transport budget. */
+  droppedLines?: number;
 }
 
 /** Browser-safe managed process state; daemon log-file paths stay private. */
@@ -1230,7 +1249,7 @@ export interface ManagedProcessesSnapshot {
 }
 
 export type ManagedProcessOutputResult =
-  | { ok: true; lines: ManagedProcessLogLine[] }
+  | ({ ok: true } & ManagedProcessOutputBatch)
   | { ok: false; reason: "unavailable" | "not_found" | "invalid_response" };
 
 export type ManagedProcessKillResult =
@@ -1282,7 +1301,7 @@ type SessionUiEventBody =
   | { type: "session.pull-request.unlinked"; link: PullLink }
   | { type: "pi.event"; eventType: string }
   | { type: "processes.update"; snapshot: ManagedProcessesSnapshot }
-  | { type: "processes.output"; id: string; lines: ManagedProcessLogLine[]; droppedLines: number };
+  | { type: "processes.output"; id: string; lines: ManagedProcessLogLine[]; droppedLines: number; cursor?: ManagedProcessOutputCursor };
 
 export type GlobalSessionEvent =
   | TriggersChangedEvent
