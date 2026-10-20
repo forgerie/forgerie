@@ -27,6 +27,7 @@ import fastifyWebsocket from "@fastify/websocket";
 import { WorkspaceActivityService } from "./activity/workspaceActivityService.js";
 import { registerWorkspaceActivityRoutes } from "./activity/workspaceActivityRoutes.js";
 import { SessionEventHub } from "./realtime/sessionEventHub.js";
+import { stackLatencyFileSinkFromEnvironment } from "./realtime/stackLatencyFileSink.js";
 import { createModelRuntimeForAgentDir } from "./sessions/modelRuntime.js";
 import { bootstrapAndFreezeGlobalExtensionProviders } from "./sessions/globalProviderPolicy.js";
 import { ModelCatalogRefresher } from "./sessions/modelCatalogRefresher.js";
@@ -107,6 +108,15 @@ const activeAgentProfile = createActiveAgentProfileDescriptor({
 });
 const app = Fastify({ logger: true, bodyLimit: maxUploadBytes(daemonEnvironment, config) });
 await app.register(fastifyWebsocket);
+// Measurement profiles only: unset in production, so no span hooks are installed.
+const stackLatencyFile = stackLatencyFileSinkFromEnvironment(daemonEnvironment);
+if (stackLatencyFile !== undefined) {
+  app.log.warn("stack latency spans are enabled for this measurement profile");
+  app.addHook("onClose", async () => {
+    await stackLatencyFile.close();
+    app.log.info(stackLatencyFile.diagnostics(), "stack latency span file closed");
+  });
+}
 
 // Agent-executed processes (bash tool, subsessions) are spawned from
 // this process and inherit its environment, so hide the daemon's own
@@ -412,7 +422,7 @@ function registerSessionDaemonRoutes({ decisionHints, triggers, eventHub, worksp
   registerWorkspaceServicesRoutes(app, workspaceServices);
   registerProjectGroupRoutes(app, groups, projects, relatedWork);
   registerSessionSearchRoutes(app, sessionSearch);
-  registerSessionRoutes(app, sessions, eventHub, "", userSessions);
+  registerSessionRoutes(app, sessions, eventHub, "", userSessions, stackLatencyFile === undefined ? {} : { stackLatency: stackLatencyFile });
   registerProcessRoutes(app, sessions);
   registerDurableChildRoutes(app, sessions);
   registerDurableTaskRoutes(app, sessions);
