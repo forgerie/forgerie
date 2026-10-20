@@ -21,8 +21,8 @@ export interface ProjectWorkspaceCwdsDeps {
  *
  * Sessions spawned by an agent are constrained to workspaces of the spawning
  * session's own project, so this set bounds where related sessions of any cwd
- * can live. Workspace discovery can use a short cache window; a worktree made
- * outside Forgerie is included after that window expires.
+ * can live. Authorization callers must inject fresh workspace discovery so
+ * external Git inventory changes take effect on the next check.
  */
 export interface ProjectWorkspaceCwds {
   registeredProjects?(): Promise<Pick<Project, "name" | "path">[]>;

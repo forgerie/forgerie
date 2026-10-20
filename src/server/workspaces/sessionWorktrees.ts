@@ -160,6 +160,11 @@ export class SessionWorktrees {
     await this.change(id, { setup: { ...record.setup, phase: "failed", error: message(error) } });
   }
 
+  /** Authorization uses current Git ownership, never the status cache used by summaries. */
+  async assertCheckout(record: SessionWorktreeRecord): Promise<void> {
+    await assertOwnedCheckout(record);
+  }
+
   async info(record: SessionWorktreeRecord, sessionId: string): Promise<SessionWorktreeInfo> {
     const info = worktreeInfo(record, sessionId);
     if (record.state.kind !== "active") return info;

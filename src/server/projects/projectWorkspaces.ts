@@ -13,7 +13,10 @@ import type { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
 interface Dependencies {
   projects: Pick<ProjectService, "list" | "requireProject">;
   groups: Pick<ProjectGroups, "list">;
+  /** Fresh discovery for project/tool authorization. */
   workspaces: Pick<WorkspaceService, "list">;
+  /** Optional cached discovery for catalog display only. Never used to authorize a target. */
+  catalogWorkspaces?: Pick<WorkspaceService, "list">;
   worktrees: SessionWorktrees;
   agentDir: string;
   writable(ref: SessionRef): Promise<boolean>;
@@ -23,9 +26,12 @@ export class ProjectWorkspaces {
   private queue: Promise<unknown> = Promise.resolve();
   constructor(private readonly deps: Dependencies) {}
 
-  async catalog(ref: SessionRef) {
+  catalog(ref: SessionRef) {
+    return this.catalogUsing(ref, this.deps.catalogWorkspaces ?? this.deps.workspaces);
+  }
+  private async catalogUsing(ref: SessionRef, workspaces: Pick<WorkspaceService, "list">) {
     const projects = await this.deps.projects.list();
-    const home = await this.home(ref.cwd, projects);
+    const home = await this.home(ref.cwd, projects, workspaces);
     const groups = (await this.deps.groups.list()).filter((group) => home !== undefined && group.projectIds.includes(home.id));
     const members = new Set(groups.flatMap((group) => group.projectIds));
     if (home !== undefined) members.add(home.id);
@@ -78,8 +84,7 @@ export class ProjectWorkspaces {
     await this.assertWritable(ref);
     const record = await this.requireOwned(ref, id);
     if (record.state.kind !== "active" || record.setup.phase !== "done") throw new Error("The target worktree is not ready.");
-    const info = await this.deps.worktrees.info(record, ref.id);
-    if (info.statusError !== undefined) throw new Error(info.statusError);
+    await this.deps.worktrees.assertCheckout(record);
     return record.path;
   }
   /** PR operations use the target cwd; their notifications still return to the original chat. */
@@ -92,15 +97,15 @@ export class ProjectWorkspaces {
   private async target(ref: SessionRef, id: string): Promise<Project> {
     // Existing attachments remain inspectable after organizational changes.
     const attached = (await this.related(ref)).some((record) => record.relatedSession?.projectId === id);
-    const project = (await this.catalog(ref)).projects.find((item) => item.id === id);
+    const project = (await this.catalogUsing(ref, this.deps.workspaces)).projects.find((item) => item.id === id);
     if (project !== undefined) return project;
     if (attached) return this.deps.projects.requireProject(id);
     throw new Error("Choose a registered project in a group shared with this session's project.");
   }
-  private async home(cwd: string, projects: Project[]): Promise<Project | undefined> {
+  private async home(cwd: string, projects: Project[], workspaces: Pick<WorkspaceService, "list">): Promise<Project | undefined> {
     const canonical = await realpath(cwd).catch(() => cwd);
     for (const project of [...projects].sort((a, b) => b.path.length - a.path.length)) {
-      if ((await this.deps.workspaces.list(project)).some((workspace) => cwdPathsEqual(workspace.path, canonical) || pathInside(workspace.path, canonical))) return project;
+      if ((await workspaces.list(project)).some((workspace) => cwdPathsEqual(workspace.path, canonical) || pathInside(workspace.path, canonical))) return project;
     }
     return undefined;
   }

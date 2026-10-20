@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, readFile, writeFile, rm, access } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm, access, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, expect, it } from "vitest";
@@ -32,7 +32,7 @@ async function fixture(discovery?: GitWorktreeDiscovery) {
   const group = await groups.save({ name: "KORI", projectIds: [pa.id, pb.id] });
   const store = new SessionWorktreeStore(join(root, "worktrees.json")); await store.initialize();
   const worktrees = new SessionWorktrees(store, { publish: () => undefined, worktreesChanged: () => discovery?.invalidate() });
-  const work = new ProjectWorkspaces({ projects, groups, workspaces: new WorkspaceService(discovery), worktrees, agentDir: root, writable: (ref) => Promise.resolve(ref.id === "source") });
+  const work = new ProjectWorkspaces({ projects, groups, workspaces: new WorkspaceService(), catalogWorkspaces: new WorkspaceService(discovery), worktrees, agentDir: root, writable: (ref) => Promise.resolve(ref.id === "source") });
   const ref = { id: "source", cwd: a };
   return { root, git, a, b, pa, pb, projects, groups, group, store, worktrees, work, ref };
 }
@@ -130,4 +130,20 @@ it("serves the same project catalog without repeat Git reads and discovers exter
     now += 10_000;
     expect((await read(external)).json<Catalog>().home).toEqual(f.pa);
   } finally { await app.close(); }
+});
+
+it("does not use cached status to authorize a tool checkout removed from Git inventory", async () => {
+  const f = await fixture();
+  const record = await f.work.prepare(f.ref, f.pb.id, "tool-checkout");
+  const worktrees = new SessionWorktrees(f.store, undefined, { statusCacheMs: 10_000 });
+  const work = new ProjectWorkspaces({ projects: f.projects, groups: f.groups, workspaces: new WorkspaceService(), worktrees, agentDir: f.root, writable: () => Promise.resolve(true) });
+  expect((await worktrees.info(record, f.ref.id)).statusError).toBeUndefined();
+  expect(await work.toolCwd(f.ref, record.id)).toBe(record.path);
+  const held = join(f.root, "held-tool-checkout");
+  await rename(record.path, held);
+  await f.git(f.b, "worktree", "prune", "--expire=now");
+  await rename(held, record.path);
+  await access(record.path);
+  expect((await worktrees.info(record, f.ref.id)).statusError).toBeUndefined();
+  await expect(work.toolCwd(f.ref, record.id)).rejects.toThrow("Owned worktree");
 });

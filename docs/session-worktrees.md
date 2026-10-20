@@ -54,9 +54,9 @@ The branch takes a slug of the generated session title. A taken name gains `-2`,
 
 ### Project discovery caching
 
-Sessiond caches read-only Git repository detection and worktree listings by path for 10 seconds. Concurrent project-view and workspace-list requests share the same Git read. `GitWorktreeDiscovery` defaults to no caching outside the daemon; its `cacheMs` and clock options make the window explicit.
+Sessiond caches Git repository detection and worktree listings by path for 10 seconds for project catalog display only. Concurrent project-view requests share the same Git read. `GitWorktreeDiscovery` defaults to no caching outside the daemon; its `cacheMs` and clock options make the window explicit.
 
-Managed worktree creation (including child worktrees), removal, and branch rename clear project discovery immediately, before lifecycle notifications. Failed Git mutations also clear it because they can leave partial changes. Invalidation clears all project entries to cover main, linked, and symlink paths without extra Git processes. The next read of another project can therefore need Git again. Ownership checks and destructive lifecycle preconditions still use uncached Git reads.
+Managed worktree creation (including child worktrees), removal, and branch rename clear project discovery immediately, before lifecycle notifications. Failed Git mutations also clear it because they can leave partial changes. Invalidation clears all project entries to cover main, linked, and symlink paths without extra Git processes. The next read of another project can therefore need Git again. Spawn authorization, session workspace membership, trigger validation, and project-tool target authorization use separate uncached discovery. The project catalog can still display an externally removed checkout while those checks deny it immediately. Tool checkout ownership and destructive lifecycle preconditions use fresh Git reads, not cached status summaries.
 
 A worktree added, removed, or renamed outside Forgerie can appear up to 10 seconds late in the project view. The first request after expiry refreshes the facts; there is no background refresh. Rejected discovery reads are not cached.
 

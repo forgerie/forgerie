@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createProjectWorkspaceServices } from "./sessiond/projectWorkspaceServices.js";
 import { registerDecisionGatewayKeyRoutes } from "./decisions/decisionGatewayKeyRoutes.js";
 import { registerDurableTaskRoutes } from "./sessions/durableTaskRoutes.js";
 import { createDecisionHints, decisionHintsRuntimeStatus } from "./decisions/decisionHints.js";
@@ -65,16 +66,11 @@ import { SessionArchiveStore, defaultSessionArchiveFilePath } from "./sessions/s
 import { SessionPinStore, defaultSessionPinFilePath } from "./sessions/sessionPinStore.js";
 import { SessionTabsStore, defaultSessionTabsFilePath } from "./sessions/sessionTabsStore.js";
 import { FileSessionUnreadPersistence, SessionUnreadStore, defaultSessionUnreadFilePath } from "./sessions/sessionUnreadStore.js";
-import { ProjectScopedSpawnTargetResolver } from "./sessions/spawnTargetResolver.js";
-import { RegisteredProjectWorkspaceCwds } from "./workspaces/projectWorkspaceCwds.js";
 import { ProjectService } from "./projects/projectService.js";
 import { ProjectStore, projectStorePath } from "./storage/projectStore.js";
 import { ProjectGroups } from "./projects/projectGroups.js";
-import { ProjectWorkspaces } from "./projects/projectWorkspaces.js";
 import { relatedPullSessions } from "./projects/relatedPullSessions.js";
 import { registerProjectGroupRoutes } from "./projects/projectGroupRoutes.js";
-import { GitWorktreeDiscovery } from "./workspaces/gitWorktreeDiscovery.js";
-import { WorkspaceService } from "./workspaces/workspaceService.js";
 import { SessionWorktreeStore } from "./workspaces/sessionWorktreeStore.js";
 import { SessionWorktrees } from "./workspaces/sessionWorktrees.js";
 import { WorkspaceServices } from "./workspaces/workspaceServices.js";
@@ -102,7 +98,6 @@ import { registerResourceEditorRoutes } from "./resources/resourceEditorRoutes.j
 
 /** A worktree's ahead/behind/dirty counts are reused this long across session lists, project views and heartbeats. */
 const WORKTREE_STATUS_CACHE_MS = 10_000;
-const WORKTREE_DISCOVERY_CACHE_MS = 10_000;
 const daemonEnvironment: NodeJS.ProcessEnv = Object.freeze({ ...process.env });
 const { config } = effectivePiWebConfig({ env: daemonEnvironment });
 const activeAgentProfile = createActiveAgentProfileDescriptor({
@@ -168,10 +163,10 @@ async function createSessionDaemonRuntime() {
   const azureCredentials = new AzureDevopsCredentials({ directory: join(piWebDataDir(daemonEnvironment), "azure-devops"), azureCliCommand: config.azureDevops?.azureCliCommand ?? "az", env: daemonEnvironment,
     onCleanupWarning: (message) => { app.log.warn(message); } });
   const azurePulls = new AzurePullReader({ credentials: azureCredentials, fetch });
-  const backlogSettings = new BacklogSettingsStore(join(piWebDataDir(daemonEnvironment), "backlog-settings.json"), { projects: () => projectWorkspaceDeps.projects.list() });
+  const backlogSettings = new BacklogSettingsStore(join(piWebDataDir(daemonEnvironment), "backlog-settings.json"), { projects: () => projects.list() });
   const githubAgent: GitHubAgent = new GitHubAgent({ app: github, fetch: fetchGitHub, trust: githubTrust, backlogConfig: async (root) => {
-    const projects = await projectWorkspaceDeps.projects.list();
-    for (const project of projects) {
+    const registeredProjects = await projects.list();
+    for (const project of registeredProjects) {
       let canonical: string;
       try { canonical = await canonicalBacklogRoot(project.path); } catch { continue; }
       if (canonical === root) return (await resolveBacklogConfig(project, root, backlogSettings)).backlog;
@@ -199,10 +194,7 @@ async function createSessionDaemonRuntime() {
   // Cross-workspace session relationships are reported regardless of whether
   // agents may spawn sessions: children can predate a config change, and the
   // session tree should stay honest about them either way.
-  const workspaceGit = new GitWorktreeDiscovery(undefined, { cacheMs: WORKTREE_DISCOVERY_CACHE_MS });
-  const projectWorkspaceDeps = { projects: new ProjectService(new ProjectStore(projectStorePath(daemonEnvironment))), workspaces: new WorkspaceService(workspaceGit) };
-  const projectWorkspaces = new RegisteredProjectWorkspaceCwds(projectWorkspaceDeps);
-  const spawnTargets = config.spawnSessions ? new ProjectScopedSpawnTargetResolver(projectWorkspaceDeps) : undefined;
+  const projects = new ProjectService(new ProjectStore(projectStorePath(daemonEnvironment)));
   const worktreeStore = new SessionWorktreeStore(join(piWebDataDir(daemonEnvironment), "session-worktrees.json"));
   await worktreeStore.initialize(await archiveStore.list());
   const workspaceServices = new WorkspaceServices({
@@ -212,7 +204,7 @@ async function createSessionDaemonRuntime() {
   });
   await workspaceServices.initialize();
   const sessionWorktrees: SessionWorktrees = new SessionWorktrees(worktreeStore, {
-    worktreesChanged: () => { workspaceGit.invalidate(); },
+    worktreesChanged: () => { projectServices.invalidateCatalog(); },
     publish(record) {
       // A secondary checkout must never replace the chat's primary worktree in existing clients.
       if (record.relatedSession !== undefined || record.childOwner !== undefined) return;
@@ -234,10 +226,12 @@ async function createSessionDaemonRuntime() {
       return affected;
     },
   }, { statusCacheMs: WORKTREE_STATUS_CACHE_MS });
-  await sessionWorktrees.initialize();
-  const groups = new ProjectGroups(join(piWebDataDir(daemonEnvironment), "project-groups.json"), projectWorkspaceDeps.projects);
-  const relatedWork = new ProjectWorkspaces({ ...projectWorkspaceDeps, groups, worktrees: sessionWorktrees, agentDir: activeAgentProfile.dir,
+  const groups = new ProjectGroups(join(piWebDataDir(daemonEnvironment), "project-groups.json"), projects);
+  const projectServices = createProjectWorkspaceServices({ projects, groups, worktrees: sessionWorktrees, agentDir: activeAgentProfile.dir,
     writable: async (ref) => { await sessionWorktrees.store.assertWritable(ref); return (await sessions.inspectPullSession(ref)).available; } });
+  const { projectWorkspaces, relatedWork } = projectServices;
+  const spawnTargets = config.spawnSessions ? projectServices.spawnTargets : undefined;
+  await sessionWorktrees.initialize();
   const childRuns = new ChildRunStore(join(piWebDataDir(daemonEnvironment), "child-runs.json"));
   await childRuns.list();
   const liveChildren = config.durableChildren ? new LiveChildSessionIndex(join(piWebDataDir(daemonEnvironment), "durable-children-live.json")) : undefined;
@@ -399,9 +393,9 @@ async function createSessionDaemonRuntime() {
     onError: (error) => { app.log.warn({ err: error }, "worktree cleanup failed"); },
   });
   const azureItems = new AzureDevopsClient({ credentials: azureCredentials, fetch });
-  const backlog = new BacklogService({ settings: backlogSettings, projects: projectWorkspaceDeps.projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
+  const backlog = new BacklogService({ settings: backlogSettings, projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues })], sourceProvider: createAzureDevopsBacklogProvider(azureItems) });
-  return { decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, actionRuns, groups, relatedWork, projects: projectWorkspaceDeps.projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
+  return { decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, actionRuns, groups, relatedWork, projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 
 function registerSessionDaemonRoutes({ decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, actionRuns, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
