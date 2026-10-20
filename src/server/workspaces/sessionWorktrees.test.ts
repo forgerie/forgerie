@@ -72,7 +72,7 @@ describe("session-owned worktrees with real git", () => {
     expect(await discovery.isGitRepository(child.path)).toBe(false);
     expect(await discovery.discoverGitWorktrees(f.record.path)).toHaveLength(2);
     expect((await discovery.discoverGitWorktrees(f.repo)).map((tree) => tree.path)).not.toContain(child.path);
-
+  });
   it("reports a missing worktree folder from one stat, without asking git, and recovers when it returns", async () => {
     const f = await fixture();
     const child = await f.worktrees.createForChild(f.session, "task-missing");
