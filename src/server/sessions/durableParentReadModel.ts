@@ -1,5 +1,6 @@
 import { decisionAnnotations, withRiskAnnotations, withToolInvocationIds } from "../decisions/optionalDecisionAnnotations.js";
 import { z } from "zod";
+import type { StackLatencyContext } from "../../shared/stackLatency.js";
 import type { Static } from "typebox";
 import { copyJson } from "@earendil-works/chord";
 import { Check } from "typebox/value";
@@ -82,17 +83,21 @@ export class DurableParentReadModel {
    * Membership is guarded by adoption: Tx.doc creates absent documents, which an open must never do.
    */
   async open(cwd: string, request: SessionOpenPageRequest, hub: SessionEventHub, context: Context,
-    hostStatus: () => DurableHostState = () => ({})): Promise<SessionOpenResult> {
+    hostStatus: () => DurableHostState = () => ({}), trace?: StackLatencyContext): Promise<SessionOpenResult> {
     const { handle } = this.options;
     const id = handle.conversation.id;
     // Begin observing before preparation; the callback reads the generation on the same cut line.
     hub.nativeHistoryId(handle.address.journalId, handle.harness, id);
     hub.observeNativeRuns(handle.address.sessionId, handle.harness, id);
     let retiredRequired = 0;
+    let entriesRevision = 0;
     const keys = new Set<string>();
     const membership = new Map<string, number>();
     const stop = handle.harness.subscribeCommits(publication => {
       for (const change of publication.changes) {
+        // Preparation runs outside the cut line. Any entry adoption makes its pages stale,
+        // including an inherited entry; reuse is permitted only on an unchanged generation.
+        if (change.type === "entry") entriesRevision++;
         if (change.type === "document" && change.value === null && change.record.kind === SessionBindings.definition.kind) retiredRequired++;
         if (change.type === "document" && change.conversationId === id) {
           if (change.value === null) retiredRequired++;
@@ -105,8 +110,10 @@ export class DurableParentReadModel {
       }
     });
     const unobserve = hub.observeNative(handle.address.sessionId, handle.harness, id);
+    let finishPreparation: ReturnType<StackLatencyContext["start"]> | undefined;
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
+        finishPreparation = trace?.start("storage-read");
         const membershipRevision = retiredRequired;
         const cached = this.liveHistory?.value;
         const required = cached === undefined ? await Promise.all([
@@ -117,9 +124,12 @@ export class DurableParentReadModel {
         ]) : [];
         if (required.some(value => value === undefined)) throw new Error("Native open requires initialized parent documents");
         const bound = cached?.bound ?? (await handle.harness.snapshot(SessionBindings, context)) !== undefined;
+        const preparedRevision = entriesRevision;
+        const entries: EntryRecord[] = [];
         let cursor: Cursor | undefined;
         if (cached === undefined) do {
           const page = await handle.conversation.entries({ order: "ascending" }, SCAN_SIZE, cursor, context);
+          entries.push(...page.items);
           for (const entry of page.items) {
             const key = String(entry.id);
             const version = membership.get(key);
@@ -128,15 +138,10 @@ export class DurableParentReadModel {
           }
           cursor = page.next;
         } while (cursor !== undefined);
+        finishPreparation?.(); finishPreparation = undefined;
         const cut = await handle.conversation.commit(async tx => {
-          if (membershipRevision !== retiredRequired || cached !== undefined && cached !== this.liveHistory?.value) return undefined;
+          if (membershipRevision !== retiredRequired || (cached === undefined ? preparedRevision !== entriesRevision : cached !== this.liveHistory?.value)) return undefined;
           const before = hub.currentSeq(handle.address.sessionId);
-          const entries: EntryRecord[] = [];
-          let cursor: Cursor | undefined;
-          if (cached === undefined) do {
-            const page = await tx.scanEntries({ conversationId: id, order: "ascending" }, SCAN_SIZE, cursor);
-            entries.push(...page.items); cursor = page.next;
-          } while (cursor !== undefined);
           // No table reads may follow document acquisition (which can stage initialization).
           if (bound && (await tx.doc(SessionBindings)).sessions[handle.address.sessionId]?.conversationId !== id) {
             throw new SessionOpenError("Session history changed during native open", 409, "HISTORY_CHANGED");
@@ -153,7 +158,11 @@ export class DurableParentReadModel {
             if (!Check(PresentationSchema, detached)) throw new Error("Invalid detached native presentation");
             envelopes.set(key, detached);
           }
-          const messages = cached?.messages ?? entries.flatMap(entry => this.entryMessages(entry, nativePresentation(entry, envelopes.get(String(entry.id))?.envelope), true));
+          const finishProjection = trace?.start("projection");
+          let messages: DurableBrowserMessage[];
+          try { messages = cached?.messages ?? entries.flatMap(entry => this.entryMessages(entry, nativePresentation(entry, envelopes.get(String(entry.id))?.envelope), true)); }
+          catch (error) { finishProjection?.("error"); throw error; }
+          finishProjection?.();
           const seq = hub.currentSeq(handle.address.sessionId);
           const partial = live.generation?.message;
           const tools = (live.tools ?? []).filter(slot => projectBrowserSessionEvent({ type: "tool.start", toolName: slot.name, toolCallId: slot.callId, summary: "" }).type === "tool.start")
@@ -191,7 +200,8 @@ export class DurableParentReadModel {
         if (cut !== undefined) return cut;
       }
       throw new Error("Native open could not acquire a consistent checkpoint after three attempts");
-    } finally { stop(); unobserve(); }
+    } catch (error) { finishPreparation?.("error"); throw error; }
+    finally { stop(); unobserve(); }
   }
 
   /** Project only at delivery: the shared required cut never owns optional data. */

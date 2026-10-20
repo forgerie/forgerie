@@ -1,10 +1,11 @@
 import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import type { Context } from "@earendil-works/chord";
+import type { StackLatencyContext } from "../../shared/stackLatency.js";
 import type { WatchEnd } from "@earendil-works/pi-durable";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import type { DurableParentReadModel, DurableBrowserAttachment, DurableHostState } from "./durableParentReadModel.js";
-import type { SessionOpenResult } from "./sessionOpen.js";
+import type { SessionOpenPageRequest, SessionOpenResult } from "./sessionOpen.js";
 import { nativeOpenChanged } from "./durableLiveHistory.js";
 
 interface Subscriber {
@@ -53,6 +54,16 @@ export class DurableOpenPublisher {
       this.hub.noteDecisionHintChange(handle.address.sessionId);
       this.changed();
     });
+  }
+
+  /** Borrow only the derived history after a fresh reader lease admitted this exact owner.
+   * Acquire a new cut, not the last socket frame: host state, cursor and annotations stay fresh.
+   */
+  readOpen(handle: DurableSessionHandle, cwd: string, request: SessionOpenPageRequest, hub: SessionEventHub,
+    hostStatus?: () => DurableHostState, trace?: StackLatencyContext): Promise<SessionOpenResult> | undefined {
+    if (this.stopped || this.hub !== hub || this.handle.harness !== handle.harness
+      || this.handle.address.sessionId !== handle.address.sessionId || this.handle.conversation.id !== handle.conversation.id) return undefined;
+    return this.model.open(cwd, request, hub, this.context, hostStatus, trace).then(cut => this.model.annotateOpen(cut));
   }
 
   async attach(send: Subscriber["send"], onFailure: (error: Error) => void): Promise<DurableBrowserAttachment> {

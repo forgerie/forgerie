@@ -1,4 +1,5 @@
 import { listChildren, childMessages } from "./durableChildAgents.js";
+import type { StackLatencyContext } from "../../shared/stackLatency.js";
 import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { DurableOpenPublisher } from "./durableOpenPublisher.js";
 import { readTaskActivity } from "./durableTaskActivity.js";
@@ -55,22 +56,26 @@ export class DurableSessionReader {
 
   locate(ref: SessionRef): Promise<DurableSessionAddress | undefined> { return this.options.locate(ref); }
 
-  open(ref: SessionRef, page: SessionOpenPageRequest, hub: SessionEventHub, hostStatus?: () => DurableHostState): Promise<SessionOpenResult | undefined> {
-    return this.read(ref, async handle => {
-      const model = this.options.readModel(handle);
-      return model.annotateOpen(await model.open(ref.cwd, page, hub, context, hostStatus));
-    });
+  open(ref: SessionRef, page: SessionOpenPageRequest, hub: SessionEventHub, hostStatus?: () => DurableHostState, trace?: StackLatencyContext): Promise<SessionOpenResult | undefined> {
+    return this.read(ref, handle => this.openHandle(ref, handle, page, hub, hostStatus, trace));
   }
 
   async openAddress(ref: SessionRef, address: DurableSessionAddress, page: SessionOpenPageRequest, hub: SessionEventHub,
-    hostStatus?: () => DurableHostState): Promise<SessionOpenResult> {
+    hostStatus?: () => DurableHostState, trace?: StackLatencyContext): Promise<SessionOpenResult> {
     if (this.stopped) throw new Error("Durable session reader is closed");
     const handle = await this.options.acquire(address);
-    try {
-      const model = this.options.readModel(handle);
-      return model.annotateOpen(await model.open(ref.cwd, page, hub, context, hostStatus));
-    }
+    try { return await this.openHandle(ref, handle, page, hub, hostStatus, trace); }
     finally { await handle.release(context); }
+  }
+
+  private async openHandle(ref: SessionRef, handle: DurableSessionHandle, page: SessionOpenPageRequest, hub: SessionEventHub,
+    hostStatus?: () => DurableHostState, trace?: StackLatencyContext): Promise<SessionOpenResult> {
+    for (const publisher of this.publishers) {
+      const reading = publisher.readOpen(handle, ref.cwd, page, hub, hostStatus, trace);
+      if (reading !== undefined) return reading;
+    }
+    const model = this.options.readModel(handle);
+    return model.annotateOpen(await model.open(ref.cwd, page, hub, context, hostStatus, trace));
   }
 
   messages(ref: SessionRef, page?: MessagePageRequest): Promise<DurableBrowserSnapshot["history"] | undefined> {
