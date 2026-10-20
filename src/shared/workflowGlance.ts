@@ -1,7 +1,7 @@
 import type { WorkflowRun } from "./workflowRuns.js";
 import { stageViews, type StageView } from "./workflowStops.js";
 
-/** done: finished. working: at work now. waiting: waits on the reader. failed: its worker failed. next: not reached. */
+/** done: finished. working: at work now. waiting: waits on the reader. failed: its worker failed. next: not reached. The same shape as StageStrip.tsx's. */
 export type StageStripState = "done" | "working" | "waiting" | "failed" | "next";
 /** One stage as a bar. A stage with several lanes, such as parallel workers, is stacked bars. */
 export interface StageStripSegment { key: string; lanes: readonly StageStripState[] }
@@ -15,7 +15,10 @@ export interface WorkflowGlance {
 
 type StripRun = Pick<WorkflowRun, "stages" | "stops" | "children" | "state">;
 
-/** Worst first: what a block shows when it stands for several lanes. */
+/**
+ * Worst first: what a block shows when it stands for several lanes. Its system twin is SEVERITY in
+ * ui/src/ui/stageStripPlan.ts, which may not import this file (ui/gates/layers.test.ts); keep both in the same order.
+ */
 const SEVERITY: readonly StageStripState[] = ["failed", "waiting", "working", "next", "done"];
 /** The worst state among `states`; `done` when there are none. */
 export function worstState(states: readonly StageStripState[]): StageStripState {

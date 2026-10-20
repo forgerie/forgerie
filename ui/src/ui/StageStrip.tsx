@@ -1,10 +1,12 @@
-import type { StageStripSegment } from "@shared/workflowGlance";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { stripGrid, type StripCell } from "./stageStripPlan";
 import "./StageStrip.css";
 
-export type { StageStripSegment, StageStripState } from "@shared/workflowGlance";
+/** done: finished. working: at work now. waiting: waits on the reader. failed: its worker failed. next: not reached. */
+export type StageStripState = "done" | "working" | "waiting" | "failed" | "next";
+/** One stage as a bar. A stage with several lanes, such as parallel workers, is stacked bars. */
+export interface StageStripSegment { key: string; lanes: readonly StageStripState[] }
 
 /** The root size the plan's thresholds assume, in CSS px. */
 const PLAN_ROOT = 16;

@@ -1,6 +1,5 @@
 // How the stage strip draws a run as a block grid: rows, columns, and the leading stages that fold into a count.
-import { worstState, type StageStripSegment, type StageStripState } from "@shared/workflowGlance";
-export { worstState } from "@shared/workflowGlance";
+import type { StageStripSegment, StageStripState } from "./StageStrip";
 
 /** One cell of the grid: a lane's state, or `empty` above a stage with fewer lanes than the grid has rows. */
 export type StripCell = StageStripState | "empty";
@@ -22,6 +21,13 @@ export const STRIP_ROWS_MAX = 3;
  * counted at any width. Below an inner width of STRIP_FOLD_WIDTH / STRIP_GRID_SHARE the count alone is over the share.
  */
 export const STRIP_FOLD_WIDTH = 20;
+
+/** Worst first: what a top block or the `+n` count shows when it stands for several lanes. */
+const SEVERITY: readonly StageStripState[] = ["failed", "waiting", "working", "next", "done"];
+/** The worst state among `states`; `done` when there are none. */
+export function worstState(states: readonly StageStripState[]): StageStripState {
+  return SEVERITY.find((state) => states.includes(state)) ?? "done";
+}
 
 export interface StripGrid {
   /** Blocks per column: min(STRIP_ROWS_MAX, the largest lane count). 0 without stages. */
