@@ -1,4 +1,5 @@
 import { request as httpRequest } from "node:http";
+import { DurableAgentSession } from "./durableAgentSession.js";
 import Fastify from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
 import { registerSessionRoutes } from "./sessionRoutes.js";
@@ -36,6 +37,36 @@ class CompletionSessionEventHub extends CapturingSessionEventHub {
 }
 
 describe("Forgerie default Durable runtime", () => {
+  it("returns the same HTTP status without projecting annotated messages", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-status-"));
+    const agentDir = join(directory, "agent");
+    const models = await ModelRuntime.create({authPath: join(agentDir, "auth.json"), modelsPath: null, allowModelNetwork: false});
+    models.registerNativeProvider(fauxProvider().provider);
+    const hub = new CapturingSessionEventHub();
+    const gateway = createPiSessionManagerGateway({agentDir, env: {HOME: directory}, sessionDirEnvKeys: []});
+    const service = new PiSessionService(hub, {agentDir, modelRuntime: models, sessionManager: gateway, archiveStore: emptyArchiveStore(), heartbeatIntervalMs: 60_000});
+    const app = Fastify({logger: false});
+    await app.register(fastifyWebsocket);
+    const messages = vi.spyOn(DurableAgentSession.prototype, "messages", "get");
+    try {
+      const session = await service.start(directory, {initialModelSpec: "faux/faux-1"});
+      const ref = {id: session.id, cwd: directory};
+      await service.runCommand(ref, "/name Status test");
+      await service.shell(ref, "!printf status-output");
+      await vi.waitFor(() => {expect(hub.sessionEvents.some(({event}) => event.type === "shell.end")).toBe(true);});
+      const before = await service.status(ref);
+      expect(before.messageCount).toBeGreaterThan(0);
+      registerSessionRoutes(app, service, hub);
+      messages.mockClear();
+      const response = await app.inject({method: "GET", url: `/sessions/${session.id}/status?cwd=${encodeURIComponent(directory)}`});
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual(before);
+      expect(messages).not.toHaveBeenCalled();
+    } finally {
+      messages.mockRestore();
+      await app.close(); await service.dispose(); await rm(directory, {recursive: true, force: true});
+    }
+  });
   it("retries an idle-sent prompt while its native run still streams with one run and echo", async () => {
     const directory = await mkdtemp(join(tmpdir(), "forgerie-durable-streaming-retry-"));
     const agentDir = join(directory, "agent");
@@ -155,6 +186,8 @@ describe("Forgerie default Durable runtime", () => {
       expect(navigate.status).toBe(200);
       expect(await navigate.json()).toEqual({ cancelled: false, editorText: body.text });
       expect((await service.messages(cloneRef)).messages).toHaveLength(0);
+      expect((await service.status(cloneRef)).messageCount).toBe(0);
+      expect((await service.status(ref)).messageCount).toBeGreaterThan(0);
       expect((await service.messages(ref)).messages.filter((message) => typeof message === "object" && message !== null && "role" in message && message.role === "user")).toHaveLength(1);
       const selector = await service.runCommand(ref, "/fork");
       if (selector.type !== "select") throw new Error(`Fork selector failed: ${JSON.stringify(selector)}`);
