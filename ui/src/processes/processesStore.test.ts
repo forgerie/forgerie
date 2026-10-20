@@ -223,6 +223,44 @@ it("loads selected output even when a pushed snapshot supersedes the list read",
     expect(store.getSnapshot().output).toBe("history");
   } finally { read.resolve(Response.json(snapshot)); store.dispose(); }
 });
+it("reports a selected-output failure after a snapshot-only push retains the selection", async () => {
+  const read = deferred<Response>();
+  const started = deferred<void>();
+  const request = vi.fn(async (url: string) => {
+    if (!url.includes("/output?")) return Response.json(snapshot);
+    started.resolve(); return read.promise;
+  });
+  const store = createProcessesStore(request, () => ({ id: "session", cwd: "/project" }));
+  try {
+    const selecting = store.select("one"); await started.promise;
+    store.applySnapshot(snapshot);
+    read.reject(new Error("Output unavailable"));
+    await selecting;
+    expect(store.getSnapshot().view).toEqual({ kind: "ready", snapshot });
+    expect(store.getSnapshot().selected).toBe("one");
+    expect(store.getSnapshot().output).toBeUndefined();
+    expect(store.getSnapshot().readError).toBe("Output unavailable");
+    expect(request.mock.calls.filter(([url]) => url.includes("/output?"))).toHaveLength(1);
+  } finally { read.resolve(Response.json(tail([]))); store.dispose(); }
+});
+it("loads selected output from a pushed snapshot after the superseded list read fails", async () => {
+  const read = deferred<Response>();
+  const request = vi.fn(async (url: string) => url.includes("/output?") ? Response.json(tail([line(1, "history")])) : read.promise);
+  const store = createProcessesStore(request, () => ({ id: "session", cwd: "/project" }));
+  try {
+    const selecting = store.select("one");
+    expect(request).toHaveBeenCalledTimes(1);
+    store.applySnapshot(snapshot);
+    read.resolve(new Response("Old list unavailable", { status: 503 }));
+    await selecting;
+    expect(store.getSnapshot().view).toEqual({ kind: "ready", snapshot });
+    expect(store.getSnapshot().selected).toBe("one");
+    expect(store.getSnapshot().output).toBe("history");
+    expect(store.getSnapshot().readError).toBeUndefined();
+    expect(request.mock.calls.filter(([url]) => url.includes("/output?"))).toHaveLength(1);
+    expect(request).toHaveBeenCalledTimes(2);
+  } finally { read.resolve(Response.json(snapshot)); store.dispose(); }
+});
 it("ignores a tail failure superseded by pushed output", async () => {
   const read = deferred<Response>();
   const started = deferred<void>();

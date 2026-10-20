@@ -71,35 +71,45 @@ export function createProcessesStore(request: Request, ref: () => { id: string; 
     if (!session) return;
     const key = keyOf(session);
     const generation = snapshotGeneration;
-    let errorSnapshotGeneration = generation;
-    let errorSelectionVersion = selectionVersion;
-    let errorOutputGeneration = outputGeneration;
+    const listSelectionVersion = selectionVersion;
+    const listOutputGeneration = outputGeneration;
     const currentSession = () => !disposed && keyOf(ref()) === key;
+    const reportReadError = (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      update(state.view.kind === "ready" ? { ...state, readError: message } : { ...state, view: { kind: "failed", error: message } });
+    };
     reading = true;
     try {
-      const response = await request(`${path(session.id)}?${new URLSearchParams({ cwd: session.cwd })}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const snapshot = snapshotSchema.parse(await response.json());
-      // A push owns a newer snapshot, including when this read fails or finishes decoding later.
+      try {
+        const response = await request(`${path(session.id)}?${new URLSearchParams({ cwd: session.cwd })}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const snapshot = snapshotSchema.parse(await response.json());
+        if (currentSession() && generation === snapshotGeneration) setSnapshot(snapshot);
+      } catch (error) {
+        if (!currentSession()) return;
+        if (generation === snapshotGeneration) {
+          if (listSelectionVersion === selectionVersion && listOutputGeneration === outputGeneration) reportReadError(error);
+          return;
+        }
+        // A pushed snapshot replaces this failed list read, but the selected output still needs its own read.
+      }
       if (!currentSession()) return;
-      if (generation === snapshotGeneration) setSnapshot(snapshot);
       const selected = state.selected;
+      if (selected === undefined) return;
       const version = selectionVersion;
-      errorSnapshotGeneration = snapshotGeneration;
-      errorSelectionVersion = version; errorOutputGeneration = outputGeneration;
-      if (selected !== undefined) {
+      const outputVersion = outputGeneration;
+      try {
         const batch = await loadProcessTail(request, session, selected, OUTPUT_TAIL_LINES);
         if (!currentSession() || version !== selectionVersion) return;
         const next = reconcileProcessOutput(output, batch, "tail");
-        if (next === undefined || (next.cursor === undefined && errorOutputGeneration !== outputGeneration)) {
+        if (next === undefined || (next.cursor === undefined && outputVersion !== outputGeneration)) {
           again = true; return;
         }
         update({ ...state, ...setOutput(next) });
+      } catch (error) {
+        // A snapshot-only push says nothing about whether this output read succeeded.
+        if (currentSession() && version === selectionVersion && outputVersion === outputGeneration) reportReadError(error);
       }
-    } catch (error) {
-      if (!currentSession() || errorSnapshotGeneration !== snapshotGeneration || errorSelectionVersion !== selectionVersion || errorOutputGeneration !== outputGeneration) return;
-      const message = error instanceof Error ? error.message : String(error);
-      update(state.view.kind === "ready" ? { ...state, readError: message } : { ...state, view: { kind: "failed", error: message } });
     } finally { reading = false; if (again && !disposed) { again = false; void refresh(); } }
   }
   async function action(id: string, command: "kill" | "write", input = "", end = false): Promise<ManagedProcessWriteResult> {
