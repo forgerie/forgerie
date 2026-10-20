@@ -250,3 +250,61 @@ describe("managed processes", () => {
     } finally { await manager.dispose(); }
   });
 });
+
+describe("panel output tail", () => {
+  /** The browse algorithm the panel used before readTail: every batch is a separate admission. */
+  async function browsedTail(manager: ManagedProcesses, id: string, tailLines: number) {
+    let cursor = { offset: 0, line: 1 };
+    let lines: Awaited<ReturnType<ManagedProcesses["readOutput"]>>["lines"] = [];
+    let droppedLines = 0;
+    for (;;) {
+      const batch = await manager.readOutput(id, { cursor, maxLines: 1000 });
+      const combined = [...lines, ...batch.lines];
+      lines = combined.slice(-tailLines);
+      droppedLines += batch.droppedLines + combined.length - lines.length;
+      cursor = batch.cursor;
+      if (batch.lines.length < 1000) return { lines, cursor, droppedLines };
+    }
+  }
+  const body = (count: number) => Array.from({ length: count }, (_, index) => `line ${String(index + 1)} ${"x".repeat(40)}\n`).join("");
+
+  it("returns the same running tail as a full browse with one supervisor inspection and no acknowledgement", async () => {
+    const root = await directory(); const { launcher } = controlledLauncher();
+    let inspections = 0;
+    const inspect = launcher.inspect.bind(launcher);
+    launcher.inspect = (record) => { inspections++; return inspect(record); };
+    const manager = new ManagedProcesses({ stateDirectory: root, sessionId: "tail", launcher });
+    await manager.initialize();
+    try {
+      const record = await manager.start({ id: "one", command: "cat", cwd: root });
+      await writeFile(join(record.directory, "output.log"), `${body(25_001)}unfinished`);
+      inspections = 0;
+      const tail = await manager.readTail("one", 50);
+      expect(inspections).toBe(1);
+      expect(tail).toEqual(await browsedTail(manager, "one", 50));
+      expect(tail.lines).toHaveLength(50);
+      expect(tail.lines.at(-1)).toMatchObject({ number: 25_001, terminated: true });
+      expect(tail.droppedLines).toBe(24_951);
+      // The durable watch reader still starts at the first line.
+      expect((await manager.readOutput("one", { maxLines: 1 })).lines[0]?.number).toBe(1);
+    } finally { await manager.dispose(); }
+  });
+
+  it("matches a full browse on a retained ended log, including the base and the final unterminated line", async () => {
+    const root = await directory(); const { launcher } = controlledLauncher();
+    const manager = new ManagedProcesses({ stateDirectory: root, sessionId: "tail-retained", launcher, logCapBytes: 64 * 1024 });
+    await manager.initialize();
+    try {
+      const record = await manager.start({ id: "one", command: "cat", cwd: root });
+      await writeFile(join(record.directory, "output.log"), `${body(12_000)}final`);
+      await writeFile(join(record.directory, "result"), "success\nexited\n0\n");
+      const tail = await manager.readTail("one", 200);
+      expect(tail).toEqual(await browsedTail(manager, "one", 200));
+      expect(tail.lines.at(-1)).toEqual({ number: 12_001, text: "final", terminated: false, truncatedStart: false });
+      expect(tail.droppedLines).toBe(11_801);
+      const short = await manager.readTail("one", 5000);
+      expect(short).toEqual(await browsedTail(manager, "one", 5000));
+      expect(short.lines[0]?.number).toBeGreaterThan(1);
+    } finally { await manager.dispose(); }
+  });
+});
