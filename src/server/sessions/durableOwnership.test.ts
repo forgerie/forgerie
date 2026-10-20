@@ -17,6 +17,15 @@ async function database(): Promise<string> {
   return join(directory, "state.sqlite");
 }
 
+/** The flock process that holds this test's lock, then its cat. */
+function lockHolderProcesses(path: string): number[] {
+  const children = (parent: number) => execFileSync("ps", ["--ppid", String(parent), "-o", "pid=,args="], { encoding: "utf8" })
+    .split("\n").flatMap((line) => { const [pid, ...args] = line.trim().split(/\s+/); return pid === undefined || pid === "" ? [] : [{ pid: Number(pid), args: args.join(" ") }]; });
+  const flock = children(process.pid).find((child) => child.args.includes(`${path}.lock cat`));
+  if (flock === undefined) return [];
+  return [flock.pid, ...children(flock.pid).filter((child) => child.args === "cat").map((child) => child.pid)];
+}
+
 describe("Durable storage ownership", () => {
   it("rejects another owner before opening SQLite, then allows reopen after release", async () => {
     const path = await database();
@@ -34,11 +43,25 @@ describe("Durable storage ownership", () => {
     const path = await database();
     const owner = await acquireDurableOwnership(path);
     leases.push(owner);
-    const children = execFileSync("ps", ["--ppid", String(process.pid), "-o", "pid=,args="], { encoding: "utf8" });
-    const holder = children.split("\n").find(line => line.includes(`${path}.lock cat`));
+    const [holder] = lockHolderProcesses(path);
     if (holder === undefined) throw new Error("Missing test lock holder");
-    process.kill(Number(holder.trim().split(/\s+/)[0]), "SIGTERM");
-    await expect.poll(() => { try { owner.assertOwned(); return "owned"; } catch (error) { return String(error); } }).toContain("flock exit null, signal SIGTERM");
+    process.kill(holder, "SIGKILL");
+    await expect.poll(() => { try { owner.assertOwned(); return "owned"; } catch (error) { return String(error); } }).toContain("flock exit null, signal SIGKILL");
+  });
+  it("keeps the lock when a service stop signals every process of the owner", async () => {
+    const path = await database();
+    const owner = await acquireDurableOwnership(path);
+    leases.push(owner);
+    const holders = lockHolderProcesses(path);
+    expect(holders).toHaveLength(2);
+    // KillMode=control-group: the stop signal reaches the lock holder and its cat with the daemon.
+    for (const signal of ["SIGTERM", "SIGINT"] as const) for (const pid of holders) process.kill(pid, signal);
+    // A dead holder would release the kernel lock before this second owner's flock runs.
+    await expect(acquireDurableOwnership(path)).rejects.toThrow("already held");
+    owner.assertOwned();
+    await owner.release();
+    expect(() => { owner.assertOwned(); }).toThrow("no longer owned");
+    leases.push(await acquireDurableOwnership(path));
   });
   it("canonicalizes file symlinks and rejects hard-link aliases", async () => {
     const path = await database();

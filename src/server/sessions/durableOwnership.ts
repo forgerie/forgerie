@@ -9,7 +9,13 @@ export interface DurableOwnership {
   release(): Promise<void>;
 }
 
-/** A kernel lock, not a PID file. Closing the owner's pipe also releases it after SIGKILL. */
+/**
+ * A kernel lock, not a PID file. Closing the owner's pipe also releases it after SIGKILL.
+ *
+ * The holder ignores SIGTERM and SIGINT. A service stop sends SIGTERM to every process of the unit at once
+ * (KillMode=control-group), and the daemon still writes while it shuts down. The lock must last until the daemon
+ * releases it or exits, not end at the first stop signal. The holder still ends at SIGKILL and when the owner's pipe closes.
+ */
 export async function acquireDurableOwnership(databasePath: string): Promise<DurableOwnership> {
   const directory = dirname(resolve(databasePath));
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -23,7 +29,8 @@ export async function acquireDurableOwnership(databasePath: string): Promise<Dur
   const file = await stat(canonicalPath).catch((error: unknown) => { if (!isMissing(error)) throw error; return undefined; });
   if (file !== undefined && file.nlink !== 1) throw new Error(`Durable database must not have hard-link aliases: ${canonicalPath}`);
   // Never unlink this file: a new inode would let a second owner bypass the lock.
-  const holder = spawn("flock", ["--exclusive", "--nonblock", `${canonicalPath}.lock`, "cat"], {
+  // An ignored signal stays ignored across exec, so flock and its cat inherit it. "$0" is the lock path.
+  const holder = spawn("sh", ["-c", 'trap "" TERM INT; exec flock --exclusive --nonblock "$0" cat', `${canonicalPath}.lock`], {
     stdio: ["pipe", "pipe", "pipe"],
   });
   const marker = `${randomUUID()}\n`;
