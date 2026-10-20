@@ -75,7 +75,13 @@ const cases: [string, string | undefined, RepositoryState?][] = [
   ["cd \"$X\" && git push origin feature", "force-push"], ["true && cd x && git push origin feature", undefined],
   ["(cd x); git push origin feature", "force-push"], ["true && cd x && git push origin main", "push-default"],
   ["cd x 2>/dev/null && git push origin feature", undefined], ["git fetch && cd x; git push origin feature", "force-push"],
-  ["if true; then git push -f; fi", "force-push"], ["git push origin feature 2>&1", undefined],
+  ["if true; then git push -f; fi", "force-push"],
+  // Redirects are not refs: a ref-less push gates, and the named ref still decides.
+  ["git push origin 2>&1", "force-push"], ["git push origin &>/dev/null", "force-push"], ["git push origin >/dev/null", "force-push"],
+  ["git push origin 2>/dev/null", "force-push"], ["git push origin > log.txt", "force-push"], ["git push origin >&2", "force-push"],
+  ["git push origin 2>&1 | tail -3", "force-push"], ["git push origin main 2>&1", "push-default"], ["git push origin main &>/dev/null", "push-default"],
+  ["git push origin feature 2>&1", undefined], ["git push origin feature > main", undefined], ["git push origin \">x\"", undefined],
+  ["2>/dev/null git push --force", "force-push"], ["&>/dev/null git push --force", "force-push"], [">/dev/null git reset --hard", "destroy-local"],
   ["(git push --force)", "force-push"], ["{ git push --force; }", "force-push"],
   ["git \\\npush --force", "force-push"], ["gi\\\nt push --force", "force-push"],
   ['echo "$(git push --force)"', "force-push"], ["echo $(git push --force)", "force-push"],
@@ -227,6 +233,12 @@ it("names the main checkout of a default-branch push, also from a linked worktre
       expect((await gatedAction("bash", {command: "git push --force origin HEAD:main"}, cwd, observed))?.category).toBe("force-push");
       expect((await gatedAction("bash", {command: "git push --all origin"}, cwd, observed))?.category).toBe("force-push");
     }
+    // Redirect words are not refs, before or after the command.
+    for (const command of ["git push origin 2>&1", "git push origin &>/dev/null", "git push origin >/dev/null", "git push origin 2>&1 | tail -3", "2>/dev/null git push --force", "&>/dev/null git push --force"]) {
+      expect((await gatedAction("bash", {command}, root, observed))?.category, command).toBe("force-push");
+    }
+    expect((await gatedAction("bash", {command: "git push origin HEAD:main 2>&1"}, root, observed))?.category).toBe("push-default");
+    expect((await gatedAction("bash", {command: ">/dev/null git reset --hard"}, root, observed))?.category).toBe("destroy-local");
   } finally { await rm(base, {recursive: true, force: true}); }
 });
 

@@ -40,14 +40,9 @@ export async function gatedAction(name: string, args: Record<string, unknown>, c
 
 const expandHome = (path: string, home: string) => path === "~" ? home : path.startsWith("~/") ? `${home}${path.slice(1)}` : path;
 const REDIRECT = /^(?:\d*(?:<<<|<<|>>|>\||<>|<&|>&|<|>)|&>>?)/u;
-/** The literal folder of `cd <path>`, past its redirects. Options, `-`, `~user`, globs and extra operands are not literal. */
+/** The literal folder of `cd <path>`. Options, `-`, `~user`, globs and extra operands are not literal. */
 function cdTarget(tokens: readonly string[]): string | undefined {
-  const words: string[] = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i] ?? ""; const redirect = REDIRECT.exec(token);
-    if (redirect === null) words.push(token);
-    else if (redirect[0] === token) i++; // The redirect target is the next word.
-  }
+  const words = [...tokens];
   if (words[0] === "--") words.shift();
   const [target] = words;
   if (words.length !== 1 || target === undefined || target.startsWith("-") || /[*?[]/u.test(target) || /^~[^/]/u.test(target)) return undefined;
@@ -383,9 +378,22 @@ function parseShell(script: string, readSubstitutions = true): ShellCommand[] {
   let groups = 0; let compounds = 0;
   // Set inside `end`, so an object keeps the type checker from narrowing them to their first values.
   const seen = {continued: false, unbalanced: false};
-  const flush = () => { if (started) tokens.push(word); word = ""; started = false; };
+  // `plain` counts the leading characters of `word` that were neither quoted, escaped nor substituted.
+  let plain = 0; let redirectTarget = false;
+  const flush = () => {
+    if (started) {
+      // A redirect and its separate target are not arguments: `git push origin 2>&1` names no ref. Only unquoted text
+      // redirects, so `">x"` stays an argument.
+      const redirect = REDIRECT.exec(word);
+      if (redirectTarget) redirectTarget = false;
+      else if (redirect !== null && redirect[0].length <= plain) redirectTarget = redirect[0] === word;
+      else tokens.push(word);
+    }
+    word = ""; started = false; plain = 0;
+  };
+  const literal = (c: string) => { if (plain === word.length) plain++; word += c; started = true; };
   const end = (operator: "&&" | "||" | "|" | "&" | ";" | "(" | ")") => {
-    flush();
+    flush(); redirectTarget = false;
     let words = tokens; let isolated = piped || groups > 0 || compounds > 0;
     for (let first = words[0]; first !== undefined; first = words[0]) {
       if (OPENING_WORDS.has(first)) compounds++;
@@ -428,7 +436,7 @@ function parseShell(script: string, readSubstitutions = true): ShellCommand[] {
     if (c === "'" || c === '"') { quote = c; started = true; continue; }
     if (c === "#" && !started) { while (i < text.length && text[i] !== "\n") i++; if (!(empty && seen.continued)) end(";"); continue; }
     // `>&`, `<&` and `&>` are redirects, not control operators.
-    if (c === "&" && (text[i + 1] === ">" || (started && (text[i - 1] === ">" || text[i - 1] === "<")))) { word += c; started = true; continue; }
+    if (c === "&" && (text[i + 1] === ">" || (started && (text[i - 1] === ">" || text[i - 1] === "<")))) { literal(c); continue; }
     if (c === "&" || c === "|") {
       const doubled = text[i + 1] === c;
       if (doubled || (c === "|" && text[i + 1] === "&")) i++; // `|&` pipes stderr too.
@@ -439,7 +447,7 @@ function parseShell(script: string, readSubstitutions = true): ShellCommand[] {
     if (c === "(" || c === "{") { end("("); continue; }
     if (c === ")" || c === "}") { end(")"); continue; }
     if (/\s/u.test(c)) { flush(); continue; }
-    word += c; started = true;
+    literal(c);
   }
   end(";");
   // An unbalanced group or compound command hides which commands run in this shell.
