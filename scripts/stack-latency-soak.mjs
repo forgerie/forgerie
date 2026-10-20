@@ -52,16 +52,27 @@ async function open(index) {
   return result;
 }
 
+// Retained sessions keep hidden composers in the document, so the check uses the one on screen.
+// The editor reads DOM edits on its next animation frame; switching inside that frame is not a
+// human sequence, so each edit waits two frames before the next switch.
+const SHOWN_COMPOSER = "[...document.querySelectorAll('[data-composer-input]')].find(n=>n.checkVisibility())";
+const settleFrames = () => evaluate(cdp, "new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
+const clearDraft = async () => {
+  // The composer input's own value setter: one editor transaction, as the app's recall and clear use.
+  await evaluate(cdp, `(()=>{const input=${SHOWN_COMPOSER};input.focus();input.value='';return true;})()`);
+  await settleFrames();
+};
 async function draftCheck(sequence) {
   counts.draftChecks++;
   const text = `soak draft ${sequence}`;
   await open(0);
-  await evaluate(cdp, "(()=>{const input=document.querySelector('[data-composer-input]');input.focus();document.execCommand('selectAll');document.execCommand('delete');return true;})()");
+  await clearDraft();
   await cdp.send("Input.insertText", { text });
+  await settleFrames();
   await open(1); await open(0);
-  const kept = await evaluate(cdp, "document.querySelector('[data-composer-input]')?.textContent ?? null");
+  const kept = await evaluate(cdp, `${SHOWN_COMPOSER}?.value ?? null`);
   if (kept !== text) { counts.draftFailures++; fail("draft", `expected ${text.length} chars, found ${kept === null ? "no composer" : kept.length}`); }
-  await evaluate(cdp, "(()=>{const input=document.querySelector('[data-composer-input]');input.focus();document.execCommand('selectAll');document.execCommand('delete');return true;})()");
+  await clearDraft();
 }
 
 async function reconnect() {

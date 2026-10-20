@@ -138,7 +138,9 @@ lifetime; schedule it in a window agreed with the coordinator.
 
 Phases: warm-up, then repeating blocks of quiet (40%), load (50%: verified
 switches across all sessions, a draft round trip every 25 switches) and
-reconnect (10%). Samples record browser heap, nodes, listeners and documents
+reconnect (10%). The draft check uses the composer on screen (retained sessions keep
+hidden composers in the document), clears it with the input's own value setter,
+types with CDP `Input.insertText`, and waits two frames before switching. Samples record browser heap, nodes, listeners and documents
 (CDP `Performance.getMetrics`), edge RSS and heap, daemon RSS (`/proc`), host
 load, switch latency and correctness counts. No forced GC or heap snapshot.
 
