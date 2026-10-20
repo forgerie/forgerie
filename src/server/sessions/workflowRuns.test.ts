@@ -809,6 +809,74 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
     expect(git("log", "--format=%s", "main")).toContain("Main moved");
   }, 30000);
 
+  it("names the overlapping files when uncommitted work in the main checkout blocks the land", async () => {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: sanitizedGitEnv(), encoding: "utf8" });
+    git("init", "-b", "main"); git("config", "user.email", "workflow@example.invalid"); git("config", "user.name", "Workflow tests");
+    await writeFile(join(root, "base.txt"), "base");
+    git("add", "base.txt"); git("commit", "-m", "Initial workspace");
+    const ownership = new SessionWorktreeStore(join(agentDir, "ownership.json"));
+    await ownership.initialize();
+    worktrees = new SessionWorktrees(ownership, { publish: () => undefined });
+    autonomy = { landStops: false, approveStops: true, reviewRounds: 2, pushDefaultFolders: [] };
+    await service.dispose(); service = openService();
+    const ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+    const run = await service.runWorkflow(ref, "staged", {}, "staged-main-dirty");
+    await until(async () => (await service.workflowRuns(ref))[0]?.stops?.["land"]?.state === "waiting");
+    // Another session edits the same file in the shared checkout and does not commit.
+    await writeFile(join(root, "result.txt"), "ANOTHER-SESSION");
+    await expect(service.decideWorkflowStop(ref, run.id, "land", "land", undefined)).rejects.toThrow(/^Nothing landed\. c-\S+ could not land: main-dirty in result\.txt$/u);
+    expect((await service.workflowRuns(ref))[0]?.stops?.["land"]?.state).toBe("waiting");
+    expect(await readFile(join(root, "result.txt"), "utf8")).toBe("ANOTHER-SESSION");
+    await service.cancelWorkflow(ref, run.id);
+  }, 30000);
+
+  it("waits for a repair child's report when the user lands, then lands the repaired branch", async () => {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: sanitizedGitEnv(), encoding: "utf8" });
+    git("init", "-b", "main"); git("config", "user.email", "workflow@example.invalid"); git("config", "user.name", "Workflow tests");
+    await writeFile(join(root, "base.txt"), "base");
+    git("add", "base.txt"); git("commit", "-m", "Initial workspace");
+    const ownership = new SessionWorktreeStore(join(agentDir, "ownership.json"));
+    await ownership.initialize();
+    worktrees = new SessionWorktrees(ownership, { publish: () => undefined });
+    let ref = { id: "", cwd: root };
+    let calls = 0;
+    let releaseRepair: () => void = () => undefined;
+    // First work call: alpha's build. Second: alpha's repair, which holds until the test releases it, then commits.
+    modelWork = async () => {
+      calls++;
+      if (calls === 1) return;
+      await new Promise<void>((resolve) => { releaseRepair = resolve; });
+      const path = (await service.durableChildren(ref)).find((child) => child.name === "alpha")?.worktree?.path;
+      if (path === undefined) throw new Error("alpha has no worktree");
+      await writeFile(join(path, "repair.txt"), "REPAIRED");
+      execFileSync("git", ["add", "repair.txt"], { cwd: path, env: sanitizedGitEnv() });
+      execFileSync("git", ["commit", "-qm", "Child repair"], { cwd: path, env: sanitizedGitEnv() });
+    };
+    autonomy = { landStops: false, approveStops: true, reviewRounds: 2, pushDefaultFolders: [] };
+    await service.dispose(); service = openService();
+    ref = { id: (await service.start(root)).id, cwd: root };
+    await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
+    const run = await service.runWorkflow(ref, "staged", {}, "staged-land-wait");
+    await until(async () => (await service.workflowRuns(ref))[0]?.stops?.["land"]?.state === "waiting" && !(await service.status(ref)).isStreaming);
+    await service.prompt(ref, "MODEL-SEND-alpha");
+    await until(() => Promise.resolve(calls === 2));
+    expect((await service.workflowRuns(ref))[0]?.children.map((child) => child.state.kind)).toEqual(["settled", "working"]);
+    // Before the wait, this click failed with "Stop the child before changing its worktree".
+    const landing = service.decideWorkflowStop(ref, run.id, "land", "land", undefined).then((landed) => ({ landed }), (error: unknown) => ({ error }));
+    await sleep(300);
+    releaseRepair();
+    const outcome = await landing;
+    const branch = (await service.durableChildren(ref)).find((child) => child.name === "alpha")?.worktree?.branch;
+    expect(outcome).toMatchObject({ landed: { stops: { land: { state: "approved", landed: [branch] } } } });
+    expect(git("log", "-2", "--format=%s", "main").trim().split("\n")).toEqual(["Child repair", "Child result"]);
+    const finished = await until(async () => {
+      const current = (await service.workflowRuns(ref))[0];
+      return current?.state.kind === "finished" ? current : false;
+    });
+    expect(finished.state).toMatchObject({ outcome: "completed", result: "STAGED-DONE" });
+  }, 30000);
+
   it("recovers a workflow waiting at a user stop without the live index or starting later work", async () => {
     const ref = { id: (await service.start(root)).id, cwd: root };
     await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });

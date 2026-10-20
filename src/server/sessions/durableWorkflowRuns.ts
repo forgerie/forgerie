@@ -2,6 +2,7 @@ import { waitingStops, workflowGlance, type WorkflowGlance } from "../../shared/
 import { createHash } from "node:crypto";
 import { AssistantEntry, defineDoc, defineExtension, defineTask, defineTool, InboxDoc, LiveDoc, type CommitPublication, type Conversation, type ConversationId, type Cursor, type Harness, type SubmissionRecord, type TaskId, type Tx } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
+import { withAbortSignal } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import { Check } from "typebox/value";
 import { WorkflowOutcomeSchema, WorkflowModelSchema, WorkflowModelsSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowChildDelivery, type WorkflowInputs, type WorkflowModels, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
@@ -340,23 +341,80 @@ export async function requestWorkflowStop(tx: Tx, parent: ConversationId, runId:
 }
 
 /**
+ * How long Land waits for working children of the run to report before it lands. A repair child can still change its
+ * branch, and Land then threw "Stop the child before changing its worktree" (01a151b4 L603, L660). Those repairs took
+ * 3 to 10.5 min, so Forgerie's own land waits 10 min. The user's Land click waits 90 s: the browser aborts that
+ * request after 120 s (`ui/src/workflows/workflowsStore.ts`), and the land itself needs the rest.
+ */
+const USER_LAND_REPORT_WAIT_MS = 90_000;
+const AUTO_LAND_REPORT_WAIT_MS = 10 * 60_000;
+
+/**
+ * Waits until every child of the run has reported: no completion reporter of the run is still live. Returns the names
+ * of the children still working when `limitMs` runs out, or an empty list.
+ */
+async function waitForRunReports(harness: Harness, parent: ConversationId, runId: string, context: Context, limitMs: number): Promise<string[]> {
+  const working = async (): Promise<{ name: string; reporter: TaskId }[]> => {
+    const children = (await harness.snapshot(Runs, parent, context))?.records[runId]?.children ?? [];
+    const live: { name: string; reporter: TaskId }[] = [];
+    for (const { name, reporterId } of children) {
+      if (!Check(reporterIdSchema, reporterId)) throw new Error("Invalid workflow reporter identity");
+      if ((await harness.getTask(reporterId, context))?.state.status !== "terminal") live.push({ name, reporter: reporterId });
+    }
+    return live;
+  };
+  const limit = new AbortController();
+  const timer = setTimeout(() => { limit.abort(); }, limitMs);
+  const bounded = withAbortSignal(limit.signal, context);
+  try {
+    // The agent can send a child more work while Land waits, so read the run again after each wait.
+    for (let live = await working(); live.length > 0; live = await working()) {
+      try { await Promise.all(live.map(({ reporter }) => harness.waitForTask(reporter, bounded))); }
+      catch (error) {
+        if (!limit.signal.aborted) throw error;
+        return [...new Set((await working()).map(({ name }) => name))];
+      }
+    }
+    return [];
+  } finally { clearTimeout(timer); }
+}
+
+function reportWaitFailure(working: readonly string[], limitMs: number, by: "user" | "forgerie"): string {
+  const names = working.join(", ");
+  const waited = limitMs >= 60_000 ? `${String(Math.round(limitMs / 60_000))} min` : `${String(Math.round(limitMs / 1000))} s`;
+  return `Nothing landed. Land waited ${waited} for the report of ${names}, and ${working.length === 1 ? "it is" : "they are"} still working. Land did not change any branch.${
+    by === "user" ? ` Click Land all again after ${names} ${working.length === 1 ? "reports" : "report"}.` : ""}`;
+}
+
+/**
  * The user's decision at a stop. One commit records it and creates the delivery task, so the agent hears each
- * decision exactly once. A land decision runs `land` first: it lands the children's branches in order and returns
- * their names. A failure leaves the stop waiting and keeps the branches that did land.
+ * decision exactly once. A land decision first waits for the run's working children to report, then runs `land`:
+ * it lands the children's branches in order and returns their names. A failure leaves the stop waiting and keeps
+ * the branches that did land.
  */
 export async function decideWorkflowStop(harness: Harness, parent: Conversation, runId: string, stageId: string, decision: WorkflowStopDecision,
-  note: string | undefined, land: (run: WorkflowRun) => Promise<{ landed: string[]; error?: string }>, context: Context, by: "user" | "forgerie" = "user"): Promise<WorkflowRun> {
-  const snapshot = (await harness.snapshot(Runs, parent.id, context))?.records[runId];
-  if (snapshot === undefined) throw new WorkflowError(404, "Workflow run not found in this session");
-  const stage = snapshot.stages?.find((candidate) => candidate.id === stageId);
-  if (stage?.stop === undefined) throw new WorkflowError(404, "This workflow has no stop with that id");
-  if (snapshot.state.kind !== "running") throw new WorkflowError(409, "This workflow has finished");
-  if (stopOf(snapshot, stageId).state !== "waiting") throw new WorkflowError(409, `"${stage.name}" is not waiting for a decision`);
+  note: string | undefined, land: (run: WorkflowRun) => Promise<{ landed: string[]; error?: string }>, context: Context, by: "user" | "forgerie" = "user",
+  reportWaitMs = by === "user" ? USER_LAND_REPORT_WAIT_MS : AUTO_LAND_REPORT_WAIT_MS): Promise<WorkflowRun> {
+  const read = async () => {
+    const snapshot = (await harness.snapshot(Runs, parent.id, context))?.records[runId];
+    if (snapshot === undefined) throw new WorkflowError(404, "Workflow run not found in this session");
+    const stage = snapshot.stages?.find((candidate) => candidate.id === stageId);
+    if (stage?.stop === undefined) throw new WorkflowError(404, "This workflow has no stop with that id");
+    if (snapshot.state.kind !== "running") throw new WorkflowError(409, "This workflow has finished");
+    if (stopOf(snapshot, stageId).state !== "waiting") throw new WorkflowError(409, `"${stage.name}" is not waiting for a decision`);
+    return { snapshot, stage };
+  };
+  const { stage } = await read();
   const trimmed = note?.trim() ?? "";
   if (decision === "changes" && trimmed === "") throw new WorkflowError(400, "Say what to change");
   if (decision === "approve" && stage.stop !== "approve") throw new WorkflowError(409, `"${stage.name}" is a land stop; land the branches instead`);
   if (decision === "land" && stage.stop !== "land") throw new WorkflowError(409, `"${stage.name}" is not a land stop`);
-  const landing = decision === "land" ? await land(publicRun(snapshot)) : undefined;
+  let landing: { landed: string[]; error?: string } | undefined;
+  if (decision === "land") {
+    const working = await waitForRunReports(harness, parent.id, runId, context, reportWaitMs);
+    // The wait can take minutes. Land the run as it is now, if its stop still waits.
+    landing = working.length === 0 ? await land(publicRun((await read()).snapshot)) : { landed: [], error: reportWaitFailure(working, reportWaitMs, by) };
+  }
   const run = await parent.commit(async (tx) => {
     const doc = await tx.doc(Runs, parent.id);
     const record = doc.records[runId];
@@ -415,7 +473,7 @@ export async function notifyAutoStopFailed(tx: Tx, parent: ConversationId, runId
 export function autoStopFailureAdvice(stage: { id: string; name: string; stop?: "approve" | "land" | undefined }, failures: number): string {
   const guard = "The stop now waits for the user. Do not land, merge or push to the default branch yourself.";
   if (stage.stop !== "land" || failures > 1) return `${guard}${stage.stop === "land" ? " The one repair attempt is used." : ""} End your turn.`;
-  return `${guard} You may make one repair attempt first: send each worker whose branch failed to land an instruction to rebase its own branch onto the current default branch, keep every change already there, resolve the conflict, run focused checks and report. When they have reported, run the full check once, then call workflow_stop for "${stage.id}" again; Forgerie then tries to land once more. If the conflict needs a product decision, or no repair is possible, end your turn and let the user decide.`;
+  return `${guard} You may make one repair attempt first: send each worker whose branch failed to land an instruction to rebase its own branch onto the current default branch, keep every change already there, resolve the conflict, run focused checks and report. Land rebases each branch alone onto the default branch, in the order the children started, and keeps only the non-merge commits. A merge commit, or a fast-forward to a merge, does not repair a branch: each branch must apply as linear commits on top of the branches before it. When they have reported, run the full check once, then call workflow_stop for "${stage.id}" again; Forgerie then tries to land once more. If the conflict needs a product decision, or no repair is possible, end your turn and let the user decide.`;
 }
 
 export async function proposeWorkflow(tx: Tx, parent: ConversationId, id: string, args: WorkflowProposalTool): Promise<WorkflowProposal> {

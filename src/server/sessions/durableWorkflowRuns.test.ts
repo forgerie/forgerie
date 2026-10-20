@@ -1,15 +1,17 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
+import { setTimeout as sleep } from "node:timers/promises";
+import { awaitWithContext, BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { createRegistry } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, defineTask } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { durableChildExtensions } from "./durableChildAgents.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
-import { autoStopFailureAdvice, proposeWorkflow, startWorkflowProposal, workflowExtension, workflowProposals, workflowRuns, WORKFLOW_DOC_KIND, WORKFLOW_PROPOSALS_DOC_KIND } from "./durableWorkflowRuns.js";
+import type { WorkflowRun } from "../../shared/workflowRuns.js";
+import { associateWorkflowChild, autoStopFailureAdvice, decideWorkflowStop, proposeWorkflow, requestWorkflowStop, startWorkflowProposal, workflowExtension, workflowProposals, workflowRuns, WORKFLOW_DOC_KIND, WORKFLOW_PROPOSALS_DOC_KIND } from "./durableWorkflowRuns.js";
 
 it("replays a proposal without another entry and commits Start's run and decision together", async () => {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-workflow-proposal-commit-"));
@@ -62,4 +64,93 @@ it("offers one repair after a failed automatic land, and none after a second fai
     expect(advice).toMatch(/End your turn\.$/u);
   }
   expect(autoStopFailureAdvice(land, 2)).toContain("The one repair attempt is used.");
+});
+
+it("tells the repair agent that Land rebases each branch alone, in start order, and keeps only non-merge commits", () => {
+  const advice = autoStopFailureAdvice({ id: "land", name: "Land", stop: "land" }, 1);
+  expect(advice).toContain("Land rebases each branch alone onto the default branch, in the order the children started, and keeps only the non-merge commits.");
+  expect(advice).toContain("A merge commit, or a fast-forward to a merge, does not repair a branch");
+});
+
+/** A repair child's completion report. It stays live until the test releases it, as a reporter does while its child works. */
+let releaseReport: () => void = () => undefined;
+const RepairReport = defineTask<null, { phase: "work" }, null>({
+  name: "test.repair-report", version: 1, initial: () => ({ phase: "work" }),
+  phases: { work: async (_task, runtime, context) => {
+    await awaitWithContext(new Promise<void>((resolve) => { releaseReport = resolve; }), context);
+    await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+  } },
+  abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+});
+
+/** A run whose land stop waits while its child alpha still works on a repair. */
+async function landWhileRepairing(run: (fixture: { journal: DurableSessionJournal; runId: string; reporter: Awaited<ReturnType<typeof startRepair>> }) => Promise<void>) {
+  const directory = await mkdtemp(join(tmpdir(), "forgerie-workflow-land-wait-"));
+  const manager = SessionManager.create(directory, directory);
+  manager.appendMessage(fauxAssistantMessage("Prior context"));
+  const models = createModels();
+  const provider = fauxProvider();
+  models.setProvider(provider.provider);
+  provider.setResponses(Array.from({ length: 10 }, () => fauxAssistantMessage("Waiting.")));
+  const registry = createRegistry();
+  registry.install(workflowExtension());
+  registry.install(defineExtension({ name: "test.repair", tasks: [RepairReport] }));
+  const journal = await DurableSessionJournal.open({ manager, models, registry, agent: { model: { provider: "faux", modelId: "faux-1" } } });
+  const parent = journal.conversation.id;
+  const text = "---\nworkflow:\n  version: 1\n  stages:\n    - { id: build, name: Build }\n    - { id: land, name: Land, stop: land }\n---\nBuild, then land.\n";
+  const proposal = await journal.conversation.commit((tx) => proposeWorkflow(tx, parent, "p:land", { name: "land-wait", summary: "Land after a repair.", text, basis: { kind: "new", reason: "Test." } }), context);
+  const launched = await startWorkflowProposal(journal.harness, journal.conversation, directory, manager.getSessionId(), proposal.id, {}, "land-wait", context);
+  await journal.conversation.commit((tx) => requestWorkflowStop(tx, parent, launched.id, "land", "Land the repaired branch."), context);
+  const reporter = await startRepair(journal);
+  try { await run({ journal, runId: launched.id, reporter }); }
+  finally {
+    await journal.harness.abortTask(reporter, context);
+    await journal.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+async function startRepair(journal: DurableSessionJournal) {
+  const parent = journal.conversation.id;
+  const reporter = await journal.conversation.commit(async (tx) => {
+    const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
+    const task = await tx.createTask(RepairReport, null, { ownership: { kind: "conversation" }, background: true });
+    await associateWorkflowChild(tx, parent, child.id, task, "alpha");
+    return task;
+  }, context);
+  journal.harness.resume();
+  return reporter;
+}
+
+it.each(["user", "forgerie"] as const)("%s land waits for a working repair child's report, then lands", async (by) => {
+  await landWhileRepairing(async ({ journal, runId, reporter }) => {
+    const landedRuns: WorkflowRun[] = [];
+    const land = async (run: WorkflowRun) => {
+      // The report is in before Land touches a worktree.
+      expect((await journal.harness.getTask(reporter, context))?.state.status).toBe("terminal");
+      landedRuns.push(run);
+      return { landed: ["c-alpha"] };
+    };
+    const decided = decideWorkflowStop(journal.harness, journal.conversation, runId, "land", "land", undefined, land, context, by);
+    await sleep(200);
+    expect(landedRuns).toEqual([]);
+    releaseReport();
+    const run = await decided;
+    expect(landedRuns).toHaveLength(1);
+    expect(run.stops?.["land"]).toMatchObject({ state: "approved", landed: ["c-alpha"] });
+  });
+});
+
+it.each([
+  ["user", /^Nothing landed\. Land waited 0 s for the report of alpha, and it is still working\. Land did not change any branch\. Click Land all again after alpha reports\.$/u],
+  ["forgerie", /^Nothing landed\. Land waited 0 s for the report of alpha, and it is still working\. Land did not change any branch\.$/u],
+] as const)("%s land fails and names the child when its report does not arrive in time", async (by, message) => {
+  await landWhileRepairing(async ({ journal, runId }) => {
+    let lands = 0;
+    const land = () => { lands++; return Promise.resolve({ landed: [] }); };
+    await expect(decideWorkflowStop(journal.harness, journal.conversation, runId, "land", "land", undefined, land, context, by, 50)).rejects.toThrow(message);
+    expect(lands).toBe(0);
+    const [run] = await workflowRuns(journal.harness, journal.conversation.id, context);
+    expect(run?.stops?.["land"]?.state).toBe("waiting");
+    expect(run?.children).toMatchObject([{ name: "alpha", state: { kind: "working" } }]);
+  });
 });

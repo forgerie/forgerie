@@ -484,7 +484,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       try { result = await this.landDurableChildWorktree(conversationId); }
       catch (error) { return failed(error instanceof Error ? error.message : String(error)); }
       if (result.kind === "conflict") return failed(`conflicts with ${result.defaultBranch} in ${result.files.join(", ")}`);
-      if (result.kind === "blocked") return failed(result.reason);
+      // The files say what blocks the land, for example another session's uncommitted edits in the main checkout.
+      if (result.kind === "blocked") return failed(result.files.length === 0 ? result.reason : `${result.reason} in ${result.files.join(", ")}`);
       if (result.kind !== "landed") return failed(`unexpected result ${result.kind}`);
       landed.push(worktree.branch);
     }
