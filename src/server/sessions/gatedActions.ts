@@ -38,41 +38,66 @@ export async function gatedAction(name: string, args: Record<string, unknown>, c
   return shellAction(args["command"], cwd, reads, 0);
 }
 
-/**
- * A script that starts with `cd <path> &&` runs the rest in that folder or not at all, so its folder is certain.
- * Later `cd` commands stay uncertain when the script has pipes, subshells or other control operators.
- */
-const LEADING_CD = /^\s*cd\s+(?:"([^"$`\\]+)"|'([^']+)'|([^\s;&|()<>"'$`\\]+))\s*&&/u;
-export function leadingDirectory(command: string, cwd: string, home: string): {cwd: string; rest: string} {
-  let folder = cwd; let rest = command;
-  for (let found = LEADING_CD.exec(rest); found !== null; found = LEADING_CD.exec(rest)) {
-    folder = resolve(folder, expandHome(found[1] ?? found[2] ?? found[3] ?? ".", home));
-    rest = rest.slice(found[0].length);
-  }
-  return {cwd: folder, rest};
-}
 const expandHome = (path: string, home: string) => path === "~" ? home : path.startsWith("~/") ? `${home}${path.slice(1)}` : path;
+const REDIRECT = /^(?:\d*(?:<<<|<<|>>|>\||<>|<&|>&|<|>)|&>>?)/u;
+/** The literal folder of `cd <path>`, past its redirects. Options, `-`, `~user`, globs and extra operands are not literal. */
+function cdTarget(tokens: readonly string[]): string | undefined {
+  const words: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i] ?? ""; const redirect = REDIRECT.exec(token);
+    if (redirect === null) words.push(token);
+    else if (redirect[0] === token) i++; // The redirect target is the next word.
+  }
+  if (words[0] === "--") words.shift();
+  const [target] = words;
+  if (words.length !== 1 || target === undefined || target.startsWith("-") || /[*?[]/u.test(target) || /^~[^/]/u.test(target)) return undefined;
+  return target;
+}
 
-async function shellAction(script: string, cwd: string, reads: GatedActionReads, depth: number): Promise<GatedActionMatch | undefined> {
-  const lead = leadingDirectory(script, cwd, homedir());
-  const command = lead.rest;
-  let folder = lead.cwd; let uncertainCwd = false;
-  for (const words of shellCommands(command)) {
-    const normalized = normalizeCommand(words, folder);
+/**
+ * The folder of each command follows `cd <literal>` through the script:
+ * - `cd x && rest` runs the rest in x or not at all, wherever the `cd` stands in an `&&` chain.
+ * - `cd x; rest` and a newline also move the folder when the `cd` starts its list. If the `cd` fails, the Git read in x
+ *   fails too and the action gates. A `cd` that an earlier `&&` can skip makes the folder after `;` uncertain.
+ * - `||`, a pipe, a subshell, a group, a compound command, a background `&`, a wrapper and a computed path make the
+ *   folder uncertain for the rest of the script, and every Git read then fails closed.
+ */
+async function shellAction(script: string, cwd: string, reads: GatedActionReads, depth: number, uncertainAtStart = false): Promise<GatedActionMatch | undefined> {
+  let folder = cwd; let uncertainCwd = uncertainAtStart;
+  // A `cd` in the current and-or list moved the folder; `conditionalCd` when an earlier `&&` could skip it.
+  let movedInList = false; let conditionalCd = false;
+  // Heredoc bodies run when their line runs, so they read the folder at the start of that line.
+  const lineStarts = new Map<number, {folder: string; uncertain: boolean}>(); const cdLines = new Set<number>();
+  for (const command of parseShell(script)) {
+    let commandFolder = folder; let uncertainHere: boolean;
+    if (command.heredoc) {
+      const start = lineStarts.get(command.line);
+      commandFolder = start?.folder ?? folder;
+      uncertainHere = start === undefined || start.uncertain || cdLines.has(command.line);
+    } else {
+      if (command.join === "start") { uncertainCwd ||= conditionalCd; movedInList = false; conditionalCd = false; }
+      else if (command.join === "||") uncertainCwd ||= movedInList;
+      if (!lineStarts.has(command.line)) lineStarts.set(command.line, {folder, uncertain: uncertainCwd});
+      uncertainHere = uncertainCwd;
+    }
+    const normalized = normalizeCommand(command.words, commandFolder);
     if (normalized === undefined) continue;
     const tokens = normalized.tokens;
     let overriddenGitState = normalized.unknownGitState;
     const commandCwd = normalized.cwd;
     const executable = tokens.shift()?.split("/").at(-1);
-    if (executable === "cd") {
-      uncertainCwd ||= tokens[0] === undefined || normalized.unknownGitState || /[|&()`]/u.test(command);
-      if (tokens[0] !== undefined) folder = resolve(commandCwd, expandHome(tokens[0], homedir()));
+    if (executable === "cd" || executable === "pushd" || executable === "popd" || (executable === "builtin" && ["cd", "pushd", "popd"].includes(tokens[0] ?? ""))) {
+      cdLines.add(command.line);
+      // A wrapper such as `sudo` or `env` runs an external `cd`, which cannot move this shell.
+      const target = executable === "cd" && command.words[0] === "cd" && !normalized.unknownGitState ? cdTarget(tokens) : undefined;
+      if (target === undefined || command.isolated || command.heredoc || command.join === "||") uncertainCwd = true;
+      if (target !== undefined) { folder = resolve(commandFolder, expandHome(target, homedir())); movedInList = true; conditionalCd ||= command.join === "&&"; }
       continue;
     }
     if ((executable === "bash" || executable === "sh") && depth === 0) {
       const index = tokens.findIndex(t => /^-[^-]*c/u.test(t));
       const script = tokens[index + 1];
-      if (index >= 0 && script !== undefined) { const found = await shellAction(script, commandCwd, reads, depth + 1); if (found !== undefined) return found; }
+      if (index >= 0 && script !== undefined) { const found = await shellAction(script, commandCwd, reads, depth + 1, uncertainHere); if (found !== undefined) return found; }
     }
     if (executable === "npm" && npmCommand(tokens) === "publish") return match("publish", "Publish an npm package (including dry-run)");
     if (executable === "git") {
@@ -86,7 +111,7 @@ async function shellAction(script: string, cwd: string, reads: GatedActionReads,
         else if (option?.startsWith("--git-dir=") === true || option?.startsWith("--work-tree=") === true || option?.startsWith("--config-env=") === true || option?.startsWith("--namespace=") === true) overriddenGitState = true;
       }
       const action = tokens.shift();
-      const found = await gitAction(action, tokens, gitCwd, (overriddenGitState || uncertainCwd) ? {...reads, git: unavailableReads.git.bind(unavailableReads)} : reads);
+      const found = await gitAction(action, tokens, gitCwd, (overriddenGitState || uncertainHere) ? {...reads, git: unavailableReads.git.bind(unavailableReads)} : reads);
       if (found !== undefined) return found;
     }
     if (executable === "gh") {
@@ -309,34 +334,85 @@ async function gitMatch(action: string | undefined, tokens: string[], cwd: strin
   return undefined;
 }
 
+/** How a command joins the one before it. `start` begins an and-or list: the script start, `;`, a newline or a background `&`. */
+type Join = "start" | "&&" | "||";
+interface ShellCommand {
+  words: string[];
+  join: Join;
+  /** Runs in a subshell, pipeline, group, compound command, substitution or background job: a `cd` here cannot move the script. */
+  isolated: boolean;
+  /** The code line, without heredoc bodies, where the command starts or where its heredoc is read. */
+  line: number;
+  /** A heredoc body, or a substitution in one. It runs when the command on `line` reads the heredoc. */
+  heredoc: boolean;
+}
+const OPENING_WORDS = new Set(["if", "while", "until", "for", "select", "case"]);
+const CLOSING_WORDS = new Set(["fi", "done", "esac"]);
+const INNER_WORDS = new Set(["then", "do", "else", "elif"]);
+const shellCommands = (script: string): string[][] => parseShell(script).map(command => command.words);
+
 /** Quote-aware recognition, not shell execution. Only unquoted heredocs expand substitutions. */
-function shellCommands(script: string, readSubstitutions = true): string[][] {
+function parseShell(script: string, readSubstitutions = true): ShellCommand[] {
   const lines = script.split("\n"); const code: string[] = [];
-  const delimiters: {word: string; quoted: boolean; shell: boolean}[] = [];
-  const shellBodies: string[][] = []; const substitutions: string[][] = []; let body: string[] = [];
+  const delimiters: {word: string; quoted: boolean; shell: boolean; line: number}[] = [];
+  const shellBodies: ShellCommand[] = []; const bodySubstitutions: ShellCommand[] = []; let body: string[] = [];
+  const detached = (words: string[], line: number): ShellCommand => ({words, join: "start", isolated: true, line, heredoc: true});
   for (const line of lines) {
     const delimiter = delimiters[0];
     if (delimiter !== undefined) {
       if (line.replace(/^\t+/u, "") === delimiter.word) {
         delimiters.shift(); const content = body.join("\n");
-        if (delimiter.shell) shellBodies.push(["bash", "-c", content]);
-        if (!delimiter.quoted && readSubstitutions) substitutions.push(...heredocSubstitutions(content));
+        if (delimiter.shell) shellBodies.push(detached(["bash", "-c", content], delimiter.line));
+        if (!delimiter.quoted && readSubstitutions) bodySubstitutions.push(...heredocSubstitutions(content).map(words => detached(words, delimiter.line)));
         body = [];
       } else body.push(line);
       continue;
     }
     code.push(line);
-    const shell = /^\s*(?:bash|sh)\s+.*<</u.test(line);
+    // A shell anywhere on the line, also after `&&`, may read the body. Reading data as a script only gates more.
+    const shell = /(?:^|[\s;&|(){}])(?:bash|sh)\s.*<</u.test(line);
     for (const found of line.matchAll(/(?<!<)<<-?\s*(['"]?)([A-Za-z_][A-Za-z_0-9]*)\1(?=$|[\s;|&<>])/gu)) {
-      if (found[2] !== undefined) delimiters.push({word: found[2], quoted: found[1] !== "", shell});
+      if (found[2] !== undefined) delimiters.push({word: found[2], quoted: found[1] !== "", shell, line: code.length - 1});
     }
   }
-  const result: string[][] = []; let tokens: string[] = []; let word = ""; let quote = ""; let started = false;
-  const flush = () => { if (started) tokens.push(word); word = ""; started = false; };
-  const end = () => { flush(); if (tokens.length > 0) result.push(tokens); tokens = []; };
   const text = code.join("\n");
+  const lineAt = (index: number) => text.slice(0, index).split("\n").length - 1;
+  const result: ShellCommand[] = []; let tokens: string[] = []; let word = ""; let quote = ""; let started = false;
+  let substitutions: string[][] = []; let commandStart = 0;
+  let join: Join = "start"; let piped = false; let listStart = 0;
+  let groups = 0; let compounds = 0;
+  // Set inside `end`, so an object keeps the type checker from narrowing them to their first values.
+  const seen = {continued: false, unbalanced: false};
+  const flush = () => { if (started) tokens.push(word); word = ""; started = false; };
+  const end = (operator: "&&" | "||" | "|" | "&" | ";" | "(" | ")") => {
+    flush();
+    let words = tokens; let isolated = piped || groups > 0 || compounds > 0;
+    for (let first = words[0]; first !== undefined; first = words[0]) {
+      if (OPENING_WORDS.has(first)) compounds++;
+      else if (CLOSING_WORDS.has(first)) { if (compounds === 0) seen.unbalanced = true; else compounds--; }
+      else if (!INNER_WORDS.has(first)) break;
+      isolated = true; words = words.slice(1);
+    }
+    const line = lineAt(commandStart);
+    // Substitutions run before their command, in the same folder and only when it runs.
+    for (const inner of substitutions) result.push({words: inner, join, isolated: true, line, heredoc: false});
+    if (words.length > 0) result.push({words, join, isolated, line, heredoc: false});
+    tokens = []; substitutions = [];
+    seen.continued = operator === "&&" || operator === "||" || operator === "|";
+    if (operator === "|") { const last = result.at(-1); if (last !== undefined) last.isolated = true; piped = true; return; }
+    piped = false;
+    if (operator === "&&" || operator === "||") join = operator;
+    else if (operator === ";") { join = "start"; listStart = result.length; }
+    else if (operator === "&") { for (const command of result.slice(listStart)) command.isolated = true; join = "start"; listStart = result.length; }
+    else if (operator === "(") groups++;
+    else if (groups === 0) seen.unbalanced = true; else groups--;
+  };
   for (let i = 0; i < text.length; i++) {
     const c = text[i] ?? "";
+    const empty = !started && tokens.length === 0 && substitutions.length === 0;
+    if (empty) commandStart = i;
+    // A newline or comment after `&&`, `||` or `|` continues the list; it does not start a new one.
+    if (empty && seen.continued && c === "\n") continue;
     if (c === "\\" && quote !== "'") {
       const escaped = text[++i] ?? "";
       if (escaped !== "\n") { word += escaped; started = true; }
@@ -345,17 +421,30 @@ function shellCommands(script: string, readSubstitutions = true): string[][] {
     if (quote !== "'" && (c === "`" || (c === "$" && text[i + 1] === "("))) {
       const endIndex = substitutionEnd(text, i);
       const inner = text.slice(i + (c === "`" ? 1 : 2), endIndex);
-      if (readSubstitutions) substitutions.push(...shellCommands(inner, false));
+      if (readSubstitutions) substitutions.push(...parseShell(inner, false).map(command => command.words));
       word += "<substitution>"; started = true; i = endIndex; continue;
     }
     if (quote !== "") { if (c === quote) quote = ""; else word += c; started = true; continue; }
     if (c === "'" || c === '"') { quote = c; started = true; continue; }
-    if (c === "#" && !started) { while (i < text.length && text[i] !== "\n") i++; end(); continue; }
-    if (";|&\n(){}".includes(c)) { end(); continue; }
+    if (c === "#" && !started) { while (i < text.length && text[i] !== "\n") i++; if (!(empty && seen.continued)) end(";"); continue; }
+    // `>&`, `<&` and `&>` are redirects, not control operators.
+    if (c === "&" && (text[i + 1] === ">" || (started && (text[i - 1] === ">" || text[i - 1] === "<")))) { word += c; started = true; continue; }
+    if (c === "&" || c === "|") {
+      const doubled = text[i + 1] === c;
+      if (doubled || (c === "|" && text[i + 1] === "&")) i++; // `|&` pipes stderr too.
+      if (c === "&") end(doubled ? "&&" : "&"); else end(doubled ? "||" : "|");
+      continue;
+    }
+    if (c === ";" || c === "\n") { end(";"); continue; }
+    if (c === "(" || c === "{") { end("("); continue; }
+    if (c === ")" || c === "}") { end(")"); continue; }
     if (/\s/u.test(c)) { flush(); continue; }
     word += c; started = true;
   }
-  end(); return [...result, ...shellBodies, ...substitutions];
+  end(";");
+  // An unbalanced group or compound command hides which commands run in this shell.
+  if (seen.unbalanced || groups > 0 || compounds > 0) for (const command of result) command.isolated = true;
+  return [...result, ...shellBodies, ...bodySubstitutions];
 }
 function substitutionEnd(text: string, start: number): number {
   const backtick = text[start] === "`"; let depth = 1; let quote = "";
@@ -380,7 +469,7 @@ function heredocSubstitutions(text: string): string[][] {
     if (text[i] === "\\") { i++; continue; }
     if (text[i] === "`" || (text[i] === "$" && text[i + 1] === "(")) {
       const end = substitutionEnd(text, i);
-      result.push(...shellCommands(text.slice(i + (text[i] === "`" ? 1 : 2), end), false)); i = end;
+      result.push(...parseShell(text.slice(i + (text[i] === "`" ? 1 : 2), end), false).map(command => command.words)); i = end;
     }
   }
   return result;

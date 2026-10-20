@@ -72,8 +72,10 @@ const cases: [string, string | undefined, RepositoryState?][] = [
   ["cd x && git push origin feature", undefined], ["cd x && git push origin feature 2>&1 | tail -3", undefined],
   ["cd ~/x && cd y && git push -q origin feature", undefined], ["cd x && git push origin main", "push-default"],
   ["cd x || true && git push origin feature", "force-push"], ["cd x | cat && git push origin feature", "force-push"],
-  ["cd \"$X\" && git push origin feature", "force-push"], ["true && cd x && git push origin feature", "force-push"],
-  ["(cd x); git push origin feature", "force-push"],
+  ["cd \"$X\" && git push origin feature", "force-push"], ["true && cd x && git push origin feature", undefined],
+  ["(cd x); git push origin feature", "force-push"], ["true && cd x && git push origin main", "push-default"],
+  ["cd x 2>/dev/null && git push origin feature", undefined], ["git fetch && cd x; git push origin feature", "force-push"],
+  ["if true; then git push -f; fi", "force-push"], ["git push origin feature 2>&1", undefined],
   ["(git push --force)", "force-push"], ["{ git push --force; }", "force-push"],
   ["git \\\npush --force", "force-push"], ["gi\\\nt push --force", "force-push"],
   ['echo "$(git push --force)"', "force-push"], ["echo $(git push --force)", "force-push"],
@@ -246,8 +248,8 @@ it("discards files in a disposable worktree without approval, and reads the root
   // A leading `cd <path> &&` is certain: the rest runs there or not at all.
   expect(await classify("cd /tmp/clone && git clean -fd")).toBeUndefined();
   expect(await classify("cd /tmp/clone && git worktree remove --force /tmp/baseline && echo ok")).toBeUndefined();
-  // Any other conditional cd stays unknown: the parser cannot tell && from || or a pipe.
-  expect(await classify("echo start && cd /tmp/clone && git clean -fd")).toBe("destroy-local");
+  // A `cd` later in an `&&` chain is certain too: the rest runs there or not at all.
+  expect(await classify("echo start && cd /tmp/clone && git clean -fd")).toBeUndefined();
   // The removed worktree decides, not the cwd.
   expect(await classify("git worktree remove --force /tmp/baseline")).toBeUndefined();
   expect(await classify("git worktree remove --force ../../repo/copy", "/tmp/clone")).toBe("destroy-local");
@@ -260,6 +262,82 @@ it("discards files in a disposable worktree without approval, and reads the root
   const failing: GatedActionReads = {...scratch, git: () => Promise.reject(new Error("not a repository"))};
   expect((await gatedAction("bash", {command: "git reset --hard"}, "/tmp/clone", failing))?.category).toBe("destroy-local");
   expect(asked).toContain("/tmp/baseline");
+});
+
+it("follows each `cd <literal> &&` of a land recipe to the tree that each Git command changes", async () => {
+  const asked: string[] = [];
+  const project: GatedActionReads = {
+    ...reads,
+    git: (cwd, args) => args[0] === "rev-parse" && args[1] === "--show-toplevel"
+      ? Promise.resolve(`${cwd.startsWith("/repo/.worktree/") ? cwd : "/repo"}\n`) : reads.git(cwd, args),
+    disposable: (root) => { asked.push(root); return Promise.resolve(root.startsWith("/repo/.worktree/")); },
+  };
+  const classify = async (command: string, cwd = "/elsewhere") => (await gatedAction("bash", {command}, cwd, project))?.category;
+  const land = "cd /repo/.worktree/x && git add -A && git commit -qm 'Fix' && cd /repo && git merge --ff-only x";
+  // The removal reaches the disposable rule and its backup, in the tree that the last `cd` names.
+  expect(await classify(`${land} && git worktree remove .worktree/x`)).toBeUndefined();
+  expect(await classify(`${land} && git worktree remove --force .worktree/x && git branch -d x`)).toBeUndefined();
+  expect(asked).toEqual(["/repo/.worktree/x", "/repo/.worktree/x"]);
+  // A relative `cd` resolves from the last certain folder.
+  expect(await classify("cd .worktree/x && git commit -qm Fix && cd ../.. && git worktree remove .worktree/x", "/repo")).toBeUndefined();
+  // Shared branches and the main checkout stay gated.
+  expect(await classify(`${land} && git push origin main`)).toBe("push-default");
+  expect(await classify(`${land} && git reset --hard`)).toBe("destroy-local");
+  expect(await classify(`${land} && git branch -D x`)).toBe("destroy-local");
+  expect(await classify("cd /repo && git clean -fd", "/repo/.worktree/x")).toBe("destroy-local");
+  expect(await classify("cd /repo/.worktree/x && git status && cd /repo && git checkout -- dirty.txt")).toBe("destroy-local");
+  expect(await classify("cd /repo/.worktree/x && cd .. && git clean -fd")).toBe("destroy-local");
+});
+
+it("accepts redirects on cd and keeps every folder it cannot prove uncertain", async () => {
+  const scratch: GatedActionReads = {
+    ...reads,
+    git: (cwd, args) => args[0] === "rev-parse" && args[1] === "--show-toplevel" ? Promise.resolve(`${cwd}\n`) : reads.git(cwd, args),
+    disposable: (root) => Promise.resolve(root.startsWith("/tmp/")),
+  };
+  const classify = async (command: string, cwd = "/tmp/start") => (await gatedAction("bash", {command}, cwd, scratch))?.category;
+  for (const command of ["cd /tmp/x 2>/dev/null && git checkout -- dirty.txt", "cd /tmp/x >/dev/null 2>&1 && git clean -fd", "cd /tmp/x 2> /dev/null && git reset --hard", "cd -- /tmp/x &>/dev/null && git restore dirty.txt"]) {
+    expect(await classify(command, "/repo")).toBeUndefined();
+  }
+  // Both folders are disposable, so only an uncertain folder, whose Git reads fail closed, can gate these.
+  expect(await classify("cd /tmp/clone && git clean -fd")).toBeUndefined();
+  expect(await classify("cd /tmp/clone\nbash <<EOF\ngit clean -fd\nEOF")).toBeUndefined();
+  // A newline or comment after `&&`, `||` or `|` continues the list.
+  expect(await classify("cd /tmp/clone &&\n  git clean -fd")).toBeUndefined();
+  expect(await classify("cd /tmp/clone && # enter the clone\n  git clean -fd")).toBeUndefined();
+  for (const command of [
+    "cd /tmp/clone || true && git clean -fd", "cd /tmp/clone 2>/dev/null || exit 1; git clean -fd", "cd /tmp/clone ||\n  true\ngit clean -fd",
+    "cd /tmp/clone |\n  cat && git clean -fd", "false || cd /tmp/clone && git clean -fd",
+    "git fetch && cd /tmp/clone; git clean -fd", "cd /tmp/clone | cat && git clean -fd", "cd /tmp/clone |& cat && git clean -fd",
+    "(cd /tmp/clone) && git clean -fd", "(cd /tmp/clone && true); git clean -fd", "{ cd /tmp/clone; } && git clean -fd",
+    "cd /tmp/clone & git clean -fd", "cd /tmp/clone && true & git clean -fd", "echo $(cd /tmp/clone) && git clean -fd",
+    "if true; then cd /tmp/clone; fi; git clean -fd", "for d in a; do cd /tmp/clone; done && git clean -fd",
+    "cd \"$DIR\" && git clean -fd", "cd $(mktemp -d) && git clean -fd", "cd `mktemp -d` && git clean -fd", "cd /tmp/cl* && git clean -fd",
+    "cd ~other && git clean -fd", "cd -P /tmp/clone && git clean -fd", "cd - && git clean -fd", "cd && git clean -fd",
+    "pushd /tmp/clone && git clean -fd", "builtin cd /tmp/clone && git clean -fd", "env cd /tmp/clone && git clean -fd",
+    "cd /tmp/clone || true; bash -c 'git clean -fd'", "cd /tmp/clone && bash <<EOF\ngit clean -fd\nEOF",
+  ]) expect(await classify(command), command).toBe("destroy-local");
+  // Substitutions and heredoc bodies run where their command runs, not where a later `cd` goes.
+  expect(await classify("echo $(git clean -fd) && cd /tmp/clone", "/repo")).toBe("destroy-local");
+  expect(await classify("bash <<EOF\ngit clean -fd\nEOF\ncd /tmp/clone", "/repo")).toBe("destroy-local");
+});
+
+it("gates `cd <missing>; <destructive>` because the Git read in the missing folder fails", async () => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), "forgerie-classifier-cd-")));
+  const main = join(base, "main"); const clone = join(base, "clone");
+  const observed: GatedActionReads = {
+    ...reads,
+    git: async (cwd, args) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8"})).stdout,
+    disposable: (root) => Promise.resolve(root === clone),
+  };
+  const classify = async (command: string) => (await gatedAction("bash", {command}, main, observed))?.category;
+  try {
+    for (const repo of [main, clone]) await promisify(execFile)("git", ["init", "-q", "-b", "main", repo]);
+    expect(await classify(`cd ${clone}; git clean -fd`)).toBeUndefined();
+    // If this `cd` fails, git clean runs in the main checkout.
+    expect(await classify(`cd ${join(base, "missing")}; git clean -fd`)).toBe("destroy-local");
+    expect(await classify("git clean -fd")).toBe("destroy-local");
+  } finally { await rm(base, {recursive: true, force: true}); }
 });
 
 it("does not gate marking a draft PR ready for review", async () => {
