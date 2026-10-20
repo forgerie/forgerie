@@ -48,6 +48,18 @@ export class SessionEventHub {
   private readonly hostBySession = new Map<string, { shells: { events: SessionOpenTransientEvent[]; after?: string | undefined }[]; consumed: Set<string>; command?: Extract<SessionOpenTransientEvent, { type: "command.output" }> }>();
   private readonly nativeRefresh = new Map<string, Set<() => void>>();
 
+  /** Scalar ownership counts only; identities and transcript data never leave the hub. */
+  diagnostics() {
+    return {
+      socketSessions: this.socketsBySession.size,
+      sessionSockets: [...this.socketsBySession.values()].reduce((count, sockets) => count + sockets.size, 0),
+      globalSockets: this.globalSockets.size,
+      hostObservers: [...this.nativeRefresh.values()].reduce((count, listeners) => count + listeners.size, 0),
+      sequenceSessions: this.seqBySession.size,
+      hostStateSessions: this.hostBySession.size,
+    };
+  }
+
   /** Host-only state has no Durable commit. Reacquire a native cut instead of forwarding SDK status. */
   observeHostState(sessionId: string, changed: () => void): () => void {
     const listeners = this.nativeRefresh.get(sessionId) ?? new Set<() => void>();
@@ -138,7 +150,14 @@ export class SessionEventHub {
     sockets.add(socket);
     socket.on("close", () => {
       sockets.delete(socket);
+      this.releaseEmptySessionSockets(sessionId, sockets);
     });
+  }
+
+  /** Drop only this empty browser-socket bucket. Sequence and history identities stay for reattachment. */
+  private releaseEmptySessionSockets(sessionId: string, sockets: Set<RealtimeSocket>): void {
+    // A late close from an earlier connection must not remove a replacement bucket.
+    if (sockets.size === 0 && this.socketsBySession.get(sessionId) === sockets) this.socketsBySession.delete(sessionId);
   }
 
   addDurable(sessionId: string, socket: RealtimeSocket): void {
@@ -202,7 +221,9 @@ export class SessionEventHub {
     this.seqBySession.set(sessionId, seq);
     if (event.type === "status.update") for (const changed of this.nativeRefresh.get(sessionId) ?? []) changed();
     const payload = JSON.stringify({ ...projectBrowserSessionEvent(event), seq });
-    this.sendToSockets(this.socketsBySession.get(sessionId), payload, event.type.startsWith("shell.") || event.type === "command.output" || event.type.startsWith("dialog.") || event.type === "session.error" || event.type === "pi.event" || event.type === "processes.update" || event.type === "processes.output");
+    const sockets = this.socketsBySession.get(sessionId);
+    this.sendToSockets(sockets, payload, event.type.startsWith("shell.") || event.type === "command.output" || event.type.startsWith("dialog.") || event.type === "session.error" || event.type === "pi.event" || event.type === "processes.update" || event.type === "processes.output");
+    if (sockets !== undefined) this.releaseEmptySessionSockets(sessionId, sockets);
   }
 
   /**
