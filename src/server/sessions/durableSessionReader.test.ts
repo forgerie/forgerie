@@ -893,6 +893,33 @@ it("reuses the admitted publisher's committed history for HTTP open while retain
   expect(f.leased()).toBe(0);
 });
 
+it("keeps the borrowed open history equal to storage after a failed durable write", async () => {
+  const f = await fixture();
+  await f.conversation().commit(async tx => {
+    await initializeParentDocuments(tx, { id: f.conversation().id });
+    await tx.doc(LiveDoc, f.conversation().id); await tx.doc(InboxDoc, f.conversation().id); await tx.doc(UsageDoc, f.conversation().id);
+  }, context);
+  await f.user("committed input");
+  const ref = { id: "logical", cwd: f.directory };
+  const attachment = await f.reader.attachOpen(ref, f.hub, () => Promise.resolve(), error => { throw error; });
+  let borrowed: SessionOpenResult | undefined;
+  try {
+    await expect(f.conversation().commit(async tx => {
+      await tx.appendEntry(UserEntry, f.conversation().id, { model: [{ role: "user", content: "rolled back input", timestamp: 2 }] });
+      throw new Error("durable write failed");
+    }, context)).rejects.toThrow("durable write failed");
+    const entries = vi.spyOn(f.conversation(), "entries");
+    borrowed = await f.reader.open(ref, { limit: 50 }, f.hub);
+    expect(entries).not.toHaveBeenCalled();
+    entries.mockRestore();
+    await f.user("later committed input");
+    expect((await f.reader.open(ref, { limit: 50 }, f.hub))?.page.messages.map(message => message.content)).toEqual(["committed input", "later committed input"]);
+  } finally { await attachment?.stop(); }
+  expect(borrowed?.page.messages.map(message => message.content)).toEqual(["committed input"]);
+  // Without a publisher the reader scans storage; both projections agree.
+  expect((await f.reader.open(ref, { limit: 50 }, f.hub))?.page.messages.map(message => message.content)).toEqual(["committed input", "later committed input"]);
+});
+
 it("nests the reader's storage spans inside the service's native storage-read span, with and without an attached publisher", async () => {
   const f = await fixture();
   await f.conversation().commit(async tx => {
