@@ -153,19 +153,23 @@ Two more cases copy the deployed sessiond unit (`Restart=always`, `RestartSec=3s
 
 | Case | In-flight tool | Stop | Requires |
 | --- | --- | --- | --- |
-| `continuation` | A `bash` command that systemd's SIGTERM reaches directly. | `TimeoutStopSec=20s`, as deployed. | The next model step's extension and `bash` tool calls run once, under the new owner, and succeed. No `ownership lost`, `ELOCKED` or `flock exit` in the transcript or daemon log. `NRestarts` stays 0. |
+| `continuation` | A `bash` command that systemd's SIGTERM reaches directly (exit 143). | `TimeoutStopSec=20s`, as deployed. | The stopping daemon sends no model request that answers a tool result. The held command starts once and reports `Tool bash was interrupted and may have partially run`. The next model step's extension and `bash` tool calls run once, under the new owner, and succeed. No `ownership lost`, `ELOCKED` or `flock exit` in the transcript or daemon log. `NRestarts` stays 0. |
 | `slow-stop` | An extension tool that ignores abort. | `TimeoutStopSec=3s`. The case first checks that the stop ended with `Result=timeout` (systemd sent SIGKILL). | The same as `continuation`: an immediate start must not fail with `Lock file is already being held` (`ELOCKED`). |
 
-Both cases are **expected red** on current main, and both are races: one pass
-does not prove a fix. Results in one worktree on 2026-10-20, at host load
-average 15–35:
+`continuation` is **expected green** since the stopping daemon holds parent turns
+(issue #70). `slow-stop` is **expected red** until the `ELOCKED` start defect is
+fixed. Both are races: one pass does not prove a fix. Results in one worktree on
+2026-10-20:
 
-| Case | Runs | Red | Failure seen |
-| --- | --- | --- | --- |
-| `continuation` | 5 | 1 | The next model step's tool call ran under the stopping owner during shutdown. `ownership lost` text was not seen; this case does not yet reproduce the production message reliably. |
-| `slow-stop` | 6 | 5 | `Lock file is already being held` (`ELOCKED`) on `data/workspace-services` at the immediate start. In the one pass, the new daemon took about 7 s to start under load; the SIGKILLed owner's `proper-lockfile` lock (stale after 10 s) had probably expired by then. |
+| Case | Build | Runs | Red | Failure seen |
+| --- | --- | --- | --- | --- |
+| `continuation` | Before the turn hold, with the request check (load average 7–9) | 3 | 3 | The stopping daemon sent a model request that answered the exit 143 result. |
+| `continuation` | With the turn hold (load average 6–9) | 5 | 0 | None. |
+| `continuation` | Before the turn hold and the request check (load average 15–35) | 5 | 1 | The next model step's tool call ran under the stopping owner during shutdown. Without the request check, a fast shutdown hid the continued turn. |
+| `slow-stop` | With the turn hold | 1 | 1 | `Lock file is already being held` (`ELOCKED`) on `data/workspace-services` at the immediate start. |
+| `slow-stop` | Before the turn hold (load average 15–35) | 6 | 5 | `Lock file is already being held` (`ELOCKED`) on `data/workspace-services` at the immediate start. In the one pass, the new daemon took about 7 s to start under load; the SIGKILLed owner's `proper-lockfile` lock (stale after 10 s) had probably expired by then. |
 
-Wire the proof into deployment only after the product fix and repeated green
+Wire the proof into deployment only after the `ELOCKED` fix and repeated green
 runs of all four cases. Run one case with
 `npm run verify:durable-restart -- --daemon continuation`; the default runs
 `graceful`, `forced`, `continuation` and `slow-stop`.
@@ -176,7 +180,8 @@ timeout or automatic restarts as `warnings` in its output and `result.json`.
 These warnings never cause a rollback. See [deployment](deployment.md).
 
 Current-repo result (2026-10-18, repeated 2026-10-20): graceful restart passed. Immediate startup after
-SIGKILL failed with `ELOCKED` on the temporary `data/workspace-services` directory.
+SIGKILL failed with `ELOCKED` on the temporary `data/workspace-services` directory
+(`forced` again on 2026-10-20 with the turn hold).
 The acceptance command remains standalone and is **not connected to deployment
 preflight** while that real ownership defect is present. The staged launcher in
 `scripts/redeploy-when-idle.sh` delegates publication checks to `src/deployment.ts`;

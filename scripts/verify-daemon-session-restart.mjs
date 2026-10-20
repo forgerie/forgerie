@@ -36,13 +36,13 @@ const readOptional = path => readFile(path, "utf8").catch(error => { if (error.c
  * graceful and forced restart with an in-process tool in flight.
  * continuation and slow-stop copy the deployed sessiond unit (Restart=always,
  * RestartSec=3s, KillMode=control-group) and the publisher's stop, then start.
- * Both are expected red until the ownership defect is fixed; see docs/testing.md.
+ * slow-stop is expected red until the ELOCKED start defect is fixed; see docs/testing.md.
  */
 const CASES = {
   graceful: { hold: "proof_hold", timeoutStop: "10s" },
   forced: { hold: "proof_hold", timeoutStop: "10s" },
-  // The first call is a bash command, which systemd's SIGTERM reaches directly.
-  // The next model step calls another tool, which must run under the new owner.
+  // The first call is a bash command, which systemd's SIGTERM reaches directly (exit 143).
+  // The stopping daemon must not answer that result; the next model step's tools run under the new owner.
   continuation: { hold: "bash", timeoutStop: "20s", production: true },
   // The in-flight tool ignores abort, so the graceful stop outlasts TimeoutStopSec
   // and systemd sends SIGKILL. The start follows at once.
@@ -80,6 +80,7 @@ async function runCase(mode) {
     await writeFile(join(directory, "config.json"), JSON.stringify({ agent: { command: "pi", dir: profile } }));
     await writeFile(join(profile, "extensions/restart-proof.ts"), `
       import { appendFile } from 'node:fs/promises';
+      import { appendFileSync } from 'node:fs';
       import { setTimeout as delay } from 'node:timers/promises';
       import { fauxProvider, fauxAssistantMessage, fauxToolCall } from ${JSON.stringify(fileURLToPath(import.meta.resolve("@earendil-works/pi-ai/providers/faux")))};
       import { Type } from 'typebox';
@@ -91,6 +92,8 @@ async function runCase(mode) {
           const call = (name, args, id) => fauxToolCall(name, args, { id });
           const calls = values => fauxAssistantMessage(values, { stopReason: 'toolUse' });
           if (!task) return fauxAssistantMessage('Restart acceptance');
+          // Every model request, with the daemon that sent it and the tool result it answers.
+          appendFileSync(${JSON.stringify(join(directory, "requests.jsonl"))}, JSON.stringify({ pid: process.pid, last: last?.role === 'toolResult' ? last.toolCallId : last?.role }) + '\\n');
           const hold = ${JSON.stringify(settings.hold)};
           if (last?.role === 'user') return calls([hold === 'bash' ? call('bash', { command: ${JSON.stringify(holdCommand)} }, 'hold') : call(hold, {}, 'hold')]);
           const results = context.messages.filter(message => message.role === 'toolResult');
@@ -169,6 +172,11 @@ async function runCase(mode) {
       await execute("systemctl", ["--user", "start", unit]);
     }
     const after = await poll(async () => { const pid = await ownerPid(); return pid !== 0 && pid !== before ? pid : undefined; }, "new owner");
+    // The stopping daemon must not continue the turn: none of its model requests answers a tool result.
+    // Title requests also end with the user message, so they are not counted.
+    const requests = await readOptional(join(directory, "requests.jsonl"));
+    assert.deepEqual(requests.trim().split("\n").filter(line => line !== "").map(JSON.parse).filter(request => request.pid === before && request.last !== "user"), [],
+      `The stopping daemon ${before} sent a model request after the stop signal:\n${requests}`);
     // No prompt, open request, or websocket is sent to the new daemon before recovery completes.
     await poll(async () => {
       assert.notEqual(await ownerPid(), 0, `New daemon exited:\n${(await readFile(join(directory, "daemon.log"), "utf8")).slice(-5000)}`);
@@ -191,7 +199,8 @@ async function runCase(mode) {
     assert.doesNotMatch(text, /ownership lost|ELOCKED|flock exit/);
     const calls = (await readFile(join(directory, "calls.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
     if (settings.production === true) {
-      // The second call ran once, under the new owner, and succeeded.
+      // The held call started once and was not rerun. The second call ran once, under the new owner, and succeeded.
+      if (settings.hold === "bash") assert.match(text, /Tool bash was interrupted and may have partially run/);
       assert.deepEqual(calls, [settings.hold === "bash" ? { name: "bash_hold" } : { name: settings.hold, pid: before }, { name: "proof_owner", pid: after }]);
       assert.match(text, new RegExp(`owner ${after}`)); assert.match(text, /PROOF-BASH-OK/);
       const state = await unitState();
