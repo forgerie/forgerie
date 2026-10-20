@@ -138,6 +138,9 @@ it("defers speculative and hidden reconnect panel reads until selection, without
   expect(panels()).toHaveLength(0);
   expect(api.registry.select(session("hidden"))).toBe(entry);
   await vi.waitFor(() => expect(panels()).toHaveLength(7));
+  // A child read still in flight when the entry hides is aborted and correctly read again on show.
+  // Settle it first so the count below covers only the deferred change event.
+  await vi.waitFor(() => expect(entry.childAgents.getSnapshot().available).toBe(false));
   expect(api.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(2);
   api.registry.setVisible(false);
   api.emit({ type: "pi.event", eventType: "durable_children_changed" });
