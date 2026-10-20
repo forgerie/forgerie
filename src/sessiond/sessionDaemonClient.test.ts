@@ -106,6 +106,45 @@ describe("bounded diagnostic requests", () => {
   });
 });
 
+describe("opt-in measurement trace header", () => {
+  it.skipIf(process.platform === "win32").each(["http", "socket"] as const)("forwards only a validated trace identity over %s", async (transport) => {
+    const dir = await mkdtemp(join(tmpdir(), "forgerie-daemon-trace-"));
+    const socketPath = join(dir, "daemon.sock");
+    const seen: (string | string[] | undefined)[] = [];
+    const server = createServer((request, response) => {
+      seen.push(request.headers["x-forgerie-trace"]);
+      request.resume();
+      request.on("end", () => { response.writeHead(200, { "content-type": "application/json" }); response.end("{}"); });
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        if (transport === "http") server.listen(0, "127.0.0.1", resolve);
+        else server.listen(socketPath, resolve);
+      });
+      if (transport === "http") {
+        const address = server.address();
+        if (address === null || typeof address === "string") throw new Error("Expected an HTTP listen address");
+        vi.stubEnv("PI_WEB_SESSIOND_URL", `http://127.0.0.1:${String(address.port)}`);
+      } else {
+        vi.stubEnv("PI_WEB_SESSIOND_URL", "");
+        vi.stubEnv("PI_WEB_SESSIOND_SOCKET", socketPath);
+      }
+      const client = new SessionDaemonClient();
+      const trace = "0123456789abcdef0123456789abcdef";
+      await client.request("GET", "/plain");
+      await client.request("GET", "/traced", undefined, undefined, { traceId: trace });
+      await client.request("POST", "/traced-body", { cwd: "/repo" }, undefined, { traceId: trace });
+      await client.request("GET", "/malformed", undefined, undefined, { traceId: "not-a-trace\r\nx-injected: 1" });
+      expect(seen).toEqual([undefined, trace, trace, undefined]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => { server.close(() => { resolve(); }); });
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 function runtimeResponse(profile: unknown) {
   return {
     statusCode: 200,

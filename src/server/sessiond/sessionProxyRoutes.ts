@@ -5,29 +5,89 @@ import { SessionDaemonClient } from "../../sessiond/sessionDaemonClient.js";
 import { RESOURCE_EDITOR_BODY_LIMIT } from "../../shared/resourceEditor.js";
 import { SESSION_SOCKET_MAX_BYTES, SESSION_SOCKET_SEND_TIMEOUT_MS } from "../../shared/sessionWire.js";
 import { SESSION_IMAGE_MIME_TYPES } from "../sessions/sessionImages.js";
+import { createStackLatencyContext, type StackLatencyRecording } from "../realtime/stackLatency.js";
+import { STACK_LATENCY_SERVER_TIMING, STACK_LATENCY_TRACE_HEADER, stackLatencyTraceId, type StackLatencySink, type StackLatencySpan } from "../../shared/stackLatency.js";
+
+export interface SessionProxyRequestOptions { traceId?: string }
 
 export interface SessionProxyDaemon {
-  request(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<{ statusCode: number; headers: Record<string, string>; body: string }>;
+  request(method: string, path: string, body?: unknown, signal?: AbortSignal, options?: SessionProxyRequestOptions): Promise<{ statusCode: number; headers: Record<string, string>; body: string }>;
   connectWebSocket(path: string): WebSocket;
 }
 
-export function registerSessionProxyRoutes(app: FastifyInstance, daemon: SessionProxyDaemon = new SessionDaemonClient(), prefix = "/api"): void {
+/** Measurement is opt-in. Without both fields the proxy forwards no trace and records nothing. */
+export interface SessionProxyRouteOptions { measurement?: boolean; sink?: StackLatencySink }
+
+interface ProxyTrace { recording: StackLatencyRecording; finishSerialize?: (outcome?: StackLatencySpan["outcome"]) => void }
+
+export function registerSessionProxyRoutes(app: FastifyInstance, daemon: SessionProxyDaemon = new SessionDaemonClient(), prefix = "/api", options: SessionProxyRouteOptions = {}): void {
+  const sink = options.measurement === true ? options.sink : undefined;
+  const traces = new WeakMap<object, ProxyTrace>();
+  if (sink !== undefined) {
+    // Fastify serializes (and the edge compresses) between these hooks, so the
+    // span is a serialization interval, not pure JSON.stringify CPU time.
+    // The hooks complete synchronously on purpose. An async preSerialization or
+    // onSend hook defers every reply.send() on this app, so a handler that sends
+    // and then resolves undefined (as the proxy's error path does) would make
+    // Fastify send a second time and write headers twice.
+    app.addHook("preSerialization", (request, _reply, payload, done) => {
+      const trace = traces.get(request);
+      if (trace !== undefined) trace.finishSerialize = trace.recording.start("serialize");
+      done(null, payload);
+    });
+    app.addHook("onSend", (request, _reply, payload, done) => {
+      traces.get(request)?.finishSerialize?.();
+      done(null, payload);
+    });
+    app.addHook("onResponse", (request, _reply, done) => {
+      traces.get(request)?.recording.dispose();
+      traces.delete(request);
+      done();
+    });
+  }
+  const traceFor = (reply: FastifyReply, path: string): ProxyTrace | undefined => {
+    if (sink === undefined) return undefined;
+    const traceId = stackLatencyTraceId(reply.request.headers[STACK_LATENCY_TRACE_HEADER]);
+    const operation = proxyOperation(path);
+    if (traceId === undefined || operation === undefined) return undefined;
+    const trace = { recording: createStackLatencyContext({ traceId, clock: "web", operation, sink }) };
+    traces.set(reply.request, trace);
+    return trace;
+  };
   const proxy = async (request: { method: string; url: string; body?: unknown }, reply: FastifyReply) => {
     const controller = new AbortController();
     const disconnected = () => { if (!reply.raw.writableFinished) controller.abort(); };
     reply.raw.once("close", disconnected);
+    const path = stripPrefix(request.url, prefix);
+    const trace = traceFor(reply, path);
     try {
-      const upstream = await daemon.request(request.method, stripPrefix(request.url, prefix), request.body, controller.signal);
+      const finishTransport = trace?.recording.start("transport");
+      let upstream: Awaited<ReturnType<SessionProxyDaemon["request"]>>;
+      try {
+        upstream = trace === undefined
+          ? await daemon.request(request.method, path, request.body, controller.signal)
+          : await daemon.request(request.method, path, request.body, controller.signal, { traceId: trace.recording.traceId });
+        finishTransport?.();
+      } catch (error) { finishTransport?.(controller.signal.aborted ? "aborted" : "error"); throw error; }
       reply.code(upstream.statusCode);
       const contentType = upstream.headers["content-type"];
       if (contentType !== undefined && contentType !== "") reply.header("content-type", contentType);
       const retryAfter = upstream.headers["retry-after"];
       if (retryAfter !== undefined && retryAfter !== "") reply.header("retry-after", retryAfter);
+      if (sink !== undefined) {
+        const timing = allowedServerTiming(upstream.headers["server-timing"]);
+        if (timing !== undefined) reply.header("server-timing", timing);
+      }
       if (upstream.body === "") return undefined;
-      const value: unknown = JSON.parse(upstream.body);
-      return value;
+      const finishDecode = trace?.recording.start("decode");
+      try {
+        const value: unknown = JSON.parse(upstream.body);
+        finishDecode?.();
+        return value;
+      } catch (error) { finishDecode?.("error"); throw error; }
     } catch (error) {
       if (!controller.signal.aborted) requestFailed(reply, error);
+      else trace?.recording.dispose();
       return undefined;
     } finally { reply.raw.off("close", disconnected); }
   };
@@ -91,6 +151,33 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
   });
   app.all(`${prefix}/sessions`, (request, reply) => proxy(request, reply));
   app.all(`${prefix}/sessions/*`, (request, reply) => proxy(request, reply));
+}
+
+/** Only operations the measurement contract names; other routes stay untraced. */
+function proxyOperation(path: string): StackLatencySpan["operation"] | undefined {
+  const pathname = path.split("?", 1)[0] ?? path;
+  if (/^\/sessions\/[^/]+\/open$/u.test(pathname)) return "session-open";
+  if (/^\/sessions\/[^/]+\/processes\/[^/]+\/output$/u.test(pathname)) return "process-output";
+  if (/^\/sessions\/[^/]+\/processes$/u.test(pathname)) return "process-list";
+  if (/^\/backlog(?:\/|$)/u.test(pathname)) return "backlog";
+  if (/^\/project-(?:workspaces|groups)(?:\/|$)/u.test(pathname)) return "project-context";
+  return undefined;
+}
+
+const SERVER_TIMING_NAMES: ReadonlySet<string> = new Set(STACK_LATENCY_SERVER_TIMING);
+
+/** Keep allow-listed names with a finite nonnegative duration; drop descriptions and other fields. */
+function allowedServerTiming(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const entries = value.split(",").flatMap((entry) => {
+    const [name, ...params] = entry.split(";").map(part => part.trim());
+    if (name === undefined || !SERVER_TIMING_NAMES.has(name)) return [];
+    const raw = params.find(param => param.startsWith("dur="))?.slice(4);
+    if (raw === undefined || !/^\d+(?:\.\d+)?$/u.test(raw)) return [];
+    const duration = Number(raw);
+    return Number.isFinite(duration) ? [`${name};dur=${String(duration)}`] : [];
+  });
+  return entries.length === 0 ? undefined : entries.join(", ");
 }
 
 function sessionImageBody(body: string): { mimeType: string; data: string } | undefined {
