@@ -35,6 +35,7 @@ export class ManagedProcessTools {
   private requestTurn: (() => Promise<void>) | undefined;
   private report: ((error: unknown) => void) | undefined;
   private wake: Promise<void> | undefined;
+  private readonly changeListeners = new Set<() => Promise<void>>();
   constructor(private readonly options: ProcessToolOptions) {}
 
   async initialize(deliver?: (summary: ProcessEventSummary) => Promise<void>): Promise<void> {
@@ -75,8 +76,14 @@ export class ManagedProcessTools {
     };
     if (this.timer === undefined && !this.closed) tick();
   }
+  /** Observers run after the mutation line is released, so they can safely list processes. */
+  onChange(listener: () => Promise<void>): () => void {
+    this.changeListeners.add(listener);
+    return () => { this.changeListeners.delete(listener); };
+  }
   async dispose(): Promise<void> {
     this.closed = true;
+    this.changeListeners.clear();
     clearTimeout(this.timer);
     await this.operations;
   }
@@ -158,6 +165,12 @@ export class ManagedProcessTools {
         return { action: args.action, ...(selected === undefined ? {} : { process: selected }),
           ...(startedId === undefined ? {} : { id: startedId, notice: "If this is an attached process, it ends when Forgerie restarts." }), error: error instanceof ProcessToolInputError || error instanceof ManagedProcessLaunchError ? error.message : "Managed process operation failed; inspect its status before retrying" };
       }
+    }).then(async result => {
+      // Failed launches and partial writes can still change the saved process or its output.
+      if (args.action !== "list" && args.action !== "output") {
+        await Promise.all([...this.changeListeners].map(listener => listener()));
+      }
+      return result;
     });
   }
   dispatch(missed: boolean): Promise<void> {

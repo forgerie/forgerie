@@ -271,3 +271,26 @@ it.each([
   await f.tool.dispose(); await f.core().dispose(); await f.open();
   expect(f.summaries).toHaveLength(1);
 });
+
+it("notifies mutation observers outside the tool queue and supports detaching them", async () => {
+  const f = await fixture();
+  const changes: string[][] = [];
+  const detach = f.tool.onChange(async () => {
+    const listed = await f.tool.execute({ action: "list" });
+    changes.push(listed.processes?.map(process => process.name) ?? []);
+  });
+  const started = await f.tool.execute({ action: "start", name: "observable", command: "cat" });
+  const id = started.process?.id;
+  if (id === undefined) throw new Error("Process did not start");
+  expect(changes).toEqual([["observable"]]);
+  await f.tool.execute({ action: "list" });
+  await f.tool.execute({ action: "output", id });
+  expect(changes).toHaveLength(1);
+  await f.tool.execute({ action: "write", id, input: "hello" });
+  await f.tool.execute({ action: "stop", id });
+  await f.tool.execute({ action: "clear" });
+  expect(changes).toEqual([["observable"], ["observable"], ["observable"], []]);
+  detach();
+  await f.tool.execute({ action: "start", name: "unobserved", command: "cat" });
+  expect(changes).toHaveLength(4);
+});
