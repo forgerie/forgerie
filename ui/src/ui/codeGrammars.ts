@@ -7,7 +7,9 @@ import hljs from "highlight.js";
  * drew as plain text. A label highlight.js has no grammar for is still plain
  * text; nothing is guessed for it.
  *
- * The transcript and the composer share this instance, so both call the same
- * label a code fence (composerCodeLanguage.ts).
+ * This optional module loads on the first completed known code fence. The
+ * composer uses its checked name registry (codeLanguageNames.ts), not these
+ * grammar implementations, so both recognize the same labels without putting
+ * the full highlighter on the initial application path.
  */
 export default hljs;
