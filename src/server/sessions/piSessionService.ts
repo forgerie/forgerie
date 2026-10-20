@@ -5639,7 +5639,8 @@ export class PiSessionService implements SessionRouteService {
       pendingMessageCount: this.pendingMessageCount(session),
       queuedMessages: this.queuedMessages(session),
       doubleEscapeAction: session.settingsManager.getDoubleEscapeAction?.() ?? "tree",
-      messageCount: session.messages.length,
+      // Durable stats count the current projection; SDK stats count entries across all branches.
+      messageCount: session instanceof DurableAgentSession ? stats.totalMessages : session.messages.length,
       tokens: stats.tokens,
       cost: stats.cost,
       ...(contextUsage === undefined ? {} : { contextUsage }),

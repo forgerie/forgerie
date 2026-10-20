@@ -3,7 +3,7 @@ import { Check } from "typebox/value";
 import { decisionAnnotations } from "../decisions/optionalDecisionAnnotations.js";
 import { createDurableChildHost } from "./durableChildHost.js";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, mkdir, rm, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, SessionManager, createAgentSessionServices, createCodemodeExtension } from "@earendil-works/pi-coding-agent";
@@ -12,7 +12,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { DurableAgentSession } from "./durableAgentSession.js";
 import { createDecisionClient, type DecisionAnswers, type DecisionRequest } from "../decisions/decisionClient.js";
-import { readDecisionHintsSettings } from "../decisions/decisionHintsSettings.js";
+import { createDecisionHintsSettingsReader, readDecisionHintsSettings } from "../decisions/decisionHintsSettings.js";
 import { assertDecisionHintOffEquivalence } from "../decisions/decisionHintsOffEquivalence.testSupport.js";
 import type { DecisionHints } from "../decisions/decisionHints.js";
 import { RISK_LABEL_ENTRY_KIND } from "../../shared/riskLabels.js";
@@ -62,6 +62,43 @@ async function fixture(hints?: DecisionHints) {
   };
   return {root, session, services, manager, model, events, errors, run, createServices, runChild, childState};
 }
+
+it("computes unchanged session statistics without reading risk-label settings or projecting annotations", async () => {
+  const readSettings = vi.fn(() => settings);
+  const f = await fixture({client: {ask: () => Promise.resolve(opinion)}, readSettings, status: () => ({keyPresent: false, source: "none" as const})});
+  await f.run();
+  await vi.waitFor(() => {expect(JSON.stringify(f.session.messages)).toContain("actual-risk-model");});
+  const messages = f.session.messages;
+  readSettings.mockClear();
+  const stats = f.session.getSessionStats();
+  expect(stats).toMatchObject({totalMessages: messages.length, userMessages: 1, assistantMessages: 2, toolCalls: 1});
+  expect(f.session.getSessionStats()).toEqual(stats);
+  expect(readSettings).not.toHaveBeenCalled();
+});
+
+it("picks up config-file switches for retained labels without changing statistics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "risk-labels-config-")); roots.push(root);
+  const path = join(root, "config.json");
+  let revision = 1_700_000_000;
+  const configure = async (enabled: boolean, risk_labels: boolean) => {
+    await writeFile(path, JSON.stringify({plugins: {"decision-hints": {enabled, settings: {gateway_url: "http://gateway.invalid", risk_labels}}}}));
+    await utimes(path, ++revision, revision);
+  };
+  await configure(true, true);
+  const readSettings = createDecisionHintsSettingsReader({env: {PI_WEB_CONFIG: path}});
+  const f = await fixture({client: {ask: () => Promise.resolve(opinion)}, readSettings, status: () => ({keyPresent: false, source: "none" as const})});
+  await f.run();
+  await vi.waitFor(() => {expect(JSON.stringify(f.session.messages)).toContain("actual-risk-model");});
+  const stats = f.session.getSessionStats();
+  for (const [enabled, risk_labels] of [[false, true], [true, false]] as const) {
+    await configure(enabled, risk_labels);
+    expect(JSON.stringify(f.session.messages)).not.toContain("actual-risk-model");
+    expect(f.session.getSessionStats()).toEqual(stats);
+  }
+  await configure(true, true);
+  expect(JSON.stringify(f.session.messages)).toContain("actual-risk-model");
+  expect(f.session.getSessionStats()).toEqual(stats);
+});
 
 it("bash has off-equivalence and executes before a hanging gateway times out", async () => {
   await assertDecisionHintOffEquivalence(async ({client, settings: live}) => {

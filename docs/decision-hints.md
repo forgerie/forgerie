@@ -183,8 +183,23 @@ They cannot poison Durable because no optional write calls its harness or storag
 ## Maintainer contract
 
 Inject `DecisionHints` through `PiSessionServiceDependencies.decisionHints`.
-`readSettings()` re-reads the config. Launch `client.ask(request)` in the
-background; never await it in turn completion, gate admission, or tool execution.
+`readSettings()` checks the config with one filesystem `stat` per use. Each
+reader caches validated settings until the path or file metadata changes
+(mtime, ctime, size, identity or permissions). Config edits and atomic file
+replacement take effect on the next use, without a daemon restart. Missing,
+unreadable or invalid config disables hints; invalid content is not parsed again
+until its metadata changes. Each result is a copy, so callers cannot change the
+cache.
+
+Durable status statistics use the unannotated message projection and the native
+usage ledger. Status publication does not build risk-label annotations just to
+count messages. Run `node_modules/.bin/tsx scripts/benchmark-session-status.mjs`
+to measure a temporary 600-message session with 200 labels. The benchmark disables
+attention triage to isolate the risk-label/status chain. It does not use live
+config, credentials or services.
+
+Launch `client.ask(request)` in the background; never await it in turn
+completion, gate admission, or tool execution.
 The client returns the answering model and validated answers, or `undefined` for
 no opinion. It refuses redirects and does not use a provider SDK.
 

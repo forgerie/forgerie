@@ -884,7 +884,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       text: typeof entry.message.content === "string" ? entry.message.content : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") }]);
   }
   getSessionStats(): ReturnType<PiAgentSession["getSessionStats"]> {
-    const messages = this.messages;
+    // Risk annotations add metadata only. Statistics must not project them or read their settings.
+    const messages = this.sessionManager.buildSessionContext().messages;
     // Compaction and failed/aborted attempts need not have transcript messages. pi.usage owns spend.
     const { tokens, cost } = durableUsageTotals(this.journal.usage);
     return { sessionId: this.sessionId, totalMessages: messages.length, userMessages: messages.filter((message) => message.role === "user").length,
