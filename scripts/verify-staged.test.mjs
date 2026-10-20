@@ -12,6 +12,7 @@ import {
   createValidationSteps,
   parseNameStatusChanges,
   parseNullDelimitedPaths,
+  validationStepEnvironment,
   withoutGitHookEnvironment,
 } from "./verify-staged.mjs";
 
@@ -168,8 +169,31 @@ describe("staged validation planning", () => {
         "vitest.config.ts",
         "--passWithNoTests",
         "src/path with spaces/example.ts",
+        "--reporter=agent",
       ],
     ]);
+  });
+
+  it("prints only failing tests in the full suite as well", () => {
+    const plan = createValidationPlan(["package.json"], { pathExists: () => true });
+    expect(createValidationSteps(plan).at(-1)?.npmArgs).toEqual(["test", "--", "--reporter=agent"]);
+  });
+
+  it("hides Node experimental warnings in Vitest steps and keeps inherited Node options", () => {
+    const steps = createValidationSteps(createValidationPlan(["src/example.ts"], { pathExists: () => true }));
+    const vitest = steps.at(-1);
+    const typecheck = steps[0];
+    if (vitest === undefined || typecheck === undefined) throw new Error("expected validation steps");
+
+    expect(validationStepEnvironment(vitest, { GIT_DIR: "/repo/.git", NODE_OPTIONS: "--max-old-space-size=4096", PATH: "/bin" })).toEqual({
+      NODE_OPTIONS: "--max-old-space-size=4096 --disable-warning=ExperimentalWarning",
+      PATH: "/bin",
+    });
+    expect(validationStepEnvironment(vitest, { PATH: "/bin" })).toEqual({
+      NODE_OPTIONS: "--disable-warning=ExperimentalWarning",
+      PATH: "/bin",
+    });
+    expect(validationStepEnvironment(typecheck, { PATH: "/bin" })).toEqual({ PATH: "/bin" });
   });
 });
 

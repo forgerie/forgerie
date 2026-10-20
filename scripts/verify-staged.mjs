@@ -86,6 +86,14 @@ export function createStagedSnapshot(options = {}) {
   }
 }
 
+/**
+ * Hook output goes to the agent that commits. A passing suite printed ~50 KB of
+ * test logs and SQLite warnings, and agents skipped the hook to avoid it.
+ * Vitest's `agent` reporter prints failing tests and their logs only.
+ */
+const QUIET_VITEST_ARGS = ["--reporter=agent"];
+const QUIET_VITEST_NODE_OPTIONS = ["--disable-warning=ExperimentalWarning"];
+
 export function createValidationSteps(plan) {
   const steps = [
     {
@@ -109,11 +117,16 @@ export function createValidationSteps(plan) {
   }
 
   if (plan.tests.mode === "full") {
-    steps.push({ label: "full Vitest validation (broad dependency changed)", npmArgs: ["test"] });
+    steps.push({
+      label: "full Vitest validation (broad dependency changed)",
+      npmArgs: ["test", "--", ...QUIET_VITEST_ARGS],
+      nodeOptions: QUIET_VITEST_NODE_OPTIONS,
+    });
   } else if (plan.tests.mode === "related") {
     steps.push({
       label: `Vitest validation related to ${String(plan.tests.files.length)} staged input(s)`,
-      npmArgs: ["exec", "--", "vitest", ...vitestArgsForTestPlan(plan.tests)],
+      npmArgs: ["exec", "--", "vitest", ...vitestArgsForTestPlan(plan.tests), ...QUIET_VITEST_ARGS],
+      nodeOptions: QUIET_VITEST_NODE_OPTIONS,
     });
   }
 
@@ -148,12 +161,20 @@ export function withoutGitHookEnvironment(env) {
   return Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith("GIT_")));
 }
 
+/** Environment for one validation step: no hook Git variables, plus the step's Node options. */
+export function validationStepEnvironment(step, env) {
+  const stepEnv = withoutGitHookEnvironment(env);
+  if (step.nodeOptions === undefined || step.nodeOptions.length === 0) return stepEnv;
+  const nodeOptions = [stepEnv["NODE_OPTIONS"], ...step.nodeOptions].filter((value) => value !== undefined && value.length > 0);
+  return { ...stepEnv, NODE_OPTIONS: nodeOptions.join(" ") };
+}
+
 function runNpmStep(step, cwd) {
   console.log(`\n[pre-commit] ${step.label}`);
   const invocation = npmInvocation(step.npmArgs);
   const result = spawnSync(invocation.command, invocation.args, {
     cwd,
-    env: withoutGitHookEnvironment(process.env),
+    env: validationStepEnvironment(step, process.env),
     stdio: "inherit",
   });
   if (result.error !== undefined) throw result.error;
