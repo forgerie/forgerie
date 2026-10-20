@@ -12,6 +12,7 @@ import { ManagedProcessRegistry, type ManagedProcessRegistryOptions } from "../p
 import type { ManagedProcesses } from "../processes/managedProcesses.js";
 import type { SessionWorktreeRecord } from "../../shared/sessionWorktree.js";
 import type { ChildRun } from "../../shared/childRuns.js";
+import type { StackLatencyContext, StackLatencySpan } from "../../shared/stackLatency.js";
 import { createWorkflowScheduleTool } from "../triggers/triggerTool.js";
 import type { TriggerService } from "../triggers/triggerService.js";
 import type { TriggerAction } from "../../shared/triggers.js";
@@ -2904,29 +2905,38 @@ export class PiSessionService implements SessionRouteService {
   }
 
   /** Preparation may await. The active classic cut below must not. */
-  async open(ref: PiSessionRef, page: SessionOpenPageRequest): Promise<SessionOpenResult> {
-    // Freeze admission before preparation. A stopped native owner is an error, not a fallback.
-    const active = this.activeForRef(ref)?.runtime.session;
-    const nativeAddress = await this.durableReader?.locate(ref);
-    if (active instanceof DurableAgentSession) await active.flushDurableMutations();
-    const catalog = await this.unreadCatalog(); // Capture before any transcript acquisition.
+  async open(ref: PiSessionRef, page: SessionOpenPageRequest, trace?: StackLatencyContext): Promise<SessionOpenResult> {
+    const phase = <T>(name: StackLatencySpan["phase"], run: () => Promise<T>): Promise<T> => trace === undefined ? run() : trace.measure(name, run);
+    const { active, nativeAddress, catalog, readonly, archived, worktreeInfo } = await phase("admission", async () => {
+      // Freeze admission before preparation. A stopped native owner is an error, not a fallback.
+      const active = this.activeForRef(ref)?.runtime.session;
+      const nativeAddress = await this.durableReader?.locate(ref);
+      if (active instanceof DurableAgentSession) await active.flushDurableMutations();
+      const catalog = await this.unreadCatalog(); // Capture before any transcript acquisition.
+      const readonly = await this.sessionWorktrees?.store.readOnly(ref);
+      const archived = await this.getArchived(ref);
+      const worktree = await this.sessionWorktrees?.store.forSession(ref);
+      const worktreeInfo = worktree === undefined ? undefined : await this.sessionWorktrees?.info(worktree, ref.id);
+      return { active, nativeAddress, catalog, readonly, archived, worktreeInfo };
+    });
     const receiptFor = (id: string, cwd: string) => {
       const unread = catalog.sessions.find(item => item.sessionId === id && item.cwd === canonicalizeStoredCwd(cwd));
       return unread === undefined ? null : { catalogId: catalog.catalogId, throughCompletionOrder: unread.completionOrder };
     };
-    const readonly = await this.sessionWorktrees?.store.readOnly(ref);
-    const archived = await this.getArchived(ref);
-    const worktree = await this.sessionWorktrees?.store.forSession(ref);
-    const worktreeInfo = worktree === undefined ? undefined : await this.sessionWorktrees?.info(worktree, ref.id);
-    const native = nativeAddress === undefined ? undefined : await this.durableReader?.openAddress(ref, nativeAddress, page, this.events, () => {
+    const native = nativeAddress === undefined ? undefined : await phase("storage-read", async () => await this.durableReader?.openAddress(ref, nativeAddress, page, this.events, () => {
       const session = this.activeForRef(ref)?.runtime.session;
       const host = this.nativeHostState(session);
       return { ...host, status: { ...host.status,
         ...(readonly === undefined && archived === undefined ? {} : { readOnly: true }),
         ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) } };
-    });
-    if (native !== undefined) return { ...native, page: { ...native.page, messages: withImageReferences(ref, native.page.messages) },
-      receipt: receiptFor(native.session.id, native.session.cwd) };
+    }));
+    if (native !== undefined) {
+      const projected = trace?.start("projection");
+      const result = { ...native, page: { ...native.page, messages: withImageReferences(ref, native.page.messages) },
+        receipt: receiptFor(native.session.id, native.session.cwd) };
+      projected?.();
+      return result;
+    }
     const inactiveClassic = this.durableReader !== undefined && nativeAddress === undefined && active === undefined;
     if (readonly !== undefined || archived !== undefined || inactiveClassic) {
       const match = inactiveClassic && readonly === undefined && archived === undefined
@@ -2934,9 +2944,11 @@ export class PiSessionService implements SessionRouteService {
       const path = readonly?.transcriptPath ?? archived?.archivePath ?? match?.path;
       if (path === undefined) throw new SessionOpenError("Saved session history is unavailable", 503, "OPEN_UNAVAILABLE");
       for (let attempt = 0; attempt < 3; attempt++) {
-        const before = await stat(path);
-        const manager = await (this.sessionManager.openReadOnly?.(path) ?? this.sessionManager.open(path));
-        const after = await stat(path);
+        const { before, manager, after } = await phase("storage-read", async () => {
+          const before = await stat(path);
+          const manager = await (this.sessionManager.openReadOnly?.(path) ?? this.sessionManager.open(path));
+          return { before, manager, after: await stat(path) };
+        });
         if (before.ino !== after.ino || before.dev !== after.dev || before.size !== after.size || before.mtimeMs !== after.mtimeMs) continue;
         const messages = this.openMessages(manager);
         const id = manager.getSessionId(), cwd = manager.getCwd();
@@ -2967,11 +2979,14 @@ export class PiSessionService implements SessionRouteService {
       return { ...result, cut: "sequential", statusSeq, seq: snapshot.seq, snapshot: { ...result.snapshot, seq: snapshot.seq, transientEvents } };
     }
     // Worktree/file/unread preparation is complete. All values below share one synchronous tick.
+    const projected = trace?.start("projection");
     const messages = this.openMessages(session.sessionManager);
     const streaming = session.state.streamingMessage;
     const partial = streaming == null ? null : openMessageSchema.parse(annotateAssistantThinkingLevel(projectBrowserMessage(streaming), session.thinkingLevel));
     const status = { ...this.statusFromSession(session), ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) };
-    return this.classicOpenCut(session.sessionId, session.sessionManager.getCwd(), messages, partial, status, page, receiptFor(session.sessionId, session.sessionManager.getCwd()));
+    const cut = this.classicOpenCut(session.sessionId, session.sessionManager.getCwd(), messages, partial, status, page, receiptFor(session.sessionId, session.sessionManager.getCwd()));
+    projected?.();
+    return cut;
   }
 
   private openMessages(manager: PiSessionManager): SessionOpenMessage[] {

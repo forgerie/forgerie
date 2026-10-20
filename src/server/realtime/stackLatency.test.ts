@@ -16,6 +16,17 @@ describe("bounded optional stack latency observer", () => {
     expect(stackLatencySpanSchema.safeParse({ ...spans[0], durationMs: Infinity }).success).toBe(false);
     expect(stackLatencySpanSchema.safeParse({ ...spans[0], traceId: "session-id" }).success).toBe(false);
   });
+  it("links nested phase spans to the enclosing span without summing them", async () => {
+    const spans: StackLatencySpan[] = [];
+    const root = createStackLatencyContext({ traceId, clock: "sessiond", operation: "session-open", sink: { record: span => { spans.push(span); } } });
+    const execute = root.enter("execute");
+    await execute.context.measure("storage-read", () => Promise.resolve());
+    execute.finish();
+    const [child, parent] = spans;
+    expect(parent).toMatchObject({ phase: "execute", parentSpanId: "0" });
+    expect(child).toMatchObject({ phase: "storage-read", parentSpanId: parent?.spanId });
+    expect(execute.context.spanId).toBe(parent?.spanId);
+  });
   it("retains the original result and rejection when a sink throws", async () => {
     const context = createStackLatencyContext({ traceId, clock: "sessiond", operation: "session-open", sink: { record: () => { throw new Error("observer"); } } });
     expect(await context.measure("execute", () => Promise.resolve(42))).toBe(42);
