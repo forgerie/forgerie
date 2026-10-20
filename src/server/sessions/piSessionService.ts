@@ -86,6 +86,7 @@ import type { ActiveSession } from "./sessionRuntimeStore.js";
 import { deterministicSessionName, fallbackSessionName, generateShortSessionName } from "./sessionNameGenerator.js";
 import type { SessionWorktrees, WorktreeSessionFile } from "../workspaces/sessionWorktrees.js";
 import { indexWorktreeRecords, pathInside, worktreeInfo as staticWorktreeInfo } from "../workspaces/sessionWorktreeStore.js";
+import { groupByCwd } from "./cwdGroups.js";
 import { computeEditPreview, type EditPreviewResult } from "./editPreview.js";
 import { attachmentsToInlineImages, saveAttachmentsToWorkspace } from "./attachmentService.js";
 import { parsePromptAttachments } from "../../shared/promptAttachments.js";
@@ -1556,15 +1557,11 @@ export class PiSessionService implements SessionRouteService {
       ...listedSessions.map((session) => session.cwd),
       ...archivedRecords.map((record) => record.cwd),
     ]);
+    const archivedByCwd = groupByCwd(archivedRecords, (record) => record.cwd);
+    const listedByCwd = groupByCwd(ownedSessions.filter((session) => !archivedById.has(session.id)), (session) => session.cwd);
     for (const cwd of cwds) {
-      const archivedForCwd = new Map(
-        archivedRecords
-          .filter((record) => cwdPathsEqual(record.cwd, cwd))
-          .map((record) => [record.sessionId, record]),
-      );
-      const listedSessionIds = ownedSessions
-        .filter((session) => !archivedById.has(session.id) && cwdPathsEqual(session.cwd, cwd))
-        .map((session) => session.id);
+      const archivedForCwd = new Map(archivedByCwd.get(cwd).map((record) => [record.sessionId, record]));
+      const listedSessionIds = listedByCwd.get(cwd).map((session) => session.id);
       const reconcilableSessionIds = this.reconcilableSessionIds(cwd, listedSessionIds, archivedForCwd);
       this.workspaceActivity?.reconcileSessionActivity(cwd, reconcilableSessionIds);
       await this.publishUnreadMutations(this.unreadStore.reconcileCwd(canonicalizeStoredCwd(cwd), reconcilableSessionIds));
