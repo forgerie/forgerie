@@ -14,6 +14,52 @@ import { CapturingSessionEventHub, testModelRuntime } from "./piSessionService.t
 
 const exec = promisify(execFile);
 
+describe("session catalog worktrees", () => {
+  it("lists an active worktree's identity without Git counts, while the cwd listing keeps them", async () => {
+    const root = await mkdtemp(join(tmpdir(), "forgerie-worktree-catalog-"));
+    let service: PiSessionService | undefined;
+    try {
+      const repo = join(root, "repo");
+      const agentDir = join(root, "agent");
+      await mkdir(repo);
+      const git = (...args: string[]) => exec("git", ["-C", repo, ...args]);
+      await git("init", "-b", "main");
+      await git("config", "user.name", "Test");
+      await git("config", "user.email", "test@example.invalid");
+      await writeFile(join(repo, ".gitignore"), ".sessions/\n");
+      await git("add", ".");
+      await git("commit", "-m", "base");
+      const store = new SessionWorktreeStore(join(root, "worktrees.json"));
+      await store.initialize();
+      const worktrees = new SessionWorktrees(store);
+      const record = await worktrees.create(repo);
+      const sessionDir = join(record.path, ".sessions");
+      await mkdir(sessionDir);
+      const id = "catalog-active";
+      const path = join(sessionDir, "2026-01-01_catalog-active.jsonl");
+      await writeFile(path, [
+        { type: "session", version: 3, id, timestamp: "2026-01-01T00:00:00.000Z", cwd: record.path },
+        { type: "message", id: "m1", parentId: null, timestamp: "2026-01-01T00:01:00.000Z", message: { role: "user", content: "hello" } },
+      ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+      await worktrees.attach(record.id, { id, cwd: record.path, path });
+      service = new PiSessionService(new CapturingSessionEventHub(), {
+        agentDir, modelRuntime: testModelRuntime,
+        archiveStore: new SessionArchiveStore(join(root, "archives.json")),
+        sessionWorktrees: worktrees,
+        createAgentRuntime: () => Promise.reject(new Error("Listing must not start Pi")),
+        sessionManager: createPiSessionManagerGateway({ agentDir, env: { PI_WEB_AGENT_SESSION_DIR: sessionDir }, sessionDirEnvKeys: agentSessionDirEnvKeys() }),
+        heartbeatIntervalMs: 60_000,
+      });
+      const listed = (await service.machineListing()).sessions.find((item) => item.id === id)?.worktree;
+      expect(listed).toMatchObject({ id: record.id, owned: true, branch: record.branch, state: { kind: "active" } });
+      expect(listed).not.toHaveProperty("ahead");
+      expect(listed).not.toHaveProperty("dirtyFiles");
+      expect(listed).not.toHaveProperty("statusError");
+      expect((await service.list(record.path)).find((item) => item.id === id)?.worktree).toMatchObject({ ahead: 0, dirtyFiles: 0 });
+    } finally { await service?.dispose(); await rm(root, { recursive: true, force: true }); }
+  });
+});
+
 describe("completed worktree sessions", () => {
   for (const outcome of ["landed", "discarded"] as const) {
     it(`reads real ${outcome} transcripts after checkout removal and daemon reconstruction without starting Pi`, async () => {

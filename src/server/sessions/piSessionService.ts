@@ -85,7 +85,7 @@ import { findArchiveCandidateByIdOrPrefix, planSessionArchiveTree, type SessionA
 import type { ActiveSession } from "./sessionRuntimeStore.js";
 import { deterministicSessionName, fallbackSessionName, generateShortSessionName } from "./sessionNameGenerator.js";
 import type { SessionWorktrees, WorktreeSessionFile } from "../workspaces/sessionWorktrees.js";
-import { pathInside, worktreeRecordForSession } from "../workspaces/sessionWorktreeStore.js";
+import { indexWorktreeRecords, pathInside, worktreeInfo as staticWorktreeInfo } from "../workspaces/sessionWorktreeStore.js";
 import { computeEditPreview, type EditPreviewResult } from "./editPreview.js";
 import { attachmentsToInlineImages, saveAttachmentsToWorkspace } from "./attachmentService.js";
 import { parsePromptAttachments } from "../../shared/promptAttachments.js";
@@ -1548,7 +1548,9 @@ export class PiSessionService implements SessionRouteService {
       this.delegatingSessionFiles(),
     );
 
-    const ownedSessions = (await this.withSessionWorktrees(sessions)).map((session) => ({ ...session, ...(this.pullRequestWatches?.isWatching(session.id) === true ? { watchingPullRequest: true } : {}), ...(this.actionRunWatches?.isWatching(session.id) === true ? { watchingActionRun: true } : {}) }));
+    // The catalog shows a worktree's identity and branch. Its Git counts come from the open
+    // session's own reads (status and the worktree route), so the catalog does not run Git.
+    const ownedSessions = (await this.withSessionWorktrees(sessions, undefined, { counts: false })).map((session) => ({ ...session, ...(this.pullRequestWatches?.isWatching(session.id) === true ? { watchingPullRequest: true } : {}), ...(this.actionRunWatches?.isWatching(session.id) === true ? { watchingActionRun: true } : {}) }));
     const cwds = new Set([
       ...ownedSessions.map((session) => session.cwd),
       ...listedSessions.map((session) => session.cwd),
@@ -1696,7 +1698,7 @@ export class PiSessionService implements SessionRouteService {
     });
   }
 
-  private async withSessionWorktrees(sessions: readonly ClientSession[], cwd?: string): Promise<ClientSession[]> {
+  private async withSessionWorktrees(sessions: readonly ClientSession[], cwd?: string, options: { counts: boolean } = { counts: true }): Promise<ClientSession[]> {
     const worktrees = this.sessionWorktrees;
     if (worktrees === undefined) return [...sessions];
     const records = await worktrees.store.list();
@@ -1710,9 +1712,11 @@ export class PiSessionService implements SessionRouteService {
         known.add(transcript.id);
       }
     }
+    const recordFor = indexWorktreeRecords(records);
     return Promise.all(all.map(async (session) => {
-      const record = worktreeRecordForSession(records, session);
-      return record === undefined ? session : { ...session, worktree: await worktrees.info(record, session.id) };
+      const record = recordFor(session);
+      if (record === undefined) return session;
+      return { ...session, worktree: options.counts ? await worktrees.info(record, session.id) : staticWorktreeInfo(record, session.id) };
     }));
   }
 

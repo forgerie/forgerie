@@ -163,6 +163,45 @@ export function worktreeRecordForSession(records: readonly SessionWorktreeRecord
     ?? records.find((record) => record.state.kind === "active" && pathInside(record.path, ref.cwd));
 }
 
+/**
+ * worktreeRecordForSession for many sessions over one record list. A listing asks once per
+ * session, and each scan resolved every record path again: with thousands of sessions and
+ * hundreds of records that dominated the session catalog. Paths are resolved once here and
+ * bucketed; each lookup keeps the original rule and its first-record-wins order.
+ */
+export function indexWorktreeRecords(records: readonly SessionWorktreeRecord[]): (ref: SessionIdentity) => SessionWorktreeRecord | undefined {
+  // Owner matches: record path or transcript cwd equals the session cwd; ids match by prefix.
+  const owners = new Map<string, { index: number; record: SessionWorktreeRecord; id: string }[]>();
+  const activeByPath = new Map<string, number>();
+  const add = (cwd: string, index: number, record: SessionWorktreeRecord, id: string) => {
+    const bucket = owners.get(cwd);
+    if (bucket === undefined) owners.set(cwd, [{ index, record, id }]);
+    else bucket.push({ index, record, id });
+  };
+  records.forEach((record, index) => {
+    if (record.sessionId !== undefined) add(resolve(record.path), index, record, record.sessionId);
+    for (const transcript of record.transcripts) add(resolve(transcript.cwd), index, record, transcript.id);
+    const path = resolve(record.path);
+    if (record.state.kind === "active" && !activeByPath.has(path)) activeByPath.set(path, index);
+  });
+  return (ref) => {
+    const cwd = resolve(ref.cwd);
+    let owner: { index: number; record: SessionWorktreeRecord } | undefined;
+    for (const candidate of owners.get(cwd) ?? []) {
+      if (candidate.id.startsWith(ref.id) && (owner === undefined || candidate.index < owner.index)) owner = candidate;
+    }
+    if (owner !== undefined) return owner.record;
+    // An active checkout contains the cwd when its path is the cwd or one of its ancestors.
+    let first: number | undefined;
+    for (let path = cwd; ; path = dirname(path)) {
+      const index = activeByPath.get(path);
+      if (index !== undefined && (first === undefined || index < first)) first = index;
+      if (dirname(path) === path) break;
+    }
+    return first === undefined ? undefined : records[first];
+  };
+}
+
 export function worktreeSessionMetadata(record: SessionWorktreeRecord, session: Pick<SessionInfo, "id" | "cwd" | "path"> & Partial<SessionInfo>): SessionInfo {
   return {
     id: session.id, cwd: session.cwd, path: session.path,
