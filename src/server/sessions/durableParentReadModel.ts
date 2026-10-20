@@ -91,13 +91,15 @@ export class DurableParentReadModel {
     hub.observeNativeRuns(handle.address.sessionId, handle.harness, id);
     let retiredRequired = 0;
     let entriesRevision = 0;
+    let membershipScanned = false;
     const keys = new Set<string>();
     const membership = new Map<string, number>();
     const stop = handle.harness.subscribeCommits(publication => {
       for (const change of publication.changes) {
-        // Preparation runs outside the cut line. Any entry adoption makes its pages stale,
-        // including an inherited entry; reuse is permitted only on an unchanged generation.
-        if (change.type === "entry") entriesRevision++;
+        // Preparation pages are reused only if this conversation appended nothing meanwhile.
+        // conversation.entries also returns ancestors' entries, but only up to each fork point;
+        // entry IDs only grow, so a later entry anywhere else is never in this visible range.
+        if (change.type === "entry" && change.value.conversationId === id) entriesRevision++;
         if (change.type === "document" && change.value === null && change.record.kind === SessionBindings.definition.kind) retiredRequired++;
         if (change.type === "document" && change.conversationId === id) {
           if (change.value === null) retiredRequired++;
@@ -125,11 +127,15 @@ export class DurableParentReadModel {
         if (required.some(value => value === undefined)) throw new Error("Native open requires initialized parent documents");
         const bound = cached?.bound ?? (await handle.harness.snapshot(SessionBindings, context)) !== undefined;
         const preparedRevision = entriesRevision;
-        const entries: EntryRecord[] = [];
+        // After one stale preparation, scan inside the cut as before. Presentation membership is
+        // already complete: a finished scan recorded it and the commit subscription keeps it current.
+        // The parent's own writes therefore cost one extra scan at most and cannot fail the open.
+        const scanInCut = cached === undefined && membershipScanned;
+        const prepared: EntryRecord[] = [];
         let cursor: Cursor | undefined;
-        if (cached === undefined) do {
+        if (cached === undefined && !scanInCut) do {
           const page = await handle.conversation.entries({ order: "ascending" }, SCAN_SIZE, cursor, context);
-          entries.push(...page.items);
+          prepared.push(...page.items);
           for (const entry of page.items) {
             const key = String(entry.id);
             const version = membership.get(key);
@@ -138,10 +144,20 @@ export class DurableParentReadModel {
           }
           cursor = page.next;
         } while (cursor !== undefined);
+        if (cached === undefined) membershipScanned = true;
         finishPreparation?.(); finishPreparation = undefined;
         const cut = await handle.conversation.commit(async tx => {
-          if (membershipRevision !== retiredRequired || (cached === undefined ? preparedRevision !== entriesRevision : cached !== this.liveHistory?.value)) return undefined;
+          if (membershipRevision !== retiredRequired || (cached === undefined ? !scanInCut && preparedRevision !== entriesRevision : cached !== this.liveHistory?.value)) return undefined;
           const before = hub.currentSeq(handle.address.sessionId);
+          let entries = prepared;
+          if (scanInCut) {
+            entries = [];
+            let cursor: Cursor | undefined;
+            do {
+              const page = await tx.scanEntries({ conversationId: id, order: "ascending" }, SCAN_SIZE, cursor);
+              entries.push(...page.items); cursor = page.next;
+            } while (cursor !== undefined);
+          }
           // No table reads may follow document acquisition (which can stage initialization).
           if (bound && (await tx.doc(SessionBindings)).sessions[handle.address.sessionId]?.conversationId !== id) {
             throw new SessionOpenError("Session history changed during native open", 409, "HISTORY_CHANGED");
