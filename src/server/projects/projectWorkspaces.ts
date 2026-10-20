@@ -5,6 +5,7 @@ import { loadProjectContextFiles } from "@earendil-works/pi-coding-agent";
 import type { Project, SessionRef } from "../../shared/apiTypes.js";
 import type { SessionWorktreeRecord } from "../../shared/sessionWorktree.js";
 import { cwdPathsEqual } from "../workingDirectory.js";
+import type { ProjectCatalogHome } from "./projectCatalogHome.js";
 import type { ProjectService } from "./projectService.js";
 import type { ProjectGroups } from "./projectGroups.js";
 import type { WorkspaceService } from "../workspaces/workspaceService.js";
@@ -17,6 +18,8 @@ interface Dependencies {
   workspaces: Pick<WorkspaceService, "list">;
   /** Optional cached discovery for catalog display only. Never used to authorize a target. */
   catalogWorkspaces?: Pick<WorkspaceService, "list">;
+  /** Display-only candidate index. Authorization never calls this lookup. */
+  catalogHome?: Pick<ProjectCatalogHome, "find">;
   worktrees: SessionWorktrees;
   agentDir: string;
   writable(ref: SessionRef): Promise<boolean>;
@@ -27,11 +30,11 @@ export class ProjectWorkspaces {
   constructor(private readonly deps: Dependencies) {}
 
   catalog(ref: SessionRef) {
-    return this.catalogUsing(ref, this.deps.catalogWorkspaces ?? this.deps.workspaces);
+    return this.catalogUsing(ref, this.deps.catalogWorkspaces ?? this.deps.workspaces, this.deps.catalogHome);
   }
-  private async catalogUsing(ref: SessionRef, workspaces: Pick<WorkspaceService, "list">) {
+  private async catalogUsing(ref: SessionRef, workspaces: Pick<WorkspaceService, "list">, finder?: Pick<ProjectCatalogHome, "find">) {
     const projects = await this.deps.projects.list();
-    const home = await this.home(ref.cwd, projects, workspaces);
+    const home = finder === undefined ? await this.home(ref.cwd, projects, workspaces) : await finder.find(ref.cwd, projects);
     const groups = (await this.deps.groups.list()).filter((group) => home !== undefined && group.projectIds.includes(home.id));
     const members = new Set(groups.flatMap((group) => group.projectIds));
     if (home !== undefined) members.add(home.id);

@@ -18,7 +18,7 @@ import { createProjectWorkspaceServices } from "./projectWorkspaceServices.js";
 
 const exec = promisify(execFile);
 
-it("keeps catalog reads cached but rechecks spawn, session, trigger and project-tool membership immediately", async () => {
+it("keeps catalog discovery separate from fresh spawn, session, trigger and project-tool membership", async () => {
   const root = await mkdtemp(join(tmpdir(), "forgerie-project-authorization-"));
   const app = Fastify();
   let triggers: TriggerService | undefined;
@@ -70,7 +70,8 @@ it("keeps catalog reads cached but rechecks spawn, session, trigger and project-
     await access(linked);
     expect(await git(repo, "worktree", "list", "--porcelain")).not.toContain(`worktree ${linked}`);
 
-    expect((await read()).body).toBe(first.body);
+    // The request-local inventory index can notice removal before the display Git cache expires.
+    expect((await read()).json()).toEqual({ groups: [], projects: [], related: [] });
     expect(await services.spawnTargets.resolveSpawnTarget(repo, linked)).toMatchObject({ allowed: false, reason: "out-of-project" });
     expect(await services.spawnTargets.resolveSpawnTarget(linked, repo)).toEqual({ allowed: false, reason: "not-registered" });
     expect(await services.projectWorkspaces.forCwd(linked)).toBeUndefined();

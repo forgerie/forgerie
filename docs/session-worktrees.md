@@ -60,6 +60,10 @@ Managed worktree creation (including child worktrees), removal, and branch renam
 
 A worktree added, removed, or renamed outside Forgerie can appear up to 10 seconds late in the project view. The first request after expiry refreshes the facts; there is no background refresh. Rejected discovery reads are not cached.
 
+Cold catalog home lookup first builds a request-local index from registered repositories' normal `.git` metadata and forward `worktrees/*/gitdir` registrations. This avoids starting Git for unrelated repositories. The index only narrows candidates: Git still confirms each candidate in the existing longest registered-path order, with stable ties. Linked projects, overlapping workspaces, and symlink aliases do not change that precedence. The source checkout's own `.git` pointer is not proof of membership. Unknown or inaccessible metadata and nonstandard layouts (such as separate Git directories or submodules) use the original Git discovery path instead of being excluded.
+
+This index is display-only and has no additional cache window. It can notice an external registration removal before the 10-second Git cache expires. It reads repository/worktree metadata on each catalog request; cost still grows with inventory size. Reproduce cold timings with `npx tsx scripts/benchmark-project-catalog.mjs`: it compares serial and indexed HTTP requests against 20 temporary repositories and 60 linked worktrees, without the Git cache, and checks identical response bodies. The overlap case adds a nested repository. It does not contact or change live services.
+
 ## Declared workspace services
 
 Managed worktrees can own development services through Process Compose. The declaration lives in `.forgerie/config.json` version 2. See [configuration](config.md#declared-workspace-services) for the file format and service environment.

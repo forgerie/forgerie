@@ -1,4 +1,5 @@
 import type { SessionRef } from "../../shared/apiTypes.js";
+import { ProjectCatalogHome } from "../projects/projectCatalogHome.js";
 import { ProjectWorkspaces } from "../projects/projectWorkspaces.js";
 import type { ProjectGroups } from "../projects/projectGroups.js";
 import type { ProjectService } from "../projects/projectService.js";
@@ -22,10 +23,11 @@ interface Dependencies {
 export function createProjectWorkspaceServices(deps: Dependencies) {
   const discovery = new GitWorktreeDiscovery(undefined, { cacheMs: PROJECT_CATALOG_CACHE_MS });
   const workspaceDeps = { projects: deps.projects, workspaces: new WorkspaceService() };
+  const catalogWorkspaces = new WorkspaceService(discovery);
   return {
     projectWorkspaces: new RegisteredProjectWorkspaceCwds(workspaceDeps),
     spawnTargets: new ProjectScopedSpawnTargetResolver(workspaceDeps),
-    relatedWork: new ProjectWorkspaces({ ...deps, ...workspaceDeps, catalogWorkspaces: new WorkspaceService(discovery) }),
+    relatedWork: new ProjectWorkspaces({ ...deps, ...workspaceDeps, catalogWorkspaces, catalogHome: new ProjectCatalogHome(catalogWorkspaces) }),
     invalidateCatalog: () => { discovery.invalidate(); },
   };
 }
