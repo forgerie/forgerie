@@ -72,6 +72,17 @@ describe("session-owned worktrees with real git", () => {
     expect(await discovery.isGitRepository(child.path)).toBe(false);
     expect(await discovery.discoverGitWorktrees(f.record.path)).toHaveLength(2);
     expect((await discovery.discoverGitWorktrees(f.repo)).map((tree) => tree.path)).not.toContain(child.path);
+
+  it("reports a missing worktree folder from one stat, without asking git, and recovers when it returns", async () => {
+    const f = await fixture();
+    const child = await f.worktrees.createForChild(f.session, "task-missing");
+    expect(await f.worktrees.info(child, f.session.id)).toMatchObject({ ahead: 0, dirtyFiles: 0 });
+    await rm(child.path, { recursive: true, force: true });
+    // The folder check runs first, so the message is Forgerie's own, not git's "no longer matches" text.
+    expect(await f.worktrees.info(child, f.session.id)).toMatchObject({ statusError: "The worktree folder is missing." });
+    await f.git(f.repo, "worktree", "prune");
+    await f.git(f.repo, "worktree", "add", child.path, child.branch);
+    expect(await f.worktrees.info(child, f.session.id)).toMatchObject({ ahead: 0, dirtyFiles: 0 });
   });
 
   it("keeps a worktree's git counts for the status window, refreshes after it, and forgets them when the record changes", async () => {

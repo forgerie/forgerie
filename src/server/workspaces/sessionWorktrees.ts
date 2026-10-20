@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, realpath } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { SESSION_WORKTREE_DIRECTORY, type SessionWorktreeRecord, type SessionWorktreeInfo, type WorktreeActionResult, type WorktreeArchiveCleanupResult, type WorktreeDiscardPreview } from "../../shared/sessionWorktree.js";
@@ -433,8 +433,11 @@ export class SessionWorktrees {
   }
 }
 
+/** Shown for a record whose folder is gone. One stat, no git child: dead records are read on every session list. */
+export const MISSING_WORKTREE_STATUS = "The worktree folder is missing.";
 async function readGitStatus(record: SessionWorktreeRecord): Promise<WorktreeGitStatus> {
   try {
+    try { await access(record.path); } catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return { statusError: MISSING_WORKTREE_STATUS }; throw error; }
     await assertOwnedCheckout(record);
     const [counts, files] = await Promise.all([git(record.path, "rev-list", "--left-right", "--count", `${record.sourceCommit ?? record.defaultBranch}...HEAD`), dirtyFiles(record.path)]);
     const [behind, ahead] = counts.trim().split(/\s+/).map(Number);
