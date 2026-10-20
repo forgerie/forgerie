@@ -15,6 +15,7 @@ import { FilterChip } from "./FilterChip";
 import { IconCount } from "./IconCount";
 import { GuessTag } from "./GuessTag";
 import { footerPlan, FOOTER_ALL_LABELS, FOOTER_ICONS_ONLY } from "./pickerFooter";
+import { StageLine } from "./StageLine";
 
 /** What the picker draws. Built by the binding; the view does no I/O. */
 export interface PickerView {
@@ -201,6 +202,8 @@ function PickerRow({ row, selected, pending, held, showPin, menuOpen, onSelect, 
         {row.flagged ? <IconCount icon={<FlagIcon aria-hidden />} count={row.flagged} label={`${count(row.flagged, "flagged decision", "flagged decisions")} to look at`} /> : null}
       </span> : null}
     </span>
+    {/* The run's line, under the place: the stage strip's grid, the current stage, what waits. The stages come one per stage, each already the worst of its lanes. */}
+    {row.workflow ? <span className="picker-run"><StageLine name={row.workflow.name} stage={row.workflow.stage} stages={row.workflow.stages} waiting={row.workflow.waiting} /></span> : null}
     {hasCommands && <button className="picker-row-more" aria-label="Session commands" aria-haspopup="menu" aria-expanded={menuOpen}
       aria-controls={menuOpen ? menuId(session.id) : undefined} tabIndex={-1}
       onClick={(event) => { event.stopPropagation(); if (menuOpen) onCloseMenu(); else onMenu(session.id); }}><EllipsisIcon aria-hidden /></button>}

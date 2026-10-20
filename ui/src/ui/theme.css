@@ -974,17 +974,25 @@ summary.trace-line:hover { color: var(--foreground); }
 .picker-work { flex: none; display: inline-flex; gap: var(--space-2); margin-inline-start: auto; color: var(--live); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
 .picker-work > span { display: inline-flex; align-items: center; gap: 3px; }
 .picker-work svg { inline-size: 0.75rem; block-size: 0.75rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* A third line, on a row whose session runs a workflow: the StageLine (StageLine.css), so the row and
+   the stage strip draw one run the same way. The row grows to about 60px; rows without a run keep 44px. */
+.picker-run { --stage-line-end-room: var(--picker-more-room, 0rem); grid-column: 2 / span 2; display: grid; min-inline-size: 0; margin-block-start: 0.1875rem; }
 /* Row "⋯": thread-list-item.tsx's size-6 MoreHorizontal. It sits on the
-   second line because the first carries the age. Shown on the active or
+   row's last line because the first carries the age. Shown on the active or
    focused row and on hover; never hover-only, because touch has no hover. */
 .picker-row-more { position: absolute; inset-inline-end: var(--space-1); inset-block-end: 0.125rem; display: none; place-items: center; inline-size: 1.5rem; block-size: 1.5rem; padding: 0; border: 0; border-radius: var(--radius-document); background: transparent; color: var(--muted-foreground); transition: color 150ms; }
 .picker-row-more svg { inline-size: 0.875rem; block-size: 0.875rem; }
-/* Its hit area covers the row's right edge, top to bottom, and stops there. */
+/* Its hit area covers the row's right edge, top to bottom, and stops there: a 44px row, or a 60px row with a run. */
 .picker-row-more::before { inset-block-start: auto; inset-block-end: -0.125rem; translate: -50% 0; block-size: 2.625rem; }
+.picker-row:has(.picker-run) .picker-row-more::before { block-size: 3.8125rem; }
 .picker-row-more:hover, .picker-row-more[aria-expanded="true"] { color: var(--foreground); }
 .picker-row[aria-selected="true"] .picker-row-more, .picker-row:focus-within .picker-row-more, .picker-row-more[aria-expanded="true"] { display: grid; }
-@media (hover: hover) { .picker-row:hover .picker-row-more { display: grid; } .picker-row:hover .picker-sub { padding-inline-end: 1.75rem; } }
-.picker-row[aria-selected="true"] .picker-sub, .picker-row:has(.picker-row-more[aria-expanded="true"]) .picker-sub { padding-inline-end: 1.75rem; }
+/* The room the "⋯" takes while it shows. The row's last line keeps it clear: the second line, or the run's
+   line when the row has one (the StageLine keeps that room inside itself, so its measured width, and with
+   it the grid's fold, does not change under the pointer). */
+.picker-row[aria-selected="true"], .picker-row:has(.picker-row-more[aria-expanded="true"]) { --picker-more-room: 1.75rem; }
+@media (hover: hover) { .picker-row:hover .picker-row-more { display: grid; } .picker-row:hover { --picker-more-room: 1.75rem; } }
+.picker-row:not(:has(.picker-run)) .picker-sub { padding-inline-end: var(--picker-more-room, 0rem); }
 /* The one message line: undo after an archive, a copy result, or a refusal. */
 @media (prefers-reduced-motion: reduce) {
   .picker-row .picker-mark i, .skeleton, .picker-skeleton { animation: none; }

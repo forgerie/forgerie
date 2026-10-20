@@ -1,0 +1,29 @@
+/* A process on one text line: the stage strip's block grid one block high, the stage's name, the waiting count.
+   The blocks are the tally's mark (TallyRow.css) in the strip's tones (StageStrip.css); stageStripPlan.ts assumes
+   the mark and gap sizes, so change them together. */
+.stage-line {
+  --tally-mark: 0.4375rem;
+  --tally-gap: 0.1875rem;
+  display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0;
+  line-height: 1rem; font-size: var(--meta-text); color: var(--muted-foreground); }
+.stage-line-grid { flex: none; display: flex; align-items: center; gap: var(--tally-gap); }
+.stage-line-block { inline-size: var(--tally-mark); block-size: var(--tally-mark); border-radius: calc(var(--tally-mark) / 4); background: var(--meter-ink); }
+.stage-line-block[data-state="working"] { background: var(--tone-live); animation: stage-line-blink 1.2s ease-in-out infinite; }
+.stage-line-block[data-state="waiting"] { background: var(--tone-live); box-shadow: 0 0 0 0.125rem var(--live-wash); }
+.stage-line-block[data-state="failed"] { background: var(--tone-bad); }
+.stage-line-block[data-state="next"] { background: none; box-shadow: inset 0 0 0 var(--hairline) var(--muted-foreground); }
+@keyframes stage-line-blink { 50% { opacity: 0.35; } }
+/* As wide as stageStripPlan.ts reserves for it (STRIP_FOLD_WIDTH), so the grid stays inside its share. */
+.stage-line-fold { inline-size: 1.25rem; text-align: end; font-family: var(--code-font); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stage-line-fold[data-tone="bad"] { color: var(--ink-bad); }
+.stage-line-fold[data-tone="live"] { color: var(--ink-live); }
+/* The name yields after the grid: an ellipsis, with the whole name in its title. */
+.stage-line-name { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage-line[data-tone="live"] .stage-line-name { color: var(--ink-live); font-weight: 600; }
+.stage-line[data-tone="bad"] .stage-line-name { color: var(--ink-bad); font-weight: 600; }
+/* The strip's count pill, one size down to sit on a 16px line. */
+.stage-line-count { flex: none; display: grid; place-items: center; min-inline-size: 1rem; block-size: 1rem; padding-inline: 0.25rem; border-radius: 0.5rem;
+  background: var(--live); color: var(--primary-foreground); font-family: var(--code-font); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+/* The host's room at the line's end, kept by a margin on the last item so the line's own width holds still. */
+.stage-line > :last-child { margin-inline-end: var(--stage-line-end-room, 0); }
+@media (prefers-reduced-motion: reduce) { .stage-line-block[data-state="working"] { animation: none; } }

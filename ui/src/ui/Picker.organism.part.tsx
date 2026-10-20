@@ -8,10 +8,28 @@ export const name = "Picker";
 export const note = "The session list: triage groups, each row's place, age, and live work";
 
 const location = { projectKey: "/code/forgerie", project: "forgerie" };
-const row = (id: string, name: string, state: Row["state"], time: string, work: Partial<Pick<Row, "agents" | "processes" | "flagged">> = {}): Row => ({
+const row = (id: string, name: string, state: Row["state"], time: string, work: Partial<Pick<Row, "agents" | "processes" | "flagged" | "workflow">> = {}): Row => ({
   session: { id, cwd: "/code/forgerie", name, modified: "2026-10-13T12:00:00.000Z" }, state, group: state === "open" ? "open" : state, location, time,
   working: state === "working", busy: state === "working", agents: 0, processes: 0, flagged: 0, ...work,
 });
+type Workflow = NonNullable<Row["workflow"]>;
+type Stage = Workflow["stages"][number];
+/** A seven-stage route: `done` before `at`, `at` at index `index`, `next` after. */
+const route = (at: Stage, index: number): Stage[] => Array.from({ length: 7 }, (_, stage) => stage < index ? "done" : stage === index ? at : "next");
+const run = (stages: Stage[], stage: string, waiting = 0, name = "Design, build, review"): Workflow => ({ name, stages, stage, waiting });
+/** The behaviour table's cases, one section each. A `Stage at work` row keeps its agent count on the second line. */
+const RUNS = {
+  working: [row("raid", "Thunderbolt RAID health check", "working", "36m", { agents: 1, workflow: run(route("working", 3), "Independently review") })],
+  waiting: [row("backlog", "Backlog not working", "blocked", "34m", { workflow: run(route("waiting", 5), "Approve landing", 1) })],
+  failed: [row("acq", "Steam acquisition revival", "unread", "38m", { workflow: run(route("failed", 2), "Implement and test") })],
+  many: [row("modules", "Review every module", "working", "1h", { agents: 4, processes: 1,
+    workflow: run([...Array<Stage>(34).fill("done"), "working", "working", ...Array<Stage>(4).fill("next")], "Review the queue module") })],
+  none: [row("steam", "steam", "working", "27m", { agents: 1, flagged: 1 }), row("raid", "Thunderbolt RAID health check", "working", "36m", { agents: 1, workflow: run(route("working", 3), "Independently review") })],
+  long: [row("land", "Land the picker's stage line", "blocked", "2m", { workflow: run(route("waiting", 6), "Rebase, verify, and fast-forward onto main after the final combined checks", 2) }),
+    row("word", "Rename the export job", "working", "9m", { workflow: run(route("working", 1), "Pneumonoultramicroscopicsilicovolcanoconiosis_check_without_a_break_point") })],
+  prose: [row("notes", "Release notes for 1.2", "blocked", "3m", { workflow: run([], "", 1, "Write and review") }), row("draft", "Draft the 1.3 plan", "working", "12m", { workflow: run([], "", 0, "Write and review") })],
+} satisfies Record<string, Row[]>;
+const section = (key: string, label: string, kind: Section["kind"], rows: Row[]): Section => ({ key, label, kind, rows });
 /** A session asks; one works with two agents and a flagged guess; one has only flagged guesses, and stays in its age band. */
 const SECTIONS: Section[] = [
   { key: "blocked", label: "Needs your response", kind: "blocked", rows: [row("ask", "Release notes for 1.2", "blocked", "3m")] },
@@ -34,9 +52,9 @@ const HINTED: Section[] = [
 const PREFS: PickerPrefs = { grouping: "state", showArchived: false, allPinned: false, collapsed: new Set(["week", "month", "older"]) };
 
 /** The list with its own prefs, selection, and search, as the shell's binding keeps them. */
-function Stateful({ initialQuery, all = SECTIONS }: { initialQuery?: string; all?: Section[] }) {
+function Stateful({ initialQuery, all = SECTIONS, initialSelected }: { initialQuery?: string; all?: Section[]; initialSelected?: string }) {
   const [prefs, setPrefs] = useState(PREFS);
-  const [selected, setSelected] = useState<string>();
+  const [selected, setSelected] = useState<string | undefined>(initialSelected);
   const [query, setQuery] = useState(initialQuery ?? "");
   const [open, setOpen] = useState(false);
   const needle = query.trim().toLowerCase();
@@ -64,4 +82,55 @@ export function Searching() {
 /** Hints mark a guessed row with a hollow square and a muted word, apart from the filled square of a row the agent asked from. */
 export function AttentionHints() {
   return <Stateful all={HINTED} />;
+}
+
+/**
+ * The list docked in the shell at its two bounds, 18rem and 15rem (`--picker-width: clamp(15rem, 22%, 18rem)`), the
+ * first row selected so its ⋯ shows. The 15rem list docks in the 18rem shell's main column, so both stand side by side
+ * in the shell's own chrome.
+ */
+function AtBothWidths({ sections }: { sections: Section[] }) {
+  const first = sections[0]?.rows[0]?.session.id;
+  return <div className="app-shell" data-layout="docked" style={{ "--picker-width": "18rem" }}>
+    <aside className="app-picker"><Stateful all={sections} initialSelected={first} /></aside>
+    <div className="app-shell" data-layout="docked" style={{ "--picker-width": "15rem" }}>
+      <aside className="app-picker"><Stateful all={sections} initialSelected={first} /></aside>
+    </div>
+  </div>;
+}
+/** A run with a stage at work: the strip's grid under the place, its working block blinking, the stage's name muted. The agent count stays on the second line. */
+export function StageAtWork() {
+  return <AtBothWidths sections={[section("working", "Working", "working", RUNS.working)]} />;
+}
+/** A stop waits on the reader: the name takes the live ink and a pill counts what waits. Selected, the ⋯ clears the pill. */
+export function StopWaiting() {
+  return <AtBothWidths sections={[section("blocked", "Needs your response", "blocked", RUNS.waiting)]} />;
+}
+/** A failed stage: its block and the name in the bad ink. */
+export function StageFailed() {
+  return <AtBothWidths sections={[section("unread", "Unread", "unread", RUNS.failed)]} />;
+}
+/** Forty stages: the leading ones fold to `+n` so the grid keeps the strip's share of the line. */
+export function ManyStages() {
+  return <AtBothWidths sections={[section("working", "Working", "working", RUNS.many)]} />;
+}
+/** A row without a run keeps its two lines and 44px beside one that grew a third. */
+export function NoRun() {
+  return <AtBothWidths sections={[section("working", "Working", "working", RUNS.none)]} />;
+}
+/** A long stage name ends in an ellipsis, with the full name in its title; the pill stays. One name has no break point. */
+export function LongStageName() {
+  return <AtBothWidths sections={[section("blocked", "Needs your response", "blocked", RUNS.long)]} />;
+}
+/** A prose-only run has no stages: the workflow's name stands where the stage's would, with the pill and no grid. */
+export function ProseOnlyRun() {
+  return <AtBothWidths sections={[section("blocked", "Needs your response", "blocked", RUNS.prose)]} />;
+}
+/** Every case in one list, as the inbox shows them side by side. */
+export function Runs() {
+  return <AtBothWidths sections={[
+    section("blocked", "Needs your response", "blocked", [...RUNS.waiting, ...RUNS.prose.slice(0, 1)]),
+    section("working", "Working", "working", [...RUNS.working, ...RUNS.many, ...RUNS.none.slice(0, 1)]),
+    section("unread", "Unread", "unread", RUNS.failed),
+  ]} />;
 }

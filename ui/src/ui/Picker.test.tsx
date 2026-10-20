@@ -541,6 +541,55 @@ it("exposes attention data for the design stage without adding a visual mark", (
   expect(element?.getAttribute("data-attention-urgency")).toBe("high");
 });
 
+describe("a row's workflow run", () => {
+  type Workflow = NonNullable<Row["workflow"]>;
+  const withRun = (workflow: Workflow | undefined) => {
+    const all = rows({ sessions: [S("a")], statuses: { a: { ...idle, workflow } }, activities: {}, unread: new Set(), locate, now: NOW });
+    render({ ...view([]), sections: sections(all, { grouping: "state", showArchived: false, now: NOW }) });
+    return host.querySelector<HTMLElement>('[data-session="a"]')!;
+  };
+  const line = (row: HTMLElement) => row.querySelector<HTMLElement>(".picker-run .stage-line");
+
+  it("draws a third line with the stage's name, a block per stage, and the run as one sentence", () => {
+    const row = withRun({ name: "Design, build, review", stages: ["done", "done", "working", "next"], stage: "Implement and test", waiting: 0 });
+    const run = line(row)!;
+    expect(run.getAttribute("aria-label")).toBe("Design, build, review: Implement and test");
+    expect(run.querySelector(".stage-line-name")?.textContent).toBe("Implement and test");
+    expect(run.querySelector(".stage-line-name")?.getAttribute("title")).toBe("Implement and test");
+    expect([...run.querySelectorAll(".stage-line-block")].map((block) => block.getAttribute("data-state"))).toEqual(["done", "done", "working", "next"]);
+    expect(run.querySelector(".stage-line-grid")?.getAttribute("aria-hidden")).toBe("true");
+    expect(run.querySelector(".stage-line-count")).toBeNull();
+    expect(run.dataset["tone"]).toBeUndefined();
+  });
+
+  it("counts what waits on the reader in a pill and says so, in the live tone", () => {
+    const row = withRun({ name: "Design, build, review", stages: ["done", "waiting", "next"], stage: "Approve landing", waiting: 1 });
+    const run = line(row)!;
+    expect(run.getAttribute("aria-label")).toBe("Design, build, review: Approve landing, 1 waiting for you");
+    expect(run.querySelector(".stage-line-count")?.textContent).toBe("1");
+    expect(run.dataset["tone"]).toBe("live");
+  });
+
+  it("takes the bad tone when a stage failed", () => {
+    const row = withRun({ name: "Design, build, review", stages: ["done", "failed", "next"], stage: "Implement and test", waiting: 0 });
+    expect(line(row)?.dataset["tone"]).toBe("bad");
+  });
+
+  it("names a prose-only run by its workflow, with no grid", () => {
+    const row = withRun({ name: "Write and review", stages: [], stage: "", waiting: 2 });
+    const run = line(row)!;
+    expect(run.querySelector(".stage-line-grid")).toBeNull();
+    expect(run.querySelector(".stage-line-name")?.textContent).toBe("Write and review");
+    expect(run.getAttribute("aria-label")).toBe("Write and review, 2 waiting for you");
+  });
+
+  it("draws no line on a row without a run", () => {
+    const row = withRun(undefined);
+    expect(row.querySelector(".picker-run")).toBeNull();
+    expect(row.querySelector(".stage-line")).toBeNull();
+  });
+});
+
 describe("attention hints in the list", () => {
   const hint = { turnId: "turn-1", model: "fast", at: ago(0), likelyNeedsYou: true } as const;
   const hinted = (statuses: Record<string, PickerStatus>, unread: string[]) => {
