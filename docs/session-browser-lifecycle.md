@@ -53,6 +53,20 @@ saving grows when prefetched sessions are never visited.
 The cost: a prefetched session that was never selected shows its child, process
 and task indicators after its first panel read, not at selection.
 
+A follow-up made those selection-time reads wait until the destination
+transcript had painted, with a bounded fallback. It was measured and not kept.
+Two interleaved runs, each with 100 fresh documents per client, compared the
+delay from the first click to a useful frame:
+
+| Comparison | Median (ms) | p95 (ms) | Samples over 400 ms |
+| --- | --- | --- | --- |
+| Base / paint gate | 166.8 / 169.1 | 599.6 / 604.2 | 13 / 12 |
+| Current / paint gate | 170.3 / 172.8 | 502.4 / 515.6 | 10 / 13 |
+
+The differences are within run noise. In the second run the paint gate was
+slightly worse than the current behaviour. Host load varied from 2 to 47
+during the runs, and load spikes dominated the tail.
+
 The run did not show a latency change. Four 1,000-switch runs alternated base
 and candidate clients. Warm-switch p95 varied from 61 to 146 ms with run order
 and host load (1-minute load 8 to 24 on 16 cores), not with the client. All
