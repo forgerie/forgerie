@@ -15,6 +15,8 @@ const execute = promisify(execFile);
 export interface WorktreeSessionFile { id: string; cwd: string; path: string; transcriptSourcePath?: string }
 type SessionFile = WorktreeSessionFile;
 interface WorktreeEvents {
+  /** Forget read-only project discovery after Git changes a checkout or branch. */
+  worktreesChanged?(): void;
   publish(record: SessionWorktreeRecord): void;
   /** Close idle runtimes and terminals only after the durable input gate is set. */
   beforeRemoval?(record: SessionWorktreeRecord): Promise<readonly SessionFile[]>;
@@ -118,9 +120,11 @@ export class SessionWorktrees {
           await mkdir(dirname(record.path), { recursive: true });
           // Leave setup to the lifecycle hook below, not Git's first-checkout hook.
           // It streams setup logs and allows 15 minutes rather than Git's 2-minute deadline.
-          await execute("git", ["-C", record.repo, "worktree", "add", "-b", record.branch, record.path, record.sourceCommit ?? record.defaultBranch], {
-            env: { ...sanitizedGitEnv(), FORGERIE_MANAGED_WORKTREE_SETUP: "1" }, maxBuffer: 16 * 1024 * 1024, timeout: 120_000,
-          });
+          try {
+            await execute("git", ["-C", record.repo, "worktree", "add", "-b", record.branch, record.path, record.sourceCommit ?? record.defaultBranch], {
+              env: { ...sanitizedGitEnv(), FORGERIE_MANAGED_WORKTREE_SETUP: "1" }, maxBuffer: 16 * 1024 * 1024, timeout: 120_000,
+            });
+          } finally { this.events.worktreesChanged?.(); }
         } else if (existing.branch !== record.branch) throw new Error("Setup checkout no longer has its owned branch");
         record = await this.change(record.id, { setup: { phase: "hook", log: "" } });
         let writes = Promise.resolve();
@@ -213,6 +217,7 @@ export class SessionWorktrees {
       await this.change(current.id, { pendingRename: { from: current.branch, to: branch } });
       try { await git(current.path, "branch", "-m", branch); }
       catch (error) { await this.change(current.id, { pendingRename: undefined }); throw error; }
+      finally { this.events.worktreesChanged?.(); }
       await this.change(current.id, { branch, renamed: true, pendingRename: undefined });
     });
   }
@@ -397,7 +402,8 @@ export class SessionWorktrees {
         else if (record.discardedBranchTip !== (await git(record.repo, "rev-parse", record.branch)).trim()) throw new Error("Branch changed during discard cleanup. Request a new discard preview.");
         await beforeDestruction?.("before-remove");
         await this.events.closeManagedProcesses?.(await this.store.require(record.id));
-        await git(record.repo, "worktree", "remove", ...(force ? ["--force"] : []), record.path);
+        try { await git(record.repo, "worktree", "remove", ...(force ? ["--force"] : []), record.path); }
+        finally { this.events.worktreesChanged?.(); }
       } else if (registered !== undefined) {
         throw new Error("Checkout disappeared outside Forgerie; inspect and prune its git registration before retrying cleanup");
       }

@@ -52,6 +52,14 @@ The server publishes `{type:"session.worktree",worktree:SessionWorktreeRecord}` 
 
 The branch takes a slug of the generated session title. A taken name gains `-2`, `-3`, or the next available suffix. The rename occurs only once. A branch with an upstream, a matching remote-tracking branch, or unique commits reachable from a remote-tracking ref is not renamed. This uses local Git evidence; it cannot detect a push whose remote state has not reached local tracking refs. An interrupted rename has a durable intent that is reconciled at daemon startup.
 
+### Project discovery caching
+
+Sessiond caches read-only Git repository detection and worktree listings by path for 10 seconds. Concurrent project-view and workspace-list requests share the same Git read. `GitWorktreeDiscovery` defaults to no caching outside the daemon; its `cacheMs` and clock options make the window explicit.
+
+Managed worktree creation (including child worktrees), removal, and branch rename clear project discovery immediately, before lifecycle notifications. Failed Git mutations also clear it because they can leave partial changes. Invalidation clears all project entries to cover main, linked, and symlink paths without extra Git processes. The next read of another project can therefore need Git again. Ownership checks and destructive lifecycle preconditions still use uncached Git reads.
+
+A worktree added, removed, or renamed outside Forgerie can appear up to 10 seconds late in the project view. The first request after expiry refreshes the facts; there is no background refresh. Rejected discovery reads are not cached.
+
 ## Declared workspace services
 
 Managed worktrees can own development services through Process Compose. The declaration lives in `.forgerie/config.json` version 2. See [configuration](config.md#declared-workspace-services) for the file format and service environment.

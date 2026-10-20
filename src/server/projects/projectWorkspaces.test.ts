@@ -4,6 +4,9 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, access } from "node:fs/promise
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, expect, it } from "vitest";
+import Fastify from "fastify";
+import { registerProjectGroupRoutes } from "./projectGroupRoutes.js";
+import { GitWorktreeDiscovery, discoverGitWorktrees, isGitRepository } from "../workspaces/gitWorktreeDiscovery.js";
 import { ProjectService } from "./projectService.js";
 import { ProjectStore } from "../storage/projectStore.js";
 import { ProjectGroups } from "./projectGroups.js";
@@ -15,7 +18,7 @@ import { sanitizedGitEnv } from "../git/gitEnv.js";
 const exec = promisify(execFile);
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
-async function fixture() {
+async function fixture(discovery?: GitWorktreeDiscovery) {
   const root = await mkdtemp(join(tmpdir(), "forgerie-cross-repo-")); roots.push(root);
   const git = async (cwd: string, ...args: string[]) => (await exec("git", ["-C", cwd, ...args], { env: sanitizedGitEnv() })).stdout.trim();
   const projects = new ProjectService(new ProjectStore(join(root, "projects.json")));
@@ -28,8 +31,8 @@ async function fixture() {
   const groups = new ProjectGroups(join(root, "groups.json"), projects);
   const group = await groups.save({ name: "KORI", projectIds: [pa.id, pb.id] });
   const store = new SessionWorktreeStore(join(root, "worktrees.json")); await store.initialize();
-  const worktrees = new SessionWorktrees(store);
-  const work = new ProjectWorkspaces({ projects, groups, workspaces: new WorkspaceService(), worktrees, agentDir: root, writable: (ref) => Promise.resolve(ref.id === "source") });
+  const worktrees = new SessionWorktrees(store, { publish: () => undefined, worktreesChanged: () => discovery?.invalidate() });
+  const work = new ProjectWorkspaces({ projects, groups, workspaces: new WorkspaceService(discovery), worktrees, agentDir: root, writable: (ref) => Promise.resolve(ref.id === "source") });
   const ref = { id: "source", cwd: a };
   return { root, git, a, b, pa, pb, projects, groups, group, store, worktrees, work, ref };
 }
@@ -96,4 +99,35 @@ it("fails closed on unrelated projects and retries failed setup in the owned wor
   expect(after.id).toBe(before.id);
   expect(after.setup.phase).toBe("done");
   await expect(f.work.prepare(f.ref, f.pa.id, "retry")).rejects.toThrow("another project");
+});
+
+it("serves the same project catalog without repeat Git reads and discovers external worktrees after expiry", async () => {
+  let calls = 0;
+  let now = 1_000_000;
+  const discovery = new GitWorktreeDiscovery({
+    async isGitRepository(path) { calls++; return isGitRepository(path); },
+    async discoverGitWorktrees(path) { calls++; return discoverGitWorktrees(path); },
+  }, { cacheMs: 10_000, now: () => now });
+  const f = await fixture(discovery);
+  await f.work.prepare(f.ref, f.pb.id, "route-related");
+  discovery.invalidate();
+  const app = Fastify();
+  registerProjectGroupRoutes(app, f.groups, f.projects, f.work);
+  const read = (cwd: string) => app.inject({ method: "GET", url: `/project-workspaces?id=source&cwd=${encodeURIComponent(cwd)}` });
+  try {
+    type Catalog = Awaited<ReturnType<ProjectWorkspaces["catalog"]>>;
+    const first = await read(f.ref.cwd);
+    expect(first.statusCode).toBe(200);
+    const firstCalls = calls;
+    expect(firstCalls).toBeGreaterThan(0);
+    expect((await read(f.ref.cwd)).body).toBe(first.body);
+    expect(calls).toBe(firstCalls);
+    const fresh = new ProjectWorkspaces({ projects: f.projects, groups: f.groups, workspaces: new WorkspaceService(), worktrees: f.worktrees, agentDir: f.root, writable: () => Promise.resolve(true) });
+    expect(first.json()).toEqual(await fresh.catalog(f.ref));
+    const external = join(f.root, "external");
+    await f.git(f.a, "worktree", "add", "-b", "external", external);
+    expect((await read(external)).json<Catalog>().home).toBeUndefined();
+    now += 10_000;
+    expect((await read(external)).json<Catalog>().home).toEqual(f.pa);
+  } finally { await app.close(); }
 });
