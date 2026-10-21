@@ -180,7 +180,9 @@ export class DurableParentReadModel {
           catch (error) { finishProjection?.("error"); throw error; }
           finishProjection?.();
           const seq = hub.currentSeq(handle.address.sessionId);
-          const partial = live.generation?.message;
+          // Transaction documents are proxies. Schema parsing keeps `unknown` fields such as tool-call
+          // arguments by reference, so the partial message is detached before it enters the cut.
+          const partial = live.generation?.message === undefined ? undefined : copyJson(live.generation.message);
           const tools = (live.tools ?? []).filter(slot => projectBrowserSessionEvent({ type: "tool.start", toolName: slot.name, toolCallId: slot.callId, summary: "" }).type === "tool.start")
             .map(slot => ({ toolCallId: slot.callId, toolName: slot.name, status: slot.status, output: slot.output ?? "" }));
           const host = hostStatus();

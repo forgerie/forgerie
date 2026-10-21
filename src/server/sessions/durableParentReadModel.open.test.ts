@@ -125,6 +125,20 @@ it("records optional preparation and projection phases without changing the cut 
   } finally { trace.dispose(); }
 });
 
+it("opens while a generation is streaming, with the partial message detached from the transaction document", async () => {
+  const { conversation, reader, hub } = await fixture();
+  await conversation.commit(async tx => {
+    (await tx.doc(LiveDoc, conversation.id)).generation = { attempt: 1, message: { role: "assistant", api: "faux", provider: "faux", model: "faux",
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "toolUse", timestamp: 1, content: [{ type: "text", text: "in flight" }, { type: "toolCall", id: "call-1", name: "bash", arguments: { command: "ls" } }] } };
+  }, context);
+
+  const cut = await reader.open("/fixture", { limit: 50 }, hub, context);
+
+  expect(cut.snapshot.partial).toMatchObject({ role: "assistant", content: [{ type: "text", text: "in flight" }, { type: "toolCall", name: "bash", arguments: { command: "ls" } }] });
+  expect(() => structuredClone(cut)).not.toThrow();
+});
+
 /** Commit once per preparation scan start, as child, workflow or parent work can during an open. */
 function appendDuringEachScan(conversation: Awaited<ReturnType<typeof fixture>>["conversation"], write: () => Promise<unknown>, limit: number) {
   const entries = conversation.entries.bind(conversation);
