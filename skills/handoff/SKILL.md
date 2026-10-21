@@ -20,7 +20,8 @@ after the tool call.
 
 The destination session will:
 
-1. Read a private snapshot of the source session's active branch.
+1. Read a server-written digest of the source session's active branch. A raw
+   snapshot of the branch is there too, for looking up single entries.
 2. Write `.pi-web/handoffs/<handoff-id>.md` with the compact context.
 3. Mark preparation ready or failed through Forgerie's lifecycle records.
 4. Continue the work after preparation succeeds.

@@ -1,5 +1,5 @@
 import { controlledManagedProcessLauncher } from "../processes/managedProcesses.testSupport.js";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -384,6 +384,111 @@ describe("PiSessionService handoffSession", () => {
     await service.dispose();
   });
 
+  it("continues when preparation ends through end_turn instead of a final text message", async () => {
+    const workspace = await tempWorkspace();
+    const sourceTransitions: unknown[] = [];
+    const source = fakeRuntime("source-1", {
+      sessionFile: "/sessions/source-1.jsonl",
+      sessionManager: sessionManager("source-1", "/sessions/source-1.jsonl", workspace, sourceTransitions),
+    });
+    const destination = preparableDestination("destination-1", workspace, [
+      { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "call-1", name: "end_turn", arguments: { awaiting: "nothing", reply: "Handoff document written." } }] },
+    ]);
+    const service = handoffService([source.runtime, destination.runtime], workspace, []);
+    await service.start(workspace);
+
+    const result = await service.handoffSession(handoffRequest(workspace));
+    await destination.preparationStarted;
+    await writeHandoffDocument(workspace, result.handoffId);
+    destination.finishPreparation();
+    await destination.continuationStarted;
+    await waitForBackgroundWork();
+
+    expect(statesFor(sourceTransitions, result.handoffId).at(-1)).toBe("ready");
+    expect(destination.prompts[1]).toContain("Continue the work from the prepared handoff");
+    await service.dispose();
+  });
+
+  it("continues when a retried provider error is followed by an end_turn ending", async () => {
+    const workspace = await tempWorkspace();
+    const sourceTransitions: unknown[] = [];
+    const source = fakeRuntime("source-1", {
+      sessionFile: "/sessions/source-1.jsonl",
+      sessionManager: sessionManager("source-1", "/sessions/source-1.jsonl", workspace, sourceTransitions),
+    });
+    const destination = preparableDestination("destination-1", workspace, [
+      { role: "assistant", stopReason: "error", errorMessage: "overloaded", content: [] },
+      { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "call-1", name: "end_turn", arguments: { awaiting: "nothing", reply: "Done." } }] },
+    ]);
+    const service = handoffService([source.runtime, destination.runtime], workspace, []);
+    await service.start(workspace);
+
+    const result = await service.handoffSession(handoffRequest(workspace));
+    await destination.preparationStarted;
+    await writeHandoffDocument(workspace, result.handoffId);
+    destination.finishPreparation();
+    await destination.continuationStarted;
+    await waitForBackgroundWork();
+
+    expect(statesFor(sourceTransitions, result.handoffId).at(-1)).toBe("ready");
+    await service.dispose();
+  });
+
+  it("fails an end_turn ending that wrote no handoff document", async () => {
+    const workspace = await tempWorkspace();
+    const sourceTransitions: unknown[] = [];
+    const source = fakeRuntime("source-1", {
+      sessionFile: "/sessions/source-1.jsonl",
+      sessionManager: sessionManager("source-1", "/sessions/source-1.jsonl", workspace, sourceTransitions),
+    });
+    const destination = preparableDestination("destination-1", workspace, [
+      { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "call-1", name: "end_turn", arguments: { awaiting: "nothing", reply: "Done." } }] },
+    ]);
+    const log: { details: Record<string, unknown>; message: string }[] = [];
+    const service = handoffService([source.runtime, destination.runtime], workspace, log);
+    await service.start(workspace);
+
+    await service.handoffSession(handoffRequest(workspace));
+    await destination.preparationStarted;
+    destination.finishPreparation();
+    await waitForState(sourceTransitions, "failed");
+
+    expect(destination.prompts).toHaveLength(1);
+    expect(String(log.at(-1)?.details["error"])).toContain("did not create");
+    await service.dispose();
+  });
+
+  it("gives preparation a readable digest beside the raw snapshot and removes both afterwards", async () => {
+    const workspace = await tempWorkspace();
+    const source = fakeRuntime("source-1", {
+      sessionFile: "/sessions/source-1.jsonl",
+      sessionManager: sessionManager("source-1", "/sessions/source-1.jsonl", workspace, []),
+    });
+    const destination = preparableDestination("destination-1", workspace);
+    const service = handoffService([source.runtime, destination.runtime], workspace, []);
+    await service.start(workspace);
+
+    const result = await service.handoffSession(handoffRequest(workspace));
+    await destination.preparationStarted;
+    const digestFile = join(tmpdir(), `forgerie-handoff-${result.handoffId}.md`);
+    const snapshotFile = join(tmpdir(), `forgerie-handoff-${result.handoffId}.json`);
+    const documentFile = join(workspace, ".pi-web", "handoffs", `${result.handoffId}.md`);
+    expect(destination.prompts[0]).toContain(digestFile);
+    expect(destination.prompts[0]).toContain(snapshotFile);
+    expect(destination.prompts[0]).toContain(documentFile);
+    expect((await stat(digestFile)).mode & 0o777).toBe(0o600);
+    await expect(readFile(digestFile, "utf8")).resolves.toMatch(/\[0\] USER[^\n]*\nsource work/);
+
+    await writeHandoffDocument(workspace, result.handoffId);
+    destination.finishPreparation();
+    await destination.continuationStarted;
+    await waitForBackgroundWork();
+
+    await waitForRemoval(digestFile);
+    await waitForRemoval(snapshotFile);
+    await service.dispose();
+  });
+
   it("starts a second handoff from the same source session", async () => {
     const workspace = await tempWorkspace();
     const sourceTransitions: unknown[] = [];
@@ -450,7 +555,9 @@ function handoffRequest(workspace: string) {
  * A destination whose preparation run stays open until the test releases it, so
  * two handoffs can be held in flight at the same time.
  */
-function preparableDestination(id: string, workspace: string) {
+function preparableDestination(id: string, workspace: string, endingMessages: readonly unknown[] = [
+  { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "prepared" }] },
+]) {
   const destination = fakeRuntime(id, {
     sessionFile: `/sessions/${id}.jsonl`,
     sessionManager: sessionManager(id, `/sessions/${id}.jsonl`, workspace, []),
@@ -471,7 +578,7 @@ function preparableDestination(id: string, workspace: string) {
     observePreparation?.();
     return new Promise<void>((resolve) => {
       finishPreparation = () => {
-        destination.emit({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "prepared" }] } });
+        for (const message of endingMessages) destination.emit({ type: "message_end", message });
         resolve();
       };
     });
@@ -483,6 +590,12 @@ function preparableDestination(id: string, workspace: string) {
     continuationStarted,
     finishPreparation: () => { finishPreparation?.(); },
   };
+}
+
+async function writeHandoffDocument(workspace: string, handoffId: string): Promise<void> {
+  const handoffDirectory = join(workspace, ".pi-web", "handoffs");
+  await mkdir(handoffDirectory, { recursive: true });
+  await writeFile(join(handoffDirectory, `${handoffId}.md`), "ready\n", "utf8");
 }
 
 function handoffService(runtimes: ReturnType<typeof fakeRuntime>["runtime"][], workspace: string, log: { details: Record<string, unknown>; message: string }[], managedProcesses?: PiSessionServiceDependencies["managedProcesses"]) {
@@ -567,6 +680,14 @@ async function waitForState(transitions: unknown[], state: string): Promise<void
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   throw new Error(`state ${state} did not appear`);
+}
+
+async function waitForRemoval(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try { await stat(path); } catch { return; }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`${path} was not removed`);
 }
 
 async function waitForBackgroundWork(): Promise<void> {

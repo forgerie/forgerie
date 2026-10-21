@@ -165,6 +165,7 @@ import { ExtensionDialogWaiters, effectiveExtensionDialogTimeoutMs, extensionDia
 import { DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS } from "../../config.js";
 import { createSpawnSessionToolDefinition, type SpawnSessionInvocation, type SpawnSessionResult } from "./spawnSessionTool.js";
 import { createHandoffSessionToolDefinition, type HandoffSessionInvocation, type HandoffSessionResult, type HandoffState } from "./handoffSessionTool.js";
+import { handoffBranchDigest } from "./handoffDigest.js";
 import { HANDOFF_LIFECYCLE_CUSTOM_TYPE, HANDOFF_STATUS_CUSTOM_TYPE, handoffContinuationPrompt, handoffDocumentPath, handoffPreparationPrompt, handoffStatusContent, handoffTransition, type HandoffLifecycleContext, type HandoffPreparationContext } from "./handoffSession.js";
 import { planSessionCleanup, summarizeSessionCleanupExecution, type NormalizedSessionCleanupRequest, type SessionCleanupPlan } from "./sessionCleanup.js";
 import type { SpawnTargetDecision, SpawnTargetResolver } from "./spawnTargetResolver.js";
@@ -230,10 +231,19 @@ function modelSpecOf(model: { provider: string; id: string }): string {
   return `${model.provider}/${model.id}`;
 }
 
-function handoffPreparationCompletion(event: unknown): PromptCompletion | undefined {
+/**
+ * The outcome of one assistant message in a preparation run, or undefined for
+ * any other event. A tool-use message has no outcome of its own: the run either
+ * continues, or a turn-ending tool such as end_turn ended it.
+ */
+function handoffPreparationStep(event: unknown): { outcome: PromptCompletion | undefined } | undefined {
   if (getString(event, "type") !== "message_end") return undefined;
   const message = getProperty(event, "message");
   if (getString(message, "role") !== "assistant") return undefined;
+  return { outcome: assistantStopOutcome(message) };
+}
+
+function assistantStopOutcome(message: unknown): PromptCompletion | undefined {
   const stopReason = getString(message, "stopReason");
   if (stopReason === "stop") return { accepted: true };
   if (stopReason === "toolUse") return undefined;
@@ -2067,11 +2077,13 @@ export class PiSessionService implements SessionRouteService {
       return;
     }
     const sourceSnapshotFile = join(tmpdir(), `forgerie-handoff-${lifecycleContext.handoffId}.json`);
+    const sourceDigestFile = join(tmpdir(), `forgerie-handoff-${lifecycleContext.handoffId}.md`);
     const context: HandoffPreparationContext = {
       ...lifecycleContext,
       destinationSessionId,
       cwd,
       sourceSnapshotFile,
+      sourceDigestFile,
     };
     try {
       await writeFile(sourceSnapshotFile, `${JSON.stringify({
@@ -2081,11 +2093,13 @@ export class PiSessionService implements SessionRouteService {
         sourceLeafId: context.sourceLeafId,
         branch: sourceBranch,
       }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+      await writeFile(sourceDigestFile, handoffBranchDigest(sourceBranch), { encoding: "utf8", mode: 0o600 });
       let transportCompletion: PromptCompletion | undefined;
       let runCompletion: PromptCompletion | undefined;
       const unsubscribe = destination.subscribe((event) => {
-        const observed = handoffPreparationCompletion(event);
-        if (observed !== undefined) runCompletion = observed;
+        // Only the last assistant message counts, so a retried provider error does not outlive its retry.
+        const step = handoffPreparationStep(event);
+        if (step !== undefined) runCompletion = step.outcome;
       });
       const accepted = await this.submitPrompt(
         destination,
@@ -2098,10 +2112,13 @@ export class PiSessionService implements SessionRouteService {
         (result) => { transportCompletion = result; },
       );
       unsubscribe();
+      // A run that ends through a turn-ending tool such as end_turn has no final
+      // text message, so no stop reason is observed. Only an observed error or
+      // abort fails here; otherwise the handoff document decides readiness.
       const completion = transportCompletion?.accepted === false
         ? transportCompletion
         : runCompletion ?? (accepted
-          ? { accepted: false, error: "Preparation run ended without a successful final assistant message." }
+          ? { accepted: true }
           : { accepted: false, error: "Preparation prompt failed." });
       await this.finishDetachedHandoff(source, destination, context, completion);
     } catch (error: unknown) {
@@ -2162,6 +2179,7 @@ export class PiSessionService implements SessionRouteService {
       }
     } finally {
       await rm(context.sourceSnapshotFile, { force: true });
+      await rm(context.sourceDigestFile, { force: true });
     }
   }
 
