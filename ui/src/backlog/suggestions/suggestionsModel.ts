@@ -119,5 +119,17 @@ export function contextCount(context: Suggestion["context"]): string {
 }
 export const hasContext = (context: Suggestion["context"]) => context.why.trim() !== "" || context.files.length > 0 || context.decisions.length > 0;
 
+/**
+ * How an open suggestion's row stands in a list: busy while a file is in flight, the reason the last attempt failed,
+ * and whether the row may offer File and File and act itself. A duplicate is decided on its card, where the matches show.
+ */
+export function rowState(suggestion: Pick<Suggestion, "id" | "state">, pending: Readonly<Record<string, string>>, problems: Readonly<Record<string, string>>) {
+  const state = suggestion.state;
+  const press = pending[suggestion.id];
+  const filing = press === "file" || press === "file-and-act" || state.kind === "filing";
+  const problem = problems[suggestion.id] ?? (state.kind === "failed" ? state.message : undefined);
+  return { busy: press !== undefined, filing, problem: filing ? undefined : problem, offer: canFile(state) && state.kind !== "duplicate" };
+}
+
 /** The numbers a File anyway files past: every match the reader was shown. */
 export const matchNumbers = (state: SuggestionState) => state.kind === "duplicate" ? state.matches.flatMap((match) => match.number === undefined ? [] : [match.number]) : [];

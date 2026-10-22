@@ -11,7 +11,7 @@ import { ReadoutLine } from "../../ui/ReadoutLine";
 import { Lede } from "../../ui/Lede";
 import { LoadingLines } from "../../ui/LoadingLines";
 import type { Suggestion } from "./suggestionsApi";
-import { agoText, backgroundOf, canFile, destinationWords, filedWords, groupsOf, modelFromSpec, modelWords, wordsOf, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
+import { agoText, backgroundOf, destinationWords, filedWords, groupsOf, modelFromSpec, modelWords, rowState, wordsOf, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
 
 export interface SuggestionsSheetActions {
   onFile: (id: string) => void;
@@ -53,19 +53,16 @@ export function SuggestionsSheet({ suggestions, readError, pending, problems, dr
   const show = (suggestion: Suggestion) => () => actions.onShow(suggestion.id);
 
   const openRow = (suggestion: Suggestion) => {
-    const press = pending[suggestion.id];
     const state = suggestion.state;
-    const problem = problems[suggestion.id] ?? (state.kind === "failed" ? state.message : undefined);
+    const { busy, filing, problem, offer } = rowState(suggestion, pending, problems);
     const words = destinationWords(suggestion.destination);
-    const filing = press === "file" || press === "file-and-act" || state.kind === "filing";
     const detail: ReactNode = filing ? "Filing…" : problem ?? (state.kind === "duplicate"
       ? <>{suggestion.destination.provider === "github" ? "GitHub" : "The backlog"} has a close match{state.matches[0]?.number !== undefined ? <>, #{state.matches[0].number}</> : null}. Show it in the chat to decide.</>
       : <>{words.lead} <code>{words.code}</code>{words.tail ? ` ${words.tail}` : null}</>);
-    const offer = canFile(state) && state.kind !== "duplicate";
     return <PendingRow key={suggestion.id} title={title(suggestion)} onShow={show(suggestion)} showLabel="Show in chat" detail={detail}
-      detailTone={problem !== undefined && !filing ? "bad" : undefined}
-      actions={offer ? <ActionFooter actions={[{ label: "File", tone: "primary", disabled: press !== undefined, onPress: () => actions.onFile(suggestion.id) },
-        { label: "File and act", disabled: press !== undefined, onPress: () => actions.onFileAndAct(suggestion.id) }]} /> : undefined} />;
+      detailTone={problem !== undefined ? "bad" : undefined}
+      actions={offer ? <ActionFooter actions={[{ label: "File", tone: "primary", disabled: busy, onPress: () => actions.onFile(suggestion.id) },
+        { label: "File and act", disabled: busy, onPress: () => actions.onFileAndAct(suggestion.id) }]} /> : undefined} />;
   };
   const filedRow = (suggestion: Suggestion) => {
     const state = suggestion.state;

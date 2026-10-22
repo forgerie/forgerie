@@ -5,7 +5,7 @@ import { ActionFooter } from "../../ui/ActionFooter";
 import { ReadoutLine } from "../../ui/ReadoutLine";
 import { TextButton } from "../../ui/TextButton";
 import type { Suggestion } from "./suggestionsApi";
-import { agoText, canFile, destinationWords, wordsOf, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
+import { agoText, destinationWords, rowState, wordsOf, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
 
 export interface SuggestedInChatsActions {
   onFile: (id: string) => void;
@@ -39,19 +39,16 @@ export function SuggestedInChats({ suggestions, readError, pending, problems, dr
   return <RecordGroup label="Suggested in chats" count={rows.length} open={open} onToggle={() => setOpen(!open)} emphasis>
     {rows.map((suggestion) => {
       const state = suggestion.state;
-      const press = pending[suggestion.id];
-      const filing = press === "file" || press === "file-and-act" || state.kind === "filing";
-      const problem = problems[suggestion.id] ?? (state.kind === "failed" ? state.message : undefined);
+      const { busy, filing, problem, offer } = rowState(suggestion, pending, problems);
       const words = destinationWords(suggestion.destination);
       const ago = agoText(suggestion.createdAt, now);
       const from = suggestion.sessionTitle ?? "a chat";
-      const offer = canFile(state);
       return <PendingRow key={suggestion.id} title={wordsOf(suggestion, drafts[suggestion.id]).title}
         detail={filing ? "Filing…" : problem ?? <>Suggested in <em>{from}</em>{ago ? `, ${ago}` : ""}. {words.lead} <code>{words.code}</code>{state.kind === "duplicate" ? ". It has a close match: show it in the chat to decide" : ""}</>}
-        detailTone={problem !== undefined && !filing ? "bad" : undefined}
+        detailTone={problem !== undefined ? "bad" : undefined}
         actions={<ActionFooter actions={[
-          ...(offer && state.kind !== "duplicate" ? [{ label: "File", tone: "primary" as const, disabled: press !== undefined, onPress: () => actions.onFile(suggestion.id) },
-            { label: "File and act", disabled: press !== undefined, onPress: () => actions.onFileAndAct(suggestion.id) }] : []),
+          ...(offer ? [{ label: "File", tone: "primary" as const, disabled: busy, onPress: () => actions.onFile(suggestion.id) },
+            { label: "File and act", disabled: busy, onPress: () => actions.onFileAndAct(suggestion.id) }] : []),
           { label: "Show in chat", tone: "quiet", onPress: () => actions.onShow(suggestion) }]} />} />;
     })}
   </RecordGroup>;

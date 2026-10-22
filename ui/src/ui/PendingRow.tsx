@@ -25,12 +25,14 @@ export function PendingRow({ title, onShow, showLabel, mark, detail, detailTone,
 }) {
   return <li className="pending-row" data-tone={tone}>
     <span className="pending-row-mark" aria-hidden="true">{mark}</span>
-    <span className="pending-row-words">
-      {onShow ? <button type="button" className="pending-row-title" title={showLabel} aria-label={showLabel ? `${showLabel}: ${title}` : undefined}
-        onClick={onShow}>{title}</button> : <span className="pending-row-title">{title}</span>}
-      {detail !== undefined && detail !== null && detail !== false ? <span className="pending-row-detail" data-tone={detailTone}>{detail}</span> : null}
+    <span className="pending-row-body">
+      <span className="pending-row-words">
+        {onShow ? <button type="button" className="pending-row-title" title={showLabel} aria-label={showLabel ? `${showLabel}: ${title}` : undefined}
+          onClick={onShow}>{title}</button> : <span className="pending-row-title">{title}</span>}
+        {detail !== undefined && detail !== null && detail !== false ? <span className="pending-row-detail" data-tone={detailTone}>{detail}</span> : null}
+      </span>
+      {actions !== undefined && actions !== null && actions !== false ? <span className="pending-row-actions">{actions}</span> : null}
     </span>
-    {actions !== undefined && actions !== null && actions !== false ? <span className="pending-row-actions">{actions}</span> : null}
     {below !== undefined && below !== null && below !== false ? <div className="pending-row-below">{below}</div> : null}
   </li>;
 }

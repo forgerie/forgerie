@@ -1,28 +1,32 @@
-/* The row answers to its own width: the commands trail the words while both fit, and drop under the words when not. */
-.pending-row { container-type: inline-size; display: grid; grid-template-columns: 0.875rem minmax(0, 1fr) auto;
-  grid-template-areas: "mark words actions" ". below below"; column-gap: var(--space-2); align-items: start; min-inline-size: 0;
+/* A mark gutter, then the body. The body wraps on its own: the commands trail the words while both fit, and drop to
+   a line of their own when they do not. No width threshold: the words' basis decides. */
+.pending-row {
+  /** The words' least width before the commands wrap under them, in rem. @label Words before commands wrap @min 10 @max 24 @step 1 */
+  --pending-row-words-min: 16rem;
+  display: grid; grid-template-columns: 0.875rem minmax(0, 1fr); column-gap: var(--space-2); align-items: start; min-inline-size: 0;
   padding: var(--space-2); border-radius: var(--radius-control); }
 .pending-row:hover { background: var(--hover-surface); }
-.pending-row-mark { grid-area: mark; display: grid; place-items: center; block-size: 1.375rem; }
-.pending-row-words { grid-area: words; display: grid; gap: var(--space-1); min-inline-size: 0; }
+/* The first row has no row above it, only its list's heading: it takes the title target's reach as its own top padding. */
+.pending-row:first-child { padding-block-start: calc(var(--control-size) - 1.375rem - var(--space-1)); }
+.pending-row-mark { display: grid; place-items: center; block-size: 1.375rem; }
+/* space-between puts the commands at the end of the words' line, and at the line's start once they wrap alone under the words. */
+.pending-row-body { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: var(--space-2) var(--space-3); min-inline-size: 0; }
+.pending-row-words { flex: 1 1 var(--pending-row-words-min); display: grid; gap: var(--space-1); min-inline-size: 0; }
 .pending-row-title { position: relative; justify-self: start; padding: 0; border: 0; background: transparent; color: var(--foreground);
   font: inherit; font-size: var(--small-text); font-weight: 500; line-height: 1.375rem; text-align: start; overflow-wrap: anywhere; }
-/* A pressable title keeps a control-sized target around words drawn at text size. */
-button.pending-row-title::before { content: ""; position: absolute; inset: calc(-1 * var(--space-2)) calc(-1 * var(--space-1)); }
+/* Drawn small, pressed large: a one-line title's target is the control size. It reaches up into the row's padding and the
+   gap above it, and down only to the detail line, so it never covers the detail's link or the row above's commands. */
+button.pending-row-title::before { content: ""; position: absolute; inset-inline: calc(-1 * var(--space-1));
+  inset-block: calc(-1 * (var(--control-size) - 1.375rem - var(--space-1))) calc(-1 * var(--space-1)); }
 button.pending-row-title:hover { text-decoration: underline; text-decoration-color: var(--line-focus); text-underline-offset: 0.2em; }
 .pending-row-detail { min-inline-size: 0; color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.45; overflow-wrap: anywhere; }
 .pending-row-detail code { color: var(--foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-ligatures: none; }
 .pending-row-detail em { font-style: normal; color: var(--foreground); }
+/* A link inside the detail's sentence: its target reaches sideways and down, never up over the title's. */
 .pending-row-detail a { position: relative; color: var(--foreground); text-decoration: underline; text-decoration-color: var(--line-focus); text-underline-offset: 0.2em; }
-.pending-row-detail a::before { content: ""; position: absolute; inset: calc(-1 * var(--space-2)) calc(-1 * var(--space-1)); }
+.pending-row-detail a::before { content: ""; position: absolute; inset: 0 calc(-1 * var(--space-1)) calc(-1 * var(--space-2)); }
 .pending-row-detail[data-tone="bad"] { color: var(--ink-bad); }
-.pending-row-actions { grid-area: actions; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-2); }
-.pending-row-below { grid-area: below; min-inline-size: 0; margin-block-start: var(--space-2); }
+.pending-row-actions { flex: 0 1 auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-inline-size: 0; }
+.pending-row-below { grid-column: 2; min-inline-size: 0; margin-block-start: var(--space-2); }
 /* Quiet: an item that needs nothing more steps back, title and all. */
 .pending-row[data-tone="quiet"] .pending-row-title { color: var(--muted-foreground); font-weight: 400; }
-/* A narrow row: the commands go under the words, at their start, so the title keeps its width. */
-@container (max-width: 30rem) {
-  .pending-row-words, .pending-row-actions, .pending-row-below { grid-column: 2 / -1; }
-  .pending-row-actions { grid-row: 2; justify-content: flex-start; margin-block-start: var(--space-2); }
-  .pending-row-below { grid-row: 3; }
-}
