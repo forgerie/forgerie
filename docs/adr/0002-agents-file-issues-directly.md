@@ -4,6 +4,8 @@ Status: accepted, 2026-10-12
 
 An agent creates a GitHub issue itself after it searches open and closed issues for the same work. Every issue it creates carries an `agent-filed` label, so the user can find, filter, and clean up what agents filed. This replaces the rule that every new issue goes through `propose_issue` and the user's tap. Only the parent agent files issues; a child suggests issues in its report, so one agent does the duplicate search. The `propose_issue` tool and its card are removed, so there is one way to file an issue.
 
+Amended 2026-10-22 by [ADR 0010](0010-backlog-suggestion-cards.md): agents capture follow-up ideas as suggestion cards. Direct `file_issue` remains for explicit user requests to file now. Parent-only filing, duplicate search, the `agent-filed` label, and the decision log remain in force.
+
 ## Considered options
 
 - One proposal card per issue (the behaviour before this decision).

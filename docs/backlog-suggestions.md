@@ -115,9 +115,15 @@ They are not per-session `pi.event` messages.
 BACKLOG_SUGGESTIONS_REAL=1 npx tsx scripts/backlog-suggestions-real.ts
 ```
 
+The script refuses to run unless `BACKLOG_SUGGESTIONS_REAL=1` is set, before it
+reads `~/.local/share/forgerie/agent/cliproxyapi.json`. That opt-in permits a real
+model request with the existing CLIProxyAPI credentials. The script keeps the
+key in runtime memory only; it does not write it into the temporary model config,
+auth storage, or evidence files.
+
 This uses a real model, an in-memory GitHub API, a temporary profile and a temporary
 Git repo. It checks suggestion and continued chat, duplicate refusal, File anyway,
 the label and decision, a Markdown commit and fast-forward, a server-prompted fresh
 worktree background session, and request replay. It never writes to live GitHub
 or pushes. The script prints the evidence directory and deletes its temporary
-model credentials when it exits.
+model configuration when it exits. No model key is left in its files.

@@ -39,9 +39,9 @@ const git = async (...args: string[]) => (await execute("git", ["-C", cwd, ...ar
 await git("init", "-b", "main"); await git("config", "user.name", "Suggestion Acceptance"); await git("config", "user.email", "acceptance@example.test");
 await writeFile(join(cwd, "README.md"), "Temporary acceptance project. Never push.\n"); await git("add", "."); await git("commit", "-m", "initial");
 const model = process.env.BACKLOG_SUGGESTIONS_MODEL ?? "deepseek-v4.1-flash";
-await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { "suggestion-acceptance": { baseUrl: source.baseUrl.replace(/\/$/u, "").replace(/\/v1$/u, "") + "/v1", apiKey: source.apiKey, api: "openai-completions", models: [{ id: model, name: "Suggestion acceptance", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 }] } } }), { mode: 0o600 });
-await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "suggestion-acceptance", defaultModel: model, defaultThinkingLevel: "off", packages: [], compaction: { enabled: false } }));
 process.once("exit", () => { rmSync(join(agentDir, "models.json"), { force: true }); });
+await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { "suggestion-acceptance": { baseUrl: source.baseUrl.replace(/\/$/u, "").replace(/\/v1$/u, "") + "/v1", api: "openai-completions", models: [{ id: model, name: "Suggestion acceptance", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 }] } } }), { mode: 0o600 });
+await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "suggestion-acceptance", defaultModel: model, defaultThinkingLevel: "off", packages: [], compaction: { enabled: false } }));
 const requests: { method: string; url: string; body: unknown }[] = []; const labels = new Set<string>();
 const issue = (number: number, title: string, labels: string[] = []) => ({ number, title, body: "Existing", state: "open", html_url: `https://github.com/acceptance/scratch/issues/${number}`, user: { login: "acceptance" }, author_association: "OWNER", labels, updated_at: "2026-10-20T00:00:00Z", comments: 0 });
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
@@ -63,6 +63,8 @@ const store = new BacklogSuggestionStore(join(root, "backlog-suggestions.json"))
 const claims = new BacklogClaimStore(join(root, "backlog-claims.json")); await claims.initialize();
 const worktrees = new SessionWorktrees(new SessionWorktreeStore(join(root, "worktrees.json")));
 const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
+// RuntimeCredentials keeps this override in memory; neither models.json nor auth.json stores the key.
+await models.setRuntimeApiKey("suggestion-acceptance", source.apiKey);
 const sessions: PiSessionService = new PiSessionService(new SessionEventHub(), { agentDir, modelRuntime: models, archiveStore: emptyArchiveStore(), sessionWorktrees: worktrees,
   sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] }),
   backlogSuggestions: { suggest: (cwd, id, input, context) => suggestions.suggest(cwd, id, input, context) },
