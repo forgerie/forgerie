@@ -172,6 +172,14 @@ it("never hands ownership to a tree or branch that the user recreated under the 
   expect(ledger.trees).toEqual({});
 });
 
+it("stops treating a branch as owned once its reflog is expired", async () => {
+  await act(createWorktree(deps, ledger, "f-1", { repo: project, name: "exp", branch: "exp", place: "project" }, 7));
+  const path = join(project, ".worktree", "exp");
+  await git(path, ["commit", "-q", "--allow-empty", "-m", "Unmerged"]); await git(project, ["worktree", "remove", "--force", path]);
+  await git(project, ["reflog", "expire", "--expire=now", "--all"]);
+  expect(await gate("git branch -D exp")).toBe("Delete an unmerged Git branch");
+});
+
 it("keeps gating discards and branch deletes that are not scratch work", async () => {
   await act(createWorktree(deps, ledger, "f-1", { repo: project, name: "own", place: "project" }, 7));
   await writeFile(join(project, "file.txt"), "user edit\n");

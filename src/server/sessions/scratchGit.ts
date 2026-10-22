@@ -124,10 +124,13 @@ async function exists(path: string): Promise<boolean> {
   try { await stat(path); return true; } catch (error) { if (errorCode(error) === "ENOENT") return false; throw error; }
 }
 
-/** Makes the tree's folder. `mkdir` fails when the path exists, so no one else's work can be inside it. */
-async function claimFolder(path: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  try { await mkdir(path, { mode: 0o700 }); }
+/**
+ * Makes the tree's folder. `mkdir` fails when the path exists, so no one else's work can be inside it. Scratch
+ * folders are private to the user; a project's `.worktree` folder keeps the default mode.
+ */
+async function claimFolder(path: string, scratch: boolean): Promise<void> {
+  await mkdir(dirname(path), { recursive: true, ...(scratch ? { mode: 0o700 } : {}) });
+  try { await mkdir(path, scratch ? { mode: 0o700 } : {}); }
   catch (error) { if (errorCode(error) === "EEXIST") refuse(`${path} already exists; pick another name`); throw error; }
 }
 
@@ -156,7 +159,7 @@ export async function createWorktree(deps: ScratchGitDeps, ledger: ScratchLedger
     await deps.git(main, ["check-ref-format", "--branch", args.branch]).catch(() => refuse(`${args.branch ?? ""} is not a valid branch name`));
   }
   const path = args.place === "project" ? join(main, ".worktree", args.name) : join(deps.scratchRoot, root, args.name);
-  await claimFolder(path);
+  await claimFolder(path, args.place !== "project");
   try {
     // Run from the folder the agent named, so a worktree without `ref` starts at that folder's HEAD.
     await deps.git(args.repo, ["worktree", "add", "--quiet", ...(args.branch === undefined ? ["--detach"] : ["-b", args.branch]), "--", path, ...(args.ref === undefined ? [] : [args.ref])]);
@@ -182,7 +185,7 @@ export async function cloneRepository(deps: ScratchGitDeps, ledger: ScratchLedge
   const local = resolve(cwd, args.source);
   const source = await exists(local) ? await realpath(local) : args.source;
   const path = join(deps.scratchRoot, root, args.name);
-  await claimFolder(path);
+  await claimFolder(path, true);
   try { await deps.git(cwd, ["clone", "--quiet", ...(args.shared === true ? ["--shared"] : []), "--", source, path]); }
   catch (error) { await rm(path, { recursive: true, force: true }); throw error; }
   const common = await realpath(join(path, ".git"));
@@ -230,8 +233,11 @@ export async function ownsBranches(git: ScratchGitDeps["git"], ledger: ScratchLe
   if (names.length === 0) return false;
   const common = await realpath(gitLine(await git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"])));
   for (const name of names) {
-    const tree = Object.values(ledger.trees).find(item => item.common === common && item.branch?.ref === `refs/heads/${name}`);
-    if (tree === undefined || !await sameBranch(git, cwd, tree.branch)) return false;
+    // A stale record of an earlier branch with this name may remain; any record whose identity matches proves ownership.
+    const candidates = Object.values(ledger.trees).filter(item => item.common === common && item.branch?.ref === `refs/heads/${name}`);
+    let owned = false;
+    for (const tree of candidates) if (await sameBranch(git, cwd, tree.branch)) { owned = true; break; }
+    if (!owned) return false;
   }
   return true;
 }
