@@ -14,7 +14,7 @@ This cleanup removes unused upstream features from the local Forgerie product. I
 | Browser OAuth and API-key login flows. | Configure credentials in the actual Pi profile. Existing stored credentials remain usable. |
 | Tracked-subsession spawning, control, and completion notices. | Normal sessions and Durable children remain. Historical links stay in session data and retain reciprocal-file validation. |
 | Release-registry discovery, installation detection, and generic service installers. | Local version diagnostics and controls for existing systemd user units remain. |
-| Production Smart Turn workers and check-turn endpoint. | User-driven Whisper dictation remains. Status keeps the inert compatibility field. |
+| Production Smart Turn workers and check-turn endpoint. | User-driven dictation remains, now through the [Speech to text](speech-to-text.md) plugin. Status keeps the inert compatibility field. |
 | Standalone HTML documentation site and retired development probes. | Current Markdown guides and browser-app verification remain. |
 
 Retired routes return 404 instead of serving the SPA's HTML. In particular, original plugin assets and APIs, browser-auth routes, remote-machine routes, terminal APIs, and `/api/speech/check-turn` no longer exist.

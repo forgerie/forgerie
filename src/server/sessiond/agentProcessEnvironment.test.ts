@@ -59,6 +59,8 @@ describe("agent process environment visibility", () => {
     // Daemon session-discovery wiring; agent-run `pi` CLIs must not write
     // sessions into daemon-managed storage.
     expect(isAgentVisibleEnvKey("PI_CODING_AGENT_SESSION_DIR")).toBe(false);
+    // Service keys: agents must not read them from their environment.
+    expect(isAgentVisibleEnvKey("FORGERIE_SPEECH_API_KEY")).toBe(false);
   });
 
   it("removes hidden keys from the environment and reports them sorted", () => {

@@ -2,7 +2,7 @@ import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from
 import { SPEECH_POLICY, SPEECH_SAMPLE_RATE_HZ, type SpeechRuntimePolicy } from "../../shared/speechPolicy.js";
 import { parseSpeechTranscriptionResponse, type SpeechErrorKind, type SpeechErrorResponse, type SpeechServiceStatusResponse } from "../../shared/speechContracts.js";
 import { SpeechAudioValidationError } from "./speechAudio.js";
-import { SpeechProcessError } from "./speechProcess.js";
+import { SpeechError } from "./speechErrors.js";
 import { createSpeechService, speechServiceUnavailable, type SpeechService } from "./speechService.js";
 
 export interface SpeechRouteOptions {
@@ -12,7 +12,7 @@ export interface SpeechRouteOptions {
 
 export function createUnavailableSpeechService(): SpeechService {
   return createSpeechService({
-    whisper: speechServiceUnavailable("runtime_not_configured"),
+    backend: speechServiceUnavailable("runtime_not_configured"),
   });
 }
 
@@ -29,7 +29,7 @@ export function registerSpeechRoutes(app: FastifyInstance, service: SpeechServic
   });
 
   app.get("/api/speech/status", async (_request, reply) => {
-    return sendNoStore(reply, statusResponse(service, policy));
+    return sendNoStore(reply, await statusResponse(service, policy));
   });
 
   app.post<{ Body: Buffer }>("/api/speech/transcribe", {
@@ -44,9 +44,9 @@ function registerSpeechBodyParser(app: FastifyInstance): void {
   app.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_request, body, done) => { done(null, body); });
 }
 
-function statusResponse(service: SpeechService, policy: SpeechRuntimePolicy): SpeechServiceStatusResponse {
+async function statusResponse(service: SpeechService, policy: SpeechRuntimePolicy): Promise<SpeechServiceStatusResponse> {
   return {
-    ...service.status(),
+    ...(await service.status()),
     limits: {
       sampleRateHz: SPEECH_SAMPLE_RATE_HZ,
       maxTurnSeconds: policy.audio.maxTurnSeconds,
@@ -260,7 +260,7 @@ async function sendMappedSpeechError(reply: FastifyReply, error: unknown): Promi
     if (error.kind === "too_short") return sendSpeechError(reply, 400, "too_short", "Speech audio is shorter than the minimum request duration.", false);
     return sendSpeechError(reply, 400, "invalid_pcm", "Speech audio is invalid.", false);
   }
-  if (error instanceof SpeechProcessError) {
+  if (error instanceof SpeechError) {
     switch (error.kind) {
       case "unavailable":
         return sendSpeechError(reply, 503, "speech_unavailable", "Speech is unavailable.", true);
@@ -276,10 +276,7 @@ async function sendMappedSpeechError(reply: FastifyReply, error: unknown): Promi
         return sendSpeechError(reply, 422, "transcription_empty", "Speech transcription was empty.", false);
       case "too_short":
         return sendSpeechError(reply, 400, "too_short", "Speech audio is shorter than the minimum request duration.", false);
-      case "protocol":
-      case "startup_timeout":
-      case "child_exit":
-      case "inference_failed":
+      case "failed":
         return sendSpeechError(reply, 502, "speech_failed", "Speech processing failed.", true);
     }
   }

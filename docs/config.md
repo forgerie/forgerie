@@ -67,7 +67,7 @@ Settings writes desired configuration through `/api/config`. Retired `allowedHos
 | `PI_WEB_CODEMODE` | Hosted-script tool override. |
 | `PI_WEB_DURABLE_CHILDREN` | Durable child-agent tool override. |
 | `PI_WEB_OFFLINE`, `PI_OFFLINE` | Disable background network work when set to any non-empty value. |
-| `FORGERIE_WHISPER_STT_WORKER` | Absolute path to the dictation worker. |
+| `FORGERIE_SPEECH_API_KEY` | Web-only key for the Speech to text service. Sent as a Bearer token. See [Speech to text](speech-to-text.md). |
 | `DECISION_GATEWAY_API_KEY` | Sessiond-only Decision hints gateway key. A non-empty value overrides the Settings key file; Settings cannot replace or remove it. |
 | `FORGERIE_SPEECH_ALLOWED_HOSTS` | Explicit comma-separated host allowlist for speech requests. |
 
@@ -315,8 +315,8 @@ Forgerie disables Process Compose's implicit `.env` loading. Repository commands
 
 ## Dictation
 
-The web process owns Whisper. It resolves `forgerie-whisper-stt-worker` from its `PATH`, or uses the absolute `FORGERIE_WHISPER_STT_WORKER` override. The flake retains the pinned `whisper.cpp` worker and its `base.en` model.
+Dictation uses the Speech to text plugin. Forgerie runs no speech model: the web process sends each recording to a service that speaks the OpenAI audio API. See [Speech to text](speech-to-text.md) for the settings, the key and the services that work.
 
-A missing or unusable worker disables dictation, not the rest of Forgerie. Restart only the web process after changing its worker path or speech host policy. User-driven recording and transcription remain supported. Automatic Smart Turn execution and `/api/speech/check-turn` are retired. Speech status retains an inert `smartTurn: "unavailable"` field for older clients.
+An unset address or a service that does not answer disables dictation, not the rest of Forgerie. Address changes need no restart. Restart only the web process after changing its service key or speech host policy. User-driven recording and transcription remain supported. Automatic Smart Turn execution and `/api/speech/check-turn` are retired. Speech status retains an inert `smartTurn: "unavailable"` field for older clients.
 
 The separate `prototypes/voice-content` experiment owns its own speech stack. The production cleanup does not change it.

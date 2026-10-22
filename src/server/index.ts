@@ -11,12 +11,9 @@ let speech: SpeechService | undefined;
 let app: Awaited<ReturnType<typeof buildApp>> | undefined;
 
 try {
-  speech = await createLiveSpeechService();
+  speech = createLiveSpeechService();
   app = await buildApp({ bodyLimit: maxUploadBytes(process.env, config), speech, speechAllowedHosts: speechAllowedHosts(process.env, host, port) });
   await app.listen({ port, host });
-  void speech.warm().catch((error: unknown) => {
-    app?.log.warn({ err: error }, "failed to warm speech runtime");
-  });
 } catch (error) {
   if (app !== undefined) await app.close();
   else if (speech !== undefined) await speech.close();

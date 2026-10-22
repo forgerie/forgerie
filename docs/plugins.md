@@ -66,6 +66,12 @@ The original browser-plugin runtime, bundled plugin assets, public declaration p
 
 Existing config entries remain data, but undiscovered original-client plugins no longer appear in Settings. Pi extensions, current app plugins, account meters, managed processes, and delegated agents remain supported. See [fork cleanup](fork-cleanup.md) for the full retired-feature list.
 
+## Speech to text
+
+Speech to text is a server plugin for voice input in the composer. It sends each
+recording to a service that speaks the OpenAI audio API, such as a self-hosted
+gateway, speaches, OpenAI or Groq. See [Speech to text](speech-to-text.md).
+
 ## Decision hints
 
 Decision hints is an off-by-default gateway connection for optional attention and

@@ -55,5 +55,24 @@ export const workflowAutonomyManifest: AppPluginManifest = {
   ],
 };
 
+/**
+ * Voice input in the composer. Forgerie sends each recording to a speech
+ * service that speaks the OpenAI audio API (`POST <address>/audio/transcriptions`),
+ * so the same settings reach a local gateway, speaches, LocalAI, OpenAI or Groq.
+ * The service's key is server-only (FORGERIE_SPEECH_API_KEY), never a setting.
+ */
+export const speechToTextManifest: AppPluginManifest = {
+  id: "speech-to-text", name: "Speech to text", runtime: "server",
+  description: "Turns your voice into text in the composer. Each recording leaves this machine for the speech service at the address below.",
+  settings: [
+    { type: "url", id: "base_url", label: "Service address", default: "", optional: true,
+      description: "The base address of an OpenAI-compatible API, usually ending in /v1, such as https://api.openai.com/v1. Leave empty for no voice input." },
+    { type: "text", id: "model", label: "Model", default: "whisper-1",
+      description: "The transcription model name that the service expects. Services that have one model ignore it." },
+    { type: "text", id: "language", label: "Language", default: "auto",
+      description: "An ISO-639-1 code, such as en, that tells the service which language you speak. Write auto to let the service detect it." },
+  ],
+};
+
 /** Every bundled app plugin (browser and server), in the order Settings lists them. */
-export const APP_PLUGIN_MANIFESTS: readonly AppPluginManifest[] = [accountMetersManifest, decisionHintsManifest, workflowAutonomyManifest];
+export const APP_PLUGIN_MANIFESTS: readonly AppPluginManifest[] = [accountMetersManifest, decisionHintsManifest, speechToTextManifest, workflowAutonomyManifest];

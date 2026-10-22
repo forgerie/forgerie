@@ -169,7 +169,7 @@ Landing source is not deployment. Publish the verified build even when other ses
 
 Give both units the same global `PI_WEB_CONFIG`. Set an explicit `agent.dir` for Forgerie's profile. Keep the bind address on loopback and expose it through the trusted private-network proxy. Forgerie has no browser login barrier.
 
-The web unit owns speech. Set `FORGERIE_WHISPER_STT_WORKER` to an executable absolute path, or put the worker on that unit's `PATH`. Set `FORGERIE_SPEECH_ALLOWED_HOSTS` for the browser origin served by the proxy. See [configuration](config.md).
+The web unit sends speech to the service set in Settings > Plugins > Speech to text. Set `FORGERIE_SPEECH_API_KEY` on that unit only when the service needs a key. Set `FORGERIE_SPEECH_ALLOWED_HOSTS` for the browser origin served by the proxy. See [configuration](config.md).
 
 Provider and global extension changes require a sessiond restart. A browser reload or session `/reload` does not replace the daemon's provider registry.
 
@@ -207,7 +207,7 @@ The inventory is local to one host and process namespace. Do not share it betwee
 
 `/api/pi-web/runtime` reports process versions, capabilities, and the active daemon profile. `/api/pi-web/version` and `/api/pi-web/status` report local installed and running versions. They do not query npm or another release registry. Version comparisons do not identify source changes made without a package version change.
 
-If the web process is unavailable, `forgerie version` also tries the daemon's health endpoint with a bounded wait. Read the unit journals for startup errors. If dictation is unavailable, check the web unit's worker path and speech host allowlist.
+If the web process is unavailable, `forgerie version` also tries the daemon's health endpoint with a bounded wait. Read the unit journals for startup errors. If dictation is unavailable, check the Speech to text address, that `GET <address>/models` answers from the web unit's host, and the speech host allowlist.
 
 Keep the previous verified commit and build until the new instance works. A killed publisher or host crash can interrupt the two directory renames; this is not crash-atomic deployment. Inspect `.forgerie/deploy.*` and the unit journals before recovery. A dead publisher lock becomes eligible for recovery after 120 seconds. Do not remove a live publisher's lock. If `dist` is missing, stop both units from an independent terminal and restore the retained `previous` directory before starting them. Never overwrite the only retained build. Rollback does not require an idle window. Restore the previous source, install its lockfile and rebuild in an isolated checkout, then publish the build and restart both units. Do not remove profiles or runtime data as part of rollback.
 

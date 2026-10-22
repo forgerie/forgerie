@@ -26,16 +26,15 @@ describe("speech service", () => {
 
   it("validates raw PCM bytes before backend admission", async () => {
     let calls = 0;
-    const whisper: SpeechBackend = {
-      status: () => "ready",
-      start: () => Promise.resolve(),
+    const backend: SpeechBackend = {
+      status: () => Promise.resolve("ready" as const),
       close: () => Promise.resolve(),
       transcribe: () => {
         calls += 1;
         return Promise.resolve({ text: "ok" });
       },
     };
-    const service = createSpeechService({ whisper });
+    const service = createSpeechService({ backend });
 
     await expect(service.transcribe(new Uint8Array([1, 2, 3]))).rejects.toMatchObject({ kind: "misaligned" });
     await expect(service.transcribe(new Uint8Array(SPEECH_POLICY.audio.minRequestBytes - SPEECH_POLICY.audio.bytesPerSample))).rejects.toMatchObject({ kind: "too_short" });
@@ -49,16 +48,15 @@ describe("speech service", () => {
     const first = deferred<{ text: string }>();
     const second = deferred<{ text: string }>();
     let calls = 0;
-    const whisper: SpeechBackend = {
-      status: () => "ready",
-      start: () => Promise.resolve(),
+    const backend: SpeechBackend = {
+      status: () => Promise.resolve("ready" as const),
       close: () => Promise.resolve(),
       transcribe: () => {
         calls += 1;
         return calls === 1 ? first.promise : second.promise;
       },
     };
-    const service = createSpeechService({ whisper });
+    const service = createSpeechService({ backend });
 
     const active = service.transcribe(pcm());
     const queued = service.transcribe(pcm());
@@ -75,16 +73,15 @@ describe("speech service", () => {
     const activeGate = deferred<{ text: string }>();
     const secondGate = deferred<{ text: string }>();
     let calls = 0;
-    const whisper: SpeechBackend = {
-      status: () => "ready",
-      start: () => Promise.resolve(),
+    const backend: SpeechBackend = {
+      status: () => Promise.resolve("ready" as const),
       close: () => Promise.resolve(),
       transcribe: () => {
         calls += 1;
         return calls === 1 ? activeGate.promise : secondGate.promise;
       },
     };
-    const service = createSpeechService({ whisper });
+    const service = createSpeechService({ backend });
     const activeAbort = new AbortController();
     const queuedAbort = new AbortController();
 
@@ -108,9 +105,8 @@ describe("speech service", () => {
     let calls = 0;
     const service = createSpeechService({
       policy: { ...SPEECH_POLICY, timing: { ...SPEECH_POLICY.timing, operationDeadlineMs: 30 } },
-      whisper: {
-        status: () => "ready",
-        start: () => Promise.resolve(),
+      backend: {
+        status: () => Promise.resolve("ready" as const),
         close: () => Promise.resolve(),
         transcribe: () => {
           calls += 1;
@@ -137,9 +133,8 @@ describe("speech service", () => {
     const budgets: number[] = [];
     const service = createSpeechService({
       policy: { ...SPEECH_POLICY, timing: { ...SPEECH_POLICY.timing, operationDeadlineMs: 100 } },
-      whisper: {
-        status: () => "ready",
-        start: () => Promise.resolve(),
+      backend: {
+        status: () => Promise.resolve("ready" as const),
         close: () => Promise.resolve(),
         transcribe: (_pcm, options) => {
           budgets.push(options?.timeoutMs ?? 0);
@@ -158,17 +153,46 @@ describe("speech service", () => {
     expect(budgets[1]).toBeLessThan(budgets[0] ?? 0);
   });
 
-  it("closes Whisper and rejects new work", async () => {
+  it("passes the caller's signal to the active backend request, so cancelling stops the request", async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    const service = createSpeechService({
+      backend: {
+        status: () => Promise.resolve("ready" as const),
+        close: () => Promise.resolve(),
+        transcribe: (_pcm, options) => {
+          signals.push(options?.signal);
+          return new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener("abort", () => { reject(new Error("stopped")); }, { once: true });
+          });
+        },
+      },
+    });
+    const caller = new AbortController();
+
+    const active = service.transcribe(pcm(), { signal: caller.signal });
+    caller.abort();
+    await expect(active).rejects.toMatchObject({ kind: "aborted" });
+    expect(signals[0]?.aborted).toBe(true);
+
+    // The stopped request freed its slot, so the next recording reaches the backend at once.
+    const next = new AbortController();
+    const following = service.transcribe(pcm(), { signal: next.signal });
+    await vi.waitFor(() => { expect(signals).toHaveLength(2); });
+    next.abort();
+    await expect(following).rejects.toMatchObject({ kind: "aborted" });
+  });
+
+  it("closes the backend and rejects new work", async () => {
     let closed = 0;
-    const component = {
-      status: () => "ready" as const,
-      start: () => Promise.resolve(),
+    const component: SpeechBackend = {
+      status: () => Promise.resolve("ready" as const),
+      transcribe: () => Promise.resolve({ text: "unused" }),
       close: () => {
         closed += 1;
         return Promise.resolve();
       },
     };
-    const service = createSpeechService({ whisper: component });
+    const service = createSpeechService({ backend: component });
     await service.close();
 
     expect(closed).toBe(1);

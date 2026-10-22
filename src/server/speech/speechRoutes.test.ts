@@ -5,7 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../app.js";
 import { SPEECH_POLICY, type SpeechRuntimePolicy } from "../../shared/speechPolicy.js";
 import { parseSpeechErrorResponse, parseSpeechServiceStatusResponse } from "../../shared/speechContracts.js";
-import { SpeechProcessError } from "./speechProcess.js";
+import { SpeechError } from "./speechErrors.js";
 import { createSpeechService } from "./speechService.js";
 import type { SpeechBackend, SpeechService, SpeechServiceStatus } from "./speechService.js";
 
@@ -56,8 +56,7 @@ interface ServiceOptions {
 function speechService(options: ServiceOptions = {}): SpeechService {
   const status = options.status ?? { smartTurn: "unavailable", whisper: "ready", capability: "manual-only" };
   return {
-    status: () => status,
-    warm: () => Promise.resolve(),
+    status: () => Promise.resolve(status),
     transcribe: options.transcribe ?? vi.fn(() => Promise.resolve({ text: "spoken words" })),
     close: options.close ?? vi.fn(() => Promise.resolve()),
   };
@@ -65,10 +64,9 @@ function speechService(options: ServiceOptions = {}): SpeechService {
 
 function speechBackend(options: Partial<SpeechBackend> = {}): SpeechBackend {
   return {
-    status: options.status ?? (() => "ready"),
-    start: options.start ?? (() => Promise.resolve()),
+    status: options.status ?? (() => Promise.resolve("ready")),
     close: options.close ?? (() => Promise.resolve()),
-    ...(options.transcribe === undefined ? {} : { transcribe: options.transcribe }),
+    transcribe: options.transcribe ?? (() => Promise.resolve({ text: "spoken words" })),
   };
 }
 
@@ -404,8 +402,8 @@ describe("speech routes", () => {
       audio: { ...tinyPolicy().audio, maxTurnBytes: 32, maxTurnSamples: 8 },
       admission: { ...tinyPolicy().admission, maxQueuedPcmBytes: 32, maxConcurrentParsingBytes: 32 },
     });
-    const backendTranscribe = vi.fn<NonNullable<SpeechBackend["transcribe"]>>(() => Promise.resolve({ text: "spoken words" }));
-    const service = createSpeechService({ whisper: speechBackend({ transcribe: backendTranscribe }), policy });
+    const backendTranscribe = vi.fn<SpeechBackend["transcribe"]>(() => Promise.resolve({ text: "spoken words" }));
+    const service = createSpeechService({ backend: speechBackend({ transcribe: backendTranscribe }), policy });
     const app = await appWithSpeech(service, policy);
     const payload = Buffer.alloc(policy.audio.endpointWindowBytes + policy.audio.bytesPerSample);
     try {
@@ -466,7 +464,7 @@ describe("speech routes", () => {
 
   it("rejects unsupported media type, content encoding, declared length, and lets the service own exact PCM validation before backend calls", async () => {
     const backendCheckTurn = vi.fn(() => Promise.resolve({ text: "spoken words" }));
-    const validatingService = createSpeechService({ whisper: speechBackend({ transcribe: backendCheckTurn }) });
+    const validatingService = createSpeechService({ backend: speechBackend({ transcribe: backendCheckTurn }) });
     const app = await appWithSpeech(validatingService);
     const payload = validPcm();
     try {
@@ -529,7 +527,7 @@ describe("speech routes", () => {
 
   it("maps service failures to stable errors without leaking child output, raw PCM, or transcript text", async () => {
     const canary = "SECRET_CHILD_STDERR transcript text raw pcm";
-    const app = await appWithSpeech(speechService({ transcribe: () => Promise.reject(new SpeechProcessError("inference_failed", canary)) }));
+    const app = await appWithSpeech(speechService({ transcribe: () => Promise.reject(new SpeechError("failed", canary)) }));
     const payload = validPcm();
     try {
       const response = await app.inject({ method: "POST", url: "/api/speech/transcribe", headers: { "content-type": "application/octet-stream", "content-length": String(payload.byteLength) }, payload });

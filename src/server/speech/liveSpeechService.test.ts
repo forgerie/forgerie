@@ -1,43 +1,61 @@
-import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createLiveSpeechService, resolveLiveSpeechCommands } from "./liveSpeechService.js";
+import { SPEECH_POLICY } from "../../shared/speechPolicy.js";
+import { createLiveSpeechService } from "./liveSpeechService.js";
 
 const temps: string[] = [];
+const servers: Server[] = [];
 
 afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => { server.close(() => { resolve(); }); })));
   await Promise.all(temps.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
+async function configDir(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "forgerie-live-speech-"));
+  temps.push(dir);
+  return dir;
+}
+
 describe("live speech service composition", () => {
-  it("keeps automatic turn detection disabled while resolving Whisper from PATH or an absolute override", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "forgerie-live-speech-test-"));
-    temps.push(dir);
-    const whisper = join(dir, "forgerie-whisper-stt-worker");
-    await writeFile(whisper, "#!/bin/sh\nexit 0\n");
-    await chmod(whisper, 0o755);
-
-    await expect(resolveLiveSpeechCommands({ PATH: dir })).resolves.toEqual({ whisper: await realpath(whisper) });
-    await expect(resolveLiveSpeechCommands({ PATH: dir, FORGERIE_WHISPER_STT_WORKER: whisper })).resolves.toEqual({ whisper: await realpath(whisper) });
-  });
-
-  it("resolves relative PATH entries to absolute real paths and ignores unusable candidates", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "forgerie-live-speech-relative-path-test-"));
-    temps.push(dir);
-    const whisper = join(dir, "forgerie-whisper-stt-worker");
-    await writeFile(whisper, "#!/bin/sh\nexit 0\n");
-    await chmod(whisper, 0o755);
-
-    await expect(resolveLiveSpeechCommands({ PATH: relative(process.cwd(), dir) })).resolves.toEqual({ whisper: await realpath(whisper) });
-    await expect(resolveLiveSpeechCommands({ PATH: "relative-path-entry-that-does-not-exist" })).resolves.toEqual({ whisper: undefined });
-  });
-
-  it("degrades construction to an unavailable service when runtimes are missing or unsafe", async () => {
-    const service = await createLiveSpeechService({ PATH: "", FORGERIE_WHISPER_STT_WORKER: "relative-worker" });
+  it("is unavailable until the Speech to text plugin has an address", async () => {
+    const dir = await configDir();
+    const service = createLiveSpeechService({ env: { PI_WEB_CONFIG: join(dir, "config.json") }, cwd: dir });
     try {
-      expect(service.status()).toEqual({ smartTurn: "unavailable", whisper: "unavailable", capability: "unavailable" });
-      await expect(service.transcribe(new Uint8Array(4))).rejects.toMatchObject({ kind: "unavailable" });
+      await expect(service.status()).resolves.toEqual({ smartTurn: "unavailable", whisper: "unavailable", capability: "unavailable" });
+      await expect(service.transcribe(new Uint8Array(SPEECH_POLICY.audio.minRequestBytes))).rejects.toMatchObject({ kind: "unavailable" });
+    } finally {
+      await service.close();
+    }
+  });
+
+  it("sends speech to the plugin's address with the key from FORGERIE_SPEECH_API_KEY", async () => {
+    const authorizations: (string | undefined)[] = [];
+    const server = createServer((request, response) => {
+      authorizations.push(request.headers.authorization);
+      request.resume();
+      request.on("end", () => {
+        const body = request.url === "/v1/models" ? { object: "list", data: [] } : { text: "hello" };
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve); });
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("The test server has no TCP port.");
+    const port = address.port;
+    const dir = await configDir();
+    const path = join(dir, "config.json");
+    await writeFile(path, JSON.stringify({ plugins: { "speech-to-text": { settings: { base_url: `http://127.0.0.1:${String(port)}/v1` } } } }));
+
+    const service = createLiveSpeechService({ env: { PI_WEB_CONFIG: path, FORGERIE_SPEECH_API_KEY: " speech-key " }, cwd: dir });
+    try {
+      await expect(service.status()).resolves.toMatchObject({ whisper: "ready", capability: "manual-only" });
+      await expect(service.transcribe(new Uint8Array(SPEECH_POLICY.audio.minRequestBytes))).resolves.toEqual({ text: "hello" });
+      expect(authorizations).toEqual(["Bearer speech-key", "Bearer speech-key"]);
     } finally {
       await service.close();
     }

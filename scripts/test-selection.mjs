@@ -12,9 +12,6 @@ const RELATED_SOURCE_DIRECTORIES = [
   "src/",
 ];
 
-// `vitest related` follows imports. This suite also launches a worker read at runtime.
-const WHISPER_PROCESS_TEST = "src/server/speech/whisperProcess.test.ts";
-
 export function parseNullDelimitedPaths(output) {
   const value = Buffer.isBuffer(output) ? output.toString("utf8") : output;
   return value.split("\0").filter((path) => path.length > 0);
@@ -69,10 +66,6 @@ function relatedTestInputs(paths) {
 
   for (const path of paths) {
     if (isRelatedSourcePath(path)) inputs.add(path);
-
-    if (path === "nix/whisper-stt.nix" || path === "speech/whisper_worker.py") {
-      inputs.add(WHISPER_PROCESS_TEST);
-    }
   }
 
   return [...inputs].sort();

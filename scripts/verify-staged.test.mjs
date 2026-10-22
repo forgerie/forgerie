@@ -114,11 +114,6 @@ describe("staged validation planning", () => {
     expect(plan.tests).toEqual({ mode: "related", files: ["src/shared/staged.ts"] });
   });
 
-  it("adds tests for repository assets that are read dynamically", () => {
-    const plan = createValidationPlan(["nix/whisper-stt.nix", "speech/whisper_worker.py"], { pathExists: () => true });
-    expect(plan.tests).toEqual({ mode: "related", files: ["src/server/speech/whisperProcess.test.ts"] });
-  });
-
   it("runs only the affected full validator when its configuration changes", () => {
     const eslintPlan = createValidationPlan(["eslint.config.js"], { pathExists: () => true });
     expect(eslintPlan.lint).toEqual({ mode: "full", files: [] });
