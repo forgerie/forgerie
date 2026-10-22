@@ -11,7 +11,7 @@ import { ReadoutLine } from "../../ui/ReadoutLine";
 import { Lede } from "../../ui/Lede";
 import { LoadingLines } from "../../ui/LoadingLines";
 import type { Suggestion } from "./suggestionsApi";
-import { agoText, backgroundOf, destinationWords, filedWords, groupsOf, modelFromSpec, modelWords, rowState, wordsOf, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
+import { agoText, filedPathOf, backgroundOf, destinationWords, filedWords, groupsOf, modelFromSpec, modelWords, rowState, wordsOf, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
 
 export interface SuggestionsSheetActions {
   onFile: (id: string) => void;
@@ -75,8 +75,7 @@ export function SuggestionsSheet({ suggestions, readError, pending, problems, dr
     const launchError = state.kind === "filed" ? state.launchError : undefined;
     const run = state.kind === "started" ? backgroundOf(state.sessionId, look) : undefined;
     const problem = problems[suggestion.id];
-    const filePath = state.url === undefined && state.number === undefined
-      ? state.path ?? (suggestion.destination.provider === "markdown" ? suggestion.destination.path : undefined) : undefined;
+    const filePath = filedPathOf(state, suggestion.destination);
     const openFile = filePath !== undefined && actions.onOpenFile ? <TextButton label="Open the file" onPress={() => actions.onOpenFile?.(suggestion.projectId, filePath)} /> : null;
     const startSession = launchError?.retryable ? <TextButton label={pending[suggestion.id] === "file-and-act" ? "Starting…" : "Start session"}
       disabled={pending[suggestion.id] !== undefined} onPress={() => actions.onFileAndAct(suggestion.id)} /> : null;

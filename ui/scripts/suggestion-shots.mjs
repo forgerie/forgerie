@@ -48,8 +48,8 @@ const sizes = (process.env.SIZES ?? SIZES.map((size) => size.name).join(",")).sp
 const profile = await mkdtemp(join(tmpdir(), "suggestion-shots-"));
 const port = await getFreePort();
 const chrome = launchChrome(process.env.CHROME_BIN || spawnSync("which", ["chromium"], { encoding: "utf8" }).stdout.trim(), port, profile);
-// A pressable row title's target: the button grown by its ::before insets. Each must be at least 44 px tall, and must not
-// cross another control's own box.
+// A pressable row title's or filed line's target: the button grown by its ::before insets. Each must be at least 44 px
+// tall, and must not cross another control's own box.
 const overflow = `(() => {
   // A title scrolled out of its sheet's body is clipped there and cannot be pressed; only the visible ones count.
   const visible = (button) => {
@@ -57,7 +57,8 @@ const overflow = `(() => {
     const box = button.getBoundingClientRect();
     return !clip || (box.top >= clip.top && box.bottom <= clip.bottom);
   };
-  const titles = [...document.querySelectorAll('button.pending-row-title')].filter(visible).map((button) => {
+  const TARGETS = 'button.pending-row-title, button.decision-card-link';
+  const titles = [...document.querySelectorAll(TARGETS)].filter(visible).map((button) => {
     const box = button.getBoundingClientRect();
     const style = getComputedStyle(button, '::before');
     const px = (value) => parseFloat(value) || 0;
@@ -65,14 +66,21 @@ const overflow = `(() => {
   });
   // Only controls in the same layer: a sheet's rows are checked against the sheet, not the page behind it.
   const layer = (node) => node.closest('dialog') ?? document.body;
-  const others = [...document.querySelectorAll('button, a')].filter((node) => !node.classList.contains('pending-row-title') && node.getBoundingClientRect().width > 0);
+  const others = [...document.querySelectorAll('button, a')].filter((node) => !node.matches(TARGETS) && node.getBoundingClientRect().width > 0);
   const crosses = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
   return {
     page: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     sheet: [...document.querySelectorAll('.sheet-dialog-body')].some((node) => node.scrollWidth > node.clientWidth + 1),
     ...(titles.length ? {
-      smallestTitleTarget: Math.round(Math.min(...titles.map((t) => t.bottom - t.top))),
-      titleTargetOverlaps: titles.flatMap((t) => others.filter((node) => layer(node) === layer(t.button) && !node.contains(t.button) && crosses(t, node.getBoundingClientRect()))
+      smallestTarget: Math.round(Math.min(...titles.map((t) => t.bottom - t.top)) * 10) / 10,
+      // The same, probed: how many CSS pixels, down a line a few pixels in from the target's start, the browser hits it.
+      smallestHit: Math.min(...titles.map((t) => {
+        const x = t.button.getClientRects()[0].left + 4;
+        let hits = 0;
+        for (let y = t.top - 40; y <= t.bottom + 40; y += 0.5) { const at = document.elementFromPoint(x, y); if (at === t.button || t.button.contains(at)) hits += 0.5; }
+        return hits;
+      })),
+      targetOverlaps: titles.flatMap((t) => others.filter((node) => layer(node) === layer(t.button) && !node.contains(t.button) && crosses(t, node.getBoundingClientRect()))
         .map((node) => (node.getAttribute('aria-label') ?? node.textContent ?? '').trim().slice(0, 40))),
     } : {}),
   };

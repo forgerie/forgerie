@@ -37,9 +37,13 @@
   color: var(--ink-live); font-weight: 500; text-decoration: underline; text-decoration-color: var(--live-edge); text-underline-offset: 0.2em; }
 .decision-card-link:hover { text-decoration-color: currentColor; }
 /* The same line as a button, for what opens in place: no frame of its own, words where the line's words are. */
-/* It flows as text, so a path in it wraps with the words around it; its padding still reaches past the line for the press. */
-button.decision-card-link { display: inline; border: 0; background: transparent; padding-inline: 0; font: inherit; font-weight: 500; text-align: start;
-  cursor: pointer; overflow-wrap: anywhere; }
+/* It flows as text, so a path in it wraps with the words around it. Drawn small, pressed large: its target is at least
+   the control size, laid from the space under the line (the card's gap) upward over the line and the quiet subject above
+   it, so it never reaches what follows the line, such as a session row. A line that wraps is covered whole. */
+button.decision-card-link { position: relative; display: inline; padding: 0; margin: 0; border: 0; background: transparent; font: inherit; font-weight: 500;
+  text-align: start; cursor: pointer; overflow-wrap: anywhere; }
+button.decision-card-link::before { content: ""; position: absolute; inset-inline: calc(-1 * var(--space-1));
+  inset-block: min(0rem, calc(100% + var(--space-2) - var(--control-size))) calc(-1 * var(--space-2)); }
 .decision-card-link code { color: inherit; }
 .decision-card-link-mark { flex: none; inline-size: 0.875rem; block-size: 1lh; }
 /* The card's one action: a filled button under the footer. */

@@ -46,6 +46,13 @@ const started = (id: string, sessionId: string, over: Partial<Extract<Suggestion
 export const STARTED = started("sg-started", "s-bg-working");
 export const STARTED_NEEDS = started("sg-needs", "s-bg-needs", { number: 215, url: "https://github.com/simonwjackson/forgerie/issues/215" });
 export const STARTED_DONE = started("sg-done", "s-bg-done", { number: 216, url: "https://github.com/simonwjackson/forgerie/issues/216", modelSpec: "google/gemini-3-8-flash" });
+/** Filed to a Markdown file and started: the path opens on a press, right above the session's row. */
+export const STARTED_MARKDOWN = suggestion("sg-started-md", { revision: 3, state: { kind: "started", provider: "markdown",
+  path: ".forgerie/backlog/2026-10-21-retry-on-lost-stream.md", at, sessionId: "s-bg-working", claimId: "c-md", modelSpec: "anthropic/claude-haiku-4-5" } });
+/** Filed to a Markdown file, then the launch failed: the path opens on a press, right above the failure and Start session. */
+export const LAUNCH_ERROR_MARKDOWN = suggestion("sg-launch-md", { revision: 3, state: { kind: "filed", provider: "markdown",
+  path: ".forgerie/backlog/2026-10-21-retry-on-lost-stream.md", at, launchChoice: { modelSpec: "anthropic/claude-haiku-4-5" },
+  launchError: { message: "The session worktree could not be created.", retryable: true } } });
 export const LAUNCH_ERROR = suggestion("sg-launch-error", { destination: github, revision: 3,
   state: { kind: "filed", provider: "github", number: 217, url: "https://github.com/simonwjackson/forgerie/issues/217", at,
     launchChoice: { modelSpec: "google/gemini-3-8-flash", thinkingLevel: "low" },

@@ -15,7 +15,7 @@ import { StatusRow } from "../../ui/StatusRow";
 import { LoadingLines } from "../../ui/LoadingLines";
 import { ModelPicker, type PickerOpen } from "../../ui/ModelPicker";
 import type { Suggestion, SuggestionDestination, SuggestionModel, SuggestionState } from "./suggestionsApi";
-import { agoText, contextCount, destinationWords, edited, filedWords, hasContext, modelFromSpec, modelWords, specOf, wordsOf,
+import { agoText, filedPathOf, contextCount, destinationWords, edited, filedWords, hasContext, modelFromSpec, modelWords, specOf, wordsOf,
   type BackgroundTone, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
 
 /** The press in flight, as the store holds it. */
@@ -115,8 +115,7 @@ export function SuggestionCard({ suggestion, destination, read, press, problem, 
     const recorded = state.kind === "filed" ? state.launchChoice : undefined;
     const retryModel = modelWords(modelFromSpec(recorded?.modelSpec, knownModels)) ?? modelWords(launch.model) ?? "this chat's model";
     // A Markdown item has no web page: its file opens in the chat's file reader, on a press.
-    const filePath = state.url === undefined && state.number === undefined
-      ? state.path ?? (suggestion.destination.provider === "markdown" ? suggestion.destination.path : undefined) : undefined;
+    const filePath = filedPathOf(state, suggestion.destination);
     const detail = <>
       {run}
       {launchError ? <Consequence tone="warn" icon={<CircleAlertIcon />}

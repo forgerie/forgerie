@@ -36,6 +36,15 @@ export function filedWords(state: Extract<SuggestionState, { kind: "filed" | "st
   return { lead: "Filed to", code: state.path ?? (destination.provider === "markdown" ? destination.path : destination.repo) };
 }
 
+/**
+ * The repo-relative file a filed Markdown item lives in: the path the server reports, else the one it was going to.
+ * Undefined for an item with a web page or an issue number, which opens there instead.
+ */
+export function filedPathOf(state: Extract<SuggestionState, { kind: "filed" | "started" }>, destination: SuggestionDestination): string | undefined {
+  if (state.url !== undefined || state.number !== undefined) return undefined;
+  return state.path ?? (destination.provider === "markdown" ? destination.path : undefined);
+}
+
 /** A short age for a moment in the past: "just now", "12m ago", "3h ago", "2d ago". Empty when unreadable. */
 export function agoText(at: string, now: number): string {
   const then = Date.parse(at);

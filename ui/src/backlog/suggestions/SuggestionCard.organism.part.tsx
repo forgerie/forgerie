@@ -3,7 +3,7 @@ import { SuggestionCard, type CardPress } from "./SuggestionCard";
 import type { Suggestion, SuggestionModel } from "./suggestionsApi";
 import { backgroundOf, launchModel, markdownOf, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
 import { answer } from "./fixtures/serverLike";
-import { AZURE, CHAT_MODEL, DISMISSED, DISMISSED_UNSAFE, DUPLICATE, MARKDOWN_DUPLICATE, FAILED, FAILED_ACT, FAILED_FINAL, FILED, FILED_GITHUB, FILING, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, LONG, MODELS, NO_DEFAULT, NOW,
+import { AZURE, CHAT_MODEL, DISMISSED, DISMISSED_UNSAFE, DUPLICATE, MARKDOWN_DUPLICATE, FAILED, FAILED_ACT, FAILED_FINAL, FILED, FILED_GITHUB, FILING, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, LAUNCH_ERROR_MARKDOWN, STARTED_MARKDOWN, LONG, MODELS, NO_DEFAULT, NOW,
   OPEN, OPEN_GITHUB, SHORT, STARTED, STARTED_DONE, STARTED_NEEDS, look } from "./fixtures/suggestions";
 
 export const name = "Backlog suggestion card";
@@ -52,6 +52,8 @@ export function FiledGitHub() { return <Stateful initial={FILED_GITHUB} />; }
 export function Started() { return <Stateful initial={STARTED} />; }
 export function StartedNeedsYou() { return <Stateful initial={STARTED_NEEDS} />; }
 export function StartedDone() { return <Stateful initial={STARTED_DONE} />; }
+export function StartedMarkdown() { return <Stateful initial={STARTED_MARKDOWN} />; }
+export function LaunchFailedMarkdown() { return <Stateful initial={LAUNCH_ERROR_MARKDOWN} />; }
 export function LaunchFailed() { return <Stateful initial={LAUNCH_ERROR} />; }
 export function LaunchFailedUnrecorded() { return <Stateful initial={LAUNCH_ERROR_LOGGED} />; }
 export function Duplicate() { return <Stateful initial={DUPLICATE} />; }
