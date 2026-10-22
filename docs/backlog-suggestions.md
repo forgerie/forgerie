@@ -48,7 +48,8 @@ are never overwritten. Open Markdown duplicates use the same title
 rule as `file_issue`; the writer checks them before writing.
 
 GitHub uses `githubAgent.fileIssue` against the saved repo, checks duplicates, and
-adds `agent-filed`. It logs the existing issue decision in the source chat. An
+adds `agent-filed`. A known creation invalidates that repo's cached backlog listings
+before background launch, including lists already in flight. It logs the existing issue decision in the source chat. An
 archived or removed-worktree chat gets the decision through an inactive-journal
 writer, without resuming the chat. The writer uses the existing Durable ownership
 lock. A racing owner can prevent the decision write; `decisionLogWarning` preserves
@@ -100,7 +101,8 @@ backlog proxy forwards them.
 POST returns the updated record. A repeated request ID returns its saved result;
 reusing it with different choices returns 409. Use a new ID for a launch retry.
 Wrong state returns 409 with `BacklogErrorSchema`. Open, duplicate, and retryable
-failed records can file. Filed records accept only file-and-act without edits.
+failed records can file. Failed state includes `action: "file" | "file-and-act"`,
+so a retry after reload repeats the failed action. Filed records accept only file-and-act without edits.
 Restore accepts dismissed records only.
 
 Changes emit the global event

@@ -305,7 +305,11 @@ async function createSessionDaemonRuntime() {
       gateIssueLabels: (cwd, number, slug) => githubAgent.gateIssueLabels(cwd, number, slug),
       read: (cwd, request) => githubAgent.read(cwd, request),
       write: (cwd, id, request) => githubAgent.write(cwd, id, request),
-      fileIssue: (cwd, id, input, repo) => githubAgent.fileIssue(cwd, id, input, repo),
+      fileIssue: async (cwd, id, input, repo) => {
+        const result = await githubAgent.fileIssue(cwd, id, input, repo);
+        if (result.state === "created") await githubIssues.invalidate(result.repo);
+        return result;
+      },
       watch: (cwd, id, action, number) => action === "start" ? pulls.watch({ id, cwd }, number) : pulls.stopRef({ id, cwd }, number),
     },
     azurePr: { execute: async (cwd, id, action, number) => {

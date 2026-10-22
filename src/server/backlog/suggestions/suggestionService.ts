@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { Check } from "typebox/value";
-import { SuggestBacklogInputSchema, type SuggestBacklogInput, type BacklogSuggestion, type BacklogSuggestionActRequest, type BacklogSuggestionFileRequest, type BacklogSuggestionModel, type BacklogSuggestionsQuery } from "../../../shared/backlogSuggestions.js";
+import { SuggestBacklogInputSchema, type SuggestBacklogInput, type BacklogSuggestion, type BacklogSuggestionAction, type BacklogSuggestionActRequest, type BacklogSuggestionFileRequest, type BacklogSuggestionModel, type BacklogSuggestionsQuery } from "../../../shared/backlogSuggestions.js";
 import type { FileIssueInput, FileIssueResult } from "../../../shared/fileIssues.js";
 import type { ProjectService } from "../../projects/projectService.js";
 import type { SessionWorktrees } from "../../workspaces/sessionWorktrees.js";
@@ -81,7 +81,7 @@ export class BacklogSuggestionService {
     validateContent(record);
     return this.deps.store.create(record);
   }
-  file(id: string, action: "file" | "file-and-act", input: BacklogSuggestionFileRequest & BacklogSuggestionModel): Promise<BacklogSuggestion> {
+  file(id: string, action: BacklogSuggestionAction, input: BacklogSuggestionFileRequest & BacklogSuggestionModel): Promise<BacklogSuggestion> {
     // A suggestion has one owner at a time. Concurrent retries read its durable receipt after completion.
     const previous = this.pending.get(id) ?? Promise.resolve(undefined);
     const result = previous.catch(() => undefined).then(() => this.fileOnce(id, action, input));
@@ -99,7 +99,7 @@ export class BacklogSuggestionService {
     if (!["open", "duplicate", "failed"].includes(record.state.kind)) throw new BacklogError("conflict", "This suggestion cannot be dismissed");
     return this.deps.store.update({ ...record, state: { kind: "dismissed", at: new Date().toISOString() } });
   }
-  private async fileOnce(id: string, action: "file" | "file-and-act", input: BacklogSuggestionActRequest): Promise<BacklogSuggestion> {
+  private async fileOnce(id: string, action: BacklogSuggestionAction, input: BacklogSuggestionActRequest): Promise<BacklogSuggestion> {
     const fingerprint = createHash("sha256").update(JSON.stringify([action, input.title ?? null, input.body ?? null, [...input.notDuplicateOf ?? []].sort((a, b) => a - b), input.modelSpec ?? null, input.thinkingLevel ?? null])).digest("hex");
     const receipt = this.deps.store.receipt(id, input.requestId);
     if (receipt !== undefined) {
@@ -129,7 +129,7 @@ export class BacklogSuggestionService {
         }
       } catch (error) {
         // An external writer may have accepted a request before the connection failed. Fail closed.
-        return finish({ ...record, state: { kind: "failed", message: error instanceof Error ? error.message : String(error), retryable: record.destination.provider === "markdown" } });
+        return finish({ ...record, state: { kind: "failed", action, message: error instanceof Error ? error.message : String(error), retryable: record.destination.provider === "markdown" } });
       }
     }
     if (action === "file-and-act" && record.state.kind === "filed") record = await this.launchFiled(record, input);

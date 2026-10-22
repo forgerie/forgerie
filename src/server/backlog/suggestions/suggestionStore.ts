@@ -3,10 +3,10 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
-import { BacklogSuggestionActRequestSchema, BacklogSuggestionSchema, type BacklogSuggestion } from "../../../shared/backlogSuggestions.js";
+import { BacklogSuggestionActionSchema, BacklogSuggestionActRequestSchema, BacklogSuggestionSchema, type BacklogSuggestion } from "../../../shared/backlogSuggestions.js";
 import { BacklogError, isMissingFile } from "../backlogError.js";
 
-const ReceiptSchema = Type.Object({ suggestionId: Type.String(), requestId: Type.String(), fingerprint: Type.String(), action: Type.Optional(Type.Union([Type.Literal("file"), Type.Literal("file-and-act")])), input: Type.Optional(BacklogSuggestionActRequestSchema), result: Type.Optional(BacklogSuggestionSchema) }, { additionalProperties: false });
+const ReceiptSchema = Type.Object({ suggestionId: Type.String(), requestId: Type.String(), fingerprint: Type.String(), action: Type.Optional(BacklogSuggestionActionSchema), input: Type.Optional(BacklogSuggestionActRequestSchema), result: Type.Optional(BacklogSuggestionSchema) }, { additionalProperties: false });
 type Receipt = Static<typeof ReceiptSchema>;
 const FileSchema = Type.Object({ version: Type.Literal(1), suggestions: Type.Array(BacklogSuggestionSchema), requests: Type.Array(ReceiptSchema) }, { additionalProperties: false });
 type File = Static<typeof FileSchema>;
@@ -24,7 +24,8 @@ export class BacklogSuggestionStore {
     this.file = value;
     // GitHub writes cannot be proved locally. Markdown recovery verifies Git before changing these records.
     for (const record of value.suggestions.filter(record => record.state.kind === "filing" && record.destination.provider === "github")) {
-      await this.update({ ...record, state: { kind: "failed", message: "Filing was interrupted. Inspect the destination before dismissing and suggesting again.", retryable: false } });
+      if (record.state.kind !== "filing") continue;
+      await this.update({ ...record, state: { kind: "failed", action: record.state.action, message: "Filing was interrupted. Inspect the destination before dismissing and suggesting again.", retryable: false } });
     }
   }
   list(): BacklogSuggestion[] { return structuredClone(this.file.suggestions).sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }

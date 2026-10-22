@@ -27,7 +27,7 @@ describe("backlog suggestion store", () => {
     try {
       const store = new BacklogSuggestionStore(path); await store.create(suggestion({ destination: { provider: "github", repo: "owner/repo", label: "agent-filed" }, state: { kind: "filing", action: "file" } }));
       const reopened = new BacklogSuggestionStore(path); await reopened.initialize();
-      expect(reopened.require("suggestion").state).toMatchObject({ kind: "failed", retryable: false });
+      expect(reopened.require("suggestion").state).toMatchObject({ kind: "failed", action: "file", retryable: false });
       await writeFile(path, "private broken data");
       await expect(new BacklogSuggestionStore(path).initialize()).rejects.toThrow();
       expect(await readFile(path, "utf8")).toBe("private broken data");

@@ -14,13 +14,15 @@ export const BacklogSuggestionDestinationSchema = Type.Union([
 ]);
 export type BacklogSuggestionDestination = Static<typeof BacklogSuggestionDestinationSchema>;
 const filed = { decisionLogWarning: Type.Optional(Type.String()), provider: Type.Union([Type.Literal("markdown"), Type.Literal("github")]), path: Type.Optional(text), number: Type.Optional(Type.Integer({ minimum: 1 })), url: Type.Optional(text), at: text };
+export const BacklogSuggestionActionSchema = Type.Union([Type.Literal("file"), Type.Literal("file-and-act")]);
+export type BacklogSuggestionAction = Static<typeof BacklogSuggestionActionSchema>;
 export const BacklogSuggestionStateSchema = Type.Union([
   Type.Object({ kind: Type.Literal("open") }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal("filing"), action: Type.Union([Type.Literal("file"), Type.Literal("file-and-act")]) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("filing"), action: BacklogSuggestionActionSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("filed"), ...filed, launchError: Type.Optional(Type.Object({ message: Type.String(), retryable: Type.Boolean() }, { additionalProperties: false })) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("started"), ...filed, sessionId: text, claimId: text, ...BacklogSuggestionModelSchema.properties }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("duplicate"), matches: Type.Array(Type.Object({ number: Type.Optional(Type.Integer({ minimum: 1 })), path: Type.Optional(text), title: Type.String(), state: Type.String(), url: Type.Optional(text) }, { additionalProperties: false })) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal("failed"), message: Type.String(), retryable: Type.Boolean() }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("failed"), action: BacklogSuggestionActionSchema, message: Type.String(), retryable: Type.Boolean() }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("dismissed"), at: text }, { additionalProperties: false }),
 ]);
 export const BacklogSuggestionSchema = Type.Object({

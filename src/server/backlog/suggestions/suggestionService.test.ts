@@ -4,6 +4,10 @@ import { describe, it, expect } from "vitest";
 import Fastify from "fastify";
 import { Check } from "typebox/value";
 import { Type } from "typebox";
+import { GitHubIssueClient } from "../../github/githubIssues.js";
+import type { Fetch } from "../../github/githubApp.js";
+import { createGitHubBacklogProvider } from "../githubBacklog.js";
+import { markdownBacklogProvider } from "../markdownBacklog.js";
 import { GitHubAgent } from "../../github/githubAgent.js";
 import { BacklogSuggestionSchema, type BacklogSuggestion, type BacklogSuggestionsResponse } from "../../../shared/backlogSuggestions.js";
 import type { UserSessionStart } from "../../../shared/sessionWorktree.js";
@@ -19,23 +23,28 @@ import { markdownSuggestionContent } from "./markdownWriter.js";
 import { git, repository } from "./suggestionTestSupport.js";
 
 const input = { title: "Improve launch recovery", body: "Keep the first prompt.", why: "A gap came up", files: ["src/launch.ts"], decisions: ["Use receipts"] };
-const issue = (number: number, title: string, labels: string[] = []) => ({ number, title, body: "Existing", state: "open", html_url: `https://github.com/owner/repo/issues/${String(number)}`, user: { login: "owner" }, author_association: "OWNER", labels, updated_at: "2026-10-20T00:00:00Z", comments: 0 });
+const issue = (number: number, title: string, labels: string[] = []) => ({ number, title, body: "Existing", state: "open", html_url: `https://github.com/owner/repo/issues/${String(number)}`, user: { login: "owner" }, author_association: "OWNER", labels, created_at: "2026-10-20T00:00:00Z", updated_at: "2026-10-20T00:00:00Z", comments: 0 });
 function inMemoryGitHub(gitResolution = false) {
   const writes: { url: string; body: unknown }[] = []; const labels = new Set<string>();
+  const rows = [issue(7, "fix: Improve launch recovery")]; let listingReads = 0;
+  const fetch: Fetch = (url, init) => {
+    const method = init?.method ?? "GET";
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    if (url.includes("/search/issues")) return Promise.resolve(json({ total_count: 1, items: [rows[0]], incomplete_results: false }));
+    if (method === "GET" && new URL(url).pathname.endsWith("/issues")) { listingReads++; return Promise.resolve(json(rows)); }
+    if (method === "GET" && url.includes("/labels")) return Promise.resolve(json([...labels].map(name => ({ name, description: null }))));
+    const body: unknown = JSON.parse(typeof init?.body === "string" ? init.body : "{}"); writes.push({ url, body });
+    if (url.endsWith("/labels")) { labels.add("agent-filed"); return Promise.resolve(json({ name: "agent-filed", description: "Agent filed" }, 201)); }
+    if (url.endsWith("/issues") && Check(Type.Object({ title: Type.String(), labels: Type.Array(Type.String()), body: Type.String() }), body)) {
+      const created = { ...issue(20, body.title, body.labels), body: body.body }; rows.push(created); return Promise.resolve(json(created, 201));
+    }
+    throw new Error(`Unexpected in-memory API call ${method} ${url}`);
+  };
   const agent = new GitHubAgent({ ...(gitResolution ? { backlogConfig: () => Promise.resolve({ providers: ["markdown" as const] }) } : { resolveRepo: () => Promise.resolve({ slug: "changed/repo", everyone: true }) }), trust: { judge: () => Promise.resolve(() => true) },
-    app: { tokenFor: () => Promise.resolve({ ok: true, token: "memory" }), dropToken: () => undefined, status: () => ({ state: "not-configured" }) },
-    fetch: (url, init) => {
-      const method = init?.method ?? "GET";
-      const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-      if (url.includes("/search/issues")) return Promise.resolve(json({ total_count: 1, items: [issue(7, "fix: Improve launch recovery")], incomplete_results: false }));
-      if (method === "GET" && url.includes("/labels")) return Promise.resolve(json([...labels].map(name => ({ name, description: null }))));
-      const body: unknown = JSON.parse(typeof init?.body === "string" ? init.body : "{}"); writes.push({ url, body });
-      if (url.endsWith("/labels")) { labels.add("agent-filed"); return Promise.resolve(json({ name: "agent-filed", description: "Agent filed" }, 201)); }
-      if (url.endsWith("/issues") && Check(Type.Object({ title: Type.String(), labels: Type.Array(Type.String()) }), body)) return Promise.resolve(json(issue(20, body.title, body.labels), 201));
-      throw new Error(`Unexpected in-memory API call ${method} ${url}`);
-    },
+    app: { tokenFor: () => Promise.resolve({ ok: true, token: "memory" }), dropToken: () => undefined, status: () => ({ state: "not-configured" }) }, fetch,
   });
-  return { agent, writes };
+  const client = new GitHubIssueClient({ fetch, app: { tokenFor: () => Promise.resolve({ ok: true, token: "memory" }), dropToken: () => undefined, installUrl: () => undefined } });
+  return { agent, client, writes, listingReads: () => listingReads };
 }
 async function fixture() {
   const repo = await repository(); const events: BacklogSuggestion[] = [];
@@ -45,14 +54,18 @@ async function fixture() {
   const claims = new BacklogClaimStore(join(repo.root, ".git/claims.json")); await claims.initialize();
   const starts: UserSessionStart[] = []; const prompts: { id: string; text: unknown; requestId?: string | undefined }[] = [];
   let launchError = false;
-  const backlog = new BacklogService({ projects, claims, settings, userSessions: { start: start => {
+  const github = inMemoryGitHub();
+  const backlog = new BacklogService({ projects, claims, settings, providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: github.client })], userSessions: { start: start => {
     if (launchError) throw new Error("Configured launch failure");
     starts.push(start);
     const session: SessionInfo = { id: "background", cwd: repo.root, path: join(repo.root, ".git/background.jsonl"), created: "today", modified: "today", messageCount: 0, firstMessage: "" };
     return Promise.resolve(session);
   } }, sessions: { stop: () => Promise.resolve(), prompt: (ref, text, _behavior, _images, options) => { prompts.push({ id: ref.id, text, ...options }); return Promise.resolve(); } }, isArchived: () => Promise.resolve(false) });
-  const github = inMemoryGitHub();
-  const service = new BacklogSuggestionService({ store, projects, settings, worktrees: repo.worktrees, backlog, githubRepo: () => Promise.resolve("owner/repo"), fileIssue: (cwd, sessionId, input, slug) => github.agent.fileIssue(cwd, sessionId, input, slug) });
+  const service = new BacklogSuggestionService({ store, projects, settings, worktrees: repo.worktrees, backlog, githubRepo: () => Promise.resolve("owner/repo"), fileIssue: async (cwd, sessionId, input, slug) => {
+    const result = await github.agent.fileIssue(cwd, sessionId, input, slug);
+    if (result.state === "created") await github.client.invalidate(result.repo);
+    return result;
+  } });
   return { ...repo, store, settings, service, starts, prompts, events, github, backlog, failLaunch: (fail: boolean) => { launchError = fail; } };
 }
 
@@ -105,6 +118,17 @@ describe("backlog suggestions", () => {
       const github = inMemoryGitHub(true);
       expect(await github.agent.fileIssue(repo.root, "chat", { title: input.title, body: input.body, duplicates: [input.title] }, "owner/pinned")).toMatchObject({ state: "duplicate", repo: "owner/pinned" });
     } finally { await repo.dispose(); }
+  });
+  it("launches a newly filed GitHub item even when its backlog list was already cached", async () => {
+    const f = await fixture();
+    try {
+      await f.settings.save("project", { providers: ["github"], github: { repo: "owner/repo" } }, 0);
+      expect((await f.backlog.list("everyone")).items).toHaveLength(1); expect(f.github.listingReads()).toBe(1);
+      const record = await f.service.suggest(f.root, "chat", { ...input, title: "Export saved context as JSON" });
+      const started = await f.service.file(record.id, "file-and-act", { requestId: "github-background" });
+      expect(started.state).toMatchObject({ kind: "started", provider: "github", number: 20 });
+      expect(f.starts).toHaveLength(1); expect(f.prompts[0]?.text).toContain("Keep the first prompt"); expect(f.github.listingReads()).toBe(2);
+    } finally { await f.dispose(); }
   });
   it("files before background launch, sends the prompt from the server, and never starts a second session on a repeated request", async () => {
     const f = await fixture();
@@ -170,7 +194,7 @@ describe("backlog suggestions", () => {
       expect(await git(f.root, "branch", "--list", "forgerie-backlog-scratch/*")).toBe("");
       expect(await git(f.root, "worktree", "list", "--porcelain")).not.toContain(scratch.path);
       const recovered = f.store.require(record.id);
-      expect(recovered.state).toMatchObject(afterFastForward ? { kind: "started", modelSpec: "override/cheap" } : { kind: "failed", retryable: true });
+      expect(recovered.state).toMatchObject(afterFastForward ? { kind: "started", modelSpec: "override/cheap" } : { kind: "failed", action: "file-and-act", retryable: true });
       await expect(readFile(join(indexDirectory, "item"))).rejects.toMatchObject({ code: "ENOENT" });
       expect(f.store.pendingReceipt(record.id)).toBeUndefined();
       expect(f.starts).toHaveLength(afterFastForward ? 1 : 0);
@@ -190,10 +214,24 @@ describe("backlog suggestions", () => {
       await git(f.root, "worktree", "add", "-b", orphan.branch, orphan.path, "main");
       const ordinary = join(f.root, ".worktrees/ordinary"); await git(f.root, "worktree", "add", "-b", "keep-ordinary", ordinary, "main");
       await f.store.initialize(); await f.service.recoverStartup();
-      expect(f.store.require(record.id).state).toMatchObject({ kind: "failed", retryable: true }); expect(f.starts).toEqual([]);
+      expect(f.store.require(record.id).state).toMatchObject({ kind: "failed", action: "file-and-act", retryable: true }); expect(f.starts).toEqual([]);
       expect(await git(f.root, "branch", "--list", "forgerie-backlog-scratch/*")).toBe("");
       expect(await git(f.root, "worktree", "list", "--porcelain")).toContain(ordinary);
       expect(await git(f.root, "branch", "--list", "keep-ordinary")).toContain("keep-ordinary");
+    } finally { await f.dispose(); }
+  });
+  it.each(["file", "file-and-act"] as const)("remembers a failed %s action and supports retry after reload", async action => {
+    const f = await fixture();
+    try {
+      const record = await f.service.suggest(f.root, "chat", input);
+      await git(f.root, "switch", "-c", "other");
+      const failed = await f.service.file(record.id, action, { requestId: "fail" });
+      expect(failed.state).toMatchObject({ kind: "failed", action, retryable: true });
+      await f.store.initialize(); expect(f.store.require(record.id).state).toEqual(failed.state);
+      await git(f.root, "switch", "main");
+      const retry = await f.service.file(record.id, action, { requestId: "retry" });
+      expect(retry.state.kind).toBe(action === "file-and-act" ? "started" : "filed");
+      expect(f.starts).toHaveLength(action === "file-and-act" ? 1 : 0);
     } finally { await f.dispose(); }
   });
   it("validates complete content before filing, so an oversized override leaves the card open", async () => {

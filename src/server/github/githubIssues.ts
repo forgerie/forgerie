@@ -65,6 +65,14 @@ export class GitHubIssueClient {
     return run;
   }
 
+  /** Serialize after in-flight reads, so a pre-creation response cannot repopulate a stale listing. */
+  invalidate(slug: string): Promise<void> {
+    const prefix = `${JSON.stringify([slug.toLowerCase()]).slice(0, -1)},`;
+    const run = this.queue.then(() => { for (const key of this.cache.keys()) if (key.startsWith(prefix)) this.cache.delete(key); });
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
   private async read(slug: string, trustedBots: readonly string[]): Promise<IssuesResult> {
     // A cached trust decision must never cross project policies, even for the same repository.
     const key = JSON.stringify([slug.toLowerCase(), [...new Set(trustedBots.map(login => login.toLowerCase()))].sort()]);

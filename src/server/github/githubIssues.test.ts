@@ -43,6 +43,18 @@ describe("GitHub issue client", () => {
     expect(f.github.count(LIST)).toBe(2);
   });
 
+  it("invalidates every trust-policy variant for a newly filed repo, without clearing other repos", async () => {
+    const f = fixture(); const other = "GET https://api.github.com/repos/other/repo/issues";
+    f.github.on(LIST, json([issue(1)]), json([issue(2)]), json([issue(3)]), json([issue(4)]));
+    f.github.on(other, json([issue(99)]));
+    await f.client.openIssues("korri-os/korri"); await f.client.openIssues("korri-os/korri", ["trusted[bot]"]);
+    await f.client.openIssues("other/repo");
+    await f.client.invalidate("KORRI-OS/KORRI");
+    const next = await f.client.openIssues("korri-os/korri"); const bots = await f.client.openIssues("korri-os/korri", ["trusted[bot]"]);
+    expect(next.ok && next.issues.map(item => item.number)).toEqual([3]); expect(bots.ok && bots.issues.map(item => item.number)).toEqual([4]);
+    await f.client.openIssues("other/repo"); expect(f.github.count(other)).toBe(1); expect(f.github.count(LIST)).toBe(4);
+  });
+
   it("reuses a list for a minute, then revalidates with its ETag and reuses it on 304", async () => {
     const f = fixture();
     f.github.on(LIST, json([issue(1)], { headers: { etag: '"v1"' } }), new Response(null, { status: 304 }));
