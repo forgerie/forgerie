@@ -29,7 +29,7 @@ import "./DecisionCard.css";
  * them while they are pinned beside the title) and fades in. Its arrival moves
  * the scroll as a failed choice's reason does, so the choices stay where they were.
  */
-export function DecisionCard({ title, meta, headAction, lead, edge = "live", open, closed, closedTone, closedHref, closedDetail, problem, focusClosed = false, pinChoices = false,
+export function DecisionCard({ title, meta, headAction, lead, edge = "live", open, closed, closedTone, closedHref, closedPress, closedDetail, problem, focusClosed = false, pinChoices = false,
   children, footer, action, annotation }: {
   title: string;
   /** A short fact about the subject, such as the file it concerns: at the end of the title line, or under the title when they do not fit together. */
@@ -50,6 +50,8 @@ export function DecisionCard({ title, meta, headAction, lead, edge = "live", ope
   closedTone?: "bad" | undefined;
   /** Where the closed line leads, such as the thing the decision made. It opens in a new tab. */
   closedHref?: string | undefined;
+  /** Opens what the decision made in place, such as a file in a reader, when it has no web address. `closedHref` wins. */
+  closedPress?: (() => void) | undefined;
   /** What the decision produced, such as a command's output, under the closed line. */
   closedDetail?: ReactNode;
   /** Why the last choice failed, shown above the choices while the card is open. */
@@ -121,11 +123,11 @@ export function DecisionCard({ title, meta, headAction, lead, edge = "live", ope
       <CircleAlertIcon className="decision-card-problem-mark" aria-hidden />{shown}
     </p>}
     {open ? footer !== undefined && footer !== null && footer !== false && <div className="decision-card-foot" ref={choices}>{footer}</div>
-      : closed !== undefined && <p className="decision-card-closed" data-tone={closedTone} ref={closedHref === undefined ? holdClosed : undefined}
-        tabIndex={closedHref === undefined && focusClosed ? -1 : undefined}>
-        {closedHref === undefined ? closed : <a className="decision-card-link" ref={holdClosed} href={closedHref} target="_blank" rel="noreferrer">
+      : closed !== undefined && <p className="decision-card-closed" data-tone={closedTone} ref={closedHref === undefined && closedPress === undefined ? holdClosed : undefined}
+        tabIndex={closedHref === undefined && closedPress === undefined && focusClosed ? -1 : undefined}>
+        {closedHref !== undefined ? <a className="decision-card-link" ref={holdClosed} href={closedHref} target="_blank" rel="noreferrer">
           {closed}<ExternalLinkIcon className="decision-card-link-mark" aria-hidden />
-        </a>}
+        </a> : closedPress !== undefined ? <button type="button" className="decision-card-link" ref={holdClosed} onClick={closedPress}>{closed}</button> : closed}
       </p>}
     {!open && closedDetail !== undefined && closedDetail !== null && closedDetail !== false && <div className="decision-card-detail">{closedDetail}</div>}
     {open && action !== undefined && <button type="button" className="decision-card-action" onClick={action.onPress}>{action.label}</button>}

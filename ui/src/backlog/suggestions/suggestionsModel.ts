@@ -131,5 +131,7 @@ export function rowState(suggestion: Pick<Suggestion, "id" | "state">, pending: 
   return { busy: press !== undefined, filing, problem: filing ? undefined : problem, offer: canFile(state) && state.kind !== "duplicate" };
 }
 
+/** The paths a Markdown File anyway files past: every match the reader was shown. */
+export const matchPaths = (state: SuggestionState) => state.kind === "duplicate" ? state.matches.flatMap((match) => match.path === undefined ? [] : [match.path]) : [];
 /** The numbers a File anyway files past: every match the reader was shown. */
 export const matchNumbers = (state: SuggestionState) => state.kind === "duplicate" ? state.matches.flatMap((match) => match.number === undefined ? [] : [match.number]) : [];

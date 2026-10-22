@@ -21,6 +21,8 @@ export interface SuggestionsSheetActions {
   /** Close the sheet and bring the suggestion's card into view. */
   onShow: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
+  /** Opens a filed Markdown item in the chat's file reader. Absent: its path is words only. */
+  onOpenFile?: ((path: string) => void) | undefined;
   onOpenBacklog?: (() => void) | undefined;
   onRetry: () => void;
   onClose: () => void;
@@ -73,6 +75,11 @@ export function SuggestionsSheet({ suggestions, readError, pending, problems, dr
     const launchError = state.kind === "filed" ? state.launchError : undefined;
     const run = state.kind === "started" ? backgroundOf(state.sessionId, look) : undefined;
     const problem = problems[suggestion.id];
+    const filePath = state.url === undefined && state.number === undefined
+      ? state.path ?? (suggestion.destination.provider === "markdown" ? suggestion.destination.path : undefined) : undefined;
+    const openFile = filePath !== undefined && actions.onOpenFile ? <TextButton label="Open the file" onPress={() => actions.onOpenFile?.(filePath)} /> : null;
+    const startSession = launchError?.retryable ? <TextButton label={pending[suggestion.id] === "file-and-act" ? "Starting…" : "Start session"}
+      disabled={pending[suggestion.id] !== undefined} onPress={() => actions.onFileAndAct(suggestion.id)} /> : null;
     return <PendingRow key={suggestion.id} tone="quiet" title={title(suggestion)} onShow={show(suggestion)} showLabel="Show in chat"
       detail={<>
         {link ? <>Filed as {link}</> : <>{filed.lead}{filed.code ? <> <code>{filed.code}</code></> : null}</>}{filed.tail ? ` ${filed.tail}` : null}{ago ? `, ${ago}` : null}
@@ -80,8 +87,7 @@ export function SuggestionsSheet({ suggestions, readError, pending, problems, dr
         {state.decisionLogWarning ? <>. {state.decisionLogWarning}</> : null}
         {problem ? <>. {problem}</> : null}
       </>}
-      actions={launchError?.retryable ? <TextButton label={pending[suggestion.id] === "file-and-act" ? "Starting…" : "Start session"} disabled={pending[suggestion.id] !== undefined}
-        onPress={() => actions.onFileAndAct(suggestion.id)} /> : undefined}
+      actions={openFile || startSession ? <>{openFile}{startSession}</> : undefined}
       below={state.kind === "started" && run ? <StatusRow tone={run.tone} mark="block"
         name={modelWords(modelFromSpec(state.modelSpec, knownModels)) ?? "Background session"} detail={run.name} status={run.status} meta={run.time}
         go="Open" label={`Open the background session${run.name ? `, ${run.name}` : ""}`} onPress={() => actions.onOpenSession(state.sessionId)} /> : undefined} />;

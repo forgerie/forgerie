@@ -435,6 +435,8 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     store.listModels(controller.signal).then((models) => { if (!controller.signal.aborted) setSuggestionModels(models); }, () => undefined);
     return () => controller.abort();
   }, [hasSuggestions, connected, store]);
+  // A filed Markdown item opens in this chat's file reader, as a reply's file links do; a landed chat has none.
+  const openSuggestionFile = useMemo(() => readOnly ? undefined : (path: string) => { openLinkedFile(path); }, [readOnly, openLinkedFile]);
   const chatModel = state.status?.model;
   const chatThinking = state.status?.thinkingLevel;
   const toolArtifact = useCallback<ToolArtifactView>((artifact) => {
@@ -443,9 +445,9 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     // The agent may have made the record after the last read: one more read finds it.
     queueMicrotask(() => suggestions.want(reference.suggestionId));
     return <div data-suggestion={reference.suggestionId}><SuggestionCard {...cardInputs({ reference, view: suggestionsView, store: suggestions,
-      links: { look, openSession: openSuggestionSession ?? (() => undefined), openLink, copy: writeClipboardText },
+      links: { look, openSession: openSuggestionSession ?? (() => undefined), openLink, copy: writeClipboardText, openFile: openSuggestionFile },
       chat: { model: chatModel, thinkingLevel: chatThinking }, knownModels: suggestionModels, listModels: connected ? store.listModels : undefined, now: Date.now() })} /></div>;
-  }, [suggestions, suggestionsView, look, openSuggestionSession, chatModel, chatThinking, suggestionModels, connected, store]);
+  }, [suggestions, suggestionsView, look, openSuggestionSession, openSuggestionFile, chatModel, chatThinking, suggestionModels, connected, store]);
   // Show in chat: bring the card into view once the thread has drawn it.
   const [revealing, setRevealing] = useState<string>();
   const revealSuggestionKey = revealSuggestion?.key;
@@ -721,6 +723,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
           onRestore: (suggestionId) => { void suggestions.restore(suggestionId); },
           onShow: (suggestionId) => { setSuggestionsOpen(false); setRevealing(suggestionId); },
           onOpenSession: (sessionId) => { setSuggestionsOpen(false); openSuggestionSession?.(sessionId); },
+          onOpenFile: openSuggestionFile ? (path) => { setSuggestionsOpen(false); openSuggestionFile(path); } : undefined,
           onOpenBacklog: suggestionLinks?.openBacklog ? () => { setSuggestionsOpen(false); suggestionLinks.openBacklog?.(); } : undefined,
           onRetry: () => { void suggestions.refresh(); }, onClose: () => setSuggestionsOpen(false) }} />}
       {visible && decisionsOpen && <DecisionsSheet log={log} actions={logActions} onClose={() => { decisions.dismissError(); setDecisionsOpen(false); }} />}

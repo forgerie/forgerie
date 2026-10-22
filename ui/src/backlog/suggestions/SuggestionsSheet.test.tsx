@@ -35,7 +35,7 @@ function Sheet({ store, actions }: { store: SuggestionsStore; actions: Omit<Sugg
 async function mountSheet(records = CHAT_SUGGESTIONS) {
   const server = memoryServer(records);
   const store = createSuggestionsStore(server.api, () => ({ sessionId: "s-chat" }));
-  const actions = { onShow: vi.fn(), onOpenSession: vi.fn(), onOpenBacklog: vi.fn(), onClose: vi.fn() };
+  const actions = { onShow: vi.fn(), onOpenSession: vi.fn(), onOpenFile: vi.fn(), onOpenBacklog: vi.fn(), onClose: vi.fn() };
   await act(async () => root.render(<Sheet store={store} actions={actions} />));
   await act(async () => { await store.refresh(); });
   await settle();
@@ -63,6 +63,15 @@ describe("the chat's suggestions sheet", () => {
     expect(text()).toContain("Nothing waits to be filed.");
     expect(actions.onOpenSession).not.toHaveBeenCalled();
     expect(actions.onShow).not.toHaveBeenCalled();
+  });
+
+  it("opens a filed Markdown item in the chat's file reader, only when pressed", async () => {
+    const { actions } = await mountSheet();
+    expect(actions.onOpenFile).not.toHaveBeenCalled();
+    await act(async () => button("Open the file", row("Count early stream closes per provider in the usage report"))!.click());
+    expect(actions.onOpenFile).toHaveBeenCalledWith(".forgerie/backlog/2026-10-21-count-early-closes.md");
+    // An issue opens from its own link, not the file reader.
+    expect(button("Open the file", row("Retry once when the provider stream drops before message.end"))).toBeUndefined();
   });
 
   it("restores a dismissed row into Open", async () => {

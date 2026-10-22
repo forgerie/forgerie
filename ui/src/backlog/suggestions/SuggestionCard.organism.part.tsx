@@ -3,7 +3,7 @@ import { SuggestionCard, type CardPress } from "./SuggestionCard";
 import type { Suggestion, SuggestionModel } from "./suggestionsApi";
 import { backgroundOf, launchModel, markdownOf, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
 import { answer } from "./fixtures/serverLike";
-import { AZURE, CHAT_MODEL, DISMISSED, DUPLICATE, FAILED, FAILED_ACT, FAILED_FINAL, FILED, FILED_GITHUB, FILING, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, LONG, MODELS, NO_DEFAULT, NOW,
+import { AZURE, CHAT_MODEL, DISMISSED, DISMISSED_UNSAFE, DUPLICATE, MARKDOWN_DUPLICATE, FAILED, FAILED_ACT, FAILED_FINAL, FILED, FILED_GITHUB, FILING, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, LONG, MODELS, NO_DEFAULT, NOW,
   OPEN, OPEN_GITHUB, SHORT, STARTED, STARTED_DONE, STARTED_NEEDS, look } from "./fixtures/suggestions";
 
 export const name = "Backlog suggestion card";
@@ -35,7 +35,7 @@ function Stateful({ initial, read = "ready", hold = false, editing = false, word
       launch={launch} background={record?.state.kind === "started" ? backgroundOf(record.state.sessionId, look) : undefined}
       initialEditing={editing} knownModels={MODELS} listModels={async () => MODELS} now={NOW} markdown={record ? markdownOf(record, draft) : ""}
       actions={{ onFile: () => act("file"), onFileAndAct: () => act("file-and-act"), onDismiss: () => act("dismiss"), onRestore: () => act("restore"),
-        onDraft: setDraft, onModel: setModel, onOpenSession: setOpened, onOpenLink: () => undefined, onCopy: async () => true, onRetryRead: () => undefined }} />
+        onDraft: setDraft, onModel: setModel, onOpenSession: setOpened, onOpenFile: setOpened, onOpenLink: () => undefined, onCopy: async () => true, onRetryRead: () => undefined }} />
     {opened ? <p>Opened {opened}</p> : null}
   </>;
 }
@@ -55,6 +55,9 @@ export function StartedDone() { return <Stateful initial={STARTED_DONE} />; }
 export function LaunchFailed() { return <Stateful initial={LAUNCH_ERROR} />; }
 export function LaunchFailedUnrecorded() { return <Stateful initial={LAUNCH_ERROR_LOGGED} />; }
 export function Duplicate() { return <Stateful initial={DUPLICATE} />; }
+export function DuplicateMarkdown() { return <Stateful initial={MARKDOWN_DUPLICATE} />; }
+/** Restore returns it to a GitHub failure the server will not retry: the card stays failed, with no Retry. */
+export function DismissedAfterUnsafeFailure() { return <Stateful initial={DISMISSED_UNSAFE} />; }
 export function Failed() { return <Stateful initial={FAILED} />; }
 export function FailedFileAndAct() { return <Stateful initial={FAILED_ACT} />; }
 export function FailedFinal() { return <Stateful initial={FAILED_FINAL} />; }

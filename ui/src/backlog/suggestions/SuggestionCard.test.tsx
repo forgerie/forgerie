@@ -9,7 +9,7 @@ import { cardInputs, type CardLinks } from "./cardInputs";
 import { createSuggestionsStore, type SuggestionsStore } from "./suggestionsStore";
 import type { Suggestion } from "./suggestionsApi";
 import { memoryServer, type MemoryServer } from "./fixtures/memoryApi";
-import { AZURE, CHAT_MODEL, DISMISSED, DUPLICATE, FAILED, FAILED_ACT, FAILED_FINAL, FILED, FILED_GITHUB, FILING, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, LONG, MODELS, NO_DEFAULT,
+import { AZURE, CHAT_MODEL, DISMISSED, DISMISSED_UNSAFE, DUPLICATE, MARKDOWN_DUPLICATE, FAILED, FAILED_ACT, FAILED_FINAL, FILED, FILED_GITHUB, FILING, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, LONG, MODELS, NO_DEFAULT,
   NOW, OPEN, OPEN_GITHUB, SHORT, STARTED, STARTED_DONE, STARTED_NEEDS, look } from "./fixtures/suggestions";
 
 let root: Root;
@@ -84,6 +84,22 @@ describe("the card shows the server's record in every state", () => {
     expect(button("File")).toBeUndefined();
   });
 
+  it("filed to a Markdown file: the path opens in the chat's file reader, only when pressed", async () => {
+    const openFile = vi.fn();
+    await mount(memoryServer([FILED]), FILED.id, { openFile });
+    expect(openFile).not.toHaveBeenCalled();
+    const line = button("Filed to .forgerie/backlog/2026-10-21-retry-on-lost-stream.md")!;
+    expect(line.tagName).toBe("BUTTON");
+    await act(async () => line.click());
+    expect(openFile).toHaveBeenCalledWith(".forgerie/backlog/2026-10-21-retry-on-lost-stream.md");
+  });
+
+  it("filed to a Markdown file in a chat with no file reader: the path is words only", async () => {
+    await show(FILED);
+    expect(button("Filed to .forgerie/backlog/2026-10-21-retry-on-lost-stream.md")).toBeUndefined();
+    expect(text()).toContain("Filed to .forgerie/backlog/2026-10-21-retry-on-lost-stream.md");
+  });
+
   it("filed on GitHub: a link to the issue", async () => {
     await show(FILED_GITHUB);
     const link = card().querySelector<HTMLAnchorElement>("a.decision-card-link")!;
@@ -117,6 +133,9 @@ describe("the card shows the server's record in every state", () => {
     const server = memoryServer([LAUNCH_ERROR]);
     const { links } = await mount(server, LAUNCH_ERROR.id);
     expect(text()).toContain("Filed, but the background session did not start: The worktree for the new session could not be created: the disk is full.");
+    // The retry runs on the choice the server recorded at filing; there is nothing to change.
+    expect(text()).toContain("Start session starts it on Gemini 3.8 Flash.");
+    expect(button("Change")).toBeUndefined();
     await press("Start session");
     expect(server.presses).toEqual([{ id: LAUNCH_ERROR.id, kind: "file-and-act", request: {} }]);
     expect(text()).toContain("Working");
@@ -198,6 +217,25 @@ describe("the card shows the server's record in every state", () => {
     await show(AZURE);
     expect(text()).toContain("Azure DevOps boards are read-only in Forgerie, so this item goes to the backlog folder instead.");
     expect(button("File")).toBeDefined();
+  });
+
+  it("restored after an unsafe GitHub failure: the card shows the failure the server returns it to, with no Retry", async () => {
+    const server = memoryServer([DISMISSED_UNSAFE]);
+    await mount(server, DISMISSED_UNSAFE.id);
+    await press("Restore");
+    expect(text()).toContain("GitHub may have created the issue before the connection dropped.");
+    expect(button("Retry")).toBeUndefined();
+    expect(button("File")).toBeUndefined();
+    expect(button("Copy as Markdown")).toBeDefined();
+  });
+
+  it("a Markdown duplicate: File anyway files past the paths shown", async () => {
+    const server = memoryServer([MARKDOWN_DUPLICATE]);
+    await mount(server, MARKDOWN_DUPLICATE.id);
+    expect(text()).toContain("The backlog has 2 close matches. Nothing is filed yet.");
+    expect(text()).toContain(".forgerie/backlog/2026-10-02-retry-dropped-stream.md");
+    await press("File anyway");
+    expect(server.presses[0]?.request).toEqual({ acknowledgedPaths: [".forgerie/backlog/2026-10-02-retry-dropped-stream.md", ".forgerie/backlog/2026-09-12-relay-tool-rows.md"] });
   });
 
   it("dismissed: one line with Restore, which reopens it", async () => {

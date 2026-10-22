@@ -4,7 +4,7 @@ import { fromHistory, reduceEvent } from "../../transcript";
 import { createSuggestionsApi, suggestionRefOf, type Suggestion } from "./suggestionsApi";
 import { createSuggestionsStore } from "./suggestionsStore";
 import { memoryServer } from "./fixtures/memoryApi";
-import { DUPLICATE, FAILED, FAILED_ACT, LAUNCH_ERROR_LOGGED, OPEN, STARTED } from "./fixtures/suggestions";
+import { DISMISSED_UNSAFE, DUPLICATE, FAILED, FAILED_ACT, FILED, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, MARKDOWN_DUPLICATE, OPEN, STARTED } from "./fixtures/suggestions";
 
 describe("the wire", () => {
   it("reads a suggest_backlog result's record, from history and from a live tool.end, and nothing from other calls", () => {
@@ -49,7 +49,77 @@ describe("the wire", () => {
   });
 });
 
+describe("the wire, for the fields the server is adding", () => {
+  it("reads the launch choice on filing and filed, and the state a dismissed record restores to", async () => {
+    const filing = { ...OPEN, id: "sg-filing", state: { kind: "filing", action: "file-and-act", launchChoice: { modelSpec: "google/gemini-3-8-flash" } } };
+    const nested = { ...OPEN, id: "sg-odd", state: { kind: "dismissed", at: "", restoreTo: { kind: "dismissed", at: "" } } };
+    const api = createSuggestionsApi(async () => Response.json({ suggestions: [filing, LAUNCH_ERROR, DISMISSED_UNSAFE, nested] }));
+    const [one, two, three, four] = await api.list({});
+    expect(one?.state).toEqual({ kind: "filing", action: "file-and-act", launchChoice: { modelSpec: "google/gemini-3-8-flash" } });
+    expect(two?.state).toMatchObject({ kind: "filed", launchChoice: { modelSpec: "google/gemini-3-8-flash", thinkingLevel: "low" } });
+    expect(three?.state).toMatchObject({ kind: "dismissed", restoreTo: { kind: "failed", retryable: false, action: "file" } });
+    // A record restores only to a state it can be in before dismissal; anything else reads as unknown.
+    expect(four?.state).toEqual({ kind: "dismissed", at: "", restoreTo: undefined });
+  });
+
+  it("sends acknowledgedPaths with File anyway, and leaves out an empty list", async () => {
+    const bodies: unknown[] = [];
+    const api = createSuggestionsApi(async (_path, init) => { bodies.push(JSON.parse(String(init?.body))); return Response.json(FILED); }, () => "req");
+    await api.file("sg-1", { acknowledgedPaths: [".forgerie/backlog/a.md"] });
+    await api.fileAndAct("sg-1", { acknowledgedPaths: undefined });
+    expect(bodies).toEqual([{ requestId: "req", acknowledgedPaths: [".forgerie/backlog/a.md"] }, { requestId: "req" }]);
+  });
+});
+
 describe("the store", () => {
+  it("files past a Markdown duplicate by the paths shown, and a GitHub one by number", async () => {
+    const server = memoryServer([MARKDOWN_DUPLICATE, DUPLICATE]);
+    const store = createSuggestionsStore(server.api, () => ({ sessionId: "s-chat" }));
+    await store.refresh();
+    await store.file(MARKDOWN_DUPLICATE.id);
+    await store.fileAndAct(DUPLICATE.id);
+    expect(server.presses).toEqual([
+      { id: MARKDOWN_DUPLICATE.id, kind: "file", request: { acknowledgedPaths: [".forgerie/backlog/2026-10-02-retry-dropped-stream.md", ".forgerie/backlog/2026-09-12-relay-tool-rows.md"] } },
+      { id: DUPLICATE.id, kind: "file-and-act", request: { notDuplicateOf: [198, 143] } },
+    ]);
+  });
+
+  it("keeps the chosen model when filing succeeds but the launch fails, so the retry sends the same choice", async () => {
+    const server = memoryServer([OPEN]);
+    const launchFailed = { ...OPEN, revision: 2, state: { kind: "filed" as const, provider: "markdown", path: ".forgerie/backlog/a.md", at: "",
+      launchChoice: { modelSpec: "google/gemini-3-8-flash", thinkingLevel: "low" }, launchError: { message: "The disk is full.", retryable: true } } };
+    const fileAndAct = vi.fn().mockResolvedValueOnce(launchFailed).mockImplementation(server.api.fileAndAct);
+    const store = createSuggestionsStore({ ...server.api, fileAndAct }, () => ({ sessionId: "s-chat" }));
+    await store.refresh();
+    store.setModel(OPEN.id, { modelSpec: "google/gemini-3-8-flash", thinkingLevel: "low" });
+    await store.fileAndAct(OPEN.id);
+    expect(store.getSnapshot().models[OPEN.id]).toEqual({ modelSpec: "google/gemini-3-8-flash", thinkingLevel: "low" });
+    await store.fileAndAct(OPEN.id);
+    expect(fileAndAct.mock.calls.map(([, request]) => request)).toEqual([
+      { modelSpec: "google/gemini-3-8-flash", thinkingLevel: "low" }, { modelSpec: "google/gemini-3-8-flash", thinkingLevel: "low" }]);
+    // Started: nothing left to choose.
+    expect(store.getSnapshot().models).toEqual({});
+  });
+
+  it("says when a record turns filed or started, from a press or a read, and not on the first read", async () => {
+    const server = memoryServer([OPEN, { ...FAILED, sessionId: "s-chat" }, FILED]);
+    const list = vi.fn(server.api.list);
+    const store = createSuggestionsStore({ ...server.api, list }, () => ({}));
+    const filed = vi.fn();
+    store.onFiled(filed);
+    await store.refresh();
+    expect(filed).not.toHaveBeenCalled();
+    await store.file(OPEN.id);
+    expect(filed).toHaveBeenLastCalledWith([expect.objectContaining({ id: OPEN.id })]);
+    // Filed elsewhere: the next read brings it.
+    list.mockResolvedValueOnce(server.records().map((record) => record.id === FAILED.id ? { ...record, revision: 9, state: { ...STARTED.state } } : record));
+    await store.refresh();
+    expect(filed).toHaveBeenCalledTimes(2);
+    expect(filed).toHaveBeenLastCalledWith([expect.objectContaining({ id: FAILED.id })]);
+    await store.refresh();
+    expect(filed).toHaveBeenCalledTimes(2);
+  });
+
   it("files the matches shown, the chosen model, and edited words only", async () => {
     const server = memoryServer([OPEN, DUPLICATE]);
     const store = createSuggestionsStore(server.api, () => ({ sessionId: "s-chat" }));

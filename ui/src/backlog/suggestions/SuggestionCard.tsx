@@ -36,6 +36,8 @@ export interface SuggestionCardActions {
   /** The only press that moves the reader: into the background session. */
   onOpenSession: (sessionId: string) => void;
   onOpenLink: (url: string) => void;
+  /** Opens a filed Markdown item in the chat's file reader. Absent: the path is words only. */
+  onOpenFile?: ((path: string) => void) | undefined;
   onCopy: (text: string) => Promise<boolean>;
   onRetryRead: () => void;
 }
@@ -109,18 +111,25 @@ export function SuggestionCard({ suggestion, destination, read, press, problem, 
       name={modelWords(modelFromSpec(state.modelSpec, knownModels)) ?? "Background session"} detail={background.name} status={background.status} meta={background.time}
       go="Open" label={`Open the background session${background.name ? `, ${background.name}` : ""}`} onPress={() => actions.onOpenSession(state.sessionId)} /> : null;
     const launchError = state.kind === "filed" ? state.launchError : undefined;
+    // A launch retry runs on the choice the server recorded at filing, so the card names that one and offers no Change.
+    const recorded = state.kind === "filed" ? state.launchChoice : undefined;
+    const retryModel = modelWords(modelFromSpec(recorded?.modelSpec, knownModels)) ?? modelWords(launch.model) ?? "this chat's model";
+    // A Markdown item has no web page: its file opens in the chat's file reader, on a press.
+    const filePath = state.url === undefined && state.number === undefined
+      ? state.path ?? (suggestion.destination.provider === "markdown" ? suggestion.destination.path : undefined) : undefined;
     const detail = <>
       {run}
       {launchError ? <Consequence tone="warn" icon={<CircleAlertIcon />}
         actions={launchError.retryable && press === undefined ? [{ label: "Start session", onPress: actions.onFileAndAct }] : undefined}>
         <p>Filed, but the background session did not start: {launchError.message}</p>
-        {press === "file-and-act" ? <p>Starting the session…</p> : null}
+        {press === "file-and-act" ? <p>Starting the session…</p> : launchError.retryable ? <p>Start session starts it on <strong>{retryModel}</strong>.</p> : null}
       </Consequence> : null}
       {problem ? <ReadoutLine>{problem}</ReadoutLine> : null}
       {state.decisionLogWarning ? <ReadoutLine>{state.decisionLogWarning}</ReadoutLine> : null}
     </>;
     return <DecisionCard title={TITLE} edge="ink" open={false} meta={ago ? `Filed ${ago}` : "Filed"} lead={words.title}
-      closed={line} closedHref={state.url} focusClosed={last !== undefined} closedDetail={detail} />;
+      closed={line} closedHref={state.url} closedPress={filePath !== undefined && actions.onOpenFile ? () => actions.onOpenFile?.(filePath) : undefined}
+      focusClosed={last !== undefined} closedDetail={detail} />;
   }
 
   // Open: open, filing, duplicate, failed.

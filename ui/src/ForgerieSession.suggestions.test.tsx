@@ -119,6 +119,8 @@ describe("a backlog suggestion in the chat", () => {
     await until(() => document.body.textContent?.includes("Filed to .forgerie/backlog/2026-10-21-retry-on-lost-stream.md") === true);
     expect(button("File")).toBeUndefined();
     expect(button("File and act")).toBeUndefined();
+    // The filed file opens in this chat's file reader on a press; nothing opened it before.
+    expect(button("Filed to .forgerie/backlog/2026-10-21-retry-on-lost-stream.md")?.tagName).toBe("BUTTON");
   });
 
   it("the header's list files from a row and shows a row in the chat", async () => {

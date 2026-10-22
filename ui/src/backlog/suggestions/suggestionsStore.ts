@@ -2,7 +2,7 @@
 // truth: a card draws its state from here, never from the transcript, so a reload shows the last outcome. The
 // binding calls refresh() on `backlog.suggestions.changed`, on reconnect, and when a card names a record it lacks.
 import { SuggestionRefusal, type ActRequest, type Suggestion, type SuggestionModel, type SuggestionsApi } from "./suggestionsApi";
-import { canFile, edited, matchNumbers, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
+import { canFile, edited, matchNumbers, matchPaths, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
 
 export type SuggestionPress = SuggestionAction | "dismiss" | "restore";
 export interface SuggestionsView {
@@ -38,7 +38,16 @@ export function createSuggestionsStore(api: SuggestionsApi, query: () => { sessi
   let reads = 0;
   /** Ids a card asked for that the last read lacked, so one missing id costs one read. */
   const asked = new Set<string>();
-  const set = (next: SuggestionsView) => { view = next; for (const listener of listeners) listener(); };
+  /** Called when a record turns filed or started, from a press or a read, so whoever lists the backlog reads it again. */
+  const filedListeners = new Set<(records: readonly Suggestion[]) => void>();
+  const set = (next: SuggestionsView) => {
+    const before = new Map(view.suggestions?.map((suggestion) => [suggestion.id, suggestion.state.kind]));
+    view = next;
+    const moved = (next.suggestions ?? []).filter((suggestion) => (suggestion.state.kind === "filed" || suggestion.state.kind === "started")
+      && before.has(suggestion.id) && before.get(suggestion.id) !== suggestion.state.kind);
+    for (const listener of listeners) listener();
+    if (moved.length) for (const listener of filedListeners) listener(moved);
+  };
   const update = (change: (current: SuggestionsView) => SuggestionsView) => { if (!lifetime.signal.aborted) set(change(view)); };
 
   async function refresh() {
@@ -93,18 +102,25 @@ export function createSuggestionsStore(api: SuggestionsApi, query: () => { sessi
     const record = find(id);
     const draft = view.drafts[id];
     const words = record !== undefined && edited(record, draft) && draft !== undefined ? { title: draft.title.trim(), body: draft.body.trim() } : {};
-    const numbers = record ? matchNumbers(record.state) : [];
-    return { ...words, ...(numbers.length ? { notDuplicateOf: numbers } : {}) };
+    // File anyway names the matches shown: GitHub issues by number, Markdown files by path.
+    const numbers = record?.destination.provider === "github" ? matchNumbers(record.state) : [];
+    const paths = record?.destination.provider === "markdown" ? matchPaths(record.state) : [];
+    return { ...words, ...(numbers.length ? { notDuplicateOf: numbers } : {}), ...(paths.length ? { acknowledgedPaths: paths } : {}) };
   }
-  /** A filed record no longer has words to edit or a model to pick. */
+  /**
+   * A filed record no longer has words to edit or a model to pick. One whose launch failed keeps its model: the server
+   * retries the launch with the choice it recorded, and a server older than that record takes this one again.
+   */
   const settle = (record: Suggestion) => {
     if (canFile(record.state)) return;
-    update((current) => ({ ...current, drafts: without(current.drafts, record.id), models: without(current.models, record.id) }));
+    const launchFailed = record.state.kind === "filed" && record.state.launchError !== undefined;
+    update((current) => ({ ...current, drafts: without(current.drafts, record.id), ...(launchFailed ? {} : { models: without(current.models, record.id) }) }));
   };
   return {
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     getSnapshot: () => view,
     refresh,
+    onFiled: (listener: (records: readonly Suggestion[]) => void) => { filedListeners.add(listener); return () => { filedListeners.delete(listener); }; },
     /** A card shows a record this store lacks: read once more, since the agent may have just made it. */
     want: (id: string) => {
       if (view.suggestions === undefined || find(id) !== undefined || asked.has(id)) return;
@@ -126,7 +142,7 @@ export function createSuggestionsStore(api: SuggestionsApi, query: () => { sessi
     /** Whether a card already asked for this id, so a read that still lacks it means the record is not there. */
     asked: (id: string) => asked.has(id),
     dismissProblem: (id: string) => update((current) => ({ ...current, problems: without(current.problems, id) })),
-    dispose: () => { lifetime.abort(); listeners.clear(); },
+    dispose: () => { lifetime.abort(); listeners.clear(); filedListeners.clear(); },
   };
 }
 export type SuggestionsStore = ReturnType<typeof createSuggestionsStore>;

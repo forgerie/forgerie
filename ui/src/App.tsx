@@ -393,6 +393,9 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   }, []);
   // The backlog takes the thread's place the same way; the session stays in the URL underneath.
   const { refresh: refreshBacklog } = backlogList;
+  // A suggestion filed or started from the Backlog view, or moved there by an event, is now an item (or an item held by
+  // a session): read the backlog again so it shows where it went as it leaves "Suggested in chats".
+  useEffect(() => everySuggestion.onFiled(() => refreshBacklog()), [everySuggestion, refreshBacklog]);
   const placeBacklog = useCallback((place: BacklogPlace | undefined, replace = false) => {
     const url = new URL(window.location.href);
     clearSettings(url);
@@ -430,6 +433,8 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   // A source's destination reads as a project name. The list holds ids, so the open backlog reads the projects too.
   const [backlogProjects, setBacklogProjects] = useState<readonly Project[]>();
   const backlogOpen = backlog !== undefined;
+  // The Backlog view reads every chat's suggestions when it opens, including straight from its address.
+  useEffect(() => { if (backlogOpen) void everySuggestion.refresh(); }, [backlogOpen, everySuggestion]);
   useEffect(() => {
     if (!backlogOpen) return;
     const controller = new AbortController();

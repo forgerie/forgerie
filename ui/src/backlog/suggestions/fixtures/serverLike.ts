@@ -14,11 +14,14 @@ export function answer(record: Suggestion, press: SuggestionAction | "dismiss" |
     : { provider: "markdown", path: record.destination.path };
   const filed = record.state.kind === "filed" ? record.state : undefined;
   const filedAt = filed ? { provider: filed.provider, path: filed.path, number: filed.number, url: filed.url, at: filed.at } : { ...where, at: AT };
+  // A launch retry uses the choice the server recorded when the item was filed.
+  const modelSpec = filed?.launchChoice?.modelSpec ?? request.modelSpec ?? record.defaultModel.modelSpec;
   switch (press) {
     case "file": return { ...next, state: { kind: "filed", ...where, at: AT } };
     case "file-and-act": return { ...next, state: { ...filedAt, kind: "started", sessionId: STARTED_SESSION, claimId: "c-started",
-      modelSpec: request.modelSpec ?? record.defaultModel.modelSpec } };
+      modelSpec } };
     case "dismiss": return { ...next, state: { kind: "dismissed", at: AT } };
-    case "restore": return { ...next, state: { kind: "open" } };
+    // Restore returns the record to the state it was dismissed from, which the server kept.
+    case "restore": return { ...next, state: record.state.kind === "dismissed" && record.state.restoreTo ? record.state.restoreTo : { kind: "open" } };
   }
 }

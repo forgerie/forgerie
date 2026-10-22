@@ -54,3 +54,6 @@ export function Offer() {
     <p>An offer the reader can take or leave: the rule stays in full ink, and the work goes on without it.</p>
   </DecisionCard>;
 }
+export function ClosedOpensInPlace() {
+  return <DecisionCard title="Contract" meta="Design, build, review" open={false} closed="Saved as docs/contracts/run-export.md" closedPress={() => {}} />;
+}

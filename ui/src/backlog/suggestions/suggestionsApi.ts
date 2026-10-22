@@ -31,10 +31,13 @@ const where = { provider: z.string().catch("markdown"), path: z.string().optiona
 const matchSchema = z.object({ number: z.number().int().positive().optional().catch(undefined), path: z.string().optional().catch(undefined),
   title: z.string(), state: z.string().catch("open"), url: webLink });
 
-export const suggestionStateSchema = z.discriminatedUnion("kind", [
+/** The model a File and act launch uses. The server keeps it and uses it again for every launch retry. */
+const launchChoice = suggestionModelSchema.optional().catch(undefined);
+/** Every state a record can be in before it is dismissed, and so every state a Restore can return it to. */
+const liveStates = [
   z.object({ kind: z.literal("open") }),
-  z.object({ kind: z.literal("filing"), action: z.enum(["file", "file-and-act"]).catch("file") }),
-  z.object({ kind: z.literal("filed"), ...where,
+  z.object({ kind: z.literal("filing"), action: z.enum(["file", "file-and-act"]).catch("file"), launchChoice }),
+  z.object({ kind: z.literal("filed"), ...where, launchChoice,
     /** File and act filed the item, then the background session did not start. */
     launchError: z.object({ message: z.string(), retryable: z.boolean().catch(false) }).optional().catch(undefined) }),
   z.object({ kind: z.literal("started"), ...where, sessionId: text, claimId: z.string().catch(""),
@@ -43,7 +46,12 @@ export const suggestionStateSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("failed"), message: z.string(), retryable: z.boolean().catch(false),
     /** The action that failed, so Retry repeats it. A server older than this field sends none. */
     action: z.enum(["file", "file-and-act"]).optional().catch(undefined) }),
-  z.object({ kind: z.literal("dismissed"), at: z.string().catch("") }),
+] as const;
+export const suggestionStateSchema = z.discriminatedUnion("kind", [
+  ...liveStates,
+  z.object({ kind: z.literal("dismissed"), at: z.string().catch(""),
+    /** The state Restore returns the record to. Absent from an older server: Restore reopens it. */
+    restoreTo: z.discriminatedUnion("kind", [...liveStates]).optional().catch(undefined) }),
 ]);
 export type SuggestionState = z.infer<typeof suggestionStateSchema>;
 
@@ -85,8 +93,10 @@ export class SuggestionRefusal extends Error {
 /** What File and File and act may send. The server keeps the agent's words when title and body are absent. */
 export interface FileRequest {
   title?: string | undefined; body?: string | undefined;
-  /** The matches the reader saw and chose to file past. */
+  /** The GitHub matches the reader saw and chose to file past. */
   notDuplicateOf?: readonly number[] | undefined;
+  /** The Markdown matches, by path, the reader saw and chose to file past. */
+  acknowledgedPaths?: readonly string[] | undefined;
 }
 export interface ActRequest extends FileRequest { modelSpec?: string | undefined; thinkingLevel?: string | undefined }
 

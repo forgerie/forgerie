@@ -48,6 +48,7 @@ export const STARTED_NEEDS = started("sg-needs", "s-bg-needs", { number: 215, ur
 export const STARTED_DONE = started("sg-done", "s-bg-done", { number: 216, url: "https://github.com/simonwjackson/forgerie/issues/216", modelSpec: "google/gemini-3-8-flash" });
 export const LAUNCH_ERROR = suggestion("sg-launch-error", { destination: github, revision: 3,
   state: { kind: "filed", provider: "github", number: 217, url: "https://github.com/simonwjackson/forgerie/issues/217", at,
+    launchChoice: { modelSpec: "google/gemini-3-8-flash", thinkingLevel: "low" },
     launchError: { message: "The worktree for the new session could not be created: the disk is full.", retryable: true } } });
 export const LAUNCH_ERROR_LOGGED = suggestion("sg-launch-log", { destination: github, revision: 3,
   state: { kind: "filed", provider: "github", number: 218, url: "https://github.com/simonwjackson/forgerie/issues/218", at,
@@ -56,6 +57,11 @@ export const LAUNCH_ERROR_LOGGED = suggestion("sg-launch-log", { destination: gi
 export const DUPLICATE = suggestion("sg-duplicate", { destination: github, revision: 2, state: { kind: "duplicate", matches: [
   { number: 198, title: "Retry the reply after the provider drops the stream", state: "open", url: "https://github.com/simonwjackson/forgerie/issues/198" },
   { number: 143, title: "Stream relay leaves tool rows running", state: "closed", url: "https://github.com/simonwjackson/forgerie/issues/143" },
+] } });
+/** A Markdown backlog already holds close items: File anyway names their paths. */
+export const MARKDOWN_DUPLICATE = suggestion("sg-md-duplicate", { revision: 2, state: { kind: "duplicate", matches: [
+  { path: ".forgerie/backlog/2026-10-02-retry-dropped-stream.md", title: "Retry a dropped stream once", state: "open" },
+  { path: ".forgerie/backlog/2026-09-12-relay-tool-rows.md", title: "Stream relay leaves tool rows running", state: "done" },
 ] } });
 export const FAILED = suggestion("sg-failed", { destination: github, revision: 2,
   state: { kind: "failed", message: "GitHub did not answer (502 Bad Gateway). Nothing was filed.", retryable: true, action: "file" } });
@@ -66,6 +72,9 @@ export const FAILED_FINAL = suggestion("sg-failed-final", { destination: github,
   state: { kind: "failed", message: "GitHub refused the issue: the repository is archived.", retryable: false } });
 export const AZURE = suggestion("sg-azure", { azureReadOnlyNote: true });
 export const DISMISSED = suggestion("sg-dismissed", { title: "Rename streamRelay to providerStream", revision: 2, state: { kind: "dismissed", at } });
+/** Dismissed after a GitHub failure the server will not retry: Restore returns it to that failure. */
+export const DISMISSED_UNSAFE = suggestion("sg-dismissed-unsafe", { destination: github, revision: 3, state: { kind: "dismissed", at,
+  restoreTo: { kind: "failed", message: "GitHub may have created the issue before the connection dropped. Check the repository before filing again.", retryable: false, action: "file" } } });
 export const LONG = suggestion("sg-long", {
   title: "Stop the session picker from listing a removed worktree's sessions, and make an empty transcript offer a way back that does not need a reload of the whole app",
   body: "Opening one of them shows an empty transcript. The component that draws it is ui/src/ui/backlog/very/deep/folder/structure/BacklogSuggestionCardWithAVeryLongComponentNameThatNeverBreaks.tsx, and nothing in it handles a missing folder.",
