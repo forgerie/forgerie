@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { fromHistory, reduceEvent } from "../../transcript";
 import { createSuggestionsApi, suggestionRefOf, type Suggestion } from "./suggestionsApi";
 import { createSuggestionsStore } from "./suggestionsStore";
+import { filedItemOf } from "./suggestionsModel";
+import type { BacklogItem } from "../backlogApi";
 import { memoryServer } from "./fixtures/memoryApi";
 import { DISMISSED_UNSAFE, DUPLICATE, FAILED, FAILED_ACT, FILED, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, MARKDOWN_DUPLICATE, OPEN, STARTED } from "./fixtures/suggestions";
 
@@ -166,5 +168,18 @@ describe("the store", () => {
     store.want(OPEN.id);
     expect(list).toHaveBeenCalledTimes(2);
     expect(store.asked("sg-new")).toBe(true);
+  });
+});
+
+describe("the filed item in the backlog", () => {
+  it("is the project's Markdown item at that path in its main checkout, whatever the leading ./", () => {
+    const item = (projectId: string, path: string, provider = "markdown") => ({ id: `${projectId}:${path}`, title: "T", provider, path, status: "", labels: [], assignedToMe: false,
+      assignees: [], open: true, readiness: "ready", blockingIds: [], destination: { kind: "routed", projectId, reason: "project-owned" },
+      owner: { kind: "project", projectId, projectName: projectId, repo: `/code/${projectId}` }, projectId, projectName: projectId, repo: `/code/${projectId}` }) as BacklogItem;
+    const items = [item("other", ".forgerie/backlog/a.md"), item("p", ".forgerie/backlog/a.md", "github"), item("p", ".forgerie/backlog/a.md")];
+    expect(filedItemOf(items, "p", "./.forgerie/backlog/a.md")?.id).toBe("p:.forgerie/backlog/a.md");
+    expect(filedItemOf(items, "p", ".forgerie/backlog/a.md")?.provider).toBe("markdown");
+    expect(filedItemOf(items, "p", ".forgerie/backlog/b.md")).toBeUndefined();
+    expect(filedItemOf(undefined, "p", ".forgerie/backlog/a.md")).toBeUndefined();
   });
 });

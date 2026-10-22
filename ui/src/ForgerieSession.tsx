@@ -110,9 +110,14 @@ import { writeClipboardText } from "./clipboard";
 export interface SuggestionLinks {
   look: (sessionId: string) => SessionLook | undefined;
   openSession: (sessionId: string) => void;
+  /** A project's main checkout, from the app's project list, where the server commits a filed Markdown item. */
+  projectPath?: ((projectId: string) => string | undefined) | undefined;
+  /** Shows a filed Markdown item as the Backlog view shows it, for a file this chat's reader cannot reach. */
+  openBacklogItem?: ((projectId: string, path: string) => void) | undefined;
   openBacklog?: (() => void) | undefined;
 }
 const NO_LOOK = () => undefined;
+const sameFolder = (a: string, b: string) => a.replace(/\/+$/u, "") === b.replace(/\/+$/u, "");
 const openLink = (url: string) => { window.open(url, "_blank", "noopener,noreferrer"); };
 
 const pullRequests = createPullRequestApi(browserTransport.request);
@@ -435,8 +440,21 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     store.listModels(controller.signal).then((models) => { if (!controller.signal.aborted) setSuggestionModels(models); }, () => undefined);
     return () => controller.abort();
   }, [hasSuggestions, connected, store]);
-  // A filed Markdown item opens in this chat's file reader, as a reply's file links do; a landed chat has none.
-  const openSuggestionFile = useMemo(() => readOnly ? undefined : (path: string) => { openLinkedFile(path); }, [readOnly, openLinkedFile]);
+  // The server commits a filed Markdown item to its project's main checkout. This chat's file reader reaches only this
+  // chat's folder, so it opens the item when the chat runs in that checkout; otherwise, such as in a session worktree
+  // that may not have the file, the item opens as the Backlog view shows it.
+  const projectPath = suggestionLinks?.projectPath;
+  const openBacklogItem = suggestionLinks?.openBacklogItem;
+  const openSuggestionFile = useMemo(() => {
+    if (openBacklogItem === undefined && readOnly) return undefined;
+    return (projectId: string, path: string) => {
+      const main = projectPath?.(projectId);
+      const here = main !== undefined && cwd !== undefined && sameFolder(main, cwd);
+      if (here && !readOnly && openLinkedFile(path)) return;
+      if (openBacklogItem !== undefined) openBacklogItem(projectId, path);
+      else openLinkedFile(path);
+    };
+  }, [openBacklogItem, projectPath, readOnly, cwd, openLinkedFile]);
   const chatModel = state.status?.model;
   const chatThinking = state.status?.thinkingLevel;
   const toolArtifact = useCallback<ToolArtifactView>((artifact) => {
@@ -723,7 +741,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
           onRestore: (suggestionId) => { void suggestions.restore(suggestionId); },
           onShow: (suggestionId) => { setSuggestionsOpen(false); setRevealing(suggestionId); },
           onOpenSession: (sessionId) => { setSuggestionsOpen(false); openSuggestionSession?.(sessionId); },
-          onOpenFile: openSuggestionFile ? (path) => { setSuggestionsOpen(false); openSuggestionFile(path); } : undefined,
+          onOpenFile: openSuggestionFile ? (projectId, path) => { setSuggestionsOpen(false); openSuggestionFile(projectId, path); } : undefined,
           onOpenBacklog: suggestionLinks?.openBacklog ? () => { setSuggestionsOpen(false); suggestionLinks.openBacklog?.(); } : undefined,
           onRetry: () => { void suggestions.refresh(); }, onClose: () => setSuggestionsOpen(false) }} />}
       {visible && decisionsOpen && <DecisionsSheet log={log} actions={logActions} onClose={() => { decisions.dismissError(); setDecisionsOpen(false); }} />}

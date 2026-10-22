@@ -2,6 +2,7 @@
 // the Backlog view all read their words from here, so one state reads the same everywhere.
 import type { SessionModel } from "../../contracts";
 import type { SessionLook } from "../backlogModel";
+import type { BacklogItem } from "../backlogApi";
 import type { Suggestion, SuggestionDestination, SuggestionModel, SuggestionState } from "./suggestionsApi";
 
 export type SuggestionAction = "file" | "file-and-act";
@@ -135,3 +136,11 @@ export function rowState(suggestion: Pick<Suggestion, "id" | "state">, pending: 
 export const matchPaths = (state: SuggestionState) => state.kind === "duplicate" ? state.matches.flatMap((match) => match.path === undefined ? [] : [match.path]) : [];
 /** The numbers a File anyway files past: every match the reader was shown. */
 export const matchNumbers = (state: SuggestionState) => state.kind === "duplicate" ? state.matches.flatMap((match) => match.number === undefined ? [] : [match.number]) : [];
+
+/** A repo-relative path as the backlog lists it: no leading "./" or "/". */
+const repoPath = (path: string) => path.trim().replace(/^(?:\.?\/)+/u, "");
+/** The backlog's Markdown item a filing wrote: the one in that project whose file is that path in its main checkout. */
+export function filedItemOf(items: readonly BacklogItem[] | undefined, projectId: string, path: string): BacklogItem | undefined {
+  return items?.find((item) => item.owner.kind === "project" && item.owner.projectId === projectId && item.provider === "markdown"
+    && repoPath(item.path) === repoPath(path));
+}

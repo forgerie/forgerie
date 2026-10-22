@@ -21,8 +21,8 @@ export interface SuggestionsSheetActions {
   /** Close the sheet and bring the suggestion's card into view. */
   onShow: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
-  /** Opens a filed Markdown item in the chat's file reader. Absent: its path is words only. */
-  onOpenFile?: ((path: string) => void) | undefined;
+  /** Opens a filed Markdown item by its project and its path in that project's main checkout. Absent: its path is words only. */
+  onOpenFile?: ((projectId: string, path: string) => void) | undefined;
   onOpenBacklog?: (() => void) | undefined;
   onRetry: () => void;
   onClose: () => void;
@@ -77,7 +77,7 @@ export function SuggestionsSheet({ suggestions, readError, pending, problems, dr
     const problem = problems[suggestion.id];
     const filePath = state.url === undefined && state.number === undefined
       ? state.path ?? (suggestion.destination.provider === "markdown" ? suggestion.destination.path : undefined) : undefined;
-    const openFile = filePath !== undefined && actions.onOpenFile ? <TextButton label="Open the file" onPress={() => actions.onOpenFile?.(filePath)} /> : null;
+    const openFile = filePath !== undefined && actions.onOpenFile ? <TextButton label="Open the file" onPress={() => actions.onOpenFile?.(suggestion.projectId, filePath)} /> : null;
     const startSession = launchError?.retryable ? <TextButton label={pending[suggestion.id] === "file-and-act" ? "Starting…" : "Start session"}
       disabled={pending[suggestion.id] !== undefined} onPress={() => actions.onFileAndAct(suggestion.id)} /> : null;
     return <PendingRow key={suggestion.id} tone="quiet" title={title(suggestion)} onShow={show(suggestion)} showLabel="Show in chat"

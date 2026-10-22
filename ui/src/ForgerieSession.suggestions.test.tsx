@@ -45,7 +45,7 @@ const messages: PiMessage[] = [
 ];
 
 /** One chat on the routes, which answer from `state` as the server would. */
-async function chat() {
+async function chat({ cwd = "/work", projects = { "p-forgerie": "/work" } }: { cwd?: string; projects?: Record<string, string> } = {}) {
   const state = { records: [record] };
   const posts: { path: string; body: unknown }[] = [];
   server = new WebSocketServer({ port: 0 });
@@ -73,11 +73,12 @@ async function chat() {
   }));
   const switched = vi.fn();
   const opened = vi.fn();
-  const view = () => <ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={switched}
-    suggestionLinks={{ look, openSession: opened, openBacklog: vi.fn() }} />;
+  const openBacklogItem = vi.fn();
+  const view = () => <ForgerieSession id="test" known={{ id: "test", cwd }} onSwitchSession={switched}
+    suggestionLinks={{ look, openSession: opened, openBacklog: vi.fn(), projectPath: (id) => projects[id], openBacklogItem }} />;
   await act(async () => root.render(view()));
   await until(() => button("File and act") !== undefined);
-  return { state, posts, switched, opened, view };
+  return { state, posts, switched, opened, openBacklogItem, view };
 }
 
 describe("a backlog suggestion in the chat", () => {
@@ -121,6 +122,26 @@ describe("a backlog suggestion in the chat", () => {
     expect(button("File and act")).toBeUndefined();
     // The filed file opens in this chat's file reader on a press; nothing opened it before.
     expect(button("Filed to .forgerie/backlog/2026-10-21-retry-on-lost-stream.md")?.tagName).toBe("BUTTON");
+  });
+
+  it("in a session worktree, a filed Markdown item opens from the project's main checkout, as the Backlog view shows it", async () => {
+    const { openBacklogItem } = await chat({ cwd: "/work/.worktrees/fix-stuck-row" });
+    await act(async () => button("File")!.click());
+    await until(() => button("Filed to .forgerie/backlog/2026-10-21-retry-on-lost-stream.md") !== undefined);
+    expect(openBacklogItem).not.toHaveBeenCalled();
+    await act(async () => button("Filed to .forgerie/backlog/2026-10-21-retry-on-lost-stream.md")!.click());
+    expect(openBacklogItem).toHaveBeenCalledWith("p-forgerie", ".forgerie/backlog/2026-10-21-retry-on-lost-stream.md");
+    // The chat's own file reader, which reaches only the worktree, stays closed.
+    expect(button("Close changes")).toBeUndefined();
+  });
+
+  it("in the project's main checkout, a filed Markdown item opens in this chat's file reader", async () => {
+    const { openBacklogItem } = await chat({ cwd: "/work/" });
+    await act(async () => button("File")!.click());
+    await until(() => button("Filed to .forgerie/backlog/2026-10-21-retry-on-lost-stream.md") !== undefined);
+    await act(async () => button("Filed to .forgerie/backlog/2026-10-21-retry-on-lost-stream.md")!.click());
+    await until(() => button("Close changes") !== undefined);
+    expect(openBacklogItem).not.toHaveBeenCalled();
   });
 
   it("the header's list files from a row and shows a row in the chat", async () => {

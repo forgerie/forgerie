@@ -36,7 +36,7 @@ export interface SuggestionCardActions {
   /** The only press that moves the reader: into the background session. */
   onOpenSession: (sessionId: string) => void;
   onOpenLink: (url: string) => void;
-  /** Opens a filed Markdown item in the chat's file reader. Absent: the path is words only. */
+  /** Opens a filed Markdown item from its project's main checkout. Absent: the path is words only. */
   onOpenFile?: ((path: string) => void) | undefined;
   onCopy: (text: string) => Promise<boolean>;
   onRetryRead: () => void;

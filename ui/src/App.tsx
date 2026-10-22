@@ -32,7 +32,7 @@ import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace
 import { createBacklogApi, type BacklogItem } from "./backlog/backlogApi";
 import { createSuggestionsApi, type Suggestion } from "./backlog/suggestions/suggestionsApi";
 import { createSuggestionsStore } from "./backlog/suggestions/suggestionsStore";
-import { isOpen as suggestionWaits } from "./backlog/suggestions/suggestionsModel";
+import { filedItemOf, isOpen as suggestionWaits } from "./backlog/suggestions/suggestionsModel";
 import { SuggestedInChats } from "./backlog/suggestions/SuggestedInChats";
 import { heldSessions, itemParam, launchFolder, listOf, openCount, readBacklogPlace, readItemParam, refOf, type BacklogPlace } from "./backlog/backlogModel";
 import { createGitHubApi, readSetupReturn, submitToGitHub } from "./backlog/githubApi";
@@ -516,8 +516,18 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   </SessionFrame> : null;
   // A suggestion's background session opens only on the reader's press; the Backlog opens from the chat's list.
   const lookSession = picker.look;
+  const knownProjects = projectCatalog ?? backlogProjects;
+  const projectPath = useCallback((projectId: string) => knownProjects?.find((project) => project.id === projectId)?.path, [knownProjects]);
+  // A filed Markdown item, shown as the Backlog view shows it: found by its project and its path in the project's main
+  // checkout, in the list already read or, failing that, in a fresh read. Without a match, the Backlog list opens.
+  const openBacklogItem = useCallback((projectId: string, path: string) => {
+    const shown = filedItemOf(backlogItems, projectId, path);
+    if (shown) { placeBacklog({ item: { ...refOf(shown), scope: backlogScope } }); return; }
+    void backlogApi.list(undefined, backlogScope).then((list) => filedItemOf(list.items, projectId, path), () => undefined)
+      .then((item) => placeBacklog(item ? { item: { ...refOf(item), scope: backlogScope } } : {}));
+  }, [backlogItems, backlogScope, placeBacklog]);
   const suggestionLinks = useMemo(() => ({ look: lookSession, openSession: (sessionId: string) => switchSession(find(sessionId) ?? { id: sessionId, cwd: "" }),
-    openBacklog: () => placeBacklog({}) }), [lookSession, find, switchSession, placeBacklog]);
+    openBacklog: () => placeBacklog({}), projectPath, openBacklogItem }), [lookSession, find, switchSession, placeBacklog, projectPath, openBacklogItem]);
   const chats = kept.filter(record => record.visited).map(record => {
     const entry = record.entry;
     const id = entry.session.id;

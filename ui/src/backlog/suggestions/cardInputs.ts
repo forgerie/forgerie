@@ -13,8 +13,11 @@ export interface CardLinks {
   /** The only way the card moves the reader: into a background session. */
   openSession: (sessionId: string) => void;
   openLink: (url: string) => void;
-  /** The chat's file reader, as a reply's file links use it. Absent: a filed path is words only. */
-  openFile?: ((path: string) => void) | undefined;
+  /**
+   * Opens a filed Markdown item by its project and its path in that project's main checkout, where the server commits
+   * it. Absent: a filed path is words only.
+   */
+  openFile?: ((projectId: string, path: string) => void) | undefined;
   copy: (text: string) => Promise<boolean>;
 }
 
@@ -38,7 +41,7 @@ export function cardInputs({ reference, view, store, links, chat, knownModels, l
       onFile: () => { void store.file(id); }, onFileAndAct: () => { void store.fileAndAct(id); },
       onDismiss: () => { void store.dismiss(id); }, onRestore: () => { void store.restore(id); },
       onDraft: (next) => store.setDraft(id, next), onModel: (model) => store.setModel(id, model),
-      onOpenSession: links.openSession, onOpenLink: links.openLink, onOpenFile: links.openFile, onCopy: links.copy, onRetryRead: () => { void store.refresh(); },
+      onOpenSession: links.openSession, onOpenLink: links.openLink, onOpenFile: links.openFile && suggestion ? (path) => links.openFile?.(suggestion.projectId, path) : undefined, onCopy: links.copy, onRetryRead: () => { void store.refresh(); },
     },
   };
 }

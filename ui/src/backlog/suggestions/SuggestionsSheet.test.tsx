@@ -69,7 +69,7 @@ describe("the chat's suggestions sheet", () => {
     const { actions } = await mountSheet();
     expect(actions.onOpenFile).not.toHaveBeenCalled();
     await act(async () => button("Open the file", row("Count early stream closes per provider in the usage report"))!.click());
-    expect(actions.onOpenFile).toHaveBeenCalledWith(".forgerie/backlog/2026-10-21-count-early-closes.md");
+    expect(actions.onOpenFile).toHaveBeenCalledWith("p-forgerie", ".forgerie/backlog/2026-10-21-count-early-closes.md");
     // An issue opens from its own link, not the file reader.
     expect(button("Open the file", row("Retry once when the provider stream drops before message.end"))).toBeUndefined();
   });

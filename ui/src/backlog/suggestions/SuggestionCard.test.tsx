@@ -91,7 +91,7 @@ describe("the card shows the server's record in every state", () => {
     const line = button("Filed to .forgerie/backlog/2026-10-21-retry-on-lost-stream.md")!;
     expect(line.tagName).toBe("BUTTON");
     await act(async () => line.click());
-    expect(openFile).toHaveBeenCalledWith(".forgerie/backlog/2026-10-21-retry-on-lost-stream.md");
+    expect(openFile).toHaveBeenCalledWith("p-forgerie", ".forgerie/backlog/2026-10-21-retry-on-lost-stream.md");
   });
 
   it("filed to a Markdown file in a chat with no file reader: the path is words only", async () => {
