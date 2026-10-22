@@ -63,7 +63,7 @@ export function SuggestionCard({ suggestion, destination, read, press, problem, 
   press?: CardPress | undefined;
   problem?: string | undefined;
   draft?: SuggestionDraft | undefined;
-  /** The last action pressed on this card, so Retry repeats it. */
+  /** The last action pressed on this card, so Retry repeats it when the record does not say which action failed. */
   last?: SuggestionAction | undefined;
   launch: CardLaunch;
   background?: CardBackground | undefined;
@@ -126,7 +126,8 @@ export function SuggestionCard({ suggestion, destination, read, press, problem, 
   // Open: open, filing, duplicate, failed.
   const filing = press === "file" || press === "file-and-act" ? press : state.kind === "filing" ? (state.action === "file-and-act" ? "file-and-act" : "file") : undefined;
   const busy = filing !== undefined || press !== undefined;
-  const retry = last ?? "file";
+  // Retry repeats the action that failed, as the server records it; without that field, the last one pressed here.
+  const retry = (state.kind === "failed" ? state.action : undefined) ?? last ?? "file";
   const modelName = modelWords(launch.model) ?? "this chat's model";
   const modelSentence = (lead: string) => <ReadoutLine>
     {lead} <strong>{modelName}</strong>{launch.source === "chat" && launch.model ? ", this chat's model" : launch.source === "default" ? ", the backlog's default" : ""}.

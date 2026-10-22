@@ -4,7 +4,7 @@ import { fromHistory, reduceEvent } from "../../transcript";
 import { createSuggestionsApi, suggestionRefOf, type Suggestion } from "./suggestionsApi";
 import { createSuggestionsStore } from "./suggestionsStore";
 import { memoryServer } from "./fixtures/memoryApi";
-import { DUPLICATE, LAUNCH_ERROR_LOGGED, OPEN, STARTED } from "./fixtures/suggestions";
+import { DUPLICATE, FAILED, FAILED_ACT, LAUNCH_ERROR_LOGGED, OPEN, STARTED } from "./fixtures/suggestions";
 
 describe("the wire", () => {
   it("reads a suggest_backlog result's record, from history and from a live tool.end, and nothing from other calls", () => {
@@ -23,6 +23,12 @@ describe("the wire", () => {
     const list = await api.list({ sessionId: "s-chat" });
     expect(list.map((record) => record.id)).toEqual([OPEN.id, LAUNCH_ERROR_LOGGED.id]);
     expect(list[1]?.state).toMatchObject({ kind: "filed", launchError: { retryable: false }, decisionLogWarning: expect.stringContaining("archived") });
+  });
+
+  it("reads which action a failed record failed at, and reads an unknown or missing one as unknown", async () => {
+    const older = { kind: "failed", message: "GitHub did not answer.", retryable: true };
+    const api = createSuggestionsApi(async () => Response.json({ suggestions: [FAILED_ACT, { ...FAILED, state: older }, { ...FAILED, id: "odd", state: { ...older, action: "launch" } }] }));
+    expect((await api.list({})).map((record) => record.state.kind === "failed" ? record.state.action : "none")).toEqual(["file-and-act", undefined, undefined]);
   });
 
   it("sends each press to its route with a request id, and reads a refusal's words", async () => {

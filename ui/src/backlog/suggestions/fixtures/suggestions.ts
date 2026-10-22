@@ -58,7 +58,10 @@ export const DUPLICATE = suggestion("sg-duplicate", { destination: github, revis
   { number: 143, title: "Stream relay leaves tool rows running", state: "closed", url: "https://github.com/simonwjackson/forgerie/issues/143" },
 ] } });
 export const FAILED = suggestion("sg-failed", { destination: github, revision: 2,
-  state: { kind: "failed", message: "GitHub did not answer (502 Bad Gateway). Nothing was filed.", retryable: true } });
+  state: { kind: "failed", message: "GitHub did not answer (502 Bad Gateway). Nothing was filed.", retryable: true, action: "file" } });
+/** File and act failed before anything was filed: Retry files and starts the session again. */
+export const FAILED_ACT = suggestion("sg-failed-act", { destination: github, revision: 2,
+  state: { kind: "failed", message: "GitHub did not answer (502 Bad Gateway). Nothing was filed, and no session started.", retryable: true, action: "file-and-act" } });
 export const FAILED_FINAL = suggestion("sg-failed-final", { destination: github, revision: 2,
   state: { kind: "failed", message: "GitHub refused the issue: the repository is archived.", retryable: false } });
 export const AZURE = suggestion("sg-azure", { azureReadOnlyNote: true });

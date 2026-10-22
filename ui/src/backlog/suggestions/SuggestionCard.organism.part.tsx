@@ -3,7 +3,7 @@ import { SuggestionCard, type CardPress } from "./SuggestionCard";
 import type { Suggestion, SuggestionModel } from "./suggestionsApi";
 import { backgroundOf, launchModel, markdownOf, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
 import { answer } from "./fixtures/serverLike";
-import { AZURE, CHAT_MODEL, DISMISSED, DUPLICATE, FAILED, FAILED_FINAL, FILED, FILED_GITHUB, FILING, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, LONG, MODELS, NO_DEFAULT, NOW,
+import { AZURE, CHAT_MODEL, DISMISSED, DUPLICATE, FAILED, FAILED_ACT, FAILED_FINAL, FILED, FILED_GITHUB, FILING, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, LONG, MODELS, NO_DEFAULT, NOW,
   OPEN, OPEN_GITHUB, SHORT, STARTED, STARTED_DONE, STARTED_NEEDS, look } from "./fixtures/suggestions";
 
 export const name = "Backlog suggestion card";
@@ -56,6 +56,7 @@ export function LaunchFailed() { return <Stateful initial={LAUNCH_ERROR} />; }
 export function LaunchFailedUnrecorded() { return <Stateful initial={LAUNCH_ERROR_LOGGED} />; }
 export function Duplicate() { return <Stateful initial={DUPLICATE} />; }
 export function Failed() { return <Stateful initial={FAILED} />; }
+export function FailedFileAndAct() { return <Stateful initial={FAILED_ACT} />; }
 export function FailedFinal() { return <Stateful initial={FAILED_FINAL} />; }
 export function AzureNote() { return <Stateful initial={AZURE} />; }
 export function Dismissed() { return <Stateful initial={DISMISSED} />; }

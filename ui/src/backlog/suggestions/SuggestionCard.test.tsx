@@ -9,7 +9,7 @@ import { cardInputs, type CardLinks } from "./cardInputs";
 import { createSuggestionsStore, type SuggestionsStore } from "./suggestionsStore";
 import type { Suggestion } from "./suggestionsApi";
 import { memoryServer, type MemoryServer } from "./fixtures/memoryApi";
-import { AZURE, CHAT_MODEL, DISMISSED, DUPLICATE, FAILED, FAILED_FINAL, FILED, FILED_GITHUB, FILING, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, LONG, MODELS, NO_DEFAULT,
+import { AZURE, CHAT_MODEL, DISMISSED, DUPLICATE, FAILED, FAILED_ACT, FAILED_FINAL, FILED, FILED_GITHUB, FILING, LAUNCH_ERROR, LAUNCH_ERROR_LOGGED, LONG, MODELS, NO_DEFAULT,
   NOW, OPEN, OPEN_GITHUB, SHORT, STARTED, STARTED_DONE, STARTED_NEEDS, look } from "./fixtures/suggestions";
 
 let root: Root;
@@ -152,6 +152,37 @@ describe("the card shows the server's record in every state", () => {
     await press("Retry");
     expect(server.presses.map((entry) => entry.kind)).toEqual(["file"]);
     expect(text()).toContain("Filed as #219");
+  });
+
+  it("failed File and act: after a remount, Retry still files and starts the session, as the record says", async () => {
+    const server = memoryServer([FAILED_ACT]);
+    // A new store, as after a reload: nothing was pressed in this browser.
+    const { links } = await mount(server, FAILED_ACT.id);
+    expect(text()).toContain("Retry also starts a new session on Claude Haiku 4.5");
+    await press("Retry");
+    expect(server.presses).toEqual([{ id: FAILED_ACT.id, kind: "file-and-act", request: {} }]);
+    expect(text()).toContain("Working");
+    expect(links.openSession).not.toHaveBeenCalled();
+  });
+
+  it("a failed record that does not name its action: Retry repeats the last press here, and File after a reload", async () => {
+    const server = memoryServer([OPEN]);
+    const unnamed = { ...OPEN, revision: 2, state: { kind: "failed" as const, message: "GitHub did not answer.", retryable: true } };
+    const api = { ...server.api, fileAndAct: vi.fn(async () => unnamed) };
+    const store = createSuggestionsStore(api, () => ({ sessionId: "s-chat" }));
+    const links: CardLinks = { look, openSession: vi.fn(), openLink: vi.fn(), copy: vi.fn(async () => true) };
+    await act(async () => root.render(<Card store={store} id={OPEN.id} links={links} />));
+    await act(async () => { await store.refresh(); });
+    await press("File and act");
+    expect(text()).toContain("GitHub did not answer.");
+    await press("Retry");
+    expect(api.fileAndAct).toHaveBeenCalledTimes(2);
+    await act(async () => root.unmount());
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    const fresh = memoryServer([unnamed]);
+    await mount(fresh, OPEN.id);
+    await press("Retry");
+    expect(fresh.presses.map((entry) => entry.kind)).toEqual(["file"]);
   });
 
   it("failed for good: no Retry, still Copy as Markdown", async () => {

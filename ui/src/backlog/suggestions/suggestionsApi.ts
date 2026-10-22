@@ -40,7 +40,9 @@ export const suggestionStateSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("started"), ...where, sessionId: text, claimId: z.string().catch(""),
     modelSpec: z.string().optional().catch(undefined), thinkingLevel: z.string().optional().catch(undefined) }),
   z.object({ kind: z.literal("duplicate"), matches: z.array(matchSchema).catch([]) }),
-  z.object({ kind: z.literal("failed"), message: z.string(), retryable: z.boolean().catch(false) }),
+  z.object({ kind: z.literal("failed"), message: z.string(), retryable: z.boolean().catch(false),
+    /** The action that failed, so Retry repeats it. A server older than this field sends none. */
+    action: z.enum(["file", "file-and-act"]).optional().catch(undefined) }),
   z.object({ kind: z.literal("dismissed"), at: z.string().catch("") }),
 ]);
 export type SuggestionState = z.infer<typeof suggestionStateSchema>;
