@@ -100,15 +100,15 @@ export class BacklogSuggestionService {
     return this.deps.store.update({ ...record, state: { kind: "dismissed", at: new Date().toISOString(), restoreTo: record.state } });
   }
   private async fileOnce(id: string, action: BacklogSuggestionAction, input: BacklogSuggestionActRequest): Promise<BacklogSuggestion> {
-    let record = this.deps.store.require(id);
-    const launchChoice = action !== "file-and-act" ? undefined : record.state.kind === "filed" && record.state.launchChoice !== undefined ? record.state.launchChoice : resolveLaunchChoice(record.defaultModel, input);
-    const fingerprint = createHash("sha256").update(JSON.stringify([action, input.title ?? null, input.body ?? null, [...input.notDuplicateOf ?? []].sort((a, b) => a - b), [...input.acknowledgedPaths ?? []].sort(), launchChoice?.modelSpec ?? null, launchChoice?.thinkingLevel ?? null])).digest("hex");
+    const fingerprint = createHash("sha256").update(JSON.stringify([input.requestId, input.title ?? null, input.body ?? null, [...input.notDuplicateOf ?? []].sort((a, b) => a - b), [...input.acknowledgedPaths ?? []].sort(), input.modelSpec ?? null, input.thinkingLevel ?? null])).digest("hex");
     const receipt = this.deps.store.receipt(id, input.requestId);
     if (receipt !== undefined) {
-      if (receipt.fingerprint !== fingerprint) throw new BacklogError("conflict", "requestId was reused with different filing choices");
+      if (receipt.fingerprint !== fingerprint || (receipt.action !== undefined && receipt.action !== action)) throw new BacklogError("conflict", "requestId was reused with different filing choices");
       if (receipt.result !== undefined) return receipt.result;
       throw new BacklogError("conflict", "This request was interrupted. Inspect the destination before retrying.");
     }
+    let record = this.deps.store.require(id);
+    const launchChoice = action !== "file-and-act" ? undefined : record.state.kind === "filed" && record.state.launchChoice !== undefined ? record.state.launchChoice : resolveLaunchChoice(record.defaultModel, input);
     const launchingFiled = action === "file-and-act" && record.state.kind === "filed";
     if (!launchingFiled && record.state.kind !== "open" && record.state.kind !== "duplicate" && !(record.state.kind === "failed" && record.state.retryable)) throw new BacklogError("conflict", "Suggestion is not open for filing");
     if (launchingFiled && (input.title !== undefined || input.body !== undefined || input.notDuplicateOf !== undefined || input.acknowledgedPaths !== undefined)) throw new BacklogError("conflict", "Filed items cannot be edited");

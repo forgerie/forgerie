@@ -276,6 +276,21 @@ describe("backlog suggestions", () => {
       expect(f.starts).toHaveLength(1); expect(f.prompts).toHaveLength(2); expect(f.prompts[1]?.requestId).toBe(f.prompts[0]?.requestId);
     } finally { await f.dispose(); }
   });
+  it("replays a completed launch retry without an override after prompt failure and reload", async () => {
+    const f = await fixture();
+    try {
+      const record = await f.service.suggest(f.root, "chat", input, { modelSpec: "source/current", thinkingLevel: "high" });
+      f.failPrompt(true);
+      expect((await f.service.file(record.id, "file-and-act", { requestId: "initial-override", modelSpec: "override/first", thinkingLevel: "low" })).state.kind).toBe("filed");
+      await f.store.initialize(); f.failPrompt(false);
+      const request = { requestId: "retry-without-override" };
+      const started = await f.service.file(record.id, "file-and-act", request);
+      expect(started.state).toMatchObject({ kind: "started", sessionId: "background", modelSpec: "override/first", thinkingLevel: "low" });
+      await f.store.initialize();
+      expect(await f.service.file(record.id, "file-and-act", request)).toEqual(started);
+      expect(f.starts).toHaveLength(1); expect(f.prompts).toHaveLength(2);
+    } finally { await f.dispose(); }
+  });
   it("restores an unsafe GitHub failure to the same failed state, never to a fileable open state", async () => {
     const f = await fixture();
     try {
