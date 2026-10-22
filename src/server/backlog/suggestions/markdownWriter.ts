@@ -72,7 +72,7 @@ export async function writeMarkdownSuggestion(worktrees: Pick<SessionWorktrees, 
     }
     // Cleanup must succeed before changing main; a cleanup error can never look like a failed filing that actually landed.
     await checkMain();
-    await git(options.repo, ["merge", "--ff-only", tip]);
+    await git(options.repo, ["merge", "--ff-only", "--no-overwrite-ignore", tip]);
     return { kind: "filed", provider: "markdown", path, at: new Date().toISOString() };
   });
 }

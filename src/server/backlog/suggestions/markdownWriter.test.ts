@@ -55,6 +55,18 @@ describe("Markdown suggestion filing", () => {
       expect(await readFile(join(repo.root, path), "utf8")).toBe(source); await expectNoScratch(repo.root);
     } finally { await repo.dispose(); }
   });
+  it("does not overwrite an ignored, untracked closed item in main", async () => {
+    const repo = await repository(); const record = suggestion();
+    try {
+      await writeFile(join(repo.root, ".gitignore"), ".forgerie/\n"); await git(repo.root, "add", ".gitignore"); await git(repo.root, "commit", "-m", "ignore local data");
+      if (record.destination.provider !== "markdown") throw new Error("Expected Markdown");
+      const path = record.destination.path; await mkdir(dirname(join(repo.root, path)), { recursive: true });
+      const closed = "---\nid: local\ntitle: Improve launch recovery\nstatus: Done\n---\nPrivate local draft\n";
+      await writeFile(join(repo.root, path), closed);
+      await expect(writeMarkdownSuggestion(repo.worktrees, repo.project, record)).rejects.toThrow();
+      expect(await readFile(join(repo.root, path), "utf8")).toBe(closed); await expectNoScratch(repo.root);
+    } finally { await repo.dispose(); }
+  });
   it("removes scratch files and branch after a commit failure", async () => {
     const repo = await repository();
     try {

@@ -42,7 +42,7 @@ the item. This avoids even a temporary uncommitted item in a checkout. The commi
 uses the user's Git identity and `chore(backlog): add <title>`. The writer uses the
 same per-main-checkout queue and dirty-path overlap rule as Land. Main must be on
 the default branch. Unrelated dirty main files are allowed. The writer fast-forwards
-main and never pushes. It removes scratch files, worktree, and branch before the
+main with `--no-overwrite-ignore` and never pushes. Ignored local drafts are not overwritten. It removes scratch files, worktree, and branch before the
 fast-forward, so a cleanup failure cannot leave an item on main. Existing paths
 are never overwritten. Open Markdown duplicates use the same title
 rule as `file_issue`; the writer checks them before writing.
